@@ -45,15 +45,12 @@ sc_error_t sc_http_util_post(sc_allocator_t *alloc,
     const char *body, size_t body_len,
     const char *const *headers, size_t header_count,
     char **out_body, size_t *out_len) {
-    (void)alloc;
-    (void)url;
+    if (!alloc || !url || !out_body || !out_len) return SC_ERR_INVALID_ARGUMENT;
     (void)url_len;
     (void)body;
     (void)body_len;
     (void)headers;
     (void)header_count;
-    (void)out_body;
-    (void)out_len;
     return SC_ERR_NOT_SUPPORTED;
 }
 
@@ -62,14 +59,11 @@ sc_error_t sc_http_util_get(sc_allocator_t *alloc,
     const char *const *headers, size_t header_count,
     const char *timeout_secs,
     char **out_body, size_t *out_len) {
-    (void)alloc;
-    (void)url;
+    if (!alloc || !url || !out_body || !out_len) return SC_ERR_INVALID_ARGUMENT;
     (void)url_len;
     (void)headers;
     (void)header_count;
     (void)timeout_secs;
-    (void)out_body;
-    (void)out_len;
     return SC_ERR_NOT_SUPPORTED;
 }
 #endif

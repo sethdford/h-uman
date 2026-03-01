@@ -1,6 +1,6 @@
 /*
  * file_edit tool: Find and replace text in a file.
- * Port of nullclaw src/tools/file_edit.zig
+ * Find and replace text in a file.
  * - Atomic writes (temp file + rename)
  * - Symlink detection via realpath
  * - Path security: sc_path_is_safe, sc_path_resolved_allowed

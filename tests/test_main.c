@@ -15,10 +15,12 @@ void run_slice_tests(void);
 void run_memory_tests(void);
 void run_tunnel_tests(void);
 void run_gateway_tests(void);
+void run_auth_tests(void);
 void run_security_tests(void);
 void run_provider_tests(void);
 void run_channel_tests(void);
 void run_tool_tests(void);
+void test_vtables_run(void);
 void run_peripheral_tests(void);
 void run_e2e_tests(void);
 void run_subsystems_tests(void);
@@ -69,6 +71,7 @@ void run_vector_stores_tests(void);
 void run_memory_engines_ext_tests(void);
 void run_runtime_tests(void);
 void run_channel_loop_tests(void);
+void run_util_modules_tests(void);
 
 int main(void) {
     printf("SeaClaw Test Suite\n"); fflush(stdout);
@@ -84,10 +87,12 @@ int main(void) {
     run_memory_tests();
     run_tunnel_tests();
     run_gateway_tests();
+    run_auth_tests();
     run_security_tests();
     run_provider_tests();
     run_channel_tests();
     run_tool_tests();
+    test_vtables_run();
     run_peripheral_tests();
     run_e2e_tests();
     run_subsystems_tests();
@@ -138,6 +143,7 @@ int main(void) {
     run_memory_engines_ext_tests();
     run_runtime_tests();
     run_channel_loop_tests();
+    run_util_modules_tests();
 
     SC_TEST_REPORT();
     SC_TEST_EXIT();

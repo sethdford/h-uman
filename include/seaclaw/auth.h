@@ -24,7 +24,7 @@ void sc_oauth_token_deinit(sc_oauth_token_t *t, sc_allocator_t *alloc);
 bool sc_oauth_token_is_expired(const sc_oauth_token_t *t);
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Credential store — ~/.nullclaw/auth.json
+ * Credential store — ~/.seaclaw/auth.json
  * ────────────────────────────────────────────────────────────────────────── */
 
 sc_error_t sc_auth_save_credential(sc_allocator_t *alloc,

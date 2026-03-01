@@ -1,7 +1,7 @@
 services:
   agent:
     build: .
-    image: nullclaw:latest
+    image: seaclaw:latest
     profiles: ["agent"]
     stdin_open: true
     tty: true
@@ -9,12 +9,12 @@ services:
       - path: .env
         required: false
     volumes:
-      - nullclaw-data:/root/.nullclaw
+      - seaclaw-data:/root/.seaclaw
     restart: unless-stopped
 
   gateway:
     build: .
-    image: nullclaw:latest
+    image: seaclaw:latest
     profiles: ["gateway"]
     ports:
       - "8080:8080"
@@ -22,7 +22,7 @@ services:
       - path: .env
         required: false
     volumes:
-      - nullclaw-data:/root/.nullclaw
+      - seaclaw-data:/root/.seaclaw
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
@@ -31,4 +31,4 @@ services:
       retries: 3
 
 volumes:
-  nullclaw-data:
+  seaclaw-data:

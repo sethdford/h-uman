@@ -825,14 +825,24 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
         return SC_OK;
     }
 
-    bool use_stream = (on_token != NULL) &&
+    bool can_stream = (on_token != NULL) &&
         agent->provider.vtable->supports_streaming &&
         agent->provider.vtable->supports_streaming(agent->provider.ctx) &&
-        agent->provider.vtable->stream_chat &&
-        (agent->tool_specs_count == 0);
+        agent->provider.vtable->stream_chat;
+    bool has_tools = (agent->tool_specs_count > 0);
 
-    if (!use_stream)
-        return sc_agent_turn(agent, msg, msg_len, response_out, response_len_out);
+    if (!can_stream || has_tools) {
+        sc_error_t fallback_err = sc_agent_turn(agent, msg, msg_len, response_out, response_len_out);
+        if (fallback_err == SC_OK && on_token && *response_out && response_len_out && *response_len_out > 0) {
+            size_t chunk_size = 12;
+            for (size_t i = 0; i < *response_len_out; i += chunk_size) {
+                size_t n = *response_len_out - i;
+                if (n > chunk_size) n = chunk_size;
+                on_token(*response_out + i, n, token_ctx);
+            }
+        }
+        return fallback_err;
+    }
 
     sc_error_t err = append_history(agent, SC_ROLE_USER, msg, msg_len, NULL, 0, NULL, 0);
     if (err != SC_OK) return err;

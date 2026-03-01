@@ -2,8 +2,8 @@
 #define SC_SEACLAW_H
 
 /**
- * SeaClaw — C rewrite of NullClaw (Zig).
- * Phase 2: Vtable interface headers.
+ * SeaClaw — autonomous AI assistant runtime (C11).
+ * Vtable interface headers.
  *
  * Include this umbrella header to get all public types and interfaces.
  */

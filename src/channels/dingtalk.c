@@ -47,7 +47,7 @@ static sc_error_t dingtalk_send(void *ctx,
     sc_error_t err = sc_json_buf_init(&jbuf, c->alloc);
     if (err) return err;
 
-    err = sc_json_buf_append_raw(&jbuf, "{\"msgtype\":\"markdown\",\"markdown\":{\"title\":\"nullclaw\",", 47);
+    err = sc_json_buf_append_raw(&jbuf, "{\"msgtype\":\"markdown\",\"markdown\":{\"title\":\"seaclaw\",", 47);
     if (err) goto jfail;
     err = sc_json_append_key_value(&jbuf, "text", 4, message, message_len);
     if (err) goto jfail;

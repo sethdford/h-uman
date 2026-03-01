@@ -1,5 +1,5 @@
 /*
- * Crontab storage — ~/.nullclaw/crontab.json
+ * Crontab storage — ~/.seaclaw/crontab.json
  * Format: [{"id":"1","schedule":"0 * * * *","command":"echo hello","enabled":true}]
  * In SC_IS_TEST: uses temp path.
  */
@@ -13,7 +13,7 @@
 #include <sys/stat.h>
 
 #define SC_CRONTAB_FILE "crontab.json"
-#define SC_CRONTAB_DIR ".nullclaw"
+#define SC_CRONTAB_DIR ".seaclaw"
 #define SC_CRONTAB_TEST_FILE "seaclaw_crontab_test.json"
 #define SC_CRONTAB_MAX_ENTRIES 256
 #define SC_CRONTAB_ID_MAX 64

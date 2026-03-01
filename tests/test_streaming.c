@@ -203,6 +203,73 @@ static void test_sse_parser_done_signal(void) {
     sc_sse_parser_deinit(&p);
 }
 
+/* Edge case: incomplete SSE data (no final newline) — buffered, no event until complete */
+static void test_sse_parser_incomplete_data_buffered(void) {
+    sse_event_count = 0;
+
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sse_parser_t p;
+    sc_sse_parser_init(&p, &alloc);
+
+    sc_error_t err = sc_sse_parser_feed(&p, "data: ", 5, sse_event_cb, NULL);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(sse_event_count, 0);
+
+    err = sc_sse_parser_feed(&p, "{\"x\":1}\n\n", 9, sse_event_cb, NULL);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(sse_event_count, 1);
+    SC_ASSERT_TRUE(strstr(sse_last_data, "\"x\"") != NULL);
+
+    sc_sse_parser_deinit(&p);
+}
+
+/* Edge case: missing event type — defaults to "message" */
+static void test_sse_parser_missing_event_type_defaults_message(void) {
+    sse_event_count = 0;
+    sse_last_event_type[0] = '\0';
+
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sse_parser_t p;
+    sc_sse_parser_init(&p, &alloc);
+
+    const char *input = "data: hello\n\n";
+    sc_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    SC_ASSERT_EQ(sse_event_count, 1);
+    SC_ASSERT_STR_EQ(sse_last_event_type, "message");
+    SC_ASSERT_TRUE(strstr(sse_last_data, "hello") != NULL);
+
+    sc_sse_parser_deinit(&p);
+}
+
+/* Edge case: empty data field — callback invoked with data_len 0 */
+static void test_sse_parser_empty_data_field(void) {
+    sse_event_count = 0;
+
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sse_parser_t p;
+    sc_sse_parser_init(&p, &alloc);
+
+    const char *input = "data: \n\n";
+    sc_error_t err = sc_sse_parser_feed(&p, input, strlen(input), sse_event_cb, NULL);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(sse_event_count, 1);
+    SC_ASSERT_EQ(sse_last_data_len, 0u);
+
+    sc_sse_parser_deinit(&p);
+}
+
+/* Edge case: feed with NULL bytes (len 0) is allowed and returns OK */
+static void test_sse_parser_feed_null_bytes_len_zero_ok(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sse_parser_t p;
+    sc_sse_parser_init(&p, &alloc);
+
+    sc_error_t err = sc_sse_parser_feed(&p, NULL, 0, sse_event_cb, NULL);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_sse_parser_deinit(&p);
+}
+
 static int openai_stream_chunk_count;
 static bool openai_stream_got_final;
 
@@ -340,6 +407,10 @@ void run_streaming_tests(void) {
     SC_RUN_TEST(test_sse_parser_two_empty_events);
     SC_RUN_TEST(test_sse_parser_data_with_spaces);
     SC_RUN_TEST(test_sse_parser_done_signal);
+    SC_RUN_TEST(test_sse_parser_incomplete_data_buffered);
+    SC_RUN_TEST(test_sse_parser_missing_event_type_defaults_message);
+    SC_RUN_TEST(test_sse_parser_empty_data_field);
+    SC_RUN_TEST(test_sse_parser_feed_null_bytes_len_zero_ok);
     SC_RUN_TEST(test_openai_stream_mock);
     SC_RUN_TEST(test_anthropic_stream_mock);
 }

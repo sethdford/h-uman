@@ -74,9 +74,15 @@ typedef struct sc_heartbeat_config {
     uint32_t interval_minutes;
 } sc_heartbeat_config_t;
 
+#define SC_CHANNEL_CONFIG_MAX 24
+
 typedef struct sc_channels_config {
     bool cli;
     char *default_channel;
+    /* Per-channel config presence from channels.* keys (e.g. channels.telegram). */
+    char *channel_config_keys[SC_CHANNEL_CONFIG_MAX];
+    size_t channel_config_counts[SC_CHANNEL_CONFIG_MAX];
+    size_t channel_config_len;
 } sc_channels_config_t;
 
 typedef struct sc_memory_config {
@@ -92,14 +98,15 @@ typedef struct sc_tunnel_config {
     char *domain;
 } sc_tunnel_config_t;
 
-typedef struct sc_gateway_config {
+typedef struct sc_config_gateway {
     bool enabled;
     uint16_t port;
     char *host;
     bool require_pairing;
     bool allow_public_bind;
     uint32_t pair_rate_limit_per_minute;
-} sc_gateway_config_t;
+    char *webhook_hmac_secret; /* optional, for X-Signature verification */
+} sc_config_gateway_t;
 
 typedef struct sc_secrets_config { bool encrypt; } sc_secrets_config_t;
 typedef struct sc_browser_config { bool enabled; } sc_browser_config_t;
@@ -175,7 +182,7 @@ typedef struct sc_config {
     sc_channels_config_t channels;
     sc_memory_config_t memory;
     sc_tunnel_config_t tunnel;
-    sc_gateway_config_t gateway;
+    sc_config_gateway_t gateway;
     sc_secrets_config_t secrets;
     sc_browser_config_t browser;
     sc_security_config_t security;
@@ -202,5 +209,6 @@ const char *sc_config_default_provider_key(const sc_config_t *cfg);
 const char *sc_config_get_provider_base_url(const sc_config_t *cfg, const char *name);
 bool sc_config_get_provider_native_tools(const sc_config_t *cfg, const char *name);
 const char *sc_config_get_web_search_provider(const sc_config_t *cfg);
+size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char *key);
 
 #endif /* SC_CONFIG_H */

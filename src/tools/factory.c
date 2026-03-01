@@ -58,6 +58,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     const char *workspace_dir, size_t workspace_dir_len,
     sc_security_policy_t *policy,
     const sc_config_t *config,
+    sc_memory_t *memory,
     sc_tool_t **out_tools, size_t *out_count)
 {
     if (!alloc || !out_tools || !out_count) return SC_ERR_INVALID_ARGUMENT;
@@ -117,19 +118,19 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_memory_store_create(alloc, NULL, &tools[idx]);
+    err = sc_memory_store_create(alloc, memory, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_memory_recall_create(alloc, NULL, &tools[idx]);
+    err = sc_memory_recall_create(alloc, memory, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_memory_list_create(alloc, NULL, &tools[idx]);
+    err = sc_memory_list_create(alloc, memory, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_memory_forget_create(alloc, NULL, &tools[idx]);
+    err = sc_memory_forget_create(alloc, memory, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
@@ -207,6 +208,34 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     err = sc_spi_create(alloc, NULL, 0, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
+
+    if (config) {
+        for (size_t i = 0; i < idx; i++) {
+            if (!tools[i].vtable || !tools[i].vtable->name) continue;
+            const char *tname = tools[i].vtable->name(tools[i].ctx);
+            if (!tname) continue;
+            bool keep = true;
+            if (config->tools.enabled_tools && config->tools.enabled_tools_len > 0) {
+                keep = false;
+                for (size_t j = 0; j < config->tools.enabled_tools_len; j++) {
+                    if (config->tools.enabled_tools[j] &&
+                        strcmp(config->tools.enabled_tools[j], tname) == 0) { keep = true; break; }
+                }
+            }
+            if (keep && config->tools.disabled_tools) {
+                for (size_t j = 0; j < config->tools.disabled_tools_len; j++) {
+                    if (config->tools.disabled_tools[j] &&
+                        strcmp(config->tools.disabled_tools[j], tname) == 0) { keep = false; break; }
+                }
+            }
+            if (!keep) {
+                if (tools[i].vtable->deinit) tools[i].vtable->deinit(tools[i].ctx, alloc);
+                if (i + 1 < idx) memmove(&tools[i], &tools[i + 1], (idx - i - 1) * sizeof(sc_tool_t));
+                idx--;
+                i--;
+            }
+        }
+    }
 
     *out_tools = tools;
     *out_count = idx;

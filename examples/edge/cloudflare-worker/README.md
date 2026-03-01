@@ -3,7 +3,7 @@
 This example demonstrates the **hybrid edge path**:
 
 - Edge host (`worker.mjs`) handles HTTP, secrets, Telegram webhook, OpenAI call.
-- Tiny Zig WASM module (`agent_core.zig`) decides response policy.
+- Tiny C WASM module (`agent_core.c`) decides response policy.
 
 This keeps secrets and network in the host while agent logic stays swappable as WASM.
 
@@ -19,7 +19,7 @@ This keeps secrets and network in the host while agent logic stays swappable as 
 ## Prerequisites
 
 - Cloudflare account + [`wrangler`](https://developers.cloudflare.com/workers/wrangler/)
-- Zig `0.15.2`
+- `clang` with wasm32 target support
 - Telegram bot token
 - OpenAI API key
 
@@ -28,12 +28,16 @@ This keeps secrets and network in the host while agent logic stays swappable as 
 From repository root:
 
 ```bash
-zig build-lib examples/edge/cloudflare-worker/agent_core.zig \
-  -target wasm32-freestanding \
-  -fno-entry \
-  -rdynamic \
-  -O ReleaseSmall \
-  -femit-bin=examples/edge/cloudflare-worker/dist/agent_core.wasm
+./examples/edge/cloudflare-worker/build_wasm.sh
+```
+
+Or manually:
+
+```bash
+clang --target=wasm32 -nostdlib -O2 \
+  -Wl,--no-entry -Wl,--export=choose_policy \
+  -o examples/edge/cloudflare-worker/dist/agent_core.wasm \
+  examples/edge/cloudflare-worker/agent_core.c
 ```
 
 ## Configure secrets
@@ -104,4 +108,4 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 - This is intentionally minimal and stateless.
 - Dedup with KV is best-effort (eventual consistency), but removes the common Telegram retry duplicates.
 - For production, still add retries for outbound calls and rate limiting.
-- To evolve behavior, update only `agent_core.zig` and redeploy the wasm artifact.
+- To evolve behavior, update `agent_core.c` and rebuild the WASM artifact.

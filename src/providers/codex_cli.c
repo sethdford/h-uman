@@ -205,6 +205,8 @@ static sc_error_t codex_cli_chat(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
+/* CLI wrapper shells out to `codex` binary; the CLI does not expose tool-calling or
+ * streaming via its API, so these capabilities are inherently unsupported. */
 static bool codex_cli_supports_native_tools(void *ctx) { (void)ctx; return false; }
 static const char *codex_cli_get_name(void *ctx) { (void)ctx; return "codex-cli"; }
 static void codex_cli_deinit(void *ctx, sc_allocator_t *alloc) {
@@ -220,6 +222,7 @@ static const sc_provider_vtable_t codex_cli_vtable = {
     .get_name = codex_cli_get_name,
     .deinit = codex_cli_deinit,
     .warmup = NULL, .chat_with_tools = NULL,
+    /* stream_chat NULL: CLI wrapper cannot stream; codex CLI returns complete output only. */
     .supports_streaming = NULL, .supports_vision = NULL,
     .supports_vision_for_model = NULL, .stream_chat = NULL,
 };

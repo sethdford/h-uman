@@ -5,6 +5,11 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifdef SC_ENABLE_READLINE
+#include <readline/readline.h>
+#include <readline/history.h>
+#endif
+
 typedef struct sc_cli_ctx {
     bool running;
 } sc_cli_ctx_t;
@@ -78,10 +83,22 @@ void sc_cli_destroy(sc_channel_t *ch) {
     }
 }
 
-/* Read line from stdin. Caller frees. Returns NULL on EOF. */
 char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len) {
     if (!alloc || !out_len) return NULL;
     *out_len = 0;
+
+#ifdef SC_ENABLE_READLINE
+    char *rl = readline("");
+    if (!rl) return NULL;
+    size_t len = strlen(rl);
+    if (len > 0) add_history(rl);
+    char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
+    if (!buf) { free(rl); return NULL; }
+    memcpy(buf, rl, len + 1);
+    free(rl);
+    *out_len = len;
+    return buf;
+#else
     size_t cap = 256;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf) return NULL;
@@ -103,6 +120,7 @@ char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len) {
         return NULL;
     }
     return buf;
+#endif
 }
 
 bool sc_cli_is_quit_command(const char *line, size_t len) {

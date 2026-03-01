@@ -26,7 +26,7 @@ typedef struct sc_mutation_result {
 
 void sc_config_mutator_free_result(sc_allocator_t *alloc, sc_mutation_result_t *result);
 
-/* Default config path (~/.nullclaw/config.json). Caller must free. */
+/* Default config path (~/.seaclaw/config.json). Caller must free. */
 sc_error_t sc_config_mutator_default_path(sc_allocator_t *alloc, char **out_path);
 
 /* Check if path requires daemon restart. */

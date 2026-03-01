@@ -1,6 +1,7 @@
 /* Runtime adapter tests */
 #include "test_framework.h"
 #include "seaclaw/runtime.h"
+#include "seaclaw/config.h"
 #include "seaclaw/platform.h"
 #include "seaclaw/core/allocator.h"
 #include <string.h>
@@ -227,6 +228,74 @@ static void test_runtime_kind_enum_values(void) {
     SC_ASSERT_TRUE(k3 != k4);
 }
 
+static void test_runtime_from_config_native(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "native";
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(r.vtable);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "native");
+}
+
+static void test_runtime_from_config_null_defaults_native(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = NULL;
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "native");
+}
+
+static void test_runtime_from_config_docker(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "docker";
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "docker");
+}
+
+static void test_runtime_from_config_wasm(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "wasm";
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "wasm");
+}
+
+static void test_runtime_from_config_cloudflare(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "cloudflare";
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "cloudflare");
+}
+
+static void test_runtime_from_config_unknown_returns_error(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "unknown_runtime_xyz";
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_NEQ(err, SC_OK);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_runtime_from_config_null_config_returns_error(void) {
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(NULL, &r);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_runtime_from_config_null_out_returns_error(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "native";
+    sc_error_t err = sc_runtime_from_config(&cfg, NULL);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
 void run_runtime_tests(void) {
     SC_TEST_SUITE("Runtime");
     SC_RUN_TEST(test_runtime_native_create);
@@ -258,6 +327,14 @@ void run_runtime_tests(void) {
     SC_RUN_TEST(test_runtime_vtable_dispatch_native);
     SC_RUN_TEST(test_runtime_vtable_dispatch_docker);
     SC_RUN_TEST(test_runtime_kind_enum_values);
+    SC_RUN_TEST(test_runtime_from_config_native);
+    SC_RUN_TEST(test_runtime_from_config_null_defaults_native);
+    SC_RUN_TEST(test_runtime_from_config_docker);
+    SC_RUN_TEST(test_runtime_from_config_wasm);
+    SC_RUN_TEST(test_runtime_from_config_cloudflare);
+    SC_RUN_TEST(test_runtime_from_config_unknown_returns_error);
+    SC_RUN_TEST(test_runtime_from_config_null_config_returns_error);
+    SC_RUN_TEST(test_runtime_from_config_null_out_returns_error);
     SC_RUN_TEST(test_platform_is_windows_or_unix);
     SC_RUN_TEST(test_platform_get_shell);
     SC_RUN_TEST(test_platform_get_shell_flag);

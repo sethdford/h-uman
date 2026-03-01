@@ -1,156 +1,35 @@
 {
+  "workspace": "~/.seaclaw/workspace",
+  "default_provider": "openai",
+  "default_model": "gpt-4o",
   "default_temperature": 0.7,
 
-  "models": {
-    "providers": {
-      "openrouter": {
-        "api_key": "YOUR_OPENROUTER_API_KEY"
-      }
+  "providers": [
+    {
+      "name": "openai",
+      "api_key": "YOUR_OPENAI_API_KEY"
+    },
+    {
+      "name": "anthropic",
+      "api_key": "YOUR_ANTHROPIC_API_KEY"
     }
-  },
-
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "openrouter/anthropic/claude-sonnet-4"
-      }
-    }
-  },
+  ],
 
   "channels": {
     "cli": true,
-    "telegram": {
-      "accounts": {
-        "main": {
-          "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
-          "allow_from": ["YOUR_TELEGRAM_USER_ID"]
-        }
-      }
-    }
+    "default_channel": "cli"
   },
 
   "memory": {
-    "profile": "markdown_only",
-    "backend": "markdown",
+    "profile": "sqlite_full",
+    "backend": "sqlite",
     "auto_save": true,
-    "citations": "auto",
+    "max_entries": 10000
+  },
 
-    "search": {
-      "enabled": true,
-      "provider": "none",
-      "model": "text-embedding-3-small",
-      "dimensions": 1536,
-      "fallback_provider": "none",
-      "store": {
-        "kind": "auto",
-        "sidecar_path": "",
-        "qdrant_url": "",
-        "qdrant_api_key": "",
-        "qdrant_collection": "nullclaw_memories",
-        "pgvector_table": "memory_embeddings"
-      },
-      "chunking": {
-        "max_tokens": 512,
-        "overlap": 64
-      },
-      "sync": {
-        "mode": "best_effort",
-        "embed_timeout_ms": 15000,
-        "vector_timeout_ms": 5000,
-        "embed_max_retries": 2,
-        "vector_max_retries": 2
-      },
-      "query": {
-        "max_results": 6,
-        "min_score": 0.0,
-        "merge_strategy": "rrf",
-        "rrf_k": 60,
-        "hybrid": {
-          "enabled": false,
-          "vector_weight": 0.7,
-          "text_weight": 0.3,
-          "candidate_multiplier": 4,
-          "mmr": { "enabled": false, "lambda": 0.7 },
-          "temporal_decay": { "enabled": false, "half_life_days": 30 }
-        }
-      },
-      "cache": {
-        "enabled": true,
-        "max_entries": 10000
-      }
-    },
-
-    "qmd": {
-      "enabled": false,
-      "command": "qmd",
-      "search_mode": "search",
-      "include_default_memory": true
-    },
-
-    "retrieval_stages": {
-      "query_expansion_enabled": false,
-      "adaptive_retrieval_enabled": false,
-      "adaptive_keyword_max_tokens": 3,
-      "adaptive_vector_min_tokens": 6,
-      "llm_reranker_enabled": false,
-      "llm_reranker_max_candidates": 10,
-      "llm_reranker_timeout_ms": 5000
-    },
-
-    "lifecycle": {
-      "hygiene_enabled": true,
-      "archive_after_days": 7,
-      "purge_after_days": 30,
-      "conversation_retention_days": 30,
-      "snapshot_enabled": false,
-      "snapshot_on_hygiene": false,
-      "auto_hydrate": true
-    },
-
-    "response_cache": {
-      "enabled": false,
-      "ttl_minutes": 60,
-      "max_entries": 5000
-    },
-
-    "reliability": {
-      "rollout_mode": "off",
-      "circuit_breaker_failures": 5,
-      "circuit_breaker_cooldown_ms": 30000,
-      "shadow_hybrid_percent": 0,
-      "canary_hybrid_percent": 0,
-      "fallback_policy": "degrade"
-    },
-
-    "summarizer": {
-      "enabled": false,
-      "window_size_tokens": 4000,
-      "summary_max_tokens": 500,
-      "auto_extract_semantic": true
-    },
-
-    "postgres": {
-      "url": "postgresql://user:pass@localhost:5432/nullclaw",
-      "schema": "public",
-      "table": "memories",
-      "connect_timeout_secs": 30
-    },
-
-    "redis": {
-      "host": "127.0.0.1",
-      "port": 6379,
-      "password": "",
-      "db_index": 0,
-      "key_prefix": "nullclaw",
-      "ttl_seconds": 0
-    },
-
-    "api": {
-      "url": "http://localhost:8080",
-      "api_key": "",
-      "timeout_ms": 10000,
-      "namespace": ""
-    }
+  "agent": {
+    "max_tool_iterations": 25,
+    "max_history_messages": 100
   },
 
   "reliability": {
@@ -163,7 +42,7 @@
   "autonomy": {
     "level": "supervised",
     "workspace_only": true,
-    "max_actions_per_hour": 20
+    "max_actions_per_hour": 100
   },
 
   "gateway": {
@@ -173,11 +52,18 @@
   },
 
   "security": {
+    "autonomy_level": 1,
     "sandbox": {
       "backend": "auto"
     },
     "audit": {
       "enabled": true
     }
+  },
+
+  "tools": {
+    "shell_timeout_secs": 30,
+    "max_file_size_bytes": 1048576,
+    "web_fetch_max_chars": 100000
   }
 }

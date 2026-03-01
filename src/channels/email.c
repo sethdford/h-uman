@@ -36,7 +36,7 @@ static void email_stop(void *ctx) {
 static const char *email_from(sc_email_ctx_t *c) {
     if (c->from_address && c->from_len > 0)
         return c->from_address;
-    return "nullclaw@localhost";
+    return "seaclaw@localhost";
 }
 
 static sc_error_t email_send(void *ctx,
@@ -75,7 +75,7 @@ static sc_error_t email_send(void *ctx,
         return SC_ERR_IO;
     }
     int n = fprintf(f,
-        "From: %s\r\nTo: %.*s\r\nSubject: nullclaw\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%.*s",
+        "From: %s\r\nTo: %.*s\r\nSubject: seaclaw\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%.*s",
         from, (int)target_len, target, (int)message_len, message);
     fclose(f);
     if (n < 0) {

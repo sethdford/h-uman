@@ -283,7 +283,7 @@ static void test_config_defaults(void) {
     sc_allocator_t backing = sc_system_allocator();
     sc_config_t cfg;
 
-    /* Use a HOME that has no .nullclaw/config.json to get pure defaults */
+    /* Use a HOME that has no .seaclaw/config.json to get pure defaults */
     const char *h = getenv("HOME");
     char *old_home = h ? strdup(h) : NULL;
     setenv("HOME", "/tmp/seaclaw_test_noconfig_xyz", 1);

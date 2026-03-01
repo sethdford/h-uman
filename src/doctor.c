@@ -67,36 +67,36 @@ sc_error_t sc_doctor_check_config_semantics(sc_allocator_t *alloc,
     sc_diag_item_t it;
 
     if (!cfg->default_provider || !cfg->default_provider[0]) {
-        it = (sc_diag_item_t){ SC_DIAG_ERR, "config", "no default_provider configured" };
+        it = (sc_diag_item_t){ SC_DIAG_ERR, sc_strdup(alloc, "config"), sc_strdup(alloc, "no default_provider configured") };
         buf[n++] = it;
     } else {
         char *msg = sc_sprintf(alloc, "provider: %s", cfg->default_provider);
-        if (msg) { it = (sc_diag_item_t){ SC_DIAG_OK, "config", msg }; buf[n++] = it; }
+        if (msg) { it = (sc_diag_item_t){ SC_DIAG_OK, sc_strdup(alloc, "config"), msg }; buf[n++] = it; }
     }
 
     if (cfg->default_temperature < 0.0 || cfg->default_temperature > 2.0) {
         char *msg = sc_sprintf(alloc, "temperature %.1f is out of range (expected 0.0-2.0)", cfg->default_temperature);
-        if (msg) { it = (sc_diag_item_t){ SC_DIAG_ERR, "config", msg }; buf[n++] = it; }
+        if (msg) { it = (sc_diag_item_t){ SC_DIAG_ERR, sc_strdup(alloc, "config"), msg }; buf[n++] = it; }
     } else {
         char *msg = sc_sprintf(alloc, "temperature %.1f (valid range 0.0-2.0)", cfg->default_temperature);
-        if (msg) { it = (sc_diag_item_t){ SC_DIAG_OK, "config", msg }; buf[n++] = it; }
+        if (msg) { it = (sc_diag_item_t){ SC_DIAG_OK, sc_strdup(alloc, "config"), msg }; buf[n++] = it; }
     }
 
     uint16_t gw_port = cfg->gateway.port;
     if (gw_port == 0) {
-        it = (sc_diag_item_t){ SC_DIAG_ERR, "config", "gateway port is 0 (invalid)" };
+        it = (sc_diag_item_t){ SC_DIAG_ERR, sc_strdup(alloc, "config"), sc_strdup(alloc, "gateway port is 0 (invalid)") };
         buf[n++] = it;
     } else {
         char *msg = sc_sprintf(alloc, "gateway port: %u", (unsigned)gw_port);
-        if (msg) { it = (sc_diag_item_t){ SC_DIAG_OK, "config", msg }; buf[n++] = it; }
+        if (msg) { it = (sc_diag_item_t){ SC_DIAG_OK, sc_strdup(alloc, "config"), msg }; buf[n++] = it; }
     }
 
     bool has_ch = sc_channel_catalog_has_any_configured(cfg, false);
     if (has_ch) {
-        it = (sc_diag_item_t){ SC_DIAG_OK, "config", "at least one channel configured" };
+        it = (sc_diag_item_t){ SC_DIAG_OK, sc_strdup(alloc, "config"), sc_strdup(alloc, "at least one channel configured") };
         buf[n++] = it;
     } else {
-        it = (sc_diag_item_t){ SC_DIAG_WARN, "config", "no channels configured -- run onboard to set one up" };
+        it = (sc_diag_item_t){ SC_DIAG_WARN, sc_strdup(alloc, "config"), sc_strdup(alloc, "no channels configured -- run onboard to set one up") };
         buf[n++] = it;
     }
 

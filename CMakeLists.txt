@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(nullclaw C ASM)
+project(seaclaw C ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -10,6 +10,7 @@ option(SC_ENABLE_POSTGRES "Enable PostgreSQL memory backend" OFF)
 option(SC_ENABLE_CURL "Enable libcurl for HTTP client" ON)
 option(SC_BUILD_WASM "Build WASM/WASI target (seaclaw.wasm)" OFF)
 option(SC_ENABLE_LTO "Enable Link-Time Optimization" OFF)
+option(SC_ENABLE_READLINE "Enable readline/libedit for CLI line editing" OFF)
 
 # WASM build: cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON ..
 
@@ -188,7 +189,6 @@ set(SC_CORE_SOURCES
     src/doctor.c
     src/status.c
     src/http_util.c
-    src/integrations.c
     src/mcp.c
     src/multimodal.c
     src/rag.c
@@ -227,6 +227,7 @@ set(SC_CORE_SOURCES
     src/runtime/docker.c
     src/runtime/wasm_rt.c
     src/runtime/cloudflare.c
+    src/runtime/factory.c
     src/agent/agent.c
     src/agent/context.c
     src/agent/prompt.c
@@ -250,7 +251,6 @@ set(SC_CORE_SOURCES
     src/providers/runtime_bundle.c
     src/providers/openai.c
     src/providers/anthropic.c
-    src/providers/sse.c
     src/providers/gemini.c
     src/providers/ollama.c
     src/providers/openrouter.c
@@ -557,18 +557,31 @@ if(SC_ENABLE_CURL)
     endif()
 endif()
 
+if(SC_ENABLE_READLINE)
+    find_library(READLINE_LIBRARY NAMES readline edit)
+    if(READLINE_LIBRARY)
+        target_link_libraries(seaclaw_core PUBLIC ${READLINE_LIBRARY})
+        target_compile_definitions(seaclaw_core PRIVATE SC_ENABLE_READLINE=1)
+        message(STATUS "Readline: enabled (${READLINE_LIBRARY})")
+    else()
+        message(STATUS "Readline: disabled (library not found)")
+    endif()
+else()
+    message(STATUS "Readline: OFF")
+endif()
+
 if(SC_ENABLE_ASAN)
     target_compile_options(seaclaw_core PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(seaclaw_core PRIVATE -fsanitize=address)
 endif()
 
 # --- Main executable ---
-add_executable(nullclaw src/main.c)
-target_link_libraries(nullclaw seaclaw_core)
+add_executable(seaclaw src/main.c)
+target_link_libraries(seaclaw seaclaw_core)
 
 if(SC_ENABLE_ASAN)
-    target_compile_options(nullclaw PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(nullclaw PRIVATE -fsanitize=address)
+    target_compile_options(seaclaw PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(seaclaw PRIVATE -fsanitize=address)
 endif()
 
 # --- LTO (Link-Time Optimization) ---
@@ -576,23 +589,23 @@ if(SC_ENABLE_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT lto_supported)
     if(lto_supported)
-        set_property(TARGET nullclaw PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET seaclaw PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET seaclaw_core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
 endif()
 
 # --- Release optimizations ---
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-    target_compile_options(nullclaw PRIVATE -Os)
-    set_target_properties(nullclaw PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
+    target_compile_options(seaclaw PRIVATE -Os)
+    set_target_properties(seaclaw PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
 endif()
 
 # --- Strip MinSizeRel binary (macOS: -x to preserve local syms, Linux: full strip) ---
 if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel" AND UNIX)
     if(APPLE)
-        add_custom_command(TARGET nullclaw POST_BUILD COMMAND strip -x $<TARGET_FILE:nullclaw>)
+        add_custom_command(TARGET seaclaw POST_BUILD COMMAND strip -x $<TARGET_FILE:seaclaw>)
     else()
-        add_custom_command(TARGET nullclaw POST_BUILD COMMAND strip $<TARGET_FILE:nullclaw>)
+        add_custom_command(TARGET seaclaw POST_BUILD COMMAND strip $<TARGET_FILE:seaclaw>)
     endif()
 endif()
 
@@ -709,6 +722,7 @@ set(SC_TEST_SOURCES
     tests/test_memory.c
     tests/test_tunnel.c
     tests/test_gateway.c
+    tests/test_auth.c
     tests/test_security.c
     tests/test_provider.c
     tests/test_channel.c
@@ -764,103 +778,104 @@ set(SC_TEST_SOURCES
     tests/test_cli.c
     tests/test_memory_engines_ext.c
     tests/test_runtime.c
+    tests/test_util_modules.c
 )
 
-add_executable(nullclaw_tests ${SC_TEST_SOURCES} wasm/wasm_alloc.c)
-target_link_libraries(nullclaw_tests seaclaw_core_test)
-target_include_directories(nullclaw_tests PRIVATE ${SC_ROOT}/tests)
-target_compile_definitions(nullclaw_tests PRIVATE SC_IS_TEST=1 SC_GATEWAY_TEST_MODE=1 SC_HAS_NONE_ENGINE=1)
+add_executable(seaclaw_tests ${SC_TEST_SOURCES} wasm/wasm_alloc.c)
+target_link_libraries(seaclaw_tests seaclaw_core_test)
+target_include_directories(seaclaw_tests PRIVATE ${SC_ROOT}/tests)
+target_compile_definitions(seaclaw_tests PRIVATE SC_IS_TEST=1 SC_GATEWAY_TEST_MODE=1 SC_HAS_NONE_ENGINE=1)
 if(SC_ENABLE_SQLITE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_ENABLE_SQLITE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_ENABLE_SQLITE=1)
 endif()
 if(SC_ENABLE_TELEGRAM)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_TELEGRAM=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_TELEGRAM=1)
 endif()
 if(SC_ENABLE_DISCORD)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_DISCORD=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_DISCORD=1)
 endif()
 if(SC_ENABLE_SLACK)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_SLACK=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_SLACK=1)
 endif()
 if(SC_ENABLE_WHATSAPP)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_WHATSAPP=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_WHATSAPP=1)
 endif()
 if(SC_ENABLE_MATRIX)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_MATRIX=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_MATRIX=1)
 endif()
 if(SC_ENABLE_IRC)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_IRC=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_IRC=1)
 endif()
 if(SC_ENABLE_LINE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_LINE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_LINE=1)
 endif()
 if(SC_ENABLE_LARK)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_LARK=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_LARK=1)
 endif()
 if(SC_ENABLE_WEB)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_WEB=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_WEB=1)
 endif()
 if(SC_ENABLE_EMAIL)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_EMAIL=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_EMAIL=1)
 endif()
 if(SC_ENABLE_IMESSAGE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_IMESSAGE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_IMESSAGE=1)
 endif()
 if(SC_ENABLE_MATTERMOST)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_MATTERMOST=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_MATTERMOST=1)
 endif()
 if(SC_ENABLE_ONEBOT)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_ONEBOT=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_ONEBOT=1)
 endif()
 if(SC_ENABLE_DINGTALK)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_DINGTALK=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_DINGTALK=1)
 endif()
 if(SC_ENABLE_LUCID_ENGINE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_LUCID_ENGINE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_LUCID_ENGINE=1)
 endif()
 if(SC_ENABLE_LANCEDB_ENGINE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_LANCEDB_ENGINE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_LANCEDB_ENGINE=1)
 endif()
 if(SC_ENABLE_POSTGRES)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_ENABLE_POSTGRES=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_ENABLE_POSTGRES=1)
 endif()
 if(SC_ENABLE_REDIS_ENGINE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_REDIS_ENGINE=1 SC_ENABLE_REDIS_ENGINE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_REDIS_ENGINE=1 SC_ENABLE_REDIS_ENGINE=1)
 endif()
 if(SC_ENABLE_API_ENGINE)
-    target_compile_definitions(nullclaw_tests PRIVATE SC_HAS_API_ENGINE=1)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_API_ENGINE=1)
 endif()
 
 if(SC_ENABLE_ASAN)
-    target_compile_options(nullclaw_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(nullclaw_tests PRIVATE -fsanitize=address)
+    target_compile_options(seaclaw_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(seaclaw_tests PRIVATE -fsanitize=address)
 endif()
 
-add_test(NAME unit_tests COMMAND nullclaw_tests)
+add_test(NAME unit_tests COMMAND seaclaw_tests)
 
 # --- WASM/WASI target (optional, use with wasm32-wasi toolchain) ---
 # Usage: cmake -DCMAKE_TOOLCHAIN_FILE=cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON ..
 if(SC_BUILD_WASM)
     include(cmake/wasm_sources.cmake)
-    add_executable(nullclaw.wasm
+    add_executable(seaclaw.wasm
         ${SC_WASM_MAIN}
         ${SC_WASM_SOURCES}
         ${SC_WASM_CORE_SOURCES}
         ${SC_WASM_CRYPTO_SOURCES}
     )
-    target_include_directories(nullclaw.wasm PRIVATE ${SC_ROOT}/include ${SC_ROOT}/asm/generic)
-    target_compile_definitions(nullclaw.wasm PRIVATE __wasi__=1 SC_IS_TEST=0)
+    target_include_directories(seaclaw.wasm PRIVATE ${SC_ROOT}/include ${SC_ROOT}/asm/generic)
+    target_compile_definitions(seaclaw.wasm PRIVATE __wasi__=1 SC_IS_TEST=0)
     if(SC_ENABLE_SQLITE)
-        target_compile_definitions(nullclaw.wasm PRIVATE SC_ENABLE_SQLITE=0)
+        target_compile_definitions(seaclaw.wasm PRIVATE SC_ENABLE_SQLITE=0)
     endif()
-    set_target_properties(nullclaw.wasm PROPERTIES SUFFIX ".wasm" RUNTIME_OUTPUT_NAME "nullclaw")
-    message(STATUS "WASM target: nullclaw.wasm (requires wasm32-wasi toolchain)")
+    set_target_properties(seaclaw.wasm PROPERTIES SUFFIX ".wasm" RUNTIME_OUTPUT_NAME "seaclaw")
+    message(STATUS "WASM target: seaclaw.wasm (requires wasm32-wasi toolchain)")
 endif()
 
 # Compiler warnings (-Werror disabled to allow unused params in tool stubs)
 target_compile_options(seaclaw_core PRIVATE -Wall -Wextra -Wpedantic)
-target_compile_options(nullclaw PRIVATE -Wall -Wextra -Wpedantic -Werror)
-target_compile_options(nullclaw_tests PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(seaclaw PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_options(seaclaw_tests PRIVATE -Wall -Wextra -Wpedantic)
 
 # Print build info
 message(STATUS "SeaClaw v0.1.0")

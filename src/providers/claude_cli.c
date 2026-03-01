@@ -29,98 +29,96 @@ static sc_error_t run_claude_cli(sc_allocator_t *alloc,
     char **out, size_t *out_len)
 {
     const char *cli = SC_CLAUDE_CLI_NAME;
-    char prompt_buf[65536];
     char model_buf[128];
-    if (prompt_len >= sizeof(prompt_buf)) return SC_ERR_INVALID_ARGUMENT;
-    memcpy(prompt_buf, prompt, prompt_len);
-    prompt_buf[prompt_len] = '\0';
     if (model_len >= sizeof(model_buf)) model_len = sizeof(model_buf) - 1;
     memcpy(model_buf, model, model_len);
     model_buf[model_len] = '\0';
 
     char *argv[] = {
         (char *)cli,
-        "-p", prompt_buf,
-        "--output-format", "stream-json",
+        "-p",
+        "--output-format", "json",
         "--model", model_buf,
         NULL
     };
 
-    int fds[2];
-    if (pipe(fds) != 0) return SC_ERR_IO;
+    int stdout_fds[2];
+    int stdin_fds[2];
+    if (pipe(stdout_fds) != 0) return SC_ERR_IO;
+    if (pipe(stdin_fds) != 0) {
+        close(stdout_fds[0]);
+        close(stdout_fds[1]);
+        return SC_ERR_IO;
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
-        close(fds[0]);
-        close(fds[1]);
+        close(stdout_fds[0]); close(stdout_fds[1]);
+        close(stdin_fds[0]); close(stdin_fds[1]);
         return SC_ERR_IO;
     }
 
     if (pid == 0) {
-        close(fds[0]);
-        dup2(fds[1], STDOUT_FILENO);
-        dup2(fds[1], STDERR_FILENO);
-        close(fds[1]);
+        close(stdout_fds[0]);
+        close(stdin_fds[1]);
+        dup2(stdin_fds[0], STDIN_FILENO);
+        dup2(stdout_fds[1], STDOUT_FILENO);
+        dup2(stdout_fds[1], STDERR_FILENO);
+        close(stdin_fds[0]);
+        close(stdout_fds[1]);
         execvp(cli, argv);
         _exit(127);
     }
 
-    close(fds[1]);
+    close(stdout_fds[1]);
+    close(stdin_fds[0]);
+
+    /* Write prompt to child's stdin, then close to signal EOF */
+    size_t written = 0;
+    while (written < prompt_len) {
+        ssize_t w = write(stdin_fds[1], prompt + written, prompt_len - written);
+        if (w <= 0) break;
+        written += (size_t)w;
+    }
+    close(stdin_fds[1]);
+
     size_t cap = 256 * 1024;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf) {
-        close(fds[0]);
+        close(stdout_fds[0]);
         waitpid(pid, NULL, 0);
         return SC_ERR_OUT_OF_MEMORY;
     }
     size_t len = 0;
     for (;;) {
         if (len >= cap - 1) break;
-        ssize_t n = read(fds[0], buf + len, cap - len - 1);
+        ssize_t n = read(stdout_fds[0], buf + len, cap - len - 1);
         if (n <= 0) break;
         len += (size_t)n;
     }
     buf[len] = '\0';
-    close(fds[0]);
+    close(stdout_fds[0]);
 
     int status;
     waitpid(pid, &status, 0);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        alloc->free(alloc->ctx, buf, cap);
-        return SC_ERR_PROVIDER_RESPONSE;
-    }
 
-    /* Parse stream-json: find line with {"type":"result","result":"..."} */
-    const char *result = NULL;
-    size_t result_len = 0;
-    const char *p = buf;
-    while (*p) {
-        const char *eol = strchr(p, '\n');
-        size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
-        if (linelen > 10) {
-            sc_json_value_t *parsed = NULL;
-            sc_error_t err = sc_json_parse(alloc, p, linelen, &parsed);
-            if (err == SC_OK && parsed) {
-                const char *type_str = sc_json_get_string(parsed, "type");
-                if (type_str && strcmp(type_str, "result") == 0) {
-                    result = sc_json_get_string(parsed, "result");
-                    if (result) result_len = strlen(result);
-                }
-                sc_json_free(alloc, parsed);
-                if (result) break;
-            }
-        }
-        if (!eol) break;
-        p = eol + 1;
-    }
+    /* Parse JSON output: {"type":"result","result":"..."} */
+    sc_json_value_t *parsed = NULL;
+    sc_error_t err = sc_json_parse(alloc, buf, len, &parsed);
     alloc->free(alloc->ctx, buf, cap);
 
-    if (result && result_len > 0) {
-        *out = sc_strndup(alloc, result, result_len);
+    if (err != SC_OK || !parsed) return SC_ERR_PROVIDER_RESPONSE;
+
+    const char *result = sc_json_get_string(parsed, "result");
+    if (result && strlen(result) > 0) {
+        size_t rlen = strlen(result);
+        *out = sc_strndup(alloc, result, rlen);
+        *out_len = rlen;
+        sc_json_free(alloc, parsed);
         if (!*out) return SC_ERR_OUT_OF_MEMORY;
-        *out_len = result_len;
         return SC_OK;
     }
+    sc_json_free(alloc, parsed);
     return SC_ERR_PROVIDER_RESPONSE;
 }
 #endif /* SC_GATEWAY_POSIX && !SC_IS_TEST */
@@ -252,6 +250,8 @@ static sc_error_t claude_cli_chat(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
+/* CLI wrapper shells out to `claude` binary; the CLI does not expose tool-calling or
+ * streaming via its API, so these capabilities are inherently unsupported. */
 static bool claude_cli_supports_native_tools(void *ctx) { (void)ctx; return false; }
 static const char *claude_cli_get_name(void *ctx) { (void)ctx; return "claude-cli"; }
 static void claude_cli_deinit(void *ctx, sc_allocator_t *alloc) {
@@ -268,6 +268,7 @@ static const sc_provider_vtable_t claude_cli_vtable = {
     .get_name = claude_cli_get_name,
     .deinit = claude_cli_deinit,
     .warmup = NULL, .chat_with_tools = NULL,
+    /* stream_chat NULL: CLI wrapper cannot stream; claude CLI returns complete output only. */
     .supports_streaming = NULL, .supports_vision = NULL,
     .supports_vision_for_model = NULL, .stream_chat = NULL,
 };

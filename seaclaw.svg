@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="512" height="512" shape-rendering="crispEdges">
+  <!-- SeaClaw logo — lobster claw forming letter C -->
+
+  <!-- Upper pincer tip -->
+  <rect x="6" y="1" width="1" height="1" fill="#8B0000"/>
+  <rect x="7" y="1" width="1" height="1" fill="#8B0000"/>
+
+  <!-- Upper arm -->
+  <rect x="4" y="2" width="1" height="1" fill="#CC0000"/>
+  <rect x="5" y="2" width="1" height="1" fill="#CC0000"/>
+  <rect x="6" y="2" width="1" height="1" fill="#CC0000"/>
+
+  <!-- Palm top curve -->
+  <rect x="2" y="3" width="1" height="1" fill="#FF0000"/>
+  <rect x="3" y="3" width="1" height="1" fill="#FF0000"/>
+  <rect x="4" y="3" width="1" height="1" fill="#FF0000"/>
+
+  <!-- Palm upper -->
+  <rect x="1" y="4" width="1" height="1" fill="#FF0000"/>
+  <rect x="2" y="4" width="1" height="1" fill="#FF0000"/>
+  <rect x="3" y="4" width="1" height="1" fill="#FF0000"/>
+
+  <!-- Palm lower -->
+  <rect x="1" y="5" width="1" height="1" fill="#FF0000"/>
+  <rect x="2" y="5" width="1" height="1" fill="#FF0000"/>
+  <rect x="3" y="5" width="1" height="1" fill="#FF0000"/>
+
+  <!-- Palm bottom curve -->
+  <rect x="2" y="6" width="1" height="1" fill="#FF0000"/>
+  <rect x="3" y="6" width="1" height="1" fill="#FF0000"/>
+  <rect x="4" y="6" width="1" height="1" fill="#FF0000"/>
+
+  <!-- Lower arm -->
+  <rect x="4" y="7" width="1" height="1" fill="#CC0000"/>
+  <rect x="5" y="7" width="1" height="1" fill="#CC0000"/>
+  <rect x="6" y="7" width="1" height="1" fill="#CC0000"/>
+
+  <!-- Lower pincer tip -->
+  <rect x="6" y="8" width="1" height="1" fill="#8B0000"/>
+  <rect x="7" y="8" width="1" height="1" fill="#8B0000"/>
+</svg>

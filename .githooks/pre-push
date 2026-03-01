@@ -2,21 +2,17 @@
 # pre-push: run the full test suite before pushing.
 # Activate: git config core.hooksPath .githooks
 
-if [ -d "seaclaw/build" ]; then
-    echo "Running SeaClaw tests..."
-    cd seaclaw/build && cmake --build . -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4) && ./seaclaw_tests
-    if [ $? -ne 0 ]; then
-        echo "SeaClaw tests failed. Fix before pushing."
-        exit 1
-    fi
-    cd ../..
-elif [ -f "build.zig" ] && command -v zig >/dev/null 2>&1; then
-    echo "Running Zig tests..."
-    zig build test --summary all 2>&1
+JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+if [ -f "CMakeLists.txt" ]; then
+    echo "Running seaclaw tests..."
+    mkdir -p build
+    cd build && cmake .. -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_ASAN=ON 2>/dev/null && cmake --build . -j"$JOBS" && ./seaclaw_tests
     if [ $? -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
         exit 1
     fi
+    cd ..
 else
     echo "No build system found. Skipping pre-push tests."
 fi

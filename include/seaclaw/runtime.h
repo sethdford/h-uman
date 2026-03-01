@@ -1,6 +1,7 @@
 #ifndef SC_RUNTIME_H
 #define SC_RUNTIME_H
 
+#include "seaclaw/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,5 +41,9 @@ sc_runtime_t sc_runtime_native(void);
 sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb);
 sc_runtime_t sc_runtime_wasm(uint64_t memory_limit_mb);
 sc_runtime_t sc_runtime_cloudflare(void);
+
+/* Select runtime from config; fills *out and returns SC_OK, or error for unknown kind. */
+struct sc_config;
+sc_error_t sc_runtime_from_config(const struct sc_config *cfg, sc_runtime_t *out);
 
 #endif /* SC_RUNTIME_H */

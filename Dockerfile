@@ -20,9 +20,9 @@ RUN mkdir build && cd build && \
 # ── Stage 2: Config Prep ─────────────────────────────────────
 FROM busybox:1.37 AS config
 
-RUN mkdir -p /nullclaw-data/.nullclaw /nullclaw-data/workspace
+RUN mkdir -p /seaclaw-data/.seaclaw /seaclaw-data/workspace
 
-RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
+RUN cat > /seaclaw-data/.seaclaw/config.json << 'EOF'
 {
   "api_key": "",
   "default_provider": "openrouter",
@@ -36,29 +36,29 @@ RUN cat > /nullclaw-data/.nullclaw/config.json << 'EOF'
 }
 EOF
 
-RUN chown -R 65534:65534 /nullclaw-data
+RUN chown -R 65534:65534 /seaclaw-data
 
 # ── Stage 3: Runtime Base (shared) ────────────────────────────
 FROM alpine:3.23 AS release-base
 
-LABEL org.opencontainers.image.source=https://github.com/nullclaw/nullclaw
+LABEL org.opencontainers.image.source=https://github.com/seaclaw/seaclaw
 
 RUN apk add --no-cache ca-certificates curl tzdata libsqlite3
 
-COPY --from=builder /app/build/nullclaw /usr/local/bin/nullclaw
-COPY --from=config /nullclaw-data /nullclaw-data
+COPY --from=builder /app/build/seaclaw /usr/local/bin/seaclaw
+COPY --from=config /seaclaw-data /seaclaw-data
 
-ENV NULLCLAW_WORKSPACE=/nullclaw-data/workspace
-ENV HOME=/nullclaw-data
-ENV NULLCLAW_GATEWAY_PORT=3000
+ENV SEACLAW_WORKSPACE=/seaclaw-data/workspace
+ENV HOME=/seaclaw-data
+ENV SEACLAW_GATEWAY_PORT=3000
 
-WORKDIR /nullclaw-data
+WORKDIR /seaclaw-data
 EXPOSE 3000
-ENTRYPOINT ["nullclaw"]
+ENTRYPOINT ["seaclaw"]
 CMD ["gateway", "--port", "3000", "--host", "::"]
 
 # Optional autonomous mode (explicit opt-in):
-#   docker build --target release-root -t nullclaw:root .
+#   docker build --target release-root -t seaclaw:root .
 FROM release-base AS release-root
 USER 0:0
 

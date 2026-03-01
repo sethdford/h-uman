@@ -11,23 +11,23 @@ Last updated: 2026-03-01
 | Test files                     | 55+                |
 | Tests passing                  | **704/704 (100%)** |
 | Binary size (native)           | **257 KB**         |
-| NullClaw module parity         | **100%**           |
+| SeaClaw module parity          | **100%**           |
 
-## Module Parity with NullClaw
+## Module Parity with SeaClaw
 
-| Subsystem        | NullClaw | SeaClaw | Status                      |
-| ---------------- | -------- | ------- | --------------------------- |
-| Providers        | 18       | 18      | **Full parity**             |
-| Channels         | 20       | 20      | **Full parity**             |
-| Tools            | 36       | 38      | **Full parity** (+2 extras) |
-| Security         | 11       | 13      | **Full parity** (+2 extras) |
-| Agent            | 8        | 11      | **Full parity** (+3 extras) |
-| Memory Engines   | 10       | 10      | **Full parity**             |
-| Memory Lifecycle | 8        | 8       | **Full parity**             |
-| Memory Retrieval | 8        | 10      | **Full parity** (+2 extras) |
-| Memory Vector    | 12       | 15      | **Full parity** (+3 extras) |
+| Subsystem        | Zig Ref | SeaClaw | Status                      |
+| ---------------- | ------- | ------- | --------------------------- |
+| Providers        | 18      | 18      | **Full parity**             |
+| Channels         | 20      | 20      | **Full parity**             |
+| Tools            | 36      | 38      | **Full parity** (+2 extras) |
+| Security         | 11      | 13      | **Full parity** (+2 extras) |
+| Agent            | 8       | 11      | **Full parity** (+3 extras) |
+| Memory Engines   | 10      | 10      | **Full parity**             |
+| Memory Lifecycle | 8       | 8       | **Full parity**             |
+| Memory Retrieval | 8       | 10      | **Full parity** (+2 extras) |
+| Memory Vector    | 12      | 15      | **Full parity** (+3 extras) |
 
-**All NullClaw modules have been ported. Zero gaps remain.**
+**All SeaClaw modules have been ported. Zero gaps remain.**
 
 ## What Works (Real Implementation)
 

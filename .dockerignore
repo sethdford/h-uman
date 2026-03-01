@@ -1,8 +1,8 @@
 .git
 .gitignore
-zig-out
-zig-cache
-.zig-cache
+build
+build-*
+archive
 reference
 *.md
 *.png

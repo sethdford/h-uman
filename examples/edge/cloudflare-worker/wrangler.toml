@@ -1,4 +1,4 @@
-name = "nullclaw-edge-telegram"
+name = "seaclaw-edge-telegram"
 main = "src/worker.mjs"
 compatibility_date = "2026-02-26"
 

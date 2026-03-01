@@ -3,17 +3,48 @@
 #include "seaclaw/agent.h"
 #include "seaclaw/provider.h"
 #include "seaclaw/providers/factory.h"
+#include "seaclaw/runtime.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/tools/factory.h"
 #include "seaclaw/security.h"
 #include "seaclaw/observability/log_observer.h"
 #include "seaclaw/channels/cli.h"
+#include "seaclaw/memory.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/core/string.h"
 #include "seaclaw/version.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SC_CODENAME "SeaClaw"
+#define SC_CLI_MAX_PATH 1024
+
+static sc_memory_t create_memory_from_config(sc_allocator_t *alloc,
+    const sc_config_t *cfg, const char *ws)
+{
+    const char *backend = cfg->memory.backend;
+    if (!backend) backend = "markdown";
+
+    if (strcmp(backend, "sqlite") == 0) {
+        const char *path = cfg->memory.sqlite_path;
+        char buf[SC_CLI_MAX_PATH];
+        if (!path) {
+            const char *home = getenv("HOME");
+            if (home) {
+                int n = snprintf(buf, sizeof(buf), "%s/.seaclaw/memory.db", home);
+                if (n > 0 && (size_t)n < sizeof(buf)) path = buf;
+            }
+        }
+        if (path) return sc_sqlite_memory_create(alloc, path);
+        return sc_markdown_memory_create(alloc, ws);
+    }
+
+    if (strcmp(backend, "none") == 0)
+        return sc_none_memory_create(alloc);
+
+    return sc_markdown_memory_create(alloc, ws);
+}
 
 sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
     sc_parsed_agent_args_t *out) {
@@ -40,6 +71,14 @@ sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
         }
     }
     return SC_OK;
+}
+
+static void cli_stream_token(const char *delta, size_t len, void *ctx) {
+    (void)ctx;
+    if (delta && len > 0) {
+        fwrite(delta, 1, len, stdout);
+        fflush(stdout);
+    }
 }
 
 sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size_t argc) {
@@ -77,35 +116,56 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     uint32_t max_iters = cfg.agent.max_tool_iterations > 0 ? cfg.agent.max_tool_iterations : 25;
     uint32_t max_hist = cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
 
+    sc_runtime_t runtime;
+    err = sc_runtime_from_config(&cfg, &runtime);
+    if (err != SC_OK) {
+        fprintf(stderr, "[%s] Runtime '%s' not supported: %s\n", SC_CODENAME,
+            cfg.runtime.kind ? cfg.runtime.kind : "(null)", sc_error_string(err));
+        sc_config_deinit(&cfg);
+        return err;
+    }
+
     sc_security_policy_t policy = {0};
     policy.autonomy = (sc_autonomy_level_t)cfg.security.autonomy_level;
     policy.workspace_dir = ws;
     policy.workspace_only = true;
     policy.allow_shell = (policy.autonomy != SC_AUTONOMY_READ_ONLY);
+    if (runtime.vtable && runtime.vtable->has_shell_access)
+        policy.allow_shell = policy.allow_shell && runtime.vtable->has_shell_access(runtime.ctx);
     policy.block_high_risk_commands = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
     policy.require_approval_for_medium_risk = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
     policy.max_actions_per_hour = 100;
     policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
 
+    sc_observer_t observer = sc_log_observer_create(alloc, stderr);
+
+    sc_memory_t memory = create_memory_from_config(alloc, &cfg, ws);
+    sc_session_store_t session_store = {0};
+    if (memory.vtable && strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)
+        session_store = sc_sqlite_memory_get_session_store(&memory);
+
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
-    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg, &tools, &tools_count);
+    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
+        memory.vtable ? &memory : NULL, &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         sc_config_deinit(&cfg);
         return err;
     }
 
-    sc_observer_t observer = sc_log_observer_create(alloc, stderr);
-
     sc_agent_t agent;
     err = sc_agent_from_config(&agent, alloc, provider,
-        tools, tools_count, NULL, NULL, &observer, NULL,
+        tools, tools_count,
+        memory.vtable ? &memory : NULL,
+        session_store.vtable ? &session_store : NULL,
+        &observer, NULL,
         model, strlen(model),
         prov_name, prov_name_len,
         temp, ws, strlen(ws), max_iters, max_hist, cfg.memory.auto_save,
-        2, NULL, 0);  /* autonomy_level=2 (full), no custom_instructions */
+        2, NULL, 0);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
         if (observer.vtable && observer.vtable->deinit)
@@ -143,11 +203,11 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
         char *response = NULL;
         size_t response_len = 0;
-        err = sc_agent_turn(&agent, line, line_len, &response, &response_len);
+        err = sc_agent_turn_stream(&agent, line, line_len,
+            cli_stream_token, NULL, &response, &response_len);
         if (err != SC_OK) {
             fprintf(stderr, "[error] %s\n", sc_error_string(err));
         } else if (response && response_len > 0) {
-            fwrite(response, 1, response_len, stdout);
             fputc('\n', stdout);
             fflush(stdout);
             alloc->free(alloc->ctx, response, response_len + 1);
@@ -158,6 +218,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     printf("\nGoodbye.\n");
     sc_agent_deinit(&agent);
+    if (memory.vtable && memory.vtable->deinit)
+        memory.vtable->deinit(memory.ctx);
     if (observer.vtable && observer.vtable->deinit)
         observer.vtable->deinit(observer.ctx);
     sc_tools_destroy_default(alloc, tools, tools_count);

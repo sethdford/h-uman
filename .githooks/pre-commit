@@ -1,12 +1,14 @@
 #!/bin/sh
-# pre-commit: enforce formatting on source files.
+# pre-commit: basic checks on C source files.
 # Activate: git config core.hooksPath .githooks
 
-if [ -d "src" ] && command -v zig >/dev/null 2>&1; then
-    output=$(zig fmt --check src/ 2>&1)
-    if [ $? -ne 0 ]; then
-        echo "zig fmt check failed. Run: zig fmt src/"
-        echo "$output"
-        exit 1
+if [ -d "src" ] && [ -f "CMakeLists.txt" ]; then
+    staged_c=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.[ch]$')
+    if [ -n "$staged_c" ]; then
+        for f in $staged_c; do
+            if grep -qn '	' "$f" 2>/dev/null; then
+                echo "Warning: tabs found in $f (project uses spaces)"
+            fi
+        done
     fi
 fi

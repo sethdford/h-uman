@@ -108,10 +108,10 @@ static void test_config_env_override_autonomy(void) {
     sc_config_t *cfg = make_config_with_arena();
     cfg->default_provider = sc_strdup(&cfg->allocator, "openai");
     cfg->default_model = sc_strdup(&cfg->allocator, "gpt-4");
-    setenv("NULLCLAW_AUTONOMY", "2", 1);
+    setenv("SEACLAW_AUTONOMY", "2", 1);
     sc_config_apply_env_overrides(cfg);
     SC_ASSERT_EQ(cfg->security.autonomy_level, 2);
-    unsetenv("NULLCLAW_AUTONOMY");
+    unsetenv("SEACLAW_AUTONOMY");
     free_config(cfg);
 }
 

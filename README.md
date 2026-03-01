@@ -1,37 +1,37 @@
 <p align="center">
-  <img src="nullclaw.png" alt="nullclaw" width="200" />
+  <img src="seaclaw.png" alt="seaclaw" width="200" />
 </p>
 
-<h1 align="center">NullClaw</h1>
+<h1 align="center">SeaClaw</h1>
 
 <p align="center">
-  <strong>Null overhead. Null compromise. 100% Zig. 100% Agnostic.</strong><br>
-  <strong>678 KB binary. ~1 MB RAM. Boots in <2 ms. Runs on anything with a CPU.</strong>
+  <strong>Null overhead. Null compromise. 100% C. 100% Agnostic.</strong><br>
+  <strong>239 KB binary. < 5 MB RAM. Boots in <2 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/nullclaw/nullclaw/actions/workflows/ci.yml"><img src="https://github.com/nullclaw/nullclaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://nullclaw.github.io"><img src="https://img.shields.io/badge/docs-nullclaw.github.io-informational" alt="Documentation" /></a>
+  <a href="https://github.com/seaclaw/seaclaw/actions/workflows/seaclaw-ci.yml"><img src="https://github.com/seaclaw/seaclaw/actions/workflows/seaclaw-ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://seaclaw.github.io"><img src="https://img.shields.io/badge/docs-seaclaw.github.io-informational" alt="Documentation" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
 </p>
 
-The smallest fully autonomous AI assistant infrastructure — a static Zig binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
+The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-678 KB binary · <2 ms startup · 3,230+ tests · 22+ providers · 18 channels · Pluggable everything
+239 KB binary · <2 ms startup · 1,697 tests · 22+ providers · 18 channels · Pluggable everything
 ```
 
 ### Features
 
-- **Impossibly Small:** 678 KB static binary — no runtime, no VM, no framework overhead.
-- **Near-Zero Memory:** ~1 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
+- **Impossibly Small:** 239 KB static binary — no runtime, no VM, no framework overhead.
+- **Near-Zero Memory:** < 5 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
 - **Instant Startup:** <2 ms on Apple Silicon, <8 ms on a 0.8 GHz edge core.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
 - **Feature-Complete:** 22+ providers, 18 channels, 18+ tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 
-### Why nullclaw
+### Why seaclaw
 
-- **Lean by default:** Zig compiles to a tiny static binary. No allocator overhead, no garbage collector, no runtime.
+- **Lean by default:** C11 compiles to a tiny static binary. No runtime overhead, no garbage collector, no framework.
 - **Secure by design:** pairing, strict sandboxing (landlock, firejail, bubblewrap, docker), explicit allowlists, workspace scoping, encrypted secrets.
 - **Fully swappable:** core systems are vtable interfaces (providers, channels, tools, memory, tunnels, peripherals, observers, runtimes).
 - **No lock-in:** OpenAI-compatible provider support + pluggable custom endpoints.
@@ -40,105 +40,84 @@ The smallest fully autonomous AI assistant infrastructure — a static Zig binar
 
 Local machine benchmark (macOS arm64, Feb 2026), normalized for 0.8 GHz edge hardware.
 
-|                       | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **[🦞 NullClaw](https://github.com/nullclaw/nullclaw)** |
-| --------------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------- |
-| **Language**          | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **Zig**                                                 |
-| **RAM**               | > 1 GB                                           | > 100 MB                                    | < 10 MB                                        | < 5 MB                                                | **~1 MB**                                               |
-| **Startup (0.8 GHz)** | > 500 s                                          | > 30 s                                      | < 1 s                                          | < 10 ms                                               | **< 8 ms**                                              |
-| **Binary Size**       | ~28 MB (dist)                                    | N/A (Scripts)                               | ~8 MB                                          | 3.4 MB                                                | **678 KB**                                              |
-| **Tests**             | —                                                | —                                           | —                                              | 1,017                                                 | **3,230+**                                              |
-| **Source Files**      | ~400+                                            | —                                           | —                                              | ~120                                                  | **~110**                                                |
-| **Cost**              | Mac Mini $599                                    | Linux SBC ~$50                              | Linux Board $10                                | Any $10 hardware                                      | **Any $5 hardware**                                     |
+|                       | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **[🦀 SeaClaw](https://github.com/seaclaw/seaclaw)** |
+| --------------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| **Language**          | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**                                                |
+| **RAM**               | > 1 GB                                           | > 100 MB                                    | < 10 MB                                        | < 5 MB                                                | **< 5 MB**                                           |
+| **Startup (0.8 GHz)** | > 500 s                                          | > 30 s                                      | < 1 s                                          | < 10 ms                                               | **< 8 ms**                                           |
+| **Binary Size**       | ~28 MB (dist)                                    | N/A (Scripts)                               | ~8 MB                                          | 3.4 MB                                                | **239 KB**                                           |
+| **Tests**             | —                                                | —                                           | —                                              | 1,017                                                 | **1,697**                                            |
+| **Source Files**      | ~400+                                            | —                                           | —                                              | ~120                                                  | **~415**                                             |
+| **Cost**              | Mac Mini $599                                    | Linux SBC ~$50                              | Linux Board $10                                | Any $10 hardware                                      | **Any $5 hardware**                                  |
 
-> Measured with `/usr/bin/time -l` on ReleaseSmall builds. nullclaw is a static binary with zero runtime dependencies.
+> Measured with `/usr/bin/time -l` on MinSizeRel builds. seaclaw is a static binary with zero runtime dependencies.
 
 Reproduce locally:
 
 ```bash
-zig build -Doptimize=ReleaseSmall
-ls -lh zig-out/bin/nullclaw
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+make -j
+ls -lh seaclaw
 
-/usr/bin/time -l zig-out/bin/nullclaw --help
-/usr/bin/time -l zig-out/bin/nullclaw status
+/usr/bin/time -l ./seaclaw --help
+/usr/bin/time -l ./seaclaw status
 ```
 
 ## Quick Start
 
-> **Prerequisite:** use **Zig 0.15.2** (exact version).
-> `0.16.0-dev` and other Zig versions are currently unsupported and may fail to build.
-> Verify before building: `zig version` should print `0.15.2`.
+> **Prerequisites:** C compiler (gcc or clang), CMake 3.16+, and optionally SQLite3 and libcurl.
+> macOS: `brew install cmake sqlite3`
+> Linux: `sudo apt-get install cmake libsqlite3-dev libcurl4-openssl-dev`
 
 ```bash
-git clone https://github.com/nullclaw/nullclaw.git
-cd nullclaw
-zig build -Doptimize=ReleaseSmall
+git clone https://github.com/seaclaw/seaclaw.git
+cd seaclaw
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+make -j
+cd ..
 
 # Quick setup
-nullclaw onboard --api-key sk-... --provider openrouter
+seaclaw onboard --api-key sk-... --provider openrouter
 
 # Or interactive wizard
-nullclaw onboard --interactive
+seaclaw onboard --interactive
 
 # Chat
-nullclaw agent -m "Hello, nullclaw!"
+seaclaw agent -m "Hello, seaclaw!"
 
 # Interactive mode
-nullclaw agent
+seaclaw agent
 
 # Start gateway runtime (gateway + all configured channels/accounts + heartbeat + scheduler)
-nullclaw gateway                # default: 127.0.0.1:3000
-nullclaw gateway --port 8080    # custom port
+seaclaw gateway                # default: 127.0.0.1:3000
+seaclaw gateway --port 8080    # custom port
 
 # Check status
-nullclaw status
+seaclaw status
 
 # Run system diagnostics
-nullclaw doctor
+seaclaw doctor
 
 # Check channel health
-nullclaw channel status
+seaclaw channel status
 
 # Start specific channels
-nullclaw channel start telegram
-nullclaw channel start discord
-nullclaw channel start signal
+seaclaw channel start telegram
+seaclaw channel start discord
+seaclaw channel start signal
 
 # Manage background service
-nullclaw service install
-nullclaw service status
+seaclaw service install
+seaclaw service status
 
 # Migrate memory from OpenClaw
-nullclaw migrate openclaw --dry-run
-nullclaw migrate openclaw
+seaclaw migrate openclaw --dry-run
+seaclaw migrate openclaw
 ```
 
-> **Dev fallback (no global install):** prefix commands with `zig-out/bin/` (example: `zig-out/bin/nullclaw status`).
-
-### SeaClaw (C/CMake) — alternative build
-
-The C port (SeaClaw) can be built from the repo root:
-
-```bash
-# macOS: install sqlite3 (brew install sqlite3)
-# Linux: install libsqlite3-dev, libcurl4-openssl-dev
-
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
-make -j
-
-# Run tests
-./seaclaw/seaclaw_tests
-
-# Run binary
-./seaclaw/seaclaw --help
-```
-
-Release build (optimized size):
-
-```bash
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
-make -j
-```
+> **Dev fallback (no global install):** prefix commands with `build/` (example: `build/seaclaw status`).
 
 ## Edge MVP (Hybrid Host + WASM Logic)
 
@@ -146,7 +125,7 @@ If you want edge deployment (Cloudflare Worker) with Telegram + OpenAI while kee
 
 `examples/edge/cloudflare-worker/`
 
-This pattern keeps networking/secrets in the edge host and lets you swap/update logic by replacing a tiny Zig WASM module.
+This pattern keeps networking/secrets in the edge host and lets you swap/update logic by replacing a WASM module.
 
 ## Architecture
 
@@ -197,7 +176,7 @@ All custom, zero external dependencies:
 
 ## Security
 
-nullclaw enforces security at **every layer**.
+seaclaw enforces security at **every layer**.
 
 | #   | Item                             | Status | How                                                                                                  |
 | --- | -------------------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
@@ -220,14 +199,14 @@ Nostr additionally: the `owner_pubkey` is **always** allowed regardless of `dm_a
 
 ### Nostr Channel Setup
 
-`nullclaw` speaks Nostr natively via NIP-17 (gift-wrapped private DMs) and NIP-04 (legacy DMs), using [`nak`](https://github.com/fiatjaf/nak).
+`seaclaw` speaks Nostr natively via NIP-17 (gift-wrapped private DMs) and NIP-04 (legacy DMs), using [`nak`](https://github.com/fiatjaf/nak).
 
 **Prerequisites:** Install `nak` and ensure it's in your `$PATH`.
 
 **Setup via onboarding wizard:**
 
 ```bash
-nullclaw onboard --interactive   # Step 7 configures Nostr
+seaclaw onboard --interactive   # Step 7 configures Nostr
 ```
 
 The wizard will:
@@ -239,13 +218,13 @@ The wizard will:
 
 Or configure manually in the [config](#configuration).
 
-**How it works:** On startup, nullclaw announces its DM inbox relays (kind:10050), then listens for incoming NIP-17 gift wraps and NIP-04 encrypted DMs. Outbound messages mirror the sender's protocol. Multi-relay rumor deduplication prevents duplicate responses when the same message is delivered via multiple relays.
+**How it works:** On startup, seaclaw announces its DM inbox relays (kind:10050), then listens for incoming NIP-17 gift wraps and NIP-04 encrypted DMs. Outbound messages mirror the sender's protocol. Multi-relay rumor deduplication prevents duplicate responses when the same message is delivered via multiple relays.
 
 ## Configuration
 
-Config: `~/.nullclaw/config.json` (created by `onboard`)
+Config: `~/.seaclaw/config.json` (created by `onboard`)
 
-> **OpenClaw compatible:** nullclaw uses the same config structure as [OpenClaw](https://github.com/openclaw/openclaw) (snake_case). Providers live under `models.providers`, the default model under `agents.defaults.model.primary`, and channels use `accounts` wrappers.
+> **OpenClaw compatible:** seaclaw uses the same config structure as [OpenClaw](https://github.com/openclaw/openclaw) (snake_case). Providers live under `models.providers`, the default model under `agents.defaults.model.primary`, and channels use `accounts` wrappers.
 > Top-level `default_provider` / `default_model` keys are not supported.
 
 ```json
@@ -303,8 +282,8 @@ Config: `~/.nullclaw/config.json` (created by `onboard`)
         "main": {
           "host": "irc.libera.chat",
           "port": 6697,
-          "nick": "nullclaw",
-          "channel": "#nullclaw",
+          "nick": "seaclaw",
+          "channel": "#seaclaw",
           "tls": true,
           "allow_from": ["user1"]
         }
@@ -328,9 +307,9 @@ Config: `~/.nullclaw/config.json` (created by `onboard`)
         "wss://relay.nostr.band"
       ],
       "dm_allowed_pubkeys": ["*"],
-      "display_name": "NullClaw",
+      "display_name": "SeaClaw",
       "about": "AI assistant on Nostr",
-      "nip05": "nullclaw@yourdomain.com",
+      "nip05": "seaclaw@yourdomain.com",
       "lnurl": "lnurl1..."
     }
   },
@@ -464,7 +443,7 @@ Use `channels.web` for browser UI events (WebChannel v1):
       "accounts": {
         "default": {
           "transport": "relay",
-          "relay_url": "wss://relay.nullclaw.io/ws/agent",
+          "relay_url": "wss://relay.seaclaw.io/ws/agent",
           "relay_agent_id": "default",
           "relay_token": "replace-with-relay-token",
           "relay_token_ttl_secs": 2592000,
@@ -478,7 +457,7 @@ Use `channels.web` for browser UI events (WebChannel v1):
 }
 ```
 
-- Relay token lifecycle (dedicated): `relay_token` (config) -> `NULLCLAW_RELAY_TOKEN` (env) -> persisted `web-relay-<account_id>` credential -> generated token.
+- Relay token lifecycle (dedicated): `relay_token` (config) -> `SEACLAW_RELAY_TOKEN` (env) -> persisted `web-relay-<account_id>` credential -> generated token.
 - Relay UI handshake: send `pairing_request` with one-time `pairing_code`, receive `pairing_result` with UI `access_token` JWT (and optional `set_cookie` string for relay HTTP layer).
 - Relay `user_message` must include valid UI JWT in `access_token` (top-level or `payload.access_token`).
 - If E2E is enabled (`relay_e2e_required=true`), UI and agent exchange X25519 keys during pairing and send encrypted payloads in `payload.e2e`.
@@ -516,68 +495,74 @@ Use `channels.web` for browser UI events (WebChannel v1):
 
 ## Development
 
-Build and tests are pinned to **Zig 0.15.2**.
+Build and tests require a C11 compiler and CMake 3.16+.
 
 ```bash
-zig build                          # Dev build
-zig build -Doptimize=ReleaseSmall  # Release build (678 KB)
-zig build test --summary all       # 3,230+ tests
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
+make -j                                    # Dev build
+./seaclaw_tests                            # 1,697 tests
+cd ..
+
+# Release build (239 KB)
+mkdir -p build-release && cd build-release
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+make -j
 ```
 
 ### Channel Flow Coverage
 
 Channel CJM coverage (ingress parsing/filtering, session key routing, account propagation, bus handoff) is validated by tests in:
 
-- `src/channel_manager.zig` (runtime channel registration/start semantics + listener mode wiring)
-- `src/config.zig` (OpenClaw-compatible `channels.*.accounts` parsing, multi-account selection/ordering, aliases)
-- `src/gateway.zig` (Telegram/WhatsApp/LINE/Lark routed session keys from webhook payloads)
-- `src/daemon.zig` (gateway-loop inbound route resolution for Discord/QQ/OneBot/Mattermost/MaixCam)
-- `src/channels/discord.zig`, `src/channels/mattermost.zig`, `src/channels/qq.zig`, `src/channels/onebot.zig`, `src/channels/signal.zig`, `src/channels/line.zig`, `src/channels/whatsapp.zig` (per-channel inbound/outbound contracts)
+- `src/channel_manager.c` (runtime channel registration/start semantics + listener mode wiring)
+- `src/config.c` (OpenClaw-compatible `channels.*.accounts` parsing, multi-account selection/ordering, aliases)
+- `src/gateway/gateway.c` (Telegram/WhatsApp/LINE/Lark routed session keys from webhook payloads)
+- `src/daemon.c` (gateway-loop inbound route resolution for Discord/QQ/OneBot/Mattermost/MaixCam)
+- `src/channels/discord.c`, `src/channels/mattermost.c`, `src/channels/qq.c`, `src/channels/onebot.c`, `src/channels/signal.c`, `src/channels/line.c`, `src/channels/whatsapp.c` (per-channel inbound/outbound contracts)
 
 ### Project Stats
 
 ```
-Language:     Zig 0.15.2
-Source files: ~110
-Lines of code: ~45,000
-Tests:        3,230+
-Binary:       678 KB (ReleaseSmall)
-Peak RSS:     ~1 MB
+Language:     C11 + ASM (aarch64, x86_64)
+Source files: ~415
+Lines of code: ~52,000
+Tests:        1,697
+Binary:       239 KB (MinSizeRel + LTO)
+Peak RSS:     < 5 MB
 Startup:      <2 ms (Apple Silicon)
-Dependencies: 0 (besides libc + optional SQLite)
+Dependencies: libc + optional SQLite, libcurl
 ```
 
 ### Source Layout
 
 ```
 src/
-  main.zig              CLI entry point + argument parsing
-  root.zig              Module hierarchy (public API)
-  config.zig            JSON config loader + 30 sub-config structs
-  agent.zig             Agent loop, auto-compaction, tool dispatch
-  daemon.zig            Daemon supervisor with exponential backoff
-  gateway.zig           HTTP gateway (rate limiting, idempotency, pairing)
-  channels/             19 channel implementations (telegram, signal, discord, slack, nostr, matrix, whatsapp, line, lark, onebot, mattermost, qq, ...)
-  providers/            22+ AI provider implementations
-  memory/               SQLite backend, embeddings, vector search, hygiene, snapshots
-  tools/                18 tool implementations
-  security/             Secrets (ChaCha20), sandbox backends (landlock, firejail, ...)
-  cron.zig              Cron scheduler with JSON persistence
-  health.zig            Component health registry
-  tunnel.zig            Tunnel vtable (cloudflare, ngrok, tailscale, custom)
-  peripherals.zig       Hardware peripheral vtable (serial, Arduino, RPi, Nucleo)
-  runtime.zig           Runtime vtable (native, docker, WASM)
-  skillforge.zig        Skill discovery (GitHub), evaluation, integration
+  main.c               CLI entry point + command routing
+  agent/               Agent loop, context, planner, compaction, dispatcher
+  channels/            20 channel implementations (cli, telegram, discord, ...)
+  providers/           22+ AI provider implementations
+  memory/              SQLite + markdown + LRU backends, embeddings, vector search
+  tools/               30+ tool implementations
+  security/            Policy, pairing, secrets, sandbox backends
+  runtime/             Runtime adapters (native, docker, wasm, cloudflare)
+  core/                Allocator, arena, error, json, http, string, slice
+  observability/       Log + metrics observers
+  gateway/             HTTP gateway server
+  config.c             Config loading/merging (~/.seaclaw/config.json)
   ...
+
+include/seaclaw/      Public C headers
+tests/                66 test files, 1,697 tests
+asm/                  Platform-specific assembly (aarch64, x86_64, generic C)
 ```
 
 ## Versioning
 
-nullclaw uses **CalVer** (`YYYY.M.D`) for releases — e.g. `v2026.2.20`.
+seaclaw uses **CalVer** (`YYYY.M.D`) for releases — e.g. `v2026.2.20`.
 
 - **Tag format:** `vYYYY.M.D` (one release per day max; patch suffix `vYYYY.M.D.N` if needed)
 - **No stability guarantees yet** — the project is pre-1.0, config and CLI may change between releases
-- **`nullclaw --version`** prints the current version
+- **`seaclaw --version`** prints the current version
 
 ## Contributing
 
@@ -587,14 +572,14 @@ Implement a vtable interface, submit a PR:
 - New `Channel` -> `src/channels/`
 - New `Tool` -> `src/tools/`
 - New `Memory` backend -> `src/memory/`
-- New `Tunnel` -> `src/tunnel.zig`
+- New `Tunnel` -> `src/tunnel/`
 - New `Sandbox` backend -> `src/security/`
-- New `Peripheral` -> `src/peripherals.zig`
-- New `Skill` -> `~/.nullclaw/workspace/skills/<name>/`
+- New `Peripheral` -> `src/peripherals/`
+- New `Skill` -> `~/.seaclaw/workspace/skills/<name>/`
 
 ## Disclaimer
 
-nullclaw is a pure open-source software project. It has **no token, no cryptocurrency, no blockchain component, and no financial instrument** of any kind. This project is not affiliated with any token or financial product.
+seaclaw is a pure open-source software project. It has **no token, no cryptocurrency, no blockchain component, and no financial instrument** of any kind. This project is not affiliated with any token or financial product.
 
 ## License
 
@@ -602,8 +587,8 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-**nullclaw** — Null overhead. Null compromise. Deploy anywhere. Swap anything.
+**seaclaw** — Zero overhead. Zero compromise. Deploy anywhere. Swap anything.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=nullclaw/nullclaw&type=date&legend=top-left)](https://www.star-history.com/#nullclaw/nullclaw&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=seaclaw/seaclaw&type=date&legend=top-left)](https://www.star-history.com/#seaclaw/seaclaw&type=date&legend=top-left)

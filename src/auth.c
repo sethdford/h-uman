@@ -14,7 +14,7 @@
 #endif
 #endif
 
-#define SC_AUTH_DIR ".nullclaw"
+#define SC_AUTH_DIR ".seaclaw"
 #define SC_AUTH_FILE "auth.json"
 #define SC_AUTH_MAX_BODY 65536
 
@@ -249,7 +249,7 @@ sc_error_t sc_auth_start_device_flow(sc_allocator_t *alloc,
 
     sc_http_response_t resp = {0};
     sc_error_t err = sc_http_request(alloc, device_auth_url, "POST",
-        "Content-Type: application/x-www-form-urlencoded\nUser-Agent: nullClaw/1.0",
+        "Content-Type: application/x-www-form-urlencoded\nUser-Agent: SeaClaw/1.0",
         body, j, &resp);
     if (err != SC_OK) return err;
 
@@ -321,7 +321,7 @@ sc_error_t sc_auth_poll_device_code(sc_allocator_t *alloc,
 
         sc_http_response_t resp = {0};
         sc_error_t err = sc_http_request(alloc, token_url, "POST",
-            "Content-Type: application/x-www-form-urlencoded\nUser-Agent: nullClaw/1.0",
+            "Content-Type: application/x-www-form-urlencoded\nUser-Agent: SeaClaw/1.0",
             body, (size_t)n, &resp);
         if (err != SC_OK) return err;
 
@@ -403,7 +403,7 @@ sc_error_t sc_auth_refresh_token(sc_allocator_t *alloc,
 
     sc_http_response_t resp = {0};
     sc_error_t err = sc_http_request(alloc, token_url, "POST",
-        "Content-Type: application/x-www-form-urlencoded\nUser-Agent: nullClaw/1.0",
+        "Content-Type: application/x-www-form-urlencoded\nUser-Agent: SeaClaw/1.0",
         body, j, &resp);
     if (err != SC_OK) return err;
 

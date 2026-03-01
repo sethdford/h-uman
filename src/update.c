@@ -27,8 +27,8 @@
 #include <stdlib.h>
 #endif
 
-#define GITHUB_API_URL "https://api.github.com/repos/nullclaw/nullclaw/releases/latest"
-#define RELEASE_BASE "https://github.com/nullclaw/nullclaw/releases/latest/download/"
+#define GITHUB_API_URL "https://api.github.com/repos/seaclaw/seaclaw/releases/latest"
+#define RELEASE_BASE "https://github.com/seaclaw/seaclaw/releases/latest/download/"
 
 typedef enum { INSTALL_NIX, INSTALL_HOMEBREW, INSTALL_DOCKER, INSTALL_BINARY, INSTALL_DEV } install_method_t;
 
@@ -36,8 +36,8 @@ static install_method_t detect_install_method(const char *exe_path) {
     if (!exe_path) return INSTALL_BINARY;
     if (strstr(exe_path, "/nix/store/")) return INSTALL_NIX;
     if (strstr(exe_path, "/homebrew/") || strstr(exe_path, "/Cellar/")) return INSTALL_HOMEBREW;
-    if (strcmp(exe_path, "/nullclaw") == 0) return INSTALL_DOCKER;
-    if (strstr(exe_path, "zig-out")) return INSTALL_DEV;
+    if (strcmp(exe_path, "/seaclaw") == 0) return INSTALL_DOCKER;
+    if (strstr(exe_path, "/build/")) return INSTALL_DEV;
     return INSTALL_BINARY;
 }
 
@@ -67,15 +67,15 @@ static char *get_exe_path(sc_allocator_t *alloc) {
 
 static const char *get_platform_asset(void) {
 #if defined(__linux__) && defined(__x86_64__)
-    return "nullclaw-linux-x86_64.bin";
+    return "seaclaw-linux-x86_64.bin";
 #elif defined(__linux__) && defined(__aarch64__)
-    return "nullclaw-linux-aarch64.bin";
+    return "seaclaw-linux-aarch64.bin";
 #elif defined(__APPLE__) && defined(__aarch64__)
-    return "nullclaw-macos-aarch64.bin";
+    return "seaclaw-macos-aarch64.bin";
 #elif defined(__APPLE__) && defined(__x86_64__)
-    return "nullclaw-macos-x86_64.bin";
+    return "seaclaw-macos-x86_64.bin";
 #elif defined(_WIN32) || defined(_WIN64)
-    return "nullclaw-windows-x86_64.exe";
+    return "seaclaw-windows-x86_64.exe";
 #else
     return NULL;
 #endif
@@ -84,13 +84,13 @@ static const char *get_platform_asset(void) {
 static void print_package_instructions(install_method_t method) {
     switch (method) {
         case INSTALL_NIX:
-            printf("Detected installation via: Nix\nTo update, run:\n  nix-channel --update && nix-env -iA nixpkgs.nullclaw\n");
+            printf("Detected installation via: Nix\nTo update, run:\n  nix-channel --update && nix-env -iA nixpkgs.seaclaw\n");
             break;
         case INSTALL_HOMEBREW:
-            printf("Detected installation via: Homebrew\nTo update, run:\n  brew upgrade nullclaw\n");
+            printf("Detected installation via: Homebrew\nTo update, run:\n  brew upgrade seaclaw\n");
             break;
         case INSTALL_DOCKER:
-            printf("Detected installation via: Docker\nTo update, run:\n  docker pull ghcr.io/nullclaw/nullclaw:latest\n");
+            printf("Detected installation via: Docker\nTo update, run:\n  docker pull ghcr.io/seaclaw/seaclaw:latest\n");
             break;
         case INSTALL_DEV:
             printf("Development installation detected.\nTo update, run:\n  git pull && cmake --build build && make -C build\n");
@@ -167,7 +167,7 @@ sc_error_t sc_update_apply(void) {
 
     const char *asset = get_platform_asset();
     if (!asset) {
-        printf("Unsupported platform for auto-update. Please download manually from:\n  %s\n", "https://github.com/nullclaw/nullclaw/releases/latest");
+        printf("Unsupported platform for auto-update. Please download manually from:\n  %s\n", "https://github.com/seaclaw/seaclaw/releases/latest");
         alloc.free(alloc.ctx, exe_path, strlen(exe_path) + 1);
         return SC_ERR_NOT_SUPPORTED;
     }

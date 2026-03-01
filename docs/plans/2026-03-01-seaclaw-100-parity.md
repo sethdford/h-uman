@@ -1,16 +1,14 @@
-# SeaClaw 100% Parity — Complete Porting Plan
+# SeaClaw 100% Parity — Porting Plan (COMPLETED)
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Status: COMPLETED** — All Zig modules have been ported to C. This document is retained as historical reference.
 
-**Goal:** Port every remaining Zig module in `src/` to C in `seaclaw/`, reaching full feature parity so `src/` can be deleted.
+**Goal:** Port every remaining Zig module to C, reaching full feature parity.
 
-**Architecture:** SeaClaw follows nullclaw's vtable-driven design. Every extension point (provider, channel, tool, memory engine, sandbox backend) is a struct of function pointers registered in a factory. Stubs already exist for all 33 remaining gaps — each returns `SC_ERR_NOT_SUPPORTED`. The work is replacing stub bodies with real logic, porting from the Zig reference.
+**Architecture:** SeaClaw follows the original Zig reference's vtable-driven design. Every extension point (provider, channel, tool, memory engine, sandbox backend) is a struct of function pointers registered in a factory.
 
 **Tech Stack:** C11, CMake, libcurl (HTTP), libsqlite3 (memory), pthreads (concurrency), ChaCha20-Poly1305 + SHA-256 (crypto via `asm/`). Platform deps: libpq (postgres), hiredis (redis). Test framework: custom `test_framework.h` with ASan.
 
-**Current state:** 661/661 tests passing, 0 ASan errors. ~40,500 lines of C source + 10,300 lines of tests.
-
-**Gap:** ~38,900 Zig reference lines across 33 stub files + 5 missing web search providers + config schema + CLI commands.
+**Final state:** 1,697 tests passing, 0 ASan errors. ~52,000 lines of C source + ~22,000 lines of tests. 239 KB MinSizeRel binary.
 
 ---
 

@@ -203,7 +203,7 @@ sc_error_t sc_config_mutator_default_path(sc_allocator_t *alloc, char **out_path
     size_t n = strlen(home) + 20;
     char *p = (char *)alloc->alloc(alloc->ctx, n);
     if (!p) return SC_ERR_OUT_OF_MEMORY;
-    (void)snprintf(p, n, "%s/.nullclaw/config.json", home);
+    (void)snprintf(p, n, "%s/.seaclaw/config.json", home);
     *out_path = p;
     return SC_OK;
 }

@@ -1,6 +1,6 @@
 /*
  * SchemaCleanr: JSON Schema cleaning for LLM tool-calling compatibility.
- * Port of nullclaw src/tools/schema.zig
+ * JSON Schema cleaning for LLM tool-calling compatibility.
  * Removes unsupported keywords per provider, resolves $ref, const->enum, etc.
  */
 #include "seaclaw/tools/schema_clean.h"

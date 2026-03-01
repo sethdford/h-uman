@@ -22,18 +22,17 @@
 #include "seaclaw/migration.h"
 #include "seaclaw/crontab.h"
 #include "seaclaw/cli_commands.h"
+#include "seaclaw/doctor.h"
+#include "seaclaw/gateway.h"
 
 #define SC_VERSION "0.1.0"
-#define SC_CODENAME "nullclaw"
+#define SC_CODENAME "seaclaw"
 
 typedef struct sc_command {
     const char *name;
     const char *description;
     sc_error_t (*handler)(sc_allocator_t *alloc, int argc, char **argv);
 } sc_command_t;
-
-extern sc_error_t sc_gateway_run(sc_allocator_t *alloc,
-    const char *host, uint16_t port, const void *config);
 
 static sc_error_t cmd_agent(sc_allocator_t *alloc, int argc, char **argv);
 static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv);
@@ -81,7 +80,7 @@ static sc_command_t const *find_command(const char *name) {
 
 static void print_usage(FILE *out) {
     fprintf(out, "%s v%s — Autonomous AI Assistant Runtime (C/ASM/WASM)\n\n", SC_CODENAME, SC_VERSION);
-    fprintf(out, "Usage: nullclaw [command] [options]\n\n");
+    fprintf(out, "Usage: seaclaw [command] [options]\n\n");
     fprintf(out, "Commands:\n");
     for (size_t i = 0; i < COMMANDS_COUNT; i++) {
         if (strcmp(commands[i].name, "version") != 0 && strcmp(commands[i].name, "help") != 0)
@@ -150,6 +149,26 @@ static sc_error_t cmd_doctor(sc_allocator_t *alloc, int argc, char **argv) {
 
     const char *backend = cfg.memory_backend ? cfg.memory_backend : "none";
     printf("[doctor] memory engine: %s\n", backend);
+
+    sc_diag_item_t *items = NULL;
+    size_t item_count = 0;
+    err = sc_doctor_check_config_semantics(alloc, &cfg, &items, &item_count);
+    if (err == SC_OK && items && item_count > 0) {
+        for (size_t i = 0; i < item_count; i++) {
+            const char *sev = items[i].severity == SC_DIAG_ERR ? "error" :
+                              items[i].severity == SC_DIAG_WARN ? "warning" : "info";
+            printf("[doctor] %s: %s — %s\n", sev,
+                items[i].category ? items[i].category : "config",
+                items[i].message ? items[i].message : "");
+        }
+    }
+    if (items) {
+        for (size_t i = 0; i < item_count; i++) {
+            if (items[i].category) alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
+            if (items[i].message) alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+        }
+        alloc->free(alloc->ctx, items, item_count * sizeof(sc_diag_item_t));
+    }
 
     sc_config_deinit(&cfg);
     return SC_OK;
@@ -249,9 +268,9 @@ static sc_error_t cmd_cron(sc_allocator_t *alloc, int argc, char **argv) {
 
     alloc->free(alloc->ctx, path, path_len + 1);
     fprintf(stderr, "[%s] cron: use 'list', 'add', or 'remove'\n", SC_CODENAME);
-    fprintf(stderr, "  nullclaw cron list\n");
-    fprintf(stderr, "  nullclaw cron add <schedule> <command>\n");
-    fprintf(stderr, "  nullclaw cron remove <id>\n");
+    fprintf(stderr, "  seaclaw cron list\n");
+    fprintf(stderr, "  seaclaw cron add <schedule> <command>\n");
+    fprintf(stderr, "  seaclaw cron remove <id>\n");
     return SC_ERR_INVALID_ARGUMENT;
 }
 
@@ -329,128 +348,8 @@ static sc_error_t cmd_migrate(sc_allocator_t *alloc, int argc, char **argv) {
     return err;
 }
 
-sc_error_t sc_cli_create(sc_allocator_t *alloc, sc_channel_t *out);
-void sc_cli_destroy(sc_channel_t *ch);
-char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len);
-bool sc_cli_is_quit_command(const char *line, size_t len);
-
-__attribute__((unused))
 static sc_error_t cmd_agent(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    sc_config_t cfg;
-    sc_error_t err = sc_config_load(alloc, &cfg);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Config error: %s\n", SC_CODENAME, sc_error_string(err));
-        return err;
-    }
-
-    const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
-    size_t prov_name_len = strlen(prov_name);
-    const char *api_key = sc_config_default_provider_key(&cfg);
-    size_t api_key_len = api_key ? strlen(api_key) : 0;
-    const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
-    size_t base_url_len = base_url ? strlen(base_url) : 0;
-
-    sc_provider_t provider;
-    err = sc_provider_create(alloc, prov_name, prov_name_len,
-        api_key, api_key_len, base_url, base_url_len, &provider);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Provider '%s' init failed: %s\n",
-            SC_CODENAME, prov_name, sc_error_string(err));
-        sc_config_deinit(&cfg);
-        return err;
-    }
-
-    const char *model = cfg.default_model ? cfg.default_model : "gpt-4o";
-    const char *ws = cfg.workspace_dir ? cfg.workspace_dir : ".";
-    double temp = cfg.temperature > 0.0 ? cfg.temperature : 0.7;
-    uint32_t max_iters = cfg.agent.max_tool_iterations > 0 ? cfg.agent.max_tool_iterations : 25;
-    uint32_t max_hist = cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
-
-    sc_security_policy_t policy = {0};
-    policy.autonomy = (sc_autonomy_level_t)cfg.security.autonomy_level;
-    policy.workspace_dir = ws;
-    policy.workspace_only = true;
-    policy.allow_shell = (policy.autonomy != SC_AUTONOMY_READ_ONLY);
-    policy.block_high_risk_commands = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
-    policy.require_approval_for_medium_risk = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
-    policy.max_actions_per_hour = 100;
-    policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
-
-    sc_tool_t *tools = NULL;
-    size_t tools_count = 0;
-    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg, &tools, &tools_count);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
-        sc_config_deinit(&cfg);
-        return err;
-    }
-
-    sc_observer_t observer = sc_log_observer_create(alloc, stderr);
-
-    sc_agent_t agent;
-    err = sc_agent_from_config(&agent, alloc, provider,
-        tools, tools_count, NULL, NULL, &observer, NULL,
-        model, strlen(model),
-        prov_name, prov_name_len,
-        temp, ws, strlen(ws), max_iters, max_hist, cfg.memory.auto_save,
-        2, NULL, 0);  /* autonomy_level=2 (full), no custom_instructions */
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
-        sc_tools_destroy_default(alloc, tools, tools_count);
-        sc_config_deinit(&cfg);
-        return err;
-    }
-
-    printf("%s v%s — Interactive Agent\n", SC_CODENAME, SC_VERSION);
-    printf("Provider: %s | Model: %s | Tools: %zu\n", prov_name, model, tools_count);
-    printf("Type your message, or 'exit'/'quit' to leave.\n\n");
-
-    while (1) {
-        printf("> ");
-        fflush(stdout);
-
-        size_t line_len = 0;
-        char *line = sc_cli_readline(alloc, &line_len);
-        if (!line) break;
-
-        if (sc_cli_is_quit_command(line, line_len)) {
-            alloc->free(alloc->ctx, line, line_len + 1);
-            break;
-        }
-
-        char *slash = sc_agent_handle_slash_command(&agent, line, line_len);
-        if (slash) {
-            printf("%s\n", slash);
-            alloc->free(alloc->ctx, slash, strlen(slash) + 1);
-            alloc->free(alloc->ctx, line, line_len + 1);
-            continue;
-        }
-
-        char *response = NULL;
-        size_t response_len = 0;
-        err = sc_agent_turn(&agent, line, line_len, &response, &response_len);
-        if (err != SC_OK) {
-            fprintf(stderr, "[error] %s\n", sc_error_string(err));
-        } else if (response && response_len > 0) {
-            fwrite(response, 1, response_len, stdout);
-            fputc('\n', stdout);
-            fflush(stdout);
-            alloc->free(alloc->ctx, response, response_len + 1);
-        }
-
-        alloc->free(alloc->ctx, line, line_len + 1);
-    }
-
-    printf("\nGoodbye.\n");
-    sc_agent_deinit(&agent);
-    if (observer.vtable && observer.vtable->deinit)
-        observer.vtable->deinit(observer.ctx);
-    sc_tools_destroy_default(alloc, tools, tools_count);
-    if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
-    sc_config_deinit(&cfg);
-    return SC_OK;
+    return sc_agent_cli_run(alloc, (const char *const *)argv, (size_t)argc);
 }
 
 static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
@@ -463,17 +362,16 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         return err;
     }
 
-    const char *host = cfg.gateway_host && cfg.gateway_host[0] ?
-        cfg.gateway_host : "0.0.0.0";
-    uint16_t port = cfg.gateway_port > 0 ? cfg.gateway_port : 8080;
+    sc_gateway_config_t gw_config;
+    sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
 
-    sc_config_deinit(&cfg);
-
-    err = sc_gateway_run(alloc, host, port, NULL);
+    err = sc_gateway_run(alloc, gw_config.host, gw_config.port, &gw_config);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Gateway error: %s\n", SC_CODENAME, sc_error_string(err));
+        sc_config_deinit(&cfg);
         return err;
     }
+    sc_config_deinit(&cfg);
     return SC_OK;
 }
 
@@ -500,7 +398,7 @@ int main(int argc, char *argv[]) {
 
     if (!cmd) {
         fprintf(stderr, "Unknown command: %s\n", cmd_name);
-        fprintf(stderr, "Run 'nullclaw help' for usage.\n");
+        fprintf(stderr, "Run 'seaclaw help' for usage.\n");
         return 1;
     }
 

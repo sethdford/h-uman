@@ -191,6 +191,7 @@ sc_error_t sc_voice_stt(sc_allocator_t *alloc, const sc_voice_config_t *config,
     char **out_text, size_t *out_len)
 {
     if (!alloc || !config || !out_text || !out_len) return SC_ERR_INVALID_ARGUMENT;
+    if (!audio_data && audio_len > 0) return SC_ERR_INVALID_ARGUMENT;
     *out_text = NULL;
     *out_len = 0;
 

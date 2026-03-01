@@ -1,4 +1,5 @@
 #include "seaclaw/gateway.h"
+#include "seaclaw/config.h"
 #include "seaclaw/health.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
@@ -18,6 +19,30 @@
 #endif
 
 #define SC_GATEWAY_DEFAULT_PORT 8080
+
+void sc_gateway_config_from_cfg(const sc_config_gateway_t *cfg_gw,
+                                sc_gateway_config_t *out) {
+    if (!cfg_gw || !out) return;
+    memset(out, 0, sizeof(*out));
+    out->host = cfg_gw->host && cfg_gw->host[0] ? cfg_gw->host : "0.0.0.0";
+    out->port = cfg_gw->port > 0 ? cfg_gw->port : SC_GATEWAY_DEFAULT_PORT;
+    out->max_body_size = SC_GATEWAY_MAX_BODY_SIZE;
+    out->rate_limit_per_minute = cfg_gw->pair_rate_limit_per_minute > 0 ?
+        cfg_gw->pair_rate_limit_per_minute : SC_GATEWAY_RATE_LIMIT_PER_MIN;
+    out->hmac_secret = cfg_gw->webhook_hmac_secret && cfg_gw->webhook_hmac_secret[0] ?
+        cfg_gw->webhook_hmac_secret : NULL;
+    out->hmac_secret_len = out->hmac_secret ? strlen(out->hmac_secret) : 0;
+    if (cfg_gw->require_pairing && !out->hmac_secret) {
+        const char *v = getenv("SEACLAW_WEBHOOK_HMAC_SECRET");
+        if (v && v[0]) {
+            out->hmac_secret = v;
+            out->hmac_secret_len = strlen(v);
+        }
+    }
+    out->test_mode = false;
+    out->on_webhook = NULL;
+    out->on_webhook_ctx = NULL;
+}
 
 typedef struct rate_entry {
     char ip[64];
@@ -81,6 +106,29 @@ static bool is_webhook_path(const char *path) {
         path_is(path, "/line") ||
         path_is(path, "/lark") ||
         path_is(path, "/discord");
+}
+
+static const char *webhook_path_to_channel(const char *path, char *buf, size_t buf_len) {
+    if (!path || !buf || buf_len == 0) return "unknown";
+    if (strncmp(path, "/webhook/", 9) == 0) {
+        const char *rest = path + 9;
+        const char *end = strchr(rest, '/');
+        size_t n = end ? (size_t)(end - rest) : strlen(rest);
+        if (n >= buf_len) n = buf_len - 1;
+        memcpy(buf, rest, n);
+        buf[n] = '\0';
+        return buf;
+    }
+    if (path[0] == '/') {
+        const char *rest = path + 1;
+        const char *end = strchr(rest, '/');
+        size_t n = end ? (size_t)(end - rest) : strlen(rest);
+        if (n >= buf_len) n = buf_len - 1;
+        memcpy(buf, rest, n);
+        buf[n] = '\0';
+        return buf;
+    }
+    return "unknown";
 }
 
 static bool verify_hmac(const char *body, size_t body_len,
@@ -151,6 +199,15 @@ static void handle_request(sc_gateway_state_t *gw, int fd, const char *method,
                     gw->config.hmac_secret, gw->config.hmac_secret_len)) {
                 send_response(fd, 401, "{\"error\":\"invalid signature\"}");
                 return;
+            }
+        }
+        /* Dispatch webhook to channel handler */
+        {
+            char ch_buf[32];
+            const char *channel = webhook_path_to_channel(path, ch_buf, sizeof(ch_buf));
+            (void)fprintf(stderr, "[gateway] webhook received path=%s channel=%s\n", path, channel);
+            if (gw && gw->config.on_webhook) {
+                gw->config.on_webhook(channel, body, body_len, gw->config.on_webhook_ctx);
             }
         }
         send_response(fd, 200, "{\"received\":true}");

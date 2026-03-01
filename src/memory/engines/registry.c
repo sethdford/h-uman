@@ -84,6 +84,62 @@ static const sc_backend_descriptor_t desc_postgres = {
     .needs_workspace = false,
 };
 
+static const sc_backend_descriptor_t desc_api = {
+    .name = "api",
+    .label = "Remote API — delegated memory via HTTP",
+    .auto_save_default = true,
+    .capabilities = {
+        .supports_keyword_rank = false,
+        .supports_session_store = false,
+        .supports_transactions = false,
+        .supports_outbox = false,
+    },
+    .needs_db_path = false,
+    .needs_workspace = false,
+};
+
+static const sc_backend_descriptor_t desc_redis = {
+    .name = "redis",
+    .label = "Redis — in-memory key-value store",
+    .auto_save_default = true,
+    .capabilities = {
+        .supports_keyword_rank = false,
+        .supports_session_store = false,
+        .supports_transactions = false,
+        .supports_outbox = false,
+    },
+    .needs_db_path = false,
+    .needs_workspace = false,
+};
+
+static const sc_backend_descriptor_t desc_lucid = {
+    .name = "lucid",
+    .label = "Lucid — SQLite-backed with contextual retrieval",
+    .auto_save_default = true,
+    .capabilities = {
+        .supports_keyword_rank = true,
+        .supports_session_store = true,
+        .supports_transactions = true,
+        .supports_outbox = false,
+    },
+    .needs_db_path = true,
+    .needs_workspace = false,
+};
+
+static const sc_backend_descriptor_t desc_lancedb = {
+    .name = "lancedb",
+    .label = "LanceDB — SQLite-backed with vector search",
+    .auto_save_default = true,
+    .capabilities = {
+        .supports_keyword_rank = true,
+        .supports_session_store = false,
+        .supports_transactions = true,
+        .supports_outbox = false,
+    },
+    .needs_db_path = true,
+    .needs_workspace = false,
+};
+
 /* Known names (all possible backends, not necessarily enabled) */
 static const char *const known_names[] = {
     "none", "markdown", "memory", "api", "sqlite", "lucid", "redis", "lancedb", "postgres",
@@ -107,6 +163,16 @@ static const sc_backend_descriptor_t *const *get_descriptors(size_t *out_count) 
 #endif
 #ifdef SC_ENABLE_POSTGRES
     list[n++] = &desc_postgres;
+#endif
+    list[n++] = &desc_api;
+#ifdef SC_ENABLE_REDIS_ENGINE
+    list[n++] = &desc_redis;
+#endif
+#ifdef SC_HAS_LUCID_ENGINE
+    list[n++] = &desc_lucid;
+#endif
+#ifdef SC_HAS_LANCEDB_ENGINE
+    list[n++] = &desc_lancedb;
 #endif
     *out_count = n;
     return (n > 0) ? list : NULL;

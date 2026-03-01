@@ -4,6 +4,7 @@
 #include "seaclaw/config.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/memory.h"
 #include "seaclaw/security.h"
 #include "seaclaw/tool.h"
 #include <stddef.h>
@@ -12,6 +13,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     const char *workspace_dir, size_t workspace_dir_len,
     sc_security_policy_t *policy,
     const sc_config_t *config,
+    sc_memory_t *memory,
     sc_tool_t **out_tools, size_t *out_count);
 
 void sc_tools_destroy_default(sc_allocator_t *alloc,

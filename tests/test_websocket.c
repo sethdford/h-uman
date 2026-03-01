@@ -136,6 +136,45 @@ static void test_ws_apply_mask_empty(void) {
     SC_ASSERT_EQ(payload[0], '\0');
 }
 
+static void test_ws_connect_invalid_host_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ws_client_t *ws = NULL;
+    sc_error_t err = sc_ws_connect(&alloc, "ws://invalid-host-that-does-not-resolve.example/ws", &ws);
+    SC_ASSERT_NEQ(err, SC_OK);
+    SC_ASSERT_NULL(ws);
+}
+
+static void test_ws_send_null_client_fails(void) {
+    sc_error_t err = sc_ws_send(NULL, "x", 1);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_ws_recv_null_client_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *data = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_ws_recv(NULL, &alloc, &data, &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+    SC_ASSERT_NULL(data);
+    SC_ASSERT_EQ(len, 0u);
+}
+
+static void test_ws_close_null_safe(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ws_close(NULL, &alloc);
+}
+
+static void test_ws_connect_null_args_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ws_client_t *ws = NULL;
+    sc_error_t err = sc_ws_connect(NULL, "ws://example.com/ws", &ws);
+    SC_ASSERT_NEQ(err, SC_OK);
+    err = sc_ws_connect(&alloc, NULL, &ws);
+    SC_ASSERT_NEQ(err, SC_OK);
+    err = sc_ws_connect(&alloc, "ws://example.com/ws", NULL);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
 void run_websocket_tests(void) {
     SC_TEST_SUITE("WebSocket");
     SC_RUN_TEST(test_ws_build_frame_empty_text);
@@ -153,4 +192,9 @@ void run_websocket_tests(void) {
     SC_RUN_TEST(test_ws_apply_mask);
     SC_RUN_TEST(test_ws_apply_mask_empty);
     SC_RUN_TEST(test_ws_connect_stub);
+    SC_RUN_TEST(test_ws_connect_invalid_host_returns_error);
+    SC_RUN_TEST(test_ws_send_null_client_fails);
+    SC_RUN_TEST(test_ws_recv_null_client_fails);
+    SC_RUN_TEST(test_ws_close_null_safe);
+    SC_RUN_TEST(test_ws_connect_null_args_fails);
 }

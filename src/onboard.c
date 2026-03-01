@@ -187,6 +187,7 @@ sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
             provider, api_key);
     else
         fprintf(f, "  \"providers\": [],\n");
+    fprintf(f, "  \"memory\": {\"backend\": \"sqlite\", \"auto_save\": true},\n");
     fprintf(f, "  \"gateway\": {\"port\": 3000, \"host\": \"127.0.0.1\"}\n");
     fprintf(f, "}\n");
     fclose(f);

@@ -23,6 +23,8 @@ typedef struct sc_gateway_config {
     const char *hmac_secret;   /* for webhook verification, optional */
     size_t hmac_secret_len;
     bool test_mode;            /* if true, skip binding (for unit tests) */
+    void (*on_webhook)(const char *channel, const char *body, size_t body_len, void *ctx);
+    void *on_webhook_ctx;
 } sc_gateway_config_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -30,6 +32,13 @@ typedef struct sc_gateway_config {
  * ────────────────────────────────────────────────────────────────────────── */
 
 typedef struct sc_gateway_state sc_gateway_state_t;
+
+struct sc_config_gateway;
+
+/* Map sc_config_gateway_t (config schema) to sc_gateway_config_t (runtime).
+ * Caller must include seaclaw/config.h. */
+void sc_gateway_config_from_cfg(const struct sc_config_gateway *cfg_gw,
+                               sc_gateway_config_t *out);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * API

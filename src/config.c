@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define SC_CONFIG_DIR ".nullclaw"
+#define SC_CONFIG_DIR ".seaclaw"
 #define SC_CONFIG_FILE "config.json"
 #define SC_DEFAULT_WORKSPACE "workspace"
 #define SC_MAX_PATH 1024
@@ -97,6 +97,7 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->gateway.require_pairing = true;
     cfg->gateway.allow_public_bind = false;
     cfg->gateway.pair_rate_limit_per_minute = 10;
+    cfg->gateway.webhook_hmac_secret = NULL;
     cfg->secrets.encrypt = true;
     cfg->security.sandbox = sc_strdup(a, "auto");
     cfg->security.autonomy_level = 1;
@@ -122,13 +123,15 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->session.idle_minutes = 60;
     cfg->session.identity_links = NULL;
     cfg->session.identity_links_len = 0;
-    cfg->identity.format = sc_strdup(a, "nullclaw");
+    cfg->identity.format = sc_strdup(a, "seaclaw");
     cfg->cost.enabled = false;
     cfg->cost.daily_limit_usd = 10.0;
     cfg->cost.monthly_limit_usd = 100.0;
     cfg->cost.warn_at_percent = 80;
     cfg->cost.allow_override = false;
+    cfg->browser.enabled = false;
     cfg->peripherals.enabled = false;
+    cfg->peripherals.datasheet_dir = NULL;
     cfg->hardware.enabled = false;
     cfg->hardware.transport = sc_strdup(a, "none");
     cfg->hardware.baud_rate = 115200;
@@ -272,6 +275,13 @@ static sc_error_t parse_gateway(sc_allocator_t *a, sc_config_t *cfg,
     cfg->gateway.allow_public_bind = sc_json_get_bool(obj, "allow_public_bind", cfg->gateway.allow_public_bind);
     double prl = sc_json_get_number(obj, "pair_rate_limit_per_minute", cfg->gateway.pair_rate_limit_per_minute);
     if (prl >= 0 && prl <= 1000) cfg->gateway.pair_rate_limit_per_minute = (uint32_t)prl;
+    const char *whs = sc_json_get_string(obj, "webhook_hmac_secret");
+    if (whs) {
+        if (cfg->gateway.webhook_hmac_secret)
+            a->free(a->ctx, cfg->gateway.webhook_hmac_secret,
+                    strlen(cfg->gateway.webhook_hmac_secret) + 1);
+        cfg->gateway.webhook_hmac_secret = sc_strdup(a, whs);
+    }
     return SC_OK;
 }
 
@@ -302,6 +312,14 @@ static sc_error_t parse_memory(sc_allocator_t *a, sc_config_t *cfg,
 static sc_error_t parse_tools(sc_allocator_t *a, sc_config_t *cfg,
                                const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
+    double sts = sc_json_get_number(obj, "shell_timeout_secs", cfg->tools.shell_timeout_secs);
+    if (sts >= 1 && sts <= 86400) cfg->tools.shell_timeout_secs = (uint64_t)sts;
+    double smob = sc_json_get_number(obj, "shell_max_output_bytes", cfg->tools.shell_max_output_bytes);
+    if (smob >= 0 && smob <= 1073741824) cfg->tools.shell_max_output_bytes = (uint32_t)smob;
+    double mfsb = sc_json_get_number(obj, "max_file_size_bytes", cfg->tools.max_file_size_bytes);
+    if (mfsb >= 0 && mfsb <= 1073741824) cfg->tools.max_file_size_bytes = (uint32_t)mfsb;
+    double wfmc = sc_json_get_number(obj, "web_fetch_max_chars", cfg->tools.web_fetch_max_chars);
+    if (wfmc >= 0 && wfmc <= 10000000) cfg->tools.web_fetch_max_chars = (uint32_t)wfmc;
     const char *provider = sc_json_get_string(obj, "web_search_provider");
     if (provider && provider[0]) {
         if (cfg->tools.web_search_provider)
@@ -371,6 +389,32 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg,
     if (def_ch) {
         if (cfg->channels.default_channel) a->free(a->ctx, cfg->channels.default_channel, strlen(cfg->channels.default_channel) + 1);
         cfg->channels.default_channel = sc_strdup(a, def_ch);
+    }
+    cfg->channels.channel_config_len = 0;
+    if (obj->data.object.pairs && cfg->channels.channel_config_len < SC_CHANNEL_CONFIG_MAX) {
+        for (size_t i = 0; i < obj->data.object.len; i++) {
+            sc_json_pair_t *p = &obj->data.object.pairs[i];
+            if (!p->key || !p->value) continue;
+            if (strcmp(p->key, "cli") == 0 || strcmp(p->key, "default_channel") == 0)
+                continue;
+            size_t cnt = 0;
+            if (p->value->type == SC_JSON_ARRAY && p->value->data.array.items)
+                cnt = p->value->data.array.len;
+            else if (p->value->type == SC_JSON_OBJECT && p->value->data.object.pairs)
+                cnt = (p->value->data.object.len > 0) ? 1 : 0;
+            else if (p->value->type == SC_JSON_OBJECT || p->value->type == SC_JSON_ARRAY)
+                cnt = 1;
+            if (cnt == 0) continue;
+            if (cfg->channels.channel_config_len >= SC_CHANNEL_CONFIG_MAX) break;
+            size_t klen = p->key_len > 0 ? p->key_len : strlen(p->key);
+            char *k = (char *)a->alloc(a->ctx, klen + 1);
+            if (!k) break;
+            memcpy(k, p->key, klen);
+            k[klen] = '\0';
+            cfg->channels.channel_config_keys[cfg->channels.channel_config_len] = k;
+            cfg->channels.channel_config_counts[cfg->channels.channel_config_len] = cnt;
+            cfg->channels.channel_config_len++;
+        }
     }
     return SC_OK;
 }
@@ -453,6 +497,64 @@ static sc_error_t parse_session(sc_allocator_t *a, sc_config_t *cfg,
         else if (strcmp(scope, "per_channel_peer") == 0) cfg->session.dm_scope = DirectScopePerChannelPeer;
         else if (strcmp(scope, "per_account_channel_peer") == 0) cfg->session.dm_scope = DirectScopePerAccountChannelPeer;
     }
+    return SC_OK;
+}
+
+static sc_error_t parse_peripherals(sc_allocator_t *a, sc_config_t *cfg,
+                                     const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
+    cfg->peripherals.enabled = sc_json_get_bool(obj, "enabled", cfg->peripherals.enabled);
+    const char *dd = sc_json_get_string(obj, "datasheet_dir");
+    if (dd) {
+        if (cfg->peripherals.datasheet_dir)
+            a->free(a->ctx, cfg->peripherals.datasheet_dir, strlen(cfg->peripherals.datasheet_dir) + 1);
+        cfg->peripherals.datasheet_dir = sc_strdup(a, dd);
+    }
+    return SC_OK;
+}
+
+static sc_error_t parse_hardware(sc_allocator_t *a, sc_config_t *cfg,
+                                 const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
+    cfg->hardware.enabled = sc_json_get_bool(obj, "enabled", cfg->hardware.enabled);
+    const char *transport = sc_json_get_string(obj, "transport");
+    if (transport) {
+        if (cfg->hardware.transport) a->free(a->ctx, cfg->hardware.transport, strlen(cfg->hardware.transport) + 1);
+        cfg->hardware.transport = sc_strdup(a, transport);
+    }
+    const char *serial_port = sc_json_get_string(obj, "serial_port");
+    if (serial_port) {
+        if (cfg->hardware.serial_port) a->free(a->ctx, cfg->hardware.serial_port, strlen(cfg->hardware.serial_port) + 1);
+        cfg->hardware.serial_port = sc_strdup(a, serial_port);
+    }
+    double br = sc_json_get_number(obj, "baud_rate", cfg->hardware.baud_rate);
+    if (br >= 0 && br <= 4000000) cfg->hardware.baud_rate = (uint32_t)br;
+    const char *probe_target = sc_json_get_string(obj, "probe_target");
+    if (probe_target) {
+        if (cfg->hardware.probe_target) a->free(a->ctx, cfg->hardware.probe_target, strlen(cfg->hardware.probe_target) + 1);
+        cfg->hardware.probe_target = sc_strdup(a, probe_target);
+    }
+    return SC_OK;
+}
+
+static sc_error_t parse_browser(sc_allocator_t *a, sc_config_t *cfg,
+                                const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
+    cfg->browser.enabled = sc_json_get_bool(obj, "enabled", cfg->browser.enabled);
+    return SC_OK;
+}
+
+static sc_error_t parse_cost(sc_allocator_t *a, sc_config_t *cfg,
+                             const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
+    cfg->cost.enabled = sc_json_get_bool(obj, "enabled", cfg->cost.enabled);
+    double dl = sc_json_get_number(obj, "daily_limit_usd", cfg->cost.daily_limit_usd);
+    if (dl >= 0 && dl <= 1000000.0) cfg->cost.daily_limit_usd = dl;
+    double ml = sc_json_get_number(obj, "monthly_limit_usd", cfg->cost.monthly_limit_usd);
+    if (ml >= 0 && ml <= 10000000.0) cfg->cost.monthly_limit_usd = ml;
+    double wp = sc_json_get_number(obj, "warn_at_percent", cfg->cost.warn_at_percent);
+    if (wp >= 0 && wp <= 100) cfg->cost.warn_at_percent = (uint8_t)wp;
+    cfg->cost.allow_override = sc_json_get_bool(obj, "allow_override", cfg->cost.allow_override);
     return SC_OK;
 }
 
@@ -676,6 +778,18 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
     sc_json_value_t *session_obj = sc_json_object_get(root, "session");
     if (session_obj) parse_session(a, cfg, session_obj);
 
+    sc_json_value_t *peripherals_obj = sc_json_object_get(root, "peripherals");
+    if (peripherals_obj) parse_peripherals(a, cfg, peripherals_obj);
+
+    sc_json_value_t *hardware_obj = sc_json_object_get(root, "hardware");
+    if (hardware_obj) parse_hardware(a, cfg, hardware_obj);
+
+    sc_json_value_t *browser_obj = sc_json_object_get(root, "browser");
+    if (browser_obj) parse_browser(a, cfg, browser_obj);
+
+    sc_json_value_t *cost_obj = sc_json_object_get(root, "cost");
+    if (cost_obj) parse_cost(a, cfg, cost_obj);
+
     sc_json_value_t *sec = sc_json_object_get(root, "security");
     if (sec && sec->type == SC_JSON_OBJECT) {
         double al = sc_json_get_number(sec, "autonomy_level", cfg->security.autonomy_level);
@@ -752,23 +866,19 @@ void sc_config_apply_env_overrides(sc_config_t *cfg) {
     sc_allocator_t *a = &cfg->allocator;
 
     const char *v;
-    v = env_get("NULLCLAW_PROVIDER");
-    if (!v) v = env_get("SEACLAW_PROVIDER");
+    v = env_get("SEACLAW_PROVIDER");
     if (v) apply_env_str(a, &cfg->default_provider, v);
 
-    v = env_get("NULLCLAW_MODEL");
-    if (!v) v = env_get("SEACLAW_MODEL");
+    v = env_get("SEACLAW_MODEL");
     if (v) apply_env_str(a, &cfg->default_model, v);
 
-    v = env_get("NULLCLAW_TEMPERATURE");
-    if (!v) v = env_get("SEACLAW_TEMPERATURE");
+    v = env_get("SEACLAW_TEMPERATURE");
     if (v) {
         double temp = strtod(v, NULL);
         if (temp >= 0.0 && temp <= 2.0) cfg->default_temperature = temp;
     }
 
-    v = env_get("NULLCLAW_GATEWAY_PORT");
-    if (!v) v = env_get("SEACLAW_GATEWAY_PORT");
+    v = env_get("SEACLAW_GATEWAY_PORT");
     if (v) {
         unsigned long port = strtoul(v, NULL, 10);
         if (port < 1) port = 1;
@@ -776,19 +886,19 @@ void sc_config_apply_env_overrides(sc_config_t *cfg) {
         cfg->gateway.port = (uint16_t)port;
     }
 
-    v = env_get("NULLCLAW_GATEWAY_HOST");
-    if (!v) v = env_get("SEACLAW_GATEWAY_HOST");
+    v = env_get("SEACLAW_GATEWAY_HOST");
     if (v) apply_env_str(a, &cfg->gateway.host, v);
 
-    v = env_get("NULLCLAW_WORKSPACE");
-    if (!v) v = env_get("SEACLAW_WORKSPACE");
+    v = env_get("SEACLAW_WORKSPACE");
     if (v) apply_env_str(a, &cfg->workspace_dir, v);
 
-    v = env_get("NULLCLAW_ALLOW_PUBLIC_BIND");
-    if (!v) v = env_get("SEACLAW_ALLOW_PUBLIC_BIND");
+    v = env_get("SEACLAW_ALLOW_PUBLIC_BIND");
     if (v) cfg->gateway.allow_public_bind = (strcmp(v, "1") == 0 || strcmp(v, "true") == 0);
 
-    v = env_get("NULLCLAW_API_KEY");
+    v = env_get("SEACLAW_WEBHOOK_HMAC_SECRET");
+    if (v) apply_env_str(a, &cfg->gateway.webhook_hmac_secret, v);
+
+    v = env_get("SEACLAW_API_KEY");
     if (v) apply_env_str(a, &cfg->api_key, v);
     else if (cfg->default_provider && !cfg->api_key) {
         if (strcmp(cfg->default_provider, "openai") == 0)
@@ -802,7 +912,7 @@ void sc_config_apply_env_overrides(sc_config_t *cfg) {
         if (v) apply_env_str(a, &cfg->api_key, v);
     }
 
-    v = env_get("NULLCLAW_AUTONOMY");
+    v = env_get("SEACLAW_AUTONOMY");
     if (v) {
         unsigned long al = strtoul(v, NULL, 10);
         if (al <= 4) cfg->security.autonomy_level = (uint8_t)al;
@@ -922,9 +1032,18 @@ bool sc_config_get_provider_native_tools(const sc_config_t *cfg, const char *nam
 
 const char *sc_config_get_web_search_provider(const sc_config_t *cfg) {
     const char *v = env_get("WEB_SEARCH_PROVIDER");
-    if (!v) v = env_get("NULLCLAW_WEB_SEARCH_PROVIDER");
     if (!v) v = env_get("SEACLAW_WEB_SEARCH_PROVIDER");
     if (v && v[0]) return v;
     return (cfg && cfg->tools.web_search_provider && cfg->tools.web_search_provider[0])
         ? cfg->tools.web_search_provider : "duckduckgo";
+}
+
+size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char *key) {
+    if (!cfg || !key) return 0;
+    for (size_t i = 0; i < cfg->channels.channel_config_len; i++) {
+        if (cfg->channels.channel_config_keys[i] &&
+            strcmp(cfg->channels.channel_config_keys[i], key) == 0)
+            return cfg->channels.channel_config_counts[i];
+    }
+    return 0;
 }

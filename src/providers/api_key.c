@@ -38,7 +38,7 @@ static const char *provider_env(const char *name, size_t name_len, char *buf, si
             if (v && strlen(v) > 0) return v;
         }
     }
-    const char *v = getenv_safe("NULLCLAW_API_KEY");
+    const char *v = getenv_safe("SEACLAW_API_KEY");
     if (v && strlen(v) > 0) return v;
     v = getenv_safe("API_KEY");
     if (v && strlen(v) > 0) return v;
