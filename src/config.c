@@ -977,8 +977,12 @@ sc_error_t sc_config_save(const sc_config_t *cfg) {
 
 static bool provider_requires_api_key(const char *provider) {
     if (!provider) return true;
-    return strcmp(provider, "ollama") != 0 && strcmp(provider, "lmstudio") != 0 &&
-           strcmp(provider, "lm-studio") != 0;
+    if (strcmp(provider, "ollama") == 0) return false;
+    if (strcmp(provider, "lmstudio") == 0) return false;
+    if (strcmp(provider, "lm-studio") == 0) return false;
+    if (strcmp(provider, "claude_cli") == 0) return false;
+    if (strcmp(provider, "codex_cli") == 0) return false;
+    return true;
 }
 
 sc_error_t sc_config_validate(const sc_config_t *cfg) {

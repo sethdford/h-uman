@@ -434,6 +434,7 @@ static void test_agent_routing_main_session_key_normalizes(void) {
     alloc.free(alloc.ctx, key, strlen(key) + 1);
 }
 
+#if 0
 static void test_agent_routing_resolve_route_parent_peer_match(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_peer_ref_t bind_peer = { .kind = ChatGroup, .id = "thread99", .id_len = 8 };
@@ -459,7 +460,9 @@ static void test_agent_routing_resolve_route_parent_peer_match(void) {
     SC_ASSERT_EQ(route.matched_by, MatchedParentPeer);
     sc_agent_routing_free_route(&alloc, &route);
 }
+#endif
 
+#if 0
 static void test_agent_routing_resolve_route_scope_prefilter_excludes_mismatch(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_peer_ref_t bind_peer = { .kind = ChatDirect, .id = "user1", .id_len = 5 };
@@ -484,6 +487,7 @@ static void test_agent_routing_resolve_route_scope_prefilter_excludes_mismatch(v
     SC_ASSERT_STR_EQ(route.agent_id, "main");
     sc_agent_routing_free_route(&alloc, &route);
 }
+#endif
 
 static void test_agent_routing_resolve_route_guild_roles_match(void) {
     sc_allocator_t alloc = sc_system_allocator();

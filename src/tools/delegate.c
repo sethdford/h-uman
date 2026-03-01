@@ -27,6 +27,7 @@ static sc_error_t delegate_execute(void *ctx, sc_allocator_t *alloc,
     const char *agent = sc_json_get_string(args, "agent");
     const char *prompt = sc_json_get_string(args, "prompt");
     const char *context = sc_json_get_string(args, "context");
+    (void)context;
     if (!agent || strlen(agent) == 0) {
         *out = sc_tool_result_fail("missing agent", 13);
         return SC_OK;
@@ -46,7 +47,6 @@ static sc_error_t delegate_execute(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 #else
     (void)alloc;
-    (void)context;
     *out = sc_tool_result_fail("Delegate requires subagent runtime", 34);
     return SC_OK;
 #endif
@@ -64,6 +64,7 @@ static const sc_tool_vtable_t delegate_vtable = {
 };
 
 sc_error_t sc_delegate_create(sc_allocator_t *alloc, sc_tool_t *out) {
+    (void)alloc;
     sc_delegate_ctx_t *c = (sc_delegate_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;
     out->ctx = c;

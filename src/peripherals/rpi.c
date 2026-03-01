@@ -121,6 +121,7 @@ static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_va
 }
 
 static sc_peripheral_error_t impl_write(void *ctx, uint32_t addr, uint8_t data) {
+    (void)data;
     sc_rpi_ctx_t *s = (sc_rpi_ctx_t *)ctx;
     if (!s->connected) return SC_PERIPHERAL_ERR_NOT_CONNECTED;
     if (addr >= 64) return SC_PERIPHERAL_ERR_INVALID_ADDRESS;

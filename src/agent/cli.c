@@ -73,9 +73,15 @@ sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
     return SC_OK;
 }
 
+static int cli_stream_started = 0;
+
 static void cli_stream_token(const char *delta, size_t len, void *ctx) {
     (void)ctx;
     if (delta && len > 0) {
+        if (!cli_stream_started) {
+            cli_stream_started = 1;
+            printf("\r                    \r");
+        }
         fwrite(delta, 1, len, stdout);
         fflush(stdout);
     }
@@ -137,7 +143,13 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     policy.max_actions_per_hour = 100;
     policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
 
-    sc_observer_t observer = sc_log_observer_create(alloc, stderr);
+    sc_observer_t observer = {0};
+    const char *log_env = getenv("SEACLAW_LOG");
+    if (log_env && log_env[0]) {
+        FILE *log_fp = fopen(log_env, "a");
+        if (log_fp)
+            observer = sc_log_observer_create(alloc, log_fp);
+    }
 
     sc_memory_t memory = create_memory_from_config(alloc, &cfg, ws);
     sc_session_store_t session_store = {0};
@@ -203,8 +215,15 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
         char *response = NULL;
         size_t response_len = 0;
+        cli_stream_started = 0;
+        printf("Thinking...\r");
+        fflush(stdout);
         err = sc_agent_turn_stream(&agent, line, line_len,
             cli_stream_token, NULL, &response, &response_len);
+        if (!cli_stream_started) {
+            printf("                    \r");
+            fflush(stdout);
+        }
         if (err != SC_OK) {
             fprintf(stderr, "[error] %s\n", sc_error_string(err));
         } else if (response && response_len > 0) {

@@ -16,6 +16,7 @@ typedef struct sc_discord_ctx {
     bool running;
 } sc_discord_ctx_t;
 
+#if !SC_IS_TEST
 static sc_error_t build_discord_body(sc_allocator_t *alloc,
     const char *content, size_t content_len,
     char **out, size_t *out_len)
@@ -39,6 +40,7 @@ fail:
     sc_json_buf_free(&jbuf);
     return err;
 }
+#endif
 
 static sc_error_t discord_start(void *ctx) {
     sc_discord_ctx_t *c = (sc_discord_ctx_t *)ctx;
@@ -57,12 +59,17 @@ static sc_error_t discord_send(void *ctx,
     const char *message, size_t message_len,
     const char *const *media, size_t media_count)
 {
+    (void)media;
+    (void)media_count;
     sc_discord_ctx_t *c = (sc_discord_ctx_t *)ctx;
     if (!c || !c->alloc) return SC_ERR_INVALID_ARGUMENT;
     if (!c->token || c->token_len == 0) return SC_ERR_CHANNEL_NOT_CONFIGURED;
     if (!target || target_len == 0 || !message) return SC_ERR_INVALID_ARGUMENT;
 
 #if SC_IS_TEST
+    (void)target;
+    (void)target_len;
+    (void)message;
     (void)message_len;
     (void)media;
     (void)media_count;

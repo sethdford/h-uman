@@ -75,7 +75,7 @@ char *sc_diagnostics_format_report(sc_allocator_t *alloc,
         "  active: %s\n"
         "  count:  %zu\n\n"
         "Retrieval\n"
-        "  sources: %zu\n"
+        "  sources: %d\n"
         "  rollout: %.*s\n\n"
         "Pipeline Stages\n"
         "  query_expansion: %s\n"

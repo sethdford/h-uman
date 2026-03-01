@@ -27,7 +27,7 @@ static sc_error_t qdrant_search(void *ctx, sc_allocator_t *alloc,
     const float *query_embedding, size_t dims,
     size_t limit,
     sc_vector_search_result_t **results, size_t *result_count) {
-    (void)ctx;(void)query_embedding;(void)dims;(void)limit;
+    (void)ctx;(void)alloc;(void)query_embedding;(void)dims;(void)limit;
     *results = NULL;
     *result_count = 0;
     return SC_OK;

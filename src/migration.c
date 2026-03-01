@@ -5,6 +5,7 @@
 #include "seaclaw/core/string.h"
 #include <string.h>
 
+#if !defined(SC_IS_TEST)
 static void free_entries(sc_allocator_t *alloc, sc_memory_entry_t *entries, size_t count) {
     if (!alloc || !entries) return;
     for (size_t i = 0; i < count; i++) {
@@ -20,6 +21,7 @@ static void free_entries(sc_allocator_t *alloc, sc_memory_entry_t *entries, size
     }
     alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
 }
+#endif
 
 #ifdef SC_IS_TEST
 static sc_error_t migration_test_data(sc_allocator_t *alloc,
@@ -27,6 +29,7 @@ static sc_error_t migration_test_data(sc_allocator_t *alloc,
     sc_migration_stats_t *out_stats,
     sc_migration_progress_fn progress,
     void *progress_ctx) {
+    (void)alloc;
     (void)cfg;
     memset(out_stats, 0, sizeof(*out_stats));
 

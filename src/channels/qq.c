@@ -34,11 +34,16 @@ static sc_error_t qq_send(void *ctx,
     const char *message, size_t message_len,
     const char *const *media, size_t media_count)
 {
+    (void)media;
+    (void)media_count;
     sc_qq_ctx_t *c = (sc_qq_ctx_t *)ctx;
     if (!c || !c->alloc) return SC_ERR_INVALID_ARGUMENT;
     if (!c->bot_token || !target || target_len == 0 || !message) return SC_ERR_INVALID_ARGUMENT;
 
 #if SC_IS_TEST
+    (void)target;
+    (void)target_len;
+    (void)message;
     (void)message_len;
     (void)media;
     (void)media_count;
@@ -69,10 +74,10 @@ static sc_error_t qq_send(void *ctx,
     char auth_buf[256];
     int ab = snprintf(auth_buf, sizeof(auth_buf), "Authorization: Bot %s.%s",
         c->app_id ? c->app_id : "", c->bot_token);
-    const char *headers[] = { auth_buf };
+    (void)ab;
 
     sc_http_response_t resp = {0};
-    err = sc_http_post_json(c->alloc, url_buf, headers, body, body_len, &resp);
+    err = sc_http_post_json(c->alloc, url_buf, auth_buf, body, body_len, &resp);
     c->alloc->free(c->alloc->ctx, body, body_len + 1);
     if (err) {
         if (resp.owned && resp.body) sc_http_response_free(c->alloc, &resp);
@@ -111,17 +116,19 @@ sc_error_t sc_qq_create(sc_allocator_t *alloc,
     c->sandbox = sandbox;
     if (app_id && app_id_len > 0) {
         c->app_id = (char *)malloc(app_id_len + 1);
-        if (c->app_id) {
-            memcpy(c->app_id, app_id, app_id_len);
-            c->app_id[app_id_len] = '\0';
-        }
+        if (!c->app_id) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        memcpy(c->app_id, app_id, app_id_len);
+        c->app_id[app_id_len] = '\0';
     }
     if (bot_token && bot_token_len > 0) {
         c->bot_token = (char *)malloc(bot_token_len + 1);
-        if (c->bot_token) {
-            memcpy(c->bot_token, bot_token, bot_token_len);
-            c->bot_token[bot_token_len] = '\0';
+        if (!c->bot_token) {
+            if (c->app_id) free(c->app_id);
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
         }
+        memcpy(c->bot_token, bot_token, bot_token_len);
+        c->bot_token[bot_token_len] = '\0';
     }
     out->ctx = c;
     out->vtable = &qq_vtable;

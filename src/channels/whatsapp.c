@@ -35,11 +35,16 @@ static sc_error_t whatsapp_send(void *ctx,
     const char *message, size_t message_len,
     const char *const *media, size_t media_count)
 {
-    sc_whatsapp_ctx_t *c = (sc_whatsapp_ctx_t *)ctx;
+    (void)target;
+    (void)target_len;
+    (void)message;
+    (void)message_len;
     (void)media;
     (void)media_count;
+    sc_whatsapp_ctx_t *c = (sc_whatsapp_ctx_t *)ctx;
 
 #if SC_IS_TEST
+    (void)c;
     return SC_OK;
 #else
     if (!c || !c->alloc) return SC_ERR_INVALID_ARGUMENT;

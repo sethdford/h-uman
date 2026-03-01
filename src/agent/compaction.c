@@ -128,8 +128,8 @@ sc_error_t sc_compact_history(sc_allocator_t *alloc,
     if (!alloc || !history || !history_count || !history_cap || !config)
         return SC_ERR_INVALID_ARGUMENT;
     size_t count = *history_count;
-    size_t cap = *history_cap;
 
+    (void)history_cap;
     if (!history || count == 0) return SC_OK;
     if (!sc_should_compact(history, count, config)) return SC_OK;
 

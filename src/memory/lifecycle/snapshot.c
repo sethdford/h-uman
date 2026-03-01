@@ -155,6 +155,7 @@ sc_error_t sc_memory_snapshot_import(sc_allocator_t *alloc, sc_memory_t *memory,
         const char *ts = sc_json_get_string(item, "timestamp");
         const char *sid = sc_json_get_string(item, "session_id");
 
+        (void)ts;
         if (!key || !content) continue;
 
         size_t key_len = strlen(key);

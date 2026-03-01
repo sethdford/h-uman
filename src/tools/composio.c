@@ -236,17 +236,19 @@ sc_error_t sc_composio_create(sc_allocator_t *alloc,
     c->alloc = alloc;
     if (api_key && api_key_len > 0) {
         c->api_key = (char *)alloc->alloc(alloc->ctx, api_key_len + 1);
-        if (c->api_key) {
-            memcpy(c->api_key, api_key, api_key_len);
-            c->api_key[api_key_len] = '\0';
-        }
+        if (!c->api_key) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        memcpy(c->api_key, api_key, api_key_len);
+        c->api_key[api_key_len] = '\0';
     }
     if (entity_id && entity_id_len > 0) {
         c->entity_id = (char *)alloc->alloc(alloc->ctx, entity_id_len + 1);
-        if (c->entity_id) {
-            memcpy(c->entity_id, entity_id, entity_id_len);
-            c->entity_id[entity_id_len] = '\0';
+        if (!c->entity_id) {
+            if (c->api_key) alloc->free(alloc->ctx, c->api_key, api_key_len + 1);
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
         }
+        memcpy(c->entity_id, entity_id, entity_id_len);
+        c->entity_id[entity_id_len] = '\0';
     }
     out->ctx = c;
     out->vtable = &composio_vtable;

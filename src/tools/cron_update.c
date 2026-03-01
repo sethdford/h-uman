@@ -30,6 +30,7 @@ static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
         return SC_OK;
     }
     uint64_t job_id = (uint64_t)id_val;
+    (void)job_id;
     const char *expr = sc_json_get_string(args, "expression");
     const char *cmd = sc_json_get_string(args, "command");
     bool enabled_val = sc_json_get_bool(args, "enabled", true);

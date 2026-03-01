@@ -112,6 +112,7 @@ sc_error_t sc_image_create(sc_allocator_t *alloc,
     const char *api_key, size_t api_key_len,
     sc_tool_t *out)
 {
+    (void)alloc;
     sc_image_ctx_t *c = (sc_image_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;
     if (api_key && api_key_len > 0) {

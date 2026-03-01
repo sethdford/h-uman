@@ -8,6 +8,7 @@
 #ifdef SC_ENABLE_SQLITE
 #include <sqlite3.h>
 
+#if 0
 static int map_sqlite_err(int rc) {
     switch (rc) {
         case SQLITE_OK: return SC_OK;
@@ -15,6 +16,7 @@ static int map_sqlite_err(int rc) {
         default: return SC_ERR_INTERNAL;
     }
 }
+#endif
 
 static int table_exists(sqlite3 *db, const char *table) {
     sqlite3_stmt *stmt = NULL;

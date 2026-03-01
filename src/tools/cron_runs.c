@@ -32,6 +32,7 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
         return SC_OK;
     }
     uint64_t job_id = (uint64_t)id_val;
+    (void)job_id;
     double limit_val = sc_json_get_number(args, "limit", 10);
     size_t limit = (size_t)(limit_val > 0 ? limit_val : 10);
     if (limit > 100) limit = 100;

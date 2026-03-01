@@ -50,6 +50,7 @@ typedef struct sc_telegram_ctx {
 
 /* ─── Helpers ───────────────────────────────────────────────────────────── */
 
+#if !SC_IS_TEST
 static int build_api_url(char *buf, size_t cap,
     const char *token, size_t token_len,
     const char *method)
@@ -105,7 +106,6 @@ static size_t smart_split_next(const char *buf, size_t len,
     size_t search_end = cursor + max_chunk;
     if (search_end > len) search_end = len;
     size_t half = cursor + max_chunk / 2;
-    const char *p = buf + search_end - 1;
     size_t split_at = search_end;
     /* Search backwards for newline in second half */
     for (size_t i = search_end; i > cursor; i--) {
@@ -352,6 +352,7 @@ static tg_media_kind_t infer_media_kind(const char *path, size_t len) {
     }
     return TG_MEDIA_DOCUMENT;
 }
+#endif
 
 /* ─── Vtable: start, stop, send ─────────────────────────────────────────── */
 
@@ -440,8 +441,14 @@ static sc_error_t telegram_start_typing(void *ctx,
 {
     sc_telegram_ctx_t *c = (sc_telegram_ctx_t *)ctx;
     if (!c) return SC_ERR_INVALID_ARGUMENT;
+#if SC_IS_TEST
+    (void)recipient;
+    (void)recipient_len;
+    return SC_OK;
+#else
     send_typing_action(c, recipient, recipient_len);
     return SC_OK;
+#endif
 }
 
 static sc_error_t telegram_stop_typing(void *ctx,
@@ -561,6 +568,8 @@ sc_error_t sc_telegram_poll(void *channel_ctx,
     *out_count = 0;
 
 #if SC_IS_TEST
+    (void)msgs;
+    (void)max_msgs;
     /* No network in test mode */
     return SC_OK;
 #else
@@ -705,17 +714,18 @@ sc_error_t sc_telegram_poll(void *channel_ctx,
                                     size_t need = prefix_len + (size_t)ub + 2 + (text_len ? 1 + text_len : 0) + 1;
                                     built = (char *)alloc->alloc(alloc->ctx, need);
                                     if (built) {
-                                        memcpy(built, prefix, prefix_len);
-                                        strcpy(built + prefix_len, url_buf);
-                                        strcat(built + prefix_len, "]");
+                                        size_t pos = 0;
+                                        memcpy(built + pos, prefix, prefix_len); pos += prefix_len;
+                                        memcpy(built + pos, url_buf, (size_t)ub); pos += (size_t)ub;
+                                        built[pos++] = ']';
                                         if (text_len > 0) {
-                                            strcat(built, " ");
+                                            built[pos++] = ' ';
                                             size_t cp = text_len < 4000 ? text_len : 4000;
-                                            memcpy(built + strlen(built), text, cp);
-                                            built[strlen(built) + cp] = '\0';
+                                            memcpy(built + pos, text, cp); pos += cp;
                                         }
+                                        built[pos] = '\0';
                                         content = built;
-                                        content_len = strlen(built);
+                                        content_len = pos;
                                     }
                                 }
                             }

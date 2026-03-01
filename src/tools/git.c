@@ -38,6 +38,7 @@ static bool sanitize_git_args(const char *args)
     return true;
 }
 
+#if !SC_IS_TEST
 static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, int argc,
     sc_tool_result_t *out)
 {
@@ -108,6 +109,7 @@ static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, 
     return NULL;
 #endif
 }
+#endif
 
 static sc_error_t git_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,
@@ -148,7 +150,10 @@ static sc_error_t git_execute(void *ctx, sc_allocator_t *alloc,
     } else if (strcmp(op, "diff") == 0) {
         argv[argc++] = "diff"; argv[argc++] = "--unified=3";
         if (sc_json_get_bool(args, "cached", false)) argv[argc++] = "--cached";
-        argv[argc++] = "--"; argv[argc++] = sc_json_get_string(args, "files") ?: ".";
+        {
+            const char *files = sc_json_get_string(args, "files");
+            argv[argc++] = "--"; argv[argc++] = files ? files : ".";
+        }
     } else if (strcmp(op, "log") == 0) {
         int lim = (int)sc_json_get_number(args, "limit", 10);
         if (lim < 1) lim = 1; if (lim > 1000) lim = 1000;

@@ -78,13 +78,14 @@ static void *dispatch_worker(void *arg) {
 }
 #endif
 
+#if defined(SC_GATEWAY_POSIX) && !defined(SC_IS_TEST)
 static sc_error_t dispatch_parallel(sc_dispatcher_t *d,
     sc_allocator_t *alloc,
     sc_tool_t *tools, size_t tools_count,
     const sc_tool_call_t *calls, size_t calls_count,
     sc_dispatch_result_t *out)
 {
-#if defined(SC_GATEWAY_POSIX) && !defined(SC_IS_TEST)
+    (void)d;
     if (calls_count == 0) {
         out->results = NULL;
         out->count = 0;
@@ -140,11 +141,8 @@ static sc_error_t dispatch_parallel(sc_dispatcher_t *d,
     out->results = results;
     out->count = calls_count;
     return SC_OK;
-#else
-    (void)d;
-    return dispatch_sequential(alloc, tools, tools_count, calls, calls_count, out);
-#endif
 }
+#endif
 
 void sc_dispatcher_default(sc_dispatcher_t *out) {
     if (!out) return;

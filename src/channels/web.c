@@ -48,6 +48,7 @@ static void free_last_event(sc_web_ctx_t *c)
     }
 }
 
+#if !SC_IS_TEST
 /* Build streaming event JSON: {"v":1,"type":"assistant_chunk"|"assistant_final",...} */
 static sc_error_t build_event_json(sc_allocator_t *alloc,
     const char *target, size_t target_len,
@@ -91,12 +92,17 @@ fail:
     sc_json_buf_free(&jbuf);
     return err;
 }
+#endif
 
 static sc_error_t web_send(void *ctx,
     const char *target, size_t target_len,
     const char *message, size_t message_len,
     const char *const *media, size_t media_count)
 {
+    (void)target;
+    (void)target_len;
+    (void)media;
+    (void)media_count;
 #if SC_IS_TEST
     (void)ctx;
     (void)target;
@@ -129,6 +135,10 @@ static sc_error_t web_send_event(void *ctx,
     const char *const *media, size_t media_count,
     sc_outbound_stage_t stage)
 {
+    (void)target;
+    (void)target_len;
+    (void)media;
+    (void)media_count;
 #if SC_IS_TEST
     (void)ctx;
     (void)target;

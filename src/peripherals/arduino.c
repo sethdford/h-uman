@@ -112,6 +112,7 @@ static sc_peripheral_error_t impl_init(void *ctx) {
         set_default_board_name(s);
     }
     s->connected = true;
+    return SC_PERIPHERAL_ERR_NONE;
 #endif
 #ifdef __APPLE__
     if (!s->serial_port || s->serial_port_len == 0) return SC_PERIPHERAL_ERR_DEVICE_NOT_FOUND;
@@ -176,6 +177,7 @@ static sc_peripheral_error_t impl_init(void *ctx) {
         set_default_board_name(s);
     }
     s->connected = true;
+    return SC_PERIPHERAL_ERR_NONE;
 #endif
 #if !defined(__linux__) && !defined(__APPLE__)
     return SC_PERIPHERAL_ERR_UNSUPPORTED_OPERATION;

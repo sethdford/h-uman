@@ -49,6 +49,7 @@ typedef struct sc_signal_ctx {
 #endif
 } sc_signal_ctx_t;
 
+#if !SC_IS_TEST
 /* Build URL for RPC, SSE, or health. */
 static int build_url(char *buf, size_t cap, const sc_signal_ctx_t *c,
     const char *endpoint)
@@ -197,6 +198,7 @@ static sc_error_t send_rpc(sc_signal_ctx_t *c, const char *body, size_t body_len
     if (resp.owned && resp.body) sc_http_response_free(c->alloc, &resp);
     return SC_OK;
 }
+#endif /* !SC_IS_TEST */
 
 #if !SC_IS_TEST && defined(SC_HTTP_CURL)
 static void *typing_thread_fn(void *arg)
@@ -261,6 +263,8 @@ static sc_error_t signal_send(void *ctx,
     const char *message, size_t message_len,
     const char *const *media, size_t media_count)
 {
+    (void)media;
+    (void)media_count;
     sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
     if (!c || !c->alloc) return SC_ERR_INVALID_ARGUMENT;
     if (!c->http_url || !target || target_len == 0 || !message) return SC_ERR_INVALID_ARGUMENT;

@@ -32,6 +32,7 @@ static int tag_eq(const char *a, const char *b, size_t n) {
     return 1;
 }
 
+#if !SC_IS_TEST
 /* Simple HTML-to-text: strip script/style, decode entities */
 static char *html_to_text(sc_allocator_t *alloc, const char *html, size_t html_len, size_t *out_len)
 {
@@ -111,6 +112,7 @@ static char *html_to_text(sc_allocator_t *alloc, const char *html, size_t html_l
     *out_len=len;
     return buf;
 }
+#endif
 
 static sc_error_t web_fetch_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,

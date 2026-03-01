@@ -73,7 +73,7 @@ static void test_command_very_long(void) {
     char buf[5000];
     memset(buf, 'a', 4095);
     buf[4095] = '\0';
-    strcat(buf, " ls");
+    memcpy(buf + 4095, " ls", 4);
     sc_security_policy_t p = {
         .autonomy = SC_AUTONOMY_SUPERVISED,
         .allowed_commands = allowed,

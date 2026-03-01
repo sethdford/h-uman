@@ -88,6 +88,7 @@ static sc_error_t parse_skill_json(sc_allocator_t *alloc, const char *json, size
     return SC_OK;
 }
 
+#if !defined(SC_IS_TEST)
 static sc_error_t discover_from_dir(sc_skillforge_t *sf, const char *dir_path) {
 #ifndef _WIN32
     DIR *d = opendir(dir_path);
@@ -146,6 +147,7 @@ static sc_error_t discover_from_dir(sc_skillforge_t *sf, const char *dir_path) {
 #endif
     return SC_OK;
 }
+#endif
 
 #ifdef SC_IS_TEST
 static sc_error_t discover_test_data(sc_skillforge_t *sf) {

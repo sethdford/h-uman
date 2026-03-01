@@ -74,6 +74,7 @@ sc_error_t sc_message_create(sc_allocator_t *alloc,
     sc_channel_t *channel,
     sc_tool_t *out)
 {
+    (void)alloc;
     sc_message_ctx_t *c = (sc_message_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;
     c->channel = channel;

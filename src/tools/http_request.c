@@ -41,6 +41,7 @@ static int method_valid(const char *method)
     return 0;
 }
 
+#if !SC_IS_TEST
 /* Build extra_headers string from JSON object. Caller frees. */
 static sc_error_t parse_headers(sc_allocator_t *alloc, const sc_json_value_t *headers_val,
     char **out, size_t *out_len)
@@ -77,6 +78,7 @@ static sc_error_t parse_headers(sc_allocator_t *alloc, const sc_json_value_t *he
     *out_len = len;
     return SC_OK;
 }
+#endif
 
 static sc_error_t http_request_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,
@@ -185,6 +187,7 @@ static const sc_tool_vtable_t http_request_vtable = {
 
 sc_error_t sc_http_request_create(sc_allocator_t *alloc, bool allow_http, sc_tool_t *out)
 {
+    (void)alloc;
     (void)allow_http;
     sc_http_request_ctx_t *c = (sc_http_request_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;

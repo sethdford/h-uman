@@ -21,11 +21,13 @@ static uint32_t hash_str(const char *s, size_t len) {
     return h;
 }
 
+#if SC_IS_TEST
 /* Simple LCG for deterministic "random" in test mode */
 static float next_rand(uint32_t *state) {
     *state = *state * 1103515245u + 12345u;
     return (float)((*state >> 16) & 0x7FFFu) / 32767.0f;
 }
+#endif
 
 #if SC_IS_TEST
 /* In test mode: deterministic pseudo-random 384-dim vector from text hash */

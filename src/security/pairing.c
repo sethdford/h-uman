@@ -127,11 +127,11 @@ sc_pairing_guard_t *sc_pairing_guard_create(sc_allocator_t *alloc,
                     return NULL;
                 }
                 if (is_token_hash(existing_tokens[i])) {
-                    strncpy(slot, existing_tokens[i], 64);
+                    memcpy(slot, existing_tokens[i], 64);
                     slot[64] = '\0';
                 } else {
                     hash_token_sha256(existing_tokens[i], hash_buf);
-                    strcpy(slot, hash_buf);
+                    memcpy(slot, hash_buf, 65);
                 }
                 guard->paired_token_hashes[guard->token_count++] = slot;
             }
@@ -235,16 +235,19 @@ sc_pair_attempt_result_t sc_pairing_guard_attempt_pair(sc_pairing_guard_t *guard
         guard->paired_token_hashes = n;
         guard->token_cap = new_cap;
     }
-    guard->paired_token_hashes[guard->token_count] =
-        (char *)guard->alloc->alloc(guard->alloc->ctx, 65);
-    if (!guard->paired_token_hashes[guard->token_count])
-        return SC_PAIR_INTERNAL_ERROR;
-    strcpy(guard->paired_token_hashes[guard->token_count], hash_buf);
-    guard->token_count++;
+    char *hash_slot = (char *)guard->alloc->alloc(guard->alloc->ctx, 65);
+    if (!hash_slot) return SC_PAIR_INTERNAL_ERROR;
+    memcpy(hash_slot, hash_buf, 65);
 
     *out_token = (char *)guard->alloc->alloc(guard->alloc->ctx, strlen(token) + 1);
-    if (!*out_token) return SC_PAIR_INTERNAL_ERROR;
-    strcpy(*out_token, token);
+    if (!*out_token) {
+        guard->alloc->free(guard->alloc->ctx, hash_slot, 65);
+        return SC_PAIR_INTERNAL_ERROR;
+    }
+    memcpy(*out_token, token, strlen(token) + 1);
+
+    guard->paired_token_hashes[guard->token_count] = hash_slot;
+    guard->token_count++;
     return SC_PAIR_PAIRED;
 }
 

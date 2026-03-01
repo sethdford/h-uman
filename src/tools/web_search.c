@@ -28,6 +28,7 @@ typedef struct sc_web_search_ctx {
     size_t api_key_len;
 } sc_web_search_ctx_t;
 
+#if !SC_IS_TEST
 static const char *get_env(const char *name)
 {
 #ifdef _WIN32
@@ -37,6 +38,7 @@ static const char *get_env(const char *name)
     return getenv(name);
 #endif
 }
+#endif
 
 static sc_error_t web_search_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,

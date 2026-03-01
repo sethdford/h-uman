@@ -204,6 +204,7 @@ fail:
 }
 
 
+#if !SC_IS_TEST
 /* Build chat.postMessage body with optional thread_ts. */
 static sc_error_t build_chat_body(sc_allocator_t *alloc,
     const char *channel, size_t channel_len,
@@ -242,6 +243,7 @@ fail:
     sc_json_buf_free(&jbuf);
     return err;
 }
+#endif /* !SC_IS_TEST */
 
 /* Call auth.test to fetch bot_user_id. */
 static sc_error_t fetch_auth_test(sc_slack_ctx_t *c)
@@ -307,6 +309,8 @@ static sc_error_t slack_send(void *ctx,
     const char *message, size_t message_len,
     const char *const *media, size_t media_count)
 {
+    (void)media;
+    (void)media_count;
     sc_slack_ctx_t *c = (sc_slack_ctx_t *)ctx;
     if (!c || !c->alloc) return SC_ERR_INVALID_ARGUMENT;
     if (!c->token || c->token_len == 0) return SC_ERR_CHANNEL_NOT_CONFIGURED;

@@ -29,6 +29,7 @@ static sc_error_t cron_run_execute(void *ctx, sc_allocator_t *alloc,
         return SC_OK;
     }
     uint64_t job_id = (uint64_t)id_val;
+    (void)job_id;
 
 #if SC_IS_TEST
     sc_cron_scheduler_t *sched = sc_cron_create(alloc, 100, true);

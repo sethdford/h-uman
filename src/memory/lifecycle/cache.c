@@ -88,6 +88,7 @@ static void slot_free(sc_allocator_t *alloc, cache_slot_t *slot) {
 
 /* Move slot at idx to front (index 0) by shifting others right */
 static void move_to_front(cache_slot_t *slots, size_t count, size_t idx) {
+    (void)count;
     if (idx == 0) return;
     cache_slot_t tmp = slots[idx];
     memmove(slots + 1, slots, idx * sizeof(cache_slot_t));

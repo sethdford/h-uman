@@ -513,6 +513,9 @@ static sc_error_t gemini_stream_chat(void *ctx, sc_allocator_t *alloc,
     memset(out, 0, sizeof(*out));
 
 #if SC_IS_TEST
+    (void)model;
+    (void)model_len;
+    (void)temperature;
     {
         const char *chunks[] = { "Hello ", "from ", "Gemini ", "stream" };
         for (int i = 0; i < 4; i++) {
@@ -679,7 +682,7 @@ static const sc_provider_vtable_t gemini_vtable = {
     .supports_streaming = gemini_supports_streaming,
     .supports_vision = gemini_supports_vision,
     .supports_vision_for_model = gemini_supports_vision_for_model,
-    .stream_chat = NULL,
+    .stream_chat = gemini_stream_chat,
 };
 
 sc_error_t sc_gemini_create(sc_allocator_t *alloc,

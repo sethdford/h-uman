@@ -36,12 +36,12 @@ static void test_agent_very_long_input(void) {
     sc_allocator_t alloc = sc_system_allocator();
     char buf[10000];
     size_t pos = 0;
-    pos += (size_t)sprintf(buf + pos, "{\"steps\":[");
+    pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "{\"steps\":[");
     for (int i = 0; i < 100; i++) {
-        if (i > 0) pos += (size_t)sprintf(buf + pos, ",");
-        pos += (size_t)sprintf(buf + pos, "{\"tool\":\"shell\",\"args\":{}}");
+        if (i > 0) pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, ",");
+        pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "{\"tool\":\"shell\",\"args\":{}}");
     }
-    pos += (size_t)sprintf(buf + pos, "]}");
+    pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "]}");
     sc_plan_t *plan = NULL;
     sc_error_t err = sc_planner_create_plan(&alloc, buf, pos, &plan);
     if (err == SC_OK && plan) {

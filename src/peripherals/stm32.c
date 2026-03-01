@@ -61,6 +61,7 @@ static sc_peripheral_error_t impl_init(void *ctx) {
     strncpy(s->board_name, s->chip, sizeof(s->board_name) - 1);
     s->board_name[sizeof(s->board_name) - 1] = '\0';
     s->connected = true;
+    return SC_PERIPHERAL_ERR_NONE;
 #else
     return SC_PERIPHERAL_ERR_UNSUPPORTED_OPERATION;
 #endif

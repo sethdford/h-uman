@@ -222,6 +222,9 @@ sc_error_t sc_auth_start_device_flow(sc_allocator_t *alloc,
                                     const char *scope,
                                     sc_device_code_t *out) {
     if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
+    (void)client_id;
+    (void)device_auth_url;
+    (void)scope;
 #if SC_IS_TEST
     if (out) {
         out->device_code = sc_strdup(alloc, "mock-device-code");
@@ -294,6 +297,10 @@ sc_error_t sc_auth_poll_device_code(sc_allocator_t *alloc,
                                     uint32_t interval_secs,
                                     sc_oauth_token_t *token_out) {
     if (!alloc || !token_out) return SC_ERR_INVALID_ARGUMENT;
+    (void)token_url;
+    (void)client_id;
+    (void)device_code;
+    (void)interval_secs;
 #if SC_IS_TEST
     if (token_out) {
         token_out->access_token = sc_strdup(alloc, "mock-access-token");
@@ -377,6 +384,8 @@ sc_error_t sc_auth_refresh_token(sc_allocator_t *alloc,
                                 const char *refresh_token,
                                 sc_oauth_token_t *token_out) {
     if (!alloc || !token_out) return SC_ERR_INVALID_ARGUMENT;
+    (void)token_url;
+    (void)client_id;
 #if SC_IS_TEST
     if (token_out) {
         token_out->access_token = sc_strdup(alloc, "mock-refreshed-token");

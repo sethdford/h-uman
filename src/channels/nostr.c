@@ -50,6 +50,8 @@ static sc_error_t nostr_send(void *ctx,
     (void)media;
     (void)media_count;
 #if SC_IS_TEST
+    (void)target;
+    (void)target_len;
     sc_nostr_ctx_t *c = (sc_nostr_ctx_t *)ctx;
     if (c && message && message_len > 0) {
         size_t copy = message_len;

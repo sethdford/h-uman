@@ -202,7 +202,7 @@ sc_error_t sc_secret_store_decrypt(sc_secret_store_t *store,
     if (!sc_secret_store_is_encrypted(value)) {
         char *dup = (char *)alloc->alloc(alloc->ctx, strlen(value) + 1);
         if (!dup) return SC_ERR_OUT_OF_MEMORY;
-        strcpy(dup, value);
+        memcpy(dup, value, strlen(value) + 1);
         *out_plaintext = dup;
         return SC_OK;
     }

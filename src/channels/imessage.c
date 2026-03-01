@@ -23,6 +23,7 @@ static void imessage_stop(void *ctx) {
     if (c) c->running = false;
 }
 
+#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 /* Escape " and \ for AppleScript string literal */
 static size_t escape_for_applescript(char *out, size_t out_cap,
     const char *in, size_t in_len)
@@ -39,6 +40,7 @@ static size_t escape_for_applescript(char *out, size_t out_cap,
     out[j] = '\0';
     return j;
 }
+#endif
 
 static sc_error_t imessage_send(void *ctx,
     const char *target, size_t target_len,
@@ -138,11 +140,10 @@ sc_error_t sc_imessage_create(sc_allocator_t *alloc,
     c->default_target_len = 0;
     if (default_target && default_target_len > 0) {
         c->default_target = (char *)malloc(default_target_len + 1);
-        if (c->default_target) {
-            memcpy(c->default_target, default_target, default_target_len);
-            c->default_target[default_target_len] = '\0';
-            c->default_target_len = default_target_len;
-        }
+        if (!c->default_target) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        memcpy(c->default_target, default_target, default_target_len);
+        c->default_target[default_target_len] = '\0';
+        c->default_target_len = default_target_len;
     }
     out->ctx = c;
     out->vtable = &imessage_vtable;

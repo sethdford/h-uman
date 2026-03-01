@@ -33,11 +33,13 @@ static void email_stop(void *ctx) {
     if (c) c->running = false;
 }
 
+#if !SC_IS_TEST
 static const char *email_from(sc_email_ctx_t *c) {
     if (c->from_address && c->from_len > 0)
         return c->from_address;
     return "seaclaw@localhost";
 }
+#endif
 
 static sc_error_t email_send(void *ctx,
     const char *target, size_t target_len,
@@ -47,6 +49,8 @@ static sc_error_t email_send(void *ctx,
     (void)media;
     (void)media_count;
 #if SC_IS_TEST
+    (void)target;
+    (void)target_len;
     sc_email_ctx_t *c = (sc_email_ctx_t *)ctx;
     if (c && message && message_len > 0) {
         size_t copy = message_len;
@@ -142,11 +146,14 @@ sc_error_t sc_email_create(sc_allocator_t *alloc,
     c->smtp_port = smtp_port > 0 ? smtp_port : 587;
     if (from_address && from_len > 0) {
         c->from_address = (char *)malloc(from_len + 1);
-        if (c->from_address) {
-            memcpy(c->from_address, from_address, from_len);
-            c->from_address[from_len] = '\0';
-            c->from_len = from_len;
+        if (!c->from_address) {
+            if (c->smtp_host) free(c->smtp_host);
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
         }
+        memcpy(c->from_address, from_address, from_len);
+        c->from_address[from_len] = '\0';
+        c->from_len = from_len;
     }
     out->ctx = c;
     out->vtable = &email_vtable;

@@ -44,6 +44,8 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
     if (length < 1) length = HARDWARE_MEMORY_LEN_DEFAULT;
     if (length > HARDWARE_MEMORY_LEN_MAX) length = HARDWARE_MEMORY_LEN_MAX;
 #if SC_IS_TEST
+    (void)value;
+    (void)board;
     if (strcmp(action, "read") == 0) {
         char *msg = sc_strndup(alloc, "00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF", 41);
         if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
@@ -113,12 +115,19 @@ sc_error_t sc_hardware_memory_create(sc_allocator_t *alloc,
     c->boards_count = boards_count;
     if (boards && boards_count > 0) {
         c->boards = (char **)alloc->alloc(alloc->ctx, boards_count * sizeof(char *));
-        if (c->boards) {
-            for (size_t i = 0; i < boards_count; i++) {
-                size_t len = strlen(boards[i]);
-                c->boards[i] = (char *)alloc->alloc(alloc->ctx, len + 1);
-                if (c->boards[i]) memcpy(c->boards[i], boards[i], len + 1);
+        if (!c->boards) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        memset(c->boards, 0, boards_count * sizeof(char *));
+        for (size_t i = 0; i < boards_count; i++) {
+            size_t len = strlen(boards[i]);
+            c->boards[i] = (char *)alloc->alloc(alloc->ctx, len + 1);
+            if (!c->boards[i]) {
+                for (size_t j = 0; j < i; j++)
+                    alloc->free(alloc->ctx, c->boards[j], strlen(c->boards[j]) + 1);
+                alloc->free(alloc->ctx, c->boards, boards_count * sizeof(char *));
+                free(c);
+                return SC_ERR_OUT_OF_MEMORY;
             }
+            memcpy(c->boards[i], boards[i], len + 1);
         }
     }
     out->ctx = c;

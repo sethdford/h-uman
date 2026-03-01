@@ -137,6 +137,7 @@ sc_error_t sc_pushover_create(sc_allocator_t *alloc,
     const char *user_key, size_t user_key_len,
     sc_tool_t *out)
 {
+    (void)alloc;
     sc_pushover_ctx_t *c = (sc_pushover_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;
     if (api_token && api_token_len > 0) {

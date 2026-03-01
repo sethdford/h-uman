@@ -32,6 +32,7 @@
 
 typedef enum { INSTALL_NIX, INSTALL_HOMEBREW, INSTALL_DOCKER, INSTALL_BINARY, INSTALL_DEV } install_method_t;
 
+#if !defined(SC_IS_TEST)
 /* Detect install method from executable path. build/ = dev build (cmake out-of-tree). */
 static install_method_t detect_install_method(const char *exe_path) {
     if (!exe_path) return INSTALL_BINARY;
@@ -43,6 +44,7 @@ static install_method_t detect_install_method(const char *exe_path) {
 }
 
 static char *get_exe_path(sc_allocator_t *alloc) {
+    (void)alloc;
 #if defined(__linux__)
     char buf[PATH_MAX];
     ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
@@ -61,7 +63,6 @@ static char *get_exe_path(sc_allocator_t *alloc) {
     }
     return sc_strdup(alloc, buf);
 #else
-    (void)alloc;
     return NULL;
 #endif
 }
@@ -100,6 +101,7 @@ static void print_package_instructions(install_method_t method) {
             break;
     }
 }
+#endif
 
 sc_error_t sc_update_check(char *version_buf, size_t buf_size) {
     if (!version_buf || buf_size == 0) return SC_ERR_INVALID_ARGUMENT;
