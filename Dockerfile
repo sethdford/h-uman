@@ -41,7 +41,7 @@ RUN chown -R 65534:65534 /seaclaw-data
 # ── Stage 3: Runtime Base (shared) ────────────────────────────
 FROM alpine:3.23 AS release-base
 
-LABEL org.opencontainers.image.source=https://github.com/seaclaw/seaclaw
+LABEL org.opencontainers.image.source=https://github.com/sethdford/seaclaw
 
 RUN apk add --no-cache ca-certificates curl tzdata libsqlite3
 

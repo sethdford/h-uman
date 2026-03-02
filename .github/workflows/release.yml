@@ -38,8 +38,8 @@ jobs:
       - name: Build MinSizeRel + LTO
         run: |
           mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
-          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_CURL=ON
+          cmake --build . --target seaclaw -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
