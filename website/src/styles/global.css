@@ -6,21 +6,112 @@
 
 @layer base {
   :root {
+    /* ── Color tokens ── */
     --color-bg: #fafaf9;
     --color-surface: #ffffff;
+    --color-surface-elevated: rgba(255, 255, 255, 0.6);
     --color-border: rgba(0, 0, 0, 0.06);
+    --color-border-strong: rgba(0, 0, 0, 0.12);
     --color-text: #1d1d1f;
     --color-text-secondary: #6e6e73;
-    --color-text-tertiary: #a1a1a6;
+    --color-text-tertiary: #86868b;
     --color-accent: #f97066;
     --color-accent-hover: #ef5350;
+    --color-accent-glow: rgba(249, 112, 102, 0.25);
     --color-accent-light: rgba(249, 112, 102, 0.08);
     --color-code-bg: #f5f5f4;
     --color-terminal-bg: #1d1d1f;
+    --color-terminal-chrome: #2c2c2e;
+
+    /* ── Pill tokens ── */
+    --color-pill-provider: #3b72c4;
+    --color-pill-provider-bg: rgba(59, 130, 246, 0.06);
+    --color-pill-provider-border: rgba(59, 130, 246, 0.15);
+    --color-pill-channel: #16874d;
+    --color-pill-channel-bg: rgba(34, 197, 94, 0.06);
+    --color-pill-channel-border: rgba(34, 197, 94, 0.15);
+    --color-pill-tool: #a37e12;
+    --color-pill-tool-bg: rgba(234, 179, 8, 0.06);
+    --color-pill-tool-border: rgba(234, 179, 8, 0.15);
+
+    /* ── SVG/arch tokens ── */
+    --color-node-fill: rgba(255, 255, 255, 0.8);
+    --color-node-stroke: rgba(0, 0, 0, 0.08);
+    --color-line-stroke: #d4d4d8;
+
+    /* ── Typography ── */
     --font-serif: "Instrument Serif", "Georgia", serif;
     --font-sans:
       "Inter Variable", "Inter", system-ui, -apple-system, sans-serif;
     --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+    /* ── Spacing scale (4px base) ── */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+    --space-12: 3rem;
+    --space-16: 4rem;
+    --space-24: 6rem;
+    --space-32: 8rem;
+
+    /* ── Radii ── */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --radius-full: 9999px;
+
+    /* ── Shadows ── */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+    --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.12);
+    --shadow-glow: 0 0 30px var(--color-accent-glow);
+
+    /* ── Transitions ── */
+    --duration-fast: 150ms;
+    --duration-normal: 200ms;
+    --duration-slow: 300ms;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-bg: #0a0a0a;
+      --color-surface: #1c1c1e;
+      --color-surface-elevated: rgba(28, 28, 30, 0.7);
+      --color-border: rgba(255, 255, 255, 0.08);
+      --color-border-strong: rgba(255, 255, 255, 0.15);
+      --color-text: #f5f5f7;
+      --color-text-secondary: #a1a1a6;
+      --color-text-tertiary: #86868b;
+      --color-accent: #f97066;
+      --color-accent-hover: #ff8a80;
+      --color-accent-glow: rgba(249, 112, 102, 0.2);
+      --color-accent-light: rgba(249, 112, 102, 0.12);
+      --color-code-bg: #1c1c1e;
+      --color-terminal-bg: #0f0f0f;
+      --color-terminal-chrome: #1c1c1e;
+
+      --color-pill-provider: #93bbfd;
+      --color-pill-provider-bg: rgba(59, 130, 246, 0.1);
+      --color-pill-provider-border: rgba(59, 130, 246, 0.25);
+      --color-pill-channel: #86efac;
+      --color-pill-channel-bg: rgba(34, 197, 94, 0.1);
+      --color-pill-channel-border: rgba(34, 197, 94, 0.25);
+      --color-pill-tool: #fde68a;
+      --color-pill-tool-bg: rgba(234, 179, 8, 0.1);
+      --color-pill-tool-border: rgba(234, 179, 8, 0.25);
+
+      --color-node-fill: rgba(28, 28, 30, 0.8);
+      --color-node-stroke: rgba(255, 255, 255, 0.1);
+      --color-line-stroke: #3a3a3c;
+
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+      --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+      --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.4);
+    }
   }
 
   html {
@@ -37,7 +128,7 @@
 
   ::selection {
     background: rgba(249, 112, 102, 0.2);
-    color: #1d1d1f;
+    color: var(--color-text);
   }
 
   code,
@@ -45,31 +136,64 @@
   kbd {
     font-family: var(--font-mono);
   }
+
+  /* ── Focus visible ── */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
 }
 
 @layer components {
+  /* ── Skip link ── */
+  .skip-link {
+    position: absolute;
+    top: -100%;
+    left: var(--space-4);
+    z-index: 200;
+    padding: var(--space-2) var(--space-4);
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    transition: top var(--duration-fast);
+  }
+
+  .skip-link:focus {
+    top: var(--space-4);
+  }
+
+  /* ── Glass ── */
   .glass {
-    background: rgba(255, 255, 255, 0.6);
+    background: var(--color-surface-elevated);
     backdrop-filter: blur(20px) saturate(1.8);
     -webkit-backdrop-filter: blur(20px) saturate(1.8);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    border-radius: 20px;
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.04),
-      0 1px 2px rgba(0, 0, 0, 0.03);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
   }
 
   .glass-nav {
-    background: rgba(250, 250, 249, 0.7);
+    background: var(--color-surface-elevated);
     backdrop-filter: blur(24px) saturate(1.8);
     -webkit-backdrop-filter: blur(24px) saturate(1.8);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    border-bottom: 1px solid var(--color-border);
   }
 
+  /* ── Typography ── */
   .font-serif {
     font-family: var(--font-serif);
   }
 
+  /* ── Ambient gradients ── */
   .ambient-coral {
     position: absolute;
     width: 600px;
@@ -77,7 +201,7 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      rgba(249, 112, 102, 0.06) 0%,
+      var(--color-accent-light) 0%,
       transparent 70%
     );
     pointer-events: none;
@@ -96,5 +220,132 @@
     );
     pointer-events: none;
     z-index: -1;
+  }
+
+  /* ── Buttons ── */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-8);
+    border-radius: var(--radius-full);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    background: var(--color-accent);
+    color: #fff;
+    transition: all var(--duration-normal) var(--ease-out);
+  }
+
+  .btn-primary:hover {
+    background: var(--color-accent-hover);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .btn-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-3) var(--space-8);
+    border-radius: var(--radius-full);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border-strong);
+    transition: all var(--duration-normal) var(--ease-out);
+  }
+
+  .btn-outline:hover {
+    border-color: var(--color-text-secondary);
+    color: var(--color-text);
+  }
+
+  /* ── Terminal cursor blink ── */
+  .terminal-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1.1em;
+    background: var(--color-accent);
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  /* ── Logo float ── */
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .hero-logo,
+  .hero-headline,
+  .hero-desc,
+  .hero-buttons,
+  .bloat-title,
+  .bloat-card,
+  .bloat-answer,
+  .spectrum-title,
+  .spectrum-sub,
+  .spectrum-card,
+  .arch-title,
+  .arch-sub,
+  .arch-node,
+  #arch-core,
+  .providers-title,
+  .providers-sub,
+  .provider-pill,
+  .terminal-title,
+  .terminal-sub,
+  #terminal,
+  .cta-title,
+  .cta-sub,
+  .cta-buttons,
+  .number-item {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* ── Print ── */
+@media print {
+  nav,
+  .ambient-coral,
+  .ambient-blue,
+  footer {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  section {
+    page-break-inside: avoid;
+    padding: 1rem 0;
+  }
+  .glass {
+    background: transparent;
+    backdrop-filter: none;
+    border: 1px solid #ccc;
+    box-shadow: none;
   }
 }

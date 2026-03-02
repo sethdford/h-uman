@@ -1,0 +1,17 @@
+{
+  "name": "SeaClaw",
+  "short_name": "SeaClaw",
+  "description": "Autonomous AI agent runtime in 282 KB of pure C",
+  "start_url": "/seaclaw/",
+  "display": "standalone",
+  "theme_color": "#f97066",
+  "background_color": "#fafaf9",
+  "icons": [
+    { "src": "/seaclaw/favicon-48.png", "sizes": "48x48", "type": "image/png" },
+    {
+      "src": "/seaclaw/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

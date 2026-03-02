@@ -39,7 +39,7 @@ sudo dnf install -y cmake sqlite-devel libcurl-devel
 Clone the repository, then build:
 
 ```bash
-git clone https://github.com/seaclaw/seaclaw.git
+git clone https://github.com/sethdford/seaclaw.git
 cd seaclaw
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
@@ -59,7 +59,7 @@ cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNE
 cmake --build .
 ```
 
-This produces a small binary (~239 KB with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
+This produces a small binary (~282 KB with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
 
 ### Basic development build
 
@@ -135,4 +135,4 @@ If config is missing, run the onboard wizard first (see [Quick Start](/getting-s
 ./build/seaclaw_tests
 ```
 
-All 1,697+ tests must pass with zero ASan errors.
+All 1,946 tests must pass with zero ASan errors.

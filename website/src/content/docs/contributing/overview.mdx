@@ -58,7 +58,7 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 
 ## Testing requirements
 
-- **1,697+ tests** must pass
+- **1,946 tests** must pass
 - **Zero ASan errors** — AddressSanitizer enabled in dev builds
 - Use `SC_IS_TEST` to skip side effects (network, spawning, real hardware)
 - Tests must be deterministic; no flaky behavior
