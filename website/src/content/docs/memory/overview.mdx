@@ -1,0 +1,69 @@
+---
+title: Memory Overview
+description: Memory backends, embeddings, and session storage in SeaClaw.
+---
+
+SeaClaw maintains memory for facts, conversation context, and session continuity. The memory system uses a vtable interface with pluggable backends.
+
+## Memory vtable
+
+The `sc_memory_t` interface provides:
+
+- **Store** — Save a memory entry with key, content, category
+- **Recall** — Search memories by query (keyword or semantic)
+- **Forget** — Remove a memory by ID
+- **Session store** — Save/load conversation messages per session
+
+## Backends
+
+### SQLite (default for production)
+
+- FTS5 full-text search
+- Vector cosine similarity for semantic recall (when embeddings available)
+- Config: `"memory": { "backend": "sqlite", "sqlite_path": "~/.seaclaw/memory.db" }`
+- Requires `SC_ENABLE_SQLITE=ON` (default)
+
+### Markdown
+
+- Simple file-based storage
+- One markdown file per memory or structured directory
+- No embeddings; keyword search
+- Config: `"memory": { "backend": "markdown" }`
+
+### None
+
+- No persistence
+- Config: `"memory": { "backend": "none" }`
+
+### Other engines
+
+Additional engines (Lucid, LanceDB, Redis, API) may be built with their respective CMake options.
+
+## Memory categories
+
+- **core** — Essential facts (user preferences, identity)
+- **daily** — Day-specific notes
+- **conversation** — Conversation context
+- **custom** — User-defined categories
+
+## Embedding providers
+
+For semantic (vector) recall, an embedding provider can be configured. Embeddings are stored with memory entries for cosine similarity search.
+
+## Hybrid search
+
+SQLite backend supports:
+
+- **Keyword (FTS5)** — Fast full-text match
+- **Vector** — Semantic similarity when embeddings are present
+- **Hybrid** — Combine both for better recall
+
+## Hygiene and snapshots
+
+- Old entries can be pruned by age or count
+- Snapshots allow exporting/importing memory state
+- Config: `memory.max_entries`, `memory.auto_save`
+
+## Session store
+
+Conversation messages are stored per `session_id` for continuity across turns. Cleared when session expires or is explicitly reset.

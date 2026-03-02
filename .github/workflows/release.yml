@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 jobs:
   build:
@@ -16,49 +16,31 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-            zig_target: x86_64-linux-musl
-            ext: ""
-          - os: ubuntu-latest
-            target: linux-aarch64
-            zig_target: aarch64-linux-musl
-            ext: ""
-          - os: ubuntu-latest
-            target: linux-riscv64
-            zig_target: riscv64-linux-musl
-            ext: ""
           - os: macos-latest
             target: macos-aarch64
-            zig_target: aarch64-macos
-            ext: ""
-          - os: macos-latest
-            target: macos-x86_64
-            zig_target: x86_64-macos
-            ext: ""
-          - os: windows-latest
-            target: windows-x86_64
-            zig_target: x86_64-windows
-            ext: ".exe"
-          - os: windows-latest
-            target: windows-aarch64
-            zig_target: aarch64-windows
-            ext: ".exe"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Zig 0.15.2
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
 
-      - name: Build ReleaseSmall
-        run: zig build -Doptimize=ReleaseSmall ${{ matrix.zig_target && format('-Dtarget={0}', matrix.zig_target) || '' }}
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sqlite3
+
+      - name: Build MinSizeRel + LTO
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_CURL=ON
+          cmake --build . --target seaclaw -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nullclaw-${{ matrix.target }}
-          path: zig-out/bin/nullclaw${{ matrix.ext }}
+          name: seaclaw-${{ matrix.target }}
+          path: build/seaclaw
 
   release:
     needs: build
@@ -71,30 +53,21 @@ jobs:
 
       - name: Rename binaries
         run: |
-          mv nullclaw-linux-x86_64/nullclaw nullclaw-linux-x86_64.bin
-          mv nullclaw-linux-aarch64/nullclaw nullclaw-linux-aarch64.bin
-          mv nullclaw-linux-riscv64/nullclaw nullclaw-linux-riscv64.bin
-          mv nullclaw-macos-aarch64/nullclaw nullclaw-macos-aarch64.bin
-          mv nullclaw-macos-x86_64/nullclaw nullclaw-macos-x86_64.bin
-          mv nullclaw-windows-x86_64/nullclaw.exe nullclaw-windows-x86_64.exe
-          mv nullclaw-windows-aarch64/nullclaw.exe nullclaw-windows-aarch64.exe
+          mv seaclaw-linux-x86_64/seaclaw seaclaw-linux-x86_64.bin
+          mv seaclaw-macos-aarch64/seaclaw seaclaw-macos-aarch64.bin
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            nullclaw-linux-x86_64.bin
-            nullclaw-linux-aarch64.bin
-            nullclaw-linux-riscv64.bin
-            nullclaw-macos-aarch64.bin
-            nullclaw-macos-x86_64.bin
-            nullclaw-windows-x86_64.exe
-            nullclaw-windows-aarch64.exe
+            seaclaw-linux-x86_64.bin
+            seaclaw-macos-aarch64.bin
           generate_release_notes: true
 
   docker:
     needs: release
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: read
       packages: write

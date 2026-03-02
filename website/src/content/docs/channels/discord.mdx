@@ -1,0 +1,73 @@
+---
+title: Discord
+description: Set up the Discord bot channel.
+---
+
+# Discord Channel
+
+SeaClaw can run as a Discord bot using the Discord API.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_DISCORD=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- A Discord account and server
+
+## 1. Create a Discord application
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application**, name it, create
+3. Open **Bot** in the sidebar
+4. Click **Add Bot**
+5. Copy the **token** (click Reset Token if needed)
+6. Enable **Message Content Intent** (Privileged Gateway Intents) if the bot needs to read message content
+7. Note your **Application ID** (General Information)
+
+## 2. Invite the bot
+
+Use this URL (replace `YOUR_CLIENT_ID` with your Application ID):
+
+```
+https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=274877975552&scope=bot
+```
+
+Permissions include: Send Messages, Read Message History, Read Messages/View Channels.
+
+## 3. Configuration
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "channels": {
+    "discord": [
+      {
+        "token": "MTIzNDU2Nzg5MDEyMzQ1Njc4.ABcdEF.GhijKlmnOpqrstUvWxYz",
+        "guild_id": "1234567890123456789",
+        "allow_from": [],
+        "allow_bots": false
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field        | Type   | Description                                       |
+| ------------ | ------ | ------------------------------------------------- |
+| `token`      | string | Bot token from Developer Portal                   |
+| `guild_id`   | string | Discord server (guild) ID                         |
+| `allow_from` | array  | User IDs allowed to interact. Empty = allow all   |
+| `allow_bots` | bool   | Whether to respond to other bots (default: false) |
+
+### Get guild ID
+
+Enable Developer Mode in Discord (Settings → App Settings → Advanced → Developer Mode). Right-click your server icon → Copy Server ID.
+
+## 4. Webhook
+
+Incoming Discord events are received at the gateway path `/webhook/discord` or `/discord`. Configure your bot's interaction endpoint or use a compatible event gateway.
+
+## 5. Run
+
+Start the gateway and ensure the Discord channel is configured. The bot will connect and respond in the configured guild.

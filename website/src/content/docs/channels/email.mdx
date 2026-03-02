@@ -1,0 +1,73 @@
+---
+title: Email
+description: Bidirectional email via SMTP send and IMAP receive.
+---
+
+# Email Channel
+
+SeaClaw can send and receive email via SMTP and IMAP. Messages are sent using curl over SMTP (TLS), and received by polling the INBOX with IMAP `SEARCH UNSEEN`.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_EMAIL=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- `curl` available in PATH (used for SMTP send and IMAP polling)
+- SMTP and IMAP credentials for your email provider
+
+## Configuration
+
+Add to `~/.seaclaw/config.json` under `channels.email`:
+
+```json
+{
+  "channels": {
+    "email": {
+      "smtp_host": "smtp.gmail.com",
+      "smtp_port": 587,
+      "from_address": "bot@gmail.com",
+      "smtp_user": "bot@gmail.com",
+      "smtp_pass": "your-app-password",
+      "imap_host": "imap.gmail.com",
+      "imap_port": 993
+    }
+  }
+}
+```
+
+### Fields
+
+| Field          | Type   | Description                                            |
+| -------------- | ------ | ------------------------------------------------------ |
+| `smtp_host`    | string | SMTP server hostname (required for send)               |
+| `smtp_port`    | number | SMTP port (default 587 for STARTTLS, 465 for implicit) |
+| `from_address` | string | Sender address (required)                              |
+| `smtp_user`    | string | SMTP username (often same as from_address)             |
+| `smtp_pass`    | string | SMTP password or app password                          |
+| `imap_host`    | string | IMAP server hostname (required for receive)            |
+| `imap_port`    | number | IMAP port (default 993 for IMAPS)                      |
+
+### Gmail app passwords
+
+Gmail requires [App Passwords](https://support.google.com/accounts/answer/185833) when 2FA is enabled. Use an app password rather than your account password.
+
+## How it works
+
+### Outbound (send)
+
+- SeaClaw writes a MIME plain-text email to a temp file
+- Invokes `curl` with `--url smtps://host:port` (or `smtp://` for non-TLS)
+- Sends via `--mail-from`, `--mail-rcpt`, `--upload-file`
+- Port 587 uses STARTTLS; port 465 uses implicit TLS
+
+### Inbound (receive)
+
+- Polls IMAP every 30 seconds (`SEARCH UNSEEN` or `UID SEARCH UNSEEN UID N:*`)
+- Fetches headers (From, Subject) and body text per message
+- Uses sender address as session key; subject + body as content
+- Requires both `imap_host` and `smtp_user`/`smtp_pass` (IMAP uses same credentials)
+
+## Platform limitations
+
+- **Requires curl**: The channel uses `curl` for both SMTP and IMAP. Ensure curl is installed and in PATH.
+- **IMAP only**: Receive uses IMAP; no POP3 support.
+- **Single mailbox**: Polls INBOX only; no configurable folder.
+- **No attachments**: Sends plain text only; attachments not supported.

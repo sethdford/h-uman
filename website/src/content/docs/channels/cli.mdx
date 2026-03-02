@@ -1,0 +1,46 @@
+---
+title: CLI Channel
+description: Terminal-based chat channel.
+---
+
+The CLI channel is the default interface for SeaClaw. It is always built by default and requires no configuration.
+
+## Usage
+
+```bash
+./seaclaw agent
+```
+
+This starts an interactive chat session. Type messages and receive responses. The agent can use tools (shell, file read/write, memory, etc.) based on your security policy.
+
+## Options
+
+```bash
+./seaclaw agent -m "Your message"          # Single message, exit after response
+./seaclaw agent --provider ollama          # Override provider
+./seaclaw agent --model llama3             # Override model
+./seaclaw agent --session my-session        # Session ID for continuity
+./seaclaw agent --temperature 0.5           # Override temperature
+```
+
+## Behavior
+
+- **Interactive mode**: Prompts for input in a loop until you exit (Ctrl+C).
+- **Single message**: With `-m`, sends one message and prints the response.
+- **Streaming**: Responses stream token-by-token when the provider supports it.
+- **Tool use**: The agent can call tools; output is shown in the terminal.
+
+## Configuration
+
+The CLI channel is enabled by default. In config:
+
+```json
+{
+  "channels": {
+    "cli": true,
+    "default_channel": "cli"
+  }
+}
+```
+
+No API keys or accounts are needed. Workspace and security settings apply to tool execution.

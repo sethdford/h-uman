@@ -1,0 +1,465 @@
+#include "seaclaw/channels/email.h"
+#include "seaclaw/core/process_util.h"
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+#if !SC_IS_TEST
+#include <ctype.h>
+#endif
+
+#define SC_EMAIL_LAST_MSG_SIZE 4096
+
+#if !SC_IS_TEST
+static const char *sc_email_find_header_ci(const char *hdr, size_t hdr_len,
+    const char *name, size_t name_len)
+{
+    for (size_t i = 0; i + name_len + 1 < hdr_len; i++) {
+        if (i > 0 && hdr[i - 1] != '\n') continue;
+        size_t j;
+        for (j = 0; j < name_len; j++) {
+            if (tolower((unsigned char)hdr[i + j]) != tolower((unsigned char)name[j]))
+                break;
+        }
+        if (j == name_len && hdr[i + j] == ':') {
+            size_t v = i + j + 1;
+            while (v < hdr_len && hdr[v] == ' ') v++;
+            return hdr + v;
+        }
+    }
+    return NULL;
+}
+#endif
+
+typedef struct sc_email_ctx {
+    sc_allocator_t *alloc;
+    char *smtp_host;
+    size_t smtp_host_len;
+    uint16_t smtp_port;
+    char *smtp_user;
+    size_t smtp_user_len;
+    char *smtp_pass;
+    size_t smtp_pass_len;
+    char *imap_host;
+    size_t imap_host_len;
+    uint16_t imap_port;
+    char *from_address;
+    size_t from_len;
+    bool running;
+    unsigned int last_uid;
+#if SC_IS_TEST
+    char last_message[SC_EMAIL_LAST_MSG_SIZE];
+    size_t last_message_len;
+#endif
+} sc_email_ctx_t;
+
+static sc_error_t email_start(void *ctx) {
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ctx;
+    if (!c) return SC_ERR_INVALID_ARGUMENT;
+    c->running = true;
+    return SC_OK;
+}
+
+static void email_stop(void *ctx) {
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ctx;
+    if (c) c->running = false;
+}
+
+#if !SC_IS_TEST
+static const char *email_from(sc_email_ctx_t *c) {
+    if (c->from_address && c->from_len > 0)
+        return c->from_address;
+    return "seaclaw@localhost";
+}
+#endif
+
+static sc_error_t email_send(void *ctx,
+    const char *target, size_t target_len,
+    const char *message, size_t message_len,
+    const char *const *media, size_t media_count)
+{
+    (void)media;
+    (void)media_count;
+#if SC_IS_TEST
+    (void)target;
+    (void)target_len;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ctx;
+    if (c && message && message_len > 0) {
+        size_t copy = message_len;
+        if (copy >= SC_EMAIL_LAST_MSG_SIZE) copy = SC_EMAIL_LAST_MSG_SIZE - 1;
+        memcpy(c->last_message, message, copy);
+        c->last_message[copy] = '\0';
+        c->last_message_len = copy;
+    }
+    return SC_OK;
+#else
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ctx;
+    if (!c || !c->alloc) return SC_ERR_INVALID_ARGUMENT;
+    if (!c->smtp_host || c->smtp_host_len == 0)
+        return SC_ERR_NOT_SUPPORTED;
+
+    const char *from = email_from(c);
+
+    /* Write email to temp file (MIME plain text) */
+    char tmppath[] = "/tmp/sc_email_XXXXXX";
+    int fd = mkstemp(tmppath);
+    if (fd < 0) return SC_ERR_IO;
+    FILE *f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        unlink(tmppath);
+        return SC_ERR_IO;
+    }
+    int n = fprintf(f,
+        "From: %s\r\nTo: %.*s\r\nSubject: seaclaw\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%.*s",
+        from, (int)target_len, target, (int)message_len, message);
+    fclose(f);
+    if (n < 0) {
+        unlink(tmppath);
+        return SC_ERR_IO;
+    }
+
+    /* Null-terminate target for argv */
+    char *target_str = (char *)c->alloc->alloc(c->alloc->ctx, target_len + 1);
+    if (!target_str) {
+        unlink(tmppath);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    memcpy(target_str, target, target_len);
+    target_str[target_len] = '\0';
+
+    char smtp_url[512];
+    bool use_tls = (c->smtp_port == 465 || c->smtp_port == 587);
+    snprintf(smtp_url, sizeof(smtp_url), "%s://%.*s:%u",
+        use_tls ? "smtps" : "smtp",
+        (int)c->smtp_host_len, c->smtp_host, c->smtp_port);
+
+    /* Base args + optional auth (up to 15 args) */
+    const char *argv[16];
+    int ai = 0;
+    argv[ai++] = "curl";
+    argv[ai++] = "--url";
+    argv[ai++] = smtp_url;
+    argv[ai++] = "--mail-from";
+    argv[ai++] = from;
+    argv[ai++] = "--mail-rcpt";
+    argv[ai++] = target_str;
+    argv[ai++] = "--upload-file";
+    argv[ai++] = tmppath;
+    if (use_tls && c->smtp_port == 587) {
+        argv[ai++] = "--ssl-reqd";
+    }
+    if (c->smtp_user && c->smtp_user_len > 0) {
+        argv[ai++] = "--user";
+        /* user:pass stored as single string */
+        argv[ai++] = c->smtp_user;
+    }
+    argv[ai] = NULL;
+
+    sc_run_result_t run = {0};
+    sc_error_t err = sc_process_run(c->alloc, argv, NULL, 4096, &run);
+    c->alloc->free(c->alloc->ctx, target_str, target_len + 1);
+    unlink(tmppath);
+    sc_run_result_free(c->alloc, &run);
+    return (err == SC_OK && run.success) ? SC_OK : SC_ERR_IO;
+#endif
+}
+
+static const char *email_name(void *ctx) { (void)ctx; return "email"; }
+static bool email_health_check(void *ctx) { (void)ctx; return true; }
+
+static const sc_channel_vtable_t email_vtable = {
+    .start = email_start, .stop = email_stop, .send = email_send,
+    .name = email_name, .health_check = email_health_check,
+    .send_event = NULL, .start_typing = NULL, .stop_typing = NULL,
+};
+
+sc_error_t sc_email_create(sc_allocator_t *alloc,
+    const char *smtp_host, size_t smtp_host_len,
+    uint16_t smtp_port,
+    const char *from_address, size_t from_len,
+    sc_channel_t *out)
+{
+    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)calloc(1, sizeof(*c));
+    if (!c) return SC_ERR_OUT_OF_MEMORY;
+    c->alloc = alloc;
+    if (smtp_host && smtp_host_len > 0) {
+        c->smtp_host = (char *)malloc(smtp_host_len + 1);
+        if (!c->smtp_host) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        memcpy(c->smtp_host, smtp_host, smtp_host_len);
+        c->smtp_host[smtp_host_len] = '\0';
+        c->smtp_host_len = smtp_host_len;
+    }
+    c->smtp_port = smtp_port > 0 ? smtp_port : 587;
+    if (from_address && from_len > 0) {
+        c->from_address = (char *)malloc(from_len + 1);
+        if (!c->from_address) {
+            if (c->smtp_host) free(c->smtp_host);
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
+        memcpy(c->from_address, from_address, from_len);
+        c->from_address[from_len] = '\0';
+        c->from_len = from_len;
+    }
+    out->ctx = c;
+    out->vtable = &email_vtable;
+    return SC_OK;
+}
+
+sc_error_t sc_email_set_auth(sc_channel_t *ch,
+    const char *user, size_t user_len,
+    const char *pass, size_t pass_len)
+{
+    if (!ch || !ch->ctx) return SC_ERR_INVALID_ARGUMENT;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
+    if (user && user_len > 0 && pass && pass_len > 0) {
+        /* Store as "user:pass" for curl --user */
+        size_t combo_len = user_len + 1 + pass_len;
+        c->smtp_user = (char *)malloc(combo_len + 1);
+        if (!c->smtp_user) return SC_ERR_OUT_OF_MEMORY;
+        memcpy(c->smtp_user, user, user_len);
+        c->smtp_user[user_len] = ':';
+        memcpy(c->smtp_user + user_len + 1, pass, pass_len);
+        c->smtp_user[combo_len] = '\0';
+        c->smtp_user_len = combo_len;
+    }
+    return SC_OK;
+}
+
+sc_error_t sc_email_set_imap(sc_channel_t *ch,
+    const char *imap_host, size_t imap_host_len,
+    uint16_t imap_port)
+{
+    if (!ch || !ch->ctx) return SC_ERR_INVALID_ARGUMENT;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
+    if (imap_host && imap_host_len > 0) {
+        c->imap_host = (char *)malloc(imap_host_len + 1);
+        if (!c->imap_host) return SC_ERR_OUT_OF_MEMORY;
+        memcpy(c->imap_host, imap_host, imap_host_len);
+        c->imap_host[imap_host_len] = '\0';
+        c->imap_host_len = imap_host_len;
+    }
+    c->imap_port = imap_port > 0 ? imap_port : 993;
+    return SC_OK;
+}
+
+void sc_email_destroy(sc_channel_t *ch) {
+    if (ch && ch->ctx) {
+        sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
+        if (c->smtp_host) free(c->smtp_host);
+        if (c->smtp_user) free(c->smtp_user);
+        if (c->smtp_pass) free(c->smtp_pass);
+        if (c->imap_host) free(c->imap_host);
+        if (c->from_address) free(c->from_address);
+        free(c);
+        ch->ctx = NULL;
+        ch->vtable = NULL;
+    }
+}
+
+bool sc_email_is_configured(sc_channel_t *ch) {
+    if (!ch || !ch->ctx) return false;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
+    return c->smtp_host != NULL && c->smtp_host[0] != '\0'
+        && c->from_address != NULL && c->from_address[0] != '\0';
+}
+
+#if SC_IS_TEST
+const char *sc_email_test_last_message(sc_channel_t *ch) {
+    if (!ch || !ch->ctx) return NULL;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
+    return c->last_message_len > 0 ? c->last_message : NULL;
+}
+#endif
+
+/* ── Email IMAP polling via curl ──────────────────────────────────────── */
+
+sc_error_t sc_email_poll(void *channel_ctx,
+    sc_allocator_t *alloc,
+    sc_channel_loop_msg_t *msgs,
+    size_t max_msgs,
+    size_t *out_count)
+{
+    if (!channel_ctx || !msgs || !out_count) return SC_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+
+#if SC_IS_TEST
+    (void)alloc;
+    (void)max_msgs;
+    return SC_OK;
+#else
+    sc_email_ctx_t *c = (sc_email_ctx_t *)channel_ctx;
+    if (!c->imap_host || c->imap_host_len == 0)
+        return SC_ERR_NOT_SUPPORTED;
+    if (!c->smtp_user || c->smtp_user_len == 0)
+        return SC_ERR_NOT_SUPPORTED;
+
+    /*
+     * Use curl to fetch unseen messages via IMAP SEARCH.
+     * curl "imaps://host:port/INBOX" -u user:pass -X "SEARCH UNSEEN"
+     * Returns message sequence numbers, then we FETCH each one.
+     *
+     * Step 1: SEARCH UNSEEN to get message UIDs
+     */
+    char imap_url[512];
+    snprintf(imap_url, sizeof(imap_url), "imaps://%.*s:%u/INBOX",
+        (int)c->imap_host_len, c->imap_host, c->imap_port);
+
+    char uid_search[64];
+    if (c->last_uid > 0)
+        snprintf(uid_search, sizeof(uid_search), "UID SEARCH UNSEEN UID %u:*", c->last_uid + 1);
+    else
+        snprintf(uid_search, sizeof(uid_search), "SEARCH UNSEEN");
+
+    const char *search_argv[] = {
+        "curl", "--silent", "--url", imap_url,
+        "--user", c->smtp_user,
+        "-X", uid_search,
+        NULL
+    };
+
+    sc_run_result_t search_result = {0};
+    sc_error_t err = sc_process_run(alloc, search_argv, NULL, 8192, &search_result);
+    if (err != SC_OK || !search_result.success) {
+        sc_run_result_free(alloc, &search_result);
+        return err != SC_OK ? err : SC_ERR_IO;
+    }
+
+    /* Parse SEARCH response: "* SEARCH 1 2 3\r\n" */
+    const char *output = search_result.stdout_buf;
+    if (!output || search_result.stdout_len == 0) {
+        sc_run_result_free(alloc, &search_result);
+        return SC_OK;
+    }
+
+    unsigned int uids[32];
+    size_t uid_count = 0;
+    const char *p = strstr(output, "* SEARCH");
+    if (p) {
+        p += 8;
+        while (*p && uid_count < 32 && uid_count < max_msgs) {
+            while (*p == ' ') p++;
+            if (*p >= '0' && *p <= '9') {
+                unsigned int uid = 0;
+                while (*p >= '0' && *p <= '9') {
+                    if (uid > (unsigned int)(UINT32_MAX / 10)) break;
+                    uid = uid * 10 + (unsigned int)(*p - '0');
+                    p++;
+                }
+                if (uid > c->last_uid) {
+                    uids[uid_count++] = uid;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    sc_run_result_free(alloc, &search_result);
+
+    /* Step 2: FETCH each message (headers + body preview) */
+    size_t count = 0;
+    for (size_t i = 0; i < uid_count && count < max_msgs; i++) {
+        char fetch_url[640];
+        snprintf(fetch_url, sizeof(fetch_url),
+            "imaps://%.*s:%u/INBOX;UID=%u;SECTION=HEADER.FIELDS%%20(FROM%%20SUBJECT)",
+            (int)c->imap_host_len, c->imap_host, c->imap_port, uids[i]);
+
+        const char *fetch_argv[] = {
+            "curl", "--silent", "--url", fetch_url,
+            "--user", c->smtp_user,
+            NULL
+        };
+
+        sc_run_result_t fetch_result = {0};
+        err = sc_process_run(alloc, fetch_argv, NULL, 8192, &fetch_result);
+        if (err != SC_OK || !fetch_result.success) {
+            sc_run_result_free(alloc, &fetch_result);
+            continue;
+        }
+
+        /* Extract From: and Subject: from headers (case-insensitive, bounded) */
+        const char *from_line = NULL;
+        const char *subj_line = NULL;
+        const char *hdr = fetch_result.stdout_buf;
+        size_t hdr_len = fetch_result.stdout_len;
+        if (hdr && hdr_len > 0) {
+            from_line = sc_email_find_header_ci(hdr, hdr_len, "From", 4);
+            subj_line = sc_email_find_header_ci(hdr, hdr_len, "Subject", 7);
+        }
+
+        /* session_key = sender address, content = subject */
+        char session[128] = "unknown";
+        char content[4096] = "";
+        if (from_line) {
+            size_t remaining = hdr_len - (size_t)(from_line - hdr);
+            while (remaining > 0 && *from_line == ' ') { from_line++; remaining--; }
+            size_t flen = 0;
+            while (flen < remaining && from_line[flen] != '\r' && from_line[flen] != '\n' && flen < sizeof(session) - 1)
+                flen++;
+            memcpy(session, from_line, flen);
+            session[flen] = '\0';
+        }
+        if (subj_line) {
+            size_t remaining = hdr_len - (size_t)(subj_line - hdr);
+            while (remaining > 0 && *subj_line == ' ') { subj_line++; remaining--; }
+            size_t slen = 0;
+            while (slen < remaining && subj_line[slen] != '\r' && subj_line[slen] != '\n' && slen < sizeof(content) - 1)
+                slen++;
+            memcpy(content, subj_line, slen);
+            content[slen] = '\0';
+        }
+        sc_run_result_free(alloc, &fetch_result);
+
+        /* Now fetch the body text */
+        char body_url[640];
+        snprintf(body_url, sizeof(body_url),
+            "imaps://%.*s:%u/INBOX;UID=%u;SECTION=TEXT",
+            (int)c->imap_host_len, c->imap_host, c->imap_port, uids[i]);
+
+        const char *body_argv[] = {
+            "curl", "--silent", "--url", body_url,
+            "--user", c->smtp_user,
+            NULL
+        };
+
+        sc_run_result_t body_result = {0};
+        err = sc_process_run(alloc, body_argv, NULL, 8192, &body_result);
+        if (err == SC_OK && body_result.success && body_result.stdout_buf) {
+            size_t ct_len = strlen(content);
+            if (ct_len + 3 < sizeof(content)) {
+                size_t blen = body_result.stdout_len;
+                size_t avail = sizeof(content) - ct_len - 3;
+                if (blen > avail) blen = avail;
+                if (blen > 0) {
+                    if (ct_len > 0) {
+                        strcat(content, "\n\n");
+                        ct_len += 2;
+                    }
+                    memcpy(content + ct_len, body_result.stdout_buf, blen);
+                    content[ct_len + blen] = '\0';
+                }
+            }
+        }
+        sc_run_result_free(alloc, &body_result);
+
+        size_t sk_len = strlen(session);
+        size_t ct_len = strlen(content);
+        if (sk_len >= sizeof(msgs[count].session_key)) sk_len = sizeof(msgs[count].session_key) - 1;
+        if (ct_len >= sizeof(msgs[count].content)) ct_len = sizeof(msgs[count].content) - 1;
+        memcpy(msgs[count].session_key, session, sk_len);
+        msgs[count].session_key[sk_len] = '\0';
+        memcpy(msgs[count].content, content, ct_len);
+        msgs[count].content[ct_len] = '\0';
+
+        c->last_uid = uids[i];
+        count++;
+    }
+
+    *out_count = count;
+    return SC_OK;
+#endif
+}

@@ -1,0 +1,82 @@
+---
+title: Security Overview
+description: Pairing, sandboxing, encryption, and access control in SeaClaw.
+---
+
+SeaClaw is designed secure-by-default: pairing for gateway access, sandboxed tool execution, encrypted secrets, and workspace scoping.
+
+## Pairing (6-digit code → bearer token)
+
+When the gateway requires pairing:
+
+1. On startup, the gateway generates a one-time **6-digit pairing code**
+2. The user (or client) calls the pairing endpoint with the code
+3. On success, the server returns a **bearer token** (format: `zc_` + 64 hex chars)
+4. The token is stored as a SHA-256 hash; the plaintext is shown once
+5. Subsequent requests use `Authorization: Bearer zc_...`
+6. After 5 failed attempts, pairing is locked out for 5 minutes
+7. Once paired, the code is cleared; additional pairings add more tokens
+
+Config: `gateway.require_pairing` (default: true when HMAC secret not set)
+
+## Sandbox backends
+
+Shell and spawn tools run in a sandbox when available. Backends (Linux):
+
+| Backend    | Description                                          |
+| ---------- | ---------------------------------------------------- |
+| Landlock   | Linux kernel LSM; filesystem access control          |
+| Firejail   | User-space sandbox; `--private=workspace --net=none` |
+| Bubblewrap | `bwrap` namespace sandbox                            |
+| Docker     | Container-based isolation                            |
+| None       | No sandbox (fallback)                                |
+
+Config: `security.sandbox` = `"auto"` (prefer Landlock → Firejail → Bubblewrap → Docker → none) or explicit `"landlock"`, `"firejail"`, `"bubblewrap"`, `"docker"`, `"none"`.
+
+On non-Linux, only Docker and none are used.
+
+## Encrypted secrets
+
+API keys and sensitive config can be stored encrypted:
+
+- **Algorithm**: ChaCha20 (RFC 7539) with HMAC-SHA256
+- **Key derivation**: Local key file in config directory
+- **Prefix**: Encrypted values use `enc2:` prefix
+- Config: `secrets.encrypt` (default: true)
+
+## Workspace scoping
+
+- File and shell tools are restricted to `workspace_dir` by default
+- `autonomy.workspace_only` enforces path allowlist
+- `autonomy.allowed_paths` — explicit paths (empty = workspace only)
+- `autonomy.allowed_commands` — shell command allowlist
+
+## Resource limits
+
+- `security.resource_limits.max_file_size`
+- `security.resource_limits.max_read_size`
+- `security.resource_limits.max_memory_mb`
+- `tools.shell_max_output_bytes`
+- `tools.max_file_size_bytes`
+
+## Audit logging
+
+- `security.audit.enabled`
+- `security.audit.log_path`
+- Logs security-relevant events without sensitive data
+
+## Autonomy levels
+
+| Level          | Description                                            |
+| -------------- | ------------------------------------------------------ |
+| 0 (read-only)  | No shell, no writes                                    |
+| 1 (supervised) | Allowlisted commands, require approval for medium risk |
+| 2+ (full)      | Broader autonomy                                       |
+
+Config: `security.autonomy_level` or `SEACLAW_AUTONOMY` env.
+
+## Rate limiting
+
+- `autonomy.max_actions_per_hour` — tool execution rate
+- `gateway.pair_rate_limit_per_minute` — pairing attempts
+- Per-IP rate limiting on gateway endpoints

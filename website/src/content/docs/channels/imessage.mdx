@@ -1,0 +1,65 @@
+---
+title: iMessage
+description: Apple iMessage on macOS via Messages.app and chat.db.
+---
+
+# iMessage Channel
+
+SeaClaw can send and receive Apple iMessage on macOS. Sends go through AppleScript to Messages.app; receives poll the Messages SQLite database at `~/Library/Messages/chat.db`.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_IMESSAGE=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- **macOS only** — not supported on Linux or Windows
+- Messages.app installed and signed in to an Apple ID
+- SQLite support enabled (`SC_ENABLE_SQLITE`)
+- **Full Disk Access** granted to the seaclaw binary (or terminal) in System Settings → Privacy & Security
+
+## Configuration
+
+Add to `~/.seaclaw/config.json` under `channels.imessage`:
+
+```json
+{
+  "channels": {
+    "imessage": {
+      "default_target": "+15551234567"
+    }
+  }
+}
+```
+
+### Fields
+
+| Field            | Type   | Description                                                       |
+| ---------------- | ------ | ----------------------------------------------------------------- |
+| `default_target` | string | Phone number or Apple ID used when no explicit target is provided |
+
+### Target format
+
+- Use E.164 format for phone numbers (e.g. `+15551234567`)
+- For Apple ID (email) recipients, use the email address
+- The target is also used as the buddy identifier in AppleScript
+
+## How it works
+
+### Outbound (send)
+
+- Uses `osascript -e` to run AppleScript: `tell application "Messages" to send "MESSAGE" to buddy "TARGET"`
+- Escapes quotes and backslashes in the message text for AppleScript
+- If a message provides an explicit target, that is used; otherwise `default_target` is used
+
+### Inbound (receive)
+
+- Polls `~/Library/Messages/chat.db` every 3 seconds
+- Queries: `SELECT m.ROWID, m.text, h.id FROM message m JOIN handle h ON m.handle_id = h.ROWID WHERE m.is_from_me = 0 AND m.text IS NOT NULL AND m.ROWID > ?`
+- Uses handle ID (phone/email) as session key; message text as content
+- Tracks `last_rowid` to avoid reprocessing
+
+## Platform limitations
+
+- **macOS only**: Returns `SC_ERR_NOT_SUPPORTED` on non-Apple platforms
+- **Full Disk Access required**: macOS blocks read access to `~/Library/Messages/` without Full Disk Access
+- **Messages.app must be running**: AppleScript send requires Messages.app to be available
+- **Single default target**: Config provides one default; per-message targets can differ when the agent routes replies
+- **Read-only SQLite**: Opens the database with `SQLITE_OPEN_READONLY`; does not modify Messages data

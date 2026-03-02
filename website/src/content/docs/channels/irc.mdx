@@ -1,0 +1,73 @@
+---
+title: IRC
+description: Connect to IRC servers for real-time chat.
+---
+
+# IRC Channel
+
+SeaClaw can connect to IRC servers and participate in channels. The connection is bidirectional: it joins and receives messages over a raw TCP socket, and sends via `PRIVMSG`.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_IRC=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- Network access to the IRC server
+
+## Configuration
+
+Add to `~/.seaclaw/config.json`. IRC expects a `channels.irc` array of account configs:
+
+```json
+{
+  "channels": {
+    "irc": [
+      {
+        "host": "irc.libera.chat",
+        "port": 6667,
+        "nick": "seaclaw",
+        "channel": "#seaclaw",
+        "tls": false,
+        "allow_from": []
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field        | Type   | Description                                    |
+| ------------ | ------ | ---------------------------------------------- |
+| `host`       | string | IRC server hostname (or `server`)              |
+| `port`       | number | Port (default 6667 for plain, 6697 for TLS)    |
+| `nick`       | string | IRC nickname                                   |
+| `channel`    | string | Channel to join (e.g. `#channelname`)          |
+| `tls`        | bool   | Use TLS for connection (default false)         |
+| `allow_from` | array  | Nicknames or masks to allow. Empty = allow all |
+
+Refer to `src/channels/irc.c` for the exact config schema. The implementation accepts `server` and `port`; `nick` and `channel` are used by the channel loop/dispatcher when connecting and joining.
+
+## How it works
+
+### Connection
+
+- Resolves host via `getaddrinfo`, connects with a streaming socket
+- Default port 6667 (plain) or 6697 (TLS)
+- On start, the channel connects to the server; connection is kept open
+
+### Outbound (send)
+
+- Sends `PRIVMSG <target> :<message>\r\n` over the socket
+- Long messages are split into chunks (max ~400 chars per line to stay under 512-byte IRC limit)
+- Target is typically `#channelname` or a nickname for DMs
+
+### Inbound (receive)
+
+- Polling-based: the channel loop reads from the socket
+- Incoming PRIVMSG and NOTICE are parsed and delivered to the agent
+- Poll interval: 1000 ms
+
+## Platform limitations
+
+- **Plain TCP by default**: TLS support depends on build; current implementation may use raw sockets
+- **Single connection per config**: Each array entry is one IRC connection
+- **No SASL/auth**: Authentication (e.g. NickServ) is not built in; configure separately if required

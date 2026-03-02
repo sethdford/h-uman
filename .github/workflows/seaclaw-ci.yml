@@ -1,0 +1,34 @@
+name: seaclaw CI
+
+on: [push, pull_request]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install sqlite3
+      - run: mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_ASAN=ON && make -j$(sysctl -n hw.ncpu)
+      - run: cd build && ./seaclaw_tests
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+      - run: mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON -DSC_ENABLE_ASAN=ON && make -j$(nproc)
+      - run: cd build && ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=0 ./seaclaw_tests
+
+  release-size:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install sqlite3
+      - run: mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && make -j$(sysctl -n hw.ncpu)
+      - run: ls -lh build/seaclaw
+      - run: |
+          SIZE=$(stat -f%z build/seaclaw)
+          if [ "$SIZE" -gt 512000 ]; then
+            echo "Binary size $SIZE bytes exceeds 500KB (512000 bytes)"
+            exit 1
+          fi

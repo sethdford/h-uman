@@ -1,0 +1,76 @@
+---
+title: Matrix
+description: Matrix.org or self-hosted Synapse integration.
+---
+
+# Matrix Channel
+
+SeaClaw can send messages to Matrix rooms and receive messages via polling. Works with matrix.org or self-hosted Synapse homeservers.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_MATRIX=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- libcurl / HTTP client support
+- A Matrix account and access token
+- Room ID (or room alias) to send/receive in
+
+## Configuration
+
+Add to `~/.seaclaw/config.json`. Matrix expects a `channels.matrix` array of account configs:
+
+```json
+{
+  "channels": {
+    "matrix": [
+      {
+        "homeserver": "https://matrix.org",
+        "access_token": "syt_...",
+        "room_id": "!abc123:matrix.org",
+        "allow_from": []
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field          | Type   | Description                                           |
+| -------------- | ------ | ----------------------------------------------------- |
+| `homeserver`   | string | Base URL of the Matrix homeserver (no trailing slash) |
+| `access_token` | string | Bearer token for API authentication                   |
+| `room_id`      | string | Room ID (e.g. `!xxx:matrix.org`) or alias             |
+| `allow_from`   | array  | User IDs to allow. Empty = allow all                  |
+
+### Getting an access token
+
+1. Use a client (Element, etc.) or [matrix.org/login](https://matrix.org/login) to log in
+2. Use a script or client API to obtain an access token, or use tools like [matrix-cli](https://github.com/ma1ex/matrix-cli)
+3. Store the token in config (keep it secret)
+
+### Room ID
+
+- Room IDs start with `!` (e.g. `!abc123:matrix.org`)
+- Room aliases start with `#` (e.g. `#room:matrix.org`) — resolve to room ID via API if needed
+
+## How it works
+
+### Outbound (send)
+
+- Sends `PUT /_matrix/client/r0/rooms/<room_id>/send/m.room.message/<txn_id>`
+- Payload: `{"msgtype":"m.text","body":"<message>"}`
+- Uses `Authorization: Bearer <access_token>`
+- Transaction ID is derived from `time(NULL)` for idempotency
+
+### Inbound (receive)
+
+- Polling-based (poll interval: 2000 ms)
+- Uses Matrix Client-Server API to sync or poll for new messages
+- Fetches events from the room; filters for `m.room.message` from other users
+- `allow_from` restricts which user IDs the bot responds to
+
+## Platform limitations
+
+- **Polling only**: No Synapse push/WebSocket in this implementation; uses periodic sync
+- **Plain text**: Sends `m.text` only; no rich formatting or media
+- **Single room per config**: Each config entry targets one room

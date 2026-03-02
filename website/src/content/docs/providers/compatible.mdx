@@ -1,0 +1,120 @@
+---
+title: OpenAI-Compatible APIs
+description: Use any endpoint that speaks the OpenAI chat completions API.
+---
+
+SeaClaw can use any service that implements the OpenAI chat completions API. Use the `compatible` provider type or the `custom:` prefix.
+
+## The compatible provider
+
+The `compatible` provider sends requests in OpenAI format. It works with:
+
+- OpenAI
+- OpenRouter
+- Groq, Mistral, DeepSeek, Together, Fireworks, etc.
+- Local servers (llama.cpp, vLLM, LM Studio, sglang)
+- Your own proxy or gateway
+
+## Custom URL syntax
+
+### `custom:https://...`
+
+Use a fully custom base URL:
+
+```json
+{
+  "default_provider": "compatible",
+  "default_model": "gpt-4o",
+  "providers": [
+    {
+      "name": "compatible",
+      "api_key": "sk-...",
+      "base_url": "https://your-api.example.com/v1"
+    }
+  ]
+}
+```
+
+Or use the `custom:` prefix as the provider name (no separate config entry needed if you use env/config for key):
+
+```json
+{
+  "default_provider": "custom:https://your-api.example.com/v1",
+  "default_model": "gpt-4o",
+  "providers": [
+    {
+      "name": "custom:https://your-api.example.com/v1",
+      "api_key": "your-api-key"
+    }
+  ]
+}
+```
+
+### Examples
+
+**LiteLLM proxy** (aggregates many providers):
+
+```json
+{
+  "default_provider": "compatible",
+  "default_model": "gpt-4o",
+  "providers": [
+    {
+      "name": "compatible",
+      "api_key": "sk-...",
+      "base_url": "http://localhost:4000"
+    }
+  ]
+}
+```
+
+**Azure OpenAI** (replace with your endpoint):
+
+```json
+{
+  "providers": [
+    {
+      "name": "compatible",
+      "api_key": "your-azure-key",
+      "base_url": "https://your-resource.openai.azure.com/openai/deployments/your-deployment"
+    }
+  ],
+  "default_provider": "compatible",
+  "default_model": "gpt-4o"
+}
+```
+
+**Self-hosted proxy**:
+
+```json
+{
+  "default_provider": "custom:https://proxy.internal.company.com/openai/v1",
+  "default_model": "gpt-4o",
+  "providers": [
+    {
+      "name": "custom:https://proxy.internal.company.com/openai/v1",
+      "api_key": "internal-token"
+    }
+  ]
+}
+```
+
+## API contract
+
+The endpoint must accept:
+
+- `POST /chat/completions` (or `/v1/chat/completions` depending on base URL)
+- JSON body with `model`, `messages`, `temperature`, `max_tokens`
+- Optional `tools` for function calling
+
+Response format:
+
+- `choices[0].message.content` — text response
+- `choices[0].message.tool_calls` — tool calls (if tools provided)
+- `usage` — token counts
+
+## Predefined compatible providers
+
+SeaClaw includes 80+ predefined compatible providers with default base URLs. You only need to set `api_key` and optionally `base_url`. See [Provider Overview](/providers/overview/) for the full list.
+
+To add one not in the list, use `compatible` with a custom `base_url` or `custom:https://...`.

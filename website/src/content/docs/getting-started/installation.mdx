@@ -1,0 +1,138 @@
+---
+title: Installation
+description: Build SeaClaw from source on macOS and Linux.
+---
+
+SeaClaw is built from source. There are no pre-built binaries; you compile it with CMake.
+
+## Prerequisites
+
+Before building, ensure you have:
+
+- **C compiler** — GCC or Clang (C11)
+- **CMake** 3.16 or later
+- **SQLite3** — for the SQLite memory backend; omit to use markdown-only (`-DSC_ENABLE_SQLITE=OFF`)
+- **libcurl** — for HTTP/HTTPS and cloud providers; omit for minimal builds (`-DSC_ENABLE_CURL=OFF`)
+
+## macOS
+
+```bash
+brew install cmake sqlite3
+# libcurl is usually included with Xcode Command Line Tools
+```
+
+## Linux (Debian/Ubuntu)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential cmake libsqlite3-dev libcurl4-openssl-dev
+```
+
+## Linux (Fedora)
+
+```bash
+sudo dnf install -y cmake sqlite-devel libcurl-devel
+```
+
+## Clone and build
+
+Clone the repository, then build:
+
+```bash
+git clone https://github.com/seaclaw/seaclaw.git
+cd seaclaw
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
+cmake --build . -j$(nproc)
+```
+
+The binaries are produced in `build/`:
+
+- `build/seaclaw` — main CLI
+- `build/seaclaw_tests` — test suite
+
+### Release build (minimal size)
+
+```bash
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake --build .
+```
+
+This produces a small binary (~239 KB with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
+
+### Basic development build
+
+```bash
+mkdir -p build && cd build
+cmake .. -DSC_ENABLE_ALL_CHANNELS=ON
+cmake --build .
+```
+
+### Development build with AddressSanitizer
+
+For detecting memory errors during development:
+
+```bash
+cmake -B build -DSC_ENABLE_ASAN=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake --build build
+./build/seaclaw_tests
+```
+
+## Build options
+
+| Option                   | Default | Description                                          |
+| ------------------------ | ------- | ---------------------------------------------------- |
+| `SC_ENABLE_ALL_CHANNELS` | OFF     | Build all 20 channels (CLI, Telegram, Discord, etc.) |
+| `SC_ENABLE_LTO`          | OFF     | Link-time optimization for smaller binaries          |
+| `SC_ENABLE_ASAN`         | OFF     | AddressSanitizer for memory debugging                |
+| `SC_ENABLE_SQLITE`       | ON      | SQLite memory backend                                |
+| `SC_ENABLE_CURL`         | ON      | libcurl for HTTP clients                             |
+
+Per-channel options (`SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, etc.) are available if you want a minimal build with only specific channels.
+
+## Verify installation
+
+Confirm the binary runs:
+
+```bash
+./build/seaclaw --help
+```
+
+Example output:
+
+```
+seaclaw v0.1.0 — Autonomous AI Assistant Runtime (C/ASM/WASM)
+
+Usage: seaclaw [command] [options]
+
+Commands:
+  agent          Run the agent loop
+  doctor         Run diagnostics
+  onboard        First-run setup wizard
+  ...
+```
+
+Run diagnostics to check config and provider setup:
+
+```bash
+./build/seaclaw doctor
+```
+
+Example output (with valid config):
+
+```
+[doctor] config: ok (loaded from /home/user/.seaclaw/config.json)
+[doctor] provider (ollama): ok (local — no API key required)
+[doctor] memory engine: sqlite
+```
+
+If config is missing, run the onboard wizard first (see [Quick Start](/getting-started/quickstart/)).
+
+## Run tests
+
+```bash
+./build/seaclaw_tests
+```
+
+All 1,697+ tests must pass with zero ASan errors.

@@ -1,0 +1,81 @@
+---
+title: Signal
+description: Set up Signal via signal-cli.
+---
+
+# Signal Channel
+
+SeaClaw uses [signal-cli](https://github.com/AsamK/signal-cli) to send and receive Signal messages. signal-cli runs as a daemon with an HTTP/JSON-RPC API.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_SIGNAL=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- signal-cli installed and configured with a registered number
+
+## 1. Install signal-cli
+
+```bash
+# Linux (see signal-cli releases)
+wget https://github.com/AsamK/signal-cli/releases/download/v0.11.0/signal-cli-0.11.0.tar.gz
+tar xf signal-cli-0.11.0.tar.gz
+
+# Or via package manager where available
+```
+
+## 2. Register and run the daemon
+
+```bash
+# Register with your phone number (use with -u for account ID)
+signal-cli -a +1234567890 register
+
+# Verify with code from SMS
+signal-cli -a +1234567890 verify <code>
+
+# Run daemon (HTTP API on port 8080 by default)
+signal-cli -a +1234567890 daemon
+```
+
+The daemon exposes:
+
+- RPC: `http://localhost:8080/api/v1/rpc`
+- SSE events: `http://localhost:8080/api/v1/events`
+- Health: `http://localhost:8080/api/v1/check`
+
+## 3. Configuration
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "channels": {
+    "signal": [
+      {
+        "http_url": "http://localhost:8080",
+        "account": "+1234567890",
+        "allow_from": [],
+        "group_allow_from": [],
+        "group_policy": "mention_only"
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field              | Type   | Description                            |
+| ------------------ | ------ | -------------------------------------- |
+| `http_url`         | string | signal-cli daemon base URL             |
+| `account`          | string | Registered phone number (account ID)   |
+| `allow_from`       | array  | Allowed DM senders. Empty = allow all  |
+| `group_allow_from` | array  | Allowed group IDs for group chats      |
+| `group_policy`     | string | `open`, `mention_only`, or `allowlist` |
+
+## 4. Allowlist
+
+- `allow_from`: empty = allow all DMs; list = only those numbers/UUIDs
+- `group_allow_from`: for `group_policy: allowlist`, list of group IDs
+
+## 5. Run
+
+Start the SeaClaw gateway or agent with the Signal channel enabled. The channel connects to the signal-cli daemon and receives events via SSE.

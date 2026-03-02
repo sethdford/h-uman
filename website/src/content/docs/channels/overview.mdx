@@ -1,0 +1,91 @@
+---
+title: Channel Overview
+description: Messaging channel architecture in SeaClaw.
+---
+
+Channels are how SeaClaw receives and sends messages. Each channel implements the `sc_channel_t` vtable.
+
+## Channel vtable interface
+
+| Method                         | Description                                 |
+| ------------------------------ | ------------------------------------------- |
+| `start`                        | Start listening (e.g. long-poll, WebSocket) |
+| `stop`                         | Stop listening                              |
+| `send`                         | Send a message to a target                  |
+| `name`                         | Channel identifier                          |
+| `health_check`                 | Report channel health                       |
+| `send_event`                   | Optional: streaming send with stage         |
+| `start_typing` / `stop_typing` | Optional: typing indicators                 |
+
+## Available channels
+
+| Channel    | Build flag                   | Description                     |
+| ---------- | ---------------------------- | ------------------------------- |
+| CLI        | `SC_ENABLE_CLI` (default ON) | Terminal chat, always available |
+| Telegram   | `SC_ENABLE_TELEGRAM`         | Telegram Bot API                |
+| Discord    | `SC_ENABLE_DISCORD`          | Discord bot                     |
+| Slack      | `SC_ENABLE_SLACK`            | Slack app (Socket mode, events) |
+| Signal     | `SC_ENABLE_SIGNAL`           | Signal via signal-cli           |
+| Nostr      | `SC_ENABLE_NOSTR`            | Nostr DMs (nak)                 |
+| WhatsApp   | `SC_ENABLE_WHATSAPP`         | WhatsApp Business API           |
+| Matrix     | `SC_ENABLE_MATRIX`           | Matrix.org                      |
+| IRC        | `SC_ENABLE_IRC`              | IRC                             |
+| Line       | `SC_ENABLE_LINE`             | LINE                            |
+| Lark       | `SC_ENABLE_LARK`             | Lark/Feishu                     |
+| OneBot     | `SC_ENABLE_ONEBOT`           | OneBot protocol                 |
+| DingTalk   | `SC_ENABLE_DINGTALK`         | DingTalk                        |
+| Email      | `SC_ENABLE_EMAIL`            | Email                           |
+| Web        | `SC_ENABLE_WEB`              | WebSocket web UI                |
+| iMessage   | `SC_ENABLE_IMESSAGE`         | Apple iMessage                  |
+| Mattermost | `SC_ENABLE_MATTERMOST`       | Mattermost                      |
+| QQ         | `SC_ENABLE_QQ`               | QQ                              |
+| MaixCam    | `SC_ENABLE_MAIXCAM`          | MaixCam board                   |
+| Dispatch   | `SC_ENABLE_DISPATCH`         | Dispatch/router                 |
+
+Enable all at once: `-DSC_ENABLE_ALL_CHANNELS=ON`
+
+## Allowlist model
+
+Channels use an allowlist for access control:
+
+- **Empty allowlist** — Deny all (no one can interact)
+- **`"*"`** — Allow all
+- **List of IDs** — Exact match only (e.g. Telegram user IDs, Discord user IDs)
+
+Example (Telegram):
+
+```json
+{
+  "channels": {
+    "telegram": [
+      {
+        "token": "123456:ABC...",
+        "allow_from": ["123456789", "987654321"]
+      }
+    ]
+  }
+}
+```
+
+`allow_from` empty or omitted = allow all. `allow_from: ["*"]` = allow all. `allow_from: ["123"]` = only user 123.
+
+## Gateway webhooks
+
+When using the gateway (`seaclaw gateway`), incoming webhooks are routed by path:
+
+| Path                | Channel           |
+| ------------------- | ----------------- |
+| `/webhook/telegram` | Telegram          |
+| `/webhook/slack`    | Slack             |
+| `/webhook/discord`  | Discord           |
+| `/webhook/whatsapp` | WhatsApp          |
+| `/webhook/line`     | LINE              |
+| `/webhook/lark`     | Lark              |
+| `/telegram`         | Telegram (legacy) |
+| `/slack/events`     | Slack events      |
+| `/whatsapp`         | WhatsApp          |
+| `/line`             | LINE              |
+| `/lark`             | Lark              |
+| `/discord`          | Discord           |
+
+Use a tunnel (ngrok, cloudflared) to expose the gateway to the internet for webhook delivery.

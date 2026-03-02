@@ -1,0 +1,81 @@
+---
+title: Nostr
+description: Set up the Nostr channel with NIP-17 and nak.
+---
+
+# Nostr Channel
+
+SeaClaw can send and receive Nostr direct messages using [nak](https://github.com/fiatjaf/nak) and the NIP-17 gift-wrapped DM format. Legacy NIP-04 encryption is also supported.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_NOSTR=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- [nak](https://github.com/fiatjaf/nak) installed and on PATH
+
+## 1. Install nak
+
+```bash
+go install github.com/fiatjaf/nak@latest
+```
+
+Ensure `nak` is in your PATH.
+
+## 2. Generate keys
+
+Generate a Nostr keypair for the bot:
+
+```bash
+nak key generate
+```
+
+This outputs a hex-encoded secret key. Store it securely. Derive the public key (npub) from the seckey if needed for sharing.
+
+## 3. Configuration
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "channels": {
+    "nostr": [
+      {
+        "nak_path": "/usr/local/bin/nak",
+        "bot_pubkey": "npub1...",
+        "seckey_hex": "your-hex-secret-key",
+        "relay_url": "wss://relay.damus.io",
+        "dm_allowed_pubkeys": []
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field                | Type   | Description                               |
+| -------------------- | ------ | ----------------------------------------- |
+| `nak_path`           | string | Path to nak binary                        |
+| `bot_pubkey`         | string | Bot's public key (npub)                   |
+| `seckey_hex`         | string | Bot's hex secret key                      |
+| `relay_url`          | string | Nostr relay WebSocket URL                 |
+| `dm_allowed_pubkeys` | array  | Allowed sender pubkeys. Empty = allow all |
+
+## 4. NIP-17 gift-wrapped DMs
+
+SeaClaw uses NIP-17 for encrypted DMs. The nak tool handles event creation and relay publishing. The channel sends kind 14 (gift-wrapped) events to the recipient's pubkey.
+
+## 5. Legacy NIP-04
+
+NIP-04 legacy encryption is supported for older clients. Prefer NIP-17 for new setups.
+
+## 6. Relay configuration
+
+Use a reliable relay. Examples:
+
+- `wss://relay.damus.io`
+- `wss://relay.nostr.info`
+- `wss://nos.lol`
+
+## 7. Run
+
+Start the agent or gateway with Nostr enabled. The channel uses nak to receive (via nak's subscribe) and send (via nak event) DMs.

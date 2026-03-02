@@ -1,18 +1,46 @@
-zig-out/
-zig-cache/
-.zig-cache/
+# Build artifacts
+build/
+build-*/
+
+# Build output logs
+build-*-output.txt
+test-output.txt
+*.o
+*.so
+*.dylib
+*.exe
+*.a
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+.cache/
+
+# Runtime data
 *.db
 *.db-journal
+
+# Editor / OS
 .DS_Store
-.env
-.env.*
-!.env.example
 *.swp
 *~
 *.bak
-*.a
-reference/
 
+# Environment
+.env
+.env.*
+!.env.example
+
+# Nix
 result
 .direnv/
+
+# Archive (local-only Zig reference)
+archive/
+reference/
+
+# MCP config (local build paths)
+.mcp.json
+
+# Worktrees
 .worktrees

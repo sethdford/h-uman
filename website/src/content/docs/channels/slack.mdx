@@ -1,0 +1,64 @@
+---
+title: Slack
+description: Set up the Slack app channel.
+---
+
+# Slack Channel
+
+SeaClaw integrates with Slack via the Slack API. Supports Socket Mode and event subscriptions.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_SLACK=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- A Slack workspace (admin or app installer)
+
+## 1. Create a Slack app
+
+1. Go to [Slack API](https://api.slack.com/apps) → **Create New App** → **From scratch**
+2. Name the app and select a workspace
+3. Under **OAuth & Permissions**:
+   - Add Bot Token Scopes: `chat:write`, `chat:write.public`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `app_mentions:read`, `channels:read`, `users:read`
+4. Under **Event Subscriptions**: Enable events, add `message.channels`, `message.im`, `message.groups`, `app_mention`
+5. Under **Socket Mode**: Enable Socket Mode (for development without public URL)
+6. Install the app to your workspace
+7. Copy **Bot User OAuth Token** (starts with `xoxb-`)
+8. If using Socket Mode, copy **App-Level Token** (starts with `xapp-`)
+
+## 2. Configuration
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "channels": {
+    "slack": [
+      {
+        "bot_token": "xoxb-...",
+        "app_token": "xapp-...",
+        "allow_from": []
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field        | Type   | Description                             |
+| ------------ | ------ | --------------------------------------- |
+| `bot_token`  | string | Bot User OAuth Token (xoxb-)            |
+| `app_token`  | string | App-Level Token for Socket Mode (xapp-) |
+| `allow_from` | array  | User IDs to allow. Empty = allow all    |
+
+### Socket mode vs HTTP
+
+- **Socket Mode**: Uses WebSocket; no public URL needed. Requires `app_token`.
+- **HTTP/Events**: Slack sends events to your gateway at `/slack/events`. Requires a public HTTPS URL.
+
+## 3. Thread replies
+
+Slack channel supports thread replies. The target format is `channel_id:thread_ts` for replying in a thread.
+
+## 4. Run
+
+Start the gateway. With Socket Mode, the app connects outbound. With HTTP, ensure your Slack app's Event Request URL points to your tunnel/gateway.

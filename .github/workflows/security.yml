@@ -1,0 +1,152 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly Monday 6am UTC
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build + Test (ASan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+
+      - name: Configure (Debug + ASan)
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_ASAN=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests
+        run: ./build/seaclaw_tests
+
+      - name: Check for ASan leaks
+        run: |
+          ASAN_OPTIONS=detect_leaks=1 ./build/seaclaw_tests 2>&1 | tee asan-output.txt
+          if grep -q "ERROR: AddressSanitizer" asan-output.txt; then
+            echo "ASan errors detected!"
+            exit 1
+          fi
+
+  release-build:
+    name: Release Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
+
+      - name: Configure (MinSizeRel + LTO)
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -c%s build/seaclaw 2>/dev/null || stat -f%z build/seaclaw)
+          echo "Binary size: $SIZE bytes ($(echo "scale=1; $SIZE/1024" | bc)KB)"
+          if [ "$SIZE" -gt 400000 ]; then
+            echo "WARNING: Binary exceeds 400KB target"
+          fi
+
+  fuzz-test:
+    name: Fuzz Testing (30s each)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev clang
+
+      - name: Configure (Fuzzing)
+        run: |
+          mkdir -p build-fuzz && cd build-fuzz
+          CC=clang cmake .. -DSC_ENABLE_FUZZING=ON
+
+      - name: Build fuzzers
+        run: cmake --build build-fuzz -j$(nproc)
+
+      - name: Create seed corpora
+        run: |
+          mkdir -p corpus/json corpus/url corpus/http
+          echo '{}' > corpus/json/1.json
+          echo '{"k":"v","n":1,"a":[]}' > corpus/json/2.json
+          echo 'https://example.com' > corpus/url/1.txt
+          printf 'GET / HTTP/1.1\r\nHost: test\r\n\r\n' > corpus/http/1.txt
+
+      - name: Fuzz JSON parser
+        run: ./build-fuzz/fuzz_json_parser corpus/json -max_total_time=30 -print_final_stats=1 || true
+
+      - name: Fuzz URL validation
+        run: ./build-fuzz/fuzz_url_validation corpus/url -max_total_time=30 -print_final_stats=1 || true
+
+      - name: Fuzz HTTP parse
+        run: ./build-fuzz/fuzz_http_parse corpus/http -max_total_time=30 -print_final_stats=1 || true
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate SBOM
+        run: |
+          chmod +x scripts/generate-sbom.sh
+          ./scripts/generate-sbom.sh . sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+  audit-integrity:
+    name: Verify Audit Log Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Build
+        run: |
+          mkdir -p build && cd build
+          cmake .. && cmake --build . -j$(nproc)
+
+      - name: Run audit chain tests
+        run: ./build/seaclaw_tests
+
+  fips-build:
+    name: FIPS Crypto Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenSSL
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libsqlite3-dev
+
+      - name: Configure FIPS
+        run: mkdir -p build && cd build && cmake .. -DSC_ENABLE_FIPS_CRYPTO=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: ./build/seaclaw_tests

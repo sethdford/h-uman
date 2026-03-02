@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
-cd "$ROOT_DIR"
+WORKER_DIR="$ROOT_DIR/examples/edge/cloudflare-worker"
 
-zig build-lib examples/edge/cloudflare-worker/agent_core.zig \
-  -target wasm32-freestanding \
-  -fno-entry \
-  -rdynamic \
-  -O ReleaseSmall \
-  -femit-bin=examples/edge/cloudflare-worker/dist/agent_core.wasm
+mkdir -p "$WORKER_DIR/dist"
 
-echo "Built examples/edge/cloudflare-worker/dist/agent_core.wasm"
+clang --target=wasm32 -nostdlib -O2 \
+  -Wl,--no-entry -Wl,--export=choose_policy \
+  -o "$WORKER_DIR/dist/agent_core.wasm" \
+  "$WORKER_DIR/agent_core.c"
+
+echo "Built $WORKER_DIR/dist/agent_core.wasm"

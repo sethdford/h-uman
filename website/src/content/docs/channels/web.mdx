@@ -1,0 +1,115 @@
+---
+title: Web / WebSocket
+description: WebSocket-based web UI and browser relay channel.
+---
+
+# Web Channel
+
+SeaClaw provides a WebSocket-based channel for web UIs and browser extensions. Supports **local** mode (direct WebSocket to the gateway) and **relay** mode (connect through a relay server).
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_WEB=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- Gateway running for WebSocket connections
+- Web UI or browser extension that implements the WebChannel v1 protocol
+
+## Configuration
+
+### Local mode
+
+For development or local use, bind to loopback:
+
+```json
+{
+  "channels": {
+    "web": {
+      "accounts": {
+        "default": {
+          "transport": "local",
+          "listen": "127.0.0.1",
+          "port": 32123,
+          "path": "/ws",
+          "auth_token": "replace-with-long-random-token",
+          "allowed_origins": [
+            "http://localhost:5173",
+            "chrome-extension://your-extension-id"
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+### Relay mode
+
+For remote access, use the relay transport:
+
+```json
+{
+  "channels": {
+    "web": {
+      "accounts": {
+        "default": {
+          "transport": "relay",
+          "relay_url": "wss://relay.seaclaw.io/ws/agent",
+          "relay_agent_id": "default",
+          "relay_token": "replace-with-relay-token",
+          "relay_token_ttl_secs": 2592000,
+          "relay_pairing_code_ttl_secs": 300,
+          "relay_ui_token_ttl_secs": 86400,
+          "relay_e2e_required": false
+        }
+      }
+    }
+  }
+}
+```
+
+### Fields
+
+| Field                         | Type   | Description                                            |
+| ----------------------------- | ------ | ------------------------------------------------------ |
+| `transport`                   | string | `"local"` or `"relay"`                                 |
+| `listen`                      | string | Bind address (`127.0.0.1` local, `0.0.0.0` for remote) |
+| `port`                        | number | WebSocket port                                         |
+| `path`                        | string | WebSocket path (e.g. `/ws`)                            |
+| `auth_token`                  | string | Optional; required when binding non-loopback           |
+| `allowed_origins`             | array  | CORS origins for WebSocket upgrade                     |
+| `relay_url`                   | string | Relay server WebSocket URL (relay mode)                |
+| `relay_agent_id`              | string | Agent identifier on the relay                          |
+| `relay_token`                 | string | Token for relay authentication                         |
+| `relay_token_ttl_secs`        | number | TTL for relay token                                    |
+| `relay_pairing_code_ttl_secs` | number | Pairing code expiry                                    |
+| `relay_ui_token_ttl_secs`     | number | UI JWT TTL                                             |
+| `relay_e2e_required`          | bool   | Require E2E encryption for relay payloads              |
+
+## How it works
+
+### Pairing flow
+
+1. Client sends `pairing_request` with one-time `pairing_code`
+2. Server responds with `pairing_result` including `access_token` (JWT)
+3. Client includes `access_token` in every `user_message` (top-level or `payload.access_token`)
+
+### Events
+
+- **assistant_chunk**: Streaming text chunks
+- **assistant_final**: Final assistant message
+- Event envelope format: `{"v":1,"type":"assistant_chunk"|"assistant_final","session_id":"...","agent_id":"default","payload":{"content":"..."}}`
+
+### Local vs relay
+
+- **Local**: WebSocket server runs in the gateway; UI connects directly to `ws://127.0.0.1:port/path`
+- **Relay**: Agent connects outbound to relay; UI connects to relay separately; relay routes messages
+
+### E2E (relay)
+
+When `relay_e2e_required` is true, the UI and agent exchange X25519 keys during pairing and send encrypted payloads in `payload.e2e`.
+
+## Platform limitations
+
+- **Gateway required**: Web channel needs the gateway for WebSocket serving
+- **Token validation**: Optional `auth_token` validates WebSocket upgrade when binding non-loopback
+- **Protocol**: See `spec/webchannel_v1.json` for the full WebChannel v1 specification
+- **UI/extension separate**: The web UI or Chrome extension lives in a separate repository and connects via the WebSocket endpoint

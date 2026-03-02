@@ -1,0 +1,85 @@
+---
+title: Telegram
+description: Set up the Telegram channel with BotFather.
+---
+
+# Telegram Channel
+
+SeaClaw can run as a Telegram bot using the Bot API with long-polling.
+
+## Prerequisites
+
+- Build with `-DSC_ENABLE_TELEGRAM=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- A Telegram account
+
+## 1. Create a bot
+
+1. Open [@BotFather](https://t.me/BotFather) on Telegram
+2. Send `/newbot`
+3. Follow prompts for name and username
+4. Copy the **bot token** (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+## 2. Configuration
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "channels": {
+    "telegram": [
+      {
+        "token": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+        "allow_from": [],
+        "reply_in_private": false,
+        "proxy": null
+      }
+    ]
+  }
+}
+```
+
+### Fields
+
+| Field              | Type   | Description                                                                          |
+| ------------------ | ------ | ------------------------------------------------------------------------------------ |
+| `token`            | string | Bot token from BotFather                                                             |
+| `allow_from`       | array  | User IDs allowed to chat. Empty = allow all. `["*"]` = allow all. List = exact match |
+| `reply_in_private` | bool   | Reply in DM instead of group (default: false)                                        |
+| `proxy`            | string | Optional HTTP proxy URL (e.g. `http://proxy:8080`)                                   |
+
+## 3. Webhook vs long-polling
+
+- **Long-polling**: SeaClaw pulls updates from Telegram. Use when running as a CLI process.
+- **Webhook**: Telegram pushes updates to your server. Requires the gateway and a public URL.
+
+For webhook mode, configure your bot webhook to point at the gateway:
+
+```
+https://your-domain.com/webhook/telegram
+```
+
+Or use the gateway's `/telegram` path. Ensure `SEACLAW_WEBHOOK_HMAC_SECRET` or `gateway.webhook_hmac_secret` is set if HMAC verification is required.
+
+## 4. Allowlist
+
+Restrict who can use the bot:
+
+```json
+{
+  "allow_from": ["123456789", "987654321"]
+}
+```
+
+To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot).
+
+Allow everyone (explicit):
+
+```json
+{
+  "allow_from": ["*"]
+}
+```
+
+## 5. Run
+
+Start the gateway (if using webhooks) or run the agent with the Telegram channel enabled. The channel will connect and start receiving messages.

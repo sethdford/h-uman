@@ -1,75 +1,56 @@
 {
-  description = "nullclaw";
+  description = "seaclaw — autonomous AI assistant runtime";
+
   inputs = {
-    zig2nix.url = "github:Cloudef/zig2nix";
-    treefmt-nix.url = "github:numtide/treefmt-nix";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs =
-    { zig2nix, treefmt-nix, ... }:
-    let
-      flake-utils = zig2nix.inputs.flake-utils;
-    in
-    (flake-utils.lib.eachDefaultSystem (
-      system:
+  outputs = { nixpkgs, flake-utils, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
       let
-        env = zig2nix.outputs.zig-env.${system} {
-          zig = zig2nix.outputs.packages.${system}.zig-latest;
-        };
-        pkgs = env.pkgs;
-        project = "nullclaw";
-        mkPackage =
-          {
-            optimize ? "ReleaseSmall",
-          }:
-          env.package {
-            pname = project;
-            src = ./.;
-
-            zigBuildZonLock = ./build.zig.zon2json-lock;
-
-            zigBuildFlags = [ "-Doptimize=${optimize}" ];
-
-            nativeBuildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
-
-            meta = with pkgs.lib; {
-              mainProgram = project;
-              description = "Fastest, smallest, and fully autonomous AI assistant infrastructure written in Zig ";
-              homepage = "https://github.com/nullclaw/nullclaw";
-              license = licenses.mit;
-              maintainers = [
-                {
-                  name = "Igor Somov";
-                  github = "DonPrus";
-                }
-                {
-                  name = "psynyde";
-                  github = "psynyde";
-                }
-              ];
-              platforms = platforms.all;
-            };
-          };
+        pkgs = nixpkgs.legacyPackages.${system};
       in
       {
-        packages.default = pkgs.lib.makeOverridable mkPackage { };
-        devShells.default = env.mkShell {
-          name = project;
-          packages = with pkgs; [
-            zls
-          ];
-          shellHook = ''
-            echo -e '(¬_¬") Entered ${project} :D'
-          '';
-        };
+        packages.default = pkgs.stdenv.mkDerivation {
+          pname = "seaclaw";
+          version = "0.1.0";
+          src = ./.;
 
-        formatter = treefmt-nix.lib.mkWrapper pkgs {
-          projectRootFile = "flake.nix";
-          programs = {
-            nixfmt.enable = true;
-            zig.enable = true;
+          nativeBuildInputs = [ pkgs.cmake ];
+          buildInputs = [
+            pkgs.sqlite
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.curl
+          ];
+
+          cmakeFlags = [
+            "-DCMAKE_BUILD_TYPE=MinSizeRel"
+            "-DSC_ENABLE_LTO=ON"
+          ];
+
+          meta = with pkgs.lib; {
+            description = "Smallest fully autonomous AI assistant infrastructure";
+            homepage = "https://github.com/seaclaw/seaclaw";
+            license = licenses.mit;
+            platforms = platforms.unix;
           };
         };
+
+        devShells.default = pkgs.mkShell {
+          name = "seaclaw";
+          packages = with pkgs; [
+            cmake
+            sqlite
+            clang-tools
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            curl
+          ];
+
+          shellHook = ''
+            echo "SeaClaw dev shell — cmake, sqlite3, clang-tools available"
+          '';
+        };
       }
-    ));
+    );
 }

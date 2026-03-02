@@ -1,0 +1,271 @@
+---
+title: Local Models
+description: Run AI models locally with llama.cpp, Ollama, LM Studio, vLLM, and sglang.
+---
+
+SeaClaw supports multiple local inference servers. **No API key is required** for any local provider. Add your provider to `~/.seaclaw/config.json` and set `default_provider` and `default_model`.
+
+## llama.cpp
+
+[llama.cpp](https://github.com/ggerganov/llama.cpp) provides a high-performance local server for GGUF models.
+
+### Install (macOS)
+
+```bash
+brew install llama.cpp
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/ggerganov/llama.cpp
+cd llama.cpp && make -j
+```
+
+### Download a model
+
+Download a GGUF model from [Hugging Face](https://huggingface.co/models?library=gguf) or run:
+
+```bash
+# Example: Llama 3.2 3B
+curl -L -o models/llama-3.2-3b.gguf "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+```
+
+### Start the server
+
+```bash
+llama-server --model path/to/model.gguf --port 8080
+```
+
+Or with `llama.cpp` binary:
+
+```bash
+./llama-server -m models/llama-3.2-3b.gguf --port 8080
+```
+
+### SeaClaw config
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "llamacpp",
+  "default_model": "llama-3.2-3b",
+  "providers": [
+    {
+      "name": "llamacpp",
+      "base_url": "http://localhost:8080/v1"
+    }
+  ]
+}
+```
+
+Use `"llama.cpp"` as the provider name if you prefer (same backend). The `default_model` should match the name you pass to `llama-server` (or a friendly alias; the server may accept partial matches).
+
+---
+
+## Ollama
+
+[Ollama](https://ollama.ai) is the easiest way to run local models.
+
+### Install
+
+```bash
+# macOS / Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+### Pull a model
+
+```bash
+ollama pull llama3
+ollama pull mistral
+ollama pull codellama
+```
+
+### Start Ollama (if not already running)
+
+Ollama runs as a service. If it's not started:
+
+```bash
+ollama serve
+```
+
+Default URL: `http://localhost:11434`
+
+### SeaClaw config
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "ollama",
+  "default_model": "llama3",
+  "providers": [
+    {
+      "name": "ollama",
+      "base_url": "http://localhost:11434"
+    }
+  ]
+}
+```
+
+Models: `llama3`, `mistral`, `codellama`, `qwen2`, `phi3`, `gemma2`, etc. Use the exact name from `ollama list`:
+
+```bash
+ollama list
+```
+
+Example output:
+
+```
+NAME            ID              SIZE    MODIFIED
+llama3:latest   abc123...       4.7 GB  2 days ago
+mistral:7b      def456...       4.1 GB  1 week ago
+```
+
+---
+
+## LM Studio
+
+[LM Studio](https://lmstudio.ai) provides a graphical interface to load and run local models.
+
+### Setup
+
+1. Download and install LM Studio
+2. Download a model (e.g. Llama 3.2) from the in-app model browser
+3. Load the model and start the **local server** (Server tab)
+4. Default port: **1234**
+
+### SeaClaw config
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "lmstudio",
+  "default_model": "lmstudio-community/Llama-3.2-3B-Instruct-GGUF",
+  "providers": [
+    {
+      "name": "lmstudio",
+      "base_url": "http://localhost:1234/v1"
+    }
+  ]
+}
+```
+
+Use `"lm-studio"` as the provider name (same backend). The model name must match what LM Studio shows in the Server tab when the local server is running. Check the "Loaded model" display for the exact identifier.
+
+---
+
+## vLLM
+
+[vLLM](https://docs.vllm.ai) is a high-throughput server for HF-style models.
+
+### Install
+
+```bash
+pip install vllm
+```
+
+### Start server
+
+```bash
+python -m vllm.entrypoints.openai.api_server --model meta-llama/Llama-3.2-3B-Instruct --port 8000
+```
+
+Example output:
+
+```
+INFO:     Started server process
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+### SeaClaw config
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "vllm",
+  "default_model": "meta-llama/Llama-3.2-3B-Instruct",
+  "providers": [
+    {
+      "name": "vllm",
+      "base_url": "http://localhost:8000/v1"
+    }
+  ]
+}
+```
+
+The `default_model` must match the `--model` passed to the vLLM server.
+
+---
+
+## sglang
+
+[sglang](https://github.com/sgl-project/sglang) is a fast structured generation engine.
+
+### Install and run
+
+```bash
+pip install "sglang[all]"
+python -m sglang.launch_server --model-path meta-llama/Llama-3.2-3B-Instruct --port 30000
+```
+
+### SeaClaw config
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "sglang",
+  "default_model": "meta-llama/Llama-3.2-3B-Instruct",
+  "providers": [
+    {
+      "name": "sglang",
+      "base_url": "http://localhost:30000/v1"
+    }
+  ]
+}
+```
+
+---
+
+## osaurus
+
+[osaurus](https://github.com/explosion/osaurus) is another OpenAI-compatible server.
+
+```bash
+# Install and run (see osaurus docs)
+```
+
+Config:
+
+```json
+{
+  "default_provider": "osaurus",
+  "default_model": "model-name",
+  "providers": [
+    {
+      "name": "osaurus",
+      "base_url": "http://localhost:1337/v1"
+    }
+  ]
+}
+```
+
+---
+
+## Comparison
+
+| Provider  | Port  | Best for                   |
+| --------- | ----- | -------------------------- |
+| llama.cpp | 8080  | GGUF models, low RAM       |
+| Ollama    | 11434 | Easiest setup, many models |
+| LM Studio | 1234  | GUI, casual use            |
+| vLLM      | 8000  | High throughput, HF models |
+| sglang    | 30000 | Fast structured output     |
+| osaurus   | 1337  | Alternative server         |
+
+All use the OpenAI chat completions API, so SeaClaw treats them uniformly.

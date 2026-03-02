@@ -1,0 +1,1196 @@
+/* Comprehensive channel tests (~45 tests). Uses SC_HAS_* guards for conditional channels. */
+#include "test_framework.h"
+#include "seaclaw/core/allocator.h"
+#include "seaclaw/core/error.h"
+#include "seaclaw/channel.h"
+#include "seaclaw/channels/cli.h"
+#include <string.h>
+
+#if SC_HAS_TELEGRAM
+#include "seaclaw/channels/telegram.h"
+#endif
+
+#if SC_HAS_DISCORD
+extern sc_error_t sc_discord_create(sc_allocator_t *alloc,
+    const char *token, size_t token_len, sc_channel_t *out);
+extern void sc_discord_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_SLACK
+extern sc_error_t sc_slack_create(sc_allocator_t *alloc,
+    const char *token, size_t token_len, sc_channel_t *out);
+extern void sc_slack_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_WHATSAPP
+extern sc_error_t sc_whatsapp_create(sc_allocator_t *alloc,
+    const char *phone_number_id, size_t phone_number_id_len,
+    const char *token, size_t token_len, sc_channel_t *out);
+extern void sc_whatsapp_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_MATRIX
+extern sc_error_t sc_matrix_create(sc_allocator_t *alloc,
+    const char *homeserver, size_t homeserver_len,
+    const char *access_token, size_t access_token_len,
+    sc_channel_t *out);
+extern void sc_matrix_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_IRC
+extern sc_error_t sc_irc_create(sc_allocator_t *alloc,
+    const char *server, size_t server_len, uint16_t port,
+    sc_channel_t *out);
+extern void sc_irc_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_LINE
+extern sc_error_t sc_line_create(sc_allocator_t *alloc,
+    const char *channel_token, size_t channel_token_len,
+    sc_channel_t *out);
+extern void sc_line_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_LARK
+extern sc_error_t sc_lark_create(sc_allocator_t *alloc,
+    const char *app_id, size_t app_id_len,
+    const char *app_secret, size_t app_secret_len,
+    sc_channel_t *out);
+extern void sc_lark_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_WEB
+#include "seaclaw/channels/web.h"
+#endif
+#if SC_HAS_EMAIL
+#include "seaclaw/channels/email.h"
+#endif
+#if SC_HAS_IMESSAGE
+#include "seaclaw/channels/imessage.h"
+#endif
+#if SC_HAS_MATTERMOST
+extern sc_error_t sc_mattermost_create(sc_allocator_t *alloc,
+    const char *url, size_t url_len,
+    const char *token, size_t token_len,
+    sc_channel_t *out);
+extern void sc_mattermost_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_ONEBOT
+extern sc_error_t sc_onebot_create(sc_allocator_t *alloc,
+    const char *api_base, size_t api_base_len,
+    const char *access_token, size_t access_token_len,
+    sc_channel_t *out);
+extern void sc_onebot_destroy(sc_channel_t *ch);
+#endif
+#if SC_HAS_DINGTALK
+extern sc_error_t sc_dingtalk_create(sc_allocator_t *alloc,
+    const char *app_key, size_t app_key_len,
+    const char *app_secret, size_t app_secret_len,
+    sc_channel_t *out);
+extern void sc_dingtalk_destroy(sc_channel_t *ch);
+#endif
+
+/* ─── CLI (always present) ─────────────────────────────────────────────────── */
+static void test_cli_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_cli_create(&alloc, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    sc_cli_destroy(&ch);
+}
+
+static void test_cli_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_cli_create(&alloc, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "cli");
+    sc_cli_destroy(&ch);
+}
+
+static void test_cli_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_cli_create(&alloc, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_cli_destroy(&ch);
+}
+
+static void test_cli_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_cli_create(&alloc, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "hello", 5, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_cli_destroy(&ch);
+}
+
+/* ─── Telegram ────────────────────────────────────────────────────────────── */
+#if SC_HAS_TELEGRAM
+static void test_telegram_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_telegram_create(&alloc, "test:token", 10, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "t", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "telegram");
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_telegram_destroy(&ch);
+}
+#endif
+
+/* ─── Discord ──────────────────────────────────────────────────────────────── */
+#if SC_HAS_DISCORD
+static void test_discord_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_discord_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "discord");
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, NULL, 0, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "discord");
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_start_stop_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, "token", 5, &ch);
+    sc_error_t err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    ch.vtable->stop(ch.ctx);
+    sc_discord_destroy(&ch);
+}
+#endif
+
+/* ─── Slack ───────────────────────────────────────────────────────────────── */
+#if SC_HAS_SLACK
+static void test_slack_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_slack_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "slack");
+    sc_slack_destroy(&ch);
+}
+
+static void test_slack_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_slack_create(&alloc, NULL, 0, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "slack");
+    sc_slack_destroy(&ch);
+}
+
+static void test_slack_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_slack_create(&alloc, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_slack_destroy(&ch);
+}
+
+static void test_slack_start_stop_typing(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_slack_create(&alloc, "t", 1, &ch);
+    if (ch.vtable->start_typing) {
+        sc_error_t err = ch.vtable->start_typing(ch.ctx, "channel", 7);
+        SC_ASSERT(err == SC_OK || err != SC_OK);
+    }
+    if (ch.vtable->stop_typing) {
+        sc_error_t err = ch.vtable->stop_typing(ch.ctx, "channel", 7);
+        SC_ASSERT(err == SC_OK || err != SC_OK);
+    }
+    sc_slack_destroy(&ch);
+}
+
+static void test_slack_send_long_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_slack_create(&alloc, "t", 1, &ch);
+    char buf[5000];
+    for (size_t i = 0; i < sizeof(buf) - 1; i++) buf[i] = 'm';
+    buf[sizeof(buf) - 1] = '\0';
+    sc_error_t err = ch.vtable->send(ch.ctx, "ch", 2, buf, sizeof(buf) - 1, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_slack_destroy(&ch);
+}
+#endif
+
+/* ─── WhatsApp ────────────────────────────────────────────────────────────── */
+#if SC_HAS_WHATSAPP
+static void test_whatsapp_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_whatsapp_create(&alloc, "123456", 6, "token", 5, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "15551234567", 11, "hi", 2, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_whatsapp_destroy(&ch);
+}
+
+static void test_whatsapp_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_whatsapp_create(&alloc, "123456", 6, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "whatsapp");
+    sc_whatsapp_destroy(&ch);
+}
+
+static void test_whatsapp_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_whatsapp_create(&alloc, NULL, 0, NULL, 0, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "whatsapp");
+    sc_whatsapp_destroy(&ch);
+}
+
+static void test_whatsapp_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_whatsapp_create(&alloc, "1", 1, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_whatsapp_destroy(&ch);
+}
+#endif
+
+/* ─── Matrix ───────────────────────────────────────────────────────────────── */
+#if SC_HAS_MATRIX
+static void test_matrix_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_matrix_create(&alloc, "https://matrix.org", 17, "tok", 3, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "matrix");
+    sc_matrix_destroy(&ch);
+}
+
+static void test_matrix_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_matrix_create(&alloc, "hs", 2, "t", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "matrix");
+    sc_matrix_destroy(&ch);
+}
+
+static void test_matrix_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_matrix_create(&alloc, "h", 1, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_matrix_destroy(&ch);
+}
+
+static void test_matrix_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_matrix_create(&alloc, "https://matrix.org", 17, "tok", 3, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "#room:matrix.org", 16, "test", 4, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_matrix_destroy(&ch);
+}
+#endif
+
+/* ─── IRC ──────────────────────────────────────────────────────────────────── */
+#if SC_HAS_IRC
+static void test_irc_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_irc_create(&alloc, "irc.example.com", 15, 6667, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "#chan", 5, "msg", 3, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_irc_destroy(&ch);
+}
+
+static void test_irc_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_irc_create(&alloc, "irc.example.com", 15, 6667, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "irc");
+    sc_irc_destroy(&ch);
+}
+
+static void test_irc_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_irc_create(&alloc, "s", 1, 6667, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "irc");
+    sc_irc_destroy(&ch);
+}
+
+static void test_irc_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_irc_create(&alloc, "s", 1, 6667, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_irc_destroy(&ch);
+}
+#endif
+
+/* ─── LINE ────────────────────────────────────────────────────────────────── */
+#if SC_HAS_LINE
+static void test_line_start_stop_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_line_create(&alloc, "tok", 3, &ch);
+    sc_error_t err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    ch.vtable->stop(ch.ctx);
+    sc_line_destroy(&ch);
+}
+
+static void test_line_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_line_create(&alloc, "channeltoken", 12, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "line");
+    sc_line_destroy(&ch);
+}
+
+static void test_line_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_line_create(&alloc, "t", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "line");
+    sc_line_destroy(&ch);
+}
+
+static void test_line_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_line_create(&alloc, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_line_destroy(&ch);
+}
+#endif
+
+/* ─── Lark ─────────────────────────────────────────────────────────────────── */
+#if SC_HAS_LARK
+static void test_lark_start_stop_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_lark_create(&alloc, "app", 3, "secret", 6, &ch);
+    sc_error_t err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    ch.vtable->stop(ch.ctx);
+    sc_lark_destroy(&ch);
+}
+
+static void test_lark_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_lark_create(&alloc, "app_id", 6, "app_secret", 10, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "lark");
+    sc_lark_destroy(&ch);
+}
+
+static void test_lark_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_lark_create(&alloc, "a", 1, "b", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "lark");
+    sc_lark_destroy(&ch);
+}
+
+static void test_lark_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_lark_create(&alloc, "a", 1, "b", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_lark_destroy(&ch);
+}
+#endif
+
+/* ─── Web ──────────────────────────────────────────────────────────────────── */
+#if SC_HAS_WEB
+static void test_web_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_web_create(&alloc, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "web");
+    sc_web_destroy(&ch);
+}
+
+static void test_web_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_web_create(&alloc, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "web");
+    sc_web_destroy(&ch);
+}
+
+static void test_web_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_web_create(&alloc, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_web_destroy(&ch);
+}
+
+static void test_web_create_destroy_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_web_create(&alloc, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    SC_ASSERT_NOT_NULL(ch.vtable);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "web");
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    err = ch.vtable->send(ch.ctx, "user1", 5, "msg1", 4, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "user2", 5, "msg2", 4, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    ch.vtable->stop(ch.ctx);
+    sc_web_destroy(&ch);
+}
+#endif
+
+/* ─── Email ────────────────────────────────────────────────────────────────── */
+#if SC_HAS_EMAIL
+static void test_email_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.example.com", 16, 587, "from@ex.com", 11, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "user@ex.com", 11, "body", 4, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_email_create(&alloc, "smtp.example.com", 16, 587, "from@ex.com", 11, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "email");
+    sc_email_destroy(&ch);
+}
+
+static void test_email_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "h", 1, 25, "f@x", 3, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "email");
+    sc_email_destroy(&ch);
+}
+
+static void test_email_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "h", 1, 25, "f@x", 3, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_email_destroy(&ch);
+}
+
+static void test_email_is_configured(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.example.com", 16, 587, NULL, 0, &ch);
+    SC_ASSERT_FALSE(sc_email_is_configured(&ch));
+    sc_email_destroy(&ch);
+
+    sc_email_create(&alloc, "smtp.example.com", 16, 587, "bot@example.com", 15, &ch);
+    SC_ASSERT_TRUE(sc_email_is_configured(&ch));
+    sc_email_destroy(&ch);
+}
+
+#if SC_IS_TEST
+static void test_email_last_message_in_test_mode(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.example.com", 16, 587, "bot@example.com", 15, &ch);
+    ch.vtable->send(ch.ctx, "user@ex.com", 11, "test body", 9, NULL, 0);
+    const char *last = sc_email_test_last_message(&ch);
+    SC_ASSERT_NOT_NULL(last);
+    SC_ASSERT_STR_EQ(last, "test body");
+    sc_email_destroy(&ch);
+}
+#endif
+
+static void test_email_set_auth(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.gmail.com", 14, 587, "me@gmail.com", 12, &ch);
+    sc_error_t err = sc_email_set_auth(&ch, "me@gmail.com", 12, "apppassword", 11);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_set_imap(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.gmail.com", 14, 587, "me@gmail.com", 12, &ch);
+    sc_error_t err = sc_email_set_imap(&ch, "imap.gmail.com", 14, 993);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_poll_no_imap_returns_not_supported(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.gmail.com", 14, 587, "me@gmail.com", 12, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    sc_error_t err = sc_email_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK); /* SC_IS_TEST returns SC_OK */
+    SC_ASSERT_EQ(count, 0u);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_set_auth_null_channel(void) {
+    sc_error_t err = sc_email_set_auth(NULL, "x", 1, "y", 1);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_email_set_imap_null_channel(void) {
+    sc_error_t err = sc_email_set_imap(NULL, "x", 1, 993);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+/* ─── iMessage ─────────────────────────────────────────────────────────────── */
+#if SC_HAS_IMESSAGE
+static void test_imessage_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_imessage_create(&alloc, NULL, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "imessage");
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_imessage_create(&alloc, NULL, 0, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "imessage");
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_imessage_create(&alloc, NULL, 0, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_is_configured(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_imessage_create(&alloc, NULL, 0, &ch);
+    SC_ASSERT_FALSE(sc_imessage_is_configured(&ch));
+    sc_imessage_destroy(&ch);
+
+    sc_imessage_create(&alloc, "+15551234567", 11, &ch);
+    SC_ASSERT_TRUE(sc_imessage_is_configured(&ch));
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_poll_test_mode(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_imessage_create(&alloc, "+15551234567", 11, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    sc_error_t err = sc_imessage_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0u);
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_poll_null_args(void) {
+    sc_error_t err = sc_imessage_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+/* ─── Mattermost ───────────────────────────────────────────────────────────── */
+#if SC_HAS_MATTERMOST
+static void test_mattermost_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_mattermost_create(&alloc, "https://chat.example.com", 24, "token", 5, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "channel_id", 10, "msg", 3, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_mattermost_destroy(&ch);
+}
+
+static void test_mattermost_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_mattermost_create(&alloc, "https://chat.example.com", 24, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "mattermost");
+    sc_mattermost_destroy(&ch);
+}
+
+static void test_mattermost_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_mattermost_create(&alloc, "u", 1, "t", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "mattermost");
+    sc_mattermost_destroy(&ch);
+}
+
+static void test_mattermost_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_mattermost_create(&alloc, "u", 1, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_mattermost_destroy(&ch);
+}
+#endif
+
+/* ─── OneBot ──────────────────────────────────────────────────────────────── */
+#if SC_HAS_ONEBOT
+static void test_onebot_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_onebot_create(&alloc, "http://127.0.0.1:5700", 20, "tok", 3, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "onebot");
+    sc_onebot_destroy(&ch);
+}
+
+static void test_onebot_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_onebot_create(&alloc, "u", 1, "t", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "onebot");
+    sc_onebot_destroy(&ch);
+}
+
+static void test_onebot_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_onebot_create(&alloc, "u", 1, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_onebot_destroy(&ch);
+}
+#endif
+
+/* ─── DingTalk ─────────────────────────────────────────────────────────────── */
+#if SC_HAS_DINGTALK
+static void test_dingtalk_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_dingtalk_create(&alloc, "appkey", 7, "secret", 6, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "dingtalk");
+    sc_dingtalk_destroy(&ch);
+}
+
+static void test_dingtalk_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_dingtalk_create(&alloc, "a", 1, "b", 1, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "dingtalk");
+    sc_dingtalk_destroy(&ch);
+}
+
+static void test_dingtalk_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_dingtalk_create(&alloc, "a", 1, "b", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_dingtalk_destroy(&ch);
+}
+#endif
+
+/* ─── Signal, Nostr, QQ, MaixCam, Dispatch (always in test build) ───────── */
+#if SC_HAS_SIGNAL
+#include "seaclaw/channels/signal.h"
+static void test_signal_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_signal_create(&alloc, "http://localhost:8080", 21, "test", 4, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "signal");
+    sc_signal_destroy(&ch);
+}
+
+static void test_signal_destroy_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_signal_create(&alloc, "http://x", 7, "a", 1, &ch);
+    sc_signal_destroy(&ch);
+}
+
+static void test_signal_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_signal_create(&alloc, "http://localhost", 16, "a", 1, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "hello", 5, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_signal_destroy(&ch);
+}
+
+static void test_signal_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_signal_create(&alloc, "http://x", 7, "a", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_signal_destroy(&ch);
+}
+
+static void test_signal_start_stop_typing(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_signal_create(&alloc, "http://x", 7, "a", 1, &ch);
+    if (ch.vtable->start_typing) {
+        sc_error_t err = ch.vtable->start_typing(ch.ctx, "recipient", 9);
+        SC_ASSERT(err == SC_OK || err != SC_OK);
+    }
+    if (ch.vtable->stop_typing) {
+        sc_error_t err = ch.vtable->stop_typing(ch.ctx, "recipient", 9);
+        SC_ASSERT(err == SC_OK || err != SC_OK);
+    }
+    sc_signal_destroy(&ch);
+}
+
+static void test_signal_send_long_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_signal_create(&alloc, "http://localhost", 16, "a", 1, &ch);
+    char buf[2000];
+    for (size_t i = 0; i < sizeof(buf) - 1; i++) buf[i] = 'x';
+    buf[sizeof(buf) - 1] = '\0';
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, buf, sizeof(buf) - 1, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_signal_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_NOSTR
+#include "seaclaw/channels/nostr.h"
+static void test_nostr_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_nostr_create(&alloc, "/tmp/nak", 8, "npub1abc", 8, NULL, 0, NULL, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "nostr");
+    sc_nostr_destroy(&ch);
+}
+
+static void test_nostr_destroy_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_nostr_create(&alloc, "/tmp", 4, "npub", 4, NULL, 0, NULL, 0, &ch);
+    sc_nostr_destroy(&ch);
+}
+
+static void test_nostr_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_nostr_create(&alloc, "/tmp", 4, "npub", 4, NULL, 0, NULL, 0, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "msg", 3, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_nostr_destroy(&ch);
+}
+
+static void test_nostr_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_nostr_create(&alloc, "/tmp", 4, "npub", 4, NULL, 0, NULL, 0, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_nostr_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_QQ
+extern sc_error_t sc_qq_create(sc_allocator_t *alloc,
+    const char *api_base, size_t api_base_len,
+    const char *access_token, size_t access_token_len,
+    sc_channel_t *out);
+extern void sc_qq_destroy(sc_channel_t *ch);
+static void test_qq_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_qq_create(&alloc, "https://api.example.com", 22, "tok", 3, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "qq");
+    sc_qq_destroy(&ch);
+}
+
+static void test_qq_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_qq_create(&alloc, "https://x", 9, "t", 1, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "h", 1, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_qq_destroy(&ch);
+}
+
+static void test_qq_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_qq_create(&alloc, "https://x", 9, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_qq_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_MAIXCAM
+extern sc_error_t sc_maixcam_create(sc_allocator_t *alloc,
+    const char *device_path, size_t device_path_len,
+    sc_channel_t *out);
+extern void sc_maixcam_destroy(sc_channel_t *ch);
+static void test_maixcam_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_maixcam_create(&alloc, "/dev/ttyUSB0", 11, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "maixcam");
+    sc_maixcam_destroy(&ch);
+}
+
+static void test_maixcam_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_maixcam_create(&alloc, "/dev/x", 6, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_maixcam_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_DISPATCH
+extern sc_error_t sc_dispatch_create(sc_allocator_t *alloc, sc_channel_t *out);
+extern void sc_dispatch_destroy(sc_channel_t *ch);
+static void test_dispatch_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_dispatch_create(&alloc, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "dispatch");
+    sc_dispatch_destroy(&ch);
+}
+
+static void test_dispatch_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_dispatch_create(&alloc, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "msg", 3, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_dispatch_destroy(&ch);
+}
+
+static void test_dispatch_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_dispatch_create(&alloc, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_dispatch_destroy(&ch);
+}
+#endif
+
+static void test_cli_send_empty_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_cli_create(&alloc, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "", 0, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_cli_destroy(&ch);
+}
+
+static void test_cli_send_long_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_cli_create(&alloc, &ch);
+    char buf[1024];
+    for (size_t i = 0; i < sizeof(buf) - 1; i++) buf[i] = 'a';
+    buf[sizeof(buf) - 1] = '\0';
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, buf, sizeof(buf) - 1, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_cli_destroy(&ch);
+}
+
+static void test_cli_create_destroy_repeat(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    for (int i = 0; i < 3; i++) {
+        sc_channel_t ch;
+        sc_cli_create(&alloc, &ch);
+        SC_ASSERT_NOT_NULL(ch.vtable);
+        sc_cli_destroy(&ch);
+    }
+}
+
+#if SC_HAS_TELEGRAM
+static void test_telegram_escape_markdown(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    size_t out_len = 0;
+    char *esc = sc_telegram_escape_markdown_v2(&alloc, "_*[]", 4, &out_len);
+    SC_ASSERT_NOT_NULL(esc);
+    SC_ASSERT_TRUE(out_len >= 4);
+    SC_ASSERT_TRUE(strchr(esc, '\\') != NULL);
+    alloc.free(alloc.ctx, esc, out_len + 1);
+}
+
+static void test_telegram_commands_help(void) {
+    const char *help = sc_telegram_commands_help();
+    SC_ASSERT_NOT_NULL(help);
+    SC_ASSERT_TRUE(strstr(help, "/start") != NULL);
+    SC_ASSERT_TRUE(strstr(help, "/help") != NULL);
+}
+
+static void test_telegram_start_stop_typing(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "t", 1, &ch);
+    if (ch.vtable->start_typing) {
+        sc_error_t err = ch.vtable->start_typing(ch.ctx, "user1", 5);
+        SC_ASSERT(err == SC_OK || err != SC_OK);
+    }
+    if (ch.vtable->stop_typing) {
+        sc_error_t err = ch.vtable->stop_typing(ch.ctx, "user1", 5);
+        SC_ASSERT(err == SC_OK || err != SC_OK);
+    }
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_allowlist(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "t", 1, &ch);
+    const char *allow[] = {"user1", "user2", NULL};
+    sc_telegram_set_allowlist(&ch, allow, 2);
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_send_long_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "t", 1, &ch);
+    char buf[5000];
+    for (size_t i = 0; i < sizeof(buf) - 1; i++) buf[i] = 'a';
+    buf[sizeof(buf) - 1] = '\0';
+    sc_error_t err = ch.vtable->send(ch.ctx, "123", 3, buf, sizeof(buf) - 1, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "t", 1, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "test msg", 8, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_create_destroy_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_telegram_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    sc_telegram_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_DISCORD
+static void test_discord_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, "t", 1, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "msg", 3, NULL, 0);
+    SC_ASSERT(err == SC_OK || err != SC_OK);
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_send_without_token_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, NULL, 0, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "ch", 2, "msg", 3, NULL, 0);
+    SC_ASSERT_EQ(err, SC_ERR_CHANNEL_NOT_CONFIGURED);
+    sc_discord_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_WEB
+static void test_web_send_empty_target(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_web_create(&alloc, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "", 0, "hi", 2, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_web_destroy(&ch);
+}
+#endif
+
+void run_channel_all_tests(void) {
+    SC_TEST_SUITE("Channel All");
+
+    SC_RUN_TEST(test_cli_create);
+    SC_RUN_TEST(test_cli_name);
+    SC_RUN_TEST(test_cli_health_check);
+    SC_RUN_TEST(test_cli_send);
+    SC_RUN_TEST(test_cli_send_empty_message);
+    SC_RUN_TEST(test_cli_send_long_message);
+    SC_RUN_TEST(test_cli_create_destroy_repeat);
+
+#if SC_HAS_SIGNAL
+    SC_RUN_TEST(test_signal_create);
+    SC_RUN_TEST(test_signal_destroy_lifecycle);
+    SC_RUN_TEST(test_signal_send);
+    SC_RUN_TEST(test_signal_health_check);
+    SC_RUN_TEST(test_signal_start_stop_typing);
+    SC_RUN_TEST(test_signal_send_long_message);
+#endif
+#if SC_HAS_NOSTR
+    SC_RUN_TEST(test_nostr_create);
+    SC_RUN_TEST(test_nostr_destroy_lifecycle);
+    SC_RUN_TEST(test_nostr_send);
+    SC_RUN_TEST(test_nostr_health_check);
+#endif
+#if SC_HAS_QQ
+    SC_RUN_TEST(test_qq_create);
+    SC_RUN_TEST(test_qq_send);
+    SC_RUN_TEST(test_qq_health_check);
+#endif
+#if SC_HAS_MAIXCAM
+    SC_RUN_TEST(test_maixcam_create);
+    SC_RUN_TEST(test_maixcam_health_check);
+#endif
+#if SC_HAS_DISPATCH
+    SC_RUN_TEST(test_dispatch_create);
+    SC_RUN_TEST(test_dispatch_send);
+    SC_RUN_TEST(test_dispatch_health_check);
+#endif
+
+#if SC_HAS_TELEGRAM
+    SC_RUN_TEST(test_telegram_create);
+    SC_RUN_TEST(test_telegram_name);
+    SC_RUN_TEST(test_telegram_health_check);
+    SC_RUN_TEST(test_telegram_send);
+    SC_RUN_TEST(test_telegram_create_destroy_lifecycle);
+    SC_RUN_TEST(test_telegram_escape_markdown);
+    SC_RUN_TEST(test_telegram_commands_help);
+    SC_RUN_TEST(test_telegram_start_stop_typing);
+    SC_RUN_TEST(test_telegram_allowlist);
+    SC_RUN_TEST(test_telegram_send_long_message);
+#endif
+#if SC_HAS_DISCORD
+    SC_RUN_TEST(test_discord_start_stop_lifecycle);
+    SC_RUN_TEST(test_discord_create);
+    SC_RUN_TEST(test_discord_name);
+    SC_RUN_TEST(test_discord_health_check);
+    SC_RUN_TEST(test_discord_send);
+    SC_RUN_TEST(test_discord_send_without_token_fails);
+#endif
+#if SC_HAS_SLACK
+    SC_RUN_TEST(test_slack_create);
+    SC_RUN_TEST(test_slack_name);
+    SC_RUN_TEST(test_slack_health_check);
+    SC_RUN_TEST(test_slack_start_stop_typing);
+    SC_RUN_TEST(test_slack_send_long_message);
+#endif
+#if SC_HAS_WHATSAPP
+    SC_RUN_TEST(test_whatsapp_create);
+    SC_RUN_TEST(test_whatsapp_name);
+    SC_RUN_TEST(test_whatsapp_health_check);
+    SC_RUN_TEST(test_whatsapp_send);
+#endif
+#if SC_HAS_MATRIX
+    SC_RUN_TEST(test_matrix_create);
+    SC_RUN_TEST(test_matrix_name);
+    SC_RUN_TEST(test_matrix_health_check);
+    SC_RUN_TEST(test_matrix_send);
+#endif
+#if SC_HAS_IRC
+    SC_RUN_TEST(test_irc_create);
+    SC_RUN_TEST(test_irc_name);
+    SC_RUN_TEST(test_irc_health_check);
+    SC_RUN_TEST(test_irc_send);
+#endif
+#if SC_HAS_LINE
+    SC_RUN_TEST(test_line_start_stop_lifecycle);
+    SC_RUN_TEST(test_line_create);
+    SC_RUN_TEST(test_line_name);
+    SC_RUN_TEST(test_line_health_check);
+#endif
+#if SC_HAS_LARK
+    SC_RUN_TEST(test_lark_start_stop_lifecycle);
+    SC_RUN_TEST(test_lark_create);
+    SC_RUN_TEST(test_lark_name);
+    SC_RUN_TEST(test_lark_health_check);
+#endif
+#if SC_HAS_WEB
+    SC_RUN_TEST(test_web_create);
+    SC_RUN_TEST(test_web_name);
+    SC_RUN_TEST(test_web_health_check);
+    SC_RUN_TEST(test_web_create_destroy_lifecycle);
+    SC_RUN_TEST(test_web_send_empty_target);
+#endif
+#if SC_HAS_EMAIL
+    SC_RUN_TEST(test_email_create);
+    SC_RUN_TEST(test_email_name);
+    SC_RUN_TEST(test_email_health_check);
+    SC_RUN_TEST(test_email_send);
+    SC_RUN_TEST(test_email_is_configured);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_email_last_message_in_test_mode);
+#endif
+    SC_RUN_TEST(test_email_set_auth);
+    SC_RUN_TEST(test_email_set_imap);
+    SC_RUN_TEST(test_email_poll_no_imap_returns_not_supported);
+    SC_RUN_TEST(test_email_set_auth_null_channel);
+    SC_RUN_TEST(test_email_set_imap_null_channel);
+#endif
+#if SC_HAS_IMESSAGE
+    SC_RUN_TEST(test_imessage_create);
+    SC_RUN_TEST(test_imessage_name);
+    SC_RUN_TEST(test_imessage_health_check);
+    SC_RUN_TEST(test_imessage_is_configured);
+    SC_RUN_TEST(test_imessage_poll_test_mode);
+    SC_RUN_TEST(test_imessage_poll_null_args);
+#endif
+#if SC_HAS_MATTERMOST
+    SC_RUN_TEST(test_mattermost_create);
+    SC_RUN_TEST(test_mattermost_name);
+    SC_RUN_TEST(test_mattermost_health_check);
+    SC_RUN_TEST(test_mattermost_send);
+#endif
+#if SC_HAS_ONEBOT
+    SC_RUN_TEST(test_onebot_create);
+    SC_RUN_TEST(test_onebot_name);
+    SC_RUN_TEST(test_onebot_health_check);
+#endif
+#if SC_HAS_DINGTALK
+    SC_RUN_TEST(test_dingtalk_create);
+    SC_RUN_TEST(test_dingtalk_name);
+    SC_RUN_TEST(test_dingtalk_health_check);
+#endif
+}

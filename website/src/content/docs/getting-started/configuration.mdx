@@ -1,0 +1,249 @@
+---
+title: Configuration
+description: Full configuration reference for SeaClaw.
+---
+
+SeaClaw reads configuration from `~/.seaclaw/config.json`. Environment variables override config values.
+
+## Config location
+
+| Platform   | Path                                 |
+| ---------- | ------------------------------------ |
+| Unix/macOS | `~/.seaclaw/config.json`             |
+| Windows    | `%USERPROFILE%\.seaclaw\config.json` |
+
+## Key sections
+
+| Section               | Description                                                |
+| --------------------- | ---------------------------------------------------------- |
+| `default_provider`    | Default AI provider (e.g. `openai`, `anthropic`, `ollama`) |
+| `default_model`       | Default model name                                         |
+| `default_temperature` | Sampling temperature (0.0–2.0, default 0.7)                |
+| `providers`           | Array of provider entries with name, api_key, base_url     |
+| `channels`            | Channel enablement (cli, telegram, discord, etc.)          |
+| `tools`               | Tool config (enabled_tools, disabled_tools, timeouts)      |
+| `memory`              | Memory backend (sqlite, markdown, none)                    |
+| `mcp_servers`         | External MCP server connections (command, args per server) |
+| `cron`                | Cron job scheduling (enabled, interval)                    |
+| `security`            | Sandbox, autonomy level, resource limits                   |
+| `autonomy`            | Action limits, workspace scoping                           |
+| `gateway`             | Host, port, pairing, webhook HMAC                          |
+| `tunnel`              | Tunnel provider (e.g. ngrok)                               |
+| `runtime`             | Execution environment (native, docker, wasm)               |
+
+## Autonomy levels
+
+Control how much the agent can do without approval via `autonomy.level` or `security.autonomy_level` (0–4):
+
+| Level | `autonomy.level` | Behavior                                                 |
+| ----- | ---------------- | -------------------------------------------------------- |
+| 0     | `readonly`       | No shell or file writes; read-only tools only            |
+| 1     | `supervised`     | Ask before destructive or high-impact commands (default) |
+| 2+    | `full`           | Autonomous execution; use with caution                   |
+
+Config example:
+
+```json
+{
+  "autonomy": {
+    "level": "supervised",
+    "workspace_only": true,
+    "max_actions_per_hour": 20
+  },
+  "security": {
+    "autonomy_level": 1
+  }
+}
+```
+
+Use `SEACLAW_AUTONOMY=0` (readonly) through `4` (full) to override via environment.
+
+## Environment variable overrides
+
+These override config values when set:
+
+| Variable                      | Overrides                   |
+| ----------------------------- | --------------------------- |
+| `SEACLAW_PROVIDER`            | `default_provider`          |
+| `SEACLAW_MODEL`               | `default_model`             |
+| `SEACLAW_API_KEY`             | Default API key             |
+| `SEACLAW_TEMPERATURE`         | `default_temperature`       |
+| `SEACLAW_GATEWAY_PORT`        | `gateway.port`              |
+| `SEACLAW_GATEWAY_HOST`        | `gateway.host`              |
+| `SEACLAW_WORKSPACE`           | Workspace directory         |
+| `SEACLAW_ALLOW_PUBLIC_BIND`   | `gateway.allow_public_bind` |
+| `SEACLAW_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret         |
+| `SEACLAW_AUTONOMY`            | Autonomy level (0–4)        |
+
+Provider-specific keys (used when no `SEACLAW_API_KEY` or provider-specific key in config):
+
+- `OPENAI_API_KEY` — OpenAI
+- `ANTHROPIC_API_KEY` — Anthropic
+- `GEMINI_API_KEY` — Google Gemini
+- `OLLAMA_HOST` — Ollama base URL (e.g. `http://localhost:11434`)
+
+## Complete example config
+
+```json
+{
+  "workspace": "~/.seaclaw/workspace",
+  "default_provider": "openai",
+  "default_model": "gpt-4o",
+  "default_temperature": 0.7,
+  "providers": [
+    {
+      "name": "openai",
+      "api_key": "sk-your-openai-key",
+      "base_url": null,
+      "native_tools": true
+    },
+    {
+      "name": "anthropic",
+      "api_key": "sk-ant-your-anthropic-key"
+    },
+    {
+      "name": "ollama",
+      "api_key": null,
+      "base_url": "http://localhost:11434"
+    }
+  ],
+  "channels": {
+    "cli": true,
+    "default_channel": "cli",
+    "email": {
+      "smtp_host": "smtp.gmail.com",
+      "smtp_port": 587,
+      "from_address": "bot@example.com",
+      "smtp_user": "bot@example.com",
+      "smtp_pass": "app-password",
+      "imap_host": "imap.gmail.com",
+      "imap_port": 993
+    },
+    "imessage": {
+      "default_target": "+15551234567"
+    }
+  },
+  "memory": {
+    "backend": "sqlite",
+    "auto_save": true,
+    "sqlite_path": null,
+    "max_entries": 0
+  },
+  "security": {
+    "sandbox": "auto",
+    "autonomy_level": 1
+  },
+  "autonomy": {
+    "level": "supervised",
+    "workspace_only": true,
+    "max_actions_per_hour": 20
+  },
+  "gateway": {
+    "enabled": true,
+    "port": 3000,
+    "host": "127.0.0.1",
+    "require_pairing": true,
+    "allow_public_bind": false,
+    "pair_rate_limit_per_minute": 10,
+    "webhook_hmac_secret": null
+  },
+  "tunnel": {
+    "provider": "none",
+    "domain": null
+  },
+  "runtime": {
+    "kind": "native",
+    "docker_image": null
+  },
+  "tools": {
+    "shell_timeout_secs": 60,
+    "shell_max_output_bytes": 1048576,
+    "web_fetch_max_chars": 100000,
+    "enabled_tools": [],
+    "disabled_tools": []
+  },
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+    }
+  },
+  "cron": {
+    "enabled": true,
+    "interval_minutes": 1
+  }
+}
+```
+
+## Provider config
+
+Each entry in the `providers` array can have:
+
+| Field          | Type    | Description                                                                                                        |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `name`         | string  | Provider identifier: `openai`, `anthropic`, `ollama`, `llamacpp`, `lmstudio`, `vllm`, `sglang`, `openrouter`, etc. |
+| `api_key`      | string  | API key (optional for local providers)                                                                             |
+| `base_url`     | string  | Override base URL (e.g. `http://localhost:11434` for Ollama)                                                       |
+| `native_tools` | boolean | Use provider-native tool format (default: true)                                                                    |
+
+**Local providers** (no API key required): `ollama`, `llamacpp`, `llama.cpp`, `lmstudio`, `lm-studio`, `vllm`, `sglang`, `osaurus`
+
+## Memory backends
+
+- `sqlite` — SQLite with FTS5 and vector search (requires `SC_ENABLE_SQLITE`)
+- `markdown` — File-based markdown files
+- `none` — No memory
+
+## Tool filtering
+
+Use `enabled_tools` and `disabled_tools` to control which tools are available:
+
+```json
+{
+  "tools": {
+    "enabled_tools": ["shell", "file_read", "memory_store"],
+    "disabled_tools": ["browser_open"]
+  }
+}
+```
+
+Empty `enabled_tools` means all tools are enabled unless listed in `disabled_tools`.
+
+## MCP Servers
+
+Connect to external MCP (Model Context Protocol) servers. SeaClaw can act as both client and server:
+
+**As client** — connect to external tool servers at startup:
+
+```json
+{
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+    }
+  }
+}
+```
+
+MCP tools are automatically loaded and available to the agent as `mcp_0_<tool_name>`.
+
+**As server** — expose all SeaClaw tools over MCP:
+
+```bash
+seaclaw mcp
+```
+
+This runs the JSON-RPC 2.0 server on stdin/stdout, compatible with Claude Code and other MCP clients.
+
+## Service Mode
+
+Run SeaClaw as an always-on service:
+
+```bash
+seaclaw service          # Daemonize (background)
+seaclaw service-loop     # Foreground (for containers)
+seaclaw status           # Check if running
+```
+
+The service loop executes cron jobs and will poll configured channels in future releases.

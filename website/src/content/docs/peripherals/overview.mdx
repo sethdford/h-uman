@@ -1,0 +1,73 @@
+---
+title: Hardware Peripherals
+description: Arduino, STM32, Raspberry Pi peripheral support.
+---
+
+SeaClaw can interact with hardware boards through the `sc_peripheral_t` vtable. Peripherals expose read, write, and flash operations.
+
+## Peripheral vtable interface
+
+| Method            | Description                              |
+| ----------------- | ---------------------------------------- |
+| `name`            | Peripheral identifier                    |
+| `board_type`      | Board type (e.g. arduino, stm32, rpi)    |
+| `health_check`    | Report connectivity                      |
+| `init_peripheral` | Initialize connection                    |
+| `read`            | Read byte at address                     |
+| `write`           | Write byte to address                    |
+| `flash`           | Flash firmware from path                 |
+| `capabilities`    | Board capabilities (GPIO, flash, serial) |
+| `destroy`         | Cleanup                                  |
+
+## Supported peripherals
+
+### Arduino
+
+- **Transport**: Serial (JSON protocol)
+- **Config**: `serial_port` (e.g. `/dev/ttyUSB0`, `COM3`)
+- **Protocol**: JSON commands over serial; responses in JSON
+- **Capabilities**: GPIO, serial, ADC (model-dependent)
+
+### STM32 / Nucleo
+
+- **Transport**: probe-rs CLI (SWD/JTAG)
+- **Config**: `chip` (e.g. `STM32F401RETx`)
+- **Flash**: `probe-rs` for flashing firmware
+- **Capabilities**: Flash, read/write memory maps
+
+### Raspberry Pi
+
+- **Transport**: GPIO (Linux sysfs or similar)
+- **Config**: No serial/chip; uses system GPIO
+- **Capabilities**: GPIO read/write
+
+## Enabling peripherals
+
+Config:
+
+```json
+{
+  "peripherals": {
+    "enabled": true,
+    "datasheet_dir": "/path/to/datasheets"
+  },
+  "hardware": {
+    "enabled": true,
+    "transport": "serial",
+    "serial_port": "/dev/ttyUSB0",
+    "baud_rate": 115200,
+    "probe_target": "STM32F401RETx"
+  }
+}
+```
+
+Build: Peripherals are included when the main binary is built; no separate flag for Arduino/STM32/RPi.
+
+## Tools using peripherals
+
+- **hardware_memory** — Read/write memory maps via probe-rs or serial
+- **hardware_info** — Query system and peripheral info
+
+## Non-Linux platforms
+
+On macOS/Windows, peripheral support may return `SC_ERR_NOT_SUPPORTED` for serial or probe-rs–based backends. Use explicit error handling rather than silent no-ops.

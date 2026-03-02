@@ -1,0 +1,31 @@
+---
+title: SeaClaw Documentation
+description: Documentation for SeaClaw — an open-source AI assistant runtime written in C11.
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+SeaClaw is a minimal, dependency-light AI assistant runtime optimized for small binaries and low memory footprint. It supports 50+ AI providers, 20 messaging channels, and 35+ tools.
+
+<CardGrid stagger>
+  <Card title="Installation" icon="pencil">
+    Build from source in minutes. Requires CMake and a C compiler.
+  </Card>
+  <Card title="Quick Start" icon="rocket">
+    Get your first chat running with the onboard wizard or a quick config.
+  </Card>
+  <Card title="Providers" icon="server">
+    OpenAI, Anthropic, Gemini, OpenRouter, Ollama, and 80+ compatible APIs.
+  </Card>
+  <Card title="Channels" icon="mail">
+    CLI, Telegram, Discord, Slack, Signal, Nostr, and more.
+  </Card>
+</CardGrid>
+
+## Quick links
+
+- [Installation](/getting-started/installation/) — Prerequisites and build commands
+- [Quick Start](/getting-started/quickstart/) — First 5 minutes with SeaClaw
+- [Configuration](/getting-started/configuration/) — Full config reference
+- [Providers Overview](/providers/overview/) — AI model provider architecture
+- [Gateway API](/api/overview/) — HTTP webhook and pairing endpoints

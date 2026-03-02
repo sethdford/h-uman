@@ -1,0 +1,97 @@
+---
+title: Gateway API
+description: HTTP endpoints, pairing, webhooks, and WebSocket.
+---
+
+The SeaClaw gateway is an HTTP server that exposes health checks, pairing, and webhook endpoints for channels.
+
+## Starting the gateway
+
+```bash
+./seaclaw gateway
+```
+
+Defaults: `127.0.0.1:3000` (config: `gateway.host`, `gateway.port`).
+
+## Endpoints
+
+### GET /health
+
+Health check. Returns `200 OK` with JSON:
+
+```json
+{ "status": "ok" }
+```
+
+### GET /ready
+
+Readiness check (includes component validation). Returns:
+
+```json
+{ "status": "ready", "checks": [] }
+```
+
+or `"not_ready"` when components are unhealthy.
+
+### POST /pair (pairing flow)
+
+When `gateway.require_pairing` is true:
+
+1. **Get pairing code** — Shown in gateway logs on startup (6 digits)
+2. **POST /pair** with body: `{"code": "123456"}`
+3. On success: `{"token": "zc_abc123..."}` — store this; it is shown once
+4. Use token: `Authorization: Bearer zc_abc123...` on subsequent requests
+5. On failure: `401` or error JSON (`invalid code`, `lockout`, etc.)
+
+### Webhook paths
+
+Incoming webhooks are routed by path:
+
+| Path                | Channel           |
+| ------------------- | ----------------- |
+| `/webhook`          | Generic webhook   |
+| `/webhook/telegram` | Telegram          |
+| `/webhook/slack`    | Slack             |
+| `/webhook/discord`  | Discord           |
+| `/webhook/whatsapp` | WhatsApp          |
+| `/webhook/line`     | LINE              |
+| `/webhook/lark`     | Lark              |
+| `/telegram`         | Telegram (legacy) |
+| `/slack/events`     | Slack events      |
+| `/whatsapp`         | WhatsApp          |
+| `/line`             | LINE              |
+| `/lark`             | Lark              |
+| `/discord`          | Discord           |
+
+POST body is forwarded to the channel handler. Response: `{"received": true}` with 200.
+
+### HMAC verification
+
+If `gateway.webhook_hmac_secret` or `SEACLAW_WEBHOOK_HMAC_SECRET` is set, webhook requests must include a valid `X-Signature` header (HMAC-SHA256 of body, hex-encoded). Invalid signature returns 401.
+
+### Rate limiting
+
+- Per-IP rate limit: `gateway.pair_rate_limit_per_minute` (default: 10)
+- 429 when exceeded
+
+## WebSocket / Web channel
+
+The Web channel uses WebSocket for real-time chat. Connect to the gateway's WebSocket endpoint (path varies by deployment). Messages follow the Web channel protocol.
+
+## Pairing flow summary
+
+```
+1. Start gateway → pairing code printed
+2. Client: POST /pair {"code": "123456"}
+3. Server: 200 {"token": "zc_..."}
+4. Client: Authorization: Bearer zc_... on all later requests
+```
+
+## Exposing the gateway
+
+For webhooks, the gateway must be reachable from the internet. Use a tunnel:
+
+- **ngrok**: `ngrok http 3000`
+- **cloudflared**: `cloudflared tunnel --url http://localhost:3000`
+
+Configure your channel's webhook URL to the tunnel URL (e.g. `https://abc123.ngrok.io/webhook/telegram`).

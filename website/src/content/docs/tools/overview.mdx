@@ -1,0 +1,84 @@
+---
+title: Tools Overview
+description: Tool execution surface and available tools in SeaClaw.
+---
+
+Tools give the AI agent the ability to act: run commands, read/write files, search the web, manage memory, and interact with hardware. Each tool implements the `sc_tool_t` vtable.
+
+## Tool vtable interface
+
+| Method            | Description                                            |
+| ----------------- | ------------------------------------------------------ |
+| `execute`         | Run the tool with JSON args, return `sc_tool_result_t` |
+| `name`            | Tool identifier (e.g. `shell`, `file_read`)            |
+| `description`     | Human-readable description for the LLM                 |
+| `parameters_json` | JSON Schema for the tool's parameters                  |
+| `deinit`          | Optional cleanup                                       |
+
+## Available tools (36)
+
+| Tool            | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
+| shell           | Execute shell commands (allowlisted, sandboxed)              |
+| file_read       | Read file contents from workspace                            |
+| file_write      | Write content to a file                                      |
+| file_edit       | Search-and-replace or structured edits                       |
+| file_append     | Append to a file                                             |
+| git             | Git operations (status, diff, commit)                        |
+| web_search      | Web search (DuckDuckGo by default)                           |
+| web_fetch       | Fetch URL content (HTTPS only, size limited)                 |
+| http_request    | HTTP/HTTPS requests                                          |
+| browser         | Browser actions: open, read, screenshot, click, type, scroll |
+| browser_open    | Open approved HTTPS URLs in default browser                  |
+| image           | Image operations (load, process)                             |
+| screenshot      | Capture screenshots                                          |
+| memory_store    | Store a fact or memory entry                                 |
+| memory_recall   | Recall memories by query                                     |
+| memory_list     | List stored memories                                         |
+| memory_forget   | Remove a memory by ID                                        |
+| message         | Send a message (e.g. to a channel)                           |
+| delegate        | Delegate tasks to sub-agents (routes to claude_code)         |
+| spawn           | Spawn child processes                                        |
+| cron_add        | Add a cron job                                               |
+| cron_list       | List cron jobs                                               |
+| cron_remove     | Remove a cron job                                            |
+| cron_run        | Run a cron job immediately                                   |
+| cron_runs       | List recent cron execution history                           |
+| cron_update     | Update a cron job                                            |
+| claude_code     | Delegate coding tasks to Claude Code CLI (sub-agent)         |
+| composio        | Composio integration (list tools, execute actions)           |
+| hardware_memory | Read/write hardware memory via probe-rs or serial            |
+| schedule        | Scheduled tasks (create, list, cancel, pause)                |
+| schema          | Validate JSON schemas, list tool schemas                     |
+| pushover        | Push notifications via Pushover                              |
+| hardware_info   | System hardware info                                         |
+| i2c             | I2C bus read/write                                           |
+| spi             | SPI bus operations                                           |
+
+## Tool filtering
+
+Enable or disable tools via config:
+
+```json
+{
+  "tools": {
+    "enabled_tools": ["shell", "file_read", "memory_store"],
+    "disabled_tools": ["browser_open", "spawn"]
+  }
+}
+```
+
+- `enabled_tools`: If non-empty, only these tools are available
+- `disabled_tools`: These tools are always disabled
+- Empty `enabled_tools` = all tools except `disabled_tools`
+
+## Security
+
+- **Shell**: Commands are allowlisted; execution is sandboxed (Landlock, Firejail, Bubblewrap, or Docker when available)
+- **File operations**: Restricted to workspace by default
+- **HTTP**: HTTPS required; HTTP URLs are rejected
+- **browser_open**: Only allowlisted domains
+
+## Workspace scoping
+
+Most file and shell tools respect `workspace_dir`. The agent cannot access paths outside the workspace unless explicitly allowed.

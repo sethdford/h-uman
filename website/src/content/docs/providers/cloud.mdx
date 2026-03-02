@@ -1,0 +1,218 @@
+---
+title: Cloud Providers
+description: Configure cloud AI providers (OpenAI, Anthropic, Gemini, etc.).
+---
+
+SeaClaw supports major cloud AI providers. Configure each with an API key in `~/.seaclaw/config.json` or via environment variables. Get API keys from each provider's dashboard.
+
+## OpenAI
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "openai",
+  "default_model": "gpt-4o",
+  "providers": [
+    {
+      "name": "openai",
+      "api_key": "sk-proj-your-key-here"
+    }
+  ]
+}
+```
+
+Or use the environment variable (no config needed):
+
+```bash
+export OPENAI_API_KEY="sk-proj-your-key-here"
+seaclaw agent -m "hello"
+```
+
+Verify with `seaclaw doctor`:
+
+```
+[doctor] config: ok (loaded from /Users/you/.seaclaw/config.json)
+[doctor] provider (openai): ok (API key configured)
+[doctor] memory engine: sqlite
+```
+
+Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-4`, `o1`, etc.
+
+## Anthropic
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "anthropic",
+  "default_model": "claude-sonnet-4-20250514",
+  "providers": [
+    {
+      "name": "anthropic",
+      "api_key": "sk-ant-your-key-here"
+    }
+  ]
+}
+```
+
+Environment variable (overrides config):
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+seaclaw agent -m "Explain recursion briefly"
+```
+
+Models: `claude-sonnet-4-20250514`, `claude-opus-4`, `claude-3-5-haiku`, `claude-3-5-sonnet`, etc.
+
+## Google Gemini
+
+Add to `~/.seaclaw/config.json`:
+
+```json
+{
+  "default_provider": "gemini",
+  "default_model": "gemini-2.0-flash",
+  "providers": [
+    {
+      "name": "gemini",
+      "api_key": "AIzaSy-your-key-here"
+    }
+  ]
+}
+```
+
+Environment variable:
+
+```bash
+export GEMINI_API_KEY="AIzaSy-your-key-here"
+seaclaw agent -m "What is 2 + 2?"
+```
+
+Models: `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`.
+
+## OpenRouter
+
+OpenRouter provides a single API for many models. One key, many providers:
+
+```json
+{
+  "default_provider": "openrouter",
+  "default_model": "anthropic/claude-sonnet-4",
+  "providers": [
+    {
+      "name": "openrouter",
+      "api_key": "sk-or-v1-your-key-here"
+    }
+  ]
+}
+```
+
+Environment variable: `OPENROUTER_API_KEY`
+
+Models use the format `provider/model`:
+
+| Model ID                            | Provider  |
+| ----------------------------------- | --------- |
+| `anthropic/claude-sonnet-4`         | Anthropic |
+| `openai/gpt-4o`                     | OpenAI    |
+| `meta-llama/llama-3.1-70b-instruct` | Meta      |
+| `google/gemini-2.0-flash`           | Google    |
+
+## Groq
+
+```json
+{
+  "providers": [{ "name": "groq", "api_key": "gsk_..." }],
+  "default_provider": "groq",
+  "default_model": "llama-3.1-70b-versatile"
+}
+```
+
+## Mistral
+
+```json
+{
+  "providers": [{ "name": "mistral", "api_key": "..." }],
+  "default_provider": "mistral",
+  "default_model": "mistral-large-latest"
+}
+```
+
+## xAI (Grok)
+
+```json
+{
+  "providers": [{ "name": "xai", "api_key": "xai-..." }],
+  "default_provider": "xai",
+  "default_model": "grok-2"
+}
+```
+
+## DeepSeek
+
+```json
+{
+  "providers": [{ "name": "deepseek", "api_key": "sk-..." }],
+  "default_provider": "deepseek",
+  "default_model": "deepseek-chat"
+}
+```
+
+## Together AI
+
+```json
+{
+  "providers": [{ "name": "together", "api_key": "..." }],
+  "default_provider": "together",
+  "default_model": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+}
+```
+
+## Fireworks
+
+```json
+{
+  "providers": [{ "name": "fireworks", "api_key": "..." }],
+  "default_provider": "fireworks",
+  "default_model": "accounts/fireworks/models/llama-v3p1-70b-instruct"
+}
+```
+
+## Perplexity
+
+```json
+{
+  "providers": [{ "name": "perplexity", "api_key": "pplx-..." }],
+  "default_provider": "perplexity",
+  "default_model": "sonar"
+}
+```
+
+## Cohere
+
+```json
+{
+  "providers": [{ "name": "cohere", "api_key": "..." }],
+  "default_provider": "cohere",
+  "default_model": "command-r-plus"
+}
+```
+
+## Base URL override
+
+Any provider can use a custom base URL:
+
+```json
+{
+  "providers": [
+    {
+      "name": "openai",
+      "api_key": "sk-...",
+      "base_url": "https://your-proxy.example.com/v1"
+    }
+  ]
+}
+```
+
+Useful for proxies, Azure OpenAI, or self-hosted endpoints.

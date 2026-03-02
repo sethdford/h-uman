@@ -1,0 +1,58 @@
+#include "seaclaw/core/error.h"
+
+static const char *error_strings[] = {
+    [SC_OK]                          = "ok",
+    [SC_ERR_OUT_OF_MEMORY]           = "out of memory",
+    [SC_ERR_INVALID_ARGUMENT]        = "invalid argument",
+    [SC_ERR_NOT_FOUND]               = "not found",
+    [SC_ERR_ALREADY_EXISTS]          = "already exists",
+    [SC_ERR_NOT_SUPPORTED]           = "not supported",
+    [SC_ERR_PERMISSION_DENIED]       = "permission denied",
+    [SC_ERR_TIMEOUT]                 = "timeout",
+    [SC_ERR_IO]                      = "I/O error",
+    [SC_ERR_PARSE]                   = "parse error",
+    [SC_ERR_CONFIG_INVALID]          = "invalid configuration",
+    [SC_ERR_CONFIG_NOT_FOUND]        = "configuration not found",
+    [SC_ERR_PROVIDER_UNAVAILABLE]    = "provider unavailable",
+    [SC_ERR_PROVIDER_AUTH]           = "provider authentication failed",
+    [SC_ERR_PROVIDER_RATE_LIMITED]   = "provider rate limited",
+    [SC_ERR_PROVIDER_RESPONSE]       = "provider response error",
+    [SC_ERR_CHANNEL_SEND]            = "channel send failed",
+    [SC_ERR_CHANNEL_START]           = "channel start failed",
+    [SC_ERR_CHANNEL_NOT_CONFIGURED]  = "channel not configured",
+    [SC_ERR_TOOL_EXECUTION]          = "tool execution failed",
+    [SC_ERR_TOOL_VALIDATION]         = "tool input validation failed",
+    [SC_ERR_TOOL_NOT_FOUND]          = "tool not found",
+    [SC_ERR_MEMORY_STORE]            = "memory store error",
+    [SC_ERR_MEMORY_RECALL]           = "memory recall error",
+    [SC_ERR_MEMORY_BACKEND]          = "memory backend error",
+    [SC_ERR_SECURITY_COMMAND_NOT_ALLOWED] = "command not allowed",
+    [SC_ERR_SECURITY_HIGH_RISK_BLOCKED]   = "high risk command blocked",
+    [SC_ERR_SECURITY_APPROVAL_REQUIRED]   = "approval required",
+    [SC_ERR_SECURITY_RATE_LIMITED]        = "security rate limited",
+    [SC_ERR_SECURITY_LOCKOUT]             = "security lockout",
+    [SC_ERR_PERIPHERAL_NOT_CONNECTED] = "peripheral not connected",
+    [SC_ERR_PERIPHERAL_IO]            = "peripheral I/O error",
+    [SC_ERR_PERIPHERAL_FLASH_FAILED]  = "peripheral flash failed",
+    [SC_ERR_PERIPHERAL_DEVICE_NOT_FOUND] = "peripheral device not found",
+    [SC_ERR_TUNNEL_START_FAILED]      = "tunnel start failed",
+    [SC_ERR_TUNNEL_URL_NOT_FOUND]     = "tunnel URL not found",
+    [SC_ERR_GATEWAY_RATE_LIMITED]     = "gateway rate limited",
+    [SC_ERR_GATEWAY_BODY_TOO_LARGE]   = "gateway body too large",
+    [SC_ERR_GATEWAY_AUTH]             = "gateway authentication failed",
+    [SC_ERR_CRYPTO_ENCRYPT]           = "encryption failed",
+    [SC_ERR_CRYPTO_DECRYPT]           = "decryption failed",
+    [SC_ERR_CRYPTO_HMAC]              = "HMAC failed",
+    [SC_ERR_JSON_PARSE]               = "JSON parse error",
+    [SC_ERR_JSON_TYPE]                = "JSON type mismatch",
+    [SC_ERR_JSON_DEPTH]               = "JSON max depth exceeded",
+    [SC_ERR_INTERNAL]                 = "internal error",
+    [SC_ERR_SUBAGENT_TOO_MANY]        = "too many concurrent subagents",
+    [SC_ERR_CANCELLED]                = "cancelled",
+};
+
+const char *sc_error_string(sc_error_t err) {
+    if (err >= 0 && err < SC_ERR_COUNT)
+        return error_strings[err];
+    return "unknown error";
+}

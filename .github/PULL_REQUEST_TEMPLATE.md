@@ -1,0 +1,4 @@
+- [ ] Tests pass (`./build/seaclaw_tests`)
+- [ ] No ASan errors
+- [ ] Code follows naming conventions
+- [ ] One concern per change
