@@ -64,6 +64,7 @@ static sc_error_t landlock_apply(void *ctx) {
     return SC_OK;
 #else
     sc_landlock_ctx_t *ll = (sc_landlock_ctx_t *)ctx;
+    if (!ll->workspace_dir[0]) return SC_ERR_INVALID_ARGUMENT;
     long abi = landlock_abi_version();
     if (abi < 1) return SC_ERR_NOT_SUPPORTED;
 
