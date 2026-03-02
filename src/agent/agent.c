@@ -702,11 +702,47 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
             return SC_ERR_CANCELLED;
         }
         if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
+        msgs = NULL;
+        msgs_count = 0;
         iter++;
         /* Compact history if it exceeds limits (before each provider call) */
         if (sc_should_compact(agent->history, agent->history_count, &compact_cfg)) {
             sc_compact_history(agent->alloc, agent->history, &agent->history_count,
                 &agent->history_cap, &compact_cfg);
+        }
+
+        /* Format messages for this iteration using arena allocator */
+        {
+            sc_chat_message_t *hist_msgs = NULL;
+            size_t hist_count = 0;
+            err = sc_context_format_messages(&turn_alloc, agent->history, agent->history_count,
+                agent->max_history_messages, &hist_msgs, &hist_count);
+            if (err != SC_OK) {
+                if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+                return err;
+            }
+            size_t total = (hist_msgs ? hist_count : 0) + 1;
+            sc_chat_message_t *all = (sc_chat_message_t *)turn_alloc.alloc(turn_alloc.ctx,
+                total * sizeof(sc_chat_message_t));
+            if (!all) {
+                if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+            all[0].role = SC_ROLE_SYSTEM;
+            all[0].content = system_prompt;
+            all[0].content_len = system_prompt_len;
+            all[0].name = NULL;
+            all[0].name_len = 0;
+            all[0].tool_call_id = NULL;
+            all[0].tool_call_id_len = 0;
+            all[0].content_parts = NULL;
+            all[0].content_parts_count = 0;
+            for (size_t i = 0; i < (hist_msgs ? hist_count : 0); i++)
+                all[i + 1] = hist_msgs[i];
+            msgs = all;
+            msgs_count = total;
+            req.messages = msgs;
+            req.messages_count = msgs_count;
         }
 
         {
