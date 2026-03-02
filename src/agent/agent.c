@@ -777,8 +777,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
                 ev.data.err.message = "provider chat failed";
                 SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
-            if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
             if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+            if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
             return err;
         }
 
@@ -802,15 +802,15 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
                 *response_out = sc_strndup(agent->alloc, resp.content, resp.content_len);
                 if (!*response_out) {
                     sc_chat_response_free(agent->alloc, &resp);
-                    if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
                     if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+                    if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
                     return SC_ERR_OUT_OF_MEMORY;
                 }
                 if (response_len_out) *response_len_out = resp.content_len;
             }
             sc_chat_response_free(agent->alloc, &resp);
-            if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
             if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+            if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
             return SC_OK;
         }
 
@@ -819,8 +819,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
             resp.tool_calls, resp.tool_calls_count);
         if (err != SC_OK) {
             sc_chat_response_free(agent->alloc, &resp);
-            if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
             if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+            if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
             return err;
         }
         sc_chat_response_free(agent->alloc, &resp);
@@ -957,41 +957,7 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
                 }
             }
         }
-        agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
-        msgs = NULL;
-        msgs_count = 0;
-        err = sc_context_format_messages(agent->alloc, agent->history, agent->history_count,
-            agent->max_history_messages, &msgs, &msgs_count);
-        if (err != SC_OK) {
-            if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
-            return err;
-        }
-        /* Prepend system message again */
-        size_t total_msgs = (msgs ? msgs_count : 0) + 1;
-        sc_chat_message_t *all_msgs = (sc_chat_message_t *)agent->alloc->alloc(agent->alloc->ctx,
-            total_msgs * sizeof(sc_chat_message_t));
-        if (!all_msgs) {
-            if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
-            if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
-            return SC_ERR_OUT_OF_MEMORY;
-        }
-        all_msgs[0].role = SC_ROLE_SYSTEM;
-        all_msgs[0].content = system_prompt;
-        all_msgs[0].content_len = system_prompt_len;
-        all_msgs[0].name = NULL;
-        all_msgs[0].name_len = 0;
-        all_msgs[0].tool_call_id = NULL;
-        all_msgs[0].tool_call_id_len = 0;
-        all_msgs[0].content_parts = NULL;
-        all_msgs[0].content_parts_count = 0;
-        all_msgs[0].tool_calls = NULL;
-        all_msgs[0].tool_calls_count = 0;
-        for (size_t i = 0; i < (msgs ? msgs_count : 0); i++) all_msgs[i + 1] = msgs[i];
-        if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
-        msgs = all_msgs;
-        msgs_count = total_msgs;
-        req.messages = msgs;
-        req.messages_count = msgs_count;
+        /* Messages will be reformatted at top of next iteration via arena */
     }
 
     {
@@ -1005,8 +971,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
         ev.data.err.message = "tool iterations exhausted";
         SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
     }
-    if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
     if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+    if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
     return SC_ERR_TIMEOUT;
 }
 
