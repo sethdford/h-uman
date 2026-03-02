@@ -73,6 +73,7 @@ static const char *docker_desc(void *ctx) {
 
 static const sc_sandbox_vtable_t docker_vtable = {
     .wrap_command = docker_wrap,
+    .apply = NULL,
     .is_available = docker_available,
     .name = docker_name,
     .description = docker_desc,

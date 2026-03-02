@@ -214,6 +214,10 @@ set(SC_CORE_SOURCES
     src/security/firejail.c
     src/security/bubblewrap.c
     src/security/docker.c
+    src/security/seatbelt.c
+    src/security/seccomp.c
+    src/security/wasi_sandbox.c
+    src/security/firecracker.c
     src/security/detect.c
     src/security/sandbox.c
     src/observability.c
@@ -955,6 +959,9 @@ endif()
 target_compile_options(seaclaw_core PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_options(seaclaw PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(seaclaw_tests PRIVATE -Wall -Wextra -Wpedantic)
+
+# Install target
+install(TARGETS seaclaw RUNTIME DESTINATION bin)
 
 # Print build info
 message(STATUS "SeaClaw v0.1.0")

@@ -369,6 +369,289 @@ static void test_sandbox_bubblewrap_non_linux(void) {
 #endif
 }
 
+/* --- Seatbelt (macOS) sandbox tests --- */
+static void test_sandbox_seatbelt_vtable_wiring(void) {
+    sc_seatbelt_ctx_t ctx;
+    sc_seatbelt_sandbox_init(&ctx, "/tmp/workspace");
+    sc_sandbox_t sb = sc_seatbelt_sandbox_get(&ctx);
+    SC_ASSERT(sb.ctx != NULL);
+    SC_ASSERT(sb.vtable != NULL);
+    SC_ASSERT(strcmp(sc_sandbox_name(&sb), "seatbelt") == 0);
+    SC_ASSERT(strlen(sc_sandbox_description(&sb)) > 0);
+}
+
+static void test_sandbox_seatbelt_availability(void) {
+    sc_seatbelt_ctx_t ctx;
+    sc_seatbelt_sandbox_init(&ctx, "/tmp");
+    sc_sandbox_t sb = sc_seatbelt_sandbox_get(&ctx);
+#ifdef __APPLE__
+    SC_ASSERT(sc_sandbox_is_available(&sb));
+#else
+    SC_ASSERT_FALSE(sc_sandbox_is_available(&sb));
+#endif
+}
+
+static void test_sandbox_seatbelt_wrap_command(void) {
+    sc_seatbelt_ctx_t ctx;
+    sc_seatbelt_sandbox_init(&ctx, "/tmp/workspace");
+    sc_sandbox_t sb = sc_seatbelt_sandbox_get(&ctx);
+    const char *argv[] = { "echo", "test" };
+    const char *out[16];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 16, &out_count);
+#ifdef __APPLE__
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out_count, 5u);
+    SC_ASSERT(strcmp(out[0], "sandbox-exec") == 0);
+    SC_ASSERT(strcmp(out[1], "-p") == 0);
+    SC_ASSERT(strstr(out[2], "deny default") != NULL);
+    SC_ASSERT(strstr(out[2], "/tmp/workspace") != NULL);
+    SC_ASSERT(strcmp(out[3], "echo") == 0);
+    SC_ASSERT(strcmp(out[4], "test") == 0);
+#else
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+static void test_sandbox_seatbelt_profile_contains_workspace(void) {
+    sc_seatbelt_ctx_t ctx;
+    sc_seatbelt_sandbox_init(&ctx, "/home/user/project");
+    SC_ASSERT(strstr(ctx.profile, "/home/user/project") != NULL);
+    SC_ASSERT(strstr(ctx.profile, "deny default") != NULL);
+    SC_ASSERT(strstr(ctx.profile, "deny network") != NULL);
+}
+
+static void test_sandbox_seatbelt_null_args(void) {
+    sc_seatbelt_ctx_t ctx;
+    sc_seatbelt_sandbox_init(&ctx, "/tmp");
+    sc_sandbox_t sb = sc_seatbelt_sandbox_get(&ctx);
+    sc_error_t err = sc_sandbox_wrap_command(&sb, NULL, 0, NULL, 0, NULL);
+#ifdef __APPLE__
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+#else
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+/* --- Landlock apply tests --- */
+static void test_sandbox_landlock_apply_in_test_mode(void) {
+    sc_landlock_ctx_t ctx;
+    sc_landlock_sandbox_init(&ctx, "/tmp/workspace");
+    sc_sandbox_t sb = sc_landlock_sandbox_get(&ctx);
+    sc_error_t err = sc_sandbox_apply(&sb);
+#ifdef __linux__
+    SC_ASSERT_EQ(err, SC_OK);
+#else
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+static void test_sandbox_landlock_vtable_has_apply(void) {
+    sc_landlock_ctx_t ctx;
+    sc_landlock_sandbox_init(&ctx, "/tmp");
+    sc_sandbox_t sb = sc_landlock_sandbox_get(&ctx);
+    SC_ASSERT(sb.vtable->apply != NULL);
+}
+
+static void test_sandbox_landlock_wrap_passthrough(void) {
+    sc_landlock_ctx_t ctx;
+    sc_landlock_sandbox_init(&ctx, "/tmp/ws");
+    sc_sandbox_t sb = sc_landlock_sandbox_get(&ctx);
+    const char *argv[] = { "ls", "-la" };
+    const char *out[8];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 8, &out_count);
+#ifdef __linux__
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out_count, 2u);
+    SC_ASSERT(strcmp(out[0], "ls") == 0);
+    SC_ASSERT(strcmp(out[1], "-la") == 0);
+#else
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+/* --- seccomp sandbox tests --- */
+static void test_sandbox_seccomp_vtable_wiring(void) {
+    sc_seccomp_ctx_t ctx;
+    sc_seccomp_sandbox_init(&ctx, "/tmp/workspace", false);
+    sc_sandbox_t sb = sc_seccomp_sandbox_get(&ctx);
+    SC_ASSERT(sb.ctx != NULL);
+    SC_ASSERT(sb.vtable != NULL);
+    SC_ASSERT(strcmp(sc_sandbox_name(&sb), "seccomp") == 0);
+}
+
+static void test_sandbox_seccomp_availability(void) {
+    sc_seccomp_ctx_t ctx;
+    sc_seccomp_sandbox_init(&ctx, "/tmp", false);
+    sc_sandbox_t sb = sc_seccomp_sandbox_get(&ctx);
+#ifdef __linux__
+#if SC_IS_TEST
+    SC_ASSERT_FALSE(sc_sandbox_is_available(&sb));
+#endif
+#else
+    SC_ASSERT_FALSE(sc_sandbox_is_available(&sb));
+#endif
+}
+
+static void test_sandbox_seccomp_wrap_passthrough(void) {
+    sc_seccomp_ctx_t ctx;
+    sc_seccomp_sandbox_init(&ctx, "/tmp", true);
+    sc_sandbox_t sb = sc_seccomp_sandbox_get(&ctx);
+    const char *argv[] = { "echo", "hello" };
+    const char *out[8];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 8, &out_count);
+#ifdef __linux__
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out_count, 2u);
+#else
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+static void test_sandbox_seccomp_has_apply(void) {
+    sc_seccomp_ctx_t ctx;
+    sc_seccomp_sandbox_init(&ctx, "/tmp", false);
+    sc_sandbox_t sb = sc_seccomp_sandbox_get(&ctx);
+#ifdef __linux__
+    SC_ASSERT(sb.vtable->apply != NULL);
+#else
+    SC_ASSERT(sb.vtable->apply == NULL);
+#endif
+}
+
+static void test_sandbox_seccomp_network_flag(void) {
+    sc_seccomp_ctx_t ctx;
+    sc_seccomp_sandbox_init(&ctx, "/tmp", true);
+    SC_ASSERT(ctx.allow_network == true);
+    sc_seccomp_sandbox_init(&ctx, "/tmp", false);
+    SC_ASSERT(ctx.allow_network == false);
+}
+
+/* --- WASI sandbox tests --- */
+static void test_sandbox_wasi_vtable_wiring(void) {
+    sc_wasi_sandbox_ctx_t ctx;
+    sc_wasi_sandbox_init(&ctx, "/tmp/workspace");
+    sc_sandbox_t sb = sc_wasi_sandbox_get(&ctx);
+    SC_ASSERT(sb.ctx != NULL);
+    SC_ASSERT(sb.vtable != NULL);
+    SC_ASSERT(strcmp(sc_sandbox_name(&sb), "wasi") == 0);
+    SC_ASSERT(strstr(sc_sandbox_description(&sb), "WASI") != NULL);
+}
+
+static void test_sandbox_wasi_wrap_command_format(void) {
+    sc_wasi_sandbox_ctx_t ctx;
+    sc_wasi_sandbox_init(&ctx, "/tmp/workspace");
+    sc_sandbox_t sb = sc_wasi_sandbox_get(&ctx);
+    const char *argv[] = { "program.wasm", "--arg1" };
+    const char *out[16];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 16, &out_count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out_count, 6u);
+    SC_ASSERT(strstr(out[0], "wasmtime") != NULL || strstr(out[0], "wasmer") != NULL);
+    SC_ASSERT(strcmp(out[1], "run") == 0);
+    SC_ASSERT(strstr(out[2], "--dir=") != NULL);
+    SC_ASSERT(strstr(out[2], "/tmp/workspace") != NULL);
+    SC_ASSERT(strcmp(out[3], "--dir=/tmp") == 0);
+    SC_ASSERT(strcmp(out[4], "program.wasm") == 0);
+    SC_ASSERT(strcmp(out[5], "--arg1") == 0);
+}
+
+static void test_sandbox_wasi_no_apply(void) {
+    sc_wasi_sandbox_ctx_t ctx;
+    sc_wasi_sandbox_init(&ctx, "/tmp");
+    sc_sandbox_t sb = sc_wasi_sandbox_get(&ctx);
+    SC_ASSERT(sb.vtable->apply == NULL);
+    SC_ASSERT_EQ(sc_sandbox_apply(&sb), SC_OK);
+}
+
+/* --- Firecracker sandbox tests --- */
+static void test_sandbox_firecracker_vtable_wiring(void) {
+    sc_firecracker_ctx_t ctx;
+    sc_firecracker_sandbox_init(&ctx, "/tmp/workspace");
+    sc_sandbox_t sb = sc_firecracker_sandbox_get(&ctx);
+    SC_ASSERT(sb.ctx != NULL);
+    SC_ASSERT(sb.vtable != NULL);
+    SC_ASSERT(strcmp(sc_sandbox_name(&sb), "firecracker") == 0);
+    SC_ASSERT(strstr(sc_sandbox_description(&sb), "microVM") != NULL);
+}
+
+static void test_sandbox_firecracker_not_available_in_test(void) {
+    sc_firecracker_ctx_t ctx;
+    sc_firecracker_sandbox_init(&ctx, "/tmp");
+    sc_sandbox_t sb = sc_firecracker_sandbox_get(&ctx);
+    SC_ASSERT_FALSE(sc_sandbox_is_available(&sb));
+}
+
+static void test_sandbox_firecracker_defaults(void) {
+    sc_firecracker_ctx_t ctx;
+    sc_firecracker_sandbox_init(&ctx, "/tmp/ws");
+    SC_ASSERT_EQ(ctx.vcpu_count, 1u);
+    SC_ASSERT_EQ(ctx.mem_size_mib, 128u);
+    SC_ASSERT(strcmp(ctx.workspace_dir, "/tmp/ws") == 0);
+    SC_ASSERT(strlen(ctx.kernel_path) > 0);
+    SC_ASSERT(strlen(ctx.rootfs_path) > 0);
+}
+
+static void test_sandbox_firecracker_wrap_non_linux(void) {
+#ifndef __linux__
+    sc_firecracker_ctx_t ctx;
+    sc_firecracker_sandbox_init(&ctx, "/tmp");
+    sc_sandbox_t sb = sc_firecracker_sandbox_get(&ctx);
+    const char *argv[] = { "echo", "x" };
+    const char *out[16];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 16, &out_count);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+/* --- Auto-detection tests --- */
+static void test_sandbox_auto_select_returns_valid(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    sc_sandbox_alloc_t alloc = {
+        .ctx = sys.ctx,
+        .alloc = sys.alloc,
+        .free = sys.free,
+    };
+    sc_sandbox_storage_t *st = sc_sandbox_storage_create(&alloc);
+    SC_ASSERT_NOT_NULL(st);
+    sc_sandbox_t sb = sc_sandbox_create(SC_SANDBOX_AUTO, "/tmp/ws", st, &alloc);
+    SC_ASSERT(sb.ctx != NULL);
+    SC_ASSERT(sb.vtable != NULL);
+    const char *name = sc_sandbox_name(&sb);
+    SC_ASSERT_NOT_NULL(name);
+    SC_ASSERT(strlen(name) > 0);
+    sc_sandbox_storage_destroy(st, &alloc);
+}
+
+static void test_sandbox_detect_available_runs(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    sc_sandbox_alloc_t alloc = {
+        .ctx = sys.ctx,
+        .alloc = sys.alloc,
+        .free = sys.free,
+    };
+    sc_available_backends_t avail = sc_sandbox_detect_available("/tmp", &alloc);
+#ifdef __APPLE__
+    SC_ASSERT(avail.seatbelt == true);
+#endif
+    (void)avail;
+}
+
+static void test_sandbox_apply_noop_returns_ok(void) {
+    sc_noop_sandbox_ctx_t ctx;
+    sc_sandbox_t sb = sc_noop_sandbox_get(&ctx);
+    SC_ASSERT_EQ(sc_sandbox_apply(&sb), SC_OK);
+}
+
+static void test_sandbox_apply_null_returns_ok(void) {
+    sc_sandbox_t sb = { .ctx = NULL, .vtable = NULL };
+    SC_ASSERT_EQ(sc_sandbox_apply(&sb), SC_OK);
+}
+
 static void test_observer_noop(void) {
     sc_observer_t obs = sc_observer_noop();
     SC_ASSERT(strcmp(sc_observer_name(obs), "noop") == 0);
@@ -442,6 +725,42 @@ void run_security_tests(void) {
     SC_RUN_TEST(test_sandbox_landlock_non_linux_or_test);
     SC_RUN_TEST(test_sandbox_firejail_non_linux);
     SC_RUN_TEST(test_sandbox_bubblewrap_non_linux);
+
+    SC_TEST_SUITE("Sandbox — Seatbelt (macOS)");
+    SC_RUN_TEST(test_sandbox_seatbelt_vtable_wiring);
+    SC_RUN_TEST(test_sandbox_seatbelt_availability);
+    SC_RUN_TEST(test_sandbox_seatbelt_wrap_command);
+    SC_RUN_TEST(test_sandbox_seatbelt_profile_contains_workspace);
+    SC_RUN_TEST(test_sandbox_seatbelt_null_args);
+
+    SC_TEST_SUITE("Sandbox — Landlock (apply)");
+    SC_RUN_TEST(test_sandbox_landlock_apply_in_test_mode);
+    SC_RUN_TEST(test_sandbox_landlock_vtable_has_apply);
+    SC_RUN_TEST(test_sandbox_landlock_wrap_passthrough);
+
+    SC_TEST_SUITE("Sandbox — seccomp-BPF");
+    SC_RUN_TEST(test_sandbox_seccomp_vtable_wiring);
+    SC_RUN_TEST(test_sandbox_seccomp_availability);
+    SC_RUN_TEST(test_sandbox_seccomp_wrap_passthrough);
+    SC_RUN_TEST(test_sandbox_seccomp_has_apply);
+    SC_RUN_TEST(test_sandbox_seccomp_network_flag);
+
+    SC_TEST_SUITE("Sandbox — WASI");
+    SC_RUN_TEST(test_sandbox_wasi_vtable_wiring);
+    SC_RUN_TEST(test_sandbox_wasi_wrap_command_format);
+    SC_RUN_TEST(test_sandbox_wasi_no_apply);
+
+    SC_TEST_SUITE("Sandbox — Firecracker");
+    SC_RUN_TEST(test_sandbox_firecracker_vtable_wiring);
+    SC_RUN_TEST(test_sandbox_firecracker_not_available_in_test);
+    SC_RUN_TEST(test_sandbox_firecracker_defaults);
+    SC_RUN_TEST(test_sandbox_firecracker_wrap_non_linux);
+
+    SC_TEST_SUITE("Sandbox — Auto-detection & Apply");
+    SC_RUN_TEST(test_sandbox_auto_select_returns_valid);
+    SC_RUN_TEST(test_sandbox_detect_available_runs);
+    SC_RUN_TEST(test_sandbox_apply_noop_returns_ok);
+    SC_RUN_TEST(test_sandbox_apply_null_returns_ok);
 
     SC_TEST_SUITE("Observer");
     SC_RUN_TEST(test_observer_noop);

@@ -18,12 +18,21 @@ typedef sc_error_t (*sc_sandbox_wrap_fn)(void *ctx,
     const char *const *argv, size_t argc,
     const char **buf, size_t buf_count, size_t *out_count);
 
+/**
+ * Apply sandbox restrictions to the current process (called after fork,
+ * before the child runs). Used by kernel-level sandboxes (Landlock, seccomp)
+ * that cannot be applied via argv wrapping. Returns SC_OK or SC_ERR_*.
+ * NULL means not applicable — use wrap_command instead.
+ */
+typedef sc_error_t (*sc_sandbox_apply_fn)(void *ctx);
+
 typedef bool (*sc_sandbox_available_fn)(void *ctx);
 typedef const char *(*sc_sandbox_name_fn)(void *ctx);
 typedef const char *(*sc_sandbox_desc_fn)(void *ctx);
 
 typedef struct sc_sandbox_vtable {
     sc_sandbox_wrap_fn wrap_command;
+    sc_sandbox_apply_fn apply;
     sc_sandbox_available_fn is_available;
     sc_sandbox_name_fn name;
     sc_sandbox_desc_fn description;
@@ -39,6 +48,11 @@ static inline sc_error_t sc_sandbox_wrap_command(sc_sandbox_t *sb,
     const char **buf, size_t buf_count, size_t *out_count) {
     if (!sb || !sb->vtable || !sb->vtable->wrap_command) return SC_ERR_INVALID_ARGUMENT;
     return sb->vtable->wrap_command(sb->ctx, argv, argc, buf, buf_count, out_count);
+}
+
+static inline sc_error_t sc_sandbox_apply(sc_sandbox_t *sb) {
+    if (!sb || !sb->vtable || !sb->vtable->apply) return SC_OK;
+    return sb->vtable->apply(sb->ctx);
 }
 
 static inline bool sc_sandbox_is_available(sc_sandbox_t *sb) {
@@ -64,6 +78,10 @@ typedef enum sc_sandbox_backend {
     SC_SANDBOX_FIREJAIL,
     SC_SANDBOX_BUBBLEWRAP,
     SC_SANDBOX_DOCKER,
+    SC_SANDBOX_SEATBELT,
+    SC_SANDBOX_SECCOMP,
+    SC_SANDBOX_WASI,
+    SC_SANDBOX_FIRECRACKER,
 } sc_sandbox_backend_t;
 
 /* Allocator interface for docker sandbox */
@@ -91,6 +109,10 @@ typedef struct sc_available_backends {
     bool firejail;
     bool bubblewrap;
     bool docker;
+    bool seatbelt;
+    bool seccomp;
+    bool wasi;
+    bool firecracker;
 } sc_available_backends_t;
 
 sc_available_backends_t sc_sandbox_detect_available(const char *workspace_dir,

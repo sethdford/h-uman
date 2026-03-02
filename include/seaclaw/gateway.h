@@ -15,8 +15,9 @@
 #define SC_GATEWAY_MAX_BODY_SIZE 65536
 #define SC_GATEWAY_RATE_LIMIT_PER_MIN 60
 
-/* Forward declaration for control protocol handler */
+/* Forward declarations */
 typedef struct sc_control_protocol sc_control_protocol_t;
+typedef struct sc_app_context sc_app_context_t;
 
 typedef struct sc_gateway_config {
     const char *host;
@@ -37,6 +38,9 @@ typedef struct sc_gateway_config {
 
     /* Control protocol handler (set by caller to wire RPC methods) */
     sc_control_protocol_t *control;
+
+    /* Application context for RPC methods (sessions, tools, config, etc.) */
+    sc_app_context_t *app_ctx;
 } sc_gateway_config_t;
 
 /* ──────────────────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ static const char *noop_desc(void *ctx) {
 
 static const sc_sandbox_vtable_t noop_vtable = {
     .wrap_command = noop_wrap,
+    .apply = NULL,
     .is_available = noop_available,
     .name = noop_name,
     .description = noop_desc,

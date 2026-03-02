@@ -67,6 +67,7 @@ static const char *bubblewrap_desc(void *ctx) {
 
 static const sc_sandbox_vtable_t bubblewrap_vtable = {
     .wrap_command = bubblewrap_wrap,
+    .apply = NULL,
     .is_available = bubblewrap_available,
     .name = bubblewrap_name,
     .description = bubblewrap_desc,

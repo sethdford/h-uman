@@ -1,4 +1,6 @@
 #include "seaclaw/skillforge.h"
+#include "seaclaw/core/allocator.h"
+#include "seaclaw/core/http.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include <stdio.h>
@@ -267,16 +269,26 @@ sc_error_t sc_skillforge_install(const char *name, const char *url) {
     mkdir(dir_path, 0755);
 #endif
 
-    FILE *f = fopen(path, "w");
-    if (!f) return SC_ERR_IO;
-
-    fprintf(f, "{\"name\":\"%s\",\"description\":\"\",\"enabled\":true,\"source_url\":\"", name);
-    for (const char *p = url; *p; p++) {
-        if (*p == '"' || *p == '\\') fputc('\\', f);
-        fputc(*p, f);
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_http_response_t resp = {0};
+    sc_error_t err = sc_http_get(&alloc, url, NULL, &resp);
+    if (err != SC_OK || !resp.body) {
+        sc_http_response_free(&alloc, &resp);
+        return err != SC_OK ? err : SC_ERR_PROVIDER_RESPONSE;
     }
-    fprintf(f, "\"}\n");
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        sc_http_response_free(&alloc, &resp);
+        return SC_ERR_IO;
+    }
+    size_t written = fwrite(resp.body, 1, resp.body_len, f);
     fclose(f);
+    sc_http_response_free(&alloc, &resp);
+    if (written != resp.body_len) {
+        remove(path);
+        return SC_ERR_IO;
+    }
     return SC_OK;
 #endif
 }

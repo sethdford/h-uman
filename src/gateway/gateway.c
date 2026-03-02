@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "seaclaw/gateway/ws_server.h"
 #include "seaclaw/gateway/control_protocol.h"
+#include "seaclaw/gateway/event_bridge.h"
 #include "seaclaw/config.h"
 #include "seaclaw/health.h"
 #include "seaclaw/core/allocator.h"
@@ -49,7 +50,7 @@ void sc_gateway_config_from_cfg(const sc_config_gateway_t *cfg_gw,
     out->test_mode = false;
     out->on_webhook = NULL;
     out->on_webhook_ctx = NULL;
-    out->control_ui_dir = NULL;
+    out->control_ui_dir = cfg_gw->control_ui_dir;
     out->auth_token = NULL;
     out->control = NULL;
 }
@@ -345,6 +346,10 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
     sc_error_t err = SC_OK;
     sc_control_protocol_t *ctrl = NULL;
     sc_control_protocol_t proto_local;
+    sc_event_bridge_t event_bridge;
+    bool bridge_active = false;
+
+    memset(&event_bridge, 0, sizeof(event_bridge));
 
     gw = (sc_gateway_state_t *)alloc->alloc(alloc->ctx, sizeof(sc_gateway_state_t));
     if (!gw) { err = SC_ERR_OUT_OF_MEMORY; goto cleanup; }
@@ -356,6 +361,14 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
     sc_control_protocol_init(ctrl, alloc, &gw->ws);
     sc_ws_server_init(&gw->ws, alloc, sc_control_on_message, sc_control_on_close,
         ctrl);
+
+    if (cfg.app_ctx) {
+        sc_control_set_app_ctx(ctrl, cfg.app_ctx);
+        if (cfg.app_ctx->bus) {
+            sc_event_bridge_init(&event_bridge, ctrl, cfg.app_ctx->bus);
+            bridge_active = true;
+        }
+    }
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -513,6 +526,8 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
     }
 
 cleanup:
+    if (bridge_active)
+        sc_event_bridge_deinit(&event_bridge);
     sc_ws_server_deinit(&gw->ws);
     if (ctrl == &proto_local)
         sc_control_protocol_deinit(ctrl);

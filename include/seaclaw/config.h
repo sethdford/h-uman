@@ -131,6 +131,7 @@ typedef struct sc_config_gateway {
     bool allow_public_bind;
     uint32_t pair_rate_limit_per_minute;
     char *webhook_hmac_secret; /* optional, for X-Signature verification */
+    char *control_ui_dir;      /* path to built Control UI static files */
 } sc_config_gateway_t;
 
 typedef struct sc_secrets_config { bool encrypt; } sc_secrets_config_t;

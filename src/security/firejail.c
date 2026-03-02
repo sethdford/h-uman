@@ -62,6 +62,7 @@ static const char *firejail_desc(void *ctx) {
 
 static const sc_sandbox_vtable_t firejail_vtable = {
     .wrap_command = firejail_wrap,
+    .apply = NULL,
     .is_available = firejail_available,
     .name = firejail_name,
     .description = firejail_desc,
