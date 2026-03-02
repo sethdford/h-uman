@@ -813,7 +813,7 @@ static bool gw_agent_on_message(sc_bus_event_type_t type,
     (void)type;
     gw_agent_bridge_t *b = (gw_agent_bridge_t *)user_ctx;
     if (!b || !b->agent || !ev) return true;
-    const char *msg = ev->message;
+    const char *msg = ev->payload ? (const char *)ev->payload : ev->message;
     if (!msg || !msg[0]) return true;
 
     char *reply = NULL;
@@ -821,9 +821,18 @@ static bool gw_agent_on_message(sc_bus_event_type_t type,
     sc_error_t err = sc_agent_turn(b->agent, msg, strlen(msg),
         &reply, &reply_len);
     if (err == SC_OK && reply && reply_len > 0) {
-        sc_bus_publish_simple(b->bus, SC_BUS_MESSAGE_SENT,
-            ev->channel[0] ? ev->channel : "gateway",
-            ev->id, reply);
+        sc_bus_event_t rev;
+        memset(&rev, 0, sizeof(rev));
+        rev.type = SC_BUS_MESSAGE_SENT;
+        snprintf(rev.channel, SC_BUS_CHANNEL_LEN, "%s",
+            ev->channel[0] ? ev->channel : "gateway");
+        snprintf(rev.id, SC_BUS_ID_LEN, "%s", ev->id);
+        rev.payload = reply;
+        size_t rl = reply_len;
+        if (rl >= SC_BUS_MSG_LEN) rl = SC_BUS_MSG_LEN - 1;
+        memcpy(rev.message, reply, rl);
+        rev.message[rl] = '\0';
+        sc_bus_publish(b->bus, &rev);
     }
     if (reply)
         b->agent->alloc->free(b->agent->alloc->ctx, reply, reply_len + 1);

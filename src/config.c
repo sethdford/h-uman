@@ -813,7 +813,10 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
     out->workspace_dir = sc_strdup(&a, workspace_dir);
 
     sc_error_t err = load_json_file(out, global_path);
-    if (err != SC_OK) return err;
+    if (err != SC_OK) {
+        sc_config_deinit(out);
+        return err;
+    }
 
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd))) {
@@ -1151,12 +1154,117 @@ sc_error_t sc_config_save(const sc_config_t *cfg) {
     if (cfg->max_tokens > 0)
         sc_json_object_set(&a, root, "max_tokens", sc_json_number_new(&a, (double)cfg->max_tokens));
 
+    sc_json_object_set(&a, root, "temperature", sc_json_number_new(&a, cfg->temperature));
+
+    /* gateway */
     sc_json_value_t *gw = sc_json_object_new(&a);
     if (gw) {
+        sc_json_object_set(&a, gw, "enabled", sc_json_bool_new(&a, cfg->gateway.enabled));
         sc_json_object_set(&a, gw, "port", sc_json_number_new(&a, cfg->gateway.port));
         if (cfg->gateway.host) sc_json_object_set(&a, gw, "host",
             sc_json_string_new(&a, cfg->gateway.host, strlen(cfg->gateway.host)));
+        if (cfg->gateway.control_ui_dir) sc_json_object_set(&a, gw, "control_ui_dir",
+            sc_json_string_new(&a, cfg->gateway.control_ui_dir, strlen(cfg->gateway.control_ui_dir)));
+        sc_json_object_set(&a, gw, "require_pairing", sc_json_bool_new(&a, cfg->gateway.require_pairing));
         sc_json_object_set(&a, root, "gateway", gw);
+    }
+
+    /* memory */
+    sc_json_value_t *mem = sc_json_object_new(&a);
+    if (mem) {
+        if (cfg->memory.backend) sc_json_object_set(&a, mem, "backend",
+            sc_json_string_new(&a, cfg->memory.backend, strlen(cfg->memory.backend)));
+        if (cfg->memory.sqlite_path) sc_json_object_set(&a, mem, "sqlite_path",
+            sc_json_string_new(&a, cfg->memory.sqlite_path, strlen(cfg->memory.sqlite_path)));
+        sc_json_object_set(&a, mem, "auto_save", sc_json_bool_new(&a, cfg->memory.auto_save));
+        sc_json_object_set(&a, root, "memory", mem);
+    }
+
+    /* security */
+    sc_json_value_t *sec = sc_json_object_new(&a);
+    if (sec) {
+        sc_json_object_set(&a, sec, "autonomy_level",
+            sc_json_number_new(&a, cfg->security.autonomy_level));
+        if (cfg->security.sandbox) sc_json_object_set(&a, sec, "sandbox",
+            sc_json_string_new(&a, cfg->security.sandbox, strlen(cfg->security.sandbox)));
+        sc_json_object_set(&a, root, "security", sec);
+    }
+
+    /* tools */
+    sc_json_value_t *tools_obj = sc_json_object_new(&a);
+    if (tools_obj) {
+        if (cfg->tools.shell_timeout_secs > 0)
+            sc_json_object_set(&a, tools_obj, "shell_timeout_secs",
+                sc_json_number_new(&a, (double)cfg->tools.shell_timeout_secs));
+        if (cfg->tools.max_file_size_bytes > 0)
+            sc_json_object_set(&a, tools_obj, "max_file_size_bytes",
+                sc_json_number_new(&a, (double)cfg->tools.max_file_size_bytes));
+        sc_json_object_set(&a, root, "tools", tools_obj);
+    }
+
+    /* cost */
+    sc_json_value_t *cost = sc_json_object_new(&a);
+    if (cost) {
+        sc_json_object_set(&a, cost, "enabled", sc_json_bool_new(&a, cfg->cost.enabled));
+        if (cfg->cost.daily_limit_usd > 0)
+            sc_json_object_set(&a, cost, "daily_limit_usd",
+                sc_json_number_new(&a, cfg->cost.daily_limit_usd));
+        if (cfg->cost.monthly_limit_usd > 0)
+            sc_json_object_set(&a, cost, "monthly_limit_usd",
+                sc_json_number_new(&a, cfg->cost.monthly_limit_usd));
+        sc_json_object_set(&a, root, "cost", cost);
+    }
+
+    /* agent */
+    sc_json_value_t *agent_obj = sc_json_object_new(&a);
+    if (agent_obj) {
+        if (cfg->agent.max_tool_iterations > 0)
+            sc_json_object_set(&a, agent_obj, "max_tool_iterations",
+                sc_json_number_new(&a, (double)cfg->agent.max_tool_iterations));
+        if (cfg->agent.max_history_messages > 0)
+            sc_json_object_set(&a, agent_obj, "max_history_messages",
+                sc_json_number_new(&a, (double)cfg->agent.max_history_messages));
+        sc_json_object_set(&a, root, "agent", agent_obj);
+    }
+
+    /* secrets */
+    sc_json_value_t *secrets_obj = sc_json_object_new(&a);
+    if (secrets_obj) {
+        sc_json_object_set(&a, secrets_obj, "encrypt",
+            sc_json_bool_new(&a, cfg->secrets.encrypt));
+        sc_json_object_set(&a, root, "secrets", secrets_obj);
+    }
+
+    /* identity */
+    if (cfg->identity.format) {
+        sc_json_value_t *id_obj = sc_json_object_new(&a);
+        if (id_obj) {
+            sc_json_object_set(&a, id_obj, "format",
+                sc_json_string_new(&a, cfg->identity.format, strlen(cfg->identity.format)));
+            sc_json_object_set(&a, root, "identity", id_obj);
+        }
+    }
+
+    /* providers array */
+    if (cfg->providers_len > 0) {
+        sc_json_value_t *parr = sc_json_array_new(&a);
+        if (parr) {
+            for (size_t i = 0; i < cfg->providers_len; i++) {
+                sc_json_value_t *pe = sc_json_object_new(&a);
+                if (!pe) continue;
+                if (cfg->providers[i].name)
+                    sc_json_object_set(&a, pe, "name",
+                        sc_json_string_new(&a, cfg->providers[i].name, strlen(cfg->providers[i].name)));
+                if (cfg->providers[i].base_url)
+                    sc_json_object_set(&a, pe, "base_url",
+                        sc_json_string_new(&a, cfg->providers[i].base_url, strlen(cfg->providers[i].base_url)));
+                if (cfg->providers[i].native_tools)
+                    sc_json_object_set(&a, pe, "native_tools",
+                        sc_json_bool_new(&a, cfg->providers[i].native_tools));
+                sc_json_array_push(&a, parr, pe);
+            }
+            sc_json_object_set(&a, root, "providers", parr);
+        }
     }
 
     char *json_str = NULL;

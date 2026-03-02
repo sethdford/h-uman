@@ -228,8 +228,17 @@ static sc_error_t handle_chat_send(sc_allocator_t *alloc,
     }
 
     if (app && app->bus) {
-        sc_bus_publish_simple(app->bus, SC_BUS_MESSAGE_RECEIVED,
-            "control-ui", session_key, message);
+        sc_bus_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SC_BUS_MESSAGE_RECEIVED;
+        snprintf(ev.channel, SC_BUS_CHANNEL_LEN, "control-ui");
+        snprintf(ev.id, SC_BUS_ID_LEN, "%s", session_key);
+        ev.payload = (void *)message;
+        size_t ml = strlen(message);
+        if (ml >= SC_BUS_MSG_LEN) ml = SC_BUS_MSG_LEN - 1;
+        memcpy(ev.message, message, ml);
+        ev.message[ml] = '\0';
+        sc_bus_publish(app->bus, &ev);
     }
 
     sc_json_value_t *obj = sc_json_object_new(alloc);
@@ -1037,6 +1046,8 @@ void sc_control_on_message(sc_ws_conn_t *conn, const char *data, size_t data_len
                 id_esc[j] = '\0';
                 pos += (size_t)snprintf(res_buf + pos, res_cap - pos, "%s\"", id_esc);
                 proto->alloc->free(proto->alloc->ctx, id_esc, esc_len);
+            } else {
+                pos += (size_t)snprintf(res_buf + pos, res_cap - pos, "%s\"", id);
             }
             pos += (size_t)snprintf(res_buf + pos, res_cap - pos,
                 ",\"ok\":%s,\"payload\":", ok ? "true" : "false");

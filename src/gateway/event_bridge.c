@@ -49,10 +49,12 @@ static bool bus_callback(sc_bus_event_type_t type, const sc_bus_event_t *ev,
         sc_json_object_set(bridge->proto->alloc, payload_obj, "id",
             sc_json_string_new(bridge->proto->alloc, ev->id, strlen(ev->id)));
     }
-    if (ev->message[0]) {
+    const char *msg_text = (ev->payload) ? (const char *)ev->payload :
+                           (ev->message[0] ? ev->message : NULL);
+    if (msg_text) {
         sc_json_object_set(bridge->proto->alloc, payload_obj, "message",
-            sc_json_string_new(bridge->proto->alloc, ev->message,
-                strlen(ev->message)));
+            sc_json_string_new(bridge->proto->alloc, msg_text,
+                strlen(msg_text)));
     }
 
     char *payload_str = NULL;

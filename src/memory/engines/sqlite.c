@@ -18,31 +18,33 @@ typedef struct sc_sqlite_memory {
     sc_allocator_t *alloc;
 } sc_sqlite_memory_t;
 
-static const char *schema_sql =
+static const char *const schema_parts[] = {
     "CREATE TABLE IF NOT EXISTS memories("
     "id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,"
     "content TEXT NOT NULL,category TEXT NOT NULL DEFAULT'core',"
-    "session_id TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);"
-    "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);"
-    "CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);"
-    "CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);"
+    "session_id TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key)",
+    "CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id)",
     "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5("
-    "key,content,content=memories,content_rowid=rowid);"
+    "key,content,content=memories,content_rowid=rowid)",
     "CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN "
-    "INSERT INTO memories_fts(rowid,key,content)VALUES(new.rowid,new.key,new.content);END;"
+    "INSERT INTO memories_fts(rowid,key,content)VALUES(new.rowid,new.key,new.content);END",
     "CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN "
     "INSERT INTO memories_fts(memories_fts,rowid,key,content)"
-    "VALUES('delete',old.rowid,old.key,old.content);END;"
+    "VALUES('delete',old.rowid,old.key,old.content);END",
     "CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN "
     "INSERT INTO memories_fts(memories_fts,rowid,key,content)"
     "VALUES('delete',old.rowid,old.key,old.content);"
     "INSERT INTO memories_fts(rowid,key,content)"
-    "VALUES(new.rowid,new.key,new.content);END;"
+    "VALUES(new.rowid,new.key,new.content);END",
     "CREATE TABLE IF NOT EXISTS messages("
     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "session_id TEXT NOT NULL,role TEXT NOT NULL,"
-    "content TEXT NOT NULL,created_at TEXT DEFAULT(datetime('now')));"
-    "CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY,value TEXT NOT NULL);";
+    "content TEXT NOT NULL,created_at TEXT DEFAULT(datetime('now')))",
+    "CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+    NULL
+};
 
 static void get_timestamp(char *buf, size_t buf_size) {
     time_t t = time(NULL);
@@ -538,12 +540,14 @@ sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path) 
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     sqlite3_exec(db, "PRAGMA foreign_keys=ON;", NULL, NULL, NULL);
 
-    char *err = NULL;
-    rc = sqlite3_exec(db, schema_sql, NULL, NULL, &err);
-    if (rc != SQLITE_OK) {
-        if (err) sqlite3_free(err);
-        sqlite3_close(db);
-        return (sc_memory_t){ .ctx = NULL, .vtable = NULL };
+    for (const char *const *part = schema_parts; *part; part++) {
+        char *err = NULL;
+        rc = sqlite3_exec(db, *part, NULL, NULL, &err);
+        if (rc != SQLITE_OK) {
+            if (err) sqlite3_free(err);
+            sqlite3_close(db);
+            return (sc_memory_t){ .ctx = NULL, .vtable = NULL };
+        }
     }
 
     sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_sqlite_memory_t));

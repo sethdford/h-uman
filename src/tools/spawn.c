@@ -29,13 +29,12 @@ typedef struct sc_spawn_ctx {
     sc_security_policy_t *policy;
 } sc_spawn_ctx_t;
 
+#if !defined(_WIN32) && !SC_IS_TEST
 typedef struct sc_spawn_child_setup_ctx {
     sc_sandbox_apply_fn sandbox_apply;
     void *sandbox_ctx;
     const sc_net_proxy_t *net_proxy;
 } sc_spawn_child_setup_ctx_t;
-
-#ifndef _WIN32
 static sc_error_t spawn_child_setup(void *raw) {
     sc_spawn_child_setup_ctx_t *s = (sc_spawn_child_setup_ctx_t *)raw;
 
@@ -75,7 +74,7 @@ static sc_error_t spawn_child_setup(void *raw) {
 
     return SC_OK;
 }
-#endif
+#endif /* !_WIN32 && !SC_IS_TEST */
 
 static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,

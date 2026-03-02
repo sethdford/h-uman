@@ -553,6 +553,10 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
                 }
             }
 
+            if (rejected) {
+                s_request_origin = NULL;
+            }
+
             if (!rejected) {
                 if (body_len > 0 && body_len <= cfg.max_body_size) {
                     size_t got = 0;

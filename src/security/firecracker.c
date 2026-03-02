@@ -45,47 +45,61 @@ static bool kvm_available(void) {
 }
 #endif
 
+#ifdef __linux__
 static sc_error_t firecracker_write_config(sc_firecracker_ctx_t *fc,
     const char *config_path, const char *const *argv, size_t argc) {
     FILE *f = fopen(config_path, "w");
     if (!f) return SC_ERR_IO;
 
-    char boot_args[2048];
+    /* Build boot_args: shell-safe single-quoted command.
+     * Inside single quotes, only '\'' works to escape a literal quote
+     * (end quote, escaped quote, new quote). The entire string must also
+     * be valid inside a JSON double-quoted value (escape " and \). */
+    char boot_args[4096];
     size_t pos = 0;
     pos += (size_t)snprintf(boot_args + pos, sizeof(boot_args) - pos,
         "console=ttyS0 reboot=k panic=1 pci=off init=/bin/sh -- -c '");
-    for (size_t i = 0; i < argc && pos < sizeof(boot_args) - 4; i++) {
+    for (size_t i = 0; i < argc && pos + 16 < sizeof(boot_args); i++) {
         if (i > 0 && pos < sizeof(boot_args) - 2) boot_args[pos++] = ' ';
-        for (const char *p = argv[i]; *p && pos < sizeof(boot_args) - 4; p++) {
-            if (*p == '\'' || *p == '\\') boot_args[pos++] = '\\';
-            boot_args[pos++] = *p;
+        for (const char *p = argv[i]; *p && pos + 16 < sizeof(boot_args); p++) {
+            if (*p == '\'') {
+                memcpy(boot_args + pos, "'\\''", 4);
+                pos += 4;
+            } else {
+                boot_args[pos++] = *p;
+            }
         }
     }
     if (pos < sizeof(boot_args) - 2) boot_args[pos++] = '\'';
     boot_args[pos] = '\0';
 
-    fprintf(f,
-        "{\n"
-        "  \"boot-source\": {\n"
-        "    \"kernel_image_path\": \"%s\",\n"
-        "    \"boot_args\": \"%s\"\n"
-        "  },\n"
-        "  \"drives\": [{\n"
-        "    \"drive_id\": \"rootfs\",\n"
-        "    \"path_on_host\": \"%s\",\n"
-        "    \"is_root_device\": true,\n"
-        "    \"is_read_only\": false\n"
-        "  }],\n"
+    /* Write JSON config, escaping boot_args for the JSON string value */
+    fprintf(f, "{\n  \"boot-source\": {\n    \"kernel_image_path\": \"");
+    for (const char *p = fc->kernel_path; *p; p++) {
+        if (*p == '"' || *p == '\\') fputc('\\', f);
+        fputc(*p, f);
+    }
+    fprintf(f, "\",\n    \"boot_args\": \"");
+    for (const char *p = boot_args; *p; p++) {
+        if (*p == '"' || *p == '\\') fputc('\\', f);
+        fputc(*p, f);
+    }
+    fprintf(f, "\"\n  },\n  \"drives\": [{\n    \"drive_id\": \"rootfs\",\n"
+        "    \"path_on_host\": \"");
+    for (const char *p = fc->rootfs_path; *p; p++) {
+        if (*p == '"' || *p == '\\') fputc('\\', f);
+        fputc(*p, f);
+    }
+    fprintf(f, "\",\n    \"is_root_device\": true,\n"
+        "    \"is_read_only\": false\n  }],\n"
         "  \"machine-config\": {\n"
         "    \"vcpu_count\": %u,\n"
-        "    \"mem_size_mib\": %u\n"
-        "  }\n"
-        "}\n",
-        fc->kernel_path, boot_args, fc->rootfs_path,
+        "    \"mem_size_mib\": %u\n  }\n}\n",
         fc->vcpu_count, fc->mem_size_mib);
     fclose(f);
     return SC_OK;
 }
+#endif
 
 static sc_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t argc,
     const char **buf, size_t buf_count, size_t *out_count) {

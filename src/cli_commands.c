@@ -202,10 +202,17 @@ sc_error_t cmd_workspace(sc_allocator_t *alloc, int argc, char **argv) {
             return SC_ERR_INVALID_ARGUMENT;
         }
         if (err == SC_OK) {
-            char json_buf[512];
-            snprintf(json_buf, sizeof(json_buf),
-                "{\"workspace\":\"%s\"}", argv[3]);
-            sc_error_t pe = sc_config_parse_json(&cfg, json_buf, strlen(json_buf));
+            char json_buf[1024];
+            size_t jp = 0;
+            jp += (size_t)snprintf(json_buf + jp, sizeof(json_buf) - jp,
+                "{\"workspace\":\"");
+            const char *s = argv[3];
+            for (; *s && jp + 4 < sizeof(json_buf); s++) {
+                if (*s == '"' || *s == '\\') json_buf[jp++] = '\\';
+                json_buf[jp++] = *s;
+            }
+            jp += (size_t)snprintf(json_buf + jp, sizeof(json_buf) - jp, "\"}");
+            sc_error_t pe = sc_config_parse_json(&cfg, json_buf, jp);
             if (pe == SC_OK) {
                 sc_error_t se = sc_config_save(&cfg);
                 if (se == SC_OK)
