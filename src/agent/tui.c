@@ -1026,9 +1026,18 @@ sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc,
     sc_agent_t *agent, const char *provider_name,
     const char *model_name, size_t tools_count)
 {
-    (void)state; (void)alloc; (void)agent;
-    (void)provider_name; (void)model_name; (void)tools_count;
-    return SC_ERR_NOT_SUPPORTED;
+    if (!state || !alloc) return SC_ERR_INVALID_ARGUMENT;
+    memset(state, 0, sizeof(*state));
+    state->alloc = alloc;
+    state->agent = agent;
+    state->provider_name = provider_name;
+    state->model_name = model_name;
+    state->tools_count = tools_count;
+    state->tab_count = 1;
+    state->tabs = (sc_tui_tab_snapshot_t *)alloc->alloc(alloc->ctx,
+        SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    if (state->tabs) memset(state->tabs, 0, SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    return SC_OK;
 }
 
 sc_error_t sc_tui_run(sc_tui_state_t *state) {
@@ -1037,12 +1046,28 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
 }
 
 void sc_tui_deinit(sc_tui_state_t *state) {
-    (void)state;
+    if (!state || !state->alloc) return;
+    for (int i = 0; i < SC_TUI_HISTORY_MAX; i++) {
+        if (state->input_history[i]) {
+            state->alloc->free(state->alloc->ctx, state->input_history[i],
+                strlen(state->input_history[i]) + 1);
+        }
+    }
+    if (state->tabs) {
+        state->alloc->free(state->alloc->ctx, state->tabs,
+            SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    }
 }
 
+static const sc_observer_vtable_t tui_stub_observer_vtable = {
+    .record_event = NULL,
+    .record_metric = NULL,
+    .name = NULL,
+};
+
 sc_observer_t sc_tui_observer_create(sc_tui_state_t *state) {
-    (void)state;
-    return sc_observer_noop();
+    sc_observer_t obs = { .ctx = state, .vtable = &tui_stub_observer_vtable };
+    return obs;
 }
 
 #endif

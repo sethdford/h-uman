@@ -13,6 +13,9 @@
 #include "seaclaw/tools/factory.h"
 #include "seaclaw/providers/openai.h"
 #include "seaclaw/provider.h"
+#ifdef SC_ENABLE_TUI
+#include "seaclaw/agent/tui.h"
+#endif
 #include <string.h>
 
 static void test_agent_max_iterations_limit(void) {
@@ -692,6 +695,66 @@ static void test_dispatcher_invalid_json_args_propagates_failure(void) {
     if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+#ifdef SC_ENABLE_TUI
+static void test_tui_init_deinit(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    sc_tui_state_t state;
+    sc_error_t err = sc_tui_init(&state, &alloc, &agent, "test", "test-model", 3);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(state.tabs);
+    SC_ASSERT_EQ(state.tab_count, 1);
+    SC_ASSERT_EQ(state.active_tab, 0);
+    SC_ASSERT_STR_EQ(state.provider_name, "test");
+    SC_ASSERT_STR_EQ(state.model_name, "test-model");
+    SC_ASSERT_EQ(state.tools_count, 3u);
+    sc_tui_deinit(&state);
+}
+
+static void test_tui_approval_state_initial(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    sc_tui_state_t state;
+    sc_tui_init(&state, &alloc, &agent, "test", "m", 0);
+    SC_ASSERT_EQ(state.approval, SC_TUI_APPROVAL_NONE);
+    SC_ASSERT_EQ(state.approval_tool[0], '\0');
+    SC_ASSERT_EQ(state.approval_args[0], '\0');
+    sc_tui_deinit(&state);
+}
+
+static void test_tui_output_initially_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    sc_tui_state_t state;
+    sc_tui_init(&state, &alloc, &agent, "p", "m", 0);
+    SC_ASSERT_EQ(state.output_len, 0u);
+    SC_ASSERT_EQ(state.input_len, 0u);
+    SC_ASSERT_EQ(state.tool_log_count, 0u);
+    SC_ASSERT_FALSE(state.agent_running);
+    SC_ASSERT_FALSE(state.quit_requested);
+    sc_tui_deinit(&state);
+}
+
+static void test_tui_observer_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    agent.alloc = &alloc;
+    sc_tui_state_t state;
+    sc_tui_init(&state, &alloc, &agent, "p", "m", 0);
+    sc_observer_t obs = sc_tui_observer_create(&state);
+    SC_ASSERT_NOT_NULL(obs.ctx);
+    SC_ASSERT_NOT_NULL(obs.vtable);
+    sc_tui_deinit(&state);
+}
+#endif
+
 void run_agent_extended_tests(void) {
     SC_TEST_SUITE("Agent Extended");
     SC_RUN_TEST(test_agent_max_iterations_limit);
@@ -756,4 +819,12 @@ void run_agent_extended_tests(void) {
     SC_RUN_TEST(test_dispatcher_max_parallel_config_stored);
     SC_RUN_TEST(test_dispatcher_invalid_json_args_propagates_failure);
     /* test_agent_tool_call_round_trip disabled: triggers SEGV in provider serialization on some builds */
+
+#ifdef SC_ENABLE_TUI
+    SC_TEST_SUITE("TUI");
+    SC_RUN_TEST(test_tui_init_deinit);
+    SC_RUN_TEST(test_tui_approval_state_initial);
+    SC_RUN_TEST(test_tui_output_initially_empty);
+    SC_RUN_TEST(test_tui_observer_create);
+#endif
 }

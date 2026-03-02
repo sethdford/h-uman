@@ -33,20 +33,42 @@ sc_error_t cmd_channel(sc_allocator_t *alloc, int argc, char **argv) {
 
 /* ── hardware ────────────────────────────────────────────────────────────── */
 sc_error_t cmd_hardware(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)alloc;
+    sc_config_t cfg;
+    sc_error_t err = sc_config_load(alloc, &cfg);
+
     if (argc < 3 || strcmp(argv[2], "list") == 0) {
-        printf("Detected hardware: none\n");
+        if (err == SC_OK) {
+            printf("Peripherals: %s\n",
+                cfg.peripherals.enabled ? "enabled" : "disabled");
+            if (cfg.hardware.enabled) {
+                printf("Hardware transport: %s\n",
+                    cfg.hardware.transport ? cfg.hardware.transport : "auto");
+                if (cfg.hardware.serial_port)
+                    printf("Serial port: %s @ %u baud\n",
+                        cfg.hardware.serial_port, cfg.hardware.baud_rate);
+                if (cfg.hardware.probe_target)
+                    printf("Probe target: %s\n", cfg.hardware.probe_target);
+            } else {
+                printf("Detected hardware: none\n");
+            }
+        } else {
+            printf("Detected hardware: none\n");
+        }
         printf("Supported boards: arduino-uno, nucleo-f401re, stm32f411, esp32, rpi-pico\n");
+        if (err == SC_OK) sc_config_deinit(&cfg);
         return SC_OK;
     }
     if (strcmp(argv[2], "info") == 0) {
         if (argc < 4) {
             fprintf(stderr, "Usage: seaclaw hardware info <board>\n");
+            if (err == SC_OK) sc_config_deinit(&cfg);
             return SC_ERR_INVALID_ARGUMENT;
         }
         printf("Board: %s\nStatus: not connected\n", argv[3]);
+        if (err == SC_OK) sc_config_deinit(&cfg);
         return SC_OK;
     }
+    if (err == SC_OK) sc_config_deinit(&cfg);
     fprintf(stderr, "Unknown hardware subcommand: %s\n", argv[2]);
     return SC_ERR_INVALID_ARGUMENT;
 }
@@ -164,23 +186,38 @@ done:
 
 /* ── workspace ───────────────────────────────────────────────────────────── */
 sc_error_t cmd_workspace(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)alloc;
-    if (argc < 3) {
-        printf("Current workspace: .\n");
-        return SC_OK;
-    }
-    if (strcmp(argv[2], "show") == 0) {
-        printf("Current workspace: .\n");
+    sc_config_t cfg;
+    sc_error_t err = sc_config_load(alloc, &cfg);
+    const char *ws = (err == SC_OK && cfg.workspace_dir) ? cfg.workspace_dir : ".";
+
+    if (argc < 3 || strcmp(argv[2], "show") == 0) {
+        printf("Current workspace: %s\n", ws);
+        if (err == SC_OK) sc_config_deinit(&cfg);
         return SC_OK;
     }
     if (strcmp(argv[2], "set") == 0) {
         if (argc < 4) {
             fprintf(stderr, "Usage: seaclaw workspace set <path>\n");
+            if (err == SC_OK) sc_config_deinit(&cfg);
             return SC_ERR_INVALID_ARGUMENT;
         }
-        printf("Workspace set to: %s\n", argv[3]);
+        if (err == SC_OK) {
+            char json_buf[512];
+            snprintf(json_buf, sizeof(json_buf),
+                "{\"workspace\":\"%s\"}", argv[3]);
+            sc_error_t pe = sc_config_parse_json(&cfg, json_buf, strlen(json_buf));
+            if (pe == SC_OK) {
+                sc_error_t se = sc_config_save(&cfg);
+                if (se == SC_OK)
+                    printf("Workspace set to: %s\n", argv[3]);
+                else
+                    fprintf(stderr, "Failed to save config: %s\n", sc_error_string(se));
+            }
+            sc_config_deinit(&cfg);
+        }
         return SC_OK;
     }
+    if (err == SC_OK) sc_config_deinit(&cfg);
     fprintf(stderr, "Unknown workspace subcommand: %s\n", argv[2]);
     return SC_ERR_INVALID_ARGUMENT;
 }
@@ -216,8 +253,23 @@ sc_error_t cmd_capabilities(sc_allocator_t *alloc, int argc, char **argv) {
 
 /* ── models ─────────────────────────────────────────────────────────────── */
 sc_error_t cmd_models(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)alloc;
+    sc_config_t cfg;
+    sc_error_t err = sc_config_load(alloc, &cfg);
+
     if (argc < 3 || strcmp(argv[2], "list") == 0) {
+        if (err == SC_OK) {
+            const char *prov = cfg.default_provider ? cfg.default_provider : "openai";
+            const char *model = cfg.default_model ? cfg.default_model : "(provider default)";
+            printf("Active: provider=%s model=%s\n\n", prov, model);
+            if (cfg.providers_len > 0) {
+                printf("Configured providers:\n");
+                for (size_t i = 0; i < cfg.providers_len; i++) {
+                    printf("  %-16s\n",
+                        cfg.providers[i].name ? cfg.providers[i].name : "?");
+                }
+                printf("\n");
+            }
+        }
         printf("Known providers and default models:\n");
         printf("  %-16s %s\n", "Provider", "Default Model");
         printf("  %-16s %s\n", "--------", "-------------");
@@ -226,16 +278,28 @@ sc_error_t cmd_models(sc_allocator_t *alloc, int argc, char **argv) {
         printf("  %-16s %s\n", "google", "gemini-2.0-flash");
         printf("  %-16s %s\n", "groq", "llama-3.3-70b-versatile");
         printf("  %-16s %s\n", "deepseek", "deepseek-chat");
+        printf("  %-16s %s\n", "ollama", "(local)");
+        printf("  %-16s %s\n", "openrouter", "(varies)");
+        if (err == SC_OK) sc_config_deinit(&cfg);
         return SC_OK;
     }
     if (strcmp(argv[2], "info") == 0) {
         if (argc < 4) {
             fprintf(stderr, "Usage: seaclaw models info <model>\n");
+            if (err == SC_OK) sc_config_deinit(&cfg);
             return SC_ERR_INVALID_ARGUMENT;
         }
-        printf("Model: %s\nProvider: unknown\nContext: unknown\n", argv[3]);
+        printf("Model: %s\n", argv[3]);
+        if (err == SC_OK) {
+            const char *prov = cfg.default_provider ? cfg.default_provider : "unknown";
+            printf("Provider: %s\n", prov);
+            sc_config_deinit(&cfg);
+        } else {
+            printf("Provider: unknown\n");
+        }
         return SC_OK;
     }
+    if (err == SC_OK) sc_config_deinit(&cfg);
     fprintf(stderr, "Unknown models subcommand: %s\n", argv[2]);
     return SC_ERR_INVALID_ARGUMENT;
 }

@@ -373,6 +373,130 @@ static void test_audit_chain_tamper_detected(void) {
     rmdir(dir);
 }
 
+static void test_audit_key_rotation_basic(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    char tmp[] = "/tmp/sc_audit_rot_XXXXXX";
+    char *dir = mkdtemp(tmp);
+    SC_ASSERT_NOT_NULL(dir);
+
+    sc_audit_config_t cfg = { .enabled = true, .log_path = "rot.log", .max_size_mb = 10 };
+    sc_audit_logger_t *log = sc_audit_logger_create(&sys, &cfg, dir);
+    SC_ASSERT_NOT_NULL(log);
+
+    sc_audit_event_t ev1, ev2;
+    sc_audit_event_init(&ev1, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_action(&ev1, "ls", "low", true, true);
+    sc_audit_event_init(&ev2, SC_AUDIT_FILE_ACCESS);
+    SC_ASSERT(sc_audit_logger_log(log, &ev1) == SC_OK);
+    SC_ASSERT(sc_audit_rotate_key(log) == SC_OK);
+    SC_ASSERT(sc_audit_logger_log(log, &ev2) == SC_OK);
+    sc_audit_logger_destroy(log, &sys);
+
+    char log_path[512];
+    snprintf(log_path, sizeof(log_path), "%s/rot.log", dir);
+    sc_error_t verr = sc_audit_verify_chain(log_path, NULL);
+    SC_ASSERT_EQ(verr, SC_OK);
+
+    unlink(log_path);
+    char key_path[512], hist_path[512];
+    snprintf(key_path, sizeof(key_path), "%s/.audit_hmac_key", dir);
+    snprintf(hist_path, sizeof(hist_path), "%s/.audit_key_history", dir);
+    unlink(key_path);
+    unlink(hist_path);
+    rmdir(dir);
+}
+
+static void test_audit_key_rotation_verify_detects_tamper_after_rotation(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    char tmp[] = "/tmp/sc_audit_tamper2_XXXXXX";
+    char *dir = mkdtemp(tmp);
+    SC_ASSERT_NOT_NULL(dir);
+
+    sc_audit_config_t cfg = { .enabled = true, .log_path = "tamper2.log", .max_size_mb = 10 };
+    sc_audit_logger_t *log = sc_audit_logger_create(&sys, &cfg, dir);
+    SC_ASSERT_NOT_NULL(log);
+
+    sc_audit_event_t ev1, ev2;
+    sc_audit_event_init(&ev1, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_action(&ev1, "ls", "low", true, true);
+    sc_audit_event_init(&ev2, SC_AUDIT_FILE_ACCESS);
+    SC_ASSERT(sc_audit_logger_log(log, &ev1) == SC_OK);
+    SC_ASSERT(sc_audit_rotate_key(log) == SC_OK);
+    SC_ASSERT(sc_audit_logger_log(log, &ev2) == SC_OK);
+    sc_audit_logger_destroy(log, &sys);
+
+    char log_path[512];
+    snprintf(log_path, sizeof(log_path), "%s/tamper2.log", dir);
+    FILE *f = fopen(log_path, "r+b");
+    SC_ASSERT_NOT_NULL(f);
+    /* Find the last line (post-rotation entry) and tamper with it */
+    fseek(f, 0, SEEK_END);
+    long end = ftell(f);
+    if (end > 80) {
+        fseek(f, end - 80, SEEK_SET);
+        int c = fgetc(f);
+        fseek(f, end - 80, SEEK_SET);
+        fputc(c == 'a' ? 'b' : 'a', f);
+    }
+    fclose(f);
+
+    sc_error_t tamper_verr = sc_audit_verify_chain(log_path, NULL);
+    SC_ASSERT_EQ(tamper_verr, SC_ERR_CRYPTO_DECRYPT);
+
+    unlink(log_path);
+    char key_path[512], hist_path[512];
+    snprintf(key_path, sizeof(key_path), "%s/.audit_hmac_key", dir);
+    snprintf(hist_path, sizeof(hist_path), "%s/.audit_key_history", dir);
+    unlink(key_path);
+    unlink(hist_path);
+    rmdir(dir);
+}
+
+static void test_audit_rotation_interval(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    char tmp[] = "/tmp/sc_audit_intv_XXXXXX";
+    char *dir = mkdtemp(tmp);
+    SC_ASSERT_NOT_NULL(dir);
+
+    sc_audit_config_t cfg = { .enabled = true, .log_path = "intv.log", .max_size_mb = 10 };
+    sc_audit_logger_t *log = sc_audit_logger_create(&sys, &cfg, dir);
+    SC_ASSERT_NOT_NULL(log);
+
+    sc_audit_set_rotation_interval(log, 1);  /* 1 hour */
+
+    sc_audit_event_t ev;
+    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_action(&ev, "echo a", "low", true, true);
+    SC_ASSERT(sc_audit_logger_log(log, &ev) == SC_OK);
+
+    sc_audit_test_set_last_rotation_epoch(log, time(NULL) - 7200);  /* 2 hours ago */
+    SC_ASSERT(sc_audit_logger_log(log, &ev) == SC_OK);
+
+    sc_audit_logger_destroy(log, &sys);
+
+    char log_path[512];
+    snprintf(log_path, sizeof(log_path), "%s/intv.log", dir);
+    sc_error_t verr = sc_audit_verify_chain(log_path, NULL);
+    SC_ASSERT_EQ(verr, SC_OK);
+
+    /* Verify key_rotation entry exists */
+    FILE *fr = fopen(log_path, "rb");
+    SC_ASSERT_NOT_NULL(fr);
+    char buf[4096];
+    size_t total = fread(buf, 1, sizeof(buf) - 1, fr);
+    fclose(fr);
+    buf[total] = '\0';
+    SC_ASSERT(strstr(buf, "key_rotation") != NULL);
+
+    unlink(log_path);
+    char key_path[512], hist_path[512];
+    snprintf(key_path, sizeof(key_path), "%s/.audit_hmac_key", dir);
+    snprintf(hist_path, sizeof(hist_path), "%s/.audit_key_history", dir);
+    unlink(key_path);
+    unlink(hist_path);
+    rmdir(dir);
+}
+
 static void test_audit_chain_delete_detected(void) {
     sc_allocator_t sys = sc_system_allocator();
     char tmp[] = "/tmp/sc_audit_del_XXXXXX";
@@ -1134,6 +1258,9 @@ void run_security_tests(void) {
     SC_RUN_TEST(test_audit_logger_disabled);
     SC_RUN_TEST(test_audit_chain_verify_valid);
     SC_RUN_TEST(test_audit_chain_tamper_detected);
+    SC_RUN_TEST(test_audit_key_rotation_basic);
+    SC_RUN_TEST(test_audit_key_rotation_verify_detects_tamper_after_rotation);
+    SC_RUN_TEST(test_audit_rotation_interval);
     SC_RUN_TEST(test_audit_chain_delete_detected);
 
     SC_TEST_SUITE("Sandbox");

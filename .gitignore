@@ -1,6 +1,10 @@
 # Build artifacts
 build/
 build-*/
+
+# Build output logs
+build-*-output.txt
+test-output.txt
 *.o
 *.so
 *.dylib

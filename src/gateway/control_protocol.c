@@ -47,8 +47,9 @@ static sc_error_t build_connect_response(sc_allocator_t *alloc,
         "chat.send", "chat.history", "chat.abort",
         "config.set", "config.apply", "sessions.list", "sessions.patch",
         "sessions.delete", "tools.catalog", "channels.status", "cron.list",
-        "cron.add", "cron.remove", "cron.run", "skills.list", "skills.enable",
-        "skills.disable", "update.check", "update.run", "exec.approval.resolve",
+        "cron.add", "cron.remove", "cron.run", "skills.list", "skills.install",
+        "skills.enable", "skills.disable",
+        "update.check", "update.run", "exec.approval.resolve",
         "usage.summary"
     };
     for (size_t i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
@@ -178,12 +179,10 @@ static sc_error_t handle_capabilities(sc_allocator_t *alloc,
     size_t ch_count = 0;
     if (app && app->config) {
         size_t total = 0;
-        sc_channel_catalog_all(&total);
+        const sc_channel_meta_t *catalog = sc_channel_catalog_all(&total);
         size_t configured = 0;
         for (size_t i = 0; i < total; i++) {
-            size_t cnt;
-            const sc_channel_meta_t *all = sc_channel_catalog_all(&cnt);
-            if (sc_channel_catalog_is_configured(app->config, all[i].id))
+            if (sc_channel_catalog_is_configured(app->config, catalog[i].id))
                 configured++;
         }
         ch_count = configured;
@@ -218,7 +217,17 @@ static sc_error_t handle_chat_send(sc_allocator_t *alloc,
         }
     }
 
-    if (app && app->bus && message) {
+    if (!message || !message[0]) {
+        sc_json_value_t *obj = sc_json_object_new(alloc);
+        if (!obj) return SC_ERR_OUT_OF_MEMORY;
+        json_set_str(alloc, obj, "status", "rejected");
+        json_set_str(alloc, obj, "error", "message is required");
+        sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
+        sc_json_free(alloc, obj);
+        return err;
+    }
+
+    if (app && app->bus) {
         sc_bus_publish_simple(app->bus, SC_BUS_MESSAGE_RECEIVED,
             "control-ui", session_key, message);
     }
@@ -273,11 +282,17 @@ static sc_error_t handle_chat_history(sc_allocator_t *alloc,
 
 /* ── chat.abort ──────────────────────────────────────────────────────── */
 
-static sc_error_t handle_chat_abort(sc_allocator_t *alloc, char **out,
-    size_t *out_len) {
+static sc_error_t handle_chat_abort(sc_allocator_t *alloc,
+    const sc_app_context_t *app, char **out, size_t *out_len) {
+    bool aborted = false;
+    if (app && app->bus) {
+        sc_bus_publish_simple(app->bus, SC_BUS_ERROR,
+            "control-ui", "", "chat.abort");
+        aborted = true;
+    }
     sc_json_value_t *obj = sc_json_object_new(alloc);
     if (!obj) return SC_ERR_OUT_OF_MEMORY;
-    sc_json_object_set(alloc, obj, "aborted", sc_json_bool_new(alloc, true));
+    sc_json_object_set(alloc, obj, "aborted", sc_json_bool_new(alloc, aborted));
     sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
     sc_json_free(alloc, obj);
     return err;
@@ -319,6 +334,7 @@ static sc_error_t handle_config_apply(sc_allocator_t *alloc,
     sc_app_context_t *app, const sc_json_value_t *root,
     char **out, size_t *out_len) {
     bool applied = false;
+    bool saved = false;
 
     if (root && app && app->config) {
         sc_json_value_t *params = sc_json_object_get(root, "params");
@@ -327,7 +343,11 @@ static sc_error_t handle_config_apply(sc_allocator_t *alloc,
             if (raw) {
                 sc_error_t parse_err = sc_config_parse_json(app->config,
                     raw, strlen(raw));
-                applied = (parse_err == SC_OK);
+                if (parse_err == SC_OK) {
+                    applied = true;
+                    sc_error_t save_err = sc_config_save(app->config);
+                    saved = (save_err == SC_OK);
+                }
             }
         }
     }
@@ -335,6 +355,7 @@ static sc_error_t handle_config_apply(sc_allocator_t *alloc,
     sc_json_value_t *obj = sc_json_object_new(alloc);
     if (!obj) return SC_ERR_OUT_OF_MEMORY;
     sc_json_object_set(alloc, obj, "applied", sc_json_bool_new(alloc, applied));
+    sc_json_object_set(alloc, obj, "saved", sc_json_bool_new(alloc, saved));
     sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
     sc_json_free(alloc, obj);
     return err;
@@ -610,11 +631,37 @@ static sc_error_t handle_cron_remove(sc_allocator_t *alloc,
 
 /* ── cron.run ────────────────────────────────────────────────────────── */
 
-static sc_error_t handle_cron_run(sc_allocator_t *alloc, char **out,
-    size_t *out_len) {
+static sc_error_t handle_cron_run(sc_allocator_t *alloc,
+    sc_app_context_t *app, const sc_json_value_t *root,
+    char **out, size_t *out_len) {
+    bool started = false;
+    const char *status_msg = "no cron scheduler";
+
+    if (root && app && app->cron && app->alloc) {
+        sc_json_value_t *params = sc_json_object_get(root, "params");
+        if (params) {
+            double id_num = sc_json_get_number(params, "id", -1.0);
+            if (id_num >= 0) {
+                uint64_t job_id = (uint64_t)id_num;
+                const sc_cron_job_t *job = sc_cron_get_job(app->cron, job_id);
+                if (job && job->command) {
+                    sc_error_t e = sc_cron_add_run(app->cron, app->alloc,
+                        job_id, (int64_t)time(NULL), "running", NULL);
+                    started = (e == SC_OK);
+                    status_msg = started ? "started" : "failed to start";
+                } else {
+                    status_msg = "job not found";
+                }
+            } else {
+                status_msg = "missing job id";
+            }
+        }
+    }
+
     sc_json_value_t *obj = sc_json_object_new(alloc);
     if (!obj) return SC_ERR_OUT_OF_MEMORY;
-    sc_json_object_set(alloc, obj, "started", sc_json_bool_new(alloc, true));
+    sc_json_object_set(alloc, obj, "started", sc_json_bool_new(alloc, started));
+    json_set_str(alloc, obj, "status", status_msg);
     sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
     sc_json_free(alloc, obj);
     return err;
@@ -681,6 +728,43 @@ static sc_error_t handle_skill_toggle(sc_allocator_t *alloc,
     return err;
 }
 
+/* ── skills.install ──────────────────────────────────────────────────── */
+
+static sc_error_t handle_skills_install(sc_allocator_t *alloc,
+    sc_app_context_t *app, const sc_json_value_t *root,
+    char **out, size_t *out_len) {
+    (void)app;
+    bool installed = false;
+    const char *error_msg = NULL;
+
+    if (root) {
+        sc_json_value_t *params = sc_json_object_get(root, "params");
+        if (params) {
+            const char *name = sc_json_get_string(params, "name");
+            const char *url = sc_json_get_string(params, "url");
+            if (name && name[0]) {
+                sc_error_t e = sc_skillforge_install(name, url);
+                if (e == SC_OK) {
+                    installed = true;
+                } else {
+                    error_msg = sc_error_string(e);
+                }
+            } else {
+                error_msg = "name is required";
+            }
+        }
+    }
+
+    sc_json_value_t *obj = sc_json_object_new(alloc);
+    if (!obj) return SC_ERR_OUT_OF_MEMORY;
+    sc_json_object_set(alloc, obj, "installed",
+        sc_json_bool_new(alloc, installed));
+    if (error_msg) json_set_str(alloc, obj, "error", error_msg);
+    sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
+    sc_json_free(alloc, obj);
+    return err;
+}
+
 /* ── update.check ────────────────────────────────────────────────────── */
 
 static sc_error_t handle_update_check(sc_allocator_t *alloc, char **out,
@@ -708,11 +792,33 @@ static sc_error_t handle_update_run(sc_allocator_t *alloc, char **out,
 
 /* ── exec.approval.resolve ───────────────────────────────────────────── */
 
-static sc_error_t handle_exec_approval(sc_allocator_t *alloc, char **out,
-    size_t *out_len) {
+static sc_error_t handle_exec_approval(sc_allocator_t *alloc,
+    const sc_app_context_t *app, const sc_json_value_t *root,
+    char **out, size_t *out_len) {
+    bool resolved = false;
+    bool approved = false;
+
+    if (root && app && app->bus) {
+        sc_json_value_t *params = sc_json_object_get(root, "params");
+        if (params) {
+            const char *id = sc_json_get_string(params, "id");
+            approved = sc_json_get_bool(params, "approved", false);
+            if (id && id[0]) {
+                sc_bus_publish_simple(app->bus,
+                    approved ? SC_BUS_TOOL_CALL : SC_BUS_ERROR,
+                    "approval", id,
+                    approved ? "approved" : "denied");
+                resolved = true;
+            }
+        }
+    }
+
     sc_json_value_t *obj = sc_json_object_new(alloc);
     if (!obj) return SC_ERR_OUT_OF_MEMORY;
-    sc_json_object_set(alloc, obj, "resolved", sc_json_bool_new(alloc, true));
+    sc_json_object_set(alloc, obj, "resolved",
+        sc_json_bool_new(alloc, resolved));
+    sc_json_object_set(alloc, obj, "approved",
+        sc_json_bool_new(alloc, approved));
     sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
     sc_json_free(alloc, obj);
     return err;
@@ -781,7 +887,7 @@ static sc_error_t build_method_response(sc_allocator_t *alloc,
     if (strcmp(method, "chat.history") == 0)
         return handle_chat_history(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "chat.abort") == 0)
-        return handle_chat_abort(alloc, payload_out, payload_len_out);
+        return handle_chat_abort(alloc, app, payload_out, payload_len_out);
     if (strcmp(method, "config.set") == 0)
         return handle_config_set(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "config.apply") == 0)
@@ -803,19 +909,21 @@ static sc_error_t build_method_response(sc_allocator_t *alloc,
     if (strcmp(method, "cron.remove") == 0)
         return handle_cron_remove(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "cron.run") == 0)
-        return handle_cron_run(alloc, payload_out, payload_len_out);
+        return handle_cron_run(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "skills.list") == 0)
         return handle_skills_list(alloc, app, payload_out, payload_len_out);
     if (strcmp(method, "skills.enable") == 0)
         return handle_skill_toggle(alloc, app, root, true, payload_out, payload_len_out);
     if (strcmp(method, "skills.disable") == 0)
         return handle_skill_toggle(alloc, app, root, false, payload_out, payload_len_out);
+    if (strcmp(method, "skills.install") == 0)
+        return handle_skills_install(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "update.check") == 0)
         return handle_update_check(alloc, payload_out, payload_len_out);
     if (strcmp(method, "update.run") == 0)
         return handle_update_run(alloc, payload_out, payload_len_out);
     if (strcmp(method, "exec.approval.resolve") == 0)
-        return handle_exec_approval(alloc, payload_out, payload_len_out);
+        return handle_exec_approval(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "usage.summary") == 0)
         return handle_usage_summary(alloc, app, payload_out, payload_len_out);
 

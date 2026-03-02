@@ -243,6 +243,9 @@ size_t sc_audit_event_write_json(const sc_audit_event_t *ev,
     return pos;
 }
 
+#define SC_AUDIT_MAX_KEY_HISTORY 64
+#define SC_AUDIT_KEY_HISTORY_LINE 128
+
 struct sc_audit_logger {
     char *log_path;
     char *key_path;
@@ -251,7 +254,40 @@ struct sc_audit_logger {
     bool chain_initialized;
     sc_audit_config_t config;
     sc_allocator_t *alloc;
+    uint32_t rotation_interval_hours;
+    time_t last_rotation_time;
 };
+
+static void get_key_history_path(const char *key_path, char *out, size_t out_cap) {
+    const char *slash = strrchr(key_path, '/');
+    if (slash && slash > key_path) {
+        size_t dlen = (size_t)(slash - key_path);
+        if (dlen + 24 < out_cap) {
+            memcpy(out, key_path, dlen);
+            out[dlen] = '\0';
+            strncat(out, "/.audit_key_history", out_cap - dlen - 1);
+            return;
+        }
+    }
+    if (out_cap > 0) out[0] = '\0';
+}
+
+static sc_error_t append_key_to_history(const char *key_path,
+    int64_t timestamp_s, const unsigned char *key, size_t key_len) {
+    char hist_path[SC_AUDIT_MAX_PATH];
+    get_key_history_path(key_path, hist_path, sizeof(hist_path));
+    if (hist_path[0] == '\0') return SC_ERR_IO;
+
+    char hex_key[128];
+    if (key_len * 2 + 1 >= sizeof(hex_key)) return SC_ERR_INVALID_ARGUMENT;
+    sc_hex_encode(key, key_len, hex_key);
+
+    FILE *f = fopen(hist_path, "a");
+    if (!f) return SC_ERR_IO;
+    int n = fprintf(f, "%ld %s\n", (long)timestamp_s, hex_key);
+    fclose(f);
+    return (n > 0) ? SC_OK : SC_ERR_IO;
+}
 
 static sc_error_t load_or_create_audit_key(const char *key_path,
     unsigned char key[SC_AUDIT_HMAC_LEN], sc_allocator_t *alloc) {
@@ -421,6 +457,15 @@ sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger,
     if (!logger || !event) return SC_ERR_INVALID_ARGUMENT;
     if (!logger->config.enabled) return SC_OK;
 
+    /* Check scheduled rotation */
+    if (logger->rotation_interval_hours > 0) {
+        time_t now = time(NULL);
+        if (now - logger->last_rotation_time >= (time_t)(logger->rotation_interval_hours * 3600)) {
+            sc_error_t rerr = sc_audit_rotate_key(logger);
+            if (rerr != SC_OK) return rerr;
+        }
+    }
+
     char json_buf[SC_AUDIT_JSON_BUF_SIZE];
     size_t json_len = sc_audit_event_write_json(event, json_buf, sizeof(json_buf));
     if (json_len == 0) return SC_ERR_INVALID_ARGUMENT;
@@ -480,6 +525,120 @@ sc_error_t sc_audit_logger_log_command(sc_audit_logger_t *logger,
     return sc_audit_logger_log(logger, &ev);
 }
 
+void sc_audit_set_rotation_interval(sc_audit_logger_t *logger, uint32_t hours) {
+    if (!logger) return;
+    logger->rotation_interval_hours = hours;
+    if (hours > 0)
+        logger->last_rotation_time = time(NULL);
+}
+
+#if defined(SC_IS_TEST) && SC_IS_TEST
+void sc_audit_test_set_last_rotation_epoch(sc_audit_logger_t *logger, time_t epoch) {
+    if (logger) logger->last_rotation_time = epoch;
+}
+#endif
+
+sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
+    if (!logger) return SC_ERR_INVALID_ARGUMENT;
+
+    /* 1. Generate new key from /dev/urandom */
+    unsigned char new_key[SC_AUDIT_HMAC_LEN];
+    FILE *frand = fopen("/dev/urandom", "rb");
+    if (!frand) return SC_ERR_CRYPTO_ENCRYPT;
+    size_t n = fread(new_key, 1, SC_AUDIT_HMAC_LEN, frand);
+    fclose(frand);
+    if (n != SC_AUDIT_HMAC_LEN) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_CRYPTO_ENCRYPT;
+    }
+
+    /* 2. Append OLD key to history before overwriting */
+    sc_error_t err = append_key_to_history(logger->key_path,
+        (int64_t)time(NULL), logger->audit_key, SC_AUDIT_HMAC_LEN);
+    if (err != SC_OK) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return err;
+    }
+
+    /* 3. Compute old_key_hash = SHA256(old key) */
+    unsigned char old_key_hash[32];
+    sc_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN, old_key_hash);
+    char old_hash_hex[65];
+    sc_hex_encode(old_key_hash, 32, old_hash_hex);
+    old_hash_hex[64] = '\0';
+
+    /* 4. Build key_rotation entry (without hmac) */
+    char rotation_json[512];
+    time_t now = time(NULL);
+    int rn = snprintf(rotation_json, sizeof(rotation_json),
+        "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\"}",
+        (long)now, old_hash_hex);
+    if (rn < 0 || (size_t)rn >= sizeof(rotation_json)) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+    size_t rotation_len = (size_t)rn;
+
+    /* 5. Compute HMAC with OLD key: HMAC(prev_hmac || rotation_json) */
+    unsigned char hmac_input[32 + 512];
+    if (sizeof(hmac_input) < SC_AUDIT_HMAC_LEN + rotation_len) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+    memcpy(hmac_input, logger->prev_hmac, SC_AUDIT_HMAC_LEN);
+    memcpy(hmac_input + SC_AUDIT_HMAC_LEN, rotation_json, rotation_len);
+    unsigned char rotation_hmac[SC_AUDIT_HMAC_LEN];
+    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN,
+        hmac_input, SC_AUDIT_HMAC_LEN + rotation_len, rotation_hmac);
+
+    /* 6. Append HMAC to rotation entry */
+    char hmac_hex[65];
+    sc_hex_encode(rotation_hmac, SC_AUDIT_HMAC_LEN, hmac_hex);
+    char full_entry[600];
+    rn = snprintf(full_entry, sizeof(full_entry),
+        "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\",\"hmac\":\"%s\"}\n",
+        (long)now, old_hash_hex, hmac_hex);
+    if (rn < 0 || (size_t)rn >= sizeof(full_entry)) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+
+    /* 7. Write rotation entry to log */
+    FILE *flog = fopen(logger->log_path, "a");
+    if (!flog) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_IO;
+    }
+    size_t written = fwrite(full_entry, 1, (size_t)rn, flog);
+    fflush(flog);
+    fclose(flog);
+    if (written != (size_t)rn) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_IO;
+    }
+
+    /* 8. Update prev_hmac for next entry (rotation entry's hmac becomes new chain head) */
+    memcpy(logger->prev_hmac, rotation_hmac, SC_AUDIT_HMAC_LEN);
+
+    /* 9. Save new key to key file */
+    FILE *fkey = fopen(logger->key_path, "wb");
+    if (!fkey) {
+        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+        return SC_ERR_IO;
+    }
+    char hex_out[SC_AUDIT_HMAC_LEN * 2 + 1];
+    sc_hex_encode(new_key, SC_AUDIT_HMAC_LEN, hex_out);
+    fwrite(hex_out, 1, SC_AUDIT_HMAC_LEN * 2, fkey);
+    fclose(fkey);
+
+    /* 10. Clear old key and update logger */
+    audit_secure_zero(logger->audit_key, SC_AUDIT_HMAC_LEN);
+    memcpy(logger->audit_key, new_key, SC_AUDIT_HMAC_LEN);
+    audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+    logger->last_rotation_time = now;
+    return SC_OK;
+}
+
 sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]) {
     if (!base_dir || !key) return SC_ERR_INVALID_ARGUMENT;
     char key_path[SC_AUDIT_MAX_PATH];
@@ -504,9 +663,97 @@ sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]) {
     return SC_OK;
 }
 
+static sc_error_t load_keys_from_base_dir(const char *base_dir,
+    unsigned char keys[SC_AUDIT_MAX_KEY_HISTORY][SC_AUDIT_HMAC_LEN],
+    size_t *out_count) {
+    char key_path[SC_AUDIT_MAX_PATH];
+    size_t base_len = strlen(base_dir);
+    if (base_len > 0 && base_dir[base_len - 1] == '/')
+        snprintf(key_path, sizeof(key_path), "%s.audit_hmac_key", base_dir);
+    else
+        snprintf(key_path, sizeof(key_path), "%s/.audit_hmac_key", base_dir);
+
+    char hist_path[SC_AUDIT_MAX_PATH];
+    get_key_history_path(key_path, hist_path, sizeof(hist_path));
+
+    size_t idx = 0;
+
+    /* Load keys from history first (oldest first) */
+    FILE *fh = fopen(hist_path, "rb");
+    if (fh) {
+        char hist_line[SC_AUDIT_KEY_HISTORY_LINE];
+        while (fgets(hist_line, sizeof(hist_line), fh) && idx < SC_AUDIT_MAX_KEY_HISTORY) {
+            size_t ll = strlen(hist_line);
+            while (ll > 0 && (hist_line[ll - 1] == '\n' || hist_line[ll - 1] == '\r'))
+                hist_line[--ll] = '\0';
+            if (ll < 70) continue;  /* Need timestamp + space + 64 hex */
+            const char *space = strchr(hist_line, ' ');
+            if (!space || (size_t)(space - hist_line) < 10) continue;
+            const char *hex = space + 1;
+            size_t dlen;
+            sc_error_t err = sc_hex_decode(hex, strlen(hex),
+                keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
+            if (err == SC_OK && dlen == SC_AUDIT_HMAC_LEN)
+                idx++;
+        }
+        fclose(fh);
+    }
+
+    /* Add current key from .audit_hmac_key */
+    FILE *fk = fopen(key_path, "rb");
+    if (!fk) return SC_ERR_IO;
+    char hex_buf[80];
+    size_t n = fread(hex_buf, 1, sizeof(hex_buf) - 1, fk);
+    fclose(fk);
+    hex_buf[n] = '\0';
+    while (n > 0 && (hex_buf[n - 1] == ' ' || hex_buf[n - 1] == '\t' ||
+                     hex_buf[n - 1] == '\n' || hex_buf[n - 1] == '\r'))
+        hex_buf[--n] = '\0';
+    size_t dlen;
+    sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf),
+        keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
+    if (err != SC_OK || dlen != SC_AUDIT_HMAC_LEN) return SC_ERR_CRYPTO_DECRYPT;
+    idx++;
+    *out_count = idx;
+    return SC_OK;
+}
+
+static void derive_base_dir_from_log_path(const char *audit_file_path,
+    char *base_dir, size_t cap) {
+    const char *slash = strrchr(audit_file_path, '/');
+    if (slash && slash > audit_file_path) {
+        size_t dlen = (size_t)(slash - audit_file_path);
+        if (dlen + 1 <= cap) {
+            memcpy(base_dir, audit_file_path, dlen);
+            base_dir[dlen] = '\0';
+            return;
+        }
+    }
+    if (cap > 0) base_dir[0] = '\0';
+}
+
 sc_error_t sc_audit_verify_chain(const char *audit_file_path,
     const unsigned char *key) {
-    if (!audit_file_path || !key) return SC_ERR_INVALID_ARGUMENT;
+    if (!audit_file_path) return SC_ERR_INVALID_ARGUMENT;
+
+    /* Single-key mode when key provided */
+    unsigned char single_key[SC_AUDIT_HMAC_LEN];
+    const unsigned char *cur_key;
+    size_t key_count = 1;
+    size_t key_index = 0;
+    unsigned char key_ring[SC_AUDIT_MAX_KEY_HISTORY][SC_AUDIT_HMAC_LEN];
+
+    if (key) {
+        memcpy(single_key, key, SC_AUDIT_HMAC_LEN);
+        cur_key = single_key;
+    } else {
+        char base_dir[SC_AUDIT_MAX_PATH];
+        derive_base_dir_from_log_path(audit_file_path, base_dir, sizeof(base_dir));
+        if (base_dir[0] == '\0') return SC_ERR_INVALID_ARGUMENT;
+        sc_error_t lerr = load_keys_from_base_dir(base_dir, key_ring, &key_count);
+        if (lerr != SC_OK) return lerr;
+        cur_key = key_ring[0];
+    }
 
     FILE *f = fopen(audit_file_path, "rb");
     if (!f) return SC_ERR_IO;
@@ -531,12 +778,11 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
             continue;  /* Malformed, skip (would fail decode) */
 
         /* Build entry without hmac: everything before ,"hmac":" plus } */
-        /* Format is ...},"hmac":"<hex>"} - comma is at hmac_start-1 */
         if (hmac_start <= line + 1) {
             fclose(f);
             return SC_ERR_PARSE;
         }
-        size_t prefix_len = (size_t)(hmac_start - line - 1);  /* exclude , before "hmac" */
+        size_t prefix_len = (size_t)(hmac_start - line - 1);
         if (prefix_len == 0) {
             fclose(f);
             return SC_ERR_PARSE;
@@ -561,7 +807,7 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
         memcpy(hmac_input, prev_hmac, SC_AUDIT_HMAC_LEN);
         memcpy(hmac_input + SC_AUDIT_HMAC_LEN, entry_without_hmac, entry_len);
         unsigned char computed[SC_AUDIT_HMAC_LEN];
-        sc_hmac_sha256(key, SC_AUDIT_HMAC_LEN, hmac_input,
+        sc_hmac_sha256(cur_key, SC_AUDIT_HMAC_LEN, hmac_input,
             SC_AUDIT_HMAC_LEN + entry_len, computed);
 
         /* Decode stored hmac and compare */
@@ -581,6 +827,13 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
             return SC_ERR_CRYPTO_DECRYPT;  /* Tampering detected */
         }
         memcpy(prev_hmac, computed, SC_AUDIT_HMAC_LEN);
+
+        /* If key_rotation entry and multi-key mode, advance to next key */
+        if (!key && key_index + 1 < key_count &&
+            strstr(line, "\"type\":\"key_rotation\"") != NULL) {
+            key_index++;
+            cur_key = key_ring[key_index];
+        }
     }
     fclose(f);
     return SC_OK;

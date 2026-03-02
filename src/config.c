@@ -877,6 +877,9 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
     double temp = sc_json_get_number(root, "default_temperature", cfg->default_temperature);
     if (temp >= 0.0 && temp <= 2.0) cfg->default_temperature = temp;
 
+    double mt = sc_json_get_number(root, "max_tokens", (double)cfg->max_tokens);
+    if (mt >= 0.0 && mt <= 1000000) cfg->max_tokens = (uint32_t)mt;
+
     sc_json_value_t *prov_arr = sc_json_object_get(root, "providers");
     if (prov_arr) parse_providers(a, cfg, prov_arr);
 
@@ -1020,6 +1023,29 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
         cfg->gateway.port = (uint16_t)port;
     }
 
+    const char *api_k_root = sc_json_get_string(root, "api_key");
+    if (api_k_root && api_k_root[0]) {
+        if (cfg->api_key) a->free(a->ctx, cfg->api_key, strlen(cfg->api_key) + 1);
+        cfg->api_key = sc_strdup(a, api_k_root);
+    }
+
+    sc_json_value_t *secrets_obj = sc_json_object_get(root, "secrets");
+    if (secrets_obj && secrets_obj->type == SC_JSON_OBJECT) {
+        cfg->secrets.encrypt = sc_json_get_bool(secrets_obj, "encrypt",
+            cfg->secrets.encrypt);
+    }
+
+    sc_json_value_t *identity_obj = sc_json_object_get(root, "identity");
+    if (identity_obj && identity_obj->type == SC_JSON_OBJECT) {
+        const char *fmt = sc_json_get_string(identity_obj, "format");
+        if (fmt) {
+            if (cfg->identity.format)
+                a->free(a->ctx, cfg->identity.format,
+                    strlen(cfg->identity.format) + 1);
+            cfg->identity.format = sc_strdup(a, fmt);
+        }
+    }
+
     sc_json_free(a, root);
     return SC_OK;
 }
@@ -1122,6 +1148,8 @@ sc_error_t sc_config_save(const sc_config_t *cfg) {
         if (dm) sc_json_object_set(&a, root, "default_model", dm);
     }
     sc_json_object_set(&a, root, "default_temperature", sc_json_number_new(&a, cfg->default_temperature));
+    if (cfg->max_tokens > 0)
+        sc_json_object_set(&a, root, "max_tokens", sc_json_number_new(&a, (double)cfg->max_tokens));
 
     sc_json_value_t *gw = sc_json_object_new(&a);
     if (gw) {

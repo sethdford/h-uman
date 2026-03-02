@@ -45,6 +45,48 @@ static bool kvm_available(void) {
 }
 #endif
 
+static sc_error_t firecracker_write_config(sc_firecracker_ctx_t *fc,
+    const char *config_path, const char *const *argv, size_t argc) {
+    FILE *f = fopen(config_path, "w");
+    if (!f) return SC_ERR_IO;
+
+    char boot_args[2048];
+    size_t pos = 0;
+    pos += (size_t)snprintf(boot_args + pos, sizeof(boot_args) - pos,
+        "console=ttyS0 reboot=k panic=1 pci=off init=/bin/sh -- -c '");
+    for (size_t i = 0; i < argc && pos < sizeof(boot_args) - 4; i++) {
+        if (i > 0 && pos < sizeof(boot_args) - 2) boot_args[pos++] = ' ';
+        for (const char *p = argv[i]; *p && pos < sizeof(boot_args) - 4; p++) {
+            if (*p == '\'' || *p == '\\') boot_args[pos++] = '\\';
+            boot_args[pos++] = *p;
+        }
+    }
+    if (pos < sizeof(boot_args) - 2) boot_args[pos++] = '\'';
+    boot_args[pos] = '\0';
+
+    fprintf(f,
+        "{\n"
+        "  \"boot-source\": {\n"
+        "    \"kernel_image_path\": \"%s\",\n"
+        "    \"boot_args\": \"%s\"\n"
+        "  },\n"
+        "  \"drives\": [{\n"
+        "    \"drive_id\": \"rootfs\",\n"
+        "    \"path_on_host\": \"%s\",\n"
+        "    \"is_root_device\": true,\n"
+        "    \"is_read_only\": false\n"
+        "  }],\n"
+        "  \"machine-config\": {\n"
+        "    \"vcpu_count\": %u,\n"
+        "    \"mem_size_mib\": %u\n"
+        "  }\n"
+        "}\n",
+        fc->kernel_path, boot_args, fc->rootfs_path,
+        fc->vcpu_count, fc->mem_size_mib);
+    fclose(f);
+    return SC_OK;
+}
+
 static sc_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t argc,
     const char **buf, size_t buf_count, size_t *out_count) {
 #ifndef __linux__
@@ -53,43 +95,23 @@ static sc_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t ar
 #else
     sc_firecracker_ctx_t *fc = (sc_firecracker_ctx_t *)ctx;
 
-    /*
-     * Firecracker requires a JSON config file for VM specification.
-     * The config file is expected at the socket path with .json extension.
-     *
-     * Production flow:
-     *   1. Caller generates /tmp/sc_fc_<pid>.json with kernel, rootfs,
-     *      vcpu, mem, and virtio-fs (workspace) configuration
-     *   2. wrap_command produces:
-     *        firecracker --no-api --boot-timer --config-file CONFIG
-     *   3. Firecracker boots the microVM and runs the command inside it
-     *
-     * For jailer-based isolation (recommended for production):
-     *   jailer --id sc-sandbox --exec-file /usr/bin/firecracker
-     *     --uid 65534 --gid 65534 -- --config-file CONFIG
-     */
-    char config_arg[280];
-    int n = snprintf(config_arg, sizeof(config_arg),
-        "--config-file=%s.json", fc->socket_path);
-    if (n <= 0 || (size_t)n >= sizeof(config_arg))
-        return SC_ERR_INTERNAL;
-
-    const char *prefix[] = {
-        "firecracker",
-        "--no-api",
-        "--boot-timer",
-        config_arg,
-    };
-    const size_t prefix_len = sizeof(prefix) / sizeof(prefix[0]);
-
     if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < prefix_len + argc) return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < 4) return SC_ERR_INVALID_ARGUMENT;
 
-    for (size_t i = 0; i < prefix_len; i++)
-        buf[i] = prefix[i];
-    for (size_t i = 0; i < argc; i++)
-        buf[prefix_len + i] = argv[i];
-    *out_count = prefix_len + argc;
+    static char config_path[280];
+    static char config_arg[300];
+    snprintf(config_path, sizeof(config_path), "%s.json", fc->socket_path);
+
+    sc_error_t err = firecracker_write_config(fc, config_path, argv, argc);
+    if (err != SC_OK) return err;
+
+    snprintf(config_arg, sizeof(config_arg), "--config-file=%s", config_path);
+
+    buf[0] = "firecracker";
+    buf[1] = "--no-api";
+    buf[2] = "--boot-timer";
+    buf[3] = config_arg;
+    *out_count = 4;
     return SC_OK;
 #endif
 }

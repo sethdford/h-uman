@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 /* ── Audit event types ─────────────────────────────────────────────── */
 
@@ -137,6 +138,17 @@ sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger,
 sc_error_t sc_audit_logger_log_command(sc_audit_logger_t *logger,
     const sc_audit_cmd_log_t *entry);
 
+/** Rotate audit HMAC key. Writes key_rotation entry, saves new key, clears old. */
+sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger);
+
+/** Set rotation interval in hours. 0 disables scheduled rotation. */
+void sc_audit_set_rotation_interval(sc_audit_logger_t *logger, uint32_t hours);
+
+#if defined(SC_IS_TEST) && SC_IS_TEST
+/** Test-only: set last_rotation_time to force scheduled rotation on next log. */
+void sc_audit_test_set_last_rotation_epoch(sc_audit_logger_t *logger, time_t epoch);
+#endif
+
 /** Filter: should this severity be logged? */
 bool sc_audit_should_log(sc_audit_event_type_t type, sc_audit_severity_t min_sev);
 
@@ -145,7 +157,8 @@ bool sc_audit_should_log(sc_audit_event_type_t type, sc_audit_severity_t min_sev
 /** Load audit HMAC key from base_dir/.audit_hmac_key. For verification. */
 sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]);
 
-/** Verify HMAC chain in audit log. Returns SC_ERR_CRYPTO_DECRYPT if tampering detected. */
+/** Verify HMAC chain in audit log. Returns SC_ERR_CRYPTO_DECRYPT if tampering detected.
+ * When key is NULL, loads key and key history from base_dir (derived from audit_file_path). */
 sc_error_t sc_audit_verify_chain(const char *audit_file_path,
     const unsigned char *key);
 
