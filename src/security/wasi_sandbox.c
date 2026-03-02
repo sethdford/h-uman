@@ -56,13 +56,10 @@ static const char *find_wasi_runtime(void) {
 static sc_error_t wasi_wrap(void *ctx, const char *const *argv, size_t argc,
     const char **buf, size_t buf_count, size_t *out_count) {
     sc_wasi_sandbox_ctx_t *wc = (sc_wasi_sandbox_ctx_t *)ctx;
-    /*
-     * wasmtime run --dir=WORKSPACE --dir=/tmp <argv...>
-     * 4 prefix args: runtime, "run", --dir=workspace, --dir=/tmp
-     */
     const size_t prefix_len = 4;
     if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
     if (buf_count < prefix_len + argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!wc->workspace_dir[0]) return SC_ERR_INVALID_ARGUMENT;
 
     buf[0] = wc->runtime_path;
     buf[1] = "run";
