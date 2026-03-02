@@ -9,6 +9,7 @@
 #include "seaclaw/channel.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/memory.h"
+#include "seaclaw/memory/retrieval.h"
 #include "seaclaw/observer.h"
 #include "seaclaw/security.h"
 #include "seaclaw/cost.h"
@@ -51,6 +52,7 @@ struct sc_agent {
     sc_tool_spec_t *tool_specs;   /* owned; built from tools */
     size_t tool_specs_count;
     sc_memory_t *memory;           /* optional, may be NULL */
+    sc_retrieval_engine_t *retrieval_engine; /* optional; when set, memory_loader uses it */
     sc_session_store_t *session_store;  /* optional, may be NULL */
     sc_observer_t *observer;       /* optional, may be NULL */
     sc_security_policy_t *policy;  /* optional, may be NULL */
@@ -110,6 +112,9 @@ sc_error_t sc_agent_from_config(sc_agent_t *out, sc_allocator_t *alloc,
     const char *custom_instructions, size_t custom_instructions_len);
 
 void sc_agent_deinit(sc_agent_t *agent);
+
+/* Optional: set retrieval engine for semantic/hybrid recall. Caller owns engine lifecycle. */
+void sc_agent_set_retrieval_engine(sc_agent_t *agent, sc_retrieval_engine_t *engine);
 
 /* Run one conversation turn: send to provider, process tool calls, iterate. */
 sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,

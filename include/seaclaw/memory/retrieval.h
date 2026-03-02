@@ -4,6 +4,7 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/memory.h"
+#include "seaclaw/memory/vector.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -57,15 +58,32 @@ typedef struct sc_retrieval_vtable {
 sc_retrieval_engine_t sc_retrieval_create(sc_allocator_t *alloc,
     sc_memory_t *backend);
 
+sc_retrieval_engine_t sc_retrieval_create_with_vector(sc_allocator_t *alloc,
+    sc_memory_t *backend,
+    sc_embedder_t *embedder,
+    sc_vector_store_t *vector_store);
+
 void sc_retrieval_result_free(sc_allocator_t *alloc, sc_retrieval_result_t *r);
 
+sc_error_t sc_retrieval_index_entry(sc_retrieval_engine_t *engine,
+    sc_allocator_t *alloc,
+    const char *key, size_t key_len,
+    const char *content, size_t content_len);
+
 /* Internal retrieval strategies (used by engine) */
+sc_error_t sc_semantic_retrieve(sc_allocator_t *alloc,
+    sc_embedder_t *embedder, sc_vector_store_t *vector_store,
+    const char *query, size_t query_len,
+    const sc_retrieval_options_t *opts,
+    sc_retrieval_result_t *out);
+
 sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend,
     const char *query, size_t query_len,
     const sc_retrieval_options_t *opts,
     sc_retrieval_result_t *out);
 
 sc_error_t sc_hybrid_retrieve(sc_allocator_t *alloc, sc_memory_t *backend,
+    sc_embedder_t *embedder, sc_vector_store_t *vector_store,
     const char *query, size_t query_len,
     const sc_retrieval_options_t *opts,
     sc_retrieval_result_t *out);

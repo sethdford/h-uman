@@ -11,9 +11,8 @@
 #endif
 
 #if SC_HAS_DISCORD
-extern sc_error_t sc_discord_create(sc_allocator_t *alloc,
-    const char *token, size_t token_len, sc_channel_t *out);
-extern void sc_discord_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/discord.h"
+#include "seaclaw/channel_loop.h"
 #endif
 #if SC_HAS_SLACK
 extern sc_error_t sc_slack_create(sc_allocator_t *alloc,
@@ -1037,6 +1036,32 @@ static void test_discord_send_without_token_fails(void) {
     SC_ASSERT_EQ(err, SC_ERR_CHANNEL_NOT_CONFIGURED);
     sc_discord_destroy(&ch);
 }
+
+static void test_discord_poll_test_mode(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, "t", 1, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    sc_error_t err = sc_discord_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0u);
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_poll_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    const char *ch_ids[] = { "123456789" };
+    sc_error_t err = sc_discord_create_ex(&alloc, "t", 1, ch_ids, 1, NULL, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    err = sc_discord_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0u);
+    sc_discord_destroy(&ch);
+}
 #endif
 
 #if SC_HAS_WEB
@@ -1109,6 +1134,8 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_discord_health_check);
     SC_RUN_TEST(test_discord_send);
     SC_RUN_TEST(test_discord_send_without_token_fails);
+    SC_RUN_TEST(test_discord_poll_test_mode);
+    SC_RUN_TEST(test_discord_poll_empty);
 #endif
 #if SC_HAS_SLACK
     SC_RUN_TEST(test_slack_create);

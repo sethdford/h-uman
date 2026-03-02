@@ -16,6 +16,8 @@
 #include "seaclaw/tool.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
+#include "seaclaw/memory/retrieval.h"
+#include "seaclaw/memory/vector.h"
 #include "seaclaw/security.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
@@ -44,6 +46,9 @@
 #endif
 #if SC_HAS_IMESSAGE
 #include "seaclaw/channels/imessage.h"
+#endif
+#if SC_HAS_DISCORD
+#include "seaclaw/channels/discord.h"
 #endif
 
 #define SC_VERSION "0.1.0"
@@ -508,6 +513,11 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         strcmp(cfg.memory.backend, "sqlite") == 0)
         session_store = sc_sqlite_memory_get_session_store(&memory);
 
+    sc_embedder_t embedder = sc_embedder_local_create(alloc);
+    sc_vector_store_t vector_store = sc_vector_store_mem_create(alloc);
+    sc_retrieval_engine_t retrieval_engine = sc_retrieval_create_with_vector(
+        alloc, &memory, &embedder, &vector_store);
+
     sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
 
     sc_tool_t *tools = NULL;
@@ -517,6 +527,12 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
         if (cron) sc_cron_destroy(cron, alloc);
+        if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+            retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+        if (vector_store.vtable && vector_store.vtable->deinit)
+            vector_store.vtable->deinit(vector_store.ctx, alloc);
+        if (embedder.vtable && embedder.vtable->deinit)
+            embedder.vtable->deinit(embedder.ctx, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
@@ -551,18 +567,25 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         if (log_fp) fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
         if (cron) sc_cron_destroy(cron, alloc);
+        if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+            retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+        if (vector_store.vtable && vector_store.vtable->deinit)
+            vector_store.vtable->deinit(vector_store.ctx, alloc);
+        if (embedder.vtable && embedder.vtable->deinit)
+            embedder.vtable->deinit(embedder.ctx, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_config_deinit(&cfg);
         return err;
     }
+    sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
 
     fprintf(stderr, "[%s] agent ready (provider=%s model=%s tools=%zu)\n",
         SC_CODENAME, prov_name, model[0] ? model : "(default)", tools_count);
 
     /* ── Wire channels ────────────────────────────────────────────────── */
-    sc_service_channel_t channels[4];
+    sc_service_channel_t channels[8];
     size_t ch_count = 0;
 
 #if SC_HAS_EMAIL
@@ -616,6 +639,29 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     }
 #endif
 
+#if SC_HAS_DISCORD
+    sc_channel_t discord_ch = {0};
+    if (cfg.channels.discord.token && cfg.channels.discord.channel_ids_count > 0) {
+        const char **ch_ids = (const char **)cfg.channels.discord.channel_ids;
+        err = sc_discord_create_ex(alloc,
+            cfg.channels.discord.token, strlen(cfg.channels.discord.token),
+            ch_ids, cfg.channels.discord.channel_ids_count,
+            cfg.channels.discord.bot_id,
+            cfg.channels.discord.bot_id ? strlen(cfg.channels.discord.bot_id) : 0,
+            &discord_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = discord_ch.ctx;
+            channels[ch_count].channel = &discord_ch;
+            channels[ch_count].poll_fn = sc_discord_poll;
+            channels[ch_count].interval_ms = 2000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] discord channel configured (polling %zu channels)\n",
+                SC_CODENAME, cfg.channels.discord.channel_ids_count);
+        }
+    }
+#endif
+
     fprintf(stderr, "[%s] %zu channel(s) active, cron enabled\n", SC_CODENAME, ch_count);
     err = sc_service_run(alloc, 1000,
         ch_count > 0 ? channels : NULL, ch_count, &agent);
@@ -627,10 +673,19 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #if SC_HAS_IMESSAGE
     if (imessage_ch.ctx) sc_imessage_destroy(&imessage_ch);
 #endif
+#if SC_HAS_DISCORD
+    if (discord_ch.ctx) sc_discord_destroy(&discord_ch);
+#endif
 
     sc_agent_deinit(&agent);
     sc_tools_destroy_default(alloc, tools, tools_count);
     if (cron) sc_cron_destroy(cron, alloc);
+    if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+        retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+    if (vector_store.vtable && vector_store.vtable->deinit)
+        vector_store.vtable->deinit(vector_store.ctx, alloc);
+    if (embedder.vtable && embedder.vtable->deinit)
+        embedder.vtable->deinit(embedder.ctx, alloc);
     if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
     if (observer.vtable && observer.vtable->deinit) observer.vtable->deinit(observer.ctx);
     if (log_fp) fclose(log_fp);
@@ -789,7 +844,7 @@ static sc_error_t cmd_mcp(sc_allocator_t *alloc, int argc, char **argv) {
     }
 
     sc_mcp_host_t *srv = NULL;
-    err = sc_mcp_host_create(alloc, tools, tool_count, &srv);
+    err = sc_mcp_host_create(alloc, tools, tool_count, NULL, &srv);
     if (err != SC_OK) {
         sc_tools_destroy_default(alloc, tools, tool_count);
         sc_config_deinit(&cfg);
@@ -973,6 +1028,9 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
     sc_provider_t provider = {0};
     sc_agent_t agent = {0};
     sc_memory_t memory = {0};
+    sc_embedder_t gw_embedder = {0};
+    sc_vector_store_t gw_vector_store = {0};
+    sc_retrieval_engine_t gw_retrieval_engine = {0};
     gw_agent_bridge_t agent_bridge = {0};
     bool agent_active = false;
 
@@ -998,6 +1056,10 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         uint32_t max_hist = cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
 
         memory = service_create_memory(alloc, &cfg, ws);
+        gw_embedder = sc_embedder_local_create(alloc);
+        gw_vector_store = sc_vector_store_mem_create(alloc);
+        gw_retrieval_engine = sc_retrieval_create_with_vector(alloc, &memory,
+            &gw_embedder, &gw_vector_store);
 
         err = sc_agent_from_config(&agent, alloc, provider,
             tools, tools_count,
@@ -1009,8 +1071,15 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
             cfg.memory.auto_save, 2, NULL, 0);
         if (err != SC_OK) {
             fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
+            if (gw_retrieval_engine.vtable && gw_retrieval_engine.vtable->deinit)
+                gw_retrieval_engine.vtable->deinit(gw_retrieval_engine.ctx, alloc);
+            if (gw_vector_store.vtable && gw_vector_store.vtable->deinit)
+                gw_vector_store.vtable->deinit(gw_vector_store.ctx, alloc);
+            if (gw_embedder.vtable && gw_embedder.vtable->deinit)
+                gw_embedder.vtable->deinit(gw_embedder.ctx, alloc);
             goto cleanup;
         }
+        sc_agent_set_retrieval_engine(&agent, &gw_retrieval_engine);
         agent_active = true;
 
         agent_bridge.agent = &agent;
@@ -1035,6 +1104,12 @@ cleanup:
     if (agent_active) {
         sc_bus_unsubscribe(&bus, gw_agent_on_message, &agent_bridge);
         sc_agent_deinit(&agent);
+        if (gw_retrieval_engine.vtable && gw_retrieval_engine.vtable->deinit)
+            gw_retrieval_engine.vtable->deinit(gw_retrieval_engine.ctx, alloc);
+        if (gw_vector_store.vtable && gw_vector_store.vtable->deinit)
+            gw_vector_store.vtable->deinit(gw_vector_store.ctx, alloc);
+        if (gw_embedder.vtable && gw_embedder.vtable->deinit)
+            gw_embedder.vtable->deinit(gw_embedder.ctx, alloc);
     }
     if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
     sc_tools_destroy_default(alloc, tools, tools_count);

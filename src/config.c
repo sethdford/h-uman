@@ -235,6 +235,24 @@ static sc_error_t parse_autonomy(sc_allocator_t *a, sc_config_t *cfg,
     return SC_OK;
 }
 
+static const char *sandbox_backend_to_string(sc_sandbox_backend_t b) {
+    switch (b) {
+    case SC_SANDBOX_AUTO: return "auto";
+    case SC_SANDBOX_NONE: return "none";
+    case SC_SANDBOX_LANDLOCK: return "landlock";
+    case SC_SANDBOX_FIREJAIL: return "firejail";
+    case SC_SANDBOX_BUBBLEWRAP: return "bubblewrap";
+    case SC_SANDBOX_DOCKER: return "docker";
+    case SC_SANDBOX_SEATBELT: return "seatbelt";
+    case SC_SANDBOX_SECCOMP: return "seccomp";
+    case SC_SANDBOX_LANDLOCK_SECCOMP: return "landlock_seccomp";
+    case SC_SANDBOX_WASI: return "wasi";
+    case SC_SANDBOX_FIRECRACKER: return "firecracker";
+    case SC_SANDBOX_APPCONTAINER: return "appcontainer";
+    }
+    return "auto";
+}
+
 static sc_sandbox_backend_t parse_sandbox_backend(const char *s) {
     if (!s) return SC_SANDBOX_AUTO;
     if (strcmp(s, "landlock") == 0) return SC_SANDBOX_LANDLOCK;
@@ -476,6 +494,49 @@ static void parse_imessage_channel(sc_allocator_t *a, sc_config_t *cfg,
     }
 }
 
+static void parse_discord_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                 const sc_json_value_t *obj)
+{
+    if (!obj) return;
+    sc_discord_channel_config_t *d = &cfg->channels.discord;
+
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT) return;
+
+    const char *s = sc_json_get_string(val, "token");
+    if (s) {
+        if (d->token) a->free(a->ctx, d->token, strlen(d->token) + 1);
+        d->token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "guild_id");
+    if (s) {
+        if (d->guild_id) a->free(a->ctx, d->guild_id, strlen(d->guild_id) + 1);
+        d->guild_id = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "bot_id");
+    if (s) {
+        if (d->bot_id) a->free(a->ctx, d->bot_id, strlen(d->bot_id) + 1);
+        d->bot_id = sc_strdup(a, s);
+    }
+
+    sc_json_value_t *ch_ids = sc_json_object_get(val, "channel_ids");
+    if (ch_ids && ch_ids->type == SC_JSON_ARRAY && ch_ids->data.array.items) {
+        for (size_t i = 0; i < d->channel_ids_count; i++) {
+            if (d->channel_ids[i])
+                a->free(a->ctx, d->channel_ids[i], strlen(d->channel_ids[i]) + 1);
+        }
+        d->channel_ids_count = 0;
+        for (size_t i = 0; i < ch_ids->data.array.len && d->channel_ids_count < SC_DISCORD_CHANNEL_IDS_MAX; i++) {
+            sc_json_value_t *item = ch_ids->data.array.items[i];
+            if (item && item->type == SC_JSON_STRING && item->data.string.ptr) {
+                d->channel_ids[d->channel_ids_count++] = sc_strdup(a, item->data.string.ptr);
+            }
+        }
+    }
+}
+
 static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg,
                                  const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
@@ -491,6 +552,9 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg,
 
     sc_json_value_t *imsg_obj = sc_json_object_get(obj, "imessage");
     if (imsg_obj) parse_imessage_channel(a, cfg, imsg_obj);
+
+    sc_json_value_t *discord_obj = sc_json_object_get(obj, "discord");
+    if (discord_obj) parse_discord_channel(a, cfg, discord_obj);
 
     cfg->channels.channel_config_len = 0;
     if (obj->data.object.pairs && cfg->channels.channel_config_len < SC_CHANNEL_CONFIG_MAX) {
@@ -1204,6 +1268,10 @@ sc_error_t sc_config_save(const sc_config_t *cfg) {
         if (sbc) {
             sc_json_object_set(&a, sbc, "enabled",
                 sc_json_bool_new(&a, cfg->security.sandbox_config.enabled));
+
+            const char *be_str = sandbox_backend_to_string(cfg->security.sandbox_config.backend);
+            sc_json_object_set(&a, sbc, "backend",
+                sc_json_string_new(&a, be_str, strlen(be_str)));
 
             if (cfg->security.sandbox_config.firejail_args_len > 0 &&
                 cfg->security.sandbox_config.firejail_args) {

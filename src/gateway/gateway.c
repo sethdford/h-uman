@@ -190,6 +190,15 @@ static bool is_allowed_origin(const char *origin) {
 
 static const char *s_request_origin = NULL;
 
+static void send_all(int fd, const char *buf, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, buf + sent, len - sent, 0);
+        if (n <= 0) break;
+        sent += (size_t)n;
+    }
+}
+
 static void send_response(int fd, int status, const char *content_type,
     const char *body, size_t body_len) {
     const char *status_str = "200 OK";
@@ -215,9 +224,9 @@ static void send_response(int fd, int status, const char *content_type,
         "%s"
         "\r\n",
         status_str, content_type, body_len, cors_line);
-    send(fd, hdr, (size_t)n, 0);
+    send_all(fd, hdr, (size_t)n);
     if (body && body_len > 0)
-        send(fd, body, body_len, 0);
+        send_all(fd, body, body_len);
 }
 
 static void send_json(int fd, int status, const char *body) {
@@ -339,8 +348,8 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd,
         }
         char ch_buf[32];
         const char *channel = webhook_path_to_channel(path, ch_buf, sizeof(ch_buf));
-        (void)fprintf(stderr, "[gateway] webhook received path=%s channel=%s\n",
-            path, channel);
+        if (gw->config.test_mode)
+            (void)fprintf(stderr, "[gateway] webhook received channel=%s\n", channel);
         if (gw && gw->config.on_webhook)
             gw->config.on_webhook(channel, body, body_len, gw->config.on_webhook_ctx);
         send_json(fd, 200, "{\"received\":true}");
@@ -506,10 +515,28 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
             char client_ip[64];
             inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
 
+            /* Ensure client socket is blocking (macOS accept inherits O_NONBLOCK) */
+            {
+                int flags = fcntl(client, F_GETFL, 0);
+                if (flags >= 0 && (flags & O_NONBLOCK))
+                    fcntl(client, F_SETFL, flags & ~O_NONBLOCK);
+            }
+
             char req[4096];
-            ssize_t n = recv(client, req, sizeof(req) - 1, 0);
+            size_t total = 0;
+            {
+                struct timeval tv = { 5, 0 };
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            }
+            while (total < sizeof(req) - 1) {
+                ssize_t r = recv(client, req + total, sizeof(req) - 1 - total, 0);
+                if (r <= 0) break;
+                total += (size_t)r;
+                req[total] = '\0';
+                if (strstr(req, "\r\n\r\n") || strstr(req, "\n\n")) break;
+            }
+            ssize_t n = (ssize_t)total;
             if (n <= 0) { close(client); continue; }
-            req[n] = '\0';
 
             /* Check for WebSocket upgrade */
             if (sc_ws_server_is_upgrade(req, (size_t)n)) {
@@ -585,6 +612,15 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
                 handle_http_request(gw, client, method, path, body_buf, body_len,
                     client_ip, sig_header);
                 s_request_origin = NULL;
+                {
+                    struct linger sl = { 1, 5 };
+                    setsockopt(client, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+                    shutdown(client, SHUT_WR);
+                    char drain[256];
+                    struct timeval tv = { 1, 0 };
+                    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                    while (recv(client, drain, sizeof(drain), 0) > 0) {}
+                }
                 close(client);
             }
         }

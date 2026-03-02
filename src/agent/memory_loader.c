@@ -25,11 +25,13 @@ static void free_recall_entries(sc_allocator_t *alloc,
 
 sc_error_t sc_memory_loader_init(sc_memory_loader_t *loader,
     sc_allocator_t *alloc, sc_memory_t *memory,
+    sc_retrieval_engine_t *retrieval_engine,
     size_t max_entries, size_t max_context_chars)
 {
     if (!loader || !alloc) return SC_ERR_INVALID_ARGUMENT;
     loader->alloc = alloc;
     loader->memory = memory;
+    loader->retrieval_engine = retrieval_engine;
     loader->max_entries = max_entries ? max_entries : 10;
     loader->max_context_chars = max_context_chars ? max_context_chars : 4000;
     return SC_OK;
@@ -44,23 +46,47 @@ sc_error_t sc_memory_loader_load(sc_memory_loader_t *loader,
     *out_context = NULL;
     if (out_context_len) *out_context_len = 0;
 
-    if (!loader->memory || !loader->memory->vtable ||
-        !loader->memory->vtable->recall) {
-        return SC_OK; /* no memory backend, not an error */
-    }
-
     sc_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = loader->memory->vtable->recall(loader->memory->ctx,
-        loader->alloc,
-        query ? query : "",
-        query_len,
-        loader->max_entries,
-        session_id ? session_id : "",
-        session_id_len,
-        &entries, &count);
+    sc_error_t err;
 
-    if (err != SC_OK) return err;
+    if (loader->retrieval_engine && loader->retrieval_engine->ctx &&
+        loader->retrieval_engine->vtable) {
+        sc_retrieval_options_t opts = {
+            .mode = SC_RETRIEVAL_HYBRID,
+            .limit = loader->max_entries,
+            .min_score = 0.0,
+            .use_reranking = false,
+            .temporal_decay_factor = 0.0,
+        };
+        sc_retrieval_result_t res = {0};
+        err = loader->retrieval_engine->vtable->retrieve(
+            loader->retrieval_engine->ctx, loader->alloc,
+            query ? query : "", query_len, &opts, &res);
+        if (err == SC_OK && res.count > 0) {
+            entries = res.entries;
+            count = res.count;
+            if (res.scores)
+                loader->alloc->free(loader->alloc->ctx, res.scores,
+                    count * sizeof(double));
+            res.entries = NULL;
+            res.count = 0;
+            res.scores = NULL;
+        }
+    } else if (loader->memory && loader->memory->vtable &&
+        loader->memory->vtable->recall) {
+        err = loader->memory->vtable->recall(loader->memory->ctx,
+            loader->alloc,
+            query ? query : "",
+            query_len,
+            loader->max_entries,
+            session_id ? session_id : "",
+            session_id_len,
+            &entries, &count);
+        if (err != SC_OK) return err;
+    } else {
+        return SC_OK;
+    }
     if (!entries || count == 0) return SC_OK;
 
     sc_json_buf_t buf;

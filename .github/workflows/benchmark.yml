@@ -1,0 +1,70 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev libssl-dev
+
+      - name: Build (MinSizeRel)
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+          cmake --build . -j$(nproc)
+
+      - name: Measure binary size
+        run: |
+          SIZE=$(stat -c%s build/seaclaw 2>/dev/null || stat -f%z build/seaclaw)
+          SIZE_KB=$((SIZE / 1024))
+          echo "## Binary Size: ${SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
+          echo "BINARY_SIZE_KB=${SIZE_KB}" >> $GITHUB_ENV
+
+      - name: Build tests
+        run: |
+          mkdir build-test && cd build-test
+          cmake .. -DCMAKE_BUILD_TYPE=Debug
+          cmake --build . -j$(nproc)
+
+      - name: Run tests + count
+        run: |
+          cd build-test
+          OUTPUT=$(./seaclaw_tests 2>&1)
+          echo "$OUTPUT" | tail -5
+          RESULT=$(echo "$OUTPUT" | grep "^--- Results:" | head -1)
+          echo "## Tests: $RESULT" >> $GITHUB_STEP_SUMMARY
+
+      - name: Measure startup time
+        run: |
+          cd build
+          START=$(date +%s%N)
+          ./seaclaw version 2>/dev/null || true
+          END=$(date +%s%N)
+          ELAPSED_MS=$(( (END - START) / 1000000 ))
+          echo "## Startup: ${ELAPSED_MS}ms" >> $GITHUB_STEP_SUMMARY
+
+      - name: Measure peak RSS
+        run: |
+          cd build-test
+          /usr/bin/time -v ./seaclaw_tests 2>&1 | grep "Maximum resident" | awk '{print $NF}' > /tmp/rss.txt || true
+          RSS=$(cat /tmp/rss.txt 2>/dev/null || echo "N/A")
+          echo "## Peak RSS: ${RSS} KB" >> $GITHUB_STEP_SUMMARY
+
+      - name: Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Comparison Target" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | nullclaw | OpenClaw |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|----------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Binary | ${BINARY_SIZE_KB} KB | ~75 MB (node_modules) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependencies | 0 (libc only) | 1,200+ npm packages |" >> $GITHUB_STEP_SUMMARY

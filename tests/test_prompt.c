@@ -152,7 +152,7 @@ static void test_memory_loader_empty_backend(void) {
     sc_memory_t mem = sc_none_memory_create(&alloc);
 
     sc_memory_loader_t loader;
-    sc_error_t err = sc_memory_loader_init(&loader, &alloc, &mem, 10, 4000);
+    sc_error_t err = sc_memory_loader_init(&loader, &alloc, &mem, NULL, 10, 4000);
     SC_ASSERT_EQ(err, SC_OK);
 
     char *ctx = NULL;
@@ -176,7 +176,7 @@ static void test_memory_loader_with_entries(void) {
     SC_ASSERT_EQ(err, SC_OK);
 
     sc_memory_loader_t loader;
-    err = sc_memory_loader_init(&loader, &alloc, &mem, 10, 4000);
+    err = sc_memory_loader_init(&loader, &alloc, &mem, NULL, 10, 4000);
     SC_ASSERT_EQ(err, SC_OK);
 
     char *ctx = NULL;

@@ -114,6 +114,7 @@ sc_error_t sc_agent_from_config(sc_agent_t *out, sc_allocator_t *alloc,
     out->alloc = alloc;
     out->provider = provider;
     out->memory = memory;
+    out->retrieval_engine = NULL;
     out->session_store = session_store;
     out->observer = observer;
     out->policy = policy;
@@ -226,6 +227,11 @@ sc_error_t sc_agent_from_config(sc_agent_t *out, sc_allocator_t *alloc,
     out->turn_arena = sc_arena_create(*alloc);
 
     return SC_OK;
+}
+
+void sc_agent_set_retrieval_engine(sc_agent_t *agent, sc_retrieval_engine_t *engine) {
+    if (!agent) return;
+    agent->retrieval_engine = engine;
 }
 
 void sc_agent_deinit(sc_agent_t *agent) {
@@ -659,7 +665,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
     size_t memory_ctx_len = 0;
     if (agent->memory && agent->memory->vtable) {
         sc_memory_loader_t loader;
-        sc_memory_loader_init(&loader, agent->alloc, agent->memory, 10, 4000);
+        sc_memory_loader_init(&loader, agent->alloc, agent->memory,
+            agent->retrieval_engine, 10, 4000);
         (void)sc_memory_loader_load(&loader, msg, msg_len, "", 0, &memory_ctx, &memory_ctx_len);
     }
 
@@ -1083,7 +1090,8 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
     size_t memory_ctx_len = 0;
     if (agent->memory && agent->memory->vtable) {
         sc_memory_loader_t loader;
-        sc_memory_loader_init(&loader, agent->alloc, agent->memory, 10, 4000);
+        sc_memory_loader_init(&loader, agent->alloc, agent->memory,
+            agent->retrieval_engine, 10, 4000);
         (void)sc_memory_loader_load(&loader, msg, msg_len, "", 0, &memory_ctx, &memory_ctx_len);
     }
 

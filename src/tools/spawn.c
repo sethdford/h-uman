@@ -11,11 +11,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifndef _WIN32
-#include <unistd.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-#endif
 
 #define SC_SPAWN_NAME "spawn"
 #define SC_SPAWN_DESC "Spawn child process"
@@ -28,62 +23,6 @@ typedef struct sc_spawn_ctx {
     size_t workspace_dir_len;
     sc_security_policy_t *policy;
 } sc_spawn_ctx_t;
-
-#if !defined(_WIN32) && !SC_IS_TEST
-typedef struct sc_spawn_child_setup_ctx {
-    sc_sandbox_apply_fn sandbox_apply;
-    void *sandbox_ctx;
-    const sc_net_proxy_t *net_proxy;
-} sc_spawn_child_setup_ctx_t;
-static sc_error_t spawn_child_setup(void *raw) {
-    sc_spawn_child_setup_ctx_t *s = (sc_spawn_child_setup_ctx_t *)raw;
-
-    /* Apply network proxy env vars (deny-all = route to dead proxy) */
-    if (s->net_proxy && s->net_proxy->enabled) {
-        const char *addr = s->net_proxy->proxy_addr;
-        if (!addr) addr = "http://127.0.0.1:0";
-        setenv("HTTP_PROXY", addr, 1);
-        setenv("HTTPS_PROXY", addr, 1);
-        setenv("http_proxy", addr, 1);
-        setenv("https_proxy", addr, 1);
-
-        if (s->net_proxy->allowed_domains_count > 0) {
-            size_t total = 0;
-            for (size_t i = 0; i < s->net_proxy->allowed_domains_count; i++) {
-                if (s->net_proxy->allowed_domains[i])
-                    total += strlen(s->net_proxy->allowed_domains[i]) + 1;
-            }
-            if (total > 0) {
-                char *no_proxy = (char *)malloc(total + 1);
-                if (no_proxy) {
-                    size_t off = 0;
-                    for (size_t i = 0; i < s->net_proxy->allowed_domains_count; i++) {
-                        const char *d = s->net_proxy->allowed_domains[i];
-                        if (!d) continue;
-                        size_t dlen = strlen(d);
-                        if (off > 0) no_proxy[off++] = ',';
-                        memcpy(no_proxy + off, d, dlen);
-                        off += dlen;
-                    }
-                    no_proxy[off] = '\0';
-                    setenv("NO_PROXY", no_proxy, 1);
-                    setenv("no_proxy", no_proxy, 1);
-                    free(no_proxy);
-                }
-            }
-        }
-    }
-
-    /* Apply kernel-level sandbox restrictions (Landlock, seccomp, etc.) */
-    if (s->sandbox_apply) {
-        sc_error_t err = s->sandbox_apply(s->sandbox_ctx);
-        if (err != SC_OK && err != SC_ERR_NOT_SUPPORTED)
-            return err;
-    }
-
-    return SC_OK;
-}
-#endif /* !_WIN32 && !SC_IS_TEST */
 
 static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,
@@ -184,11 +123,6 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     const char *sandbox_argv[SC_SPAWN_MAX_ARGS + 16];
     const char *const *run_argv = argv_buf;
 
-    sc_spawn_child_setup_ctx_t setup_ctx = {
-        .sandbox_apply = NULL, .sandbox_ctx = NULL, .net_proxy = NULL,
-    };
-    sc_child_setup_fn child_setup = NULL;
-
     if (c->policy && c->policy->sandbox &&
         sc_sandbox_is_available(c->policy->sandbox)) {
         size_t wrapped_count = 0;
@@ -199,25 +133,11 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
             sandbox_argv[wrapped_count] = NULL;
             run_argv = sandbox_argv;
         }
-        if (c->policy->sandbox->vtable &&
-            c->policy->sandbox->vtable->apply) {
-            setup_ctx.sandbox_apply = c->policy->sandbox->vtable->apply;
-            setup_ctx.sandbox_ctx = c->policy->sandbox->ctx;
-        }
     }
-
-    if (c->policy && c->policy->net_proxy &&
-        c->policy->net_proxy->enabled) {
-        setup_ctx.net_proxy = c->policy->net_proxy;
-    }
-
-    if (setup_ctx.sandbox_apply || setup_ctx.net_proxy)
-        child_setup = spawn_child_setup;
 
     sc_run_result_t run = {0};
-    sc_error_t err = sc_process_run_sandboxed(alloc, run_argv, cwd,
-        SC_SPAWN_MAX_OUTPUT, child_setup,
-        child_setup ? &setup_ctx : NULL, &run);
+    sc_error_t err = sc_process_run_with_policy(alloc, run_argv, cwd,
+        SC_SPAWN_MAX_OUTPUT, c->policy, &run);
 
     /* Free any number-arg copies we allocated */
     if (args_arr && args_arr->type == SC_JSON_ARRAY) {

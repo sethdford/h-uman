@@ -34,6 +34,11 @@ typedef struct sc_shell_ctx {
  * Shell metacharacters in cmd are interpreted by the shell.
  * This tool should be restricted or disabled in high-assurance deployments.
  * Use sc_policy_validate_command and sandbox wrapping for mitigation.
+ *
+ * RUNTIME WRAP: The sc_runtime_vtable_t has an optional wrap_command method
+ * (e.g. Docker runtime wraps as "docker run ..."). Shell tool does not yet
+ * use it; integration left for later. Callers that have a runtime can invoke
+ * wrap_command to wrap argv before exec.
  */
 static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,

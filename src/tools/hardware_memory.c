@@ -3,7 +3,9 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
+#include "seaclaw/core/process_util.h"
 #include "seaclaw/core/string.h"
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -61,23 +63,96 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
     *out = sc_tool_result_fail("Unknown action", 14);
     return SC_OK;
 #else
-    (void)alloc;
-    (void)value;
-    (void)address;
-    (void)length;
     if (!board || !board[0]) board = (c->boards_count > 0) ? c->boards[0] : NULL;
+    if (!board) {
+        *out = sc_tool_result_fail("No board specified", 18);
+        return SC_OK;
+    }
     bool supported = false;
     for (size_t i = 0; i < c->boards_count; i++) {
         if (c->boards[i] && strcmp(c->boards[i], board) == 0) {
-            supported = (strcmp(board, "nucleo-f401re") == 0 || strcmp(board, "nucleo-f411re") == 0);
+            supported = true;
             break;
         }
     }
     if (!supported) {
-        *out = sc_tool_result_fail("Board not supported (probe-rs: nucleo-f401re, nucleo-f411re)", 58);
+        *out = sc_tool_result_fail("Board not configured in peripherals list", 40);
         return SC_OK;
     }
-    *out = sc_tool_result_fail("hardware_memory: probe-rs integration not yet available", 56);
+
+    const char *chip = NULL;
+    if (strcmp(board, "nucleo-f401re") == 0) chip = "STM32F401RETx";
+    else if (strcmp(board, "nucleo-f411re") == 0) chip = "STM32F411RETx";
+    else if (strcmp(board, "nucleo-l476rg") == 0) chip = "STM32L476RGTx";
+    else if (strcmp(board, "nucleo-f446re") == 0) chip = "STM32F446RETx";
+
+    if (strcmp(action, "read") == 0) {
+        char addr_buf[32], len_buf[16];
+        snprintf(addr_buf, sizeof(addr_buf), "%s", address);
+        snprintf(len_buf, sizeof(len_buf), "%zu", length);
+
+        const char *argv[10];
+        int ai = 0;
+        argv[ai++] = "probe-rs";
+        argv[ai++] = "read";
+        argv[ai++] = addr_buf;
+        argv[ai++] = len_buf;
+        if (chip) { argv[ai++] = "--chip"; argv[ai++] = chip; }
+        argv[ai] = NULL;
+
+        sc_run_result_t run = {0};
+        sc_error_t err = sc_process_run(alloc, argv, NULL, 65536, &run);
+        if (err != SC_OK || !run.success) {
+            const char *emsg = (run.stderr_buf && run.stderr_len > 0) ?
+                run.stderr_buf : "probe-rs read failed";
+            size_t elen = strlen(emsg);
+            if (elen > 256) elen = 256;
+            *out = sc_tool_result_fail(emsg, elen);
+            sc_run_result_free(alloc, &run);
+            return SC_OK;
+        }
+        char *msg = sc_strndup(alloc, run.stdout_buf, run.stdout_len);
+        size_t mlen = run.stdout_len;
+        sc_run_result_free(alloc, &run);
+        if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+        *out = sc_tool_result_ok_owned(msg, mlen);
+        return SC_OK;
+    }
+    if (strcmp(action, "write") == 0) {
+        if (!value || strlen(value) == 0) {
+            *out = sc_tool_result_fail("missing value for write", 23);
+            return SC_OK;
+        }
+        char addr_buf[32];
+        snprintf(addr_buf, sizeof(addr_buf), "%s", address);
+
+        const char *argv[10];
+        int ai = 0;
+        argv[ai++] = "probe-rs";
+        argv[ai++] = "write";
+        argv[ai++] = addr_buf;
+        argv[ai++] = value;
+        if (chip) { argv[ai++] = "--chip"; argv[ai++] = chip; }
+        argv[ai] = NULL;
+
+        sc_run_result_t run = {0};
+        sc_error_t err = sc_process_run(alloc, argv, NULL, 65536, &run);
+        if (err != SC_OK || !run.success) {
+            const char *emsg = (run.stderr_buf && run.stderr_len > 0) ?
+                run.stderr_buf : "probe-rs write failed";
+            size_t elen = strlen(emsg);
+            if (elen > 256) elen = 256;
+            *out = sc_tool_result_fail(emsg, elen);
+            sc_run_result_free(alloc, &run);
+            return SC_OK;
+        }
+        sc_run_result_free(alloc, &run);
+        char *msg = sc_strndup(alloc, "Write OK", 8);
+        if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+        *out = sc_tool_result_ok_owned(msg, 8);
+        return SC_OK;
+    }
+    *out = sc_tool_result_fail("Unknown action", 14);
     return SC_OK;
 #endif
 }

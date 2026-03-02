@@ -15,6 +15,7 @@ struct sc_skillforge;
 struct sc_cost_tracker;
 struct sc_bus;
 struct sc_tool;
+struct sc_push_manager;
 
 typedef struct sc_app_context {
     struct sc_config *config;
@@ -26,6 +27,7 @@ typedef struct sc_app_context {
     struct sc_bus *bus;
     struct sc_tool *tools;
     size_t tools_count;
+    struct sc_push_manager *push;
 } sc_app_context_t;
 
 typedef struct sc_control_protocol {

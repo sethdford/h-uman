@@ -102,7 +102,7 @@ static void test_mcp_host_create_destroy(void) {
     tools[0].vtable = &mock_host_vtable;
 
     sc_mcp_host_t *host = NULL;
-    sc_error_t err = sc_mcp_host_create(&alloc, tools, 1, &host);
+    sc_error_t err = sc_mcp_host_create(&alloc, tools, 1, NULL, &host);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_NOT_NULL(host);
     sc_mcp_host_destroy(host);
@@ -110,20 +110,20 @@ static void test_mcp_host_create_destroy(void) {
 
 static void test_mcp_host_create_null_alloc(void) {
     sc_mcp_host_t *host = NULL;
-    sc_error_t err = sc_mcp_host_create(NULL, NULL, 0, &host);
+    sc_error_t err = sc_mcp_host_create(NULL, NULL, 0, NULL, &host);
     SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
 }
 
 static void test_mcp_host_create_null_out(void) {
     sc_allocator_t alloc = sc_system_allocator();
-    sc_error_t err = sc_mcp_host_create(&alloc, NULL, 0, NULL);
+    sc_error_t err = sc_mcp_host_create(&alloc, NULL, 0, NULL, NULL);
     SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
 }
 
 static void test_mcp_host_create_zero_tools(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_mcp_host_t *host = NULL;
-    sc_error_t err = sc_mcp_host_create(&alloc, NULL, 0, &host);
+    sc_error_t err = sc_mcp_host_create(&alloc, NULL, 0, NULL, &host);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_NOT_NULL(host);
     sc_mcp_host_destroy(host);

@@ -6,6 +6,8 @@
 #if defined(__linux__) && !SC_IS_TEST
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/spi/spidev.h>
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -76,7 +78,103 @@ static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc,
         *out = sc_tool_result_ok_owned(msg, len);
         return SC_OK;
     }
-    *out = sc_tool_result_fail("SPI ioctl transfer not yet available", 35);
+    const char *device = sc_json_get_string(args, "device");
+    if (!device || device[0] == '\0') device = "/dev/spidev0.0";
+    uint32_t speed = (uint32_t)sc_json_get_number(args, "speed_hz", 1000000);
+    uint8_t mode = (uint8_t)sc_json_get_number(args, "mode", 0);
+    uint8_t bits = (uint8_t)sc_json_get_number(args, "bits_per_word", 8);
+
+    int fd = open(device, O_RDWR);
+    if (fd < 0) {
+        *out = sc_tool_result_fail("Cannot open SPI device", 22);
+        return SC_OK;
+    }
+    ioctl(fd, SPI_IOC_WR_MODE, &mode);
+    ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
+    ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
+
+    if (strcmp(action, "transfer") == 0) {
+        const char *hex_data = sc_json_get_string(args, "data");
+        if (!hex_data || hex_data[0] == '\0') {
+            close(fd);
+            *out = sc_tool_result_fail("missing data for transfer", 25);
+            return SC_OK;
+        }
+        uint8_t tx[128], rx[128];
+        size_t tx_len = 0;
+        for (const char *p = hex_data; *p && tx_len < sizeof(tx); ) {
+            while (*p == ' ') p++;
+            if (!*p) break;
+            char byte_str[3] = { p[0], p[1] ? p[1] : '\0', '\0' };
+            tx[tx_len++] = (uint8_t)strtoul(byte_str, NULL, 16);
+            p += (p[1] ? 2 : 1);
+        }
+        memset(rx, 0, sizeof(rx));
+
+        struct spi_ioc_transfer tr;
+        memset(&tr, 0, sizeof(tr));
+        tr.tx_buf = (unsigned long)tx;
+        tr.rx_buf = (unsigned long)rx;
+        tr.len = (uint32_t)tx_len;
+        tr.speed_hz = speed;
+        tr.bits_per_word = bits;
+
+        int ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+        close(fd);
+        if (ret < 0) {
+            *out = sc_tool_result_fail("SPI transfer failed", 19);
+            return SC_OK;
+        }
+        char hex_buf[512];
+        size_t hp = 0;
+        hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "{\"rx_data\":\"");
+        for (size_t i = 0; i < tx_len && hp + 4 < sizeof(hex_buf); i++) {
+            if (i > 0) hex_buf[hp++] = ' ';
+            hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "%02X", rx[i]);
+        }
+        hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "\"}");
+        char *msg = sc_strndup(alloc, hex_buf, hp);
+        if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+        *out = sc_tool_result_ok_owned(msg, hp);
+        return SC_OK;
+    }
+    if (strcmp(action, "read") == 0) {
+        double len_val = sc_json_get_number(args, "length", 16);
+        size_t read_len = (size_t)len_val;
+        if (read_len > 128) read_len = 128;
+        uint8_t tx[128], rx[128];
+        memset(tx, 0xFF, sizeof(tx));
+        memset(rx, 0, sizeof(rx));
+
+        struct spi_ioc_transfer tr;
+        memset(&tr, 0, sizeof(tr));
+        tr.tx_buf = (unsigned long)tx;
+        tr.rx_buf = (unsigned long)rx;
+        tr.len = (uint32_t)read_len;
+        tr.speed_hz = speed;
+        tr.bits_per_word = bits;
+
+        int ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+        close(fd);
+        if (ret < 0) {
+            *out = sc_tool_result_fail("SPI read failed", 15);
+            return SC_OK;
+        }
+        char hex_buf[512];
+        size_t hp = 0;
+        hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "{\"rx_data\":\"");
+        for (size_t i = 0; i < read_len && hp + 4 < sizeof(hex_buf); i++) {
+            if (i > 0) hex_buf[hp++] = ' ';
+            hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "%02X", rx[i]);
+        }
+        hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "\"}");
+        char *msg = sc_strndup(alloc, hex_buf, hp);
+        if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+        *out = sc_tool_result_ok_owned(msg, hp);
+        return SC_OK;
+    }
+    close(fd);
+    *out = sc_tool_result_fail("unknown SPI action", 18);
     return SC_OK;
 #else
     (void)alloc;

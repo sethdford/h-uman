@@ -41,6 +41,7 @@
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/spi.h"
 #include "seaclaw/tools/claude_code.h"
+#include "seaclaw/security.h"
 #include <string.h>
 
 #define TOOL_TEST_3(tool_id, create_fn, expected_name, ...) \
@@ -710,6 +711,52 @@ static void test_web_search_parameters_has_query(void) {
     if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+static void test_browser_create_with_policy(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_security_policy_t policy = {0};
+    sc_tool_t tool;
+    sc_error_t err = sc_browser_create(&alloc, true, &policy, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(tool.ctx);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "browser");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_screenshot_create_with_policy(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_security_policy_t policy = {0};
+    sc_tool_t tool;
+    sc_error_t err = sc_screenshot_create(&alloc, true, &policy, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(tool.ctx);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "screenshot");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_browser_open_create_with_policy(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_security_policy_t policy = {0};
+    const char *domains[] = {"example.com"};
+    sc_tool_t tool;
+    sc_error_t err = sc_browser_open_create(&alloc, domains, 1, &policy, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(tool.ctx);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "browser_open");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_spawn_create_with_policy(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_security_policy_t policy = {0};
+    policy.allow_shell = true;
+    sc_tool_t tool;
+    sc_error_t err = sc_spawn_create(&alloc, ".", 1, &policy, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(tool.ctx);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "spawn");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+
 void run_tools_all_tests(void) {
     SC_TEST_SUITE("Tools (all) - Shell/File");
     SC_RUN_TEST(test_shell_create);
@@ -865,6 +912,12 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_claude_code_execute_empty);
     SC_RUN_TEST(test_claude_code_execute_with_prompt);
     SC_RUN_TEST(test_claude_code_execute_with_model_and_dir);
+
+    SC_TEST_SUITE("Tools (all) - Policy Wiring");
+    SC_RUN_TEST(test_browser_create_with_policy);
+    SC_RUN_TEST(test_screenshot_create_with_policy);
+    SC_RUN_TEST(test_browser_open_create_with_policy);
+    SC_RUN_TEST(test_spawn_create_with_policy);
 
     SC_TEST_SUITE("Tools (all) - Factory");
     SC_RUN_TEST(test_tools_factory_create_all);

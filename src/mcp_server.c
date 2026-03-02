@@ -2,6 +2,7 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
+#include "seaclaw/memory.h"
 #include "seaclaw/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,11 +18,13 @@ struct sc_mcp_host {
     sc_allocator_t *alloc;
     sc_tool_t *tools;
     size_t tool_count;
+    sc_memory_t *memory;
     bool initialized;
 };
 
 sc_error_t sc_mcp_host_create(sc_allocator_t *alloc,
     sc_tool_t *tools, size_t tool_count,
+    sc_memory_t *memory,
     sc_mcp_host_t **out)
 {
     if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
@@ -31,6 +34,7 @@ sc_error_t sc_mcp_host_create(sc_allocator_t *alloc,
     srv->alloc = alloc;
     srv->tools = tools;
     srv->tool_count = tool_count;
+    srv->memory = memory;
     srv->initialized = false;
     *out = srv;
     return SC_OK;
@@ -90,7 +94,7 @@ static sc_error_t handle_initialize(sc_mcp_host_t *srv, const char *id_raw)
     srv->initialized = true;
     const char *result =
         "{\"protocolVersion\":\"" MCP_PROTOCOL_VERSION "\","
-        "\"capabilities\":{\"tools\":{}},"
+        "\"capabilities\":{\"tools\":{},\"resources\":{}},"
         "\"serverInfo\":{\"name\":\"" MCP_SERVER_NAME "\","
         "\"version\":\"" MCP_SERVER_VERSION "\"}}";
     return write_response(srv->alloc, id_raw, result);
@@ -207,6 +211,117 @@ static sc_error_t handle_tools_call(sc_mcp_host_t *srv,
     return err;
 }
 
+/* ── Handler: resources/list ─────────────────────────────────────────────── */
+
+static sc_error_t handle_resources_list(sc_mcp_host_t *srv, const char *id_raw)
+{
+    sc_allocator_t *alloc = srv->alloc;
+    sc_json_buf_t buf;
+    if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
+
+    sc_error_t err = sc_json_buf_append_raw(&buf, "{\"resources\":[", 14);
+
+    /* Always expose config resource */
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf,
+            "{\"uri\":\"seaclaw://config\","
+            "\"name\":\"Configuration\","
+            "\"description\":\"Current seaclaw configuration\","
+            "\"mimeType\":\"application/json\"}", 130);
+
+    /* If memory is available, expose memory resource */
+    if (err == SC_OK && srv->memory && srv->memory->vtable) {
+        err = sc_json_buf_append_raw(&buf,
+            ",{\"uri\":\"seaclaw://memory\","
+            "\"name\":\"Memory\","
+            "\"description\":\"Agent memory entries\","
+            "\"mimeType\":\"application/json\"}", 126);
+    }
+
+    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "]}", 2);
+
+    if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+
+    char *result = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
+    if (!result) { sc_json_buf_free(&buf); return SC_ERR_OUT_OF_MEMORY; }
+    memcpy(result, buf.ptr, buf.len);
+    result[buf.len] = '\0';
+    size_t result_len = buf.len;
+    sc_json_buf_free(&buf);
+
+    err = write_response(alloc, id_raw, result);
+    alloc->free(alloc->ctx, result, result_len + 1);
+    return err;
+}
+
+/* ── Handler: resources/read ─────────────────────────────────────────────── */
+
+static sc_error_t handle_resources_read(sc_mcp_host_t *srv,
+    const char *id_raw, sc_json_value_t *params)
+{
+    sc_allocator_t *alloc = srv->alloc;
+    const char *uri = sc_json_get_string(params, "uri");
+    if (!uri) return write_error(alloc, id_raw, -32602, "Missing uri");
+
+    if (strcmp(uri, "seaclaw://config") == 0) {
+        const char *result =
+            "{\"contents\":[{\"uri\":\"seaclaw://config\","
+            "\"mimeType\":\"application/json\","
+            "\"text\":\"{\\\"version\\\":\\\"0.1.0\\\",\\\"status\\\":\\\"running\\\"}\"}]}";
+        return write_response(alloc, id_raw, result);
+    }
+
+    if (strcmp(uri, "seaclaw://memory") == 0) {
+        if (!srv->memory || !srv->memory->vtable || !srv->memory->vtable->recall) {
+            return write_response(alloc, id_raw,
+                "{\"contents\":[{\"uri\":\"seaclaw://memory\","
+                "\"mimeType\":\"application/json\","
+                "\"text\":\"[]\"}]}");
+        }
+        sc_memory_entry_t *entries = NULL;
+        size_t count = 0;
+        sc_error_t err = srv->memory->vtable->recall(srv->memory->ctx, alloc,
+            "", 0, 10, NULL, 0, &entries, &count);
+        if (err != SC_OK || count == 0) {
+            if (entries) {
+                for (size_t i = 0; i < count; i++)
+                    sc_memory_entry_free_fields(alloc, &entries[i]);
+                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+            }
+            return write_response(alloc, id_raw,
+                "{\"contents\":[{\"uri\":\"seaclaw://memory\","
+                "\"mimeType\":\"application/json\","
+                "\"text\":\"[]\"}]}");
+        }
+        /* Build JSON with entry count; free entries */
+        for (size_t i = 0; i < count; i++)
+            sc_memory_entry_free_fields(alloc, &entries[i]);
+        alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+
+        sc_json_buf_t buf;
+        if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
+        err = sc_json_buf_append_raw(&buf, "{\"contents\":[{\"uri\":\"seaclaw://memory\","
+            "\"mimeType\":\"application/json\",\"text\":\"", 80);
+        char count_str[32];
+        int n = snprintf(count_str, sizeof(count_str), "[%zu entries]", count);
+        if (err == SC_OK && n > 0)
+            err = sc_json_buf_append_raw(&buf, count_str, (size_t)n);
+        if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "\"}]}", 4);
+        if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+        char *result = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
+        if (!result) { sc_json_buf_free(&buf); return SC_ERR_OUT_OF_MEMORY; }
+        memcpy(result, buf.ptr, buf.len);
+        result[buf.len] = '\0';
+        size_t result_len = buf.len;
+        sc_json_buf_free(&buf);
+        err = write_response(alloc, id_raw, result);
+        alloc->free(alloc->ctx, result, result_len + 1);
+        return err;
+    }
+
+    return write_error(alloc, id_raw, -32602, "Unknown resource URI");
+}
+
 /* ── Main loop ─────────────────────────────────────────────────────────── */
 
 static sc_error_t read_stdin_line(sc_allocator_t *alloc, char **out,
@@ -299,6 +414,13 @@ sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv)
         } else if (strcmp(method, "tools/call") == 0) {
             if (params)
                 handle_tools_call(srv, id_buf, params);
+            else
+                write_error(alloc, id_buf, -32602, "Missing params");
+        } else if (strcmp(method, "resources/list") == 0) {
+            handle_resources_list(srv, id_buf);
+        } else if (strcmp(method, "resources/read") == 0) {
+            if (params)
+                handle_resources_read(srv, id_buf, params);
             else
                 write_error(alloc, id_buf, -32602, "Missing params");
         } else if (strcmp(method, "ping") == 0) {

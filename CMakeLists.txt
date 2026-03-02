@@ -335,7 +335,6 @@ set(SC_CORE_SOURCES
     src/tools/schedule.c
     src/tools/schema.c
     src/tools/schema_clean.c
-    src/tools/process_util.c
     src/tools/pushover.c
     src/tools/hardware_info.c
     src/tools/i2c.c

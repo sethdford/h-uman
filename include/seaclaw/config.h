@@ -90,6 +90,15 @@ typedef struct sc_imessage_channel_config {
     char *default_target;
 } sc_imessage_channel_config_t;
 
+#define SC_DISCORD_CHANNEL_IDS_MAX 16
+typedef struct sc_discord_channel_config {
+    char *token;
+    char *guild_id;
+    char *bot_id;
+    char *channel_ids[SC_DISCORD_CHANNEL_IDS_MAX];
+    size_t channel_ids_count;
+} sc_discord_channel_config_t;
+
 #define SC_MCP_SERVERS_MAX 16
 #define SC_MCP_SERVER_ARGS_MAX 16
 
@@ -108,6 +117,7 @@ typedef struct sc_channels_config {
     size_t channel_config_len;
     sc_email_channel_config_t email;
     sc_imessage_channel_config_t imessage;
+    sc_discord_channel_config_t discord;
 } sc_channels_config_t;
 
 typedef struct sc_memory_config {

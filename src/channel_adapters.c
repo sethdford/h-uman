@@ -14,6 +14,7 @@ int sc_channel_adapters_parse_peer_kind(const char *raw, size_t len) {
 /* Polling descriptors for SC_LISTENER_POLLING channels (telegram, matrix, irc, signal, nostr). */
 static const sc_polling_descriptor_t polling_table[] = {
     { "telegram", 1000 },
+    { "discord", 2000 },
     { "matrix", 2000 },
     { "irc", 1000 },
     { "signal", 2000 },

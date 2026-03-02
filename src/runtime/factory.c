@@ -12,8 +12,12 @@ sc_error_t sc_runtime_from_config(const struct sc_config *cfg, sc_runtime_t *out
     }
 
     if (strcmp(kind, "docker") == 0) {
-        /* docker_image is parsed but docker adapter uses mount_workspace + memory_limit_mb */
-        *out = sc_runtime_docker(true, 0);
+        uint64_t mem_mb = 0;
+        if (cfg->security.resource_limits.max_memory_mb > 0)
+            mem_mb = (uint64_t)cfg->security.resource_limits.max_memory_mb;
+        const char *image = cfg->runtime.docker_image;
+        const char *workspace = cfg->workspace_dir ? cfg->workspace_dir : ".";
+        *out = sc_runtime_docker(true, mem_mb, image, workspace);
         return SC_OK;
     }
 

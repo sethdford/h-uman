@@ -8,8 +8,11 @@
 #include "seaclaw/core/arena.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/security/sandbox.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
 
 static void test_config_parse_empty_json(void) {
     sc_allocator_t backing = sc_system_allocator();
@@ -444,6 +447,68 @@ static void test_config_parse_memory_api(void) {
     sc_arena_destroy(arena);
 }
 
+static void test_config_sandbox_save_roundtrip(void) {
+    sc_allocator_t backing = sc_system_allocator();
+    sc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    sc_arena_t *arena = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena);
+    cfg.allocator = sc_arena_allocator(arena);
+    cfg.arena = arena;
+
+    const char *j =
+        "{\"security\":{\"sandbox\":\"firejail\",\"sandbox_config\":{"
+        "\"enabled\":true,\"backend\":\"firejail\","
+        "\"firejail_args\":[\"--whitelist=/opt\",\"--net=none\"],"
+        "\"net_proxy\":{\"enabled\":true,\"deny_all\":false,"
+        "\"proxy_addr\":\"http://10.0.0.1:3128\","
+        "\"allowed_domains\":[\"api.example.com\",\"*.internal.io\"]}"
+        "}}}";
+    sc_error_t err = sc_config_parse_json(&cfg, j, strlen(j));
+    SC_ASSERT_EQ(err, SC_OK);
+
+    char tmp_path[] = "/tmp/sc_test_cfg_XXXXXX";
+    int fd = mkstemp(tmp_path);
+    SC_ASSERT(fd >= 0);
+    close(fd);
+    cfg.config_path = tmp_path;
+
+    err = sc_config_save(&cfg);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    FILE *f = fopen(tmp_path, "r");
+    SC_ASSERT_NOT_NULL(f);
+    char buf[8192];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    unlink(tmp_path);
+
+    sc_config_t cfg2;
+    memset(&cfg2, 0, sizeof(cfg2));
+    sc_arena_t *arena2 = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena2);
+    cfg2.allocator = sc_arena_allocator(arena2);
+    cfg2.arena = arena2;
+    err = sc_config_parse_json(&cfg2, buf, n);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    SC_ASSERT_TRUE(cfg2.security.sandbox_config.enabled);
+    SC_ASSERT_EQ((int)cfg2.security.sandbox_config.backend, (int)SC_SANDBOX_FIREJAIL);
+    SC_ASSERT_EQ(cfg2.security.sandbox_config.firejail_args_len, 2);
+    SC_ASSERT_STR_EQ(cfg2.security.sandbox_config.firejail_args[0], "--whitelist=/opt");
+    SC_ASSERT_STR_EQ(cfg2.security.sandbox_config.firejail_args[1], "--net=none");
+    SC_ASSERT_TRUE(cfg2.security.sandbox_config.net_proxy.enabled);
+    SC_ASSERT_FALSE(cfg2.security.sandbox_config.net_proxy.deny_all);
+    SC_ASSERT_STR_EQ(cfg2.security.sandbox_config.net_proxy.proxy_addr, "http://10.0.0.1:3128");
+    SC_ASSERT_EQ(cfg2.security.sandbox_config.net_proxy.allowed_domains_len, 2);
+    SC_ASSERT_STR_EQ(cfg2.security.sandbox_config.net_proxy.allowed_domains[0], "api.example.com");
+    SC_ASSERT_STR_EQ(cfg2.security.sandbox_config.net_proxy.allowed_domains[1], "*.internal.io");
+
+    sc_arena_destroy(arena);
+    sc_arena_destroy(arena2);
+}
+
 void run_config_parse_tests(void) {
     SC_TEST_SUITE("Config parse");
     SC_RUN_TEST(test_config_parse_empty_json);
@@ -476,4 +541,7 @@ void run_config_parse_tests(void) {
     SC_RUN_TEST(test_config_parse_memory_postgres);
     SC_RUN_TEST(test_config_parse_memory_redis);
     SC_RUN_TEST(test_config_parse_memory_api);
+
+    SC_TEST_SUITE("Config sandbox roundtrip");
+    SC_RUN_TEST(test_config_sandbox_save_roundtrip);
 }

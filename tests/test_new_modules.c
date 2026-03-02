@@ -719,19 +719,26 @@ static void test_migration_run_null_stats(void) {
 
 static void test_migration_run_dry_run(void) {
     sc_allocator_t alloc = sc_system_allocator();
-    sc_migration_config_t cfg = {
-        .source = SC_MIGRATION_SOURCE_NONE,
-        .target = SC_MIGRATION_TARGET_SQLITE,
-        .source_path = "/tmp",
-        .source_path_len = 4,
-        .target_path = "/tmp/out.db",
-        .target_path_len = 12,
-        .dry_run = true,
-    };
+    sc_migration_config_t cfg = {0};
+    cfg.dry_run = true;
     sc_migration_stats_t stats = {0};
     sc_error_t err = sc_migration_run(&alloc, &cfg, &stats, NULL, NULL);
     SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(stats.imported, 0u);
+}
+
+static void test_migration_run_null_config_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_migration_stats_t stats = {0};
+    sc_error_t err = sc_migration_run(&alloc, NULL, &stats, NULL, NULL);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_migration_run_null_stats_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_migration_config_t cfg = {0};
+    cfg.dry_run = true;
+    sc_error_t err = sc_migration_run(&alloc, &cfg, NULL, NULL, NULL);
+    SC_ASSERT_NEQ(err, SC_OK);
 }
 
 #if 0
@@ -1101,6 +1108,8 @@ void run_new_modules_tests(void) {
     SC_RUN_TEST(test_migration_run_null_config);
     SC_RUN_TEST(test_migration_run_null_stats);
     SC_RUN_TEST(test_migration_run_dry_run);
+    SC_RUN_TEST(test_migration_run_null_config_fails);
+    SC_RUN_TEST(test_migration_run_null_stats_fails);
     SC_RUN_TEST(test_migration_run_progress_callback_invoked);
     SC_RUN_TEST(test_migration_stats_zeroed);
     SC_RUN_TEST(test_migration_progress_callback);

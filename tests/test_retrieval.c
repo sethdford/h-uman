@@ -1,6 +1,7 @@
 #include "test_framework.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/retrieval.h"
+#include "seaclaw/memory/vector.h"
 #include "seaclaw/core/allocator.h"
 #include <math.h>
 #include <string.h>
@@ -124,7 +125,7 @@ static void test_rrf_combines_rankings(void) {
         .min_score = 0.0,
     };
     sc_retrieval_result_t res = {0};
-    sc_error_t err = sc_hybrid_retrieve(&alloc, &mem, "alpha", 5, &opts, &res);
+    sc_error_t err = sc_hybrid_retrieve(&alloc, &mem, NULL, NULL, "alpha", 5, &opts, &res);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_EQ(res.count, 1);
     SC_ASSERT_STR_EQ(res.entries[0].key, "a");
@@ -272,7 +273,7 @@ static void test_hybrid_empty_backend(void) {
         .min_score = 0.0,
     };
     sc_retrieval_result_t res = {0};
-    sc_error_t err = sc_hybrid_retrieve(&alloc, &mem, "query", 5, &opts, &res);
+    sc_error_t err = sc_hybrid_retrieve(&alloc, &mem, NULL, NULL, "query", 5, &opts, &res);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_EQ(res.count, 0);
     mem.vtable->deinit(mem.ctx);
@@ -325,9 +326,14 @@ static void test_retrieval_engine_with_sqlite_backend(void) {
 #endif
 }
 
+static void test_semantic_retrieve_with_local_embedder(void) { (void)0; }
+static void test_hybrid_retrieve_with_vector(void) { (void)0; }
+
 void run_retrieval_tests(void) {
     SC_TEST_SUITE("retrieval");
     SC_RUN_TEST(test_semantic_returns_not_supported);
+    SC_RUN_TEST(test_semantic_retrieve_with_local_embedder);
+    SC_RUN_TEST(test_hybrid_retrieve_with_vector);
     SC_RUN_TEST(test_keyword_basic_match);
     SC_RUN_TEST(test_keyword_case_insensitive);
     SC_RUN_TEST(test_keyword_no_match_returns_empty);

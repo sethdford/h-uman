@@ -16,6 +16,8 @@
 #include "seaclaw/cron.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
+#include "seaclaw/memory/retrieval.h"
+#include "seaclaw/memory/vector.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/version.h"
@@ -378,6 +380,11 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     if (memory.vtable && strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)
         session_store = sc_sqlite_memory_get_session_store(&memory);
 
+    sc_embedder_t embedder = sc_embedder_local_create(alloc);
+    sc_vector_store_t vector_store = sc_vector_store_mem_create(alloc);
+    sc_retrieval_engine_t retrieval_engine = sc_retrieval_create_with_vector(
+        alloc, &memory, &embedder, &vector_store);
+
     sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
 
     sc_tool_t *tools = NULL;
@@ -387,6 +394,12 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
         if (cron) sc_cron_destroy(cron, alloc);
+        if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+            retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+        if (vector_store.vtable && vector_store.vtable->deinit)
+            vector_store.vtable->deinit(vector_store.ctx, alloc);
+        if (embedder.vtable && embedder.vtable->deinit)
+            embedder.vtable->deinit(embedder.ctx, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
@@ -411,11 +424,18 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         if (log_fp) fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
         if (cron) sc_cron_destroy(cron, alloc);
+        if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+            retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+        if (vector_store.vtable && vector_store.vtable->deinit)
+            vector_store.vtable->deinit(vector_store.ctx, alloc);
+        if (embedder.vtable && embedder.vtable->deinit)
+            embedder.vtable->deinit(embedder.ctx, alloc);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_config_deinit(&cfg);
         return err;
     }
+    sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
 
     /* TUI mode: launch split-pane terminal UI if --tui was passed */
     if (parsed_args.use_tui) {
@@ -429,6 +449,12 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
                 sc_error_string(err));
         }
         sc_agent_deinit(&agent);
+        if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+            retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+        if (vector_store.vtable && vector_store.vtable->deinit)
+            vector_store.vtable->deinit(vector_store.ctx, alloc);
+        if (embedder.vtable && embedder.vtable->deinit)
+            embedder.vtable->deinit(embedder.ctx, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (observer.vtable && observer.vtable->deinit) observer.vtable->deinit(observer.ctx);
         if (log_fp) fclose(log_fp);
@@ -539,6 +565,12 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     printf("\n" SC_ANSI_DIM "Goodbye." SC_ANSI_RESET "\n");
     g_active_agent = NULL;
     sc_agent_deinit(&agent);
+    if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
+        retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
+    if (vector_store.vtable && vector_store.vtable->deinit)
+        vector_store.vtable->deinit(vector_store.ctx, alloc);
+    if (embedder.vtable && embedder.vtable->deinit)
+        embedder.vtable->deinit(embedder.ctx, alloc);
     if (memory.vtable && memory.vtable->deinit)
         memory.vtable->deinit(memory.ctx);
     if (observer.vtable && observer.vtable->deinit)

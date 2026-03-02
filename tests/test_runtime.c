@@ -29,13 +29,13 @@ static void test_runtime_native_supports_long_running(void) {
 }
 
 static void test_runtime_docker_create(void) {
-    sc_runtime_t r = sc_runtime_docker(true, 256);
+    sc_runtime_t r = sc_runtime_docker(true, 256, "alpine:latest", ".");
     SC_ASSERT_NOT_NULL(r.ctx);
     SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "docker");
 }
 
 static void test_runtime_docker_memory_budget(void) {
-    sc_runtime_t r = sc_runtime_docker(false, 512);
+    sc_runtime_t r = sc_runtime_docker(false, 512, "alpine:latest", ".");
     uint64_t budget = r.vtable->memory_budget(r.ctx);
     SC_ASSERT_EQ(budget, 512u * 1024 * 1024);
 }
@@ -97,7 +97,7 @@ static void test_platform_get_home_dir(void) {
 }
 
 static void test_runtime_docker_storage_path(void) {
-    sc_runtime_t r = sc_runtime_docker(true, 128);
+    sc_runtime_t r = sc_runtime_docker(true, 128, "alpine:latest", ".");
     const char *path = r.vtable->storage_path(r.ctx);
     SC_ASSERT_NOT_NULL(path);
 }
@@ -114,8 +114,8 @@ static void test_runtime_wasm_no_long_running(void) {
 }
 
 static void test_runtime_docker_mount_workspace(void) {
-    sc_runtime_t r_mount = sc_runtime_docker(true, 64);
-    sc_runtime_t r_no_mount = sc_runtime_docker(false, 64);
+    sc_runtime_t r_mount = sc_runtime_docker(true, 64, "alpine:latest", ".");
+    sc_runtime_t r_no_mount = sc_runtime_docker(false, 64, "alpine:latest", ".");
     SC_ASSERT_NOT_NULL(r_mount.ctx);
     SC_ASSERT_NOT_NULL(r_no_mount.ctx);
 }
@@ -134,31 +134,31 @@ static void test_runtime_native_storage_contains_seaclaw(void) {
 }
 
 static void test_runtime_docker_has_shell(void) {
-    sc_runtime_t r = sc_runtime_docker(false, 0);
+    sc_runtime_t r = sc_runtime_docker(false, 0, "alpine:latest", ".");
     SC_ASSERT_TRUE(r.vtable->has_shell_access(r.ctx));
 }
 
 static void test_runtime_docker_no_long_running(void) {
-    sc_runtime_t r = sc_runtime_docker(true, 128);
+    sc_runtime_t r = sc_runtime_docker(true, 128, "alpine:latest", ".");
     SC_ASSERT_FALSE(r.vtable->supports_long_running(r.ctx));
 }
 
 static void test_runtime_docker_fs_with_mount(void) {
-    sc_runtime_t r = sc_runtime_docker(true, 64);
+    sc_runtime_t r = sc_runtime_docker(true, 64, "alpine:latest", ".");
     SC_ASSERT_TRUE(r.vtable->has_filesystem_access(r.ctx));
     const char *path = r.vtable->storage_path(r.ctx);
     SC_ASSERT_TRUE(strstr(path, "workspace") != NULL);
 }
 
 static void test_runtime_docker_fs_without_mount(void) {
-    sc_runtime_t r = sc_runtime_docker(false, 64);
+    sc_runtime_t r = sc_runtime_docker(false, 64, "alpine:latest", ".");
     SC_ASSERT_FALSE(r.vtable->has_filesystem_access(r.ctx));
     const char *path = r.vtable->storage_path(r.ctx);
     SC_ASSERT_TRUE(strstr(path, "tmp") != NULL);
 }
 
 static void test_runtime_docker_memory_zero_when_unlimited(void) {
-    sc_runtime_t r = sc_runtime_docker(false, 0);
+    sc_runtime_t r = sc_runtime_docker(false, 0, "alpine:latest", ".");
     uint64_t budget = r.vtable->memory_budget(r.ctx);
     SC_ASSERT_EQ(budget, 0u);
 }
@@ -186,13 +186,13 @@ static void test_runtime_wasm_no_fs(void) {
 }
 
 static void test_runtime_docker_storage_workspace_path(void) {
-    sc_runtime_t r = sc_runtime_docker(true, 64);
+    sc_runtime_t r = sc_runtime_docker(true, 64, "alpine:latest", ".");
     const char *path = r.vtable->storage_path(r.ctx);
     SC_ASSERT_STR_EQ(path, "/workspace/.seaclaw");
 }
 
 static void test_runtime_docker_storage_tmp_path(void) {
-    sc_runtime_t r = sc_runtime_docker(false, 64);
+    sc_runtime_t r = sc_runtime_docker(false, 64, "alpine:latest", ".");
     const char *path = r.vtable->storage_path(r.ctx);
     SC_ASSERT_STR_EQ(path, "/tmp/.seaclaw");
 }
@@ -208,7 +208,7 @@ static void test_runtime_vtable_dispatch_native(void) {
 }
 
 static void test_runtime_vtable_dispatch_docker(void) {
-    sc_runtime_t r = sc_runtime_docker(true, 256);
+    sc_runtime_t r = sc_runtime_docker(true, 256, "alpine:latest", ".");
     SC_ASSERT_TRUE(strlen(r.vtable->name(r.ctx)) > 0);
     (void)r.vtable->has_shell_access(r.ctx);
     (void)r.vtable->has_filesystem_access(r.ctx);
@@ -296,6 +296,57 @@ static void test_runtime_from_config_null_out_returns_error(void) {
     SC_ASSERT_NEQ(err, SC_OK);
 }
 
+static void test_docker_runtime_wrap_command(void) {
+    sc_runtime_t r = sc_runtime_docker(true, 256, "alpine:3", "/home/ws");
+    SC_ASSERT_NOT_NULL(r.vtable->wrap_command);
+
+    const char *argv_in[] = { "echo", "hello" };
+    const char *argv_out[32];
+    size_t argc_out = 0;
+    sc_error_t err = r.vtable->wrap_command(r.ctx, argv_in, 2, argv_out, 32, &argc_out);
+    SC_ASSERT_EQ(err, SC_OK);
+    /* docker run --rm -m 256m -v /home/ws:/workspace -w /workspace alpine:3 echo hello = 12 args */
+    SC_ASSERT_EQ(argc_out, 12u);
+    SC_ASSERT_STR_EQ(argv_out[0], "docker");
+    SC_ASSERT_STR_EQ(argv_out[1], "run");
+    SC_ASSERT_STR_EQ(argv_out[2], "--rm");
+    SC_ASSERT_STR_EQ(argv_out[3], "-m");
+    SC_ASSERT_STR_EQ(argv_out[5], "-v");
+    SC_ASSERT_STR_EQ(argv_out[7], "-w");
+    SC_ASSERT_STR_EQ(argv_out[8], "/workspace");
+    SC_ASSERT_STR_EQ(argv_out[9], "alpine:3");
+    SC_ASSERT_STR_EQ(argv_out[10], "echo");
+    SC_ASSERT_STR_EQ(argv_out[11], "hello");
+    SC_ASSERT_EQ(argv_out[12], (const char *)NULL);
+}
+
+static void test_docker_runtime_wrap_command_no_image_returns_not_supported(void) {
+    sc_runtime_t r = sc_runtime_docker(true, 0, NULL, ".");
+    SC_ASSERT_NOT_NULL(r.vtable->wrap_command);
+
+    const char *argv_in[] = { "ls" };
+    const char *argv_out[32];
+    size_t argc_out = 0;
+    sc_error_t err = r.vtable->wrap_command(r.ctx, argv_in, 1, argv_out, 32, &argc_out);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_native_runtime_no_wrap(void) {
+    sc_runtime_t r = sc_runtime_native();
+    SC_ASSERT_EQ(r.vtable->wrap_command, (void *)NULL);
+}
+
+static void test_wasm_runtime_wrap_not_supported(void) {
+    sc_runtime_t r = sc_runtime_wasm(64);
+    SC_ASSERT_NOT_NULL(r.vtable->wrap_command);
+
+    const char *argv_in[] = { "echo", "x" };
+    const char *argv_out[32];
+    size_t argc_out = 0;
+    sc_error_t err = r.vtable->wrap_command(r.ctx, argv_in, 2, argv_out, 32, &argc_out);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
 void run_runtime_tests(void) {
     SC_TEST_SUITE("Runtime");
     SC_RUN_TEST(test_runtime_native_create);
@@ -335,6 +386,10 @@ void run_runtime_tests(void) {
     SC_RUN_TEST(test_runtime_from_config_unknown_returns_error);
     SC_RUN_TEST(test_runtime_from_config_null_config_returns_error);
     SC_RUN_TEST(test_runtime_from_config_null_out_returns_error);
+    SC_RUN_TEST(test_docker_runtime_wrap_command);
+    SC_RUN_TEST(test_docker_runtime_wrap_command_no_image_returns_not_supported);
+    SC_RUN_TEST(test_native_runtime_no_wrap);
+    SC_RUN_TEST(test_wasm_runtime_wrap_not_supported);
     SC_RUN_TEST(test_platform_is_windows_or_unix);
     SC_RUN_TEST(test_platform_get_shell);
     SC_RUN_TEST(test_platform_get_shell_flag);

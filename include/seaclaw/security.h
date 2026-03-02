@@ -40,10 +40,6 @@ uint32_t sc_rate_tracker_remaining(sc_rate_tracker_t *t);
 
 /* ── Security policy ────────────────────────────────────────────── */
 
-#ifndef SC_SANDBOX_H
-typedef struct sc_sandbox sc_sandbox_t;
-#endif
-
 typedef struct sc_security_policy {
     sc_autonomy_level_t autonomy;
     const char *workspace_dir;

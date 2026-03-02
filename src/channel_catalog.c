@@ -13,7 +13,7 @@ static const sc_channel_meta_t catalog[] = {
     { SC_CHANNEL_TELEGRAM, "telegram", "Telegram", "", SC_LISTENER_POLLING },
 #endif
 #ifdef SC_HAS_DISCORD
-    { SC_CHANNEL_DISCORD, "discord", "Discord", "", SC_LISTENER_GATEWAY },
+    { SC_CHANNEL_DISCORD, "discord", "Discord", "", SC_LISTENER_POLLING },
 #endif
 #ifdef SC_HAS_SLACK
     { SC_CHANNEL_SLACK, "slack", "Slack", "", SC_LISTENER_GATEWAY },

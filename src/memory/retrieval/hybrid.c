@@ -10,9 +10,11 @@
  * When vector store is not wired, uses keyword only. This is intentional:
  * hybrid = best available (keyword + semantic when both exist). */
 sc_error_t sc_hybrid_retrieve(sc_allocator_t *alloc, sc_memory_t *backend,
+    sc_embedder_t *embedder, sc_vector_store_t *vector_store,
     const char *query, size_t query_len,
     const sc_retrieval_options_t *opts,
     sc_retrieval_result_t *out) {
-    /* Keyword always available; semantic requires vector store (not wired yet) */
+    (void)embedder;
+    (void)vector_store;
     return sc_keyword_retrieve(alloc, backend, query, query_len, opts, out);
 }

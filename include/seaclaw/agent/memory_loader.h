@@ -4,6 +4,7 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/memory.h"
+#include "seaclaw/memory/retrieval.h"
 #include <stddef.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@
 
 typedef struct sc_memory_loader {
     sc_memory_t *memory;
+    sc_retrieval_engine_t *retrieval_engine; /* optional; when set, use hybrid retrieval */
     sc_allocator_t *alloc;
     size_t max_entries;
     size_t max_context_chars;
@@ -19,6 +21,7 @@ typedef struct sc_memory_loader {
 
 sc_error_t sc_memory_loader_init(sc_memory_loader_t *loader,
     sc_allocator_t *alloc, sc_memory_t *memory,
+    sc_retrieval_engine_t *retrieval_engine,
     size_t max_entries, size_t max_context_chars);
 
 /* Load relevant memories for a query and format them as markdown text.
