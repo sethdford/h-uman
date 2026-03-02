@@ -3,6 +3,7 @@
  * In SC_IS_TEST mode, returns mock data without network calls.
  */
 #include "seaclaw/update.h"
+#include <stdint.h>
 #include "seaclaw/version.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"

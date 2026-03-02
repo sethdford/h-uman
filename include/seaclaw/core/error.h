@@ -62,6 +62,7 @@ typedef enum sc_error {
 
     SC_ERR_INTERNAL,
     SC_ERR_SUBAGENT_TOO_MANY,
+    SC_ERR_CANCELLED,
 
     SC_ERR_COUNT
 } sc_error_t;

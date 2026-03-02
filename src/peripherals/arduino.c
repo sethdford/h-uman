@@ -1,4 +1,5 @@
 #include "seaclaw/peripheral.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/core/error.h"

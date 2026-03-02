@@ -1,8 +1,9 @@
 #include "seaclaw/skillforge.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -225,4 +226,73 @@ sc_error_t sc_skillforge_disable(sc_skillforge_t *sf, const char *name) {
     if (!s) return SC_ERR_NOT_FOUND;
     s->enabled = false;
     return SC_OK;
+}
+
+sc_error_t sc_skillforge_execute(sc_allocator_t *alloc, const sc_skillforge_t *sf,
+    const char *name, char **out_instructions) {
+    if (!alloc || !sf || !name || !out_instructions) return SC_ERR_INVALID_ARGUMENT;
+    *out_instructions = NULL;
+    sc_skill_t *s = sc_skillforge_get_skill(sf, name);
+    if (!s) return SC_ERR_NOT_FOUND;
+    if (!s->description || !s->description[0]) {
+        char *empty = (char *)alloc->alloc(alloc->ctx, 1);
+        if (!empty) return SC_ERR_OUT_OF_MEMORY;
+        empty[0] = '\0';
+        *out_instructions = empty;
+        return SC_OK;
+    }
+    *out_instructions = sc_strdup(alloc, s->description);
+    if (!*out_instructions) return SC_ERR_OUT_OF_MEMORY;
+    return SC_OK;
+}
+
+sc_error_t sc_skillforge_install(const char *name, const char *url) {
+    if (!name || !name[0] || !url || !url[0]) return SC_ERR_INVALID_ARGUMENT;
+
+#ifdef SC_IS_TEST
+    (void)url;
+    return SC_OK;
+#else
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) return SC_ERR_INVALID_ARGUMENT;
+
+    char path[1024];
+    int n = snprintf(path, sizeof(path), "%s/.seaclaw/skills/%.256s.skill.json", home, name);
+    if (n <= 0 || (size_t)n >= sizeof(path)) return SC_ERR_INVALID_ARGUMENT;
+
+    char dir_path[1024];
+    n = snprintf(dir_path, sizeof(dir_path), "%s/.seaclaw/skills", home);
+    if (n <= 0 || (size_t)n >= sizeof(dir_path)) return SC_ERR_INVALID_ARGUMENT;
+#ifndef _WIN32
+    mkdir(dir_path, 0755);
+#endif
+
+    FILE *f = fopen(path, "w");
+    if (!f) return SC_ERR_IO;
+
+    fprintf(f, "{\"name\":\"%s\",\"description\":\"\",\"enabled\":true,\"source_url\":\"", name);
+    for (const char *p = url; *p; p++) {
+        if (*p == '"' || *p == '\\') fputc('\\', f);
+        fputc(*p, f);
+    }
+    fprintf(f, "\"}\n");
+    fclose(f);
+    return SC_OK;
+#endif
+}
+
+sc_error_t sc_skillforge_uninstall(sc_skillforge_t *sf, const char *name) {
+    if (!sf || !name) return SC_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < sf->skills_len; i++) {
+        if (strcmp(sf->skills[i].name, name) == 0) {
+            skill_free(sf->alloc, &sf->skills[i]);
+            if (i + 1 < sf->skills_len) {
+                memmove(&sf->skills[i], &sf->skills[i + 1],
+                    (sf->skills_len - i - 1) * sizeof(sc_skill_t));
+            }
+            sf->skills_len--;
+            return SC_OK;
+        }
+    }
+    return SC_ERR_NOT_FOUND;
 }

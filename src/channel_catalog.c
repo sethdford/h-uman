@@ -37,10 +37,10 @@ static const sc_channel_meta_t catalog[] = {
     { SC_CHANNEL_WEB, "web", "Web", "", SC_LISTENER_GATEWAY },
 #endif
 #ifdef SC_HAS_EMAIL
-    { SC_CHANNEL_EMAIL, "email", "Email", "", SC_LISTENER_SEND_ONLY },
+    { SC_CHANNEL_EMAIL, "email", "Email", "", SC_LISTENER_POLLING },
 #endif
 #ifdef SC_HAS_IMESSAGE
-    { SC_CHANNEL_IMESSAGE, "imessage", "iMessage", "", SC_LISTENER_SEND_ONLY },
+    { SC_CHANNEL_IMESSAGE, "imessage", "iMessage", "", SC_LISTENER_POLLING },
 #endif
 #ifdef SC_HAS_MATTERMOST
     { SC_CHANNEL_MATTERMOST, "mattermost", "Mattermost", "", SC_LISTENER_WEBHOOK_ONLY },
@@ -200,6 +200,8 @@ bool sc_channel_catalog_requires_runtime(sc_channel_id_t id) {
     case SC_CHANNEL_SIGNAL:
     case SC_CHANNEL_NOSTR:
     case SC_CHANNEL_QQ:
+    case SC_CHANNEL_EMAIL:
+    case SC_CHANNEL_IMESSAGE:
         return true;
     default:
         return false;

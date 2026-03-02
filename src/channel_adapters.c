@@ -18,6 +18,8 @@ static const sc_polling_descriptor_t polling_table[] = {
     { "irc", 1000 },
     { "signal", 2000 },
     { "nostr", 5000 },
+    { "imessage", 3000 },
+    { "email", 30000 },
 };
 static const size_t polling_table_len = sizeof(polling_table) / sizeof(polling_table[0]);
 

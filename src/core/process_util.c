@@ -86,13 +86,16 @@ sc_error_t sc_process_run(sc_allocator_t *alloc,
     }
 
     size_t out_len = 0, err_len = 0;
+    int stdout_eof = 0, stderr_eof = 0;
     fd_set rfds;
     int nfds = (stdout_pipe[0] > stderr_pipe[0]) ? stdout_pipe[0] + 1 : stderr_pipe[0] + 1;
 
-    while (out_len < max_output_bytes || err_len < max_output_bytes) {
+    while (!stdout_eof || !stderr_eof) {
         FD_ZERO(&rfds);
-        if (out_len < max_output_bytes) FD_SET(stdout_pipe[0], &rfds);
-        if (err_len < max_output_bytes) FD_SET(stderr_pipe[0], &rfds);
+        if (!stdout_eof && out_len < max_output_bytes) FD_SET(stdout_pipe[0], &rfds);
+        if (!stderr_eof && err_len < max_output_bytes) FD_SET(stderr_pipe[0], &rfds);
+
+        if (stdout_eof && stderr_eof) break;
 
         struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
         int r = select(nfds, &rfds, NULL, NULL, &tv);
@@ -106,15 +109,15 @@ sc_error_t sc_process_run(sc_allocator_t *alloc,
             continue;
         }
 
-        if (FD_ISSET(stdout_pipe[0], &rfds) && out_len < max_output_bytes) {
+        if (!stdout_eof && FD_ISSET(stdout_pipe[0], &rfds)) {
             ssize_t n = read(stdout_pipe[0], out_buf + out_len, cap - out_len - 1);
             if (n > 0) out_len += (size_t)n;
-            if (n <= 0) FD_CLR(stdout_pipe[0], &rfds);
+            else stdout_eof = 1;
         }
-        if (FD_ISSET(stderr_pipe[0], &rfds) && err_len < max_output_bytes) {
+        if (!stderr_eof && FD_ISSET(stderr_pipe[0], &rfds)) {
             ssize_t n = read(stderr_pipe[0], err_buf + err_len, cap - err_len - 1);
             if (n > 0) err_len += (size_t)n;
-            if (n <= 0) FD_CLR(stderr_pipe[0], &rfds);
+            else stderr_eof = 1;
         }
     }
 

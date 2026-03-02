@@ -1,4 +1,5 @@
 #include "seaclaw/context_tokens.h"
+#include <stdint.h>
 #include "seaclaw/config_types.h"
 #include "seaclaw/util.h"
 #include <string.h>

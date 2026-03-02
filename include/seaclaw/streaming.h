@@ -2,6 +2,7 @@
 #define SC_STREAMING_H
 
 #include "seaclaw/provider.h"
+#include <stdint.h>
 
 /* Create a text delta chunk (caller keeps ownership of delta string) */
 static inline sc_stream_chunk_t sc_stream_chunk_text_delta(const char *delta, size_t delta_len) {

@@ -1,4 +1,5 @@
 #include "seaclaw/runtime.h"
+#include <stdint.h>
 
 static char cf_ctx_dummy;
 static const char *cf_name(void *ctx) { (void)ctx; return "cloudflare"; }

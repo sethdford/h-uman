@@ -14,8 +14,8 @@ char *sc_strdup(sc_allocator_t *alloc, const char *s) {
 
 char *sc_strndup(sc_allocator_t *alloc, const char *s, size_t n) {
     if (!s) return NULL;
-    size_t len = strlen(s);
-    if (n < len) len = n;
+    const char *end = (const char *)memchr(s, '\0', n);
+    size_t len = end ? (size_t)(end - s) : n;
     char *dup = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!dup) return NULL;
     memcpy(dup, s, len);

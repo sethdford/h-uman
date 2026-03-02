@@ -48,6 +48,7 @@ static const char *error_strings[] = {
     [SC_ERR_JSON_DEPTH]               = "JSON max depth exceeded",
     [SC_ERR_INTERNAL]                 = "internal error",
     [SC_ERR_SUBAGENT_TOO_MANY]        = "too many concurrent subagents",
+    [SC_ERR_CANCELLED]                = "cancelled",
 };
 
 const char *sc_error_string(sc_error_t err) {

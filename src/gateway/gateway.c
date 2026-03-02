@@ -1,4 +1,7 @@
 #include "seaclaw/gateway.h"
+#include <stdint.h>
+#include "seaclaw/gateway/ws_server.h"
+#include "seaclaw/gateway/control_protocol.h"
 #include "seaclaw/config.h"
 #include "seaclaw/health.h"
 #include "seaclaw/core/allocator.h"
@@ -12,13 +15,17 @@
 
 #ifdef SC_GATEWAY_POSIX
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #endif
 
 #define SC_GATEWAY_DEFAULT_PORT 8080
+#define SC_GATEWAY_POLL_TIMEOUT_MS 100
 
 void sc_gateway_config_from_cfg(const sc_config_gateway_t *cfg_gw,
                                 sc_gateway_config_t *out) {
@@ -42,7 +49,12 @@ void sc_gateway_config_from_cfg(const sc_config_gateway_t *cfg_gw,
     out->test_mode = false;
     out->on_webhook = NULL;
     out->on_webhook_ctx = NULL;
+    out->control_ui_dir = NULL;
+    out->auth_token = NULL;
+    out->control = NULL;
 }
+
+/* ── Rate limiting ──────────────────────────────────────────────────────── */
 
 typedef struct rate_entry {
     char ip[64];
@@ -57,6 +69,7 @@ typedef struct sc_gateway_state {
     bool running;
     rate_entry_t rate_entries[256];
     size_t rate_count;
+    sc_ws_server_t ws;
 } sc_gateway_state_t;
 
 static void trim_crlf(char *s) {
@@ -90,6 +103,8 @@ static bool rate_limit_allow(sc_gateway_state_t *gw, const char *ip) {
     }
     return true;
 }
+
+/* ── Path matching ──────────────────────────────────────────────────────── */
 
 static bool path_is(const char *path, const char *base) {
     size_t n = strlen(base);
@@ -131,48 +146,119 @@ static const char *webhook_path_to_channel(const char *path, char *buf, size_t b
     return "unknown";
 }
 
+/* ── HMAC verification ──────────────────────────────────────────────────── */
+
 static bool verify_hmac(const char *body, size_t body_len,
     const char *sig_header, const char *secret, size_t secret_len) {
     if (!secret || secret_len == 0) return true;
     if (!sig_header) return false;
-
     uint8_t computed[32];
     sc_hmac_sha256((const uint8_t *)secret, secret_len,
         (const uint8_t *)body, body_len, computed);
-
     char hex[65];
     for (int i = 0; i < 32; i++)
         snprintf(hex + i * 2, 3, "%02x", computed[i]);
     hex[64] = '\0';
-
     return strncmp(sig_header, hex, 64) == 0;
 }
 
-static void send_response(int fd, int status, const char *body) {
+/* ── HTTP response helpers ──────────────────────────────────────────────── */
+
+static void send_response(int fd, int status, const char *content_type,
+    const char *body, size_t body_len) {
     const char *status_str = "200 OK";
     if (status == 404) status_str = "404 Not Found";
     else if (status == 429) status_str = "429 Too Many Requests";
     else if (status == 413) status_str = "413 Payload Too Large";
     else if (status == 401) status_str = "401 Unauthorized";
+    else if (status == 304) status_str = "304 Not Modified";
 
-    char buf[1024];
-    int n = snprintf(buf, sizeof(buf),
+    char hdr[512];
+    int n = snprintf(hdr, sizeof(hdr),
         "HTTP/1.1 %s\r\n"
-        "Content-Type: application/json\r\n"
+        "Content-Type: %s\r\n"
         "Connection: close\r\n"
-        "Content-Length: %zu\r\n\r\n%s",
-        status_str, body ? strlen(body) : 0, body ? body : "");
-    send(fd, buf, (size_t)n, 0);
+        "Content-Length: %zu\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "\r\n",
+        status_str, content_type, body_len);
+    send(fd, hdr, (size_t)n, 0);
+    if (body && body_len > 0)
+        send(fd, body, body_len, 0);
+}
+
+static void send_json(int fd, int status, const char *body) {
+    send_response(fd, status, "application/json",
+        body, body ? strlen(body) : 0);
+}
+
+/* ── Static file serving ────────────────────────────────────────────────── */
+
+static const char *mime_for_ext(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "application/octet-stream";
+    if (strcmp(dot, ".html") == 0) return "text/html; charset=utf-8";
+    if (strcmp(dot, ".js") == 0)   return "application/javascript; charset=utf-8";
+    if (strcmp(dot, ".mjs") == 0)  return "application/javascript; charset=utf-8";
+    if (strcmp(dot, ".css") == 0)  return "text/css; charset=utf-8";
+    if (strcmp(dot, ".json") == 0) return "application/json; charset=utf-8";
+    if (strcmp(dot, ".svg") == 0)  return "image/svg+xml";
+    if (strcmp(dot, ".png") == 0)  return "image/png";
+    if (strcmp(dot, ".ico") == 0)  return "image/x-icon";
+    if (strcmp(dot, ".woff2") == 0) return "font/woff2";
+    if (strcmp(dot, ".woff") == 0) return "font/woff";
+    return "application/octet-stream";
 }
 
 #ifdef SC_GATEWAY_POSIX
-static void handle_request(sc_gateway_state_t *gw, int fd, const char *method,
-    const char *path, const char *body, size_t body_len, const char *client_ip,
-    const char *sig_header) {
+static bool serve_static_file(int fd, const char *base_dir, const char *url_path) {
+    if (!base_dir || !url_path) return false;
+    if (strstr(url_path, "..")) return false;
+
+    char filepath[1024];
+    const char *rel = url_path;
+    if (rel[0] == '/') rel++;
+    if (rel[0] == '\0') rel = "index.html";
+
+    snprintf(filepath, sizeof(filepath), "%s/%s", base_dir, rel);
+
+    struct stat st;
+    if (stat(filepath, &st) != 0 || !S_ISREG(st.st_mode)) {
+        /* SPA fallback: serve index.html for unmatched routes */
+        snprintf(filepath, sizeof(filepath), "%s/index.html", base_dir);
+        if (stat(filepath, &st) != 0 || !S_ISREG(st.st_mode))
+            return false;
+    }
+
+    if (st.st_size > 10 * 1024 * 1024) return false;
+
+    FILE *f = fopen(filepath, "rb");
+    if (!f) return false;
+
+    size_t fsize = (size_t)st.st_size;
+    char *buf = (char *)malloc(fsize);
+    if (!buf) { fclose(f); return false; }
+    size_t rd = fread(buf, 1, fsize, f);
+    fclose(f);
+
+    const char *mime = mime_for_ext(filepath);
+    send_response(fd, 200, mime, buf, rd);
+    free(buf);
+    return true;
+}
+#endif
+
+/* ── HTTP request handling ──────────────────────────────────────────────── */
+
+#ifdef SC_GATEWAY_POSIX
+static void handle_http_request(sc_gateway_state_t *gw, int fd,
+    const char *method, const char *path,
+    const char *body, size_t body_len,
+    const char *client_ip, const char *sig_header) {
     (void)method;
 
     if (!rate_limit_allow(gw, client_ip)) {
-        send_response(fd, 429, "{\"error\":\"rate limited\"}");
+        send_json(fd, 429, "{\"error\":\"rate limited\"}");
         return;
     }
 
@@ -181,7 +267,7 @@ static void handle_request(sc_gateway_state_t *gw, int fd, const char *method,
         sc_readiness_result_t r = sc_health_check_readiness(&alloc);
         char *json = sc_sprintf(&alloc, "{\"status\":\"%s\",\"checks\":[]}",
             r.status == SC_READINESS_READY ? "ready" : "not_ready");
-        send_response(fd, 200, json);
+        send_json(fd, 200, json);
         if (json) alloc.free(alloc.ctx, json, strlen(json) + 1);
         if (r.checks) alloc.free(alloc.ctx, (void *)r.checks,
             r.check_count * sizeof(sc_component_check_t));
@@ -189,7 +275,17 @@ static void handle_request(sc_gateway_state_t *gw, int fd, const char *method,
     }
 
     if (path_is(path, "/health")) {
-        send_response(fd, 200, "{\"status\":\"ok\"}");
+        send_json(fd, 200, "{\"status\":\"ok\"}");
+        return;
+    }
+
+    /* API endpoint: capabilities snapshot */
+    if (path_is(path, "/api/status")) {
+        char resp[256];
+        snprintf(resp, sizeof(resp),
+            "{\"status\":\"ok\",\"websocket\":%s,\"connections\":%zu}",
+            "true", gw->ws.conn_count);
+        send_json(fd, 200, resp);
         return;
     }
 
@@ -197,26 +293,31 @@ static void handle_request(sc_gateway_state_t *gw, int fd, const char *method,
         if (gw && gw->config.hmac_secret && gw->config.hmac_secret_len > 0) {
             if (!verify_hmac(body, body_len, sig_header,
                     gw->config.hmac_secret, gw->config.hmac_secret_len)) {
-                send_response(fd, 401, "{\"error\":\"invalid signature\"}");
+                send_json(fd, 401, "{\"error\":\"invalid signature\"}");
                 return;
             }
         }
-        /* Dispatch webhook to channel handler */
-        {
-            char ch_buf[32];
-            const char *channel = webhook_path_to_channel(path, ch_buf, sizeof(ch_buf));
-            (void)fprintf(stderr, "[gateway] webhook received path=%s channel=%s\n", path, channel);
-            if (gw && gw->config.on_webhook) {
-                gw->config.on_webhook(channel, body, body_len, gw->config.on_webhook_ctx);
-            }
-        }
-        send_response(fd, 200, "{\"received\":true}");
+        char ch_buf[32];
+        const char *channel = webhook_path_to_channel(path, ch_buf, sizeof(ch_buf));
+        (void)fprintf(stderr, "[gateway] webhook received path=%s channel=%s\n",
+            path, channel);
+        if (gw && gw->config.on_webhook)
+            gw->config.on_webhook(channel, body, body_len, gw->config.on_webhook_ctx);
+        send_json(fd, 200, "{\"received\":true}");
         return;
     }
 
-    send_response(fd, 404, "{\"error\":\"not found\"}");
+    /* Static file serving (Control UI) */
+    if (gw->config.control_ui_dir) {
+        if (serve_static_file(fd, gw->config.control_ui_dir, path))
+            return;
+    }
+
+    send_json(fd, 404, "{\"error\":\"not found\"}");
 }
 #endif
+
+/* ── Main gateway run loop (poll-based) ─────────────────────────────────── */
 
 sc_error_t sc_gateway_run(sc_allocator_t *alloc,
     const char *host, uint16_t port,
@@ -226,9 +327,7 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
     if (!alloc) return SC_ERR_INVALID_ARGUMENT;
 
     sc_gateway_config_t cfg = {0};
-    if (config) {
-        memcpy(&cfg, config, sizeof(cfg));
-    }
+    if (config) memcpy(&cfg, config, sizeof(cfg));
     if (!cfg.host) cfg.host = "0.0.0.0";
     if (cfg.port == 0) cfg.port = SC_GATEWAY_DEFAULT_PORT;
     if (cfg.max_body_size == 0) cfg.max_body_size = SC_GATEWAY_MAX_BODY_SIZE;
@@ -244,16 +343,19 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
     int fd = -1;
     char *body_buf = NULL;
     sc_error_t err = SC_OK;
+    sc_control_protocol_t *ctrl = NULL;
+    sc_control_protocol_t proto_local;
 
-    gw = (sc_gateway_state_t *)alloc->alloc(
-        alloc->ctx, sizeof(sc_gateway_state_t));
-    if (!gw) {
-        err = SC_ERR_OUT_OF_MEMORY;
-        goto cleanup;
-    }
+    gw = (sc_gateway_state_t *)alloc->alloc(alloc->ctx, sizeof(sc_gateway_state_t));
+    if (!gw) { err = SC_ERR_OUT_OF_MEMORY; goto cleanup; }
     memset(gw, 0, sizeof(*gw));
     gw->alloc = alloc;
     gw->config = cfg;
+
+    ctrl = cfg.control ? cfg.control : &proto_local;
+    sc_control_protocol_init(ctrl, alloc, &gw->ws);
+    sc_ws_server_init(&gw->ws, alloc, sc_control_on_message, sc_control_on_close,
+        ctrl);
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -282,79 +384,141 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc,
         goto cleanup;
     }
 
+    /* Set listen socket non-blocking for poll */
+    {
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
     gw->listen_fd = fd;
     gw->running = true;
     sc_health_mark_ok("gateway");
 
     body_buf = (char *)alloc->alloc(alloc->ctx, cfg.max_body_size + 1);
-    if (!body_buf) {
-        err = SC_ERR_OUT_OF_MEMORY;
-        goto cleanup;
-    }
+    if (!body_buf) { err = SC_ERR_OUT_OF_MEMORY; goto cleanup; }
 
+    fprintf(stderr, "[gateway] listening on %s:%u (ws: enabled, ui: %s)\n",
+        cfg.host, (unsigned)cfg.port,
+        cfg.control_ui_dir ? cfg.control_ui_dir : "disabled");
+
+    /* Poll-based event loop: listen socket + WebSocket connections */
     while (gw->running) {
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        int client = accept(fd, (struct sockaddr *)&client_addr, &client_len);
-        if (client < 0) continue;
+        struct pollfd fds[1 + SC_WS_SERVER_MAX_CONNS];
+        int nfds = 0;
 
-        char client_ip[64];
-        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+        fds[nfds].fd = fd;
+        fds[nfds].events = POLLIN;
+        fds[nfds].revents = 0;
+        int listen_idx = nfds++;
 
-        char req[4096];
-        ssize_t n = recv(client, req, sizeof(req) - 1, 0);
-        if (n <= 0) {
-            close(client);
-            continue;
+        int ws_indices[SC_WS_SERVER_MAX_CONNS];
+        int ws_count = 0;
+        for (int i = 0; i < SC_WS_SERVER_MAX_CONNS; i++) {
+            if (gw->ws.conns[i].active) {
+                ws_indices[ws_count] = i;
+                fds[nfds].fd = gw->ws.conns[i].fd;
+                fds[nfds].events = POLLIN;
+                fds[nfds].revents = 0;
+                nfds++;
+                ws_count++;
+            }
         }
-        req[n] = '\0';
 
-        char *line = strtok(req, "\n");
-        char method[16] = {0}, path[256] = {0};
-        if (line) sscanf(line, "%15s %255s", method, path);
+        int ready = poll(fds, (nfds_t)nfds, SC_GATEWAY_POLL_TIMEOUT_MS);
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (ready == 0) continue;
 
-        size_t body_len = 0;
-        char *sig_header = NULL;
-        while ((line = strtok(NULL, "\n")) != NULL) {
-            trim_crlf(line);
-            if (line[0] == '\0') break;
-            if (strncasecmp(line, "Content-Length:", 15) == 0) {
-                body_len = (size_t)atoi(line + 15);
-                if (body_len > cfg.max_body_size) {
-                    send_response(client, 413, "{\"error\":\"body too large\"}");
+        /* Handle WebSocket connections first */
+        for (int w = 0; w < ws_count; w++) {
+            int poll_idx = listen_idx + 1 + w;
+            if (fds[poll_idx].revents & (POLLIN | POLLERR | POLLHUP)) {
+                int ci = ws_indices[w];
+                sc_ws_server_read_and_process(&gw->ws, &gw->ws.conns[ci]);
+            }
+        }
+
+        /* Handle new connections on listen socket */
+        if (fds[listen_idx].revents & POLLIN) {
+            struct sockaddr_in client_addr;
+            socklen_t client_len = sizeof(client_addr);
+            int client = accept(fd, (struct sockaddr *)&client_addr, &client_len);
+            if (client < 0) continue;
+
+            char client_ip[64];
+            inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+
+            char req[4096];
+            ssize_t n = recv(client, req, sizeof(req) - 1, 0);
+            if (n <= 0) { close(client); continue; }
+            req[n] = '\0';
+
+            /* Check for WebSocket upgrade */
+            if (sc_ws_server_is_upgrade(req, (size_t)n)) {
+                sc_ws_conn_t *conn = NULL;
+                sc_error_t ws_err = sc_ws_server_upgrade(&gw->ws, client,
+                    req, (size_t)n, &conn);
+                if (ws_err != SC_OK) {
+                    send_json(client, 429, "{\"error\":\"too many connections\"}");
                     close(client);
-                    continue;
+                } else {
+                    fprintf(stderr, "[gateway] ws connected id=%llu ip=%s\n",
+                        (unsigned long long)conn->id, client_ip);
+                }
+                continue;
+            }
+
+            /* Regular HTTP request */
+            char *line = strtok(req, "\n");
+            char method[16] = {0}, path[256] = {0};
+            if (line) sscanf(line, "%15s %255s", method, path);
+
+            size_t body_len = 0;
+            char *sig_header = NULL;
+            while ((line = strtok(NULL, "\n")) != NULL) {
+                trim_crlf(line);
+                if (line[0] == '\0') break;
+                if (strncasecmp(line, "Content-Length:", 15) == 0) {
+                    body_len = (size_t)atoi(line + 15);
+                    if (body_len > cfg.max_body_size) {
+                        send_json(client, 413, "{\"error\":\"body too large\"}");
+                        close(client);
+                        body_len = 0;
+                        break;
+                    }
+                }
+                if (strncasecmp(line, "X-Signature:", 12) == 0) {
+                    char *v = line + 12;
+                    while (*v == ' ') v++;
+                    sig_header = v;
                 }
             }
-            if (strncasecmp(line, "X-Signature:", 12) == 0) {
-                char *v = line + 12;
-                while (*v == ' ') v++;
-                sig_header = v;
-            }
-        }
 
-        if (body_len > 0 && body_len <= cfg.max_body_size) {
-            size_t got = 0;
-            while (got < body_len) {
-                ssize_t r = recv(client, body_buf + got, body_len - got, 0);
-                if (r <= 0) break;
-                got += (size_t)r;
+            if (body_len > 0 && body_len <= cfg.max_body_size) {
+                size_t got = 0;
+                while (got < body_len) {
+                    ssize_t r = recv(client, body_buf + got, body_len - got, 0);
+                    if (r <= 0) break;
+                    got += (size_t)r;
+                }
+                body_buf[body_len] = '\0';
             }
-            body_buf[body_len] = '\0';
-        }
 
-        handle_request(gw, client, method, path, body_buf, body_len,
-            client_ip, sig_header);
-        close(client);
+            handle_http_request(gw, client, method, path, body_buf, body_len,
+                client_ip, sig_header);
+            close(client);
+        }
     }
 
 cleanup:
-    if (body_buf)
-        alloc->free(alloc->ctx, body_buf, cfg.max_body_size + 1);
-    if (fd >= 0)
-        close(fd);
-    if (gw)
-        alloc->free(alloc->ctx, gw, sizeof(*gw));
+    sc_ws_server_deinit(&gw->ws);
+    if (ctrl == &proto_local)
+        sc_control_protocol_deinit(ctrl);
+    if (body_buf) alloc->free(alloc->ctx, body_buf, cfg.max_body_size + 1);
+    if (fd >= 0) close(fd);
+    if (gw) alloc->free(alloc->ctx, gw, sizeof(*gw));
     return err;
 #endif
 

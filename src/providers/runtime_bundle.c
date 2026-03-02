@@ -1,4 +1,5 @@
 #include "seaclaw/providers/runtime_bundle.h"
+#include <stdint.h>
 #include "seaclaw/providers/reliable.h"
 #include <string.h>
 

@@ -1,4 +1,5 @@
 #include "seaclaw/observer.h"
+#include <stdint.h>
 #include "seaclaw/core/error.h"
 #include <stdio.h>
 #include <string.h>

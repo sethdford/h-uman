@@ -1,14 +1,23 @@
 #include "seaclaw/channels/imessage.h"
+#include <stdint.h>
+#include "seaclaw/channel_loop.h"
 #include "seaclaw/core/process_util.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+#ifdef SC_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
+#endif
 
 typedef struct sc_imessage_ctx {
     sc_allocator_t *alloc;
     char *default_target;
     size_t default_target_len;
     bool running;
+    int64_t last_rowid;
 } sc_imessage_ctx_t;
 
 static sc_error_t imessage_start(void *ctx) {
@@ -164,4 +173,91 @@ void sc_imessage_destroy(sc_channel_t *ch) {
         ch->ctx = NULL;
         ch->vtable = NULL;
     }
+}
+
+/* ── iMessage polling via ~/Library/Messages/chat.db ──────────────────── */
+
+sc_error_t sc_imessage_poll(void *channel_ctx,
+    sc_allocator_t *alloc,
+    sc_channel_loop_msg_t *msgs,
+    size_t max_msgs,
+    size_t *out_count)
+{
+    (void)alloc;
+    if (!channel_ctx || !msgs || !out_count) return SC_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+
+#if SC_IS_TEST
+    (void)max_msgs;
+    return SC_OK;
+#elif !defined(__APPLE__) || !defined(__MACH__)
+    (void)max_msgs;
+    return SC_ERR_NOT_SUPPORTED;
+#elif !defined(SC_ENABLE_SQLITE)
+    (void)max_msgs;
+    return SC_ERR_NOT_SUPPORTED;
+#else
+    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)channel_ctx;
+
+    const char *home = getenv("HOME");
+    if (!home) return SC_ERR_NOT_SUPPORTED;
+
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path),
+        "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path)) return SC_ERR_INTERNAL;
+
+    sqlite3 *db = NULL;
+    int rc = sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL);
+    if (rc != SQLITE_OK) {
+        if (db) sqlite3_close(db);
+        return SC_ERR_IO;
+    }
+
+    const char *sql =
+        "SELECT m.ROWID, m.text, h.id "
+        "FROM message m "
+        "JOIN handle h ON m.handle_id = h.ROWID "
+        "WHERE m.is_from_me = 0 AND m.text IS NOT NULL "
+        "AND m.ROWID > ? "
+        "ORDER BY m.ROWID ASC LIMIT ?";
+
+    sqlite3_stmt *stmt = NULL;
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        sqlite3_close(db);
+        return SC_ERR_IO;
+    }
+
+    sqlite3_bind_int64(stmt, 1, c->last_rowid);
+    sqlite3_bind_int(stmt, 2, (int)max_msgs);
+
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_msgs) {
+        int64_t rowid = sqlite3_column_int64(stmt, 0);
+        const char *text = (const char *)sqlite3_column_text(stmt, 1);
+        const char *handle = (const char *)sqlite3_column_text(stmt, 2);
+
+        if (!text || !handle) continue;
+
+        size_t handle_len = strlen(handle);
+        size_t text_len = strlen(text);
+        if (handle_len >= sizeof(msgs[count].session_key)) handle_len = sizeof(msgs[count].session_key) - 1;
+        if (text_len >= sizeof(msgs[count].content)) text_len = sizeof(msgs[count].content) - 1;
+
+        memcpy(msgs[count].session_key, handle, handle_len);
+        msgs[count].session_key[handle_len] = '\0';
+        memcpy(msgs[count].content, text, text_len);
+        msgs[count].content[text_len] = '\0';
+
+        c->last_rowid = rowid;
+        count++;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    *out_count = count;
+    return SC_OK;
+#endif
 }

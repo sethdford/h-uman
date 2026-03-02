@@ -141,6 +141,38 @@ static void add_header(struct curl_slist **list, const char *header) {
     if (header && header[0]) *list = curl_slist_append(*list, header);
 }
 
+/* ── Connection pool: reuse curl handles to avoid TCP/TLS handshake ── */
+#define SC_CURL_POOL_SIZE 4
+
+static CURL *curl_pool[SC_CURL_POOL_SIZE];
+static int curl_pool_count = 0;
+
+static CURL *curl_pool_acquire(void) {
+    if (curl_pool_count > 0) {
+        CURL *h = curl_pool[--curl_pool_count];
+        curl_easy_reset(h);
+        return h;
+    }
+    return curl_easy_init();
+}
+
+static void curl_pool_release(CURL *h) {
+    if (!h) return;
+    if (curl_pool_count < SC_CURL_POOL_SIZE) {
+        curl_pool[curl_pool_count++] = h;
+    } else {
+        curl_easy_cleanup(h);
+    }
+}
+
+static void curl_setup_common(CURL *curl) {
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 60L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 30L);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+}
+
 static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
     const char *url,
     const char *auth_header,
@@ -148,7 +180,7 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
 {
     if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = curl_pool_acquire();
     if (!curl) return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
@@ -165,7 +197,7 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
+        curl_pool_release(curl);
         return SC_ERR_OUT_OF_MEMORY;
     }
     w.cap = 4096;
@@ -176,14 +208,14 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+    curl_setup_common(curl);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    curl_pool_release(curl);
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
@@ -206,7 +238,7 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
 {
     if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = curl_pool_acquire();
     if (!curl) return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
@@ -233,7 +265,7 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
+        curl_pool_release(curl);
         return SC_ERR_OUT_OF_MEMORY;
     }
     w.cap = 4096;
@@ -244,14 +276,14 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+    curl_setup_common(curl);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    curl_pool_release(curl);
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
@@ -277,7 +309,7 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
 {
     if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = curl_pool_acquire();
     if (!curl) return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
@@ -311,7 +343,7 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
+        curl_pool_release(curl);
         return SC_ERR_OUT_OF_MEMORY;
     }
     w.cap = 4096;
@@ -323,14 +355,14 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+    curl_setup_common(curl);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    curl_pool_release(curl);
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
@@ -369,7 +401,7 @@ static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
 {
     if (!alloc || !url || !callback) return SC_ERR_INVALID_ARGUMENT;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = curl_pool_acquire();
     if (!curl) return SC_ERR_NOT_SUPPORTED;
 
     struct curl_slist *headers = NULL;
@@ -404,11 +436,11 @@ static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb_stream);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+    curl_setup_common(curl);
 
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    curl_pool_release(curl);
 
     if (res != CURLE_OK) {
         if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
@@ -520,7 +552,7 @@ sc_error_t sc_http_request(sc_allocator_t *alloc,
 {
     if (!alloc || !url || !method || !out) return SC_ERR_INVALID_ARGUMENT;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = curl_pool_acquire();
     if (!curl) return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
@@ -547,7 +579,7 @@ sc_error_t sc_http_request(sc_allocator_t *alloc,
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
+        curl_pool_release(curl);
         return SC_ERR_OUT_OF_MEMORY;
     }
     w.cap = 4096;
@@ -562,14 +594,14 @@ sc_error_t sc_http_request(sc_allocator_t *alloc,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &w);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+    curl_setup_common(curl);
 
     CURLcode res = curl_easy_perform(curl);
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    curl_pool_release(curl);
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);

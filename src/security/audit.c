@@ -1,4 +1,5 @@
 #include "seaclaw/security/audit.h"
+#include <stdint.h>
 #include "seaclaw/core/error.h"
 #include <string.h>
 #include <time.h>

@@ -1,4 +1,5 @@
 #include "seaclaw/max_tokens.h"
+#include <stdint.h>
 #include "seaclaw/config_types.h"
 #include <string.h>
 #include <ctype.h>

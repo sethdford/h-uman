@@ -1,4 +1,5 @@
 #include "seaclaw/observability/metrics_observer.h"
+#include <stdint.h>
 #include "seaclaw/observer.h"
 #include "seaclaw/core/error.h"
 #include <string.h>

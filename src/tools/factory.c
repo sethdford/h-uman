@@ -1,5 +1,6 @@
 #include "seaclaw/tools/factory.h"
 #include "seaclaw/config.h"
+#include "seaclaw/mcp.h"
 #include "seaclaw/tools/shell.h"
 #include "seaclaw/tools/file_read.h"
 #include "seaclaw/tools/file_write.h"
@@ -34,13 +35,14 @@
 #include "seaclaw/tools/hardware_info.h"
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/spi.h"
+#include "seaclaw/tools/claude_code.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/security.h"
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_TOOLS_COUNT 35
+#define SC_TOOLS_COUNT 36
 
 static sc_error_t add_tool_ws(sc_allocator_t *alloc,
     sc_tool_t *tools, size_t *idx,
@@ -63,9 +65,10 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
 {
     if (!alloc || !out_tools || !out_count) return SC_ERR_INVALID_ARGUMENT;
 
-    sc_tool_t *tools = (sc_tool_t *)alloc->alloc(alloc->ctx, SC_TOOLS_COUNT * sizeof(sc_tool_t));
+    size_t tools_alloc = SC_TOOLS_COUNT * sizeof(sc_tool_t);
+    sc_tool_t *tools = (sc_tool_t *)alloc->alloc(alloc->ctx, tools_alloc);
     if (!tools) return SC_ERR_OUT_OF_MEMORY;
-    memset(tools, 0, SC_TOOLS_COUNT * sizeof(sc_tool_t));
+    memset(tools, 0, tools_alloc);
 
     size_t idx = 0;
     sc_error_t err;
@@ -209,6 +212,37 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     if (err != SC_OK) goto fail;
     idx++;
 
+    err = sc_claude_code_create(alloc, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    /* Load MCP server tools from config when available */
+    sc_tool_t *mcp_tools = NULL;
+    size_t mcp_count = 0;
+    if (config && config->mcp_servers_len > 0) {
+        sc_mcp_server_config_t mcp_configs[SC_MCP_SERVERS_MAX];
+        for (size_t i = 0; i < config->mcp_servers_len && i < SC_MCP_SERVERS_MAX; i++) {
+            mcp_configs[i].command = config->mcp_servers[i].command;
+            mcp_configs[i].args = (const char **)config->mcp_servers[i].args;
+            mcp_configs[i].args_count = config->mcp_servers[i].args_count;
+        }
+        sc_mcp_init_tools(alloc, mcp_configs, config->mcp_servers_len,
+            &mcp_tools, &mcp_count);
+    }
+
+    if (mcp_count > 0 && mcp_tools) {
+        size_t new_alloc = (idx + mcp_count) * sizeof(sc_tool_t);
+        sc_tool_t *merged = (sc_tool_t *)alloc->realloc(alloc->ctx,
+            tools, tools_alloc, new_alloc);
+        if (merged) {
+            tools = merged;
+            tools_alloc = new_alloc;
+            memcpy(&tools[idx], mcp_tools, mcp_count * sizeof(sc_tool_t));
+            idx += mcp_count;
+        }
+        alloc->free(alloc->ctx, mcp_tools, mcp_count * sizeof(sc_tool_t));
+    }
+
     if (config) {
         for (size_t i = 0; i < idx; i++) {
             if (!tools[i].vtable || !tools[i].vtable->name) continue;
@@ -237,6 +271,14 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
         }
     }
 
+    /* Shrink to exact size so destroy_default can free with count * sizeof */
+    if (idx * sizeof(sc_tool_t) < tools_alloc) {
+        size_t new_size = idx * sizeof(sc_tool_t);
+        sc_tool_t *shrunk = (sc_tool_t *)alloc->realloc(alloc->ctx,
+            tools, tools_alloc, new_size);
+        if (shrunk) { tools = shrunk; tools_alloc = new_size; }
+    }
+
     *out_tools = tools;
     *out_count = idx;
     return SC_OK;
@@ -246,7 +288,7 @@ fail:
         if (tools[i].vtable && tools[i].vtable->deinit)
             tools[i].vtable->deinit(tools[i].ctx, alloc);
     }
-    alloc->free(alloc->ctx, tools, SC_TOOLS_COUNT * sizeof(sc_tool_t));
+    alloc->free(alloc->ctx, tools, tools_alloc);
     return err;
 }
 

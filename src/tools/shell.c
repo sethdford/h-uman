@@ -4,6 +4,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/security.h"
+#include "seaclaw/security/sandbox.h"
 #include "seaclaw/config.h"
 #include <string.h>
 #include <stdlib.h>
@@ -18,7 +19,7 @@
 
 #define SC_SHELL_NAME "shell"
 #define SC_SHELL_DESC "Execute shell commands. Use with caution."
-#define SC_SHELL_PARAMS "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"Shell command to run\"}},\"required\":[\"command\"]}"
+#define SC_SHELL_PARAMS "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}"
 #define SC_SHELL_CMD_MAX 4096
 
 typedef struct sc_shell_ctx {
@@ -105,6 +106,19 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
 
         setenv("PATH", "/usr/bin:/bin", 1);
 
+        /* Wrap command with sandbox if available */
+        if (s->policy && s->policy->sandbox &&
+            sc_sandbox_is_available(s->policy->sandbox)) {
+            const char *orig_argv[] = { "/bin/sh", "-c", cmd, NULL };
+            const char *wrapped[16];
+            size_t wrapped_count = 0;
+            if (sc_sandbox_wrap_command(s->policy->sandbox,
+                    orig_argv, 3, wrapped, 16, &wrapped_count) == SC_OK &&
+                    wrapped_count > 0) {
+                execvp(wrapped[0], (char *const *)wrapped);
+                _exit(127);
+            }
+        }
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }

@@ -1,4 +1,5 @@
 #include "seaclaw/json_util.h"
+#include <stdint.h>
 #include <string.h>
 
 sc_error_t sc_json_util_append_string(sc_json_buf_t *buf, const char *s) {

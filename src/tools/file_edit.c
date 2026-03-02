@@ -26,7 +26,7 @@
 
 #define SC_FILE_EDIT_NAME "file_edit"
 #define SC_FILE_EDIT_DESC "Find and replace text in a file"
-#define SC_FILE_EDIT_PARAMS "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Relative path to the file within the workspace\"},\"old_text\":{\"type\":\"string\",\"description\":\"Text to find in the file\"},\"new_text\":{\"type\":\"string\",\"description\":\"Replacement text\"}},\"required\":[\"path\",\"old_text\",\"new_text\"]}"
+#define SC_FILE_EDIT_PARAMS "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_text\":{\"type\":\"string\"},\"new_text\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_text\",\"new_text\"]}"
 #define SC_FILE_EDIT_MAX_SIZE (10 * 1024 * 1024) /* 10 MB */
 #define SC_PATH_BUF 4096
 

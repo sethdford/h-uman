@@ -12,8 +12,9 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/tools/validation.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
 #define SC_BROWSER_READ_MAX 8192
 
@@ -35,8 +36,14 @@ static sc_error_t browser_execute(void *ctx, sc_allocator_t *alloc,
             *out = sc_tool_result_fail("missing url", 11);
             return SC_OK;
         }
-        if (strncmp(url, "https://", 8) != 0 && strncmp(url, "http://", 7) != 0) {
-            *out = sc_tool_result_fail("URL must start with https:// or http://", 39);
+        /* Secure by default: HTTPS only, or http://localhost for local dev */
+        if (sc_tool_validate_url(url) == SC_OK) {
+            /* Valid HTTPS URL */
+        } else if (strncasecmp(url, "http://localhost", 16) == 0 &&
+                   (url[16] == '\0' || url[16] == '/' || url[16] == ':' || url[16] == '?' || url[16] == '#')) {
+            /* Allow http://localhost for local development */
+        } else {
+            *out = sc_tool_result_fail("invalid url: use https:// or http://localhost only", 48);
             return SC_OK;
         }
 #if SC_IS_TEST
@@ -136,7 +143,7 @@ static sc_error_t browser_execute(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 static const char *browser_name(void *ctx) { (void)ctx; return "browser"; }
-static const char *browser_desc(void *ctx) { (void)ctx; return "Browser actions: open URL, read page content, or take screenshot."; }
+static const char *browser_desc(void *ctx) { (void)ctx; return "Open a URL in the user's system browser for visual display. NOT for searching or retrieving content — use web_search or web_fetch instead."; }
 static const char *browser_params(void *ctx) { (void)ctx; return "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"open\",\"read\",\"screenshot\",\"click\",\"type\",\"scroll\"]},\"url\":{\"type\":\"string\"},\"selector\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"}},\"required\":[\"action\"]}"; }
 static void browser_deinit(void *ctx, sc_allocator_t *alloc) { (void)alloc; free(ctx); }
 

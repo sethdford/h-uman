@@ -1,4 +1,5 @@
 #include "seaclaw/runtime.h"
+#include <stdint.h>
 #include <string.h>
 
 static const char *impl_name(void *ctx) {

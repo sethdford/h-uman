@@ -37,6 +37,10 @@ uint32_t sc_rate_tracker_remaining(sc_rate_tracker_t *t);
 
 /* ── Security policy ────────────────────────────────────────────── */
 
+#ifndef SC_SANDBOX_H
+typedef struct sc_sandbox sc_sandbox_t;
+#endif
+
 typedef struct sc_security_policy {
     sc_autonomy_level_t autonomy;
     const char *workspace_dir;
@@ -47,10 +51,10 @@ typedef struct sc_security_policy {
     bool require_approval_for_medium_risk;
     bool block_high_risk_commands;
     sc_rate_tracker_t *tracker;
-    /* Shell tool / path allowlist (for sc_security_shell_allowed, sc_security_path_allowed) */
     bool allow_shell;
     const char *const *allowed_paths;
     size_t allowed_paths_count;
+    sc_sandbox_t *sandbox;
 } sc_security_policy_t;
 
 bool sc_security_path_allowed(const sc_security_policy_t *policy,

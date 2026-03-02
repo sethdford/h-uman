@@ -76,13 +76,38 @@ typedef struct sc_heartbeat_config {
 
 #define SC_CHANNEL_CONFIG_MAX 24
 
+typedef struct sc_email_channel_config {
+    char *smtp_host;
+    uint16_t smtp_port;
+    char *from_address;
+    char *smtp_user;
+    char *smtp_pass;
+    char *imap_host;
+    uint16_t imap_port;
+} sc_email_channel_config_t;
+
+typedef struct sc_imessage_channel_config {
+    char *default_target;
+} sc_imessage_channel_config_t;
+
+#define SC_MCP_SERVERS_MAX 16
+#define SC_MCP_SERVER_ARGS_MAX 16
+
+typedef struct sc_mcp_server_entry {
+    char *name;
+    char *command;
+    char *args[SC_MCP_SERVER_ARGS_MAX];
+    size_t args_count;
+} sc_mcp_server_entry_t;
+
 typedef struct sc_channels_config {
     bool cli;
     char *default_channel;
-    /* Per-channel config presence from channels.* keys (e.g. channels.telegram). */
     char *channel_config_keys[SC_CHANNEL_CONFIG_MAX];
     size_t channel_config_counts[SC_CHANNEL_CONFIG_MAX];
     size_t channel_config_len;
+    sc_email_channel_config_t email;
+    sc_imessage_channel_config_t imessage;
 } sc_channels_config_t;
 
 typedef struct sc_memory_config {
@@ -194,6 +219,8 @@ typedef struct sc_config {
     sc_hardware_config_t hardware;
     sc_cron_config_t cron;
     sc_scheduler_config_t scheduler;
+    sc_mcp_server_entry_t mcp_servers[SC_MCP_SERVERS_MAX];
+    size_t mcp_servers_len;
     sc_arena_t *arena;
     sc_allocator_t allocator;
 } sc_config_t;

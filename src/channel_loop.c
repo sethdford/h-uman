@@ -1,4 +1,5 @@
 #include "seaclaw/channel_loop.h"
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 

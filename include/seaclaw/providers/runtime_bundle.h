@@ -2,6 +2,7 @@
 #define SC_RUNTIME_BUNDLE_H
 
 #include "seaclaw/provider.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 

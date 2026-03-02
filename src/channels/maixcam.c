@@ -1,4 +1,5 @@
 #include "seaclaw/channels/maixcam.h"
+#include <stdint.h>
 #if defined(__linux__) && !SC_IS_TEST
 #include <fcntl.h>
 #include <unistd.h>

@@ -5,7 +5,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifdef SC_ENABLE_READLINE
+#ifdef SC_ENABLE_LINENOISE
+#include "linenoise.h"
+#elif defined(SC_ENABLE_READLINE)
 #include <readline/readline.h>
 #include <readline/history.h>
 #endif
@@ -87,7 +89,18 @@ char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len) {
     if (!alloc || !out_len) return NULL;
     *out_len = 0;
 
-#ifdef SC_ENABLE_READLINE
+#ifdef SC_ENABLE_LINENOISE
+    char *ln = linenoise("");
+    if (!ln) return NULL;
+    size_t len = strlen(ln);
+    if (len > 0) linenoiseHistoryAdd(ln);
+    char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
+    if (!buf) { free(ln); return NULL; }
+    memcpy(buf, ln, len + 1);
+    free(ln);
+    *out_len = len;
+    return buf;
+#elif defined(SC_ENABLE_READLINE)
     char *rl = readline("");
     if (!rl) return NULL;
     size_t len = strlen(rl);

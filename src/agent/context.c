@@ -1,4 +1,5 @@
 #include "seaclaw/agent.h"
+#include <stdint.h>
 #include "seaclaw/core/string.h"
 #include "seaclaw/core/json.h"
 #include <string.h>

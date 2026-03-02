@@ -1,4 +1,5 @@
 #include "seaclaw/providers/reliable.h"
+#include <stdint.h>
 #include "seaclaw/providers/error_classify.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"

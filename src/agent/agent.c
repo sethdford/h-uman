@@ -1,6 +1,8 @@
 #include "seaclaw/agent.h"
+#include <stdint.h>
 #include "seaclaw/agent/dispatcher.h"
 #include "seaclaw/agent/compaction.h"
+#include "seaclaw/agent/planner.h"
 #include "seaclaw/agent/prompt.h"
 #include "seaclaw/agent/memory_loader.h"
 #include "seaclaw/context.h"
@@ -181,6 +183,32 @@ sc_error_t sc_agent_from_config(sc_agent_t *out, sc_allocator_t *alloc,
     out->history_cap = 0;
     out->total_tokens = 0;
 
+    /* Build and cache the static portion of the system prompt */
+    {
+        sc_prompt_config_t cfg = {
+            .provider_name = out->provider.vtable->get_name(out->provider.ctx),
+            .provider_name_len = 0,
+            .model_name = out->model_name,
+            .model_name_len = out->model_name_len,
+            .workspace_dir = out->workspace_dir,
+            .workspace_dir_len = out->workspace_dir_len,
+            .tools = out->tools,
+            .tools_count = out->tools_count,
+            .memory_context = NULL,
+            .memory_context_len = 0,
+            .autonomy_level = out->autonomy_level,
+            .custom_instructions = out->custom_instructions,
+            .custom_instructions_len = out->custom_instructions_len,
+        };
+        sc_error_t perr = sc_prompt_build_static(alloc, &cfg,
+            &out->cached_static_prompt, &out->cached_static_prompt_len);
+        if (perr != SC_OK) {
+            out->cached_static_prompt = NULL;
+            out->cached_static_prompt_len = 0;
+        }
+        out->cached_static_prompt_cap = out->cached_static_prompt_len;
+    }
+
     return SC_OK;
 }
 
@@ -195,6 +223,11 @@ void sc_agent_deinit(sc_agent_t *agent) {
         agent->alloc->free(agent->alloc->ctx, agent->tool_specs,
             agent->tool_specs_count * sizeof(sc_tool_spec_t));
         agent->tool_specs = NULL;
+    }
+    if (agent->cached_static_prompt) {
+        agent->alloc->free(agent->alloc->ctx, agent->cached_static_prompt,
+            agent->cached_static_prompt_cap + 1);
+        agent->cached_static_prompt = NULL;
     }
     if (agent->model_name) {
         agent->alloc->free(agent->alloc->ctx, agent->model_name, agent->model_name_len + 1);
@@ -372,6 +405,10 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
             "  /quit, /exit      End session\n"
             "  /clear            Clear conversation history\n"
             "  /model [name]     Show or switch model\n"
+            "  /provider         Show current provider\n"
+            "  /tools            List available tools\n"
+            "  /plan <json>      Execute a structured plan\n"
+            "  /cost             Show token usage\n"
             "  /status           Show agent status\n";
         return sc_strndup(agent->alloc, help, strlen(help));
     }
@@ -396,6 +433,33 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
             if (!agent->model_name) return NULL;
             agent->model_name_len = arg_len;
             if (old) agent->alloc->free(agent->alloc->ctx, old, old_len + 1);
+
+            /* Invalidate and rebuild static prompt cache for new model */
+            if (agent->cached_static_prompt) {
+                agent->alloc->free(agent->alloc->ctx, agent->cached_static_prompt,
+                    agent->cached_static_prompt_len + 1);
+                agent->cached_static_prompt = NULL;
+                agent->cached_static_prompt_len = 0;
+                agent->cached_static_prompt_cap = 0;
+            }
+            sc_prompt_config_t pcfg = {
+                .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
+                .provider_name_len = 0,
+                .model_name = agent->model_name,
+                .model_name_len = agent->model_name_len,
+                .workspace_dir = agent->workspace_dir,
+                .workspace_dir_len = agent->workspace_dir_len,
+                .tools = agent->tools,
+                .tools_count = agent->tools_count,
+                .memory_context = NULL,
+                .memory_context_len = 0,
+                .autonomy_level = agent->autonomy_level,
+                .custom_instructions = agent->custom_instructions,
+                .custom_instructions_len = agent->custom_instructions_len,
+            };
+            (void)sc_prompt_build_static(agent->alloc, &pcfg,
+                &agent->cached_static_prompt, &agent->cached_static_prompt_len);
+            agent->cached_static_prompt_cap = agent->cached_static_prompt_len;
         }
         return sc_sprintf(agent->alloc, "Model: %.*s",
             (int)agent->model_name_len, agent->model_name);
@@ -409,6 +473,51 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
             (int)agent->model_name_len, agent->model_name,
             (size_t)agent->history_count,
             (unsigned long long)agent->total_tokens);
+    }
+
+    if (strcasecmp_l(cmd_buf, "cost", 4) == 0) {
+        return sc_sprintf(agent->alloc,
+            "Tokens used: %llu (est. cost depends on provider pricing)\n"
+            "History: %zu messages",
+            (unsigned long long)agent->total_tokens,
+            (size_t)agent->history_count);
+    }
+
+    if (strcasecmp_l(cmd_buf, "provider", 8) == 0) {
+        const char *prov = agent->provider.vtable->get_name(agent->provider.ctx);
+        if (arg_len > 0) {
+            return sc_sprintf(agent->alloc,
+                "Provider switching requires restart. Current: %s\n"
+                "Set in config: default_provider = \"%.*s\"",
+                prov ? prov : "?", (int)arg_len, arg_buf);
+        }
+        return sc_sprintf(agent->alloc, "Provider: %s", prov ? prov : "?");
+    }
+
+    if (strcasecmp_l(cmd_buf, "tools", 5) == 0) {
+        char *buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 4096);
+        if (!buf) return NULL;
+        int off = snprintf(buf, 4096, "Tools (%zu):\n", agent->tools_count);
+        for (size_t i = 0; i < agent->tools_count && off < 4000; i++) {
+            const char *n = agent->tools[i].vtable->name(agent->tools[i].ctx);
+            off += snprintf(buf + off, 4096 - (size_t)off, "  %s\n", n ? n : "?");
+        }
+        return buf;
+    }
+
+    if (strcasecmp_l(cmd_buf, "plan", 4) == 0) {
+        if (arg_len == 0) {
+            return sc_strndup(agent->alloc,
+                "Usage: /plan {\"steps\": [{\"tool\": \"name\", \"args\": {...}}]}",
+                57);
+        }
+        char *summary = NULL;
+        size_t summary_len = 0;
+        sc_error_t err = sc_agent_execute_plan(agent, arg_buf, arg_len, &summary, &summary_len);
+        if (err != SC_OK) {
+            return sc_sprintf(agent->alloc, "Plan failed: %s", sc_error_string(err));
+        }
+        return summary;
     }
 
     return NULL;
@@ -512,10 +621,17 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
         (void)sc_memory_loader_load(&loader, msg, msg_len, "", 0, &memory_ctx, &memory_ctx_len);
     }
 
-    /* Build system prompt */
+    /* Build system prompt using cached static portion when available */
     char *system_prompt = NULL;
     size_t system_prompt_len = 0;
-    {
+    if (agent->cached_static_prompt) {
+        err = sc_prompt_build_with_cache(agent->alloc,
+            agent->cached_static_prompt, agent->cached_static_prompt_len,
+            memory_ctx, memory_ctx_len,
+            &system_prompt, &system_prompt_len);
+        if (memory_ctx) agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+        if (err != SC_OK) return err;
+    } else {
         sc_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -601,6 +717,11 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
     }
 
     while (iter < agent->max_tool_iterations) {
+        if (agent->cancel_requested) {
+            if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
+            if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+            return SC_ERR_CANCELLED;
+        }
         iter++;
         /* Compact history if it exceeds limits (before each provider call) */
         if (sc_should_compact(agent->history, agent->history_count, &compact_cfg)) {
@@ -688,62 +809,89 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
         }
         sc_chat_response_free(agent->alloc, &resp);
 
-        for (size_t tc = 0; tc < agent->history[agent->history_count - 1].tool_calls_count; tc++) {
-            const sc_tool_call_t *call = &agent->history[agent->history_count - 1].tool_calls[tc];
-            sc_tool_t *tool = find_tool(agent, call->name, call->name_len);
+        {
+            size_t tc_count = agent->history[agent->history_count - 1].tool_calls_count;
+            const sc_tool_call_t *calls = agent->history[agent->history_count - 1].tool_calls;
 
-            char tool_name_buf[64];
-            {
-                size_t tn = (call->name_len < sizeof(tool_name_buf) - 1) ? call->name_len : sizeof(tool_name_buf) - 1;
-                if (tn > 0 && call->name) memcpy(tool_name_buf, call->name, tn);
-                tool_name_buf[tn] = '\0';
+            /* Emit TOOL_CALL_START events for all calls */
+            for (size_t tc = 0; tc < tc_count; tc++) {
+                char tn_buf[64];
+                size_t tn = (calls[tc].name_len < sizeof(tn_buf) - 1) ? calls[tc].name_len : sizeof(tn_buf) - 1;
+                if (tn > 0 && calls[tc].name) memcpy(tn_buf, calls[tc].name, tn);
+                tn_buf[tn] = '\0';
                 sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL_START, .data = {{0}} };
-                ev.data.tool_call_start.tool = tool_name_buf[0] ? tool_name_buf : "unknown";
+                ev.data.tool_call_start.tool = tn_buf[0] ? tn_buf : "unknown";
                 SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
 
-            if (!tool) {
-                (void)append_history(agent, SC_ROLE_TOOL, "tool not found", 14,
-                    call->name, call->name_len, call->id, call->id_len);
-                {
-                    sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}} };
-                    ev.data.tool_call.tool = tool_name_buf[0] ? tool_name_buf : "unknown";
-                    ev.data.tool_call.duration_ms = 0;
-                    ev.data.tool_call.success = false;
-                    ev.data.tool_call.detail = "tool not found";
-                    SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+            /* Use dispatcher for parallel execution when enabled (Tier 1.3) */
+            sc_dispatcher_t dispatcher;
+            sc_dispatcher_default(&dispatcher);
+            if (tc_count > 1) dispatcher.max_parallel = 4;
+            dispatcher.timeout_secs = 30;
+
+            sc_dispatch_result_t dispatch_result;
+            memset(&dispatch_result, 0, sizeof(dispatch_result));
+            err = sc_dispatcher_dispatch(&dispatcher, agent->alloc,
+                agent->tools, agent->tools_count,
+                calls, tc_count, &dispatch_result);
+
+            if (err == SC_OK && dispatch_result.results) {
+                for (size_t tc = 0; tc < tc_count; tc++) {
+                    const sc_tool_call_t *call = &calls[tc];
+                    sc_tool_result_t *result = &dispatch_result.results[tc];
+
+                    char tn_buf[64];
+                    size_t tn = (call->name_len < sizeof(tn_buf) - 1) ? call->name_len : sizeof(tn_buf) - 1;
+                    if (tn > 0 && call->name) memcpy(tn_buf, call->name, tn);
+                    tn_buf[tn] = '\0';
+
+                    {
+                        sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}} };
+                        ev.data.tool_call.tool = tn_buf[0] ? tn_buf : "unknown";
+                        ev.data.tool_call.duration_ms = 0;
+                        ev.data.tool_call.success = result->success;
+                        ev.data.tool_call.detail = result->success ? NULL :
+                            (result->error_msg ? result->error_msg : "failed");
+                        SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+                    }
+
+                    const char *res_content = result->success ? result->output : result->error_msg;
+                    size_t res_len = result->success ? result->output_len : result->error_msg_len;
+                    (void)append_history(agent, SC_ROLE_TOOL, res_content, res_len,
+                        call->name, call->name_len, call->id, call->id_len);
+
+                    if (agent->cancel_requested) break;
                 }
-                continue;
+                sc_dispatch_result_free(agent->alloc, &dispatch_result);
+            } else {
+                /* Fallback: sequential if dispatcher fails */
+                for (size_t tc = 0; tc < tc_count; tc++) {
+                    const sc_tool_call_t *call = &calls[tc];
+                    sc_tool_t *tool = find_tool(agent, call->name, call->name_len);
+                    if (!tool) {
+                        (void)append_history(agent, SC_ROLE_TOOL, "tool not found", 14,
+                            call->name, call->name_len, call->id, call->id_len);
+                        continue;
+                    }
+                    sc_json_value_t *args = NULL;
+                    if (call->arguments_len > 0) {
+                        sc_error_t pe = sc_json_parse(agent->alloc, call->arguments, call->arguments_len, &args);
+                        if (pe != SC_OK) args = NULL;
+                    }
+                    sc_tool_result_t result = sc_tool_result_fail("invalid arguments", 16);
+                    if (args) {
+                        tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
+                        sc_json_free(agent->alloc, args);
+                    }
+                    const char *res_content = result.success ? result.output : result.error_msg;
+                    size_t res_len = result.success ? result.output_len : result.error_msg_len;
+                    (void)append_history(agent, SC_ROLE_TOOL, res_content, res_len,
+                        call->name, call->name_len, call->id, call->id_len);
+                    sc_tool_result_free(agent->alloc, &result);
+                    if (agent->cancel_requested) break;
+                }
             }
-
-            sc_json_value_t *args = NULL;
-            if (call->arguments_len > 0) {
-                err = sc_json_parse(agent->alloc, call->arguments, call->arguments_len, &args);
-                if (err != SC_OK) args = NULL;
-            }
-            sc_tool_result_t result = sc_tool_result_fail("invalid arguments", 16);
-            clock_t tool_start = clock();
-            if (args) {
-                tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
-                sc_json_free(agent->alloc, args);
-            }
-            uint64_t tool_duration_ms = clock_diff_ms(tool_start, clock());
-
-            {
-                const char *tool_name_str = tool->vtable->name ? tool->vtable->name(tool->ctx) : "unknown";
-                sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}} };
-                ev.data.tool_call.tool = tool_name_str ? tool_name_str : "unknown";
-                ev.data.tool_call.duration_ms = tool_duration_ms;
-                ev.data.tool_call.success = result.success;
-                ev.data.tool_call.detail = result.success ? NULL : (result.error_msg ? result.error_msg : "failed");
-                SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
-            }
-
-            const char *res_content = result.success ? result.output : result.error_msg;
-            size_t res_len = result.success ? result.output_len : result.error_msg_len;
-            (void)append_history(agent, SC_ROLE_TOOL, res_content, res_len,
-                call->name, call->name_len, call->id, call->id_len);
-            sc_tool_result_free(agent->alloc, &result);
         }
         agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
         msgs = NULL;
@@ -829,12 +977,28 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
         agent->provider.vtable->supports_streaming &&
         agent->provider.vtable->supports_streaming(agent->provider.ctx) &&
         agent->provider.vtable->stream_chat;
-    bool has_tools = (agent->tool_specs_count > 0);
 
-    if (!can_stream || has_tools) {
+    if (!can_stream) {
         sc_error_t fallback_err = sc_agent_turn(agent, msg, msg_len, response_out, response_len_out);
         if (fallback_err == SC_OK && on_token && *response_out && response_len_out && *response_len_out > 0) {
             size_t chunk_size = 12;
+            for (size_t i = 0; i < *response_len_out; i += chunk_size) {
+                size_t n = *response_len_out - i;
+                if (n > chunk_size) n = chunk_size;
+                on_token(*response_out + i, n, token_ctx);
+            }
+        }
+        return fallback_err;
+    }
+
+    /* When tools are present, fall back to sc_agent_turn but simulate
+     * streaming by chunking the final response to the callback.
+     * This keeps the TUI responsive while tools execute. (Tier 2.4) */
+    bool has_tools = (agent->tool_specs_count > 0);
+    if (has_tools) {
+        sc_error_t fallback_err = sc_agent_turn(agent, msg, msg_len, response_out, response_len_out);
+        if (fallback_err == SC_OK && on_token && *response_out && response_len_out && *response_len_out > 0) {
+            size_t chunk_size = 8;
             for (size_t i = 0; i < *response_len_out; i += chunk_size) {
                 size_t n = *response_len_out - i;
                 if (n > chunk_size) n = chunk_size;
@@ -857,7 +1021,14 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
 
     char *system_prompt = NULL;
     size_t system_prompt_len = 0;
-    {
+    if (agent->cached_static_prompt) {
+        err = sc_prompt_build_with_cache(agent->alloc,
+            agent->cached_static_prompt, agent->cached_static_prompt_len,
+            memory_ctx, memory_ctx_len,
+            &system_prompt, &system_prompt_len);
+        if (memory_ctx) agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+        if (err != SC_OK) return err;
+    } else {
         sc_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -941,4 +1112,96 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
         }
         return SC_OK;
     }
+}
+
+/* ── Planner execution (Tier 1.4) ────────────────────────────────────── */
+sc_error_t sc_agent_execute_plan(sc_agent_t *agent, const char *plan_json, size_t plan_json_len,
+    char **summary_out, size_t *summary_len_out)
+{
+    if (!agent || !plan_json || !summary_out) return SC_ERR_INVALID_ARGUMENT;
+    *summary_out = NULL;
+    if (summary_len_out) *summary_len_out = 0;
+
+    sc_plan_t *plan = NULL;
+    sc_error_t err = sc_planner_create_plan(agent->alloc, plan_json, plan_json_len, &plan);
+    if (err != SC_OK) return err;
+
+    char result_buf[4096];
+    int result_off = 0;
+    result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
+        "Plan: %zu steps\n", plan->steps_count);
+
+    for (size_t i = 0; i < plan->steps_count; i++) {
+        if (agent->cancel_requested) {
+            sc_planner_mark_step(plan, i, SC_PLAN_STEP_FAILED);
+            result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
+                "  [%zu] %s: CANCELLED\n", i + 1, plan->steps[i].tool_name);
+            continue;
+        }
+
+        sc_planner_mark_step(plan, i, SC_PLAN_STEP_RUNNING);
+
+        {
+            sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL_START, .data = {{0}} };
+            ev.data.tool_call_start.tool = plan->steps[i].tool_name;
+            SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+        }
+
+        sc_tool_t *tool = find_tool(agent, plan->steps[i].tool_name,
+            strlen(plan->steps[i].tool_name));
+        if (!tool) {
+            sc_planner_mark_step(plan, i, SC_PLAN_STEP_FAILED);
+            result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
+                "  [%zu] %s: tool not found\n", i + 1, plan->steps[i].tool_name);
+            {
+                sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}} };
+                ev.data.tool_call.tool = plan->steps[i].tool_name;
+                ev.data.tool_call.success = false;
+                ev.data.tool_call.detail = "tool not found";
+                SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+            }
+            continue;
+        }
+
+        sc_json_value_t *args = NULL;
+        if (plan->steps[i].args_json) {
+            size_t args_len = strlen(plan->steps[i].args_json);
+            sc_error_t pe = sc_json_parse(agent->alloc, plan->steps[i].args_json, args_len, &args);
+            if (pe != SC_OK) args = NULL;
+        }
+
+        sc_tool_result_t result = sc_tool_result_fail("invalid arguments", 16);
+        clock_t tool_start = clock();
+        if (args) {
+            tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
+            sc_json_free(agent->alloc, args);
+        }
+        uint64_t tool_duration_ms = clock_diff_ms(tool_start, clock());
+
+        bool ok = result.success;
+        sc_planner_mark_step(plan, i, ok ? SC_PLAN_STEP_DONE : SC_PLAN_STEP_FAILED);
+
+        {
+            sc_observer_event_t ev = { .tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}} };
+            ev.data.tool_call.tool = plan->steps[i].tool_name;
+            ev.data.tool_call.duration_ms = tool_duration_ms;
+            ev.data.tool_call.success = ok;
+            ev.data.tool_call.detail = ok ? NULL : (result.error_msg ? result.error_msg : "failed");
+            SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+        }
+
+        const char *desc = plan->steps[i].description ? plan->steps[i].description : plan->steps[i].tool_name;
+        result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
+            "  [%zu] %s: %s (%llums)\n", i + 1, desc,
+            ok ? "done" : "FAILED", (unsigned long long)tool_duration_ms);
+
+        sc_tool_result_free(agent->alloc, &result);
+    }
+
+    sc_plan_free(agent->alloc, plan);
+
+    *summary_out = sc_strndup(agent->alloc, result_buf, (size_t)result_off);
+    if (!*summary_out) return SC_ERR_OUT_OF_MEMORY;
+    if (summary_len_out) *summary_len_out = (size_t)result_off;
+    return SC_OK;
 }

@@ -1,4 +1,5 @@
 #include "seaclaw/tunnel.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/string.h"
 #include <string.h>

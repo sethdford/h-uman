@@ -86,6 +86,9 @@ typedef struct sc_cost_tracker {
     sc_cost_record_t *records;
     size_t record_count;
     size_t record_cap;
+    sc_cost_record_t *history;
+    size_t history_count;
+    size_t history_cap;
     char *storage_path;
 } sc_cost_tracker_t;
 
@@ -122,5 +125,10 @@ size_t sc_cost_request_count(const sc_cost_tracker_t *t);
 void sc_cost_get_summary(const sc_cost_tracker_t *t,
                          int64_t at_secs,
                          sc_cost_summary_t *out);
+
+sc_error_t sc_cost_load_history(sc_cost_tracker_t *t);
+
+sc_error_t sc_cost_get_usage_json(sc_allocator_t *alloc, const sc_cost_tracker_t *t,
+    int64_t at_secs, char **out_json);
 
 #endif /* SC_COST_H */

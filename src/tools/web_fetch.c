@@ -3,6 +3,7 @@
  * Strips script/style tags, converts to readable text with basic markdown.
  */
 #include "seaclaw/tool.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/http.h"
@@ -15,7 +16,7 @@
 #include <stdlib.h>
 
 #define SC_WEB_FETCH_NAME "web_fetch"
-#define SC_WEB_FETCH_DESC "Fetch a web page and extract its text content. Converts HTML to readable text."
+#define SC_WEB_FETCH_DESC "Fetch a web page by URL and extract its text content. Converts HTML to readable text. Use this to read the content of a specific URL. Preferred over browser for retrieving page content."
 #define SC_WEB_FETCH_PARAMS "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"},\"max_chars\":{\"type\":\"integer\",\"default\":50000}},\"required\":[\"url\"]}"
 #define SC_WEB_FETCH_DEFAULT_MAX 50000
 #define SC_WEB_FETCH_MIN_MAX 100

@@ -1,4 +1,5 @@
 #include "seaclaw/agent/compaction.h"
+#include <stdint.h>
 #include "seaclaw/core/string.h"
 #include <string.h>
 #include <stdlib.h>

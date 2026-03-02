@@ -1,4 +1,5 @@
 #include "seaclaw/auth.h"
+#include <stdint.h>
 #include "seaclaw/platform.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"

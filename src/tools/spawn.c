@@ -5,6 +5,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/security.h"
+#include "seaclaw/security/sandbox.h"
 #include "seaclaw/config.h"
 #include <stdio.h>
 #include <string.h>
@@ -102,8 +103,23 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
         }
     }
 
+    /* Wrap argv with sandbox if available */
+    const char *sandbox_argv[SC_SPAWN_MAX_ARGS + 16];
+    const char *const *run_argv = argv_buf;
+    if (c->policy && c->policy->sandbox &&
+        sc_sandbox_is_available(c->policy->sandbox)) {
+        size_t wrapped_count = 0;
+        if (sc_sandbox_wrap_command(c->policy->sandbox,
+                argv_buf, argc, sandbox_argv,
+                SC_SPAWN_MAX_ARGS + 16, &wrapped_count) == SC_OK &&
+                wrapped_count > 0) {
+            sandbox_argv[wrapped_count] = NULL;
+            run_argv = sandbox_argv;
+        }
+    }
+
     sc_run_result_t run = {0};
-    sc_error_t err = sc_process_run(alloc, argv_buf, cwd, SC_SPAWN_MAX_OUTPUT, &run);
+    sc_error_t err = sc_process_run(alloc, run_argv, cwd, SC_SPAWN_MAX_OUTPUT, &run);
 
     /* Free any number-arg copies we allocated */
     if (args_arr && args_arr->type == SC_JSON_ARRAY) {

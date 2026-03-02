@@ -1,7 +1,10 @@
 #include "seaclaw/cost.h"
+#include <stdint.h>
+#include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -43,7 +46,19 @@ sc_error_t sc_cost_tracker_init(sc_cost_tracker_t *t, sc_allocator_t *alloc, con
     if (!t->storage_path) return SC_ERR_OUT_OF_MEMORY;
     snprintf(t->storage_path, path_len, "%s/state/costs.jsonl", workspace_dir);
 
+    t->history = NULL;
+    t->history_count = 0;
+    t->history_cap = 0;
+
     return SC_OK;
+}
+
+static void free_record_model(sc_allocator_t *alloc, sc_cost_record_t *r) {
+    if (!alloc || !r) return;
+    if (r->usage.model) {
+        alloc->free(alloc->ctx, (void *)r->usage.model, strlen(r->usage.model) + 1);
+        r->usage.model = NULL;
+    }
 }
 
 void sc_cost_tracker_deinit(sc_cost_tracker_t *t) {
@@ -52,12 +67,20 @@ void sc_cost_tracker_deinit(sc_cost_tracker_t *t) {
         t->alloc->free(t->alloc->ctx, t->records, t->record_cap * sizeof(sc_cost_record_t));
         t->records = NULL;
     }
+    if (t->history) {
+        for (size_t i = 0; i < t->history_count; i++)
+            free_record_model(t->alloc, &t->history[i]);
+        t->alloc->free(t->alloc->ctx, t->history, t->history_cap * sizeof(sc_cost_record_t));
+        t->history = NULL;
+    }
     if (t->storage_path) {
         t->alloc->free(t->alloc->ctx, t->storage_path, strlen(t->storage_path) + 1);
         t->storage_path = NULL;
     }
     t->record_count = 0;
     t->record_cap = 0;
+    t->history_count = 0;
+    t->history_cap = 0;
 }
 
 sc_budget_check_t sc_cost_check_budget(const sc_cost_tracker_t *t, double estimated_cost_usd, sc_budget_info_t *info_out) {
@@ -157,13 +180,155 @@ size_t sc_cost_request_count(const sc_cost_tracker_t *t) {
     return t ? t->record_count : 0;
 }
 
+static void tm_from_secs(int64_t secs, struct tm *out) {
+    time_t t = (time_t)secs;
+    struct tm *p = localtime(&t);
+    if (p) *out = *p;
+}
+
+static bool same_day(int64_t a_secs, int64_t b_secs) {
+    struct tm ta, tb;
+    tm_from_secs(a_secs, &ta);
+    tm_from_secs(b_secs, &tb);
+    return ta.tm_year == tb.tm_year && ta.tm_mon == tb.tm_mon && ta.tm_mday == tb.tm_mday;
+}
+
+static bool same_month(int64_t a_secs, int64_t b_secs) {
+    struct tm ta, tb;
+    tm_from_secs(a_secs, &ta);
+    tm_from_secs(b_secs, &tb);
+    return ta.tm_year == tb.tm_year && ta.tm_mon == tb.tm_mon;
+}
+
+static double sum_cost_for_period(const sc_cost_tracker_t *t, int64_t at_secs,
+    bool (*pred)(int64_t, int64_t)) {
+    double total = 0.0;
+    for (size_t i = 0; i < t->record_count; i++) {
+        if (pred(t->records[i].usage.timestamp_secs, at_secs))
+            total += t->records[i].usage.cost_usd;
+    }
+    for (size_t i = 0; i < t->history_count; i++) {
+        if (pred(t->history[i].usage.timestamp_secs, at_secs))
+            total += t->history[i].usage.cost_usd;
+    }
+    return total;
+}
+
 void sc_cost_get_summary(const sc_cost_tracker_t *t, int64_t at_secs, sc_cost_summary_t *out) {
     if (!t || !out) return;
     memset(out, 0, sizeof(*out));
     out->session_cost_usd = sc_cost_session_total(t);
     out->request_count = t->record_count;
     out->total_tokens = sc_cost_session_tokens(t);
-    (void)at_secs;
-    out->daily_cost_usd = out->session_cost_usd;
-    out->monthly_cost_usd = out->session_cost_usd;
+    if (at_secs == 0) at_secs = (int64_t)time(NULL);
+    out->daily_cost_usd = sum_cost_for_period(t, at_secs, same_day);
+    out->monthly_cost_usd = sum_cost_for_period(t, at_secs, same_month);
+    for (size_t i = 0; i < t->history_count; i++) {
+        out->total_tokens += t->history[i].usage.total_tokens;
+        out->request_count++;
+    }
+}
+
+#if !defined(SC_IS_TEST)
+static sc_error_t parse_cost_line(sc_allocator_t *alloc, const char *line, size_t len,
+    sc_cost_record_t *out) {
+    sc_json_value_t *root = NULL;
+    sc_error_t err = sc_json_parse(alloc, line, len, &root);
+    if (err != SC_OK) return err;
+    if (!root || root->type != SC_JSON_OBJECT) {
+        if (root) sc_json_free(alloc, root);
+        return SC_ERR_JSON_PARSE;
+    }
+
+    const char *model = sc_json_get_string(root, "model");
+    double cost = sc_json_get_number(root, "cost_usd", 0.0);
+    double ts = sc_json_get_number(root, "timestamp", 0.0);
+    uint64_t inp = (uint64_t)sc_json_get_number(root, "input_tokens", 0.0);
+    uint64_t out_tok = (uint64_t)sc_json_get_number(root, "output_tokens", 0.0);
+    uint64_t total = (uint64_t)sc_json_get_number(root, "tokens", 0.0);
+    if (total == 0) total = inp + out_tok;
+
+    memset(out, 0, sizeof(*out));
+    out->usage.model = model ? sc_strdup(alloc, model) : NULL;
+    out->usage.input_tokens = inp;
+    out->usage.output_tokens = out_tok;
+    out->usage.total_tokens = total;
+    out->usage.cost_usd = isfinite(cost) ? cost : 0.0;
+    out->usage.timestamp_secs = (int64_t)ts;
+    strncpy(out->session_id, "history", sizeof(out->session_id) - 1);
+    out->session_id[sizeof(out->session_id) - 1] = '\0';
+
+    sc_json_free(alloc, root);
+    return SC_OK;
+}
+#endif
+
+sc_error_t sc_cost_load_history(sc_cost_tracker_t *t) {
+    if (!t || !t->alloc) return SC_ERR_INVALID_ARGUMENT;
+
+#ifdef SC_IS_TEST
+    return SC_OK;
+#else
+    if (!t->storage_path || !t->storage_path[0]) return SC_OK;
+
+    FILE *f = fopen(t->storage_path, "r");
+    if (!f) return SC_OK;
+
+    char line[8192];
+    while (fgets(line, sizeof(line), f)) {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        if (len == 0) continue;
+        if (t->history_count >= SC_COST_MAX_RECORDS) break;
+
+        if (t->history_count >= t->history_cap) {
+            size_t new_cap = t->history_cap ? t->history_cap * 2 : 64;
+            if (new_cap > SC_COST_MAX_RECORDS) new_cap = SC_COST_MAX_RECORDS;
+            sc_cost_record_t *n = (sc_cost_record_t *)t->alloc->realloc(t->alloc->ctx,
+                t->history, t->history_cap * sizeof(sc_cost_record_t),
+                new_cap * sizeof(sc_cost_record_t));
+            if (!n) {
+                fclose(f);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+            t->history = n;
+            t->history_cap = new_cap;
+        }
+
+        sc_cost_record_t rec = {0};
+        if (parse_cost_line(t->alloc, line, len, &rec) == SC_OK) {
+            t->history[t->history_count++] = rec;
+        } else if (rec.usage.model) {
+            t->alloc->free(t->alloc->ctx, (void *)rec.usage.model, strlen(rec.usage.model) + 1);
+        }
+    }
+    fclose(f);
+    return SC_OK;
+#endif
+}
+
+sc_error_t sc_cost_get_usage_json(sc_allocator_t *alloc, const sc_cost_tracker_t *t,
+    int64_t at_secs, char **out_json) {
+    if (!alloc || !t || !out_json) return SC_ERR_INVALID_ARGUMENT;
+    *out_json = NULL;
+
+    sc_cost_summary_t s = {0};
+    sc_cost_get_summary(t, at_secs, &s);
+
+    size_t cap = 256;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf) return SC_ERR_OUT_OF_MEMORY;
+
+    int n = snprintf(buf, cap,
+        "{\"session_cost_usd\":%.6f,\"daily_cost_usd\":%.6f,\"monthly_cost_usd\":%.6f,\"total_tokens\":%llu,\"request_count\":%zu}",
+        s.session_cost_usd, s.daily_cost_usd, s.monthly_cost_usd,
+        (unsigned long long)s.total_tokens, s.request_count);
+    if (n < 0 || (size_t)n >= cap) {
+        alloc->free(alloc->ctx, buf, cap);
+        return SC_ERR_IO;
+    }
+    *out_json = buf;
+    return SC_OK;
 }

@@ -1,4 +1,5 @@
 #include "seaclaw/core/arena.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 

@@ -1,4 +1,5 @@
 #include "seaclaw/memory/vector/circuit_breaker.h"
+#include <stdint.h>
 #include <time.h>
 
 #ifdef _WIN32

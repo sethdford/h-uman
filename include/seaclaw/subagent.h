@@ -28,4 +28,17 @@ sc_task_status_t sc_subagent_get_status(sc_subagent_manager_t *mgr, uint64_t tas
 const char *sc_subagent_get_result(sc_subagent_manager_t *mgr, uint64_t task_id);
 size_t sc_subagent_running_count(sc_subagent_manager_t *mgr);
 
+sc_error_t sc_subagent_cancel(sc_subagent_manager_t *mgr, uint64_t task_id);
+
+typedef struct sc_subagent_task_info {
+    uint64_t task_id;
+    sc_task_status_t status;
+    const char *label;
+    const char *task;
+    int64_t started_at;
+} sc_subagent_task_info_t;
+
+sc_error_t sc_subagent_get_all(sc_subagent_manager_t *mgr, sc_allocator_t *alloc,
+    sc_subagent_task_info_t **out, size_t *out_count);
+
 #endif /* SC_SUBAGENT_H */

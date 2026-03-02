@@ -1,4 +1,5 @@
 #include "seaclaw/security.h"
+#include <stdint.h>
 #include "seaclaw/core/error.h"
 #include "crypto.h"
 #include <stdlib.h>

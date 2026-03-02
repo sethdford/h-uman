@@ -1,4 +1,5 @@
 #include "seaclaw/session.h"
+#include <stdint.h>
 #include "seaclaw/util.h"
 #include <string.h>
 #include <time.h>
@@ -165,4 +166,66 @@ size_t sc_session_evict_idle(sc_session_manager_t *mgr, uint64_t max_idle_secs) 
 
 size_t sc_session_count(const sc_session_manager_t *mgr) {
     return mgr ? mgr->count : 0;
+}
+
+sc_session_summary_t *sc_session_list(sc_session_manager_t *mgr,
+                                       sc_allocator_t *alloc,
+                                       size_t *out_count) {
+    if (!mgr || !alloc || !out_count) return NULL;
+    *out_count = 0;
+    size_t n = mgr->count;
+    if (n == 0) return NULL;
+
+    sc_session_summary_t *arr = alloc->alloc(alloc->ctx,
+        n * sizeof(sc_session_summary_t));
+    if (!arr) return NULL;
+
+    size_t idx = 0;
+    for (size_t i = 0; i < SC_SESSION_MAP_CAP && idx < n; i++) {
+        for (sc_session_entry_t *e = mgr->buckets[i]; e; e = e->next) {
+            if (!e->session || idx >= n) break;
+            sc_session_t *s = e->session;
+            size_t klen = strnlen(s->session_key, SC_SESSION_KEY_LEN - 1);
+            memcpy(arr[idx].session_key, s->session_key, klen);
+            arr[idx].session_key[klen] = '\0';
+            size_t llen = strnlen(s->label, SC_SESSION_LABEL_LEN - 1);
+            memcpy(arr[idx].label, s->label, llen);
+            arr[idx].label[llen] = '\0';
+            arr[idx].created_at = s->created_at;
+            arr[idx].last_active = s->last_active;
+            arr[idx].turn_count = s->turn_count;
+            idx++;
+        }
+    }
+    *out_count = idx;
+    return arr;
+}
+
+sc_error_t sc_session_delete(sc_session_manager_t *mgr, const char *session_key) {
+    if (!mgr || !mgr->alloc || !session_key) return SC_ERR_INVALID_ARGUMENT;
+
+    sc_session_entry_t **pp = find_bucket(mgr, session_key);
+    for (sc_session_entry_t *e = *pp; e; pp = &e->next, e = *pp) {
+        if (strcmp(e->key, session_key) != 0) continue;
+        *pp = e->next;
+        if (e->session) destroy_session(e->session, mgr->alloc);
+        mgr->alloc->free(mgr->alloc->ctx, e, sizeof(sc_session_entry_t));
+        mgr->count--;
+        return SC_OK;
+    }
+    return SC_ERR_NOT_FOUND;
+}
+
+sc_error_t sc_session_patch(sc_session_manager_t *mgr, const char *session_key,
+                            const char *label) {
+    if (!mgr || !session_key) return SC_ERR_INVALID_ARGUMENT;
+    if (!label) return SC_ERR_INVALID_ARGUMENT;
+
+    sc_session_t *s = find_session(mgr, session_key);
+    if (!s) return SC_ERR_NOT_FOUND;
+
+    size_t len = strnlen(label, SC_SESSION_LABEL_LEN - 1);
+    memcpy(s->label, label, len);
+    s->label[len] = '\0';
+    return SC_OK;
 }

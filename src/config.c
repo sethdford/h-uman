@@ -1,4 +1,5 @@
 #include "seaclaw/config.h"
+#include <stdint.h>
 #include "seaclaw/core/arena.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
@@ -383,6 +384,40 @@ static sc_error_t parse_tunnel(sc_allocator_t *a, sc_config_t *cfg,
     return SC_OK;
 }
 
+static void parse_email_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                const sc_json_value_t *obj)
+{
+    if (!obj || obj->type != SC_JSON_OBJECT) return;
+    sc_email_channel_config_t *e = &cfg->channels.email;
+    const char *s;
+    s = sc_json_get_string(obj, "smtp_host");
+    if (s) { if (e->smtp_host) a->free(a->ctx, e->smtp_host, strlen(e->smtp_host) + 1); e->smtp_host = sc_strdup(a, s); }
+    double port = sc_json_get_number(obj, "smtp_port", e->smtp_port);
+    if (port >= 1 && port <= 65535) e->smtp_port = (uint16_t)port;
+    s = sc_json_get_string(obj, "from_address");
+    if (s) { if (e->from_address) a->free(a->ctx, e->from_address, strlen(e->from_address) + 1); e->from_address = sc_strdup(a, s); }
+    s = sc_json_get_string(obj, "smtp_user");
+    if (s) { if (e->smtp_user) a->free(a->ctx, e->smtp_user, strlen(e->smtp_user) + 1); e->smtp_user = sc_strdup(a, s); }
+    s = sc_json_get_string(obj, "smtp_pass");
+    if (s) { if (e->smtp_pass) a->free(a->ctx, e->smtp_pass, strlen(e->smtp_pass) + 1); e->smtp_pass = sc_strdup(a, s); }
+    s = sc_json_get_string(obj, "imap_host");
+    if (s) { if (e->imap_host) a->free(a->ctx, e->imap_host, strlen(e->imap_host) + 1); e->imap_host = sc_strdup(a, s); }
+    port = sc_json_get_number(obj, "imap_port", e->imap_port);
+    if (port >= 1 && port <= 65535) e->imap_port = (uint16_t)port;
+}
+
+static void parse_imessage_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                   const sc_json_value_t *obj)
+{
+    if (!obj || obj->type != SC_JSON_OBJECT) return;
+    const char *t = sc_json_get_string(obj, "default_target");
+    if (t) {
+        if (cfg->channels.imessage.default_target)
+            a->free(a->ctx, cfg->channels.imessage.default_target, strlen(cfg->channels.imessage.default_target) + 1);
+        cfg->channels.imessage.default_target = sc_strdup(a, t);
+    }
+}
+
 static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg,
                                  const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
@@ -392,6 +427,13 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg,
         if (cfg->channels.default_channel) a->free(a->ctx, cfg->channels.default_channel, strlen(cfg->channels.default_channel) + 1);
         cfg->channels.default_channel = sc_strdup(a, def_ch);
     }
+
+    sc_json_value_t *email_obj = sc_json_object_get(obj, "email");
+    if (email_obj) parse_email_channel(a, cfg, email_obj);
+
+    sc_json_value_t *imsg_obj = sc_json_object_get(obj, "imessage");
+    if (imsg_obj) parse_imessage_channel(a, cfg, imsg_obj);
+
     cfg->channels.channel_config_len = 0;
     if (obj->data.object.pairs && cfg->channels.channel_config_len < SC_CHANNEL_CONFIG_MAX) {
         for (size_t i = 0; i < obj->data.object.len; i++) {
@@ -417,6 +459,36 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg,
             cfg->channels.channel_config_counts[cfg->channels.channel_config_len] = cnt;
             cfg->channels.channel_config_len++;
         }
+    }
+    return SC_OK;
+}
+
+static sc_error_t parse_mcp_servers(sc_allocator_t *a, sc_config_t *cfg,
+                                    const sc_json_value_t *obj)
+{
+    if (!obj || obj->type != SC_JSON_OBJECT) return SC_OK;
+    cfg->mcp_servers_len = 0;
+    for (size_t i = 0; i < obj->data.object.len && cfg->mcp_servers_len < SC_MCP_SERVERS_MAX; i++) {
+        sc_json_pair_t *p = &obj->data.object.pairs[i];
+        if (!p->key || !p->value || p->value->type != SC_JSON_OBJECT) continue;
+
+        sc_mcp_server_entry_t *entry = &cfg->mcp_servers[cfg->mcp_servers_len];
+        memset(entry, 0, sizeof(*entry));
+        entry->name = sc_strdup(a, p->key);
+
+        const char *cmd = sc_json_get_string(p->value, "command");
+        if (cmd) entry->command = sc_strdup(a, cmd);
+
+        sc_json_value_t *args_arr = sc_json_object_get(p->value, "args");
+        if (args_arr && args_arr->type == SC_JSON_ARRAY) {
+            for (size_t j = 0; j < args_arr->data.array.len && entry->args_count < SC_MCP_SERVER_ARGS_MAX; j++) {
+                sc_json_value_t *arg_val = args_arr->data.array.items[j];
+                if (arg_val && arg_val->type == SC_JSON_STRING && arg_val->data.string.ptr) {
+                    entry->args[entry->args_count++] = sc_strdup(a, arg_val->data.string.ptr);
+                }
+            }
+        }
+        cfg->mcp_servers_len++;
     }
     return SC_OK;
 }
@@ -795,6 +867,9 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
 
     sc_json_value_t *cost_obj = sc_json_object_get(root, "cost");
     if (cost_obj) parse_cost(a, cfg, cost_obj);
+
+    sc_json_value_t *mcp_obj = sc_json_object_get(root, "mcp_servers");
+    if (mcp_obj) parse_mcp_servers(a, cfg, mcp_obj);
 
     sc_json_value_t *sec = sc_json_object_get(root, "security");
     if (sec && sec->type == SC_JSON_OBJECT) {

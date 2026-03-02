@@ -1,4 +1,5 @@
 #include "seaclaw/tool.h"
+#include <stdint.h>
 #include "seaclaw/tools/cron_runs.h"
 #include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"

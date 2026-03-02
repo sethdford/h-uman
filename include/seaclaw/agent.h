@@ -10,6 +10,7 @@
 #include "seaclaw/memory.h"
 #include "seaclaw/observer.h"
 #include "seaclaw/security.h"
+#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -63,6 +64,13 @@ struct sc_agent {
     size_t history_count;
     size_t history_cap;
     uint64_t total_tokens;
+
+    /* Cached static portion of system prompt (rebuilt only when config changes) */
+    char *cached_static_prompt;
+    size_t cached_static_prompt_len;
+    size_t cached_static_prompt_cap;
+
+    volatile sig_atomic_t cancel_requested;  /* set by SIGINT handler to abort turn */
 };
 
 /* Create agent from minimal config (no full config loader yet). */
@@ -112,5 +120,11 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
 
 /* Estimate tokens for a string (rough: ~4 chars per token). */
 uint32_t sc_agent_estimate_tokens(const char *text, size_t len);
+
+/* Execute a structured plan (Tier 1.4 planner integration).
+ * plan_json format: {"steps": [{"tool": "name", "args": {...}, "description": "..."}]}
+ * Returns a summary of execution results. Caller must free summary_out. */
+sc_error_t sc_agent_execute_plan(sc_agent_t *agent, const char *plan_json, size_t plan_json_len,
+    char **summary_out, size_t *summary_len_out);
 
 #endif /* SC_AGENT_H */

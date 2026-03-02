@@ -32,4 +32,17 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc,
     const sc_prompt_config_t *config,
     char **out, size_t *out_len);
 
+/* Build only the static parts (identity, tools, autonomy, safety, custom).
+ * The result can be cached and reused across turns. Caller owns returned string. */
+sc_error_t sc_prompt_build_static(sc_allocator_t *alloc,
+    const sc_prompt_config_t *config,
+    char **out, size_t *out_len);
+
+/* Build full prompt by combining cached static part with dynamic memory context.
+ * Avoids rebuilding the static portion each turn. Caller owns returned string. */
+sc_error_t sc_prompt_build_with_cache(sc_allocator_t *alloc,
+    const char *static_prompt, size_t static_prompt_len,
+    const char *memory_context, size_t memory_context_len,
+    char **out, size_t *out_len);
+
 #endif /* SC_AGENT_PROMPT_H */

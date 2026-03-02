@@ -8,6 +8,7 @@
 
 #define SC_SESSION_MAP_CAP 256
 #define SC_SESSION_KEY_LEN 128
+#define SC_SESSION_LABEL_LEN 128
 #define SC_SESSION_MSG_CAP 4096
 #define SC_SESSION_MSG_ROLE_LEN 32
 #define SC_SESSION_MSG_CONTENT_CAP 65536
@@ -19,6 +20,7 @@ typedef struct sc_session_message {
 
 typedef struct sc_session {
     char session_key[SC_SESSION_KEY_LEN];
+    char label[SC_SESSION_LABEL_LEN];
     int64_t created_at;
     int64_t last_active;
     uint64_t turn_count;
@@ -26,6 +28,14 @@ typedef struct sc_session {
     size_t message_count;
     size_t message_cap;
 } sc_session_t;
+
+typedef struct sc_session_summary {
+    char session_key[SC_SESSION_KEY_LEN];
+    char label[SC_SESSION_LABEL_LEN];
+    int64_t created_at;
+    int64_t last_active;
+    uint64_t turn_count;
+} sc_session_summary_t;
 
 typedef struct sc_session_entry {
     char key[SC_SESSION_KEY_LEN];
@@ -52,5 +62,13 @@ char *sc_session_gen_id(sc_allocator_t *alloc);
 size_t sc_session_evict_idle(sc_session_manager_t *mgr, uint64_t max_idle_secs);
 
 size_t sc_session_count(const sc_session_manager_t *mgr);
+
+sc_session_summary_t *sc_session_list(sc_session_manager_t *mgr,
+    sc_allocator_t *alloc, size_t *out_count);
+
+sc_error_t sc_session_delete(sc_session_manager_t *mgr, const char *session_key);
+
+sc_error_t sc_session_patch(sc_session_manager_t *mgr, const char *session_key,
+    const char *label);
 
 #endif

@@ -1,4 +1,5 @@
 #include "seaclaw/cron.h"
+#include <stdint.h>
 #include "seaclaw/core/string.h"
 #include <stdlib.h>
 #include <string.h>

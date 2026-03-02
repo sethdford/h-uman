@@ -1,4 +1,5 @@
 #include "seaclaw/provider.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"

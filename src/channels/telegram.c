@@ -3,6 +3,7 @@
  * Send/receive, media, commands, smart splitting, typing, policy.
  */
 #include "seaclaw/channel.h"
+#include <stdint.h>
 #include "seaclaw/channel_loop.h"
 #include "seaclaw/channels/telegram.h"
 #include "seaclaw/core/allocator.h"

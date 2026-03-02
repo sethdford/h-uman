@@ -3,6 +3,7 @@
  * Uses doubly-linked list + hash table for O(1) lookup and eviction. */
 
 #include "seaclaw/memory/engines.h"
+#include <stdint.h>
 #include "seaclaw/memory.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"

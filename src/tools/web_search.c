@@ -15,7 +15,7 @@
 #include <string.h>
 
 #define SC_WEB_SEARCH_NAME "web_search"
-#define SC_WEB_SEARCH_DESC "Search the web. Providers: brave, duckduckgo, tavily, exa, firecrawl, perplexity, jina, searxng. Set API keys or SEARXNG_BASE_URL."
+#define SC_WEB_SEARCH_DESC "Search the web for information. Returns search results with titles, URLs, and snippets. Use this for factual questions, current events, locations, or finding information online. Preferred over browser for all information retrieval."
 #define SC_WEB_SEARCH_PARAMS "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"minLength\":1},\"count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":10,\"default\":5},\"provider\":{\"type\":\"string\"}},\"required\":[\"query\"]}"
 #define SC_WEB_QUERY_MAX 2048
 #define SC_DEFAULT_COUNT 5

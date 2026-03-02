@@ -49,4 +49,11 @@ sc_error_t sc_skillforge_list_skills(const sc_skillforge_t *sf,
 sc_error_t sc_skillforge_enable(sc_skillforge_t *sf, const char *name);
 sc_error_t sc_skillforge_disable(sc_skillforge_t *sf, const char *name);
 
+sc_error_t sc_skillforge_execute(sc_allocator_t *alloc, const sc_skillforge_t *sf,
+    const char *name, char **out_instructions);
+
+sc_error_t sc_skillforge_install(const char *name, const char *url);
+
+sc_error_t sc_skillforge_uninstall(sc_skillforge_t *sf, const char *name);
+
 #endif /* SC_SKILLFORGE_H */

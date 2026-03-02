@@ -1,4 +1,5 @@
 #include "seaclaw/portable_atomic.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include <stdatomic.h>
 #include <stdalign.h>

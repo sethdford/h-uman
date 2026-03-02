@@ -315,15 +315,10 @@ typedef struct sc_lucid_memory_prod {
 #define SC_SQLITE_BUSY_TIMEOUT_MS 5000
 
 static const char *schema_sql =
-    "CREATE TABLE IF NOT EXISTS memories ("
-    "  id         TEXT PRIMARY KEY,"
-    "  key        TEXT NOT NULL UNIQUE,"
-    "  content    TEXT NOT NULL,"
-    "  category   TEXT NOT NULL DEFAULT 'core',"
-    "  session_id TEXT,"
-    "  created_at TEXT NOT NULL,"
-    "  updated_at TEXT NOT NULL"
-    ");"
+    "CREATE TABLE IF NOT EXISTS memories("
+    "id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,"
+    "content TEXT NOT NULL,category TEXT NOT NULL DEFAULT'core',"
+    "session_id TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);"
     "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);"
     "CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);"
     "CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);";

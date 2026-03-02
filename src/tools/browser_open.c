@@ -10,7 +10,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define BROWSER_OPEN_PARAMS "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\",\"description\":\"HTTPS URL to open in browser\"}},\"required\":[\"url\"]}"
+#define BROWSER_OPEN_PARAMS "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"]}"
 
 typedef struct sc_browser_open_ctx {
     sc_allocator_t *alloc;

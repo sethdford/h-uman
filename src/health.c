@@ -1,4 +1,5 @@
 #include "seaclaw/health.h"
+#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include <string.h>
 #include <time.h>

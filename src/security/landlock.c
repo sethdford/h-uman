@@ -1,4 +1,5 @@
 #include "seaclaw/security/sandbox.h"
+#include <stdint.h>
 #include "seaclaw/security/sandbox_internal.h"
 #include "seaclaw/core/error.h"
 #include <string.h>
