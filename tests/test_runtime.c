@@ -64,9 +64,9 @@ static void test_runtime_cloudflare_create(void) {
 }
 
 static void test_platform_is_windows_or_unix(void) {
-    bool win = sc_platform_is_windows();
-    bool unix = sc_platform_is_unix();
-    SC_ASSERT_TRUE(win != unix);
+    bool is_win = sc_platform_is_windows();
+    bool is_unix = sc_platform_is_unix();
+    SC_ASSERT_TRUE(is_win != is_unix);
 }
 
 static void test_platform_get_shell(void) {

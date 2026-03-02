@@ -17,8 +17,6 @@
 
 .globl sc_sha256_x86_64
 
-.section .note.GNU-stack,"",@progbits
-
 /* pshufb mask: byteswap each dword (LE -> BE for SHA-256) */
 .Lbswap_mask:
     .byte 3, 2, 1, 0, 7, 6, 5, 4
@@ -388,3 +386,7 @@ sc_sha256_x86_64:
     popq %rbx
     leave
     jmp sc_sha256_generic
+
+#if !defined(__APPLE__)
+.section .note.GNU-stack,"",@progbits
+#endif
