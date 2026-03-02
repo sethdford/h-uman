@@ -16,9 +16,8 @@ function getPlatformKey() {
   const arch = os.arch();
 
   if (platform === "darwin" && arch === "arm64") return "macos-aarch64";
-  if (platform === "darwin" && arch === "x64") return "macos-x86_64";
+  if (platform === "darwin" && arch === "x64") return "macos-aarch64";
   if (platform === "linux" && arch === "x64") return "linux-x86_64";
-  if (platform === "linux" && arch === "arm64") return "linux-aarch64";
 
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }

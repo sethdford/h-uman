@@ -16,13 +16,8 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-            ext: ".bin"
           - os: macos-latest
             target: macos-aarch64
-            ext: ".bin"
-          - os: macos-13
-            target: macos-x86_64
-            ext: ".bin"
 
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +55,6 @@ jobs:
         run: |
           mv seaclaw-linux-x86_64/seaclaw seaclaw-linux-x86_64.bin
           mv seaclaw-macos-aarch64/seaclaw seaclaw-macos-aarch64.bin
-          mv seaclaw-macos-x86_64/seaclaw seaclaw-macos-x86_64.bin
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -68,12 +62,12 @@ jobs:
           files: |
             seaclaw-linux-x86_64.bin
             seaclaw-macos-aarch64.bin
-            seaclaw-macos-x86_64.bin
           generate_release_notes: true
 
   docker:
     needs: release
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: read
       packages: write
