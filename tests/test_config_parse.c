@@ -2,6 +2,7 @@
 #include "test_framework.h"
 #include "seaclaw/config.h"
 #include "seaclaw/config_parse.h"
+#include "seaclaw/daemon.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/arena.h"
@@ -266,6 +267,90 @@ static void test_config_parse_string_array_skips_non_strings(void) {
     sc_json_free(&alloc, json);
 }
 
+static void test_config_parse_email_channel(void) {
+    sc_allocator_t backing = sc_system_allocator();
+    sc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    sc_arena_t *arena = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = sc_arena_allocator(arena);
+    const char *json = "{\"channels\":{\"email\":{\"smtp_host\":\"smtp.gmail.com\","
+        "\"smtp_port\":587,\"from_address\":\"me@gmail.com\","
+        "\"smtp_user\":\"me@gmail.com\",\"smtp_pass\":\"apppassword\","
+        "\"imap_host\":\"imap.gmail.com\",\"imap_port\":993}}}";
+    sc_error_t err = sc_config_parse_json(&cfg, json, strlen(json));
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(cfg.channels.email.smtp_host, "smtp.gmail.com");
+    SC_ASSERT_EQ(cfg.channels.email.smtp_port, 587);
+    SC_ASSERT_STR_EQ(cfg.channels.email.from_address, "me@gmail.com");
+    SC_ASSERT_STR_EQ(cfg.channels.email.smtp_user, "me@gmail.com");
+    SC_ASSERT_STR_EQ(cfg.channels.email.smtp_pass, "apppassword");
+    SC_ASSERT_STR_EQ(cfg.channels.email.imap_host, "imap.gmail.com");
+    SC_ASSERT_EQ(cfg.channels.email.imap_port, 993);
+    sc_arena_destroy(arena);
+}
+
+static void test_config_parse_imessage_channel(void) {
+    sc_allocator_t backing = sc_system_allocator();
+    sc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    sc_arena_t *arena = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = sc_arena_allocator(arena);
+    const char *json = "{\"channels\":{\"imessage\":{\"default_target\":\"+15551234567\"}}}";
+    sc_error_t err = sc_config_parse_json(&cfg, json, strlen(json));
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(cfg.channels.imessage.default_target, "+15551234567");
+    sc_arena_destroy(arena);
+}
+
+static void test_config_parse_mcp_servers(void) {
+    sc_allocator_t backing = sc_system_allocator();
+    sc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    sc_arena_t *arena = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = sc_arena_allocator(arena);
+    const char *json = "{\"mcp_servers\":{\"filesystem\":{\"command\":\"npx\","
+        "\"args\":[\"-y\",\"@modelcontextprotocol/server-filesystem\"]},"
+        "\"search\":{\"command\":\"search-server\",\"args\":[]}}}";
+    sc_error_t err = sc_config_parse_json(&cfg, json, strlen(json));
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(cfg.mcp_servers_len, 2u);
+    SC_ASSERT_STR_EQ(cfg.mcp_servers[0].name, "filesystem");
+    SC_ASSERT_STR_EQ(cfg.mcp_servers[0].command, "npx");
+    SC_ASSERT_EQ(cfg.mcp_servers[0].args_count, 2u);
+    SC_ASSERT_STR_EQ(cfg.mcp_servers[0].args[0], "-y");
+    SC_ASSERT_STR_EQ(cfg.mcp_servers[0].args[1], "@modelcontextprotocol/server-filesystem");
+    SC_ASSERT_STR_EQ(cfg.mcp_servers[1].name, "search");
+    SC_ASSERT_STR_EQ(cfg.mcp_servers[1].command, "search-server");
+    SC_ASSERT_EQ(cfg.mcp_servers[1].args_count, 0u);
+    sc_arena_destroy(arena);
+}
+
+static void test_config_parse_mcp_servers_empty(void) {
+    sc_allocator_t backing = sc_system_allocator();
+    sc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    sc_arena_t *arena = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = sc_arena_allocator(arena);
+    sc_error_t err = sc_config_parse_json(&cfg, "{\"mcp_servers\":{}}", 18);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(cfg.mcp_servers_len, 0u);
+    sc_arena_destroy(arena);
+}
+
+static void test_config_parse_service_loop(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_service_run(&alloc, 0, NULL, 0, NULL);
+    SC_ASSERT_EQ(err, SC_OK);
+}
+
 void run_config_parse_tests(void) {
     SC_TEST_SUITE("Config parse");
     SC_RUN_TEST(test_config_parse_empty_json);
@@ -285,4 +370,11 @@ void run_config_parse_tests(void) {
     SC_RUN_TEST(test_config_parse_string_array_basic);
     SC_RUN_TEST(test_config_parse_string_array_empty);
     SC_RUN_TEST(test_config_parse_string_array_skips_non_strings);
+    SC_RUN_TEST(test_config_parse_email_channel);
+    SC_RUN_TEST(test_config_parse_imessage_channel);
+    SC_RUN_TEST(test_config_parse_mcp_servers);
+    SC_RUN_TEST(test_config_parse_mcp_servers_empty);
+
+    SC_TEST_SUITE("Service loop");
+    SC_RUN_TEST(test_config_parse_service_loop);
 }

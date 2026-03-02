@@ -536,6 +536,46 @@ static void test_email_last_message_in_test_mode(void) {
     sc_email_destroy(&ch);
 }
 #endif
+
+static void test_email_set_auth(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.gmail.com", 14, 587, "me@gmail.com", 12, &ch);
+    sc_error_t err = sc_email_set_auth(&ch, "me@gmail.com", 12, "apppassword", 11);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_set_imap(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.gmail.com", 14, 587, "me@gmail.com", 12, &ch);
+    sc_error_t err = sc_email_set_imap(&ch, "imap.gmail.com", 14, 993);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_poll_no_imap_returns_not_supported(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.gmail.com", 14, 587, "me@gmail.com", 12, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    sc_error_t err = sc_email_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK); /* SC_IS_TEST returns SC_OK */
+    SC_ASSERT_EQ(count, 0u);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_set_auth_null_channel(void) {
+    sc_error_t err = sc_email_set_auth(NULL, "x", 1, "y", 1);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_email_set_imap_null_channel(void) {
+    sc_error_t err = sc_email_set_imap(NULL, "x", 1, 993);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
 #endif
 
 /* ─── iMessage ─────────────────────────────────────────────────────────────── */
@@ -575,6 +615,23 @@ static void test_imessage_is_configured(void) {
     sc_imessage_create(&alloc, "+15551234567", 11, &ch);
     SC_ASSERT_TRUE(sc_imessage_is_configured(&ch));
     sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_poll_test_mode(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_imessage_create(&alloc, "+15551234567", 11, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    sc_error_t err = sc_imessage_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0u);
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_poll_null_args(void) {
+    sc_error_t err = sc_imessage_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
 }
 #endif
 
@@ -1106,12 +1163,19 @@ void run_channel_all_tests(void) {
 #if SC_IS_TEST
     SC_RUN_TEST(test_email_last_message_in_test_mode);
 #endif
+    SC_RUN_TEST(test_email_set_auth);
+    SC_RUN_TEST(test_email_set_imap);
+    SC_RUN_TEST(test_email_poll_no_imap_returns_not_supported);
+    SC_RUN_TEST(test_email_set_auth_null_channel);
+    SC_RUN_TEST(test_email_set_imap_null_channel);
 #endif
 #if SC_HAS_IMESSAGE
     SC_RUN_TEST(test_imessage_create);
     SC_RUN_TEST(test_imessage_name);
     SC_RUN_TEST(test_imessage_health_check);
     SC_RUN_TEST(test_imessage_is_configured);
+    SC_RUN_TEST(test_imessage_poll_test_mode);
+    SC_RUN_TEST(test_imessage_poll_null_args);
 #endif
 #if SC_HAS_MATTERMOST
     SC_RUN_TEST(test_mattermost_create);

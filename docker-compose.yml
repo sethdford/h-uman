@@ -17,7 +17,7 @@ services:
     image: seaclaw:latest
     profiles: ["gateway"]
     ports:
-      - "8080:8080"
+      - "3000:3000"
     env_file:
       - path: .env
         required: false
@@ -25,7 +25,7 @@ services:
       - seaclaw-data:/root/.seaclaw
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3

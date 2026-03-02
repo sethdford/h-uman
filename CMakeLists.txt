@@ -12,6 +12,8 @@ option(SC_ENABLE_TLS "Enable TLS via OpenSSL for WSS and HTTPS" ON)
 option(SC_BUILD_WASM "Build WASM/WASI target (seaclaw.wasm)" OFF)
 option(SC_ENABLE_LTO "Enable Link-Time Optimization" OFF)
 option(SC_ENABLE_READLINE "Enable readline/libedit for CLI line editing" OFF)
+option(SC_ENABLE_LINENOISE "Enable linenoise for lightweight CLI line editing (vendor/linenoise)" OFF)
+option(SC_ENABLE_TUI "Enable rich TUI mode with split-pane terminal UI (vendor/termbox2)" OFF)
 
 # WASM build: cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON ..
 
@@ -195,6 +197,7 @@ set(SC_CORE_SOURCES
     src/rag.c
     src/service.c
     src/skills.c
+    src/skill_registry.c
     src/subagent.c
     src/update.c
     src/voice.c
@@ -224,6 +227,9 @@ set(SC_CORE_SOURCES
     src/tunnel/custom.c
     src/tunnel/root.c
     src/gateway/gateway.c
+    src/gateway/ws_server.c
+    src/gateway/control_protocol.c
+    src/gateway/event_bridge.c
     src/runtime/native.c
     src/runtime/docker.c
     src/runtime/wasm_rt.c
@@ -237,6 +243,7 @@ set(SC_CORE_SOURCES
     src/agent/compaction.c
     src/agent/planner.c
     src/agent/cli.c
+    src/agent/tui.c
     src/agent/commands.c
     src/agent/context_tokens.c
     src/agent/max_tokens.c
@@ -327,7 +334,9 @@ set(SC_CORE_SOURCES
     src/tools/spi.c
     src/tools/image.c
     src/tools/screenshot.c
+    src/tools/claude_code.c
     src/tools/factory.c
+    src/mcp_server.c
     src/peripherals/arduino.c
     src/peripherals/stm32.c
     src/peripherals/rpi.c
@@ -579,7 +588,18 @@ if(SC_ENABLE_TLS)
     endif()
 endif()
 
-if(SC_ENABLE_READLINE)
+if(SC_ENABLE_LINENOISE)
+    set(LINENOISE_DIR "${CMAKE_SOURCE_DIR}/vendor/linenoise")
+    if(EXISTS "${LINENOISE_DIR}/linenoise.c")
+        target_sources(seaclaw_core PRIVATE "${LINENOISE_DIR}/linenoise.c")
+        target_include_directories(seaclaw_core PRIVATE "${LINENOISE_DIR}")
+        target_compile_definitions(seaclaw_core PRIVATE SC_ENABLE_LINENOISE=1)
+        message(STATUS "Linenoise: enabled (${LINENOISE_DIR})")
+    else()
+        message(WARNING "Linenoise: vendor/linenoise/linenoise.c not found. "
+            "Download from https://github.com/antirez/linenoise")
+    endif()
+elseif(SC_ENABLE_READLINE)
     find_library(READLINE_LIBRARY NAMES readline edit)
     if(READLINE_LIBRARY)
         target_link_libraries(seaclaw_core PUBLIC ${READLINE_LIBRARY})
@@ -589,7 +609,21 @@ if(SC_ENABLE_READLINE)
         message(STATUS "Readline: disabled (library not found)")
     endif()
 else()
-    message(STATUS "Readline: OFF")
+    message(STATUS "Line editing: OFF (basic getchar fallback)")
+endif()
+
+if(SC_ENABLE_TUI)
+    set(TERMBOX2_DIR "${CMAKE_SOURCE_DIR}/vendor/termbox2")
+    if(EXISTS "${TERMBOX2_DIR}/termbox2.h")
+        target_compile_definitions(seaclaw_core PRIVATE SC_ENABLE_TUI=1)
+        target_include_directories(seaclaw_core PRIVATE "${TERMBOX2_DIR}")
+        message(STATUS "TUI: enabled (termbox2 at ${TERMBOX2_DIR})")
+    else()
+        message(WARNING "TUI: vendor/termbox2/termbox2.h not found. "
+            "Download from https://github.com/termbox/termbox2")
+    endif()
+else()
+    message(STATUS "TUI: OFF (ANSI spinner mode)")
 endif()
 
 if(SC_ENABLE_ASAN)
@@ -618,8 +652,21 @@ endif()
 
 # --- Release optimizations ---
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-    target_compile_options(seaclaw PRIVATE -Os)
-    set_target_properties(seaclaw PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
+    if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel" AND CMAKE_C_COMPILER_ID MATCHES "Clang|AppleClang")
+        target_compile_options(seaclaw PRIVATE -Oz)
+        target_compile_options(seaclaw_core PRIVATE -Oz)
+    else()
+        target_compile_options(seaclaw PRIVATE -Os)
+    endif()
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(seaclaw PRIVATE -fvisibility=hidden)
+        target_compile_options(seaclaw_core PRIVATE -fvisibility=hidden)
+    endif()
+    if(APPLE)
+        set_target_properties(seaclaw PROPERTIES LINK_FLAGS "-Wl,-dead_strip")
+    elseif(UNIX)
+        set_target_properties(seaclaw PROPERTIES LINK_FLAGS "-Wl,--gc-sections")
+    endif()
 endif()
 
 # --- Strip MinSizeRel binary (macOS: -x to preserve local syms, Linux: full strip) ---

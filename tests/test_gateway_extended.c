@@ -1,6 +1,7 @@
 /* Gateway edge cases (~20 tests). Uses SC_GATEWAY_TEST_MODE - no real binding. */
 #include "test_framework.h"
 #include "seaclaw/gateway.h"
+#include "seaclaw/gateway/ws_server.h"
 #include "seaclaw/health.h"
 #include "seaclaw/core/allocator.h"
 #include <string.h>
@@ -276,6 +277,46 @@ static void test_gateway_run_test_mode_host_loopback(void) {
     SC_ASSERT_EQ(err, SC_OK);
 }
 
+static void test_ws_server_init_deinit(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ws_server_t srv;
+    sc_ws_server_init(&srv, &alloc, NULL, NULL, NULL);
+    SC_ASSERT_EQ(srv.conn_count, 0u);
+    sc_ws_server_deinit(&srv);
+}
+
+static void test_ws_server_upgrade_null_args(void) {
+    sc_ws_conn_t *out = NULL;
+    const char *req = "GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+    sc_error_t err = sc_ws_server_upgrade(NULL, 0, req, strlen(req), &out);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_ws_server_is_upgrade_valid(void) {
+    const char *req = "GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+    bool ok = sc_ws_server_is_upgrade(req, strlen(req));
+    SC_ASSERT_TRUE(ok);
+}
+
+static void test_ws_server_is_upgrade_invalid(void) {
+    const char *req = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    bool ok = sc_ws_server_is_upgrade(req, strlen(req));
+    SC_ASSERT_FALSE(ok);
+}
+
+static void test_ws_server_send_null_conn(void) {
+    sc_error_t err = sc_ws_server_send(NULL, "x", 1);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_ws_server_broadcast_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ws_server_t srv;
+    sc_ws_server_init(&srv, &alloc, NULL, NULL, NULL);
+    sc_ws_server_broadcast(&srv, "msg", 3);
+    sc_ws_server_deinit(&srv);
+}
+
 void run_gateway_extended_tests(void) {
     SC_TEST_SUITE("Gateway Extended");
     SC_RUN_TEST(test_gateway_webhook_paths);
@@ -314,4 +355,10 @@ void run_gateway_extended_tests(void) {
     SC_RUN_TEST(test_gateway_constants_match_zig);
     SC_RUN_TEST(test_health_three_components_mixed);
     SC_RUN_TEST(test_gateway_run_test_mode_host_loopback);
+    SC_RUN_TEST(test_ws_server_init_deinit);
+    SC_RUN_TEST(test_ws_server_upgrade_null_args);
+    SC_RUN_TEST(test_ws_server_is_upgrade_valid);
+    SC_RUN_TEST(test_ws_server_is_upgrade_invalid);
+    SC_RUN_TEST(test_ws_server_send_null_conn);
+    SC_RUN_TEST(test_ws_server_broadcast_empty);
 }

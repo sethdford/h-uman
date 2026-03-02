@@ -7,7 +7,7 @@ Scope: entire repository.
 
 seaclaw is a C11 autonomous AI assistant runtime optimized for:
 
-- minimal binary size (239 KB MinSizeRel)
+- minimal binary size (267 KB MinSizeRel)
 - minimal memory footprint (target: < 5 MB peak RSS)
 - zero dependencies beyond libc, optional SQLite and libcurl
 - Zig reference implementation archived in `archive/zig-reference/`
@@ -25,7 +25,7 @@ Key extension points:
 - `src/runtime/` (`sc_runtime_t`) — execution environments
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
 
-Current scale: **~415 source + header files, ~52K lines of C, ~22K lines of tests, 1,697 tests**.
+Current scale: **~415 source + header files, ~52K lines of C, ~22K lines of tests, 1,834 tests**.
 
 Build and test:
 
@@ -49,10 +49,10 @@ These codebase realities should drive every design decision:
 2. **Binary size and memory are hard product constraints**
    - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
-   - Current release binary: 239 KB.
+   - Current release binary: 267 KB.
 
 3. **Security-critical surfaces are first-class**
-   - `src/gateway.c`, `src/security/`, `src/tools/`, `src/runtime/` carry high blast radius.
+   - `src/gateway/gateway.c`, `src/security/`, `src/tools/`, `src/runtime/` carry high blast radius.
    - Defaults are secure-by-default (pairing, HTTPS-only, allowlists, AEAD encryption). Keep it that way.
 
 4. **C11 is the baseline — strict standards compliance**
@@ -62,7 +62,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `SC_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 1,697+ tests must pass at zero ASan errors**
+5. **All 1,834+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `SC_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -101,7 +101,7 @@ Required:
 
 - Prefer explicit errors for unsupported or unsafe states.
 - Never silently broaden permissions or capabilities.
-- In tests: `builtin.is_test` guards are acceptable to skip side effects (e.g., spawning browsers), but the guard must be explicit and documented.
+- In tests: `SC_IS_TEST` guards are acceptable to skip side effects (e.g., spawning browsers), but the guard must be explicit and documented.
 
 ### 3.5 Secure by Default + Least Privilege
 
@@ -138,12 +138,12 @@ src/
   websocket/            WebSocket client
   peripherals/          hardware peripherals (Arduino, STM32/Nucleo, RPi)
   config.c              schema + config loading/merging (~/.seaclaw/config.json)
-  gateway.c             webhook/HTTP gateway server
+  gateway/gateway.c     webhook/HTTP gateway server
   ...
 
 include/seaclaw/       public C headers
 
-tests/                 66 test files, 1,697+ tests
+tests/                 68 test files, 1,834+ tests
 
 asm/                   platform-specific assembly (aarch64, x86_64, generic C)
 
@@ -154,7 +154,7 @@ archive/zig-reference/ archived Zig source (build.zig, src/)
 
 - **Low risk**: docs, comments, test additions, minor formatting
 - **Medium risk**: most `src/**` behavior changes without boundary/security impact
-- **High risk**: `src/security/**`, `src/gateway.c`, `src/tools/**`, `src/runtime/`, config schema, vtable interfaces
+- **High risk**: `src/security/**`, `src/gateway/gateway.c`, `src/tools/**`, `src/runtime/`, config schema, vtable interfaces
 
 When uncertain, classify as higher risk.
 

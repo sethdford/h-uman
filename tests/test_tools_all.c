@@ -40,6 +40,7 @@
 #include "seaclaw/tools/hardware_info.h"
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/spi.h"
+#include "seaclaw/tools/claude_code.h"
 #include <string.h>
 
 #define TOOL_TEST_3(tool_id, create_fn, expected_name, ...) \
@@ -114,6 +115,87 @@ TOOL_TEST_3(pushover, sc_pushover_create, "pushover", &alloc, NULL, 0, NULL, 0)
 TOOL_TEST_3(hardware_info, sc_hardware_info_create, "hardware_info", &alloc, false)
 TOOL_TEST_3(i2c, sc_i2c_create, "i2c", &alloc, NULL, 0)
 TOOL_TEST_3(spi, sc_spi_create, "spi", &alloc, NULL, 0)
+
+/* ─── Claude Code sub-agent tool ────────────────────────────────────────────── */
+static void test_claude_code_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_claude_code_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_claude_code_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_claude_code_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "claude_code");
+    if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_claude_code_description(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_claude_code_create(&alloc, &tool);
+    const char *desc = tool.vtable->description(tool.ctx);
+    SC_ASSERT_NOT_NULL(desc);
+    SC_ASSERT_TRUE(strlen(desc) > 0);
+    SC_ASSERT_TRUE(strstr(desc, "Claude Code") != NULL);
+    if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_claude_code_execute_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_claude_code_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    SC_ASSERT_NOT_NULL(args);
+    sc_tool_result_t result;
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    sc_json_free(&alloc, args);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT_TRUE(strstr(result.error_msg, "missing prompt") != NULL);
+    if (result.output_owned && result.output) alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg) alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+    if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_claude_code_execute_with_prompt(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_claude_code_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_json_value_t *prompt_val = sc_json_string_new(&alloc, "fix the bug", 11);
+    sc_json_object_set(&alloc, args, "prompt", prompt_val);
+    sc_tool_result_t result;
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    sc_json_free(&alloc, args);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(result.success);
+    SC_ASSERT_NOT_NULL(result.output);
+    SC_ASSERT_TRUE(strstr(result.output, "fix the bug") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_claude_code_execute_with_model_and_dir(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_claude_code_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_json_object_set(&alloc, args, "prompt",
+        sc_json_string_new(&alloc, "refactor", 8));
+    sc_json_object_set(&alloc, args, "model",
+        sc_json_string_new(&alloc, "claude-sonnet-4", 15));
+    sc_json_object_set(&alloc, args, "working_directory",
+        sc_json_string_new(&alloc, "/tmp", 4));
+    sc_tool_result_t result;
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    sc_json_free(&alloc, args);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(result.success);
+    SC_ASSERT_TRUE(strstr(result.output, "claude-sonnet-4") != NULL);
+    SC_ASSERT_TRUE(strstr(result.output, "/tmp") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable && tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
 
 /* ─── Browser: open action rejects invalid URL scheme ───────────────────────── */
 static void test_browser_open_rejects_invalid_scheme(void) {
@@ -777,6 +859,12 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_spi_create);
     SC_RUN_TEST(test_spi_name);
     SC_RUN_TEST(test_spi_execute_empty);
+    SC_RUN_TEST(test_claude_code_create);
+    SC_RUN_TEST(test_claude_code_name);
+    SC_RUN_TEST(test_claude_code_description);
+    SC_RUN_TEST(test_claude_code_execute_empty);
+    SC_RUN_TEST(test_claude_code_execute_with_prompt);
+    SC_RUN_TEST(test_claude_code_execute_with_model_and_dir);
 
     SC_TEST_SUITE("Tools (all) - Factory");
     SC_RUN_TEST(test_tools_factory_create_all);

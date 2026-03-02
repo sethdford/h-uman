@@ -35,5 +35,8 @@ result
 archive/
 reference/
 
+# MCP config (local build paths)
+.mcp.json
+
 # Worktrees
 .worktrees

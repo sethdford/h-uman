@@ -233,6 +233,79 @@ static void test_session_append_empty_content(void) {
     sc_session_manager_deinit(&mgr);
 }
 
+static void test_session_list(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_session_manager_t mgr;
+    sc_session_manager_init(&mgr, &alloc);
+    sc_session_get_or_create(&mgr, "a");
+    sc_session_get_or_create(&mgr, "b");
+
+    size_t count = 0;
+    sc_session_summary_t *summaries = sc_session_list(&mgr, &alloc, &count);
+    SC_ASSERT_NOT_NULL(summaries);
+    SC_ASSERT_EQ(count, 2u);
+    alloc.free(alloc.ctx, summaries, count * sizeof(sc_session_summary_t));
+    sc_session_manager_deinit(&mgr);
+}
+
+static void test_session_list_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_session_manager_t mgr;
+    sc_session_manager_init(&mgr, &alloc);
+
+    size_t count = 0;
+    sc_session_summary_t *summaries = sc_session_list(&mgr, &alloc, &count);
+    SC_ASSERT_NULL(summaries);
+    SC_ASSERT_EQ(count, 0u);
+    sc_session_manager_deinit(&mgr);
+}
+
+static void test_session_delete(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_session_manager_t mgr;
+    sc_session_manager_init(&mgr, &alloc);
+    sc_session_get_or_create(&mgr, "del_me");
+    SC_ASSERT_EQ(sc_session_count(&mgr), 1u);
+
+    sc_error_t err = sc_session_delete(&mgr, "del_me");
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(sc_session_count(&mgr), 0u);
+    sc_session_manager_deinit(&mgr);
+}
+
+static void test_session_delete_not_found(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_session_manager_t mgr;
+    sc_session_manager_init(&mgr, &alloc);
+
+    sc_error_t err = sc_session_delete(&mgr, "nonexistent");
+    SC_ASSERT_EQ(err, SC_ERR_NOT_FOUND);
+    sc_session_manager_deinit(&mgr);
+}
+
+static void test_session_patch(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_session_manager_t mgr;
+    sc_session_manager_init(&mgr, &alloc);
+    sc_session_t *s = sc_session_get_or_create(&mgr, "patch_me");
+    SC_ASSERT_NOT_NULL(s);
+
+    sc_error_t err = sc_session_patch(&mgr, "patch_me", "my-label");
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(s->label, "my-label");
+    sc_session_manager_deinit(&mgr);
+}
+
+static void test_session_patch_not_found(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_session_manager_t mgr;
+    sc_session_manager_init(&mgr, &alloc);
+
+    sc_error_t err = sc_session_patch(&mgr, "nonexistent", "x");
+    SC_ASSERT_EQ(err, SC_ERR_NOT_FOUND);
+    sc_session_manager_deinit(&mgr);
+}
+
 void run_session_tests(void) {
     SC_TEST_SUITE("Session");
     SC_RUN_TEST(test_session_manager_init_deinit);
@@ -252,4 +325,10 @@ void run_session_tests(void) {
     SC_RUN_TEST(test_session_count_after_evict);
     SC_RUN_TEST(test_session_deinit_empty);
     SC_RUN_TEST(test_session_append_empty_content);
+    SC_RUN_TEST(test_session_list);
+    SC_RUN_TEST(test_session_list_empty);
+    SC_RUN_TEST(test_session_delete);
+    SC_RUN_TEST(test_session_delete_not_found);
+    SC_RUN_TEST(test_session_patch);
+    SC_RUN_TEST(test_session_patch_not_found);
 }
