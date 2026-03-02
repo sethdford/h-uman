@@ -1,0 +1,47 @@
+{
+  "name": "seaclaw",
+  "version": "2026.3.2",
+  "description": "Autonomous AI assistant runtime in C11. 239 KB binary. Zero dependencies. 50+ providers.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sethdford/seaclaw.git"
+  },
+  "homepage": "https://sethdford.github.io/seaclaw/",
+  "author": "Seth Ford",
+  "keywords": [
+    "ai",
+    "assistant",
+    "llm",
+    "runtime",
+    "c11",
+    "binary",
+    "edge",
+    "embedded",
+    "ollama",
+    "llama-cpp",
+    "openai",
+    "anthropic"
+  ],
+  "bin": {
+    "seaclaw": "bin/seaclaw"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "install.js",
+    "bin/"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}

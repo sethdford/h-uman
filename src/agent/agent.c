@@ -66,7 +66,7 @@ static void parse_slash(const char *msg, size_t len,
     }
 }
 
-static int strcasecmp_l(const char *a, const char *b, size_t n) {
+static int sc_strncasecmp(const char *a, const char *b, size_t n) {
     for (size_t i = 0; i < n; i++) {
         char ca = (char)tolower((unsigned char)(a[i]));
         char cb = (char)tolower((unsigned char)(b[i]));
@@ -398,8 +398,8 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
 
     if (cmd_len == 0) return NULL;
 
-    if (strcasecmp_l(cmd_buf, "help", 4) == 0 ||
-        strcasecmp_l(cmd_buf, "commands", 8) == 0) {
+    if (sc_strncasecmp(cmd_buf, "help", 4) == 0 ||
+        sc_strncasecmp(cmd_buf, "commands", 8) == 0) {
         const char *help = "Commands:\n"
             "  /help, /commands   Show this help\n"
             "  /quit, /exit      End session\n"
@@ -413,19 +413,19 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
         return sc_strndup(agent->alloc, help, strlen(help));
     }
 
-    if (strcasecmp_l(cmd_buf, "quit", 4) == 0 ||
-        strcasecmp_l(cmd_buf, "exit", 4) == 0) {
+    if (sc_strncasecmp(cmd_buf, "quit", 4) == 0 ||
+        sc_strncasecmp(cmd_buf, "exit", 4) == 0) {
         return sc_strndup(agent->alloc, "Goodbye.", 8);
     }
 
-    if (strcasecmp_l(cmd_buf, "clear", 5) == 0 ||
-        strcasecmp_l(cmd_buf, "new", 3) == 0 ||
-        strcasecmp_l(cmd_buf, "reset", 5) == 0) {
+    if (sc_strncasecmp(cmd_buf, "clear", 5) == 0 ||
+        sc_strncasecmp(cmd_buf, "new", 3) == 0 ||
+        sc_strncasecmp(cmd_buf, "reset", 5) == 0) {
         sc_agent_clear_history(agent);
         return sc_strndup(agent->alloc, "History cleared.", 16);
     }
 
-    if (strcasecmp_l(cmd_buf, "model", 5) == 0) {
+    if (sc_strncasecmp(cmd_buf, "model", 5) == 0) {
         if (arg_len > 0) {
             char *old = agent->model_name;
             size_t old_len = agent->model_name_len;
@@ -465,7 +465,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
             (int)agent->model_name_len, agent->model_name);
     }
 
-    if (strcasecmp_l(cmd_buf, "status", 6) == 0) {
+    if (sc_strncasecmp(cmd_buf, "status", 6) == 0) {
         const char *prov = agent->provider.vtable->get_name(agent->provider.ctx);
         return sc_sprintf(agent->alloc,
             "Provider: %s | Model: %.*s | History: %zu messages | Tokens: %llu",
@@ -475,7 +475,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
             (unsigned long long)agent->total_tokens);
     }
 
-    if (strcasecmp_l(cmd_buf, "cost", 4) == 0) {
+    if (sc_strncasecmp(cmd_buf, "cost", 4) == 0) {
         return sc_sprintf(agent->alloc,
             "Tokens used: %llu (est. cost depends on provider pricing)\n"
             "History: %zu messages",
@@ -483,7 +483,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
             (size_t)agent->history_count);
     }
 
-    if (strcasecmp_l(cmd_buf, "provider", 8) == 0) {
+    if (sc_strncasecmp(cmd_buf, "provider", 8) == 0) {
         const char *prov = agent->provider.vtable->get_name(agent->provider.ctx);
         if (arg_len > 0) {
             return sc_sprintf(agent->alloc,
@@ -494,7 +494,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
         return sc_sprintf(agent->alloc, "Provider: %s", prov ? prov : "?");
     }
 
-    if (strcasecmp_l(cmd_buf, "tools", 5) == 0) {
+    if (sc_strncasecmp(cmd_buf, "tools", 5) == 0) {
         char *buf = (char *)agent->alloc->alloc(agent->alloc->ctx, 4096);
         if (!buf) return NULL;
         int off = snprintf(buf, 4096, "Tools (%zu):\n", agent->tools_count);
@@ -505,7 +505,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent,
         return buf;
     }
 
-    if (strcasecmp_l(cmd_buf, "plan", 4) == 0) {
+    if (sc_strncasecmp(cmd_buf, "plan", 4) == 0) {
         if (arg_len == 0) {
             return sc_strndup(agent->alloc,
                 "Usage: /plan {\"steps\": [{\"tool\": \"name\", \"args\": {...}}]}",
@@ -841,6 +841,32 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
                     const sc_tool_call_t *call = &calls[tc];
                     sc_tool_result_t *result = &dispatch_result.results[tc];
 
+                    /* Approval flow: if tool needs approval, ask user and retry */
+                    if (result->needs_approval && agent->approval_cb) {
+                        char tn_tmp[64];
+                        size_t tn2 = (call->name_len < sizeof(tn_tmp) - 1) ? call->name_len : sizeof(tn_tmp) - 1;
+                        if (tn2 > 0 && call->name) memcpy(tn_tmp, call->name, tn2);
+                        tn_tmp[tn2] = '\0';
+                        const char *args_str = call->arguments ? call->arguments : "";
+                        bool user_approved = agent->approval_cb(agent->approval_ctx, tn_tmp, args_str);
+                        if (user_approved) {
+                            sc_tool_result_free(agent->alloc, result);
+                            if (agent->policy) agent->policy->pre_approved = true;
+                            sc_tool_t *tool = find_tool(agent, call->name, call->name_len);
+                            if (tool) {
+                                sc_json_value_t *retry_args = NULL;
+                                if (call->arguments_len > 0)
+                                    (void)sc_json_parse(agent->alloc, call->arguments, call->arguments_len, &retry_args);
+                                *result = sc_tool_result_fail("invalid arguments", 16);
+                                if (retry_args) {
+                                    if (tool->vtable->execute)
+                                        tool->vtable->execute(tool->ctx, agent->alloc, retry_args, result);
+                                    sc_json_free(agent->alloc, retry_args);
+                                }
+                            }
+                        }
+                    }
+
                     char tn_buf[64];
                     size_t tn = (call->name_len < sizeof(tn_buf) - 1) ? call->name_len : sizeof(tn_buf) - 1;
                     if (tn > 0 && call->name) memcpy(tn_buf, call->name, tn);
@@ -884,6 +910,28 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
                         tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
                         sc_json_free(agent->alloc, args);
                     }
+
+                    /* Approval retry for sequential fallback path */
+                    if (result.needs_approval && agent->approval_cb) {
+                        char seq_tn[64];
+                        size_t seq_n = (call->name_len < sizeof(seq_tn) - 1) ? call->name_len : sizeof(seq_tn) - 1;
+                        if (seq_n > 0 && call->name) memcpy(seq_tn, call->name, seq_n);
+                        seq_tn[seq_n] = '\0';
+                        if (agent->approval_cb(agent->approval_ctx, seq_tn,
+                                call->arguments ? call->arguments : "")) {
+                            sc_tool_result_free(agent->alloc, &result);
+                            if (agent->policy) agent->policy->pre_approved = true;
+                            sc_json_value_t *retry_args = NULL;
+                            if (call->arguments_len > 0)
+                                (void)sc_json_parse(agent->alloc, call->arguments, call->arguments_len, &retry_args);
+                            result = sc_tool_result_fail("invalid arguments", 16);
+                            if (retry_args) {
+                                tool->vtable->execute(tool->ctx, agent->alloc, retry_args, &result);
+                                sc_json_free(agent->alloc, retry_args);
+                            }
+                        }
+                    }
+
                     const char *res_content = result.success ? result.output : result.error_msg;
                     size_t res_len = result.success ? result.output_len : result.error_msg_len;
                     (void)append_history(agent, SC_ROLE_TOOL, res_content, res_len,
