@@ -9,6 +9,7 @@ option(SC_ENABLE_SQLITE "Enable SQLite memory backend" ON)
 option(SC_ENABLE_POSTGRES "Enable PostgreSQL memory backend" OFF)
 option(SC_ENABLE_CURL "Enable libcurl for HTTP client" ON)
 option(SC_ENABLE_TLS "Enable TLS via OpenSSL for WSS and HTTPS" ON)
+option(SC_ENABLE_FIPS_CRYPTO "Use AES-256-GCM via OpenSSL for FIPS 140-2 compliance" OFF)
 option(SC_BUILD_WASM "Build WASM/WASI target (seaclaw.wasm)" OFF)
 option(SC_ENABLE_LTO "Enable Link-Time Optimization" OFF)
 option(SC_ENABLE_READLINE "Enable readline/libedit for CLI line editing" OFF)
@@ -573,6 +574,13 @@ if(SC_ENABLE_CURL)
     endif()
 endif()
 
+if(SC_ENABLE_FIPS_CRYPTO)
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(seaclaw_core PUBLIC OpenSSL::Crypto)
+    target_compile_definitions(seaclaw_core PRIVATE SC_ENABLE_FIPS_CRYPTO=1)
+    message(STATUS "FIPS crypto: AES-256-GCM enabled")
+endif()
+
 if(SC_ENABLE_TLS)
     find_package(OpenSSL QUIET)
     if(OpenSSL_FOUND)
@@ -771,6 +779,16 @@ if(SC_ENABLE_SQLITE)
         target_link_libraries(seaclaw_core_test PUBLIC sqlite3)
     endif()
 endif()
+if(SC_ENABLE_FIPS_CRYPTO)
+    if(OpenSSL_FOUND)
+        target_link_libraries(seaclaw_core_test PUBLIC OpenSSL::Crypto)
+        target_compile_definitions(seaclaw_core_test PRIVATE SC_ENABLE_FIPS_CRYPTO=1)
+    else()
+        find_package(OpenSSL REQUIRED)
+        target_link_libraries(seaclaw_core_test PUBLIC OpenSSL::Crypto)
+        target_compile_definitions(seaclaw_core_test PRIVATE SC_ENABLE_FIPS_CRYPTO=1)
+    endif()
+endif()
 if(SC_ENABLE_TLS)
     if(OpenSSL_FOUND)
         target_link_libraries(seaclaw_core_test PUBLIC OpenSSL::SSL OpenSSL::Crypto)
@@ -930,6 +948,9 @@ endif()
 if(SC_ENABLE_API_ENGINE)
     target_compile_definitions(seaclaw_tests PRIVATE SC_HAS_API_ENGINE=1)
 endif()
+if(SC_ENABLE_FIPS_CRYPTO)
+    target_compile_definitions(seaclaw_tests PRIVATE SC_ENABLE_FIPS_CRYPTO=1)
+endif()
 
 if(SC_ENABLE_ASAN)
     target_compile_options(seaclaw_tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
@@ -964,6 +985,39 @@ target_compile_options(seaclaw_tests PRIVATE -Wall -Wextra -Wpedantic)
 
 # Install target
 install(TARGETS seaclaw RUNTIME DESTINATION bin)
+
+# SBOM Generation
+add_custom_target(sbom
+    COMMAND ${CMAKE_COMMAND} -E echo "Generating SBOM..."
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/generate-sbom.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR}/sbom.json
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Generating CycloneDX SBOM"
+)
+
+# Fuzz testing (requires Clang with libFuzzer)
+option(SC_ENABLE_FUZZING "Build fuzz testing harnesses" OFF)
+if(SC_ENABLE_FUZZING)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Fuzzing requires Clang compiler")
+    endif()
+    set(FUZZ_SANITIZE "-fsanitize=fuzzer,address")
+    set(FUZZ_FRAME "-fno-omit-frame-pointer")
+
+    add_executable(fuzz_json_parser tests/fuzz/fuzz_json_parser.c)
+    target_link_libraries(fuzz_json_parser PRIVATE seaclaw_core)
+    target_compile_options(fuzz_json_parser PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_json_parser PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+
+    add_executable(fuzz_http_parse tests/fuzz/fuzz_http_parse.c)
+    target_link_libraries(fuzz_http_parse PRIVATE seaclaw_core)
+    target_compile_options(fuzz_http_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_http_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+
+    add_executable(fuzz_url_validation tests/fuzz/fuzz_url_validation.c)
+    target_link_libraries(fuzz_url_validation PRIVATE seaclaw_core)
+    target_compile_options(fuzz_url_validation PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_url_validation PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+endif()
 
 # Print build info
 message(STATUS "SeaClaw v0.1.0")

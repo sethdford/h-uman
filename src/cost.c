@@ -17,7 +17,7 @@ static double sanitize_price(double v) {
     return 0.0;
 }
 
-void sc_token_usage_init(sc_token_usage_t *u, const char *model, uint64_t input_tokens, uint64_t output_tokens, double input_price_per_million, double output_price_per_million) {
+void sc_token_usage_init(sc_cost_entry_t *u, const char *model, uint64_t input_tokens, uint64_t output_tokens, double input_price_per_million, double output_price_per_million) {
     if (!u) return;
     memset(u, 0, sizeof(*u));
     u->model = model;
@@ -114,7 +114,7 @@ sc_budget_check_t sc_cost_check_budget(const sc_cost_tracker_t *t, double estima
     return SC_BUDGET_ALLOWED;
 }
 
-sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_token_usage_t *usage) {
+sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usage) {
     if (!t || !usage) return SC_ERR_INVALID_ARGUMENT;
     if (!t->enabled) return SC_OK;
     if (!isfinite(usage->cost_usd) || usage->cost_usd < 0.0) return SC_OK;

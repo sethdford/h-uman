@@ -15,11 +15,20 @@ typedef struct sc_cron_config {
     uint32_t max_run_history;
 } sc_cron_config_t;
 
+typedef struct sc_net_proxy_config {
+    bool enabled;
+    bool deny_all;
+    char *proxy_addr;
+    char **allowed_domains;
+    size_t allowed_domains_len;
+} sc_net_proxy_config_t;
+
 typedef struct sc_sandbox_config {
     bool enabled;
     sc_sandbox_backend_t backend;
     char **firejail_args;
     size_t firejail_args_len;
+    sc_net_proxy_config_t net_proxy;
 } sc_sandbox_config_t;
 
 typedef struct sc_resource_limits {

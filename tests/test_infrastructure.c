@@ -55,7 +55,7 @@ static void test_heartbeat_parse_tasks_empty(void) {
 }
 
 static void test_token_usage_init(void) {
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "test/model", 1000, 500, 3.0, 15.0);
     SC_ASSERT_EQ(u.input_tokens, 1000ull);
     SC_ASSERT_EQ(u.output_tokens, 500ull);
@@ -77,7 +77,7 @@ static void test_cost_tracker_record_and_summary(void) {
     sc_error_t err = sc_cost_tracker_init(&t, &alloc, "/tmp", true, 10.0, 100.0, 80);
     SC_ASSERT_EQ(err, SC_OK);
 
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "model", 1000, 500, 1.0, 2.0);
     err = sc_cost_record_usage(&t, &u);
     SC_ASSERT_EQ(err, SC_OK);
@@ -156,7 +156,7 @@ static void test_cost_session_total_single(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_cost_tracker_t t;
     sc_cost_tracker_init(&t, &alloc, "/tmp", true, 10.0, 100.0, 80);
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "m", 1000, 500, 1.0, 2.0);
     sc_cost_record_usage(&t, &u);
     double total = sc_cost_session_total(&t);
@@ -168,7 +168,7 @@ static void test_cost_session_tokens_accumulation(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_cost_tracker_t t;
     sc_cost_tracker_init(&t, &alloc, "/tmp", true, 10.0, 100.0, 80);
-    sc_token_usage_t u1, u2;
+    sc_cost_entry_t u1, u2;
     sc_token_usage_init(&u1, "m", 100, 50, 0, 0);
     sc_token_usage_init(&u2, "m", 200, 100, 0, 0);
     sc_cost_record_usage(&t, &u1);
@@ -182,7 +182,7 @@ static void test_cost_request_count(void) {
     sc_cost_tracker_t t;
     sc_cost_tracker_init(&t, &alloc, "/tmp", true, 10.0, 100.0, 80);
     SC_ASSERT_EQ(sc_cost_request_count(&t), 0u);
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "m", 1, 1, 0, 0);
     sc_cost_record_usage(&t, &u);
     sc_cost_record_usage(&t, &u);
@@ -206,7 +206,7 @@ static void test_cost_budget_warning_threshold(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_cost_tracker_t t;
     sc_cost_tracker_init(&t, &alloc, "/tmp", true, 20.0, 200.0, 80);
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "m", 10000000, 10000000, 1.0, 2.0);
     sc_cost_record_usage(&t, &u);
     sc_budget_info_t info;
@@ -216,13 +216,13 @@ static void test_cost_budget_warning_threshold(void) {
 }
 
 static void test_token_usage_total_tokens(void) {
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "model", 100, 200, 0, 0);
     SC_ASSERT_EQ(u.total_tokens, 300u);
 }
 
 static void test_token_usage_cost_zero_prices(void) {
-    sc_token_usage_t u;
+    sc_cost_entry_t u;
     sc_token_usage_init(&u, "model", 1000, 500, 0, 0);
     SC_ASSERT_EQ(u.cost_usd, 0.0);
 }

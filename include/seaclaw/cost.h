@@ -11,17 +11,17 @@
  * Token usage and cost
  * ────────────────────────────────────────────────────────────────────────── */
 
-typedef struct sc_token_usage {
+typedef struct sc_cost_entry {
     const char *model;
     uint64_t input_tokens;
     uint64_t output_tokens;
     uint64_t total_tokens;
     double cost_usd;
     int64_t timestamp_secs;
-} sc_token_usage_t;
+} sc_cost_entry_t;
 
 /* Compute cost from token counts and prices (per million). */
-void sc_token_usage_init(sc_token_usage_t *u,
+void sc_token_usage_init(sc_cost_entry_t *u,
                          const char *model,
                          uint64_t input_tokens,
                          uint64_t output_tokens,
@@ -73,7 +73,7 @@ typedef struct sc_cost_summary {
 #define SC_COST_MAX_RECORDS 1024
 
 typedef struct sc_cost_record {
-    sc_token_usage_t usage;
+    sc_cost_entry_t usage;
     char session_id[64];
 } sc_cost_record_t;
 
@@ -110,7 +110,7 @@ sc_budget_check_t sc_cost_check_budget(const sc_cost_tracker_t *t,
 
 /* Record usage. Persists to JSONL if path set. */
 sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t,
-                                const sc_token_usage_t *usage);
+                                const sc_cost_entry_t *usage);
 
 /* Session cost (in-memory). */
 double sc_cost_session_total(const sc_cost_tracker_t *t);

@@ -106,6 +106,11 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->security.sandbox_config.backend = SC_SANDBOX_AUTO;
     cfg->security.sandbox_config.firejail_args = NULL;
     cfg->security.sandbox_config.firejail_args_len = 0;
+    cfg->security.sandbox_config.net_proxy.enabled = false;
+    cfg->security.sandbox_config.net_proxy.deny_all = true;
+    cfg->security.sandbox_config.net_proxy.proxy_addr = NULL;
+    cfg->security.sandbox_config.net_proxy.allowed_domains = NULL;
+    cfg->security.sandbox_config.net_proxy.allowed_domains_len = 0;
     cfg->security.resource_limits.max_file_size = 0;
     cfg->security.resource_limits.max_read_size = 0;
     cfg->security.resource_limits.max_memory_mb = 0;
@@ -290,6 +295,13 @@ static sc_error_t parse_gateway(sc_allocator_t *a, sc_config_t *cfg,
             a->free(a->ctx, cfg->gateway.webhook_hmac_secret,
                     strlen(cfg->gateway.webhook_hmac_secret) + 1);
         cfg->gateway.webhook_hmac_secret = sc_strdup(a, whs);
+    }
+    const char *uid = sc_json_get_string(obj, "control_ui_dir");
+    if (uid) {
+        if (cfg->gateway.control_ui_dir)
+            a->free(a->ctx, cfg->gateway.control_ui_dir,
+                    strlen(cfg->gateway.control_ui_dir) + 1);
+        cfg->gateway.control_ui_dir = sc_strdup(a, uid);
     }
     return SC_OK;
 }
@@ -910,6 +922,33 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
                     a->free(a->ctx, cfg->security.sandbox_config.firejail_args, cfg->security.sandbox_config.firejail_args_len * sizeof(char *));
                 }
                 parse_string_array(a, &cfg->security.sandbox_config.firejail_args, &cfg->security.sandbox_config.firejail_args_len, fa);
+            }
+            sc_json_value_t *np = sc_json_object_get(sbox, "net_proxy");
+            if (np && np->type == SC_JSON_OBJECT) {
+                cfg->security.sandbox_config.net_proxy.enabled =
+                    sc_json_get_bool(np, "enabled", false);
+                cfg->security.sandbox_config.net_proxy.deny_all =
+                    sc_json_get_bool(np, "deny_all", true);
+                const char *pa = sc_json_get_string(np, "proxy_addr");
+                if (pa) {
+                    if (cfg->security.sandbox_config.net_proxy.proxy_addr)
+                        a->free(a->ctx, cfg->security.sandbox_config.net_proxy.proxy_addr,
+                            strlen(cfg->security.sandbox_config.net_proxy.proxy_addr) + 1);
+                    cfg->security.sandbox_config.net_proxy.proxy_addr = sc_strdup(a, pa);
+                }
+                sc_json_value_t *ad = sc_json_object_get(np, "allowed_domains");
+                if (ad && ad->type == SC_JSON_ARRAY) {
+                    if (cfg->security.sandbox_config.net_proxy.allowed_domains) {
+                        for (size_t i = 0; i < cfg->security.sandbox_config.net_proxy.allowed_domains_len; i++)
+                            a->free(a->ctx, cfg->security.sandbox_config.net_proxy.allowed_domains[i],
+                                strlen(cfg->security.sandbox_config.net_proxy.allowed_domains[i]) + 1);
+                        a->free(a->ctx, cfg->security.sandbox_config.net_proxy.allowed_domains,
+                            cfg->security.sandbox_config.net_proxy.allowed_domains_len * sizeof(char *));
+                    }
+                    parse_string_array(a,
+                        &cfg->security.sandbox_config.net_proxy.allowed_domains,
+                        &cfg->security.sandbox_config.net_proxy.allowed_domains_len, ad);
+                }
             }
         }
         sc_json_value_t *res = sc_json_object_get(sec, "resources");

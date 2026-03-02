@@ -31,7 +31,12 @@
 #include "seaclaw/cli_commands.h"
 #include "seaclaw/doctor.h"
 #include "seaclaw/gateway.h"
+#include "seaclaw/gateway/control_protocol.h"
 #include "seaclaw/mcp_server.h"
+#include "seaclaw/session.h"
+#include "seaclaw/cron.h"
+#include "seaclaw/cost.h"
+#include "seaclaw/bus.h"
 #if SC_HAS_EMAIL
 #include "seaclaw/channels/email.h"
 #endif
@@ -75,6 +80,7 @@ static const sc_command_t commands[] = {
     {"channel", "Channel management", cmd_channel},
     {"skills", "Skill discovery and integration", cmd_skills},
     {"hardware", "Hardware peripheral management", cmd_hardware},
+    {"sandbox", "Show sandbox status and backends", cmd_sandbox},
     {"migrate", "Migrate memory backends", cmd_migrate},
     {"memory", "Memory operations", cmd_memory},
     {"workspace", "Workspace management", cmd_workspace},
@@ -718,9 +724,41 @@ static sc_error_t cmd_agent(sc_allocator_t *alloc, int argc, char **argv) {
     return sc_agent_cli_run(alloc, (const char *const *)argv, (size_t)argc);
 }
 
+/* Bus→agent bridge: when a SC_BUS_MESSAGE_RECEIVED event arrives from
+ * a WebSocket chat.send, feed it into the agent and publish the reply. */
+typedef struct gw_agent_bridge {
+    sc_agent_t *agent;
+    sc_bus_t *bus;
+} gw_agent_bridge_t;
+
+static bool gw_agent_on_message(sc_bus_event_type_t type,
+    const sc_bus_event_t *ev, void *user_ctx) {
+    (void)type;
+    gw_agent_bridge_t *b = (gw_agent_bridge_t *)user_ctx;
+    if (!b || !b->agent || !ev) return true;
+    const char *msg = ev->message;
+    if (!msg || !msg[0]) return true;
+
+    char *reply = NULL;
+    size_t reply_len = 0;
+    sc_error_t err = sc_agent_turn(b->agent, msg, strlen(msg),
+        &reply, &reply_len);
+    if (err == SC_OK && reply && reply_len > 0) {
+        sc_bus_publish_simple(b->bus, SC_BUS_MESSAGE_SENT,
+            ev->channel[0] ? ev->channel : "gateway",
+            ev->id, reply);
+    }
+    if (reply)
+        b->agent->alloc->free(b->agent->alloc->ctx, reply, reply_len + 1);
+    return true;
+}
+
 static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    bool with_agent = false;
+    for (int i = 2; i < argc && argv[i]; i++) {
+        if (strcmp(argv[i], "--with-agent") == 0) with_agent = true;
+    }
+
     sc_config_t cfg;
     sc_error_t err = sc_config_load(alloc, &cfg);
     if (err != SC_OK) {
@@ -728,17 +766,148 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         return err;
     }
 
-    sc_gateway_config_t gw_config;
-    sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
+    /* ── Build all backend subsystems ──────────────────────────────────── */
+    sc_session_manager_t sessions;
+    sc_session_manager_init(&sessions, alloc);
 
-    err = sc_gateway_run(alloc, gw_config.host, gw_config.port, &gw_config);
+    sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
+
+    sc_skillforge_t skills;
+    sc_skillforge_create(alloc, &skills);
+
+    const char *ws = cfg.workspace_dir ? cfg.workspace_dir : ".";
+    sc_cost_tracker_t costs;
+    sc_cost_tracker_init(&costs, alloc, ws, true,
+        cfg.cost.daily_limit_usd > 0 ? cfg.cost.daily_limit_usd : 100.0,
+        cfg.cost.monthly_limit_usd > 0 ? cfg.cost.monthly_limit_usd : 1000.0,
+        cfg.cost.warn_at_percent > 0 ? cfg.cost.warn_at_percent : 80);
+    sc_cost_load_history(&costs);
+
+    sc_bus_t bus;
+    sc_bus_init(&bus);
+
+    /* ── Tools ─────────────────────────────────────────────────────────── */
+    sc_security_policy_t policy = {0};
+    uint8_t al = cfg.security.autonomy_level;
+    policy.autonomy = (al >= 2) ? SC_AUTONOMY_FULL :
+                      (al == 1) ? SC_AUTONOMY_SUPERVISED : SC_AUTONOMY_READ_ONLY;
+    policy.workspace_dir = ws;
+    policy.workspace_only = true;
+    policy.allow_shell = (policy.autonomy != SC_AUTONOMY_READ_ONLY);
+    policy.block_high_risk_commands = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
+    policy.require_approval_for_medium_risk = false;
+    policy.max_actions_per_hour = 200;
+    policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
+
+    sc_tool_t *tools = NULL;
+    size_t tools_count = 0;
+    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
+        NULL, &tools, &tools_count);
     if (err != SC_OK) {
-        fprintf(stderr, "[%s] Gateway error: %s\n", SC_CODENAME, sc_error_string(err));
+        fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        sc_cost_tracker_deinit(&costs);
+        sc_session_manager_deinit(&sessions);
+        if (cron) sc_cron_destroy(cron, alloc);
+        sc_skillforge_destroy(&skills);
+        if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         sc_config_deinit(&cfg);
         return err;
     }
+
+    /* ── App context ───────────────────────────────────────────────────── */
+    sc_app_context_t app_ctx = {
+        .config = &cfg,
+        .alloc = alloc,
+        .sessions = &sessions,
+        .cron = cron,
+        .skills = &skills,
+        .costs = &costs,
+        .bus = &bus,
+        .tools = tools,
+        .tools_count = tools_count,
+    };
+
+    /* ── Gateway config ────────────────────────────────────────────────── */
+    sc_gateway_config_t gw_config;
+    sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
+    gw_config.app_ctx = &app_ctx;
+
+    /* ── Optional agent integration ────────────────────────────────────── */
+    sc_provider_t provider = {0};
+    sc_agent_t agent = {0};
+    sc_memory_t memory = {0};
+    gw_agent_bridge_t agent_bridge = {0};
+    bool agent_active = false;
+
+    if (with_agent) {
+        const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
+        size_t prov_name_len = strlen(prov_name);
+        const char *api_key = sc_config_default_provider_key(&cfg);
+        size_t api_key_len = api_key ? strlen(api_key) : 0;
+        const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
+        size_t base_url_len = base_url ? strlen(base_url) : 0;
+
+        err = sc_provider_create(alloc, prov_name, prov_name_len,
+            api_key, api_key_len, base_url, base_url_len, &provider);
+        if (err != SC_OK) {
+            fprintf(stderr, "[%s] Provider '%s' init failed: %s\n",
+                SC_CODENAME, prov_name, sc_error_string(err));
+            goto cleanup;
+        }
+
+        const char *model = cfg.default_model ? cfg.default_model : "";
+        double temp = cfg.temperature > 0.0 ? cfg.temperature : 0.7;
+        uint32_t max_iters = cfg.agent.max_tool_iterations > 0 ? cfg.agent.max_tool_iterations : 25;
+        uint32_t max_hist = cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
+
+        memory = service_create_memory(alloc, &cfg, ws);
+
+        err = sc_agent_from_config(&agent, alloc, provider,
+            tools, tools_count,
+            memory.vtable ? &memory : NULL,
+            NULL, NULL, &policy,
+            model, strlen(model),
+            prov_name, prov_name_len,
+            temp, ws, strlen(ws), max_iters, max_hist,
+            cfg.memory.auto_save, 2, NULL, 0);
+        if (err != SC_OK) {
+            fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
+            goto cleanup;
+        }
+        agent_active = true;
+
+        agent_bridge.agent = &agent;
+        agent_bridge.bus = &bus;
+        sc_bus_subscribe(&bus, gw_agent_on_message, &agent_bridge,
+            SC_BUS_MESSAGE_RECEIVED);
+
+        fprintf(stderr, "[%s] gateway+agent mode (provider=%s tools=%zu)\n",
+            SC_CODENAME, prov_name, tools_count);
+    } else {
+        fprintf(stderr, "[%s] gateway-only mode (use --with-agent for full agent)\n",
+            SC_CODENAME);
+    }
+
+    /* ── Run gateway (blocks) ──────────────────────────────────────────── */
+    err = sc_gateway_run(alloc, gw_config.host, gw_config.port, &gw_config);
+    if (err != SC_OK) {
+        fprintf(stderr, "[%s] Gateway error: %s\n", SC_CODENAME, sc_error_string(err));
+    }
+
+cleanup:
+    if (agent_active) {
+        sc_bus_unsubscribe(&bus, gw_agent_on_message, &agent_bridge);
+        sc_agent_deinit(&agent);
+    }
+    if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
+    sc_tools_destroy_default(alloc, tools, tools_count);
+    if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
+    sc_cost_tracker_deinit(&costs);
+    sc_session_manager_deinit(&sessions);
+    if (cron) sc_cron_destroy(cron, alloc);
+    sc_skillforge_destroy(&skills);
     sc_config_deinit(&cfg);
-    return SC_OK;
+    return err;
 }
 
 static int run_command(sc_allocator_t *alloc, int argc, char **argv, sc_command_t const *cmd) {

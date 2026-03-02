@@ -2,6 +2,7 @@
 #include "seaclaw/config.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/security/sandbox.h"
 #include "seaclaw/version.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -263,6 +264,96 @@ sc_error_t cmd_auth(sc_allocator_t *alloc, int argc, char **argv) {
     }
     fprintf(stderr, "Unknown auth subcommand: %s\n", argv[2]);
     return SC_ERR_INVALID_ARGUMENT;
+}
+
+/* ── sandbox ────────────────────────────────────────────────────────────── */
+sc_error_t cmd_sandbox(sc_allocator_t *alloc, int argc, char **argv) {
+    (void)argc; (void)argv;
+
+    sc_config_t cfg;
+    sc_error_t err = sc_config_load(alloc, &cfg);
+    if (err != SC_OK) {
+        fprintf(stderr, "Failed to load config: %s\n", sc_error_string(err));
+        return err;
+    }
+
+    const char *ws = cfg.workspace_dir ? cfg.workspace_dir : ".";
+    sc_sandbox_backend_t backend = cfg.security.sandbox_config.backend;
+
+    printf("Sandbox Configuration\n");
+    printf("  backend:       %s\n",
+        cfg.security.sandbox ? cfg.security.sandbox : "auto");
+    printf("  enabled:       %s\n",
+        cfg.security.sandbox_config.enabled ? "yes" : "no");
+
+    /* Detect available backends */
+    sc_sandbox_alloc_t sa = {
+        .ctx = alloc->ctx, .alloc = alloc->alloc, .free = alloc->free
+    };
+    sc_available_backends_t avail = sc_sandbox_detect_available(ws, &sa);
+
+    printf("\nAvailable Backends\n");
+    struct { const char *name; bool available; const char *desc; } backends[] = {
+#ifdef __APPLE__
+        {"seatbelt",          avail.seatbelt,          "macOS kernel sandbox (SBPL)"},
+#endif
+#ifdef __linux__
+        {"landlock",          avail.landlock,          "Linux kernel FS ACLs"},
+        {"seccomp",           avail.seccomp,           "Linux syscall filtering"},
+        {"landlock+seccomp",  avail.landlock_seccomp,  "Combined FS + syscall isolation"},
+        {"firejail",          avail.firejail,          "User-space namespace sandbox"},
+        {"bubblewrap",        avail.bubblewrap,        "User-space container sandbox"},
+        {"firecracker",       avail.firecracker,       "KVM microVM isolation"},
+#endif
+#ifdef _WIN32
+        {"appcontainer",      avail.appcontainer,      "Windows AppContainer + Job Object"},
+#endif
+        {"docker",            avail.docker,            "Docker container isolation"},
+        {"wasi",              avail.wasi,              "WebAssembly capability sandbox"},
+    };
+    size_t n = sizeof(backends) / sizeof(backends[0]);
+    for (size_t i = 0; i < n; i++) {
+        printf("  %-20s %s  %s\n",
+            backends[i].name,
+            backends[i].available ? "[available]  " : "[unavailable]",
+            backends[i].desc);
+    }
+
+    /* Show active sandbox */
+    sc_sandbox_storage_t *st = sc_sandbox_storage_create(&sa);
+    if (st) {
+        sc_sandbox_t sb = sc_sandbox_create(backend, ws, st, &sa);
+        printf("\nActive Sandbox\n");
+        printf("  name:        %s\n", sc_sandbox_name(&sb));
+        printf("  available:   %s\n", sc_sandbox_is_available(&sb) ? "yes" : "no");
+        printf("  description: %s\n", sc_sandbox_description(&sb));
+        printf("  apply:       %s\n",
+            (sb.vtable && sb.vtable->apply) ? "kernel-level" : "argv-wrapping");
+        sc_sandbox_storage_destroy(st, &sa);
+    }
+
+    /* Network proxy */
+    printf("\nNetwork Proxy\n");
+    if (cfg.security.sandbox_config.net_proxy.enabled) {
+        printf("  enabled:  yes\n");
+        printf("  deny_all: %s\n",
+            cfg.security.sandbox_config.net_proxy.deny_all ? "yes" : "no");
+        if (cfg.security.sandbox_config.net_proxy.proxy_addr)
+            printf("  proxy:    %s\n", cfg.security.sandbox_config.net_proxy.proxy_addr);
+        if (cfg.security.sandbox_config.net_proxy.allowed_domains_len > 0) {
+            printf("  allowed:  ");
+            for (size_t i = 0; i < cfg.security.sandbox_config.net_proxy.allowed_domains_len; i++) {
+                if (i > 0) printf(", ");
+                printf("%s", cfg.security.sandbox_config.net_proxy.allowed_domains[i]);
+            }
+            printf("\n");
+        }
+    } else {
+        printf("  enabled:  no\n");
+    }
+
+    sc_config_deinit(&cfg);
+    return SC_OK;
 }
 
 /* ── update ─────────────────────────────────────────────────────────────── */
