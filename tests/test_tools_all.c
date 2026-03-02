@@ -88,9 +88,9 @@ TOOL_TEST_3(spawn, sc_spawn_create, "spawn", &alloc, ".", 1, NULL)
 TOOL_TEST_3(web_search, sc_web_search_create, "web_search", &alloc, NULL, NULL, 0)
 TOOL_TEST_3(web_fetch, sc_web_fetch_create, "web_fetch", &alloc, 100000)
 TOOL_TEST_3(http_request, sc_http_request_create, "http_request", &alloc, false)
-TOOL_TEST_3(browser, sc_browser_create, "browser", &alloc, false)
+TOOL_TEST_3(browser, sc_browser_create, "browser", &alloc, false, NULL)
 TOOL_TEST_3(image, sc_image_create, "image", &alloc, NULL, 0)
-TOOL_TEST_3(screenshot, sc_screenshot_create, "screenshot", &alloc, false)
+TOOL_TEST_3(screenshot, sc_screenshot_create, "screenshot", &alloc, false, NULL)
 
 /* Memory tools (need NULL memory - they use internal stub when NULL) */
 TOOL_TEST_3(memory_store, sc_memory_store_create, "memory_store", &alloc, NULL)
@@ -100,16 +100,16 @@ TOOL_TEST_3(memory_forget, sc_memory_forget_create, "memory_forget", &alloc, NUL
 
 TOOL_TEST_3(message, sc_message_create, "message", &alloc, NULL)
 TOOL_TEST_3(delegate, sc_delegate_create, "delegate", &alloc, NULL)
-TOOL_TEST_3(cron_add, sc_cron_add_create, "cron_add", &alloc)
-TOOL_TEST_3(cron_list, sc_cron_list_create, "cron_list", &alloc)
-TOOL_TEST_3(cron_remove, sc_cron_remove_create, "cron_remove", &alloc)
-TOOL_TEST_3(cron_run, sc_cron_run_create, "cron_run", &alloc)
-TOOL_TEST_3(cron_runs, sc_cron_runs_create, "cron_runs", &alloc)
-TOOL_TEST_3(cron_update, sc_cron_update_create, "cron_update", &alloc)
-TOOL_TEST_3(browser_open, sc_browser_open_create, "browser_open", &alloc, (const char*[]){"example.com"}, 1)
+TOOL_TEST_3(cron_add, sc_cron_add_create, "cron_add", &alloc, NULL)
+TOOL_TEST_3(cron_list, sc_cron_list_create, "cron_list", &alloc, NULL)
+TOOL_TEST_3(cron_remove, sc_cron_remove_create, "cron_remove", &alloc, NULL)
+TOOL_TEST_3(cron_run, sc_cron_run_create, "cron_run", &alloc, NULL)
+TOOL_TEST_3(cron_runs, sc_cron_runs_create, "cron_runs", &alloc, NULL)
+TOOL_TEST_3(cron_update, sc_cron_update_create, "cron_update", &alloc, NULL)
+TOOL_TEST_3(browser_open, sc_browser_open_create, "browser_open", &alloc, (const char*[]){"example.com"}, 1, NULL)
 TOOL_TEST_3(composio, sc_composio_create, "composio", &alloc, NULL, 0, "default", 7)
 TOOL_TEST_3(hardware_memory, sc_hardware_memory_create, "hardware_memory", &alloc, NULL, 0)
-TOOL_TEST_3(schedule, sc_schedule_create, "schedule", &alloc)
+TOOL_TEST_3(schedule, sc_schedule_create, "schedule", &alloc, NULL)
 TOOL_TEST_3(schema, sc_schema_create, "schema", &alloc)
 TOOL_TEST_3(pushover, sc_pushover_create, "pushover", &alloc, NULL, 0, NULL, 0)
 TOOL_TEST_3(hardware_info, sc_hardware_info_create, "hardware_info", &alloc, false)
@@ -201,7 +201,7 @@ static void test_claude_code_execute_with_model_and_dir(void) {
 static void test_browser_open_rejects_invalid_scheme(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
-    sc_error_t err = sc_browser_create(&alloc, true, &tool);
+    sc_error_t err = sc_browser_create(&alloc, true, NULL, &tool);
     SC_ASSERT_EQ(err, SC_OK);
 
     sc_json_value_t *args = sc_json_object_new(&alloc);
@@ -226,7 +226,7 @@ static void test_browser_open_blocks_private_ip(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
     const char *domains[] = {"example.com"};
-    sc_error_t err = sc_browser_open_create(&alloc, domains, 1, &tool);
+    sc_error_t err = sc_browser_open_create(&alloc, domains, 1, NULL, &tool);
     SC_ASSERT_EQ(err, SC_OK);
 
     sc_json_value_t *args = sc_json_object_new(&alloc);
@@ -249,7 +249,7 @@ static void test_browser_open_blocks_localhost(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
     const char *domains[] = {"example.com"};
-    sc_error_t err = sc_browser_open_create(&alloc, domains, 1, &tool);
+    sc_error_t err = sc_browser_open_create(&alloc, domains, 1, NULL, &tool);
     SC_ASSERT_EQ(err, SC_OK);
 
     sc_json_value_t *args = sc_json_object_new(&alloc);
@@ -313,7 +313,7 @@ static void test_tools_factory_create_all(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t *tools = NULL;
     size_t count = 0;
-    sc_error_t err = sc_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, &tools, &count);
+    sc_error_t err = sc_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, &tools, &count);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_NOT_NULL(tools);
     SC_ASSERT(count >= 28);
@@ -446,7 +446,7 @@ static void test_memory_recall_execute_with_query(void) {
 static void test_cron_add_execute_with_spec(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
-    sc_cron_add_create(&alloc, &tool);
+    sc_cron_add_create(&alloc, NULL, &tool);
     sc_json_value_t *args = sc_json_object_new(&alloc);
     sc_json_object_set(&alloc, args, "spec", sc_json_string_new(&alloc, "* * * * *", 9));
     sc_json_object_set(&alloc, args, "command", sc_json_string_new(&alloc, "echo hi", 7));
@@ -462,7 +462,7 @@ static void test_cron_add_execute_with_spec(void) {
 static void test_cron_list_execute_returns(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
-    sc_cron_list_create(&alloc, &tool);
+    sc_cron_list_create(&alloc, NULL, &tool);
     sc_json_value_t *args = sc_json_object_new(&alloc);
     sc_tool_result_t result;
     sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
@@ -477,7 +477,7 @@ static void test_cron_list_execute_returns(void) {
 static void test_schedule_parameters_have_delay(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
-    sc_schedule_create(&alloc, &tool);
+    sc_schedule_create(&alloc, NULL, &tool);
     const char *params = tool.vtable->parameters_json(tool.ctx);
     SC_ASSERT_NOT_NULL(params);
     SC_ASSERT_TRUE(strstr(params, "delay") != NULL || strstr(params, "seconds") != NULL || strlen(params) > 0);

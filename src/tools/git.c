@@ -69,20 +69,29 @@ static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, 
             setenv("http_proxy", addr, 1);
             setenv("https_proxy", addr, 1);
             if (policy->net_proxy->allowed_domains_count > 0) {
-                char no_proxy[4096];
-                size_t off = 0;
+                size_t total = 0;
                 for (size_t i = 0; i < policy->net_proxy->allowed_domains_count; i++) {
-                    const char *d = policy->net_proxy->allowed_domains[i];
-                    if (!d) continue;
-                    size_t dlen = strlen(d);
-                    if (off + dlen + 2 >= sizeof(no_proxy)) break;
-                    if (off > 0) no_proxy[off++] = ',';
-                    memcpy(no_proxy + off, d, dlen);
-                    off += dlen;
+                    if (policy->net_proxy->allowed_domains[i])
+                        total += strlen(policy->net_proxy->allowed_domains[i]) + 1;
                 }
-                no_proxy[off] = '\0';
-                setenv("NO_PROXY", no_proxy, 1);
-                setenv("no_proxy", no_proxy, 1);
+                if (total > 0) {
+                    char *no_proxy = (char *)malloc(total + 1);
+                    if (no_proxy) {
+                        size_t off = 0;
+                        for (size_t i = 0; i < policy->net_proxy->allowed_domains_count; i++) {
+                            const char *d = policy->net_proxy->allowed_domains[i];
+                            if (!d) continue;
+                            size_t dlen = strlen(d);
+                            if (off > 0) no_proxy[off++] = ',';
+                            memcpy(no_proxy + off, d, dlen);
+                            off += dlen;
+                        }
+                        no_proxy[off] = '\0';
+                        setenv("NO_PROXY", no_proxy, 1);
+                        setenv("no_proxy", no_proxy, 1);
+                        free(no_proxy);
+                    }
+                }
             }
         }
 

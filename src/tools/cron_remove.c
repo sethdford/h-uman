@@ -12,11 +12,13 @@
 #define SC_CRON_REMOVE_DESC "Remove cron job"
 #define SC_CRON_REMOVE_PARAMS "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}"
 
+typedef struct { sc_cron_scheduler_t *sched; } sc_cron_tool_ctx_t;
+
 static sc_error_t cron_remove_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,
     sc_tool_result_t *out)
 {
-    (void)ctx;
+    sc_cron_tool_ctx_t *tctx = (sc_cron_tool_ctx_t *)ctx;
     if (!args || !out) {
         *out = sc_tool_result_fail("invalid args", 12);
         return SC_ERR_INVALID_ARGUMENT;
@@ -58,8 +60,22 @@ static sc_error_t cron_remove_execute(void *ctx, sc_allocator_t *alloc,
     *out = sc_tool_result_ok_owned(msg, strlen(msg));
     return SC_OK;
 #else
-    (void)alloc;
-    *out = sc_tool_result_fail("cron_remove: scheduler not configured", 38);
+    if (!tctx || !tctx->sched) {
+        *out = sc_tool_result_fail("cron_remove: scheduler not configured", 38);
+        return SC_OK;
+    }
+    sc_cron_scheduler_t *sched = tctx->sched;
+    sc_error_t err = sc_cron_remove_job(sched, job_id);
+    if (err != SC_OK) {
+        *out = sc_tool_result_fail("job not found", 14);
+        return SC_OK;
+    }
+    char *msg = sc_sprintf(alloc, "{\"removed\":true,\"id\":\"%llu\"}", (unsigned long long)job_id);
+    if (!msg) {
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    *out = sc_tool_result_ok_owned(msg, strlen(msg));
     return SC_OK;
 #endif
 }
@@ -75,9 +91,12 @@ static const sc_tool_vtable_t cron_remove_vtable = {
     .deinit = cron_remove_deinit,
 };
 
-sc_error_t sc_cron_remove_create(sc_allocator_t *alloc, sc_tool_t *out) {
+sc_error_t sc_cron_remove_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched, sc_tool_t *out) {
     (void)alloc;
-    out->ctx = calloc(1, 1);
+    sc_cron_tool_ctx_t *ctx = (sc_cron_tool_ctx_t *)calloc(1, sizeof(sc_cron_tool_ctx_t));
+    if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    ctx->sched = sched;
+    out->ctx = ctx;
     out->vtable = &cron_remove_vtable;
-    return out->ctx ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+    return SC_OK;
 }

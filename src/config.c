@@ -818,6 +818,17 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
         return err;
     }
 
+    /* Tighten config directory permissions if too permissive */
+    {
+        char dir_buf[SC_MAX_PATH];
+        int dn = snprintf(dir_buf, sizeof(dir_buf), "%s/%s", home, SC_CONFIG_DIR);
+        if (dn > 0 && (size_t)dn < sizeof(dir_buf)) {
+            struct stat dir_st;
+            if (stat(dir_buf, &dir_st) == 0 && (dir_st.st_mode & 0077) != 0)
+                (void)chmod(dir_buf, 0700);
+        }
+    }
+
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd))) {
         char workspace_cfg[SC_MAX_PATH];

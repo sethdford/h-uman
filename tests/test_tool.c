@@ -108,7 +108,7 @@ static void test_tools_factory_create_default(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t *tools = NULL;
     size_t count = 0;
-    sc_error_t err = sc_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, &tools, &count);
+    sc_error_t err = sc_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, &tools, &count);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_NOT_NULL(tools);
     SC_ASSERT(count >= 1);

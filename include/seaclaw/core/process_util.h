@@ -3,6 +3,7 @@
 
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/security.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -54,6 +55,18 @@ sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc,
     size_t max_output_bytes,
     sc_child_setup_fn child_setup,
     void *child_setup_ctx,
+    sc_run_result_t *out);
+
+/**
+ * Run a child process with security policy (sandbox + net_proxy).
+ * Applies net_proxy env vars and sandbox restrictions in the child.
+ * If policy is NULL, behaves identically to sc_process_run.
+ */
+sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc,
+    const char *const *argv,
+    const char *cwd,
+    size_t max_output_bytes,
+    sc_security_policy_t *policy,
     sc_run_result_t *out);
 
 #endif /* SC_PROCESS_UTIL_H */

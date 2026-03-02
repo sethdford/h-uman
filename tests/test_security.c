@@ -1198,6 +1198,27 @@ static void test_process_run_sandboxed_with_null_setup(void) {
     sc_run_result_free(&sys, &result);
 }
 
+static void test_process_run_with_policy_null(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    const char *argv[] = { "echo", "policy-test", NULL };
+    sc_run_result_t result = {0};
+    sc_error_t err = sc_process_run_with_policy(&sys, argv, NULL, 1024, NULL, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(result.stdout_cap > 0);
+    sc_run_result_free(&sys, &result);
+}
+
+static void test_process_run_with_policy_noop_sandbox(void) {
+    sc_allocator_t sys = sc_system_allocator();
+    sc_security_policy_t policy = {0};
+    const char *argv[] = { "echo", "sandboxed", NULL };
+    sc_run_result_t result = {0};
+    sc_error_t err = sc_process_run_with_policy(&sys, argv, NULL, 1024, &policy, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(result.stdout_cap > 0);
+    sc_run_result_free(&sys, &result);
+}
+
 /* --- Sandbox storage lifecycle --- */
 static void test_sandbox_storage_create_destroy(void) {
     sc_allocator_t sys = sc_system_allocator();
@@ -1432,6 +1453,10 @@ void run_security_tests(void) {
     SC_TEST_SUITE("Sandbox — sc_process_run_sandboxed");
     SC_RUN_TEST(test_process_run_sandboxed_null_args);
     SC_RUN_TEST(test_process_run_sandboxed_with_null_setup);
+
+    SC_TEST_SUITE("Sandbox — sc_process_run_with_policy");
+    SC_RUN_TEST(test_process_run_with_policy_null);
+    SC_RUN_TEST(test_process_run_with_policy_noop_sandbox);
 
     SC_TEST_SUITE("Network Proxy — Edge Cases");
     SC_RUN_TEST(test_net_proxy_null_domain);

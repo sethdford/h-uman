@@ -5,6 +5,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/security.h"
 #include "seaclaw/tools/validation.h"
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,7 @@ typedef struct sc_browser_open_ctx {
     sc_allocator_t *alloc;
     char **allowed_domains;
     size_t allowed_count;
+    sc_security_policy_t *policy;
 } sc_browser_open_ctx_t;
 
 static bool is_local_or_private(const char *host, size_t len) {
@@ -117,7 +119,8 @@ static sc_error_t browser_open_execute(void *ctx, sc_allocator_t *alloc,
         argv[1] = url;
         argv[2] = NULL;
         sc_run_result_t run = {0};
-        sc_error_t err = sc_process_run(alloc, argv, NULL, 4096, &run);
+        sc_error_t err = sc_process_run_with_policy(alloc, argv, NULL,
+            4096, c->policy, &run);
         sc_run_result_free(alloc, &run);
         if (err != SC_OK) {
             *out = sc_tool_result_fail("Failed to open browser", 22);
@@ -163,12 +166,13 @@ static const sc_tool_vtable_t browser_open_vtable = {
 
 sc_error_t sc_browser_open_create(sc_allocator_t *alloc,
     const char *const *allowed_domains, size_t allowed_count,
-    sc_tool_t *out)
+    sc_security_policy_t *policy, sc_tool_t *out)
 {
     if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
     sc_browser_open_ctx_t *c = (sc_browser_open_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;
     c->alloc = alloc;
+    c->policy = policy;
     c->allowed_count = allowed_count;
     if (allowed_domains && allowed_count > 0) {
         c->allowed_domains = (char **)alloc->alloc(alloc->ctx, allowed_count * sizeof(char *));

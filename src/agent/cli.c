@@ -13,6 +13,7 @@
 #include "seaclaw/security/sandbox_internal.h"
 #include "seaclaw/observability/log_observer.h"
 #include "seaclaw/channels/cli.h"
+#include "seaclaw/cron.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
 #include "seaclaw/core/error.h"
@@ -377,12 +378,15 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     if (memory.vtable && strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)
         session_store = sc_sqlite_memory_get_session_store(&memory);
 
+    sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
+
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
     err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
-        memory.vtable ? &memory : NULL, &tools, &tools_count);
+        memory.vtable ? &memory : NULL, cron, &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (cron) sc_cron_destroy(cron, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
@@ -406,6 +410,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             observer.vtable->deinit(observer.ctx);
         if (log_fp) fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
+        if (cron) sc_cron_destroy(cron, alloc);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_config_deinit(&cfg);
@@ -540,6 +545,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         observer.vtable->deinit(observer.ctx);
     if (log_fp) fclose(log_fp);
     sc_tools_destroy_default(alloc, tools, tools_count);
+    if (cron) sc_cron_destroy(cron, alloc);
     if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
     if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
     sc_config_deinit(&cfg);

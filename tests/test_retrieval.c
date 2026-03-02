@@ -230,6 +230,27 @@ static void test_temporal_decay_iso8601_format(void) {
     SC_ASSERT_TRUE(d <= 0.8);
 }
 
+static void test_semantic_returns_not_supported(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+    sc_retrieval_engine_t eng = sc_retrieval_create(&alloc, &mem);
+    SC_ASSERT_NOT_NULL(eng.ctx);
+
+    sc_retrieval_options_t opts = {
+        .mode = SC_RETRIEVAL_SEMANTIC,
+        .limit = 5,
+        .min_score = 0.0,
+    };
+    sc_retrieval_result_t res = {0};
+    sc_error_t err = eng.vtable->retrieve(eng.ctx, &alloc, "query", 5, &opts, &res);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+    SC_ASSERT_EQ(res.count, 0);
+    SC_ASSERT_NULL(res.entries);
+
+    eng.vtable->deinit(eng.ctx, &alloc);
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void test_retrieval_options_default(void) {
     sc_retrieval_options_t opts = {
         .mode = SC_RETRIEVAL_KEYWORD,
@@ -306,6 +327,7 @@ static void test_retrieval_engine_with_sqlite_backend(void) {
 
 void run_retrieval_tests(void) {
     SC_TEST_SUITE("retrieval");
+    SC_RUN_TEST(test_semantic_returns_not_supported);
     SC_RUN_TEST(test_keyword_basic_match);
     SC_RUN_TEST(test_keyword_case_insensitive);
     SC_RUN_TEST(test_keyword_no_match_returns_empty);

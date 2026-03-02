@@ -4,6 +4,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/security.h"
 #include "seaclaw/tools/validation.h"
 #include <stdio.h>
 #include <string.h>
@@ -16,13 +17,14 @@
 
 typedef struct sc_screenshot_ctx {
     bool enabled;
+    sc_security_policy_t *policy;
 } sc_screenshot_ctx_t;
 
 static sc_error_t screenshot_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args,
     sc_tool_result_t *out)
 {
-    (void)ctx;
+    sc_screenshot_ctx_t *sc = (sc_screenshot_ctx_t *)ctx;
     if (!out) {
         *out = sc_tool_result_fail("invalid args", 12);
         return SC_ERR_INVALID_ARGUMENT;
@@ -48,7 +50,8 @@ static sc_error_t screenshot_execute(void *ctx, sc_allocator_t *alloc,
         argv[2] = path;
         argv[3] = NULL;
         sc_run_result_t run = {0};
-        sc_error_t err = sc_process_run(alloc, argv, NULL, 4096, &run);
+        sc_error_t err = sc_process_run_with_policy(alloc, argv, NULL,
+            4096, sc ? sc->policy : NULL, &run);
         sc_run_result_free(alloc, &run);
         if (err != SC_OK) {
             *out = sc_tool_result_fail("screencapture failed", 20);
@@ -68,7 +71,8 @@ static sc_error_t screenshot_execute(void *ctx, sc_allocator_t *alloc,
         argv[3] = path;
         argv[4] = NULL;
         sc_run_result_t run = {0};
-        sc_error_t err = sc_process_run(alloc, argv, NULL, 4096, &run);
+        sc_error_t err = sc_process_run_with_policy(alloc, argv, NULL,
+            4096, sc ? sc->policy : NULL, &run);
         sc_run_result_free(alloc, &run);
         if (err != SC_OK) {
             *out = sc_tool_result_fail("import failed", 12);
@@ -102,11 +106,13 @@ static const sc_tool_vtable_t screenshot_vtable = {
     .deinit = screenshot_deinit,
 };
 
-sc_error_t sc_screenshot_create(sc_allocator_t *alloc, bool enabled, sc_tool_t *out) {
+sc_error_t sc_screenshot_create(sc_allocator_t *alloc, bool enabled,
+    sc_security_policy_t *policy, sc_tool_t *out) {
     (void)alloc;
     sc_screenshot_ctx_t *c = (sc_screenshot_ctx_t *)calloc(1, sizeof(*c));
     if (!c) return SC_ERR_OUT_OF_MEMORY;
     c->enabled = enabled;
+    c->policy = policy;
     out->ctx = c;
     out->vtable = &screenshot_vtable;
     return SC_OK;

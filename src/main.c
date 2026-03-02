@@ -508,12 +508,15 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         strcmp(cfg.memory.backend, "sqlite") == 0)
         session_store = sc_sqlite_memory_get_session_store(&memory);
 
+    sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
+
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
     err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
-        memory.vtable ? &memory : NULL, &tools, &tools_count);
+        memory.vtable ? &memory : NULL, cron, &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (cron) sc_cron_destroy(cron, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
@@ -547,6 +550,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         if (observer.vtable && observer.vtable->deinit) observer.vtable->deinit(observer.ctx);
         if (log_fp) fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
+        if (cron) sc_cron_destroy(cron, alloc);
         if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
         if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
@@ -626,6 +630,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 
     sc_agent_deinit(&agent);
     sc_tools_destroy_default(alloc, tools, tools_count);
+    if (cron) sc_cron_destroy(cron, alloc);
     if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
     if (observer.vtable && observer.vtable->deinit) observer.vtable->deinit(observer.ctx);
     if (log_fp) fclose(log_fp);
@@ -775,7 +780,7 @@ static sc_error_t cmd_mcp(sc_allocator_t *alloc, int argc, char **argv) {
 
     sc_tool_t *tools = NULL;
     size_t tool_count = 0;
-    err = sc_tools_create_default(alloc, ".", 1, NULL, &cfg, NULL,
+    err = sc_tools_create_default(alloc, ".", 1, NULL, &cfg, NULL, NULL,
         &tools, &tool_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init error: %s\n", SC_CODENAME, sc_error_string(err));
@@ -933,7 +938,7 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
     err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
-        NULL, &tools, &tools_count);
+        NULL, cron, &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
         sc_cost_tracker_deinit(&costs);

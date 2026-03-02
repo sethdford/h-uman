@@ -1,6 +1,8 @@
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/security.h"
+#include "seaclaw/security/sandbox.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -168,6 +170,74 @@ sc_error_t sc_process_run(sc_allocator_t *alloc,
     return sc_process_run_sandboxed(alloc, argv, cwd, max_output_bytes,
         NULL, NULL, out);
 }
+
+typedef struct sc_policy_child_ctx {
+    sc_security_policy_t *policy;
+} sc_policy_child_ctx_t;
+
+static sc_error_t policy_child_setup(void *raw) {
+    sc_policy_child_ctx_t *pc = (sc_policy_child_ctx_t *)raw;
+    if (!pc || !pc->policy) return SC_OK;
+    sc_security_policy_t *p = pc->policy;
+
+    if (p->net_proxy && p->net_proxy->enabled) {
+        const char *addr = p->net_proxy->proxy_addr;
+        if (!addr) addr = "http://127.0.0.1:0";
+        setenv("HTTP_PROXY", addr, 1);
+        setenv("HTTPS_PROXY", addr, 1);
+        setenv("http_proxy", addr, 1);
+        setenv("https_proxy", addr, 1);
+        if (p->net_proxy->allowed_domains_count > 0) {
+            size_t total = 0;
+            for (size_t i = 0; i < p->net_proxy->allowed_domains_count; i++) {
+                if (p->net_proxy->allowed_domains[i])
+                    total += strlen(p->net_proxy->allowed_domains[i]) + 1;
+            }
+            if (total > 0) {
+                char *no_proxy = (char *)malloc(total + 1);
+                if (no_proxy) {
+                    size_t off = 0;
+                    for (size_t i = 0; i < p->net_proxy->allowed_domains_count; i++) {
+                        const char *d = p->net_proxy->allowed_domains[i];
+                        if (!d) continue;
+                        size_t dlen = strlen(d);
+                        if (off > 0) no_proxy[off++] = ',';
+                        memcpy(no_proxy + off, d, dlen);
+                        off += dlen;
+                    }
+                    no_proxy[off] = '\0';
+                    setenv("NO_PROXY", no_proxy, 1);
+                    setenv("no_proxy", no_proxy, 1);
+                    free(no_proxy);
+                }
+            }
+        }
+    }
+
+    if (p->sandbox && p->sandbox->vtable && p->sandbox->vtable->apply) {
+        sc_error_t err = p->sandbox->vtable->apply(p->sandbox->ctx);
+        if (err != SC_OK && err != SC_ERR_NOT_SUPPORTED)
+            return err;
+    }
+
+    return SC_OK;
+}
+
+sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc,
+    const char *const *argv,
+    const char *cwd,
+    size_t max_output_bytes,
+    sc_security_policy_t *policy,
+    sc_run_result_t *out)
+{
+    if (!policy) {
+        return sc_process_run(alloc, argv, cwd, max_output_bytes, out);
+    }
+    sc_policy_child_ctx_t ctx = { .policy = policy };
+    return sc_process_run_sandboxed(alloc, argv, cwd, max_output_bytes,
+        policy_child_setup, &ctx, out);
+}
+
 #else
 /* Non-POSIX or SC_IS_TEST: stub that returns empty success */
 sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc,
@@ -209,5 +279,16 @@ sc_error_t sc_process_run(sc_allocator_t *alloc,
 {
     return sc_process_run_sandboxed(alloc, argv, cwd, max_output_bytes,
         NULL, NULL, out);
+}
+
+sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc,
+    const char *const *argv,
+    const char *cwd,
+    size_t max_output_bytes,
+    sc_security_policy_t *policy,
+    sc_run_result_t *out)
+{
+    (void)policy;
+    return sc_process_run(alloc, argv, cwd, max_output_bytes, out);
 }
 #endif

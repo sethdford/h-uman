@@ -32,11 +32,8 @@ static sc_error_t impl_retrieve(void *ctx, sc_allocator_t *alloc,
                 &o, out);
             break;
         case SC_RETRIEVAL_SEMANTIC:
-            /* Semantic not implemented - fall back to keyword */
-            o.mode = SC_RETRIEVAL_KEYWORD;
-            err = sc_keyword_retrieve(alloc, &e->backend, query, query_len,
-                &o, out);
-            break;
+            /* Semantic retrieval requires a vector store; not wired yet */
+            return SC_ERR_NOT_SUPPORTED;
         case SC_RETRIEVAL_HYBRID:
             err = sc_hybrid_retrieve(alloc, &e->backend, query, query_len,
                 &o, out);

@@ -10,6 +10,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/security.h"
 #include "seaclaw/tools/validation.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,9 +19,14 @@
 
 #define SC_BROWSER_READ_MAX 8192
 
+typedef struct sc_browser_ctx {
+    sc_security_policy_t *policy;
+} sc_browser_ctx_t;
+
 static sc_error_t browser_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args, sc_tool_result_t *out) {
-    (void)ctx;
+    sc_browser_ctx_t *bc = (sc_browser_ctx_t *)ctx;
+    (void)bc;
     if (!args || !out) {
         *out = sc_tool_result_fail("invalid args", 12);
         return SC_ERR_INVALID_ARGUMENT;
@@ -66,7 +72,8 @@ static sc_error_t browser_execute(void *ctx, sc_allocator_t *alloc,
             argv[1] = url;
             argv[2] = NULL;
             sc_run_result_t run = {0};
-            sc_error_t err = sc_process_run(alloc, argv, NULL, 4096, &run);
+            sc_error_t err = sc_process_run_with_policy(alloc, argv, NULL,
+                4096, bc ? bc->policy : NULL, &run);
             sc_run_result_free(alloc, &run);
             if (err != SC_OK) {
                 *out = sc_tool_result_fail("Failed to open browser", 22);
@@ -153,9 +160,13 @@ static const sc_tool_vtable_t browser_vtable = {
     .deinit = browser_deinit,
 };
 
-sc_error_t sc_browser_create(sc_allocator_t *alloc, bool enabled, sc_tool_t *out) {
+sc_error_t sc_browser_create(sc_allocator_t *alloc, bool enabled,
+    sc_security_policy_t *policy, sc_tool_t *out) {
     (void)alloc; (void)enabled;
-    out->ctx = calloc(1, 1);
+    sc_browser_ctx_t *c = (sc_browser_ctx_t *)calloc(1, sizeof(*c));
+    if (!c) return SC_ERR_OUT_OF_MEMORY;
+    c->policy = policy;
+    out->ctx = c;
     out->vtable = &browser_vtable;
-    return out->ctx ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+    return SC_OK;
 }

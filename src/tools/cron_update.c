@@ -11,10 +11,13 @@
 
 #define CRON_UPDATE_PARAMS "{\"type\":\"object\",\"properties\":{\"job_id\":{\"type\":\"string\"},\"expression\":{\"type\":\"string\"},\"command\":{\"type\":\"string\"},\"enabled\":{\"type\":\"boolean\"}},\"required\":[\"job_id\"]}"
 
+typedef struct { sc_cron_scheduler_t *sched; } sc_cron_tool_ctx_t;
+
 static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
     const sc_json_value_t *args, sc_tool_result_t *out)
 {
-    (void)ctx;
+    sc_cron_tool_ctx_t *tctx = (sc_cron_tool_ctx_t *)ctx;
+    (void)tctx;
     if (!args || !out) {
         *out = sc_tool_result_fail("invalid args", 12);
         return SC_ERR_INVALID_ARGUMENT;
@@ -68,8 +71,22 @@ static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
     *out = sc_tool_result_ok_owned(msg, strlen(msg));
     return SC_OK;
 #else
-    (void)alloc;
-    *out = sc_tool_result_fail("cron_update: scheduler not configured", 38);
+    if (!tctx || !tctx->sched) {
+        *out = sc_tool_result_fail("cron_update: scheduler not configured", 38);
+        return SC_OK;
+    }
+    sc_cron_scheduler_t *sched = tctx->sched;
+    sc_error_t err = sc_cron_update_job(sched, alloc, job_id, expr, cmd, enabled_ptr);
+    if (err != SC_OK) {
+        *out = sc_tool_result_fail("update failed", 13);
+        return err;
+    }
+    char *msg = sc_sprintf(alloc, "{\"updated\":true,\"job_id\":\"%llu\"}", (unsigned long long)job_id);
+    if (!msg) {
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    *out = sc_tool_result_ok_owned(msg, strlen(msg));
     return SC_OK;
 #endif
 }
@@ -88,10 +105,11 @@ static const sc_tool_vtable_t cron_update_vtable = {
     .deinit = cron_update_deinit,
 };
 
-sc_error_t sc_cron_update_create(sc_allocator_t *alloc, sc_tool_t *out) {
+sc_error_t sc_cron_update_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched, sc_tool_t *out) {
     if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
-    void *ctx = calloc(1, 1);
+    sc_cron_tool_ctx_t *ctx = (sc_cron_tool_ctx_t *)calloc(1, sizeof(sc_cron_tool_ctx_t));
     if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    ctx->sched = sched;
     out->ctx = ctx;
     out->vtable = &cron_update_vtable;
     return SC_OK;

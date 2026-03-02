@@ -36,6 +36,7 @@
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/spi.h"
 #include "seaclaw/tools/claude_code.h"
+#include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/security.h"
@@ -61,6 +62,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     sc_security_policy_t *policy,
     const sc_config_t *config,
     sc_memory_t *memory,
+    sc_cron_scheduler_t *cron,
     sc_tool_t **out_tools, size_t *out_count)
 {
     if (!alloc || !out_tools || !out_count) return SC_ERR_INVALID_ARGUMENT;
@@ -109,7 +111,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_browser_create(alloc, false, &tools[idx]);
+    err = sc_browser_create(alloc, false, policy, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
@@ -117,7 +119,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_screenshot_create(alloc, false, &tools[idx]);
+    err = sc_screenshot_create(alloc, false, policy, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
@@ -149,33 +151,33 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
         sc_spawn_create);
     if (err != SC_OK) goto fail;
 
-    err = sc_cron_add_create(alloc, &tools[idx]);
+    err = sc_cron_add_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_cron_list_create(alloc, &tools[idx]);
+    err = sc_cron_list_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_cron_remove_create(alloc, &tools[idx]);
+    err = sc_cron_remove_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_cron_run_create(alloc, &tools[idx]);
+    err = sc_cron_run_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_cron_runs_create(alloc, &tools[idx]);
+    err = sc_cron_runs_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_cron_update_create(alloc, &tools[idx]);
+    err = sc_cron_update_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
     {
         const char *domains[] = {"example.com"};
-        err = sc_browser_open_create(alloc, domains, 1, &tools[idx]);
+        err = sc_browser_open_create(alloc, domains, 1, policy, &tools[idx]);
     }
     if (err != SC_OK) goto fail;
     idx++;
@@ -188,7 +190,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     if (err != SC_OK) goto fail;
     idx++;
 
-    err = sc_schedule_create(alloc, &tools[idx]);
+    err = sc_schedule_create(alloc, cron, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 
