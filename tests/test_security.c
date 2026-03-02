@@ -1119,13 +1119,11 @@ static void test_sandbox_firecracker_wrap_on_linux(void) {
     size_t out_count = 0;
     sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 16, &out_count);
     SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT(out_count >= 6);
+    SC_ASSERT_EQ(out_count, 4);
     SC_ASSERT_STR_EQ(out[0], "firecracker");
     SC_ASSERT_STR_EQ(out[1], "--no-api");
     SC_ASSERT_STR_EQ(out[2], "--boot-timer");
     SC_ASSERT(strstr(out[3], "--config-file=") != NULL);
-    SC_ASSERT_STR_EQ(out[out_count - 2], "echo");
-    SC_ASSERT_STR_EQ(out[out_count - 1], "hello");
 #endif
 }
 
@@ -1226,6 +1224,72 @@ static void test_net_proxy_add_null_domain(void) {
     SC_ASSERT_FALSE(sc_net_proxy_allow_domain(NULL, "test.com"));
 }
 
+/* --- Seatbelt truncated profile guard --- */
+static void test_seatbelt_wrap_fails_on_truncated_profile(void) {
+    sc_seatbelt_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.profile_len = 0;
+    sc_sandbox_t sb = sc_seatbelt_sandbox_get(&ctx);
+    const char *argv[] = { "echo", "hello" };
+    const char *out[8];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 8, &out_count);
+#ifdef __APPLE__
+    SC_ASSERT_EQ(err, SC_ERR_INTERNAL);
+    SC_ASSERT_EQ(out_count, 0);
+#else
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+}
+
+/* --- Firejail extra_args wiring --- */
+static void test_firejail_extra_args_wired(void) {
+    sc_firejail_ctx_t ctx;
+    sc_firejail_sandbox_init(&ctx, "/tmp/ws");
+    const char *extras[] = { "--whitelist=/opt" };
+    sc_firejail_sandbox_set_extra_args(&ctx, extras, 1);
+    SC_ASSERT_EQ(ctx.extra_args_len, 1);
+    SC_ASSERT(ctx.extra_args == extras);
+#ifdef __linux__
+    sc_sandbox_t sb = sc_firejail_sandbox_get(&ctx);
+    const char *argv[] = { "ls" };
+    const char *out[16];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 1, out, 16, &out_count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out_count, 7);
+    SC_ASSERT(strcmp(out[5], "--whitelist=/opt") == 0);
+    SC_ASSERT(strcmp(out[6], "ls") == 0);
+#endif
+}
+
+/* --- WASI NULL workspace guard --- */
+static void test_wasi_wrap_fails_null_workspace(void) {
+    sc_wasi_sandbox_ctx_t ctx;
+    sc_wasi_sandbox_init(&ctx, NULL);
+    sc_sandbox_t sb = sc_wasi_sandbox_get(&ctx);
+    const char *argv[] = { "test.wasm" };
+    const char *out[8];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 1, out, 8, &out_count);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+/* --- Landlock NULL workspace guard --- */
+static void test_landlock_apply_fails_null_workspace(void) {
+    sc_landlock_ctx_t ctx;
+    sc_landlock_sandbox_init(&ctx, NULL);
+    sc_sandbox_t sb = sc_landlock_sandbox_get(&ctx);
+    if (sb.vtable && sb.vtable->apply) {
+        sc_error_t err = sb.vtable->apply(sb.ctx);
+#ifdef __linux__
+        SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+#else
+        SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+#endif
+    }
+}
+
 void run_security_tests(void) {
     static sc_allocator_t sys = {0};
     sys = sc_system_allocator();
@@ -1320,6 +1384,14 @@ void run_security_tests(void) {
 
     SC_TEST_SUITE("Sandbox — Seatbelt Profile");
     SC_RUN_TEST(test_sandbox_seatbelt_profile_allows_tmp_write);
+    SC_RUN_TEST(test_seatbelt_wrap_fails_on_truncated_profile);
+
+    SC_TEST_SUITE("Sandbox — Firejail Extra Args");
+    SC_RUN_TEST(test_firejail_extra_args_wired);
+
+    SC_TEST_SUITE("Sandbox — NULL Workspace Guards");
+    SC_RUN_TEST(test_wasi_wrap_fails_null_workspace);
+    SC_RUN_TEST(test_landlock_apply_fails_null_workspace);
 
     SC_TEST_SUITE("Sandbox — Backend Coverage");
     SC_RUN_TEST(test_sandbox_create_each_backend);

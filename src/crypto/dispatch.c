@@ -48,7 +48,7 @@ void sc_chacha20_decrypt(const uint8_t key[32], const uint8_t nonce[12],
 }
 
 void sc_sha256(const uint8_t *data, size_t len, uint8_t out[32]) {
-#if defined(__x86_64__)
+#if defined(__x86_64__) && !SC_IS_TEST
     if (!sha_ni_checked) {
         sha_ni_available = has_sha_ni();
         sha_ni_checked = true;
