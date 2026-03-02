@@ -209,6 +209,8 @@ sc_error_t sc_agent_from_config(sc_agent_t *out, sc_allocator_t *alloc,
         out->cached_static_prompt_cap = out->cached_static_prompt_len;
     }
 
+    out->turn_arena = sc_arena_create(*alloc);
+
     return SC_OK;
 }
 
@@ -248,6 +250,10 @@ void sc_agent_deinit(sc_agent_t *agent) {
     }
     if (agent->provider.vtable && agent->provider.vtable->deinit) {
         agent->provider.vtable->deinit(agent->provider.ctx, agent->alloc);
+    }
+    if (agent->turn_arena) {
+        sc_arena_destroy(agent->turn_arena);
+        agent->turn_arena = NULL;
     }
 }
 
@@ -654,37 +660,6 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
 
     sc_chat_message_t *msgs = NULL;
     size_t msgs_count = 0;
-    err = sc_context_format_messages(agent->alloc, agent->history, agent->history_count,
-        agent->max_history_messages, &msgs, &msgs_count);
-    if (err != SC_OK) {
-        if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
-        return err;
-    }
-
-    /* Prepend system message */
-    size_t total_msgs = (msgs ? msgs_count : 0) + 1;
-    sc_chat_message_t *all_msgs = (sc_chat_message_t *)agent->alloc->alloc(agent->alloc->ctx,
-        total_msgs * sizeof(sc_chat_message_t));
-    if (!all_msgs) {
-        if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
-        if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
-        return SC_ERR_OUT_OF_MEMORY;
-    }
-    all_msgs[0].role = SC_ROLE_SYSTEM;
-    all_msgs[0].content = system_prompt;
-    all_msgs[0].content_len = system_prompt_len;
-    all_msgs[0].name = NULL;
-    all_msgs[0].name_len = 0;
-    all_msgs[0].tool_call_id = NULL;
-    all_msgs[0].tool_call_id_len = 0;
-    all_msgs[0].content_parts = NULL;
-    all_msgs[0].content_parts_count = 0;
-    for (size_t i = 0; i < (msgs ? msgs_count : 0); i++) {
-        all_msgs[i + 1] = msgs[i];
-    }
-    if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
-    msgs = all_msgs;
-    msgs_count = total_msgs;
 
     sc_chat_request_t req;
     req.messages = msgs;
@@ -716,12 +691,17 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len,
         SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
     }
 
+    /* Per-turn arena: reset each iteration to reclaim ephemeral message arrays */
+    sc_allocator_t turn_alloc = agent->turn_arena ?
+        sc_arena_allocator(agent->turn_arena) : *agent->alloc;
+
     while (iter < agent->max_tool_iterations) {
         if (agent->cancel_requested) {
-            if (msgs) agent->alloc->free(agent->alloc->ctx, msgs, msgs_count * sizeof(sc_chat_message_t));
             if (system_prompt) agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+            if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
             return SC_ERR_CANCELLED;
         }
+        if (agent->turn_arena) sc_arena_reset(agent->turn_arena);
         iter++;
         /* Compact history if it exceeds limits (before each provider call) */
         if (sc_should_compact(agent->history, agent->history_count, &compact_cfg)) {

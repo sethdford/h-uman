@@ -460,6 +460,27 @@ static void tui_stream_token(const char *delta, size_t len, void *ctx) {
     output_append(state, delta, len);
 }
 
+/* ── Approval callback (called from agent thread, blocks until TUI answers) ── */
+static bool tui_approval_cb(void *ctx, const char *tool_name, const char *args) {
+    sc_tui_state_t *state = (sc_tui_state_t *)ctx;
+    if (!state) return false;
+
+    snprintf(state->approval_tool, sizeof(state->approval_tool), "%s", tool_name ? tool_name : "?");
+    snprintf(state->approval_args, sizeof(state->approval_args), "%s",
+        args ? args : "");
+    state->approval = SC_TUI_APPROVAL_PENDING;
+
+    /* Spin-wait for the TUI event loop to set GRANTED or DENIED */
+    while (state->approval == SC_TUI_APPROVAL_PENDING && !state->quit_requested) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 50000000L };
+        nanosleep(&ts, NULL);
+    }
+
+    bool granted = (state->approval == SC_TUI_APPROVAL_GRANTED);
+    state->approval = SC_TUI_APPROVAL_NONE;
+    return granted;
+}
+
 /* ── Agent turn thread ───────────────────────────────────────────────── */
 typedef struct tui_turn_ctx {
     sc_tui_state_t *state;
@@ -625,6 +646,44 @@ static bool handle_slash_command(sc_tui_state_t *state) {
     return true;
 }
 
+/* ── Tab save/restore helpers ────────────────────────────────────────── */
+static void tab_save_current(sc_tui_state_t *state) {
+    if (!state->tabs || state->active_tab >= state->tab_count) return;
+    sc_tui_tab_snapshot_t *snap = &state->tabs[state->active_tab];
+    memcpy(snap->output_buf, state->output_buf, state->output_len);
+    snap->output_len = state->output_len;
+    snap->output_scroll = state->output_scroll;
+    memcpy(snap->tool_log, state->tool_log, state->tool_log_count * sizeof(sc_tui_tool_entry_t));
+    snap->tool_log_count = state->tool_log_count;
+    /* Save agent history by stealing the pointer */
+    snap->history = state->agent->history;
+    snap->history_count = state->agent->history_count;
+    snap->history_cap = state->agent->history_cap;
+    snap->total_tokens = state->agent->total_tokens;
+    state->agent->history = NULL;
+    state->agent->history_count = 0;
+    state->agent->history_cap = 0;
+}
+
+static void tab_restore(sc_tui_state_t *state, int tab_idx) {
+    if (!state->tabs || tab_idx >= state->tab_count) return;
+    sc_tui_tab_snapshot_t *snap = &state->tabs[tab_idx];
+    memcpy(state->output_buf, snap->output_buf, snap->output_len);
+    state->output_len = snap->output_len;
+    state->output_scroll = snap->output_scroll;
+    memcpy(state->tool_log, snap->tool_log, snap->tool_log_count * sizeof(sc_tui_tool_entry_t));
+    state->tool_log_count = snap->tool_log_count;
+    /* Restore agent history */
+    state->agent->history = snap->history;
+    state->agent->history_count = snap->history_count;
+    state->agent->history_cap = snap->history_cap;
+    state->agent->total_tokens = snap->total_tokens;
+    snap->history = NULL;
+    snap->history_count = 0;
+    snap->history_cap = 0;
+    state->active_tab = tab_idx;
+}
+
 /* ── Main TUI loop ───────────────────────────────────────────────────── */
 sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc,
     sc_agent_t *agent, const char *provider_name,
@@ -639,6 +698,9 @@ sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc,
     state->tools_count = tools_count;
     state->input_history_pos = 0;
     state->tab_count = 1;
+    state->tabs = (sc_tui_tab_snapshot_t *)alloc->alloc(alloc->ctx,
+        SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    if (state->tabs) memset(state->tabs, 0, SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
     return SC_OK;
 }
 
@@ -648,10 +710,12 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
     int rc = tb_init();
     if (rc != 0) return SC_ERR_IO;
 
-    /* Install TUI observer on the agent */
+    /* Install TUI observer and approval callback on the agent */
     sc_observer_t tui_obs = sc_tui_observer_create(state);
     sc_observer_t *prev_observer = state->agent->observer;
     state->agent->observer = &tui_obs;
+    state->agent->approval_cb = tui_approval_cb;
+    state->agent->approval_ctx = state;
 
     {
         const char *welcome =
@@ -704,17 +768,34 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
 
                 /* Ctrl+T: new tab (Tier 3.2) */
                 if (ev.key == TB_KEY_CTRL_T) {
-                    if (state->tab_count < SC_TUI_TAB_MAX && !state->agent_running) {
+                    if (state->tabs && state->tab_count < SC_TUI_TAB_MAX && !state->agent_running) {
+                        tab_save_current(state);
                         state->tab_count++;
                         state->active_tab = state->tab_count - 1;
                         state->output_len = 0;
                         state->output_scroll = 0;
                         state->tool_log_count = 0;
-                        sc_agent_clear_history(state->agent);
+                        state->agent->total_tokens = 0;
                         char msg[64];
                         int n = snprintf(msg, sizeof(msg), "New session (tab %d)\n\n",
                             state->active_tab + 1);
                         if (n > 0) output_append(state, msg, (size_t)n);
+                    }
+                    continue;
+
+                /* Alt+Left / Alt+Right: switch tabs */
+                } else if (ev.key == TB_KEY_ARROW_LEFT && (ev.mod & TB_MOD_ALT)) {
+                    if (state->tabs && state->tab_count > 1 && !state->agent_running) {
+                        tab_save_current(state);
+                        int next = (state->active_tab > 0) ? state->active_tab - 1 : state->tab_count - 1;
+                        tab_restore(state, next);
+                    }
+                    continue;
+                } else if (ev.key == TB_KEY_ARROW_RIGHT && (ev.mod & TB_MOD_ALT)) {
+                    if (state->tabs && state->tab_count > 1 && !state->agent_running) {
+                        tab_save_current(state);
+                        int next = (state->active_tab < state->tab_count - 1) ? state->active_tab + 1 : 0;
+                        tab_restore(state, next);
                     }
                     continue;
                 }
@@ -915,6 +996,28 @@ void sc_tui_deinit(sc_tui_state_t *state) {
     if (!state) return;
     for (size_t i = 0; i < state->input_history_count; i++)
         free(state->input_history[i]);
+    if (state->tabs) {
+        for (int t = 0; t < state->tab_count; t++) {
+            sc_tui_tab_snapshot_t *snap = &state->tabs[t];
+            if (snap->history) {
+                for (size_t h = 0; h < snap->history_count; h++) {
+                    if (snap->history[h].content)
+                        state->alloc->free(state->alloc->ctx, snap->history[h].content,
+                            snap->history[h].content_len + 1);
+                    if (snap->history[h].name)
+                        state->alloc->free(state->alloc->ctx, snap->history[h].name,
+                            snap->history[h].name_len + 1);
+                    if (snap->history[h].tool_call_id)
+                        state->alloc->free(state->alloc->ctx, snap->history[h].tool_call_id,
+                            snap->history[h].tool_call_id_len + 1);
+                }
+                state->alloc->free(state->alloc->ctx, snap->history,
+                    snap->history_cap * sizeof(sc_owned_message_t));
+            }
+        }
+        state->alloc->free(state->alloc->ctx, state->tabs,
+            SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    }
 }
 
 #else /* !SC_ENABLE_TUI || !SC_GATEWAY_POSIX || SC_IS_TEST */

@@ -55,6 +55,7 @@ typedef struct sc_security_policy {
     const char *const *allowed_paths;
     size_t allowed_paths_count;
     sc_sandbox_t *sandbox;
+    bool pre_approved;          /* set by agent before re-executing an approved tool */
 } sc_security_policy_t;
 
 bool sc_security_path_allowed(const sc_security_policy_t *policy,

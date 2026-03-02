@@ -2,6 +2,7 @@
 #define SC_AGENT_H
 
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/core/arena.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/slice.h"
 #include "seaclaw/provider.h"
@@ -33,6 +34,12 @@ typedef struct sc_owned_message {
 } sc_owned_message_t;
 
 typedef struct sc_agent sc_agent_t;
+
+/* Called when a tool needs user approval before execution.
+ * tool_name/args describe the pending action.
+ * Return true to approve, false to deny. */
+typedef bool (*sc_agent_approval_cb)(void *ctx,
+    const char *tool_name, const char *args);
 
 struct sc_agent {
     sc_allocator_t *alloc;
@@ -71,6 +78,11 @@ struct sc_agent {
     size_t cached_static_prompt_cap;
 
     volatile sig_atomic_t cancel_requested;  /* set by SIGINT handler to abort turn */
+
+    sc_agent_approval_cb approval_cb;  /* optional; if NULL, approval-required = denied */
+    void *approval_ctx;
+
+    sc_arena_t *turn_arena;  /* per-turn bump allocator for ephemeral allocations */
 };
 
 /* Create agent from minimal config (no full config loader yet). */

@@ -20,6 +20,7 @@ typedef struct sc_tool_result {
     size_t error_msg_len;
     bool output_owned;      /* true = caller must free output; false = static/borrowed */
     bool error_msg_owned;   /* true = caller must free error_msg */
+    bool needs_approval;    /* true = tool needs user approval to proceed */
 } sc_tool_result_t;
 
 static inline sc_tool_result_t sc_tool_result_ok(const char *output, size_t len) {

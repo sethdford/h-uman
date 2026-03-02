@@ -55,8 +55,15 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
         return SC_OK;
     }
     if (c->policy) {
+        bool approved = c->policy->pre_approved;
+        c->policy->pre_approved = false;
         sc_command_risk_level_t risk;
-        sc_error_t perr = sc_policy_validate_command(c->policy, cmd, false, &risk);
+        sc_error_t perr = sc_policy_validate_command(c->policy, cmd, approved, &risk);
+        if (perr == SC_ERR_SECURITY_APPROVAL_REQUIRED) {
+            *out = sc_tool_result_fail("approval required", 17);
+            out->needs_approval = true;
+            return SC_OK;
+        }
         if (perr != SC_OK) {
             *out = sc_tool_result_fail("command blocked by policy", 25);
             return SC_OK;

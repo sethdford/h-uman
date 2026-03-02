@@ -30,6 +30,19 @@ typedef enum sc_tui_approval_state {
     SC_TUI_APPROVAL_DENIED,
 } sc_tui_approval_state_t;
 
+/* Per-tab snapshot: output buffer + agent history saved/restored on tab switch */
+typedef struct sc_tui_tab_snapshot {
+    char output_buf[SC_TUI_OUTPUT_MAX];
+    size_t output_len;
+    int output_scroll;
+    sc_tui_tool_entry_t tool_log[SC_TUI_TOOL_MAX];
+    size_t tool_log_count;
+    sc_owned_message_t *history;    /* saved agent history (owned) */
+    size_t history_count;
+    size_t history_cap;
+    uint64_t total_tokens;
+} sc_tui_tab_snapshot_t;
+
 typedef struct sc_tui_state {
     sc_allocator_t *alloc;
     sc_agent_t *agent;
@@ -69,6 +82,7 @@ typedef struct sc_tui_state {
     /* Multi-tab (Tier 3.2) */
     int active_tab;
     int tab_count;
+    sc_tui_tab_snapshot_t *tabs;    /* heap array of tab snapshots */
 } sc_tui_state_t;
 
 sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc,
