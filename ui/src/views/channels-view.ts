@@ -3,12 +3,14 @@ import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 
 interface ChannelStatus {
+  key?: string;
+  label?: string;
   name?: string;
   status?: string;
   healthy?: boolean;
   configured?: boolean;
+  build_enabled?: boolean;
   error?: string;
-  [key: string]: unknown;
 }
 
 @customElement("sc-channels-view")
@@ -143,8 +145,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
 
   private dotClass(ch: ChannelStatus): string {
     if (ch.healthy === true) return "healthy";
-    if (ch.configured === false || ch.status === "unconfigured")
-      return "unconfigured";
+    if (ch.configured === false || ch.status === "unconfigured") return "unconfigured";
     return "error";
   }
 
@@ -160,18 +161,14 @@ export class ScChannelsView extends GatewayAwareLitElement {
     }
 
     return html`
-      ${this.error
-        ? html`<div class="error-banner">${this.error}</div>`
-        : nothing}
+      ${this.error ? html`<div class="error-banner">${this.error}</div>` : nothing}
       <div class="grid">
         ${this.channels.length === 0
           ? html`
               <div class="empty-state">
                 <div class="empty-icon">📡</div>
                 <p class="empty-title">No channels configured</p>
-                <p class="empty-desc">
-                  Configure messaging channels to receive and send messages.
-                </p>
+                <p class="empty-desc">Configure messaging channels to receive and send messages.</p>
               </div>
             `
           : this.channels.map(
@@ -179,12 +176,10 @@ export class ScChannelsView extends GatewayAwareLitElement {
                 <div class="card">
                   <div class="card-header">
                     <span class="status-dot ${this.dotClass(ch)}"></span>
-                    <span class="card-name">${ch.name ?? "unnamed"}</span>
+                    <span class="card-name">${ch.label || ch.key || ch.name || "unnamed"}</span>
                   </div>
                   <div class="card-info">
-                    ${ch.error
-                      ? html`<span class="error">${ch.error}</span>`
-                      : (ch.status ?? "—")}
+                    ${ch.error ? html`<span class="error">${ch.error}</span>` : (ch.status ?? "—")}
                   </div>
                 </div>
               `,

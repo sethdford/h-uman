@@ -1,0 +1,72 @@
+name: Setup and Build SeaClaw
+description: Install dependencies, configure, and build SeaClaw
+
+inputs:
+  build-type:
+    description: CMake build type (Debug, MinSizeRel)
+    default: Debug
+  build-dir:
+    description: Build directory name
+    default: build
+  enable-asan:
+    description: Enable AddressSanitizer
+    default: "false"
+  enable-curl:
+    description: Enable libcurl HTTP client
+    default: "false"
+  enable-all-channels:
+    description: Enable all channel implementations
+    default: "false"
+  enable-lto:
+    description: Enable link-time optimization
+    default: "false"
+  enable-coverage:
+    description: Enable gcov coverage instrumentation
+    default: "false"
+  enable-fuzz:
+    description: Enable fuzzing builds (requires clang)
+    default: "false"
+  extra-apt:
+    description: Additional apt packages to install
+    default: ""
+  extra-cmake-flags:
+    description: Additional CMake flags
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        PKGS="libsqlite3-dev"
+        if [ "${{ inputs.enable-curl }}" = "true" ]; then PKGS="$PKGS libcurl4-openssl-dev"; fi
+        if [ -n "${{ inputs.extra-apt }}" ]; then PKGS="$PKGS ${{ inputs.extra-apt }}"; fi
+        sudo apt-get install -y $PKGS
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install sqlite3
+
+    - name: Configure
+      shell: bash
+      run: |
+        mkdir -p ${{ inputs.build-dir }} && cd ${{ inputs.build-dir }}
+        CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ inputs.build-type }}"
+        if [ "${{ inputs.enable-asan }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_ASAN=ON"; fi
+        if [ "${{ inputs.enable-curl }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_CURL=ON"; fi
+        if [ "${{ inputs.enable-all-channels }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_ALL_CHANNELS=ON"; fi
+        if [ "${{ inputs.enable-lto }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_LTO=ON"; fi
+        if [ "${{ inputs.enable-fuzz }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_FUZZING=ON"; fi
+        if [ "${{ inputs.enable-coverage }}" = "true" ]; then
+          CMAKE_FLAGS="$CMAKE_FLAGS -DCMAKE_C_FLAGS=--coverage -fprofile-arcs -ftest-coverage"
+        fi
+        if [ -n "${{ inputs.extra-cmake-flags }}" ]; then CMAKE_FLAGS="$CMAKE_FLAGS ${{ inputs.extra-cmake-flags }}"; fi
+        cmake .. $CMAKE_FLAGS
+
+    - name: Build
+      shell: bash
+      run: cmake --build ${{ inputs.build-dir }} -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)

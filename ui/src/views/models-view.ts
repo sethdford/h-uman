@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 
@@ -178,15 +178,12 @@ export class ScModelsView extends GatewayAwareLitElement {
     this.loading = true;
     try {
       const [modelsRes, configRes] = await Promise.all([
-        gw.request<ModelsListRes>("models.list", {}).catch(() => ({})),
-        gw.request<ConfigGetRes>("config.get", {}).catch(() => ({})),
+        gw.request<ModelsListRes>("models.list", {}).catch((): Partial<ModelsListRes> => ({})),
+        gw.request<ConfigGetRes>("config.get", {}).catch((): Partial<ConfigGetRes> => ({})),
       ]);
-      const modelsPayload = modelsRes;
-      const configPayload = configRes;
-      this.defaultModel =
-        modelsPayload?.default_model ?? configPayload?.default_model ?? "";
-      this.defaultProvider = configPayload?.default_provider ?? "";
-      this.providers = modelsPayload?.providers ?? [];
+      this.defaultModel = modelsRes?.default_model ?? configRes?.default_model ?? "";
+      this.defaultProvider = configRes?.default_provider ?? "";
+      this.providers = modelsRes?.providers ?? [];
     } catch (e) {
       this.providers = [];
       this.defaultModel = "";
@@ -217,17 +214,12 @@ export class ScModelsView extends GatewayAwareLitElement {
 
     return html`
       <h2>Models & Providers</h2>
-      ${this.error
-        ? html`<div class="error-banner">${this.error}</div>`
-        : nothing}
+      ${this.error ? html`<div class="error-banner">${this.error}</div>` : nothing}
       <div class="info-bar">
         <span class="info-item"
-          ><strong>Default provider:</strong> ${this.defaultProvider ||
-          "—"}</span
+          ><strong>Default provider:</strong> ${this.defaultProvider || "—"}</span
         >
-        <span class="info-item"
-          ><strong>Default model:</strong> ${this.defaultModel || "—"}</span
-        >
+        <span class="info-item"><strong>Default model:</strong> ${this.defaultModel || "—"}</span>
       </div>
       <div class="grid">
         ${this.providers.length === 0
@@ -235,9 +227,7 @@ export class ScModelsView extends GatewayAwareLitElement {
               <div class="empty-state">
                 <div class="empty-icon">🤖</div>
                 <p class="empty-title">No providers configured</p>
-                <p class="empty-desc">
-                  Configure an AI provider in your config to get started.
-                </p>
+                <p class="empty-desc">Configure an AI provider in your config to get started.</p>
               </div>
             `
           : this.providers.map(
@@ -247,12 +237,8 @@ export class ScModelsView extends GatewayAwareLitElement {
                     <span class="card-name ${p.is_default ? "default" : ""}"
                       >${p.name ?? "unnamed"}</span
                     >
-                    ${p.is_default
-                      ? html`<span class="badge default">default</span>`
-                      : nothing}
-                    ${p.native_tools
-                      ? html`<span class="badge">native tools</span>`
-                      : nothing}
+                    ${p.is_default ? html`<span class="badge default">default</span>` : nothing}
+                    ${p.native_tools ? html`<span class="badge">native tools</span>` : nothing}
                   </div>
                   <div class="key-status ${p.has_key ? "has" : "missing"}">
                     ${p.has_key ? "✓ API key" : "✗ No API key"}

@@ -13,7 +13,7 @@ class MockWebSocket {
   send = vi.fn();
   close = vi.fn();
 
-  constructor(_url?: string) {
+  constructor(_url?: string | URL, _protocols?: string | string[]) {
     mockWsInstances.push(this);
   }
 
@@ -33,20 +33,35 @@ const OriginalWebSocket = globalThis.WebSocket;
 
 beforeEach(() => {
   mockWsInstances.length = 0;
-  (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket =
-    MockWebSocket as unknown as typeof WebSocket;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).WebSocket = MockWebSocket;
 });
 
 afterEach(() => {
-  (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = OriginalWebSocket;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).WebSocket = OriginalWebSocket;
 });
 
 async function connectClient(client: GatewayClient, url = "ws://test") {
   client.connect(url);
-  const ws = mockWsInstances[mockWsInstances.length - 1];
-  if (ws) ws.simulateOpen();
+  const ws = mockWsInstances[mockWsInstances.length - 1]!;
+  ws.simulateOpen();
   await new Promise((r) => setTimeout(r, 0));
-  return ws!;
+  // Respond to the automatic "connect" handshake if one was sent
+  if (ws.send.mock.calls.length > 0) {
+    const handshake = JSON.parse(ws.send.mock.calls[0]![0] as string);
+    if (handshake.method === "connect") {
+      ws.simulateMessage({
+        id: handshake.id,
+        type: "res",
+        ok: true,
+        payload: { features: {} },
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+  ws.send.mockClear();
+  return ws;
 }
 
 describe("GatewayClient", () => {
@@ -84,10 +99,9 @@ describe("GatewayClient", () => {
 
     it("clears pending requests", async () => {
       const client = new GatewayClient();
-      const ws = await connectClient(client);
+      await connectClient(client);
 
       const reqPromise = client.request("test.method", {}, 5000);
-      // Don't simulate response - disconnect first
       client.disconnect();
 
       await expect(reqPromise).rejects.toThrow("Disconnected");

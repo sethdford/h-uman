@@ -40,9 +40,7 @@ function renderMarkdown(text: string): (TemplateResult | string)[] {
       remaining = remaining.slice(inlineCode[0].length);
     } else if (link) {
       parts.push(
-        html`<a href="${link[2]}" target="_blank" rel="noopener noreferrer"
-          >${link[1]}</a
-        >`,
+        html`<a href="${link[2]}" target="_blank" rel="noopener noreferrer">${link[1]}</a>`,
       );
       remaining = remaining.slice(link[0].length);
     } else if (bold) {
@@ -56,8 +54,7 @@ function renderMarkdown(text: string): (TemplateResult | string)[] {
       remaining = remaining.slice(1);
     } else {
       const nextSpecial = remaining.search(/(?:\n|```|`|\[|\*\*|\*)/);
-      const chunk =
-        nextSpecial >= 0 ? remaining.slice(0, nextSpecial) : remaining;
+      const chunk = nextSpecial >= 0 ? remaining.slice(0, nextSpecial) : remaining;
       if (chunk) parts.push(chunk);
       remaining = nextSpecial >= 0 ? remaining.slice(nextSpecial) : "";
     }
@@ -141,8 +138,7 @@ export class ScChatView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: 0.25rem;
-      animation: sc-slide-up var(--sc-duration-normal, 200ms)
-        var(--sc-ease-out, ease) both;
+      animation: sc-slide-up var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease) both;
     }
     .message.user {
       align-self: flex-end;
@@ -416,10 +412,7 @@ export class ScChatView extends GatewayAwareLitElement {
     if (!gw) return;
     this.connectionStatus = gw.status;
     gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
-    gw.addEventListener(
-      GatewayClientClass.EVENT_STATUS,
-      this.statusHandler as EventListener,
-    );
+    gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
   }
 
   protected override async load(): Promise<void> {
@@ -432,11 +425,7 @@ export class ScChatView extends GatewayAwareLitElement {
       const res = await this.gateway.request<{
         messages?: { role: string; content: string }[];
       }>("chat.history", { sessionKey: this.sessionKey });
-      if (
-        res?.messages &&
-        Array.isArray(res.messages) &&
-        res.messages.length > 0
-      ) {
+      if (res?.messages && Array.isArray(res.messages) && res.messages.length > 0) {
         this.messages = res.messages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content ?? "",
@@ -460,14 +449,8 @@ export class ScChatView extends GatewayAwareLitElement {
 
   override disconnectedCallback(): void {
     const gw = this.gateway;
-    gw?.removeEventListener(
-      GatewayClientClass.EVENT_GATEWAY,
-      this.messageHandler,
-    );
-    gw?.removeEventListener(
-      GatewayClientClass.EVENT_STATUS,
-      this.statusHandler as EventListener,
-    );
+    gw?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
+    gw?.removeEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
     super.disconnectedCallback();
   }
 
@@ -480,10 +463,7 @@ export class ScChatView extends GatewayAwareLitElement {
     if (!detail?.event) return;
     const payload = detail.payload ?? {};
     if (detail.event === EVENT_NAMES.ERROR) {
-      const msg =
-        (payload.message as string) ??
-        (payload.error as string) ??
-        "Unknown error";
+      const msg = (payload.message as string) ?? (payload.error as string) ?? "Unknown error";
       this.errorBanner = msg;
       this.requestUpdate();
     }
@@ -553,8 +533,7 @@ export class ScChatView extends GatewayAwareLitElement {
           : payload.args != null
             ? JSON.stringify(payload.args)
             : undefined;
-      const result =
-        payload.result != null ? String(payload.result) : undefined;
+      const result = payload.result != null ? String(payload.result) : undefined;
       const existing = this.toolCalls.find((t) => t.id === id);
       if (!existing) {
         this.toolCalls = [
@@ -611,10 +590,7 @@ export class ScChatView extends GatewayAwareLitElement {
   private async send(): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || !this.gateway) return;
-    this.messages = [
-      ...this.messages,
-      { role: "user", content: text, ts: Date.now() },
-    ];
+    this.messages = [...this.messages, { role: "user", content: text, ts: Date.now() }];
     this.inputValue = "";
     this.isWaiting = true;
     this.resizeTextarea();
@@ -626,8 +602,7 @@ export class ScChatView extends GatewayAwareLitElement {
       });
     } catch (err) {
       this.isWaiting = false;
-      this.errorBanner =
-        err instanceof Error ? err.message : "Failed to send message";
+      this.errorBanner = err instanceof Error ? err.message : "Failed to send message";
     }
   }
 
@@ -661,22 +636,46 @@ export class ScChatView extends GatewayAwareLitElement {
           ? html`
               <div class="error-banner">
                 <span>${this.errorBanner}</span>
-                <button
-                  @click=${() => (this.errorBanner = "")}
-                  aria-label="Dismiss"
-                >
-                  ×
-                </button>
+                <button @click=${() => (this.errorBanner = "")} aria-label="Dismiss">×</button>
               </div>
             `
           : nothing}
         <div id="message-list" class="messages">
+          ${this.messages.length === 0 && this.toolCalls.length === 0
+            ? html`
+                <div
+                  style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--sc-text-muted);gap:var(--sc-space-md);text-align:center;padding:var(--sc-space-2xl);"
+                >
+                  <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    style="opacity:0.4"
+                  >
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <div>
+                    <p
+                      style="margin:0;font-size:var(--sc-text-lg);font-weight:var(--sc-weight-semibold);color:var(--sc-text)"
+                    >
+                      Start a conversation
+                    </p>
+                    <p style="margin:var(--sc-space-xs) 0 0;font-size:var(--sc-text-sm)">
+                      Type a message below to begin chatting with SeaClaw.
+                    </p>
+                  </div>
+                </div>
+              `
+            : nothing}
           ${this.messages.map(
             (m) => html`
               <div class="message ${m.role}">
-                ${m.role === "assistant"
-                  ? renderMarkdown(m.content)
-                  : m.content}
+                ${m.role === "assistant" ? renderMarkdown(m.content) : m.content}
                 ${m.ts != null
                   ? html`<span class="message-meta">${formatTime(m.ts)}</span>`
                   : nothing}
@@ -698,13 +697,9 @@ export class ScChatView extends GatewayAwareLitElement {
                     }
                   }}
                 >
-                  ${t.status === "running"
-                    ? html`<span class="tool-spinner"></span>`
-                    : nothing}
+                  ${t.status === "running" ? html`<span class="tool-spinner"></span>` : nothing}
                   <span class="tool-name">Tool: ${t.name}</span>
-                  <span class="tool-expand">
-                    ${this.expandedTools.has(t.id) ? "▼" : "▶"}
-                  </span>
+                  <span class="tool-expand"> ${this.expandedTools.has(t.id) ? "▼" : "▶"} </span>
                 </div>
                 ${this.expandedTools.has(t.id)
                   ? html`
@@ -717,9 +712,7 @@ export class ScChatView extends GatewayAwareLitElement {
                           : nothing}
                         ${t.result != null
                           ? html`
-                              <div class="label" style="margin-top: 0.5rem">
-                                Output
-                              </div>
+                              <div class="label" style="margin-top: 0.5rem">Output</div>
                               <div>${t.result}</div>
                             `
                           : t.status === "running"
@@ -733,11 +726,8 @@ export class ScChatView extends GatewayAwareLitElement {
           )}
           ${this.isWaiting
             ? html`<div class="thinking">
-                Thinking<span class="typing-dots"
-                  ><span></span><span></span><span></span></span
-                ><button class="abort-btn" @click=${() => this.handleAbort()}>
-                  Abort
-                </button>
+                Thinking<span class="typing-dots"><span></span><span></span><span></span></span
+                ><button class="abort-btn" @click=${() => this.handleAbort()}>Abort</button>
               </div>`
             : nothing}
         </div>

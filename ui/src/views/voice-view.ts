@@ -1,4 +1,4 @@
-import { html, css, nothing } from "lit";
+import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { GatewayClient } from "../gateway.js";
 import { GatewayClient as GatewayClientClass } from "../gateway.js";

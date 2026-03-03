@@ -31,32 +31,34 @@ struct sc_span {
     size_t attr_count;
 };
 
-static void otel_log(void *ctx, const char *level, size_t level_len,
-    const char *msg, size_t msg_len)
-{
-    (void)ctx; (void)level; (void)level_len; (void)msg; (void)msg_len;
+static void otel_record_event(void *ctx, const sc_observer_event_t *event) {
+    (void)ctx; (void)event;
 }
 
-static void otel_metric(void *ctx, const char *name, size_t name_len, double value) {
-    (void)ctx; (void)name; (void)name_len; (void)value;
+static void otel_record_metric(void *ctx, const sc_observer_metric_t *metric) {
+    (void)ctx; (void)metric;
 }
+
+static void otel_flush(void *ctx) { (void)ctx; }
 
 static const char *otel_observer_name(void *ctx) {
     (void)ctx;
     return "otel";
 }
 
-static void otel_deinit(void *ctx, sc_allocator_t *alloc) {
+static void otel_deinit(void *ctx) {
     sc_otel_ctx_t *c = (sc_otel_ctx_t *)ctx;
-    if (!c) return;
+    if (!c || !c->alloc) return;
+    sc_allocator_t *alloc = c->alloc;
     if (c->endpoint) alloc->free(alloc->ctx, c->endpoint, strlen(c->endpoint) + 1);
     if (c->service_name) alloc->free(alloc->ctx, c->service_name, strlen(c->service_name) + 1);
     alloc->free(alloc->ctx, c, sizeof(*c));
 }
 
 static const sc_observer_vtable_t otel_vtable = {
-    .log = otel_log,
-    .metric = otel_metric,
+    .record_event = otel_record_event,
+    .record_metric = otel_record_metric,
+    .flush = otel_flush,
     .name = otel_observer_name,
     .deinit = otel_deinit,
 };

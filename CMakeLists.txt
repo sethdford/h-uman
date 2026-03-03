@@ -129,6 +129,7 @@ if(SC_ENABLE_ALL_CHANNELS)
         src/channels/qq.c
         src/channels/maixcam.c
         src/channels/dispatch.c
+        src/channels/thread_binding.c
     )
 endif()
 
@@ -252,6 +253,8 @@ set(SC_CORE_SOURCES
     src/agent/memory_loader.c
     src/agent/dispatcher.c
     src/agent/compaction.c
+    src/agent/spawn.c
+    src/agent/mailbox.c
     src/agent/planner.c
     src/agent/cli.c
     src/agent/tui.c
@@ -325,6 +328,7 @@ set(SC_CORE_SOURCES
     src/tools/memory_forget.c
     src/tools/message.c
     src/tools/delegate.c
+    src/tools/database.c
     src/tools/spawn.c
     src/tools/cron_add.c
     src/tools/cron_list.c
@@ -345,6 +349,12 @@ set(SC_CORE_SOURCES
     src/tools/image.c
     src/tools/screenshot.c
     src/tools/claude_code.c
+    src/tools/agent_spawn.c
+    src/tools/agent_query.c
+    src/tools/canvas.c
+    src/tools/apply_patch.c
+    src/tools/notebook.c
+    src/tools/diff.c
     src/tools/factory.c
     src/mcp_server.c
     src/peripherals/arduino.c
@@ -352,6 +362,11 @@ set(SC_CORE_SOURCES
     src/peripherals/rpi.c
     src/peripherals/factory.c
     src/hardware.c
+    src/channels/thread_binding.c
+    src/security/policy_engine.c
+    src/security/replay.c
+    src/observability/otel.c
+    src/plugins/registry.c
     src/skillforge.c
     src/onboard.c
     src/interactions/choices.c
@@ -758,7 +773,7 @@ endif()
 if(SC_ENABLE_DINGTALK)
     target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_DINGTALK=1)
 endif()
-target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_SIGNAL=1 SC_HAS_NOSTR=1 SC_HAS_QQ=1 SC_HAS_MAIXCAM=1 SC_HAS_DISPATCH=1)
+target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_SIGNAL=1 SC_HAS_NOSTR=1 SC_HAS_QQ=1 SC_HAS_MAIXCAM=1 SC_HAS_DISPATCH=1 SC_HAS_THREAD_BINDING=1)
 if(SC_ENABLE_NONE_ENGINE)
     target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_NONE_ENGINE=1)
 endif()

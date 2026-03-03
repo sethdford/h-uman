@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing } from "lit";
+import { html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { formatDate } from "../utils.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
@@ -245,10 +245,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
       <div class="profile-card">
         <div class="profile-header">
           <span class="profile-title">Agent profile</span>
-          <button
-            class="edit-btn"
-            @click=${() => this.dispatchNavigate("config")}
-          >
+          <button class="edit-btn" @click=${() => this.dispatchNavigate("config")}>
             Edit Config
           </button>
         </div>
@@ -266,9 +263,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
             Max tokens: <strong>${this.config.max_tokens ?? "—"}</strong>
           </div>
           <div class="profile-item">Tools: <strong>${toolCount}</strong></div>
-          <div class="profile-item">
-            Channels: <strong>${channelCount}</strong>
-          </div>
+          <div class="profile-item">Channels: <strong>${channelCount}</strong></div>
         </div>
       </div>
 
@@ -282,14 +277,12 @@ export class ScAgentsView extends GatewayAwareLitElement {
                   <div class="session-info">
                     <div class="session-key">${s.label ?? s.key ?? "—"}</div>
                     <div class="session-meta">
-                      ${s.turn_count ?? 0} turns · Last:
-                      ${formatDate(s.last_active)}
+                      ${s.turn_count ?? 0} turns · Last: ${formatDate(s.last_active)}
                     </div>
                   </div>
                   <button
                     class="resume-btn"
-                    @click=${() =>
-                      this.dispatchNavigate("chat:" + (s.key ?? "default"))}
+                    @click=${() => this.dispatchNavigate("chat:" + (s.key ?? "default"))}
                   >
                     Resume
                   </button>
@@ -300,19 +293,13 @@ export class ScAgentsView extends GatewayAwareLitElement {
 
       <div class="stats-bar">
         <span class="stats-item"
-          >Sessions:
-          <span class="stats-value">${this.sessions.length}</span></span
+          >Sessions: <span class="stats-value">${this.sessions.length}</span></span
         >
         <span class="stats-item"
-          >Total turns:
-          <span class="stats-value">${this.totalTurns}</span></span
+          >Total turns: <span class="stats-value">${this.totalTurns}</span></span
         >
-        <span class="stats-item"
-          >Channels: <span class="stats-value">${channelCount}</span></span
-        >
-        <span class="stats-item"
-          >Tools: <span class="stats-value">${toolCount}</span></span
-        >
+        <span class="stats-item">Channels: <span class="stats-value">${channelCount}</span></span>
+        <span class="stats-item">Tools: <span class="stats-value">${toolCount}</span></span>
       </div>
     `;
   }

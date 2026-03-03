@@ -36,6 +36,13 @@
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/spi.h"
 #include "seaclaw/tools/claude_code.h"
+#include "seaclaw/tools/database.h"
+#include "seaclaw/tools/diff.h"
+#include "seaclaw/tools/notebook.h"
+#include "seaclaw/tools/canvas.h"
+#include "seaclaw/tools/apply_patch.h"
+#include "seaclaw/tools/agent_query.h"
+#include "seaclaw/tools/agent_spawn.h"
 #include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
@@ -43,7 +50,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_TOOLS_COUNT 36
+#define SC_TOOLS_COUNT 43
 
 static sc_error_t add_tool_ws(sc_allocator_t *alloc,
     sc_tool_t *tools, size_t *idx,
@@ -215,6 +222,34 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc,
     idx++;
 
     err = sc_claude_code_create(alloc, policy, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_database_tool_create(alloc, NULL, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_diff_tool_create(alloc, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_notebook_create(alloc, policy, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_canvas_create(alloc, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_apply_patch_create(alloc, policy, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_agent_query_tool_create(alloc, NULL, &tools[idx]);
+    if (err != SC_OK) goto fail;
+    idx++;
+
+    err = sc_agent_spawn_tool_create(alloc, NULL, &tools[idx]);
     if (err != SC_OK) goto fail;
     idx++;
 

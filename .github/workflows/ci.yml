@@ -10,46 +10,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install sqlite3
-
-      - name: Build (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON -DSC_ENABLE_ASAN=ON
-          cmake --build . -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
-
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_ASAN=ON
-          cmake --build . -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
-
-      - name: Test (Linux)
-        if: runner.os == 'Linux'
-        run: cd build && ASAN_OPTIONS=detect_leaks=0:detect_stack_use_after_return=0 ./seaclaw_tests
-
-      - name: Test (macOS)
-        if: runner.os == 'macOS'
-        run: cd build && ./seaclaw_tests
+      - uses: ./.github/actions/setup-build
+        with:
+          enable-asan: "true"
+          enable-curl: ${{ runner.os == 'Linux' && 'true' || 'false' }}
+          enable-all-channels: "true"
+      - uses: ./.github/actions/run-tests
+        with:
+          asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
 
   release-size:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: brew install sqlite3
-      - run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
-          cmake --build . -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: MinSizeRel
+          enable-lto: "true"
+          enable-all-channels: "true"
       - run: ls -lh build/seaclaw
       - run: |
           SIZE=$(stat -f%z build/seaclaw)
@@ -99,70 +77,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify completions are parseable
-        run: |
-          bash -n completions/seaclaw.bash
-          echo "bash completions: OK"
+        run: bash -n completions/seaclaw.bash
       - name: Verify completions cover all subcommands
         run: |
           CMDS=$(grep -oP '\{"[a-z-]+", "' src/main.c | sed 's/{"//;s/", "//' | sort)
           for cmd in $CMDS; do
-            if ! grep -q "$cmd" completions/seaclaw.bash; then
-              echo "MISSING in bash completions: $cmd"
-              exit 1
-            fi
-            if ! grep -q "$cmd" completions/seaclaw.zsh; then
-              echo "MISSING in zsh completions: $cmd"
-              exit 1
-            fi
+            grep -q "$cmd" completions/seaclaw.bash || { echo "MISSING in bash: $cmd"; exit 1; }
+            grep -q "$cmd" completions/_seaclaw || { echo "MISSING in zsh: $cmd"; exit 1; }
           done
-          echo "All subcommands covered in completions"
-
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build --target release -t seaclaw:ci-test .
-      - name: Verify binary runs in container
-        run: docker run --rm seaclaw:ci-test --version
-
-  website:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: website/package-lock.json
-      - run: cd website && npm ci && npm run build
-      - name: Verify dist exists
-        run: test -d website/dist
 
   format:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check C formatting
-        run: |
-          find src include -name '*.c' -o -name '*.h' | head -50 | \
-            xargs clang-format --dry-run -Werror 2>&1 | head -20
-          if [ $? -ne 0 ]; then
-            echo "Run: find src include -name '*.[ch]' | xargs clang-format -i"
-            exit 1
-          fi
+        run: find src include -name '*.c' -o -name '*.h' | xargs clang-format --dry-run -Werror
 
   static-analysis:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev clang-tidy
-      - name: Configure
-        run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - uses: ./.github/actions/setup-build
+        with:
+          enable-curl: "true"
+          enable-all-channels: "true"
+          extra-apt: clang-tidy
+          extra-cmake-flags: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
       - name: Run clang-tidy on changed files
         run: |
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
@@ -180,26 +121,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev lcov
-      - name: Build with coverage
-        run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON \
-            -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
-          cmake --build . -j$(nproc)
-      - name: Run tests
-        run: cd build && ./seaclaw_tests
+      - uses: ./.github/actions/setup-build
+        with:
+          enable-curl: "true"
+          enable-all-channels: "true"
+          enable-coverage: "true"
+          extra-apt: lcov
+      - uses: ./.github/actions/run-tests
       - name: Generate coverage report
         run: |
           lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch
           lcov --remove coverage.info '/usr/*' '*/tests/*' '*/vendor/*' --output-file coverage.info
           lcov --list coverage.info | tail -20
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.info
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target release -t seaclaw:ci-test .
+      - run: docker run --rm seaclaw:ci-test --version
+
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: cd website && npm ci && npm run build
+      - run: test -d website/dist
 
   nix:
     runs-on: ubuntu-latest
@@ -210,3 +166,25 @@ jobs:
           nix_path: nixpkgs=channel:nixpkgs-unstable
       - run: nix build --no-link --print-build-logs
       - run: nix flake check
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for stale branding
+        run: |
+          if grep -ri "nullclaw" docs/ skills/ sdk/ --include='*.md' -l 2>/dev/null | grep -v plans/; then
+            echo "Found 'NullClaw' references — update to 'SeaClaw'"
+            exit 1
+          fi
+      - name: Verify docs have frontmatter
+        run: |
+          MISSING=""
+          for f in $(find docs -name '*.md' -not -path '*/plans/*'); do
+            if ! head -1 "$f" | grep -q '^---'; then
+              MISSING="$MISSING $f"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Docs missing frontmatter:$MISSING"
+          fi

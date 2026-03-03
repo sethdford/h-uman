@@ -304,7 +304,10 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd,
     const char *method, const char *path,
     const char *body, size_t body_len,
     const char *client_ip, const char *sig_header) {
-    (void)method;
+
+    fprintf(stderr, "[gateway] %s %s %s body=%zu\n",
+        method ? method : "?", path ? path : "/",
+        client_ip ? client_ip : "unknown", body_len);
 
     if (!rate_limit_allow(gw, client_ip)) {
         send_json(fd, 429, "{\"error\":\"rate limited\"}");
@@ -356,7 +359,13 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd,
         return;
     }
 
-    /* Static file serving (Control UI) */
+    /* API namespace always returns 404 for unknown paths */
+    if (strncmp(path, "/api/", 5) == 0) {
+        send_json(fd, 404, "{\"error\":\"not found\"}");
+        return;
+    }
+
+    /* Static file serving (Control UI) — SPA fallback for non-API routes */
     if (gw->config.control_ui_dir) {
         if (serve_static_file(fd, gw->config.control_ui_dir, path))
             return;
