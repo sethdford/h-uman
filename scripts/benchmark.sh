@@ -17,8 +17,9 @@ warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
 
 case "${1:-}" in
     --help|-h)
-        printf "Usage: %s [path/to/seaclaw] [--compare FILE]\n" "$0"
+        printf "Usage: %s [path/to/seaclaw] [--compare FILE] [--save-history]\n" "$0"
         printf "Measures: binary size, symbols, sections, startup time, memory, test metrics.\n"
+        printf "  --save-history  Append results to benchmark-history.json\n"
         exit 0
         ;;
 esac
@@ -37,6 +38,7 @@ fi
 COMPARE_FILE=""
 SEACLAW_BIN=""
 TESTS_BIN=""
+SAVE_HISTORY=0
 
 # Parse args
 while [ $# -gt 0 ]; do
@@ -47,6 +49,10 @@ while [ $# -gt 0 ]; do
             ;;
         --compare=*)
             COMPARE_FILE="${1#--compare=}"
+            shift
+            ;;
+        --save-history)
+            SAVE_HISTORY=1
             shift
             ;;
         *)
@@ -339,6 +345,32 @@ echo ""
 echo "═══════════════════════════════════════════════"
 echo "Results saved to: $JSON_FILE"
 echo ""
+
+# --- Append to history ---
+if [ "$SAVE_HISTORY" = "1" ]; then
+    HISTORY_FILE="${ROOT_DIR}/benchmark-history.json"
+    GIT_REV=$(cd "$ROOT_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    GIT_DATE=$(cd "$ROOT_DIR" && git log -1 --format=%ci 2>/dev/null || date -u +"%Y-%m-%d %H:%M:%S %z")
+    ENTRY=$(cat <<EOFH
+{"date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","git_rev":"${GIT_REV}","git_date":"${GIT_DATE}","binary_kb":$((BINARY_SIZE/1024)),"symbols":${SYMBOL_COUNT},"startup_avg_ms":${STARTUP_AVG},"rss_version":${VERSION_RSS},"rss_tests":${TESTS_RSS},"tests":${TEST_COUNT},"test_rate":${RATE}}
+EOFH
+)
+    if [ -f "$HISTORY_FILE" ]; then
+        # Remove trailing ] and newline, append entry, close array
+        TMP="${HISTORY_FILE}.tmp"
+        # Strip trailing whitespace/newlines/], add comma + entry + ]
+        python3 -c "
+import json, sys
+with open('$HISTORY_FILE') as f: h = json.load(f)
+h.append(json.loads('$ENTRY'))
+with open('$HISTORY_FILE', 'w') as f: json.dump(h, f, indent=2)
+print('  Appended entry #' + str(len(h)))
+" 2>/dev/null || echo "  Warning: could not append to history (python3 not found)"
+    else
+        printf '[\n  %s\n]\n' "$ENTRY" > "$HISTORY_FILE"
+        echo "  Created $HISTORY_FILE with first entry"
+    fi
+fi
 
 # --- Compare with previous ---
 if [ -n "$COMPARE_FILE" ] && [ -f "$COMPARE_FILE" ]; then

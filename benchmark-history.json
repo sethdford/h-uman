@@ -1,0 +1,26 @@
+[
+  {
+    "date": "2026-03-03T10:31:01Z",
+    "git_rev": "1a54cdf",
+    "git_date": "2026-03-03 05:30:19 -0500",
+    "binary_kb": 365,
+    "symbols": 175,
+    "startup_avg_ms": 6,
+    "rss_version": 5947392,
+    "rss_tests": 6209536,
+    "tests": 2174,
+    "test_rate": 1070
+  },
+  {
+    "date": "2026-03-03T10:31:15Z",
+    "git_rev": "1a54cdf",
+    "git_date": "2026-03-03 05:30:19 -0500",
+    "binary_kb": 365,
+    "symbols": 175,
+    "startup_avg_ms": 7,
+    "rss_version": 5947392,
+    "rss_tests": 6275072,
+    "tests": 2174,
+    "test_rate": 1070
+  }
+]

@@ -16,6 +16,9 @@ cmake_install.cmake
 compile_commands.json
 .cache/
 
+# Benchmark output (transient)
+benchmark-results.json
+
 # Runtime data
 *.db
 *.db-journal
