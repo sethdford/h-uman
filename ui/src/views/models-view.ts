@@ -136,51 +136,66 @@ export class ScModelsView extends GatewayAwareLitElement {
       return html`
         <h2>Models & Providers</h2>
         <div class="grid">
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
         </div>
       `;
     }
 
     return html`
       <h2>Models & Providers</h2>
-      ${this.error ? html`<div class="error-banner">${this.error}</div>` : nothing}
-      <div class="info-bar">
-        <span class="info-item"
-          ><strong>Default provider:</strong> ${this.defaultProvider || "—"}</span
-        >
-        <span class="info-item"><strong>Default model:</strong> ${this.defaultModel || "—"}</span>
-      </div>
+      ${
+        this.error
+          ? html`<sc-empty-state
+              icon="⚠️"
+              heading="Error"
+              description=${this.error}
+            ></sc-empty-state>`
+          : nothing
+      }
+      <sc-card style="margin-bottom: var(--sc-space-lg);">
+        <div class="info-bar">
+          <span class="info-item"
+            ><strong>Default provider:</strong> ${this.defaultProvider || "—"}</span
+          >
+          <span class="info-item"><strong>Default model:</strong> ${this.defaultModel || "—"}</span>
+        </div>
+      </sc-card>
       <div class="grid">
-        ${this.providers.length === 0
-          ? html`
-              <div class="empty-state">
-                <div class="empty-icon">🤖</div>
-                <p class="empty-title">No providers configured</p>
-                <p class="empty-desc">Configure an AI provider in your config to get started.</p>
-              </div>
-            `
-          : this.providers.map(
-              (p) => html`
-                <div class="card">
-                  <div class="card-header">
-                    <span class="card-name ${p.is_default ? "default" : ""}"
-                      >${p.name ?? "unnamed"}</span
-                    >
-                    ${p.is_default ? html`<span class="badge default">default</span>` : nothing}
-                    ${p.native_tools ? html`<span class="badge">native tools</span>` : nothing}
-                  </div>
-                  <div class="key-status ${p.has_key ? "has" : "missing"}">
-                    ${p.has_key ? "✓ API key" : "✗ No API key"}
-                  </div>
-                  <div class="card-url" title=${p.base_url ?? ""}>
-                    ${this.truncateUrl(p.base_url)}
-                  </div>
-                </div>
-              `,
-            )}
-      </div>
+        ${
+          this.providers.length === 0
+            ? html`
+                <sc-empty-state
+                  icon="🤖"
+                  heading="No providers configured"
+                  description="Configure an AI provider in your config to get started."
+                ></sc-empty-state>
+              `
+            : this.providers.map(
+                (p) => html`
+                  <sc-card>
+                    <div class="card-header">
+                      <span class="card-name ${p.is_default ? "default" : ""}"
+                        >${p.name ?? "unnamed"}</span
+                      >
+                      ${p.is_default ? html`<sc-badge variant="info">default</sc-badge>` : nothing}
+                      ${p.native_tools
+                        ? html`<sc-badge variant="neutral">native tools</sc-badge>`
+                        : nothing}
+                    </div>
+                    <div class="key-status ${p.has_key ? "has" : "missing"}">
+                      ${p.has_key ? "✓ API key" : "✗ No API key"}
+                    </div>
+                    <div class="card-url" title=${p.base_url ?? ""}>
+                      ${this.truncateUrl(p.base_url)}
+                    </div>
+                  </sc-card>
+                `,
+              )
+        }
+        </div>
+      </sc-card>
     `;
   }
 }

@@ -53,12 +53,12 @@ export class ScSessionsView extends GatewayAwareLitElement {
     }
     .session-item {
       cursor: pointer;
+      border-radius: var(--sc-radius-lg);
+      outline: 2px solid transparent;
+      outline-offset: -2px;
     }
-    .session-item:hover {
-      --sc-border-subtle: var(--sc-text-muted);
-    }
-    .session-item.active sc-card {
-      border-color: var(--sc-accent);
+    .session-item.active {
+      outline-color: var(--sc-accent);
     }
     .session-key {
       font-size: var(--sc-text-base);
@@ -82,33 +82,31 @@ export class ScSessionsView extends GatewayAwareLitElement {
     .detail-header {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
+      gap: var(--sc-space-sm);
+      margin-bottom: var(--sc-space-md);
       flex-wrap: wrap;
     }
     .detail-header h3 {
       margin: 0;
-      font-size: 1rem;
-      font-weight: 600;
+      font-size: var(--sc-text-lg);
+      font-weight: var(--sc-weight-semibold);
       flex: 1;
     }
     .history {
       flex: 1;
       overflow-y: auto;
+    }
+    sc-card.history {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
-      padding: 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
+      gap: var(--sc-space-sm);
     }
     .msg {
       max-width: 85%;
-      padding: 0.625rem 1rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       border-radius: var(--sc-radius);
-      font-size: 0.875rem;
-      line-height: 1.5;
+      font-size: var(--sc-text-base);
+      line-height: var(--sc-leading-normal);
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -123,64 +121,24 @@ export class ScSessionsView extends GatewayAwareLitElement {
       border: 1px solid var(--sc-border);
       color: var(--sc-text);
     }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
-    }
     .rename-row {
       display: flex;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
       align-items: center;
     }
     .rename-row input {
-      padding: 0.375rem 0.75rem;
+      padding: var(--sc-space-sm) var(--sc-space-sm);
       background: var(--sc-bg);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
       color: var(--sc-text);
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       flex: 1;
     }
-    .error {
-      color: var(--sc-error);
-      font-size: 0.875rem;
+    .history-inner {
+      background: var(--sc-bg-surface);
+      border: 1px solid var(--sc-border);
+      border-radius: var(--sc-radius);
     }
     @media (max-width: 768px) {
       .layout {
@@ -294,22 +252,28 @@ export class ScSessionsView extends GatewayAwareLitElement {
     return html`
       <div class="header">
         <h2>Sessions</h2>
-        <button class="btn" @click=${() => this.loadSessions()}>Refresh</button>
+        <sc-button variant="secondary" @click=${() => this.loadSessions()}>Refresh</sc-button>
       </div>
-      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
+      ${this.error
+        ? html`<sc-empty-state
+            icon="⚠️"
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
+        : nothing}
       ${this.loading
         ? html`
             <div class="layout">
               <div class="session-list">
-                <div class="session-item skeleton skeleton-card"></div>
-                <div class="session-item skeleton skeleton-card"></div>
-                <div class="session-item skeleton skeleton-card"></div>
-                <div class="session-item skeleton skeleton-card"></div>
+                <sc-skeleton variant="card" height="72px"></sc-skeleton>
+                <sc-skeleton variant="card" height="72px"></sc-skeleton>
+                <sc-skeleton variant="card" height="72px"></sc-skeleton>
+                <sc-skeleton variant="card" height="72px"></sc-skeleton>
               </div>
               <div class="detail">
-                <div class="history">
-                  <div class="skeleton skeleton-line"></div>
-                </div>
+                <sc-card class="history-inner" style="flex: 1; min-height: 120px;">
+                  <sc-skeleton variant="line" width="80%"></sc-skeleton>
+                </sc-card>
               </div>
             </div>
           `
@@ -318,13 +282,11 @@ export class ScSessionsView extends GatewayAwareLitElement {
               <div class="session-list">
                 ${this.sessions.length === 0
                   ? html`
-                      <div class="empty-state">
-                        <div class="empty-icon">💬</div>
-                        <p class="empty-title">No conversations yet</p>
-                        <p class="empty-desc">
-                          Start a chat to see your conversation history here.
-                        </p>
-                      </div>
+                      <sc-empty-state
+                        icon="💬"
+                        heading="No conversations yet"
+                        description="Start a chat to see your conversation history here."
+                      ></sc-empty-state>
                     `
                   : this.sessions.map(
                       (s) => html`
@@ -332,10 +294,12 @@ export class ScSessionsView extends GatewayAwareLitElement {
                           class="session-item ${this.selectedKey === s.key ? "active" : ""}"
                           @click=${() => this.selectSession(s.key ?? "")}
                         >
-                          <div class="session-key">${s.label || s.key || "unnamed"}</div>
-                          <div class="session-meta">
-                            ${s.turn_count ?? 0} turns · ${formatRelative(s.last_active)}
-                          </div>
+                          <sc-card>
+                            <div class="session-key">${s.label || s.key || "unnamed"}</div>
+                            <div class="session-meta">
+                              ${s.turn_count ?? 0} turns · ${formatRelative(s.last_active)}
+                            </div>
+                          </sc-card>
                         </div>
                       `,
                     )}
@@ -353,46 +317,51 @@ export class ScSessionsView extends GatewayAwareLitElement {
                                   @input=${(e: Event) =>
                                     (this.renameValue = (e.target as HTMLInputElement).value)}
                                 />
-                                <button class="btn btn-accent" @click=${() => this.saveRename()}>
+                                <sc-button variant="primary" @click=${() => this.saveRename()}>
                                   Save
-                                </button>
-                                <button class="btn" @click=${() => (this.renaming = false)}>
+                                </sc-button>
+                                <sc-button
+                                  variant="secondary"
+                                  @click=${() => (this.renaming = false)}
+                                >
                                   Cancel
-                                </button>
+                                </sc-button>
                               </div>
                             `
                           : html`
                               <h3>${sel.label || sel.key}</h3>
-                              <button
-                                class="btn btn-accent"
+                              <sc-button
+                                variant="primary"
                                 @click=${() =>
                                   this.dispatchNavigate("chat:" + (this.selectedKey || "default"))}
                               >
                                 Resume
-                              </button>
-                              <button class="btn" @click=${() => this.startRename()}>Rename</button>
+                              </sc-button>
+                              <sc-button variant="secondary" @click=${() => this.startRename()}>
+                                Rename
+                              </sc-button>
                               ${this.confirmDelete
                                 ? html`
-                                    <button
-                                      class="btn-danger btn"
+                                    <sc-button
+                                      variant="destructive"
                                       @click=${() => this.deleteSession()}
                                     >
                                       Confirm Delete
-                                    </button>
-                                    <button
-                                      class="btn"
+                                    </sc-button>
+                                    <sc-button
+                                      variant="secondary"
                                       @click=${() => (this.confirmDelete = false)}
                                     >
                                       Cancel
-                                    </button>
+                                    </sc-button>
                                   `
                                 : html`
-                                    <button
-                                      class="btn-danger btn"
+                                    <sc-button
+                                      variant="destructive"
                                       @click=${() => (this.confirmDelete = true)}
                                     >
                                       Delete
-                                    </button>
+                                    </sc-button>
                                   `}
                             `}
                       </div>

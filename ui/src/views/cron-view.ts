@@ -1,6 +1,10 @@
-import { html, css } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
+import "../components/sc-button.js";
 
 interface CronJob {
   id?: number;
@@ -22,54 +26,24 @@ export class ScCronView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1rem;
+      margin-bottom: var(--sc-space-md);
     }
     h2 {
       margin: 0;
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
-    }
-    .btn {
-      padding: 0.5rem 1rem;
-      background: var(--sc-accent);
-      color: white;
-      border: none;
-      border-radius: var(--sc-radius);
-      cursor: pointer;
-      font-size: 0.875rem;
-    }
-    .btn:hover {
-      background: var(--sc-accent-hover);
-    }
-    .btn-secondary {
-      background: var(--sc-bg-elevated);
-      color: var(--sc-text);
-    }
-    .btn-secondary:hover {
-      background: var(--sc-border);
-    }
-    .btn-danger {
-      background: var(--sc-error-dim);
-      color: white;
-    }
-    .btn-danger:hover {
-      background: var(--sc-error);
     }
     .job-list {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: var(--sc-space-sm);
     }
-    .job-card {
-      padding: 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
+    .job-card-inner {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 1rem;
+      gap: var(--sc-space-md);
     }
     .job-info {
       flex: 1;
@@ -77,22 +51,22 @@ export class ScCronView extends GatewayAwareLitElement {
     }
     .job-expression {
       font-family: var(--sc-font-mono);
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-accent);
-      margin-bottom: 0.25rem;
+      margin-bottom: var(--sc-space-xs);
     }
     .job-description {
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
-      margin-bottom: 0.25rem;
+      margin-bottom: var(--sc-space-xs);
     }
     .job-meta {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
     .job-actions {
       display: flex;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
       flex-shrink: 0;
     }
     .form-overlay {
@@ -141,51 +115,9 @@ export class ScCronView extends GatewayAwareLitElement {
       justify-content: flex-end;
       margin-top: 1rem;
     }
-    .error {
-      color: var(--sc-accent);
-      font-size: 0.875rem;
-      margin-top: 0.5rem;
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
+    .form-title {
+      margin: 0 0 var(--sc-space-md);
       font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
     }
   `;
 
@@ -281,61 +213,74 @@ export class ScCronView extends GatewayAwareLitElement {
     return html`
       <div class="header">
         <h2>Cron Jobs</h2>
-        <button class="btn" @click=${this.openAddForm}>Add Job</button>
+        <sc-button variant="primary" @click=${this.openAddForm}>Add Job</sc-button>
       </div>
-      ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+      ${this.error
+        ? html`<sc-empty-state
+            icon="⚠️"
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
+        : nothing}
       ${this.loading
         ? html`
             <div class="job-list">
-              <div class="job-card skeleton skeleton-card"></div>
-              <div class="job-card skeleton skeleton-card"></div>
+              <sc-skeleton variant="card" height="80px"></sc-skeleton>
+              <sc-skeleton variant="card" height="80px"></sc-skeleton>
             </div>
           `
         : this.jobs.length === 0
           ? html`
-              <div class="empty-state">
-                <div class="empty-icon">⏰</div>
-                <p class="empty-title">No scheduled jobs</p>
-                <p class="empty-desc">Add a cron job to run commands on a schedule.</p>
-              </div>
+              <sc-empty-state
+                icon="⏰"
+                heading="No scheduled jobs"
+                description="Add a cron job to run commands on a schedule."
+              ></sc-empty-state>
             `
           : html`
               <div class="job-list">
                 ${this.jobs.map(
                   (job) => html`
-                    <div class="job-card">
-                      <div class="job-info">
-                        <div class="job-expression">${job.expression}</div>
-                        ${job.command
-                          ? html`<div class="job-description">
-                              <code>${job.command}</code>
-                            </div>`
-                          : ""}
-                        ${job.description
-                          ? html`<div class="job-description">${job.description}</div>`
-                          : ""}
-                        <div class="job-meta">
-                          ${job.lastRun ? `Last run: ${job.lastRun}` : ""}
-                          ${job.status ? ` · ${job.status}` : ""}
+                    <sc-card>
+                      <div class="job-card-inner">
+                        <div class="job-info">
+                          <div class="job-expression">${job.expression}</div>
+                          ${
+                            job.command
+                              ? html`<div class="job-description">
+                                  <code>${job.command}</code>
+                                </div>`
+                              : ""
+                          }
+                          ${
+                            job.description
+                              ? html`<div class="job-description">${job.description}</div>`
+                              : ""
+                          }
+                          <div class="job-meta">
+                            ${job.lastRun ? `Last run: ${job.lastRun}` : ""}
+                            ${job.status ? ` · ${job.status}` : ""}
+                          </div>
+                        </div>
+                        <div class="job-actions">
+                          <sc-button
+                            variant="secondary"
+                            ?disabled=${job.id == null}
+                            @click=${() => this.runJob(job)}
+                          >
+                            Run Now
+                          </sc-button>
+                          <sc-button
+                            variant="destructive"
+                            ?disabled=${job.id == null}
+                            @click=${() => this.deleteJob(job)}
+                          >
+                            Delete
+                          </sc-button>
                         </div>
                       </div>
-                      <div class="job-actions">
-                        <button
-                          class="btn btn-secondary"
-                          ?disabled=${job.id == null}
-                          @click=${() => this.runJob(job)}
-                        >
-                          Run Now
-                        </button>
-                        <button
-                          class="btn btn-danger"
-                          ?disabled=${job.id == null}
-                          @click=${() => this.deleteJob(job)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
+                    </sc-card>
+                    </sc-card>
                   `,
                 )}
               </div>
@@ -376,8 +321,8 @@ export class ScCronView extends GatewayAwareLitElement {
                   />
                 </div>
                 <div class="form-actions">
-                  <button class="btn btn-secondary" @click=${this.closeForm}>Cancel</button>
-                  <button class="btn" @click=${this.submitAdd}>Add</button>
+                  <sc-button variant="secondary" @click=${this.closeForm}>Cancel</sc-button>
+                  <sc-button variant="primary" @click=${this.submitAdd}>Add</sc-button>
                 </div>
               </div>
             </div>

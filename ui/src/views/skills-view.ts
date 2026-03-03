@@ -1,6 +1,10 @@
-import { html, css } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
+import "../components/sc-button.js";
 
 interface Skill {
   name: string;
@@ -19,19 +23,19 @@ export class ScSkillsView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1rem;
+      margin-bottom: var(--sc-space-md);
       flex-wrap: wrap;
-      gap: 1rem;
+      gap: var(--sc-space-md);
     }
     h2 {
       margin: 0;
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
     .install-row {
       display: flex;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
       align-items: center;
     }
     .install-row input {
@@ -43,38 +47,22 @@ export class ScSkillsView extends GatewayAwareLitElement {
       font-size: 0.875rem;
       width: 200px;
     }
-    .btn {
-      padding: 0.5rem 1rem;
-      background: var(--sc-accent);
-      color: white;
-      border: none;
-      border-radius: var(--sc-radius);
-      cursor: pointer;
-      font-size: 0.875rem;
-    }
-    .btn:hover {
-      background: var(--sc-accent-hover);
-    }
     .skills-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1rem;
+      gap: var(--sc-space-md);
     }
-    .skill-card {
-      padding: 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
+    .skill-card-inner {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: var(--sc-space-sm);
     }
     .skill-name {
-      font-weight: 600;
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
     .skill-desc {
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
       flex: 1;
     }
@@ -110,56 +98,10 @@ export class ScSkillsView extends GatewayAwareLitElement {
       transform: translateX(20px);
     }
     .status {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
-    .error {
-      color: var(--sc-accent);
-      font-size: 0.875rem;
-      margin-bottom: 0.5rem;
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
-    }
-    .skills-grid .empty-state {
+    .grid-full {
       grid-column: 1 / -1;
     }
   `;
@@ -240,45 +182,57 @@ export class ScSkillsView extends GatewayAwareLitElement {
             .value=${this.installUrl}
             @input=${(e: Event) => (this.installUrl = (e.target as HTMLInputElement).value)}
           />
-          <button class="btn" @click=${this.installSkill}>Install</button>
+          <sc-button variant="primary" @click=${this.installSkill}>Install</sc-button>
         </div>
       </div>
-      ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+      ${this.error
+        ? html`<sc-empty-state
+            icon="⚠️"
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
+        : nothing}
       ${this.loading
         ? html`
             <div class="skills-grid">
-              <div class="skill-card skeleton skeleton-card"></div>
-              <div class="skill-card skeleton skeleton-card"></div>
-              <div class="skill-card skeleton skeleton-card"></div>
+              <sc-skeleton variant="card" height="100px"></sc-skeleton>
+              <sc-skeleton variant="card" height="100px"></sc-skeleton>
+              <sc-skeleton variant="card" height="100px"></sc-skeleton>
             </div>
           `
         : this.skills.length === 0
           ? html`
-              <div class="empty-state">
-                <div class="empty-icon">🧩</div>
-                <p class="empty-title">No skills installed</p>
-                <p class="empty-desc">Install skills to extend your agent's capabilities.</p>
+              <div class="skills-grid">
+                <div class="grid-full">
+                  <sc-empty-state
+                    icon="🧩"
+                    heading="No skills installed"
+                    description="Install skills to extend your agent's capabilities."
+                  ></sc-empty-state>
+                </div>
               </div>
             `
           : html`
               <div class="skills-grid">
                 ${this.skills.map(
                   (skill) => html`
-                    <div class="skill-card">
-                      <div class="skill-name">${skill.name}</div>
-                      <div class="skill-desc">${skill.description ?? "No description"}</div>
-                      <div class="skill-footer">
-                        <span class="status">
-                          ${skill.enabled !== false ? "Enabled" : "Disabled"}
-                        </span>
-                        <div
-                          class="toggle ${skill.enabled !== false ? "enabled" : ""}"
-                          @click=${() => this.toggleSkill(skill)}
-                          role="switch"
-                          aria-checked=${skill.enabled !== false}
-                        ></div>
+                    <sc-card>
+                      <div class="skill-card-inner">
+                        <div class="skill-name">${skill.name}</div>
+                        <div class="skill-desc">${skill.description ?? "No description"}</div>
+                        <div class="skill-footer">
+                          <span class="status">
+                            ${skill.enabled !== false ? "Enabled" : "Disabled"}
+                          </span>
+                          <div
+                            class="toggle ${skill.enabled !== false ? "enabled" : ""}"
+                            @click=${() => this.toggleSkill(skill)}
+                            role="switch"
+                            aria-checked=${skill.enabled !== false}
+                          ></div>
+                        </div>
                       </div>
-                    </div>
+                    </sc-card>
                   `,
                 )}
               </div>

@@ -21,19 +21,19 @@ export class ScLogsView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1rem;
+      margin-bottom: var(--sc-space-md);
       flex-wrap: wrap;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
     }
     h2 {
       margin: 0;
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
     .controls {
       display: flex;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
       align-items: center;
     }
     .filter-input {
@@ -65,7 +65,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       border-radius: var(--sc-radius);
       cursor: pointer;
       font-size: 0.875rem;
-      font-weight: 500;
+      font-weight: var(--sc-weight-medium);
       transition: background 0.2s var(--sc-ease-out);
     }
     .btn:hover {
@@ -89,11 +89,11 @@ export class ScLogsView extends GatewayAwareLitElement {
       background: var(--sc-bg-inset);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
-      padding: 1rem;
+      padding: var(--sc-space-md);
       height: 400px;
       overflow-y: auto;
       font-family: var(--sc-font-mono);
-      font-size: 0.8125rem;
+      font-size: var(--sc-text-sm);
       line-height: 1.6;
       color: var(--sc-text);
       box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
@@ -113,19 +113,19 @@ export class ScLogsView extends GatewayAwareLitElement {
       background: var(--sc-text-muted);
     }
     .log-line {
-      margin-bottom: 0.5rem;
-      padding: 0.35rem 0.5rem;
+      margin-bottom: var(--sc-space-sm);
+      padding: var(--sc-space-xs) var(--sc-space-sm);
       border-radius: var(--sc-radius-sm);
       background: rgba(0, 0, 0, 0.2);
       word-break: break-all;
     }
     .log-ts {
       color: var(--sc-text-muted);
-      margin-right: 0.5rem;
+      margin-right: var(--sc-space-sm);
     }
     .event {
-      font-weight: 600;
-      margin-right: 0.5rem;
+      font-weight: var(--sc-weight-semibold);
+      margin-right: var(--sc-space-sm);
     }
   `;
 

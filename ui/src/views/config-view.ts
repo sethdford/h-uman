@@ -45,8 +45,8 @@ export class ScConfigView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1rem;
-      gap: 1rem;
+      margin-bottom: var(--sc-space-md);
+      gap: var(--sc-space-md);
       flex-wrap: wrap;
     }
     .status {
@@ -74,7 +74,7 @@ export class ScConfigView extends GatewayAwareLitElement {
     }
     .header-actions {
       display: flex;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
       align-items: center;
     }
     .toggle-btn {

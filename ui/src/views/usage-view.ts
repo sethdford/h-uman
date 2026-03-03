@@ -1,6 +1,9 @@
-import { html, css } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
 
 interface UsageSummary {
   session_cost_usd?: number;
@@ -18,41 +21,35 @@ export class ScUsageView extends GatewayAwareLitElement {
       color: var(--sc-text);
     }
     h2 {
-      margin: 0 0 1rem;
-      font-size: 1.25rem;
-      font-weight: 600;
+      margin: 0 0 var(--sc-space-md);
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    .card {
-      padding: 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-lg);
     }
     .card-label {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
-      margin-bottom: 0.25rem;
+      margin-bottom: var(--sc-space-xs);
     }
     .card-value {
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
       font-variant-numeric: tabular-nums;
     }
     .chart-section {
-      margin-top: 1.5rem;
+      margin-top: var(--sc-space-lg);
     }
     .chart-title {
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
-      margin-bottom: 0.5rem;
+      margin-bottom: var(--sc-space-sm);
     }
     .bar-chart {
       display: flex;
@@ -62,11 +59,11 @@ export class ScUsageView extends GatewayAwareLitElement {
     .bar-row {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: var(--sc-space-sm);
     }
     .bar-label {
       width: 120px;
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
       flex-shrink: 0;
     }
@@ -74,65 +71,14 @@ export class ScUsageView extends GatewayAwareLitElement {
       flex: 1;
       height: 20px;
       background: var(--sc-bg-elevated);
-      border-radius: 4px;
+      border-radius: var(--sc-radius-sm);
       overflow: hidden;
     }
     .bar-fill {
       height: 100%;
       background: var(--sc-accent);
-      border-radius: 4px;
+      border-radius: var(--sc-radius-sm);
       transition: width 0.3s ease;
-    }
-    .bar-value {
-      width: 80px;
-      font-size: 0.875rem;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-    .error {
-      color: var(--sc-accent);
-      font-size: 0.875rem;
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
     }
   `;
 
@@ -195,13 +141,19 @@ export class ScUsageView extends GatewayAwareLitElement {
 
     return html`
       <h2>Usage</h2>
-      ${this.error ? html`<p class="error">${this.error}</p>` : ""}
+      ${this.error
+        ? html`<sc-empty-state
+            icon="⚠️"
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
+        : nothing}
       ${this.loading
         ? html`
             <div class="cards">
-              <div class="card skeleton skeleton-card"></div>
-              <div class="card skeleton skeleton-card"></div>
-              <div class="card skeleton skeleton-card"></div>
+              <sc-skeleton variant="card" height="80px"></sc-skeleton>
+              <sc-skeleton variant="card" height="80px"></sc-skeleton>
+              <sc-skeleton variant="card" height="80px"></sc-skeleton>
             </div>
           `
         : sessionCost === 0 &&
@@ -210,36 +162,34 @@ export class ScUsageView extends GatewayAwareLitElement {
             totalTokens === 0 &&
             requestCount === 0
           ? html`
-              <div class="empty-state">
-                <div class="empty-icon">📊</div>
-                <p class="empty-title">No usage data</p>
-                <p class="empty-desc">
-                  Usage metrics will appear here once you start making requests.
-                </p>
-              </div>
+              <sc-empty-state
+                icon="📊"
+                heading="No usage data"
+                description="Usage metrics will appear here once you start making requests."
+              ></sc-empty-state>
             `
           : html`
               <div class="cards">
-                <div class="card">
+                <sc-card>
                   <div class="card-label">Session Cost</div>
                   <div class="card-value">${this.formatCurrency(sessionCost)}</div>
-                </div>
-                <div class="card">
+                </sc-card>
+                <sc-card>
                   <div class="card-label">Daily Cost</div>
                   <div class="card-value">${this.formatCurrency(dailyCost)}</div>
-                </div>
-                <div class="card">
+                </sc-card>
+                <sc-card>
                   <div class="card-label">Monthly Cost</div>
                   <div class="card-value">${this.formatCurrency(monthlyCost)}</div>
-                </div>
-                <div class="card">
+                </sc-card>
+                <sc-card>
                   <div class="card-label">Total Tokens</div>
                   <div class="card-value">${this.formatNumber(totalTokens)}</div>
-                </div>
-                <div class="card">
+                </sc-card>
+                <sc-card>
                   <div class="card-label">Request Count</div>
                   <div class="card-value">${this.formatNumber(requestCount)}</div>
-                </div>
+                </sc-card>
               </div>
 
               <div class="chart-section">

@@ -16,19 +16,19 @@ export class ScVoiceView extends GatewayAwareLitElement {
       margin: 0 auto;
     }
     .header {
-      margin-bottom: 1.5rem;
+      margin-bottom: var(--sc-space-lg);
     }
     h2 {
       margin: 0;
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
     .mic-area {
       display: flex;
       flex-direction: column;
       align-items: center;
-      margin-bottom: 1.5rem;
+      margin-bottom: var(--sc-space-lg);
     }
     .mic-btn {
       width: 80px;
@@ -99,18 +99,18 @@ export class ScVoiceView extends GatewayAwareLitElement {
     }
     .send-row {
       display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
+      gap: var(--sc-space-sm);
+      margin-bottom: var(--sc-space-lg);
     }
     .send-btn {
-      padding: 0.5rem 1rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-accent);
       color: var(--sc-bg);
       border: none;
       border-radius: var(--sc-radius);
-      font-weight: 500;
+      font-weight: var(--sc-weight-medium);
       cursor: pointer;
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
     }
     .send-btn:hover:not(:disabled) {
       background: var(--sc-accent-hover);
@@ -120,7 +120,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
       cursor: not-allowed;
     }
     .response-area {
-      padding: 1rem 1.25rem;
+      padding: var(--sc-space-md) var(--sc-space-lg);
       background: var(--sc-bg-elevated);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
@@ -131,7 +131,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
       white-space: pre-wrap;
       word-break: break-word;
       position: relative;
-      margin-left: 1rem;
+      margin-left: var(--sc-space-md);
       box-shadow: var(--sc-shadow-sm);
     }
     .response-area::before {
@@ -150,8 +150,8 @@ export class ScVoiceView extends GatewayAwareLitElement {
       border-style: dashed;
     }
     .status-line {
-      margin-top: 1rem;
-      font-size: 0.8125rem;
+      margin-top: var(--sc-space-md);
+      font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
     }
     .status-line.listening {
