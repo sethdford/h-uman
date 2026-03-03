@@ -27,14 +27,10 @@
 #include "seaclaw/channels/irc.h"
 #endif
 #if SC_HAS_LINE
-extern sc_error_t sc_line_create(sc_allocator_t *alloc, const char *channel_token,
-                                 size_t channel_token_len, sc_channel_t *out);
-extern void sc_line_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/line.h"
 #endif
 #if SC_HAS_LARK
-extern sc_error_t sc_lark_create(sc_allocator_t *alloc, const char *app_id, size_t app_id_len,
-                                 const char *app_secret, size_t app_secret_len, sc_channel_t *out);
-extern void sc_lark_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/lark.h"
 #endif
 #if SC_HAS_WEB
 #include "seaclaw/channels/web.h"
@@ -46,21 +42,13 @@ extern void sc_lark_destroy(sc_channel_t *ch);
 #include "seaclaw/channels/imessage.h"
 #endif
 #if SC_HAS_MATTERMOST
-extern sc_error_t sc_mattermost_create(sc_allocator_t *alloc, const char *url, size_t url_len,
-                                       const char *token, size_t token_len, sc_channel_t *out);
-extern void sc_mattermost_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/mattermost.h"
 #endif
 #if SC_HAS_ONEBOT
-extern sc_error_t sc_onebot_create(sc_allocator_t *alloc, const char *api_base, size_t api_base_len,
-                                   const char *access_token, size_t access_token_len,
-                                   sc_channel_t *out);
-extern void sc_onebot_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/onebot.h"
 #endif
 #if SC_HAS_DINGTALK
-extern sc_error_t sc_dingtalk_create(sc_allocator_t *alloc, const char *app_key, size_t app_key_len,
-                                     const char *app_secret, size_t app_secret_len,
-                                     sc_channel_t *out);
-extern void sc_dingtalk_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/dingtalk.h"
 #endif
 
 /* ─── CLI (always present) ─────────────────────────────────────────────────── */
@@ -919,14 +907,11 @@ static void test_nostr_poll_test_mode(void) {
 #endif
 
 #if SC_HAS_QQ
-extern sc_error_t sc_qq_create(sc_allocator_t *alloc, const char *api_base, size_t api_base_len,
-                               const char *access_token, size_t access_token_len,
-                               sc_channel_t *out);
-extern void sc_qq_destroy(sc_channel_t *ch);
+#include "seaclaw/channels/qq.h"
 static void test_qq_create(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_error_t err = sc_qq_create(&alloc, "https://api.example.com", 22, "tok", 3, &ch);
+    sc_error_t err = sc_qq_create(&alloc, "app-id", 6, "tok", 3, false, &ch);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "qq");
     sc_qq_destroy(&ch);
@@ -935,7 +920,7 @@ static void test_qq_create(void) {
 static void test_qq_send(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_qq_create(&alloc, "https://x", 9, "t", 1, &ch);
+    sc_qq_create(&alloc, "app", 3, "t", 1, false, &ch);
     sc_error_t err = ch.vtable->send(ch.ctx, NULL, 0, "h", 1, NULL, 0);
     SC_ASSERT_EQ(err, SC_OK);
     sc_qq_destroy(&ch);
@@ -944,7 +929,7 @@ static void test_qq_send(void) {
 static void test_qq_health_check(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_qq_create(&alloc, "https://x", 9, "t", 1, &ch);
+    sc_qq_create(&alloc, "app", 3, "t", 1, false, &ch);
     SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
     sc_qq_destroy(&ch);
 }
@@ -1162,6 +1147,140 @@ static void test_web_send_empty_target(void) {
 }
 #endif
 
+
+/* ─── Webhook + Poll tests ───────────────────────────────────────── */
+
+#if SC_HAS_LINE
+static void test_line_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_line_create(&alloc, "test-token", 10, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_line_on_webhook(ch.ctx, &alloc, "hello from line", 15);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_line_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "test-sender");
+    sc_line_destroy(&ch);
+}
+
+static void test_line_poll_null_args(void) {
+    sc_error_t err = sc_line_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+#if SC_HAS_LARK
+static void test_lark_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_lark_create(&alloc, "app-id", 6, "secret", 6, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_lark_on_webhook(ch.ctx, &alloc, "hello from lark", 15);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_lark_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_lark_destroy(&ch);
+}
+
+static void test_lark_poll_null_args(void) {
+    sc_error_t err = sc_lark_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+#if SC_HAS_MATTERMOST
+static void test_mattermost_poll_test_mode(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_mattermost_create(&alloc, "https://example.com", 19, "test-token", 10, &ch);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    err = sc_mattermost_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 0);
+    sc_mattermost_destroy(&ch);
+}
+
+static void test_mattermost_poll_null_args(void) {
+    sc_error_t err = sc_mattermost_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+#if SC_HAS_ONEBOT
+static void test_onebot_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_onebot_create(&alloc, "http://localhost:5700", 21, "test", 4, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_onebot_on_webhook(ch.ctx, &alloc, "hello from onebot", 17);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_onebot_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_onebot_destroy(&ch);
+}
+
+static void test_onebot_poll_null_args(void) {
+    sc_error_t err = sc_onebot_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+#if SC_HAS_DINGTALK
+static void test_dingtalk_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_dingtalk_create(&alloc, "key", 3, "secret", 6, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_dingtalk_on_webhook(ch.ctx, &alloc, "hello from dingtalk", 19);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_dingtalk_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_dingtalk_destroy(&ch);
+}
+
+static void test_dingtalk_poll_null_args(void) {
+    sc_error_t err = sc_dingtalk_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+#if SC_HAS_QQ
+static void test_qq_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_qq_create(&alloc, "app-id", 6, "token", 5, false, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_qq_on_webhook(ch.ctx, &alloc, "hello from qq", 13);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_qq_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_qq_destroy(&ch);
+}
+
+static void test_qq_poll_null_args(void) {
+    sc_error_t err = sc_qq_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
 void run_channel_all_tests(void) {
     SC_TEST_SUITE("Channel All");
 
@@ -1192,6 +1311,8 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_qq_create);
     SC_RUN_TEST(test_qq_send);
     SC_RUN_TEST(test_qq_health_check);
+    SC_RUN_TEST(test_qq_webhook_and_poll);
+    SC_RUN_TEST(test_qq_poll_null_args);
 #endif
 #if SC_HAS_MAIXCAM
     SC_RUN_TEST(test_maixcam_create);
@@ -1263,12 +1384,16 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_line_create);
     SC_RUN_TEST(test_line_name);
     SC_RUN_TEST(test_line_health_check);
+    SC_RUN_TEST(test_line_webhook_and_poll);
+    SC_RUN_TEST(test_line_poll_null_args);
 #endif
 #if SC_HAS_LARK
     SC_RUN_TEST(test_lark_start_stop_lifecycle);
     SC_RUN_TEST(test_lark_create);
     SC_RUN_TEST(test_lark_name);
     SC_RUN_TEST(test_lark_health_check);
+    SC_RUN_TEST(test_lark_webhook_and_poll);
+    SC_RUN_TEST(test_lark_poll_null_args);
 #endif
 #if SC_HAS_WEB
     SC_RUN_TEST(test_web_create);
@@ -1305,15 +1430,21 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_mattermost_name);
     SC_RUN_TEST(test_mattermost_health_check);
     SC_RUN_TEST(test_mattermost_send);
+    SC_RUN_TEST(test_mattermost_poll_test_mode);
+    SC_RUN_TEST(test_mattermost_poll_null_args);
 #endif
 #if SC_HAS_ONEBOT
     SC_RUN_TEST(test_onebot_create);
     SC_RUN_TEST(test_onebot_name);
     SC_RUN_TEST(test_onebot_health_check);
+    SC_RUN_TEST(test_onebot_webhook_and_poll);
+    SC_RUN_TEST(test_onebot_poll_null_args);
 #endif
 #if SC_HAS_DINGTALK
     SC_RUN_TEST(test_dingtalk_create);
     SC_RUN_TEST(test_dingtalk_name);
     SC_RUN_TEST(test_dingtalk_health_check);
+    SC_RUN_TEST(test_dingtalk_webhook_and_poll);
+    SC_RUN_TEST(test_dingtalk_poll_null_args);
 #endif
 }

@@ -20,7 +20,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is Ca
   replace binary, returns `{status: "updated"}` or error string
 - **Enriched `nodes.list`**: local node now includes `hostname`, `version` (from `sc_version_string()`),
   and `uptime_secs` (from `CLOCK_MONOTONIC`) in addition to existing fields
-- **Channel headers**: `include/seaclaw/channels/matrix.h` and `include/seaclaw/channels/irc.h`
+- **LINE/Lark/DingTalk/QQ/OneBot webhook handlers**: `sc_{ch}_on_webhook` parses platform-specific
+  JSON payloads and queues inbound messages into a ring buffer for `sc_{ch}_poll` consumption
+- **Mattermost REST polling**: `sc_mattermost_poll` via `GET /api/v4/channels/{id}/posts` with
+  `after` cursor tracking, post ordering, and user ID extraction
+- **Channel headers**: all 7 new channels get public headers in `include/seaclaw/channels/`
 - **Slack inbound polling**: `sc_slack_poll` via Slack `conversations.history` API; `sc_slack_create_ex`
   accepts `channel_ids` for multi-channel polling, bot message filtering, and `last_ts` cursor tracking
 - **WhatsApp inbound**: `sc_whatsapp_on_webhook` parses WhatsApp Cloud API webhook payloads
@@ -35,8 +39,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is Ca
 - **Config parsing**: `pool_max_concurrent`, `default_profile`, `policy`, `plugins`, `slack`, `whatsapp`
   sections in `~/.seaclaw/config.json`
 - **OTel observer**: created when config has `otel_endpoint`
-- **18 new tests**: 6 streaming tests (ollama, openrouter, compatible × supports+chat), 4 channel poll
-  tests (matrix, irc × poll+null), 1 update_apply test, 13 roadmap integration tests, 4 channel tests
+- **28 new tests**: 6 streaming, 4 matrix/irc poll, 10 webhook+poll (LINE, Lark, Mattermost, OneBot,
+  DingTalk × webhook+null), 1 update_apply, 13 roadmap integration, 4 channel tests
 - **Performance profile**: 398 KB binary (MinSizeRel+LTO), ~5.1 MB peak RSS
 
 ### Changed
@@ -45,6 +49,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is Ca
 - IRC channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
 - Slack channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
 - WhatsApp channel listener type: `SC_LISTENER_WEBHOOK_ONLY` → `SC_LISTENER_POLLING`
+- LINE, Lark, Mattermost, OneBot, DingTalk, QQ listener types: `SC_LISTENER_WEBHOOK_ONLY` → `SC_LISTENER_POLLING`
 - Ollama, OpenRouter, Compatible providers: streaming column "No" → "Yes (SSE)"
 - `nodes.list` response: added `hostname`, `version`, `uptime_secs` to local node
 - `update.check` response: now returns real version comparison instead of hardcoded false

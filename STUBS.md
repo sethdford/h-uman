@@ -9,40 +9,40 @@ Last updated: 2026-03-03
 | Source files (src/ + include/) | **~466**               |
 | Lines of C/H/ASM code          | **~55K**               |
 | Test files                     | 73                     |
-| Tests passing                  | **2,212/2,212 (100%)** |
+| Tests passing                  | **2,226/2,226 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **398 KB**             |
 | Peak RSS (test suite)          | **~5.1 MB**            |
 
 ## Channels — Honest Status
 
-### Full send + receive (9 channels)
+### Full send + receive (18 channels)
 
-| Channel  | send()         | listen()                   | Config Required               |
-| -------- | -------------- | -------------------------- | ----------------------------- |
-| CLI      | stdout         | readline                   | None                          |
-| Telegram | HTTP API       | Long-poll (getUpdates)     | `token`                       |
-| Discord  | HTTP API       | GET /messages poll         | `token`, `channel_ids`        |
-| Slack    | HTTP API       | conversations.history poll | `token`, `channel_ids`        |
-| WhatsApp | Graph API      | Webhook + poll queue       | `phone_number_id`, `token`    |
-| Email    | curl SMTP      | curl IMAP poll             | SMTP/IMAP config              |
-| iMessage | AppleScript    | chat.db SQLite poll        | `default_target` (macOS only) |
-| Signal   | signal-cli RPC | signal-cli poll            | `http_url`, `account`         |
-| Matrix   | HTTP PUT       | /sync long-poll            | `homeserver`, `access_token`  |
-| IRC      | TCP socket     | select()+recv() on socket  | `server`, `port`              |
+| Channel    | send()         | listen()                   | Config Required                       |
+| ---------- | -------------- | -------------------------- | ------------------------------------- |
+| CLI        | stdout         | readline                   | None                                  |
+| Telegram   | HTTP API       | Long-poll (getUpdates)     | `token`                               |
+| Discord    | HTTP API       | GET /messages poll         | `token`, `channel_ids`                |
+| Slack      | HTTP API       | conversations.history poll | `token`, `channel_ids`                |
+| WhatsApp   | Graph API      | Webhook + poll queue       | `phone_number_id`, `token`            |
+| Email      | curl SMTP      | curl IMAP poll             | SMTP/IMAP config                      |
+| iMessage   | AppleScript    | chat.db SQLite poll        | `default_target` (macOS only)         |
+| Signal     | signal-cli RPC | signal-cli poll            | `http_url`, `account`                 |
+| Matrix     | HTTP PUT       | /sync long-poll            | `homeserver`, `access_token`          |
+| IRC        | TCP socket     | select()+recv() on socket  | `server`, `port`                      |
+| LINE       | Push API       | Webhook + poll queue       | `channel_token`                       |
+| Lark       | HTTP API       | Webhook + poll queue       | `app_id`, `app_secret`                |
+| Mattermost | HTTP API       | REST /posts poll           | `url`, `token`                        |
+| OneBot     | HTTP API       | Webhook + poll queue       | `api_base`, `access_token`            |
+| DingTalk   | HTTP POST      | Webhook + poll queue       | `app_key`, `app_secret`               |
+| Nostr      | nak CLI        | nak sub relay poll         | `nak_path`, `relay_url`, `seckey_hex` |
+| QQ         | HTTP API       | Webhook + poll queue       | `app_id`, `bot_token`                 |
 
-### Send only — no inbound polling (9 channels)
+### Send only (2 channels)
 
-| Channel    | send()         | listen()            | Config Required                       |
-| ---------- | -------------- | ------------------- | ------------------------------------- |
-| LINE       | Push API       | Webhook only        | `channel_token`                       |
-| Lark       | HTTP API       | Webhook only        | `app_id`, `app_secret`                |
-| Mattermost | HTTP API       | Webhook only        | `url`, `token`                        |
-| OneBot     | HTTP API       | Webhook only        | `api_base`, `access_token`            |
-| DingTalk   | HTTP POST      | Webhook only        | `target` (webhook URL)                |
-| Nostr      | nak CLI        | Not implemented     | `nak_path`, `relay_url`, `seckey_hex` |
-| QQ         | HTTP API       | Webhook only        | `app_id`, `bot_token`                 |
-| MaixCam    | Serial (Linux) | Send-only by design | `host` (serial path)                  |
-| Web        | In-memory      | Gateway events      | `auth_token` (optional)               |
+| Channel | send()         | listen()            | Config Required         |
+| ------- | -------------- | ------------------- | ----------------------- |
+| MaixCam | Serial (Linux) | Send-only by design | `host` (serial path)    |
+| Web     | In-memory      | Gateway events      | `auth_token` (optional) |
 
 ### Special
 
@@ -154,12 +154,19 @@ cron._, skills._, models.list, usage.summary, push.\*, update.check/run, exec.
 - On failure: current config preserved, error logged
 - Per-channel `suppress_tool_progress` config option
 
+## Memory Engines — All Real (Build-Flag Gated)
+
+| Engine     | Build Flag                      | Status | Notes                                 |
+| ---------- | ------------------------------- | ------ | ------------------------------------- |
+| SQLite     | `SC_ENABLE_SQLITE` (ON)         | Real   | FTS5 + vector cosine; primary engine  |
+| PostgreSQL | `SC_ENABLE_POSTGRES`            | Real   | Full libpq implementation behind flag |
+| Redis      | `SC_ENABLE_REDIS_ENGINE`        | Real   | Raw TCP + RESP protocol, no hiredis   |
+| LanceDB    | `SC_ENABLE_LANCEDB_ENGINE` (ON) | Real   | SQLite-backed text search engine      |
+| pgvector   | `SC_ENABLE_POSTGRES`            | Real   | Vector store via libpq + pgvector ext |
+
 ## What Remains Stubbed
 
-| Area                   | Status | Notes                               |
-| ---------------------- | ------ | ----------------------------------- |
-| postgres/redis/lancedb | Stub   | Memory engines — need external libs |
-| store_pgvector         | Stub   | Vector store — needs libpq          |
+Nothing. All subsystems have real implementations, gated by build flags where external dependencies are required.
 
 ## Web UI Dashboard
 

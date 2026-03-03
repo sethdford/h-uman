@@ -2,17 +2,26 @@
 #include "seaclaw/bus.h"
 #include "seaclaw/channel_catalog.h"
 #include "seaclaw/config.h"
+#include "../config_internal.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/cost.h"
+#ifdef SC_HAS_CRON
 #include "seaclaw/cron.h"
 #include "seaclaw/crontab.h"
+#endif
+#ifdef SC_HAS_PUSH
 #include "seaclaw/gateway/push.h"
+#endif
 #include "seaclaw/session.h"
+#ifdef SC_HAS_SKILLS
 #include "seaclaw/skillforge.h"
+#endif
 #include "seaclaw/tool.h"
+#ifdef SC_HAS_UPDATE
 #include "seaclaw/update.h"
+#endif
 #include "seaclaw/version.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -117,6 +126,39 @@ static sc_error_t handle_config_get(sc_allocator_t *alloc, const sc_app_context_
                            sc_json_number_new(alloc, (double)app->config->max_tokens));
         sc_json_object_set(alloc, obj, "temperature",
                            sc_json_number_new(alloc, app->config->temperature));
+
+        sc_json_value_t *sec = sc_json_object_new(alloc);
+        if (sec) {
+            sc_json_object_set(alloc, sec, "autonomy_level",
+                               sc_json_number_new(alloc, app->config->security.autonomy_level));
+            json_set_str(alloc, sec, "sandbox", app->config->security.sandbox);
+            sc_json_value_t *sbc = sc_json_object_new(alloc);
+            if (sbc) {
+                sc_json_object_set(alloc, sbc, "enabled",
+                                   sc_json_bool_new(alloc,
+                                                    app->config->security.sandbox_config.enabled));
+                json_set_str(alloc, sbc, "backend",
+                             app->config->security.sandbox
+                                 ? app->config->security.sandbox
+                                 : "auto");
+                sc_json_value_t *np = sc_json_object_new(alloc);
+                if (np) {
+                    sc_json_object_set(
+                        alloc, np, "enabled",
+                        sc_json_bool_new(
+                            alloc, app->config->security.sandbox_config.net_proxy.enabled));
+                    sc_json_object_set(
+                        alloc, np, "deny_all",
+                        sc_json_bool_new(
+                            alloc, app->config->security.sandbox_config.net_proxy.deny_all));
+                    json_set_str(alloc, np, "proxy_addr",
+                                 app->config->security.sandbox_config.net_proxy.proxy_addr);
+                    sc_json_object_set(alloc, sbc, "net_proxy", np);
+                }
+                sc_json_object_set(alloc, sec, "sandbox_config", sbc);
+            }
+            sc_json_object_set(alloc, obj, "security", sec);
+        }
     } else {
         sc_json_object_set(alloc, obj, "exists", sc_json_bool_new(alloc, false));
     }
@@ -549,6 +591,7 @@ static sc_error_t handle_channels_status(sc_allocator_t *alloc, const sc_app_con
 }
 
 /* ── cron.list ───────────────────────────────────────────────────────── */
+#ifdef SC_HAS_CRON
 
 static sc_error_t handle_cron_list(sc_allocator_t *alloc, const sc_app_context_t *app, char **out,
                                    size_t *out_len) {
@@ -702,7 +745,10 @@ static sc_error_t handle_cron_run(sc_allocator_t *alloc, sc_app_context_t *app,
     return err;
 }
 
+#endif /* SC_HAS_CRON */
+
 /* ── skills.list ─────────────────────────────────────────────────────── */
+#ifdef SC_HAS_SKILLS
 
 static sc_error_t handle_skills_list(sc_allocator_t *alloc, const sc_app_context_t *app, char **out,
                                      size_t *out_len) {
@@ -798,6 +844,8 @@ static sc_error_t handle_skills_install(sc_allocator_t *alloc, sc_app_context_t 
     sc_json_free(alloc, obj);
     return err;
 }
+
+#endif /* SC_HAS_SKILLS */
 
 /* ── models.list ─────────────────────────────────────────────────────── */
 
@@ -911,6 +959,7 @@ static sc_error_t handle_nodes_list(sc_allocator_t *alloc, const sc_app_context_
 }
 
 /* ── update.check ────────────────────────────────────────────────────── */
+#ifdef SC_HAS_UPDATE
 
 static sc_error_t handle_update_check(sc_allocator_t *alloc, char **out, size_t *out_len) {
     sc_json_value_t *obj = sc_json_object_new(alloc);
@@ -952,6 +1001,8 @@ static sc_error_t handle_update_run(sc_allocator_t *alloc, char **out, size_t *o
     sc_json_free(alloc, obj);
     return err;
 }
+
+#endif /* SC_HAS_UPDATE */
 
 /* ── exec.approval.resolve ───────────────────────────────────────────── */
 
@@ -1020,6 +1071,7 @@ static sc_error_t handle_usage_summary(sc_allocator_t *alloc, const sc_app_conte
 }
 
 /* ── push.register ──────────────────────────────────────────────────── */
+#ifdef SC_HAS_PUSH
 
 static sc_error_t handle_push_register(sc_allocator_t *alloc, sc_app_context_t *app,
                                        const sc_json_value_t *root, char **out, size_t *out_len) {
@@ -1101,6 +1153,8 @@ static sc_error_t handle_push_unregister(sc_allocator_t *alloc, sc_app_context_t
     return err;
 }
 
+#endif /* SC_HAS_PUSH */
+
 /* ── Method dispatcher ───────────────────────────────────────────────── */
 
 static sc_error_t build_method_response(sc_allocator_t *alloc, const char *method,
@@ -1139,6 +1193,7 @@ static sc_error_t build_method_response(sc_allocator_t *alloc, const char *metho
         return handle_tools_catalog(alloc, app, payload_out, payload_len_out);
     if (strcmp(method, "channels.status") == 0)
         return handle_channels_status(alloc, app, payload_out, payload_len_out);
+#ifdef SC_HAS_CRON
     if (strcmp(method, "cron.list") == 0)
         return handle_cron_list(alloc, app, payload_out, payload_len_out);
     if (strcmp(method, "cron.add") == 0)
@@ -1147,6 +1202,8 @@ static sc_error_t build_method_response(sc_allocator_t *alloc, const char *metho
         return handle_cron_remove(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "cron.run") == 0)
         return handle_cron_run(alloc, app, root, payload_out, payload_len_out);
+#endif
+#ifdef SC_HAS_SKILLS
     if (strcmp(method, "skills.list") == 0)
         return handle_skills_list(alloc, app, payload_out, payload_len_out);
     if (strcmp(method, "skills.enable") == 0)
@@ -1155,10 +1212,13 @@ static sc_error_t build_method_response(sc_allocator_t *alloc, const char *metho
         return handle_skill_toggle(alloc, app, root, false, payload_out, payload_len_out);
     if (strcmp(method, "skills.install") == 0)
         return handle_skills_install(alloc, app, root, payload_out, payload_len_out);
+#endif
+#ifdef SC_HAS_UPDATE
     if (strcmp(method, "update.check") == 0)
         return handle_update_check(alloc, payload_out, payload_len_out);
     if (strcmp(method, "update.run") == 0)
         return handle_update_run(alloc, payload_out, payload_len_out);
+#endif
     if (strcmp(method, "exec.approval.resolve") == 0)
         return handle_exec_approval(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "usage.summary") == 0)
@@ -1167,10 +1227,12 @@ static sc_error_t build_method_response(sc_allocator_t *alloc, const char *metho
         return handle_models_list(alloc, app, payload_out, payload_len_out);
     if (strcmp(method, "nodes.list") == 0)
         return handle_nodes_list(alloc, app, payload_out, payload_len_out);
+#ifdef SC_HAS_PUSH
     if (strcmp(method, "push.register") == 0)
         return handle_push_register(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "push.unregister") == 0)
         return handle_push_unregister(alloc, app, root, payload_out, payload_len_out);
+#endif
 
     return SC_ERR_NOT_FOUND;
 }
