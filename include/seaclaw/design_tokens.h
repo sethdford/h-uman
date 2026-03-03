@@ -3,13 +3,13 @@
 #define SC_DESIGN_TOKENS_H
 
 /* ANSI 256-color codes for semantic colors (from dark theme tokens) */
-#define SC_COLOR_ACCENT  "\033[38;5;210m"
-#define SC_COLOR_SUCCESS "\033[38;5;78m"
+#define SC_COLOR_ACCENT  "\033[38;5;43m"
+#define SC_COLOR_SUCCESS "\033[38;5;43m"
 #define SC_COLOR_WARNING "\033[38;5;220m"
-#define SC_COLOR_ERROR   "\033[38;5;203m"
+#define SC_COLOR_ERROR   "\033[38;5;210m"
 #define SC_COLOR_INFO    "\033[38;5;75m"
-#define SC_COLOR_MUTED   "\033[38;5;145m"
-#define SC_COLOR_FAINT   "\033[38;5;102m"
+#define SC_COLOR_MUTED   "\033[38;5;110m"
+#define SC_COLOR_FAINT   "\033[38;5;67m"
 #define SC_COLOR_RESET   "\033[0m"
 #define SC_COLOR_BOLD    "\033[1m"
 #define SC_COLOR_DIM     "\033[2m"
