@@ -348,6 +348,16 @@ set(SC_CORE_SOURCES
     src/tools/agent_query.c
     src/tools/apply_patch.c
     src/tools/pdf.c
+    src/tools/spreadsheet.c
+    src/tools/report.c
+    src/tools/broadcast.c
+    src/tools/calendar.c
+    src/tools/jira.c
+    src/tools/social.c
+    src/tools/crm.c
+    src/tools/analytics.c
+    src/tools/invoice.c
+    src/tools/workflow.c
     src/tools/diff.c
     src/tools/factory.c
     src/mcp_server.c

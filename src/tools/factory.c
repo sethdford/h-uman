@@ -52,6 +52,16 @@
 #include "seaclaw/tools/message.h"
 #include "seaclaw/tools/pdf.h"
 #include "seaclaw/tools/pushover.h"
+#include "seaclaw/tools/spreadsheet.h"
+#include "seaclaw/tools/report.h"
+#include "seaclaw/tools/broadcast.h"
+#include "seaclaw/tools/calendar_tool.h"
+#include "seaclaw/tools/jira.h"
+#include "seaclaw/tools/social.h"
+#include "seaclaw/tools/crm.h"
+#include "seaclaw/tools/analytics.h"
+#include "seaclaw/tools/invoice.h"
+#include "seaclaw/tools/workflow.h"
 #ifdef SC_HAS_CRON
 #include "seaclaw/tools/schedule.h"
 #endif
@@ -68,7 +78,7 @@
 #else
 #define SC_TOOLS_CRON_COUNT 0
 #endif
-#define SC_TOOLS_COUNT_BASE (25 + SC_TOOLS_CRON_COUNT) /* 25 base + 7 cron when enabled */
+#define SC_TOOLS_COUNT_BASE (35 + SC_TOOLS_CRON_COUNT) /* 35 base + 7 cron when enabled */
 #ifdef SC_HAS_TOOLS_BROWSER
 #define SC_TOOLS_BROWSER_COUNT 3
 #else
@@ -347,6 +357,56 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc, const char *workspace_
     idx++;
 
     err = sc_pdf_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_spreadsheet_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_report_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_broadcast_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_calendar_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_jira_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_social_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_crm_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_analytics_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_invoice_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_workflow_create(alloc, &tools[idx]);
     if (err != SC_OK)
         goto fail;
     idx++;

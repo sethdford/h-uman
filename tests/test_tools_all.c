@@ -41,6 +41,16 @@
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/spi.h"
 #include "seaclaw/tools/claude_code.h"
+#include "seaclaw/tools/spreadsheet.h"
+#include "seaclaw/tools/report.h"
+#include "seaclaw/tools/broadcast.h"
+#include "seaclaw/tools/calendar_tool.h"
+#include "seaclaw/tools/jira.h"
+#include "seaclaw/tools/social.h"
+#include "seaclaw/tools/crm.h"
+#include "seaclaw/tools/analytics.h"
+#include "seaclaw/tools/invoice.h"
+#include "seaclaw/tools/workflow.h"
 #include "seaclaw/security.h"
 #include <string.h>
 
@@ -944,6 +954,267 @@ static void test_browser_open_create_with_policy(void) {
     if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+/* ─── Business Tools ──────────────────────────────────────────────────────── */
+static inline void biz_set_str(sc_allocator_t *a, sc_json_value_t *obj,
+                               const char *key, const char *val) {
+    sc_json_object_set(a, obj, key, sc_json_string_new(a, val, strlen(val)));
+}
+
+static void test_spreadsheet_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_spreadsheet_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "spreadsheet");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_spreadsheet_analyze(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_spreadsheet_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "analyze");
+    biz_set_str(&alloc, args, "data", "name,age\nalice,30\nbob,25\n");
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "Rows:") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_report_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_report_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "report");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_report_template(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_report_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "template");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "executive_summary") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_broadcast_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_broadcast_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "broadcast");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_calendar_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_calendar_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "calendar");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_calendar_list(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_calendar_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "list");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "Team Standup") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_jira_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_jira_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "jira");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_jira_list(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_jira_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "list");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "PROJ-1") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_social_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_social_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "social");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_social_post(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_social_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "post");
+    biz_set_str(&alloc, args, "platform", "twitter");
+    biz_set_str(&alloc, args, "content", "Hello from SeaClaw!");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "posted") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_crm_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_crm_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "crm");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_crm_contacts(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_crm_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "contacts");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "Alice Smith") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_analytics_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_analytics_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "analytics");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_analytics_overview(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_analytics_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "overview");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "pageviews") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_invoice_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_invoice_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "invoice");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_invoice_parse(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_invoice_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "parse");
+    biz_set_str(&alloc, args, "data", "Invoice #123 Total: $1500");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "parsed") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_workflow_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_workflow_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "workflow");
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_workflow_create_and_run(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_workflow_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "create");
+    biz_set_str(&alloc, args, "name", "Test Workflow");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "created") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "run");
+    biz_set_str(&alloc, args, "workflow_id", "wf_0");
+    memset(&result, 0, sizeof(result));
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "completed") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_workflow_approval_gate(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_workflow_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "create");
+    biz_set_str(&alloc, args, "name", "Approval WF");
+    sc_json_value_t *steps = sc_json_array_new(&alloc);
+    sc_json_value_t *step1 = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, step1, "name", "Review");
+    biz_set_str(&alloc, step1, "tool", "report");
+    sc_json_object_set(&alloc, step1, "requires_approval", sc_json_bool_new(&alloc, true));
+    sc_json_array_push(&alloc, steps, step1);
+    sc_json_object_set(&alloc, args, "steps", steps);
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "run");
+    biz_set_str(&alloc, args, "workflow_id", "wf_0");
+    memset(&result, 0, sizeof(result));
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "waiting_approval") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "action", "approve");
+    biz_set_str(&alloc, args, "workflow_id", "wf_0");
+    memset(&result, 0, sizeof(result));
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "completed") != NULL);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &alloc);
+}
+
 static void test_spawn_create_with_policy(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_security_policy_t policy = {0};
@@ -1128,6 +1399,28 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_screenshot_create_with_policy);
     SC_RUN_TEST(test_browser_open_create_with_policy);
     SC_RUN_TEST(test_spawn_create_with_policy);
+
+    SC_TEST_SUITE("Tools (all) - Business Automation");
+    SC_RUN_TEST(test_spreadsheet_create);
+    SC_RUN_TEST(test_spreadsheet_analyze);
+    SC_RUN_TEST(test_report_create);
+    SC_RUN_TEST(test_report_template);
+    SC_RUN_TEST(test_broadcast_create);
+    SC_RUN_TEST(test_calendar_create);
+    SC_RUN_TEST(test_calendar_list);
+    SC_RUN_TEST(test_jira_create);
+    SC_RUN_TEST(test_jira_list);
+    SC_RUN_TEST(test_social_create);
+    SC_RUN_TEST(test_social_post);
+    SC_RUN_TEST(test_crm_create);
+    SC_RUN_TEST(test_crm_contacts);
+    SC_RUN_TEST(test_analytics_create);
+    SC_RUN_TEST(test_analytics_overview);
+    SC_RUN_TEST(test_invoice_create);
+    SC_RUN_TEST(test_invoice_parse);
+    SC_RUN_TEST(test_workflow_create);
+    SC_RUN_TEST(test_workflow_create_and_run);
+    SC_RUN_TEST(test_workflow_approval_gate);
 
     SC_TEST_SUITE("Tools (all) - Factory");
     SC_RUN_TEST(test_tools_factory_create_all);

@@ -3,6 +3,34 @@
 All notable changes to seaclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is CalVer (`YYYY.M.D`).
 
+## [2026.3.3c] - 2026-03-03
+
+### Added
+
+- **10 business automation tools**: spreadsheet, report, broadcast, calendar, jira, social, crm,
+  analytics, invoice, workflow — all with real implementations + `SC_IS_TEST` mock paths
+- **spreadsheet**: CSV/TSV parse, analyze (stats), query (filter by column), generate
+- **report**: structured Markdown/HTML report generation with templates (executive_summary,
+  weekly_status, incident_report, financial_summary) and sections
+- **broadcast**: multi-channel message dispatch with per-channel delivery tracking
+- **calendar**: Google Calendar API integration — list events, create, delete, check availability
+- **jira**: Jira REST API v3 — list (JQL), create issue, get details, comment, update
+- **social**: Twitter/X + LinkedIn — post, read mentions, schedule, engagement analytics
+- **crm**: HubSpot CRM API — contacts list/create, deals list/create/update, notes
+- **analytics**: Plausible + Google Analytics — overview, top pages, referrers, realtime visitors
+- **invoice**: create invoices (Markdown/JSON), parse invoice text, aggregate summaries
+- **workflow**: DAG workflow engine with approval gates — create, run, approve, cancel, status, list
+- **10 new headers**: `include/seaclaw/tools/{spreadsheet,report,broadcast,calendar_tool,jira,
+social,crm,analytics,invoice,workflow}.h`
+- **20 new tests**: create + functional test for each tool (analyze, template, list, post,
+  contacts, overview, parse, create+run, approval_gate)
+- Tool factory count increased from 25 to 35 base tools
+
+### Changed
+
+- `SC_TOOLS_COUNT_BASE` in factory.c: 25 → 35
+- STUBS.md: 46 → 56 tools, 2,226 → 2,258 tests
+
 ## [2026.3.3b] - 2026-03-03
 
 ### Added

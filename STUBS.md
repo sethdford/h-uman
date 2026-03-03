@@ -6,16 +6,16 @@ Last updated: 2026-03-03
 
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
-| Source files (src/ + include/) | **~466**               |
-| Lines of C/H/ASM code          | **~55K**               |
+| Source files (src/ + include/) | **~486**               |
+| Lines of C/H/ASM code          | **~73K+**              |
 | Test files                     | 73                     |
-| Tests passing                  | **2,238/2,238 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **398 KB**             |
+| Tests passing                  | **2,258/2,258 (100%)** |
+| Binary size (MinSizeRel+LTO)   | **414 KB**             |
 | Peak RSS (test suite)          | **~5.1 MB**            |
 
 ## Channels — Honest Status
 
-### Full send + receive (21 channels)
+### Full send + receive (20 channels)
 
 | Channel     | send()         | listen()                   | Config Required                       |
 | ----------- | -------------- | -------------------------- | ------------------------------------- |
@@ -53,7 +53,7 @@ Last updated: 2026-03-03
 | -------- | ------------------------ |
 | Dispatch | Forwards to sub-channels |
 
-## Tools — All 46 Real
+## Tools — All 56 Real
 
 Every tool has a real implementation. In test mode (`SC_IS_TEST`), they return mock
 data to avoid side effects. Highlights:
@@ -66,6 +66,7 @@ data to avoid side effects. Highlights:
 - **Cron**: add, list, remove, run, runs, update
 - **Hardware**: i2c, spi (Linux only), hardware_info, hardware_memory
 - **PDF**: extract text and metadata from PDF files (pdftotext or fallback)
+- **Business**: spreadsheet (CSV/TSV parse/analyze/query/generate), report (Markdown/HTML structured reports), broadcast (multi-channel send), calendar (Google Calendar CRUD), jira (issue CRUD via REST API), social (Twitter/LinkedIn post/read/analytics), crm (HubSpot contacts/deals), analytics (Plausible/GA metrics), invoice (create/parse/summarize), workflow (DAG steps with approval gates)
 - **Other**: database (SQLite), notebook, canvas, schema, pushover, composio, message, image, screenshot, agent*query, agent_spawn, mcp*\*
 
 ## Providers — All Real
