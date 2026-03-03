@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>349 KB binary. < 5 MB RAM. Boots in <2 ms. Runs on anything with a CPU.</strong>
+  <strong>366 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -18,16 +18,16 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-349 KB binary · <2 ms startup · 2,148+ tests · 50+ providers · 21 channels · 43 tools · Pluggable everything
+366 KB binary · <30 ms startup · 2,150+ tests · 50+ providers · 21 channels · 45 tools · Pluggable everything
 ```
 
 ### Features
 
-- **Impossibly Small:** 349 KB static binary — no runtime, no VM, no framework overhead.
-- **Near-Zero Memory:** < 5 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
-- **Instant Startup:** <2 ms on Apple Silicon, <8 ms on a 0.8 GHz edge core.
+- **Impossibly Small:** 366 KB static binary — no runtime, no VM, no framework overhead.
+- **Near-Zero Memory:** < 6 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
+- **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
-- **Feature-Complete:** 50+ providers, 21 channels, 43 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
+- **Feature-Complete:** 50+ providers, 21 channels, 45 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Optional `--tui` flag.
 - **Performance-Optimized:** Per-turn arena allocator, HTTP connection pooling, HTTP/2, system prompt caching — all benefiting from C-level control.
 
@@ -45,8 +45,8 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 |                   | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **SeaClaw**       |
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
-| **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 5 MB**        |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **349 KB**        |
+| **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 6 MB**        |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **366 KB**        |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
 > ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. SeaClaw's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
@@ -54,10 +54,10 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 SeaClaw's verified numbers (measured on macOS arm64, March 2026):
 
 ```
-Binary size:   349 KB core / 430 KB full (MinSizeRel + LTO)
-Peak RSS:      < 5 MB
-Startup:       <2 ms (Apple Silicon M4 Max)
-Tests:         2,148+ passing, 0 ASan errors
+Binary size:   366 KB (MinSizeRel + LTO, all channels)
+Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
+Startup:       6–27 ms avg (Apple Silicon M4 Max)
+Tests:         2,150+ passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -519,7 +519,7 @@ Build and tests require a C11 compiler and CMake 3.16+.
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 2,148+ tests
+./seaclaw_tests                             # 2,150+ tests
 cd ..
 ```
 
@@ -531,7 +531,7 @@ cmake --build build
 ./build/seaclaw_tests
 ```
 
-Release build (349 KB core):
+Release build (366 KB):
 
 ```bash
 mkdir -p build-release && cd build-release
@@ -557,8 +557,8 @@ Language: C11 + ASM (aarch64, x86_64)
 Source files: 462
 Lines of code: ~70,000
 Test files: 69
-Tests: 2,148+
-Binary: 349 KB core / 430 KB full (MinSizeRel + LTO)
+Tests: 2,150+
+Binary: 366 KB (MinSizeRel + LTO, all channels)
 Peak RSS: < 5 MB
 Startup: <2 ms (Apple Silicon)
 Dependencies: libc + optional SQLite, libcurl
@@ -585,7 +585,7 @@ config.c Config loading/merging (~/.seaclaw/config.json)
 ...
 
 include/seaclaw/ Public C headers
-tests/ 69 test files, 2,150+ tests
+tests/ 72 test files, 2,150+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ```
