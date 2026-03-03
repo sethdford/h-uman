@@ -399,6 +399,107 @@ static void test_profile_list(void) {
     SC_ASSERT_NOT_NULL(profiles);
 }
 
+static void test_pool_null_alloc(void) {
+    SC_ASSERT_NULL(sc_agent_pool_create(NULL, 4));
+}
+
+static void test_pool_zero_max(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_agent_pool_t *pool = sc_agent_pool_create(&a, 0);
+    SC_ASSERT_NOT_NULL(pool);
+    SC_ASSERT_EQ(sc_agent_pool_running_count(pool), 0);
+    sc_agent_pool_destroy(pool);
+}
+
+static void test_pool_status_invalid_id(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_agent_pool_t *pool = sc_agent_pool_create(&a, 2);
+    SC_ASSERT_EQ(sc_agent_pool_status(pool, 99999), SC_AGENT_FAILED);
+    sc_agent_pool_destroy(pool);
+}
+
+static void test_pool_cancel_invalid_id(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_agent_pool_t *pool = sc_agent_pool_create(&a, 2);
+    SC_ASSERT_EQ(sc_agent_pool_cancel(pool, 99999), SC_ERR_NOT_FOUND);
+    sc_agent_pool_destroy(pool);
+}
+
+static void test_pool_result_invalid_id(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_agent_pool_t *pool = sc_agent_pool_create(&a, 2);
+    SC_ASSERT_NULL(sc_agent_pool_result(pool, 99999));
+    sc_agent_pool_destroy(pool);
+}
+
+static void test_canvas_description(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_tool_t tool = {0};
+    SC_ASSERT_EQ(sc_canvas_create(&a, &tool), SC_OK);
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &a);
+}
+
+static void test_apply_patch_description(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_tool_t tool = {0};
+    SC_ASSERT_EQ(sc_apply_patch_create(&a, NULL, &tool), SC_OK);
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &a);
+}
+
+static void test_notebook_description(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_tool_t tool = {0};
+    SC_ASSERT_EQ(sc_notebook_create(&a, NULL, &tool), SC_OK);
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &a);
+}
+
+static void test_diff_description(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_tool_t tool = {0};
+    SC_ASSERT_EQ(sc_diff_tool_create(&a, &tool), SC_OK);
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+}
+
+static void test_database_description(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_tool_t tool = {0};
+    SC_ASSERT_EQ(sc_database_tool_create(&a, NULL, &tool), SC_OK);
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit) tool.vtable->deinit(tool.ctx, &a);
+}
+
+static void test_policy_engine_null(void) {
+    SC_ASSERT_NULL(sc_policy_engine_create(NULL));
+}
+
+static void test_policy_engine_no_rules_allows(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_policy_engine_t *e = sc_policy_engine_create(&a);
+    sc_policy_eval_ctx_t ctx = { .tool_name = "shell", .args_json = NULL, .session_cost_usd = 0 };
+    SC_ASSERT_EQ(sc_policy_engine_evaluate(e, &ctx).action, SC_POLICY_ALLOW);
+    sc_policy_engine_destroy(e);
+}
+
+static void test_mailbox_send_unregistered_target(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_mailbox_t *mb = sc_mailbox_create(&a, 4);
+    SC_ASSERT_EQ(sc_mailbox_send(mb, 0, 99, SC_MSG_TASK, "hi", 2, 0), SC_ERR_NOT_FOUND);
+    sc_mailbox_destroy(mb);
+}
+
+static void test_profile_by_name_null(void) {
+    SC_ASSERT_NULL(sc_agent_profile_by_name(NULL, 0));
+    SC_ASSERT_NULL(sc_agent_profile_by_name("", 0));
+}
+
 void run_roadmap_tests(void) {
     SC_TEST_SUITE("Roadmap: Agent Pool (1A)");
     SC_RUN_TEST(test_pool_create_destroy);
@@ -407,6 +508,11 @@ void run_roadmap_tests(void) {
     SC_RUN_TEST(test_pool_cancel);
     SC_RUN_TEST(test_pool_list);
     SC_RUN_TEST(test_pool_query);
+    SC_RUN_TEST(test_pool_null_alloc);
+    SC_RUN_TEST(test_pool_zero_max);
+    SC_RUN_TEST(test_pool_status_invalid_id);
+    SC_RUN_TEST(test_pool_cancel_invalid_id);
+    SC_RUN_TEST(test_pool_result_invalid_id);
 
     SC_TEST_SUITE("Roadmap: Mailbox (1B)");
     SC_RUN_TEST(test_mailbox_create_destroy);
@@ -414,6 +520,7 @@ void run_roadmap_tests(void) {
     SC_RUN_TEST(test_mailbox_recv_empty);
     SC_RUN_TEST(test_mailbox_broadcast);
     SC_RUN_TEST(test_mailbox_unregister);
+    SC_RUN_TEST(test_mailbox_send_unregistered_target);
 
     SC_TEST_SUITE("Roadmap: Thread Binding (1C)");
     SC_RUN_TEST(test_thread_bind_lookup);
@@ -431,19 +538,27 @@ void run_roadmap_tests(void) {
     SC_RUN_TEST(test_profile_get_messaging);
     SC_RUN_TEST(test_profile_get_minimal);
     SC_RUN_TEST(test_profile_by_name);
+    SC_RUN_TEST(test_profile_by_name_null);
     SC_RUN_TEST(test_profile_list);
 
     SC_TEST_SUITE("Roadmap: Power Tools (3)");
     SC_RUN_TEST(test_canvas_tool);
+    SC_RUN_TEST(test_canvas_description);
     SC_RUN_TEST(test_apply_patch_tool);
+    SC_RUN_TEST(test_apply_patch_description);
     SC_RUN_TEST(test_notebook_tool);
+    SC_RUN_TEST(test_notebook_description);
     SC_RUN_TEST(test_database_tool);
+    SC_RUN_TEST(test_database_description);
     SC_RUN_TEST(test_diff_tool);
+    SC_RUN_TEST(test_diff_description);
 
     SC_TEST_SUITE("Roadmap: Policy Engine (4A)");
     SC_RUN_TEST(test_policy_engine_deny);
     SC_RUN_TEST(test_policy_engine_cost);
     SC_RUN_TEST(test_policy_engine_approval);
+    SC_RUN_TEST(test_policy_engine_null);
+    SC_RUN_TEST(test_policy_engine_no_rules_allows);
 
     SC_TEST_SUITE("Roadmap: OTel + Tracing (4B)");
     SC_RUN_TEST(test_otel_observer);
