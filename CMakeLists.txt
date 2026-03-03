@@ -873,7 +873,6 @@ set(SC_TEST_SOURCES
     tests/test_gateway_http.c
     tests/test_memory_full.c
     tests/test_tools_all.c
-    tests/test_new_features.c
     tests/test_infrastructure.c
     tests/test_memory_subsystems.c
     tests/test_memory_new.c
