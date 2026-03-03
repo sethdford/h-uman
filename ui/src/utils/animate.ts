@@ -43,15 +43,16 @@ export function springTransition(
     keyframes[prop] = [from, to];
   }
 
+  const kf = keyframes as PropertyIndexedKeyframes;
   return withReducedMotion(
     () =>
-      element.animate(keyframes, {
+      element.animate(kf, {
         duration: 400,
         easing,
         fill: "forwards",
       }),
     () =>
-      element.animate(keyframes, {
+      element.animate(kf, {
         duration: 0,
         fill: "forwards",
       }),

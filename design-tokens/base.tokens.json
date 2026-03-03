@@ -126,6 +126,13 @@
     "2xl": { "$value": "24px", "$type": "dimension" },
     "full": { "$value": "9999px", "$type": "dimension" }
   },
+  "blur": {
+    "$description": "Blur radius for backdrop-filter glass effects",
+    "sm": { "$value": "4px", "$type": "dimension" },
+    "md": { "$value": "12px", "$type": "dimension" },
+    "lg": { "$value": "24px", "$type": "dimension" },
+    "xl": { "$value": "40px", "$type": "dimension" }
+  },
   "z-index": {
     "$description": "Z-index stacking scale",
     "base": { "$value": 0, "$type": "number" },

@@ -195,6 +195,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
           <input
             type="url"
             placeholder="https://..."
+            aria-label="Skill URL to install"
             .value=${this.installUrl}
             @input=${(e: Event) => (this.installUrl = (e.target as HTMLInputElement).value)}
           />

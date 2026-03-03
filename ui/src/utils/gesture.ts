@@ -375,7 +375,7 @@ export class PullRefreshController implements ReactiveController {
       font-size: var(--sc-text-sm, 0.8125rem);
       color: var(--sc-text-muted);
       opacity: 0;
-      transition: opacity var(--sc-duration-fast, 100ms) ease;
+      transition: opacity var(--sc-duration-fast, 100ms) var(--sc-ease-out);
       pointer-events: none;
     `;
     indicator.textContent = "Pull to refresh";
@@ -407,7 +407,7 @@ export class PullRefreshController implements ReactiveController {
     if (this.indicatorElement) {
       this.indicatorElement.style.opacity = "0";
       this.indicatorElement.style.transform = "translate(-50%, -100%)";
-      this.indicatorElement.style.transition = `opacity var(--sc-duration-fast, 100ms) ease, transform var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease-out)`;
+      this.indicatorElement.style.transition = `opacity var(--sc-duration-fast, 100ms) var(--sc-ease-out), transform var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease-out)`;
       setTimeout(() => {
         this.indicatorElement?.remove();
         this.indicatorElement = null;

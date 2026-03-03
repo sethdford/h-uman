@@ -48,7 +48,8 @@ export class ScInput extends LitElement {
       outline: none;
       transition:
         border-color var(--sc-duration-fast) var(--sc-ease-out),
-        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+        box-shadow var(--sc-duration-fast) var(--sc-ease-out),
+        background var(--sc-duration-fast) var(--sc-ease-out);
     }
 
     input::placeholder {
@@ -56,7 +57,7 @@ export class ScInput extends LitElement {
     }
 
     input:hover:not(:disabled):not(:focus) {
-      border-color: var(--sc-border);
+      border-color: var(--sc-text-faint);
     }
 
     input:focus-within {

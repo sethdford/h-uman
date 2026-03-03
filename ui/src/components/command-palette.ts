@@ -103,13 +103,13 @@ export class ScCommandPalette extends LitElement {
       position: fixed;
       inset: 0;
       z-index: 10000;
-      background: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
+      background: var(--sc-backdrop-overlay);
+      backdrop-filter: blur(var(--sc-blur-md, 12px));
+      -webkit-backdrop-filter: blur(var(--sc-blur-md, 12px));
       display: flex;
       align-items: flex-start;
       justify-content: center;
-      padding-top: 15vh;
+      padding-top: 15%;
       box-sizing: border-box;
     }
 
@@ -149,7 +149,7 @@ export class ScCommandPalette extends LitElement {
     }
 
     .results {
-      max-height: 360px;
+      max-height: min(24rem, 70vh);
       overflow-y: auto;
       padding: var(--sc-space-xs);
     }
@@ -209,7 +209,7 @@ export class ScCommandPalette extends LitElement {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-faint);
       background: var(--sc-bg-elevated);
-      padding: 0.125rem 0.375rem;
+      padding: var(--sc-space-2xs) var(--sc-space-xs);
       border-radius: var(--sc-radius-sm);
       text-transform: lowercase;
     }

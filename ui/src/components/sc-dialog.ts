@@ -23,15 +23,15 @@ export class ScDialog extends LitElement {
       position: fixed;
       inset: 0;
       z-index: var(--sc-z-modal-backdrop);
-      background: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(var(--sc-space-xs));
-      -webkit-backdrop-filter: blur(var(--sc-space-xs));
+      background: var(--sc-backdrop-overlay);
+      backdrop-filter: blur(var(--sc-blur-md, 12px));
+      -webkit-backdrop-filter: blur(var(--sc-blur-md, 12px));
       display: flex;
       align-items: center;
       justify-content: center;
       padding: var(--sc-space-lg);
       box-sizing: border-box;
-      animation: sc-fade-in var(--sc-duration-normal) ease;
+      animation: sc-fade-in var(--sc-duration-normal) var(--sc-ease-out);
     }
 
     .backdrop.closing {
@@ -50,7 +50,10 @@ export class ScDialog extends LitElement {
     .panel {
       width: 100%;
       max-width: var(--sc-modal-max-width, 400px);
-      background: var(--sc-bg-overlay);
+      background: color-mix(in srgb, var(--sc-bg-overlay), transparent 5%);
+      backdrop-filter: blur(var(--sc-blur-lg, 24px));
+      -webkit-backdrop-filter: blur(var(--sc-blur-lg, 24px));
+      border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: var(--sc-radius-xl);
       box-shadow: var(--sc-shadow-lg);
       padding: var(--sc-space-lg);
@@ -105,12 +108,17 @@ export class ScDialog extends LitElement {
       cursor: pointer;
       transition:
         background-color var(--sc-duration-fast) var(--sc-ease-out),
-        color var(--sc-duration-fast) var(--sc-ease-out);
+        color var(--sc-duration-fast) var(--sc-ease-out),
+        transform var(--sc-duration-fast) var(--sc-ease-out);
     }
 
     .btn:focus-visible {
       outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);
       outline-offset: var(--sc-focus-ring-offset);
+    }
+
+    .btn:active {
+      transform: scale(0.97);
     }
 
     .btn-cancel {
@@ -159,7 +167,7 @@ export class ScDialog extends LitElement {
           this._closing = false;
           this._closeTimeout = null;
           document.removeEventListener("keydown", this._keyHandler);
-        }, 150);
+        }, 200);
       }
     }
   }

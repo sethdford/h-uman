@@ -27,7 +27,7 @@ export class ScButton extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.375rem;
+      gap: var(--sc-space-xs);
       border: none;
       outline: none;
       font-family: var(--sc-font);
@@ -71,6 +71,10 @@ export class ScButton extends LitElement {
     button.variant-secondary:hover:not(:disabled) {
       background: var(--sc-bg-overlay);
     }
+    button.variant-secondary:active:not(:disabled) {
+      transform: scale(0.97);
+      box-shadow: var(--sc-shadow-sm);
+    }
 
     button.variant-destructive {
       background: var(--sc-error-dim);
@@ -88,30 +92,34 @@ export class ScButton extends LitElement {
       background: var(--sc-hover-overlay);
       color: var(--sc-text);
     }
+    button.variant-ghost:active:not(:disabled) {
+      transform: scale(0.97);
+      background: var(--sc-accent-subtle);
+    }
 
     /* Sizes */
     button.size-sm {
       font-size: var(--sc-text-xs);
-      padding: 0.375rem 0.625rem;
+      padding: var(--sc-space-xs) var(--sc-space-sm);
     }
     button.size-sm.icon-only {
-      padding: 0.375rem;
+      padding: var(--sc-space-xs);
     }
 
     button.size-md {
       font-size: var(--sc-text-sm);
-      padding: 0.5rem 0.875rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
     }
     button.size-md.icon-only {
-      padding: 0.5rem;
+      padding: var(--sc-space-sm);
     }
 
     button.size-lg {
       font-size: var(--sc-text-base);
-      padding: 0.625rem 1.125rem;
+      padding: var(--sc-space-sm) var(--sc-space-lg);
     }
     button.size-lg.icon-only {
-      padding: 0.625rem;
+      padding: var(--sc-space-sm);
     }
 
     button:disabled {
@@ -125,7 +133,7 @@ export class ScButton extends LitElement {
       border: 2px solid currentColor;
       border-right-color: transparent;
       border-radius: 50%;
-      animation: sc-spin 0.6s linear infinite;
+      animation: sc-spin var(--sc-duration-slow) linear infinite;
       flex-shrink: 0;
     }
 

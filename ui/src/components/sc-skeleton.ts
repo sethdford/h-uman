@@ -94,13 +94,13 @@ export class ScSkeleton extends LitElement {
     if (this.height) return this.height;
     switch (this.variant) {
       case "line":
-        return "0.875rem";
+        return "var(--sc-text-base)";
       case "card":
         return "120px";
       case "circle":
         return "40px";
       default:
-        return "0.875rem";
+        return "var(--sc-text-base)";
     }
   }
 

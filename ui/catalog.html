@@ -200,12 +200,10 @@
         </div>
         <div class="code-snippet"><pre><code>&lt;sc-card hoverable&gt;Card content&lt;/sc-card&gt;</code></pre></div>
         <div class="variants"><h3>All Variants</h3><div class="row">
-    <div class="section">
-      <div class="row">
-        <sc-card style="width: 200px; padding: 1rem">Default card</sc-card>
-        <sc-card hoverable style="width: 200px; padding: 1rem">Hoverable card</sc-card>
-      </div>
-    </div>
+        <sc-card style="width: 200px; padding: var(--sc-space-md)">Default card</sc-card>
+        <sc-card hoverable style="width: 200px; padding: var(--sc-space-md)">Hoverable card</sc-card>
+        </div></div>
+      </section>
 
       <section class="component-section" id="sc-input">
         <h2>sc-input</h2>
@@ -433,6 +431,134 @@
           <sc-button variant="primary" id="dialog-demo-default">Default</sc-button>
           <sc-button variant="destructive" id="dialog-demo-danger">Danger</sc-button>
         </div></div>
+      </section>
+
+      <section class="component-section" id="sc-modal">
+        <h2>sc-modal</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-button id="modal-trigger">Open Modal</sc-button>
+            <sc-modal id="modal-preview" heading="Example Modal">
+              <p>This is the modal body content.</p>
+            </sc-modal>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-modal heading="Title" open&gt;Content&lt;/sc-modal&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row">
+          <sc-button id="modal-demo">Launch Demo Modal</sc-button>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-tooltip">
+        <h2>sc-tooltip</h2>
+        <div class="playground">
+          <div class="preview" style="gap: var(--sc-space-lg); display: flex;">
+            <sc-tooltip text="Top tooltip" position="top"><sc-button variant="secondary">Top</sc-button></sc-tooltip>
+            <sc-tooltip text="Bottom tooltip" position="bottom"><sc-button variant="secondary">Bottom</sc-button></sc-tooltip>
+            <sc-tooltip text="Left tooltip" position="left"><sc-button variant="secondary">Left</sc-button></sc-tooltip>
+            <sc-tooltip text="Right tooltip" position="right"><sc-button variant="secondary">Right</sc-button></sc-tooltip>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-tooltip text="Helpful tip" position="top"&gt;&lt;button&gt;Hover me&lt;/button&gt;&lt;/sc-tooltip&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-empty-state">
+        <h2>sc-empty-state</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%;">
+            <sc-empty-state id="empty-preview" heading="No items" description="Items will appear here when available."></sc-empty-state>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-empty-state heading="No items" description="..."&gt;&lt;/sc-empty-state&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-skeleton">
+        <h2>sc-skeleton</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; flex-direction: column; gap: var(--sc-space-md);">
+            <sc-skeleton variant="line" width="80%"></sc-skeleton>
+            <sc-skeleton variant="line" width="60%"></sc-skeleton>
+            <sc-skeleton variant="card" height="80px"></sc-skeleton>
+            <sc-skeleton variant="circle" width="48px" height="48px"></sc-skeleton>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-skeleton variant="line" width="80%"&gt;&lt;/sc-skeleton&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-sheet">
+        <h2>sc-sheet</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-button id="sheet-trigger">Open Sheet</sc-button>
+            <sc-sheet id="sheet-preview">
+              <p>Sheet content goes here. Drag the handle or press Escape to close.</p>
+            </sc-sheet>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-sheet open&gt;Sheet content&lt;/sc-sheet&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row">
+          <sc-button id="sheet-demo">Launch Demo Sheet</sc-button>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-toast">
+        <h2>sc-toast</h2>
+        <div class="playground">
+          <div class="preview" style="gap: var(--sc-space-sm); display: flex; flex-wrap: wrap;">
+            <sc-button id="toast-success-v" variant="secondary">Success</sc-button>
+            <sc-button id="toast-error-v" variant="secondary">Error</sc-button>
+            <sc-button id="toast-info-v" variant="secondary">Info</sc-button>
+            <sc-button id="toast-warning-v" variant="secondary">Warning</sc-button>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>ScToast.show({ message: "Saved!", variant: "success" });</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-tabs">
+        <h2>sc-tabs</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%;">
+            <sc-tabs id="tabs-preview"></sc-tabs>
+          </div>
+          <div class="controls">
+            <label>value
+              <select id="tabs-value-control">
+                <option value="overview" selected>overview</option>
+                <option value="chat">chat</option>
+                <option value="settings">settings</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-tabs .tabs=${'[{id:"tab1",label:"Tab 1"}]'} value="tab1"&gt;&lt;/sc-tabs&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row" style="width: 100%;">
+          <sc-tabs id="catalog-tabs"></sc-tabs>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-avatar">
+        <h2>sc-avatar</h2>
+        <div class="playground">
+          <div class="preview" style="gap: var(--sc-space-md); display: flex;">
+            <sc-avatar name="Alice Smith" size="sm"></sc-avatar>
+            <sc-avatar name="Bob Jones" size="md"></sc-avatar>
+            <sc-avatar name="Charlie" size="lg"></sc-avatar>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-avatar name="Alice Smith" size="md"&gt;&lt;/sc-avatar&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-progress">
+        <h2>sc-progress</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; flex-direction: column; gap: var(--sc-space-md);">
+            <sc-progress value="25" label="Upload progress"></sc-progress>
+            <sc-progress value="60" variant="success" label="Success"></sc-progress>
+            <sc-progress value="90" variant="warning" label="Warning"></sc-progress>
+            <sc-progress label="Indeterminate"></sc-progress>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-progress value="60" variant="success" label="Upload"&gt;&lt;/sc-progress&gt;</code></pre></div>
       </section>
 
     <sc-toast></sc-toast>

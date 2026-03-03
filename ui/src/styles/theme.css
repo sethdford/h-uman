@@ -44,7 +44,7 @@ a,
 input,
 textarea,
 select {
-  transition: all var(--sc-duration-fast) ease;
+  transition: all var(--sc-duration-fast) var(--sc-ease-out);
 }
 
 body {

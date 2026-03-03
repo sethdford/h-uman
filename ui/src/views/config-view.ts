@@ -50,7 +50,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       flex-wrap: wrap;
     }
     .status {
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
     }
     .status.saved {
@@ -69,7 +69,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       height: 6px;
       border-radius: 50%;
       background: var(--sc-accent);
-      margin-right: 0.375rem;
+      margin-right: var(--sc-space-xs);
       vertical-align: middle;
     }
     .header-actions {
@@ -78,26 +78,26 @@ export class ScConfigView extends GatewayAwareLitElement {
       align-items: center;
     }
     .toggle-btn {
-      padding: 0.5rem 0.75rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-bg-elevated);
       color: var(--sc-text);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
-      font-size: 0.8125rem;
+      font-size: var(--sc-text-sm);
       cursor: pointer;
     }
     .toggle-btn:hover {
       background: var(--sc-border);
     }
     .save-btn {
-      padding: 0.5rem 1rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-accent);
       color: var(--sc-bg);
       border: none;
       border-radius: var(--sc-radius);
-      font-weight: 500;
+      font-weight: var(--sc-weight-medium);
       cursor: pointer;
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
     }
     .save-btn:hover:not(:disabled) {
       background: var(--sc-accent-hover);
@@ -110,7 +110,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xl);
-      padding: 1.5rem;
+      padding: var(--sc-space-lg);
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
@@ -122,10 +122,10 @@ export class ScConfigView extends GatewayAwareLitElement {
       background: var(--sc-bg-elevated);
     }
     .section + .section {
-      margin-top: 0.5rem;
+      margin-top: var(--sc-space-sm);
     }
     .section-header {
-      padding: 0.75rem 1rem;
+      padding: var(--sc-space-md) var(--sc-space-md);
       background: var(--sc-bg-elevated);
       cursor: pointer;
       display: flex;
@@ -139,17 +139,17 @@ export class ScConfigView extends GatewayAwareLitElement {
     }
     .section-header .chevron {
       transition: transform var(--sc-duration-normal) var(--sc-ease-out);
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
     .section-header.collapsed .chevron {
       transform: rotate(-90deg);
     }
     .section-content {
-      padding: 1rem 1.25rem;
+      padding: var(--sc-space-md) var(--sc-space-lg);
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      gap: var(--sc-space-md);
       max-height: 600px;
       overflow: hidden;
       transition:
@@ -166,25 +166,25 @@ export class ScConfigView extends GatewayAwareLitElement {
     .field {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: var(--sc-space-xs);
     }
     .field label {
-      font-size: 0.875rem;
-      font-weight: 500;
+      font-size: var(--sc-text-base);
+      font-weight: var(--sc-weight-medium);
       color: var(--sc-text);
     }
     .field .description {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
-      margin-top: 0.125rem;
+      margin-top: var(--sc-space-2xs);
     }
     .field input {
-      padding: 0.5rem 0.875rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-bg);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
       color: var(--sc-text);
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       transition:
         border-color var(--sc-duration-fast),
         box-shadow var(--sc-duration-fast);
@@ -195,20 +195,20 @@ export class ScConfigView extends GatewayAwareLitElement {
     .field input:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle, rgba(249, 112, 102, 0.12));
+      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
     }
     .field input[type="number"] {
       width: 8rem;
     }
     .raw-area {
       min-height: 280px;
-      padding: 0.75rem 1rem;
+      padding: var(--sc-space-md) var(--sc-space-md);
       background: var(--sc-bg);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
       color: var(--sc-text);
       font-family: var(--sc-font-mono);
-      font-size: 0.8125rem;
+      font-size: var(--sc-text-sm);
       resize: vertical;
       transition:
         border-color var(--sc-duration-fast),
@@ -220,7 +220,7 @@ export class ScConfigView extends GatewayAwareLitElement {
     .raw-area:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle, rgba(249, 112, 102, 0.12));
+      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
     }
     @media (max-width: 768px) {
       .header {

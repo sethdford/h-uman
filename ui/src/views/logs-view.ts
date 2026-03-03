@@ -28,7 +28,7 @@ export class ScLogsView extends GatewayAwareLitElement {
     }
     h2 {
       margin: 0;
-      font-size: var(--sc-text-xl);
+      font-size: var(--sc-text-lg);
       font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
@@ -38,7 +38,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       align-items: center;
     }
     .filter-input {
-      padding: 0.5rem 0.75rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
@@ -59,7 +59,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
     }
     .btn {
-      padding: 0.5rem 1rem;
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-bg-elevated);
       color: var(--sc-text);
       border: 1px solid var(--sc-border);

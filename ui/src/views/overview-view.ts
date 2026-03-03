@@ -13,6 +13,13 @@ interface HealthRes {
   status?: string;
 }
 
+interface UpdateInfo {
+  available?: boolean;
+  current_version?: string;
+  latest_version?: string;
+  url?: string;
+}
+
 interface CapabilitiesRes {
   version?: string;
   tools?: number;
@@ -53,8 +60,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
     .header h2 {
       margin: 0;
-      font-size: var(--sc-text-xl);
-      font-weight: var(--sc-weight-semibold);
+      font-size: var(--sc-text-2xl);
+      font-weight: var(--sc-weight-bold);
+      letter-spacing: -0.02em;
       color: var(--sc-text);
     }
     .bento {
@@ -73,12 +81,14 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
     .stat-label {
       font-size: var(--sc-text-xs);
+      letter-spacing: 0.02em;
       color: var(--sc-text-muted);
       margin-bottom: var(--sc-space-xs);
     }
     .stat-value {
       font-size: var(--sc-text-xl);
       font-weight: var(--sc-weight-bold);
+      font-variant-numeric: tabular-nums;
       color: var(--sc-text);
     }
     .gateway-content {
@@ -184,6 +194,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
   @state() private sessions: SessionItem[] = [];
   @state() private loading = true;
   @state() private error = "";
+  @state() private updateInfo: UpdateInfo = {};
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -195,7 +206,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     this.loading = true;
     this.error = "";
     try {
-      const [healthRes, capRes, chRes, sessRes] = await Promise.all([
+      const [healthRes, capRes, chRes, sessRes, updateRes] = await Promise.all([
         gw.request<HealthRes>("health", {}).catch(() => ({})),
         gw.request<CapabilitiesRes>("capabilities", {}).catch(() => ({})),
         gw
@@ -204,6 +215,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
         gw
           .request<{ sessions?: SessionItem[] }>("sessions.list", {})
           .catch(() => ({ sessions: [] })),
+        gw.request<UpdateInfo>("update.check", {}).catch(() => ({})),
       ]);
       this.health = healthRes as HealthRes;
       this.capabilities = capRes as CapabilitiesRes;
@@ -211,6 +223,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       this.channels = chPayload?.channels ?? [];
       const sessPayload = sessRes as { sessions?: SessionItem[] };
       this.sessions = sessPayload?.sessions ?? [];
+      this.updateInfo = (updateRes as UpdateInfo) ?? {};
     } catch (e) {
       this.error = e instanceof Error ? e.message : "Failed to load overview";
       this.health = {};
@@ -304,6 +317,21 @@ export class ScOverviewView extends GatewayAwareLitElement {
           <div class="stat-label">Active Sessions</div>
           <div class="stat-value">${this.sessions.length}</div>
         </sc-card>
+
+        ${this.updateInfo.available
+          ? html`
+              <sc-card hoverable>
+                <div class="stat-label">Update Available</div>
+                <div
+                  class="stat-value"
+                  style="font-size: var(--sc-text-base); color: var(--sc-accent);"
+                >
+                  ${this.updateInfo.current_version ?? "—"} →
+                  ${this.updateInfo.latest_version ?? "—"}
+                </div>
+              </sc-card>
+            `
+          : nothing}
 
         <!-- 6. Channels Overview (full width) -->
         <sc-card hoverable class="channels-overview">

@@ -7,6 +7,6 @@
     "docs": "npx tsx generate-docs.ts"
   },
   "devDependencies": {
-    "tsx": "latest"
+    "tsx": "^4.21.0"
   }
 }

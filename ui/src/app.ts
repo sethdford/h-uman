@@ -1,13 +1,5 @@
 import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
-
-declare global {
-  interface Document {
-    startViewTransition?(callback: () => void | Promise<void>): {
-      updateCallbackDone: Promise<void>;
-    };
-  }
-}
 import type { GatewayClient, GatewayStatus } from "./gateway.js";
 import { GatewayClient as GatewayClientClass } from "./gateway.js";
 import { setGateway } from "./gateway-provider.js";
@@ -133,8 +125,10 @@ export class ScApp extends LitElement {
         display: flex;
         align-items: center;
         justify-content: space-around;
-        background: var(--sc-bg-surface);
-        border-top: 1px solid var(--sc-border-subtle);
+        background: color-mix(in srgb, var(--sc-bg-surface), transparent 5%);
+        backdrop-filter: blur(var(--sc-blur-md, 12px));
+        -webkit-backdrop-filter: blur(var(--sc-blur-md, 12px));
+        box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.08);
         padding: var(--sc-space-xs) 0;
         padding-bottom: env(safe-area-inset-bottom, 0);
       }
@@ -142,7 +136,7 @@ export class ScApp extends LitElement {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 2px;
+        gap: var(--sc-space-2xs);
         padding: var(--sc-space-xs) var(--sc-space-sm);
         background: transparent;
         border: none;
@@ -236,7 +230,7 @@ export class ScApp extends LitElement {
       }
       document.startViewTransition(() => {
         this.tab = hash as TabId;
-        return this.updateComplete as Promise<void>;
+        return this.updateComplete;
       });
     }
   }

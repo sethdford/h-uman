@@ -61,7 +61,9 @@ export class ScSidebar extends LitElement {
       flex-direction: column;
       width: var(--sc-sidebar-width);
       min-width: var(--sc-sidebar-width);
-      background: var(--sc-bg-surface);
+      background: color-mix(in srgb, var(--sc-bg-surface), transparent 3%);
+      backdrop-filter: blur(var(--sc-blur-sm, 4px));
+      -webkit-backdrop-filter: blur(var(--sc-blur-sm, 4px));
       border-right: 1px solid var(--sc-border-subtle);
       transition: width var(--sc-duration-normal) var(--sc-ease-out);
       overflow: hidden;
@@ -123,7 +125,7 @@ export class ScSidebar extends LitElement {
     .section-title {
       font-size: var(--sc-text-xs);
       font-weight: var(--sc-weight-medium);
-      letter-spacing: 0.05em;
+      letter-spacing: 0.02em;
       text-transform: uppercase;
       color: var(--sc-text-muted);
       padding: var(--sc-space-xs) var(--sc-space-md);
@@ -157,10 +159,21 @@ export class ScSidebar extends LitElement {
       transition:
         background var(--sc-duration-fast),
         color var(--sc-duration-fast),
-        border-color var(--sc-duration-fast);
+        border-color var(--sc-duration-fast),
+        transform var(--sc-duration-fast) var(--sc-ease-out);
       margin-bottom: var(--sc-space-xs);
       text-align: left;
       font-family: inherit;
+    }
+
+    .nav-item:active {
+      transform: scale(0.97);
+    }
+
+    .nav-item:focus-visible {
+      outline: 2px solid var(--sc-accent);
+      outline-offset: -2px;
+      border-radius: var(--sc-radius);
     }
 
     .nav-item:hover:not(.active) {
@@ -234,7 +247,7 @@ export class ScSidebar extends LitElement {
 
     .status-dot.connecting {
       background: var(--sc-warning);
-      animation: sc-pulse 1s ease-in-out infinite;
+      animation: sc-pulse var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
     }
 
     .status-dot.disconnected {
@@ -256,6 +269,10 @@ export class ScSidebar extends LitElement {
         background var(--sc-duration-fast),
         color var(--sc-duration-fast),
         transform var(--sc-duration-normal) var(--sc-ease-out);
+    }
+
+    .collapse-btn:active {
+      transform: scale(0.97);
     }
 
     .collapse-btn:hover {

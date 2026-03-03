@@ -40,7 +40,9 @@ export class ScCard extends LitElement {
     }
     .card.hoverable:hover {
       transform: translateY(-2px);
-      box-shadow: var(--sc-shadow-md);
+      box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.06),
+        0 8px 24px rgba(0, 0, 0, 0.08);
     }
     .card.hoverable:active {
       transform: translateY(0);
@@ -49,6 +51,13 @@ export class ScCard extends LitElement {
 
     .card.clickable {
       cursor: pointer;
+      transition:
+        transform var(--sc-duration-fast) var(--sc-ease-out),
+        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+    }
+    .card.clickable:active {
+      transform: translateY(0) scale(0.99);
+      box-shadow: var(--sc-shadow-sm);
     }
     .card.clickable:focus-visible {
       outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);

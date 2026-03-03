@@ -37,7 +37,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
     }
     h2 {
       margin: 0;
-      font-size: var(--sc-text-xl);
+      font-size: var(--sc-text-lg);
       font-weight: var(--sc-weight-semibold);
     }
     .layout {
@@ -74,6 +74,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
     .session-meta {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
+      font-variant-numeric: tabular-nums;
     }
     .detail {
       flex: 1;
@@ -141,6 +142,11 @@ export class ScSessionsView extends GatewayAwareLitElement {
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
+    }
+    .empty {
+      font-size: var(--sc-text-base);
+      color: var(--sc-text-muted);
+      padding: var(--sc-space-md);
     }
     @media (max-width: 768px) {
       .layout {

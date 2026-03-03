@@ -334,6 +334,16 @@ function generateCSS(tokens: TokenMap): string {
       lines.push(`  --sc-radius-${k.replace("radius.", "")}: ${v};`);
   }
 
+  // Blur
+  lines.push("  /* Blur */");
+  const blurKeys = Object.keys(tokens)
+    .filter((k) => k.startsWith("blur."))
+    .sort();
+  for (const k of blurKeys) {
+    const v = tokens[k];
+    if (v != null) lines.push(`  --sc-blur-${k.replace("blur.", "")}: ${v};`);
+  }
+
   // Z-index
   lines.push("  /* Z-index */");
   const zIndexKeys = Object.keys(tokens)

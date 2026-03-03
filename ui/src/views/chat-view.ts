@@ -6,6 +6,7 @@ import { GatewayClient as GatewayClientClass } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { EVENT_NAMES } from "../utils.js";
 import { icons } from "../icons.js";
+import "../components/sc-empty-state.js";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -93,7 +94,7 @@ export class ScChatView extends GatewayAwareLitElement {
       align-items: center;
       gap: var(--sc-space-sm);
       padding: var(--sc-space-sm) var(--sc-space-md);
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
       background: var(--sc-bg-surface);
       border-bottom: 1px solid var(--sc-border);
@@ -108,19 +109,10 @@ export class ScChatView extends GatewayAwareLitElement {
     }
     .status-dot.connecting {
       background: var(--sc-warning);
-      animation: pulse 1s ease-in-out infinite;
+      animation: sc-pulse var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
     }
     .status-dot.disconnected {
       background: var(--sc-text-muted);
-    }
-    @keyframes pulse {
-      0%,
-      100% {
-        opacity: 1;
-      }
-      50% {
-        opacity: 0.4;
-      }
     }
     .messages {
       flex: 1;
@@ -134,12 +126,12 @@ export class ScChatView extends GatewayAwareLitElement {
       max-width: 85%;
       padding: var(--sc-space-md) var(--sc-space-md);
       border-radius: var(--sc-radius);
-      font-size: 0.9375rem;
+      font-size: var(--sc-text-base);
       line-height: 1.5;
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xs);
-      animation: sc-slide-up var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease) both;
+      animation: sc-slide-up var(--sc-duration-normal) var(--sc-ease-out) both;
     }
     .message.user {
       align-self: flex-end;
@@ -173,7 +165,7 @@ export class ScChatView extends GatewayAwareLitElement {
     }
     .message code {
       font-family: var(--sc-font-mono);
-      font-size: 0.875em;
+      font-size: var(--sc-text-sm);
       background: var(--sc-bg-elevated);
       padding: 0.15rem 0.35rem;
       border-radius: var(--sc-radius-sm);
@@ -203,19 +195,19 @@ export class ScChatView extends GatewayAwareLitElement {
       gap: var(--sc-space-sm);
       padding: var(--sc-space-sm) var(--sc-space-md);
       cursor: pointer;
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       user-select: none;
     }
     .tool-header:hover {
       background: var(--sc-bg-surface);
     }
     .tool-header .tool-name {
-      font-weight: 600;
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-accent);
     }
     .tool-expand {
       margin-left: auto;
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
     .tool-spinner {
@@ -224,9 +216,9 @@ export class ScChatView extends GatewayAwareLitElement {
       border: 2px solid var(--sc-border);
       border-top-color: var(--sc-accent);
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: sc-spin var(--sc-duration-slow) linear infinite;
     }
-    @keyframes spin {
+    @keyframes sc-spin {
       to {
         transform: rotate(360deg);
       }
@@ -245,7 +237,7 @@ export class ScChatView extends GatewayAwareLitElement {
     .tool-body .label {
       font-size: var(--sc-text-xs);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.02em;
       margin-bottom: var(--sc-space-xs);
       color: var(--sc-text-muted);
     }
@@ -266,20 +258,20 @@ export class ScChatView extends GatewayAwareLitElement {
       flex: 1;
       min-height: 44px;
       max-height: 120px;
-      padding: 0.625rem var(--sc-space-md);
+      padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-bg);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
       color: var(--sc-text);
       font-family: var(--sc-font);
-      font-size: 0.9375rem;
+      font-size: var(--sc-text-base);
       resize: none;
       line-height: 1.5;
     }
     .input-bar textarea:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle, rgba(249, 112, 102, 0.12));
+      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
     }
     .input-bar textarea::placeholder {
       color: var(--sc-text-muted);
@@ -289,15 +281,15 @@ export class ScChatView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
     }
     .send-btn {
-      padding: 0.625rem 1.25rem;
+      padding: var(--sc-space-sm) var(--sc-space-lg);
       min-height: 44px;
       background: var(--sc-accent);
       color: var(--sc-bg);
       border: none;
       border-radius: var(--sc-radius);
-      font-weight: 500;
+      font-weight: var(--sc-weight-medium);
       cursor: pointer;
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
     }
     .send-btn:hover:not(:disabled) {
       background: var(--sc-accent-hover);
@@ -309,7 +301,7 @@ export class ScChatView extends GatewayAwareLitElement {
     .thinking {
       align-self: flex-start;
       padding: var(--sc-space-sm) var(--sc-space-md);
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
       font-style: italic;
     }
@@ -321,7 +313,7 @@ export class ScChatView extends GatewayAwareLitElement {
       border: 1px solid var(--sc-error);
       border-radius: var(--sc-radius);
       cursor: pointer;
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       font-style: normal;
     }
     .abort-btn:hover {
@@ -339,7 +331,7 @@ export class ScChatView extends GatewayAwareLitElement {
       height: 6px;
       border-radius: 50%;
       background: var(--sc-text-muted);
-      animation: sc-bounce-dot 1.4s infinite ease-in-out both;
+      animation: sc-bounce-dot var(--sc-duration-slow) var(--sc-ease-in-out) infinite both;
     }
     .typing-dots span:nth-child(1) {
       animation-delay: -0.32s;
@@ -366,7 +358,7 @@ export class ScChatView extends GatewayAwareLitElement {
       border: 1px solid var(--sc-error);
       border-radius: var(--sc-radius);
       color: var(--sc-error);
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
     }
     .error-banner button {
       background: none;

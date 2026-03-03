@@ -36,7 +36,7 @@ export class ScCronView extends GatewayAwareLitElement {
     }
     h2 {
       margin: 0;
-      font-size: var(--sc-text-xl);
+      font-size: var(--sc-text-lg);
       font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
@@ -101,7 +101,8 @@ export class ScCronView extends GatewayAwareLitElement {
     }
     .form-title {
       margin: 0 0 var(--sc-space-md);
-      font-size: var(--sc-text-base);
+      font-size: var(--sc-text-lg);
+      font-weight: var(--sc-weight-semibold);
     }
     .form-group {
       margin-bottom: var(--sc-space-md);

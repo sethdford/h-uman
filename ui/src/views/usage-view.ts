@@ -24,7 +24,7 @@ export class ScUsageView extends GatewayAwareLitElement {
     }
     h2 {
       margin: 0 0 var(--sc-space-xl);
-      font-size: var(--sc-text-xl);
+      font-size: var(--sc-text-lg);
       font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
@@ -56,7 +56,7 @@ export class ScUsageView extends GatewayAwareLitElement {
     .bar-chart {
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
     }
     .bar-row {
       display: flex;
@@ -68,6 +68,12 @@ export class ScUsageView extends GatewayAwareLitElement {
       font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
       flex-shrink: 0;
+    }
+    .bar-value {
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+      font-variant-numeric: tabular-nums;
+      min-width: 4rem;
     }
     .bar-track {
       flex: 1;
