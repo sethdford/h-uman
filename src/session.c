@@ -1,9 +1,12 @@
 #include "seaclaw/session.h"
+#include "seaclaw/core/json.h"
+#include "seaclaw/core/string.h"
 #include <stdint.h>
 #include "seaclaw/util.h"
 #include <string.h>
 #include <time.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static uint32_t hash_key(const char *key) {
     uint32_t h = 5381;
@@ -227,5 +230,100 @@ sc_error_t sc_session_patch(sc_session_manager_t *mgr, const char *session_key,
     size_t len = strnlen(label, SC_SESSION_LABEL_LEN - 1);
     memcpy(s->label, label, len);
     s->label[len] = '\0';
+    return SC_OK;
+}
+
+
+static void json_escape_to_f(FILE *f, const char *s) {
+    for (; *s; s++) {
+        switch (*s) {
+            case '"': fputs("\"" , f); break;
+            case '\': fputs("\\\\", f); break;
+            case '
+': fputs("\n", f); break;
+            case '
+': fputs("\r", f); break;
+            case '	': fputs("\t", f); break;
+            default: if ((unsigned char)*s < 0x20) fprintf(f, "\u%04x", (unsigned char)*s); else fputc(*s, f);
+        }
+    }
+}
+
+sc_error_t sc_session_save(sc_session_manager_t *mgr, const char *path) {
+    if (!mgr || !path) return SC_ERR_INVALID_ARGUMENT;
+    FILE *f = fopen(path, "w");
+    if (!f) return SC_ERR_IO;
+    fputs("[", f);
+    bool first_s = true;
+    for (size_t i = 0; i < SC_SESSION_MAP_CAP; i++) {
+        for (sc_session_entry_t *e = mgr->buckets[i]; e; e = e->next) {
+            sc_session_t *s = e->session;
+            if (!s) continue;
+            if (!first_s) fputs(",", f);
+            first_s = false;
+            fprintf(f, "
+{"key":"");
+            json_escape_to_f(f, s->session_key);
+            fprintf(f, "","label":"");
+            json_escape_to_f(f, s->label);
+            fprintf(f, "","created_at":%lld,"last_active":%lld,"turn_count":%llu,"messages":[",
+                (long long)s->created_at, (long long)s->last_active, (unsigned long long)s->turn_count);
+            for (size_t m = 0; m < s->message_count; m++) {
+                if (m > 0) fputc(',', f);
+                fputs("{"role":"", f);
+                json_escape_to_f(f, s->messages[m].role);
+                fputs("","content":"", f);
+                if (s->messages[m].content) json_escape_to_f(f, s->messages[m].content);
+                fputs(""}", f);
+            }
+            fputs("]}", f);
+        }
+    }
+    fputs("
+]
+", f);
+    fclose(f);
+    return SC_OK;
+}
+
+sc_error_t sc_session_load(sc_session_manager_t *mgr, const char *path) {
+    if (!mgr || !mgr->alloc || !path) return SC_ERR_INVALID_ARGUMENT;
+    FILE *f = fopen(path, "r");
+    if (!f) return SC_ERR_NOT_FOUND;
+    fseek(f, 0, SEEK_END); long flen = ftell(f); fseek(f, 0, SEEK_SET);
+    if (flen <= 2 || flen > 10*1024*1024) { fclose(f); return SC_OK; }
+    char *buf = mgr->alloc->alloc(mgr->alloc->ctx, (size_t)flen + 1);
+    if (!buf) { fclose(f); return SC_ERR_OUT_OF_MEMORY; }
+    size_t rd = fread(buf, 1, (size_t)flen, f); buf[rd] = ' '; fclose(f);
+    sc_json_value_t *root = NULL;
+    if (sc_json_parse(mgr->alloc, buf, rd, &root) != SC_OK || !root) {
+        mgr->alloc->free(mgr->alloc->ctx, buf, (size_t)flen + 1); return SC_ERR_PARSE;
+    }
+    if (root->type != SC_JSON_ARRAY) { sc_json_free(mgr->alloc, root); mgr->alloc->free(mgr->alloc->ctx, buf, (size_t)flen + 1); return SC_OK; }
+    for (size_t i = 0; i < root->data.array.len; i++) {
+        sc_json_value_t *item = root->data.array.items[i];
+        if (!item || item->type != SC_JSON_OBJECT) continue;
+        const char *key = sc_json_get_string(item, "key");
+        if (!key || !key[0]) continue;
+        sc_session_t *s = sc_session_get_or_create(mgr, key);
+        if (!s) continue;
+        const char *label = sc_json_get_string(item, "label");
+        if (label) { size_t llen = strlen(label); if (llen >= SC_SESSION_LABEL_LEN) llen = SC_SESSION_LABEL_LEN - 1; memcpy(s->label, label, llen); s->label[llen] = ' '; }
+        s->created_at = (int64_t)sc_json_get_number(item, "created_at", 0);
+        s->last_active = (int64_t)sc_json_get_number(item, "last_active", 0);
+        s->turn_count = (uint64_t)sc_json_get_number(item, "turn_count", 0);
+        sc_json_value_t *msgs = sc_json_object_get(item, "messages");
+        if (msgs && msgs->type == SC_JSON_ARRAY) {
+            for (size_t m = 0; m < msgs->data.array.len; m++) {
+                sc_json_value_t *msg = msgs->data.array.items[m];
+                if (!msg) continue;
+                const char *role = sc_json_get_string(msg, "role");
+                const char *content = sc_json_get_string(msg, "content");
+                if (role && content) sc_session_append_message(s, mgr->alloc, role, content);
+            }
+        }
+    }
+    sc_json_free(mgr->alloc, root);
+    mgr->alloc->free(mgr->alloc->ctx, buf, (size_t)flen + 1);
     return SC_OK;
 }

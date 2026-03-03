@@ -71,4 +71,7 @@ sc_error_t sc_session_delete(sc_session_manager_t *mgr, const char *session_key)
 sc_error_t sc_session_patch(sc_session_manager_t *mgr, const char *session_key,
     const char *label);
 
+sc_error_t sc_session_save(sc_session_manager_t *mgr, const char *path);
+sc_error_t sc_session_load(sc_session_manager_t *mgr, const char *path);
+
 #endif
