@@ -511,13 +511,13 @@ static void test_profile_by_name_null(void) {
 
 
 static void test_daemon_start_not_supported(void) {
-    sc_error_t err = sc_daemon_start(NULL);
+    sc_error_t err = sc_daemon_start();
     SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
 }
 
 static void test_update_check_not_supported(void) {
-    sc_allocator_t a = sc_system_allocator();
-    sc_error_t err = sc_update_check(&a, NULL, NULL);
+    char vbuf[64];
+    sc_error_t err = sc_update_check(vbuf, sizeof(vbuf));
     SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
 }
 
