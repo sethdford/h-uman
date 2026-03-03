@@ -7,8 +7,8 @@ Scope: entire repository.
 
 seaclaw is a C11 autonomous AI assistant runtime optimized for:
 
-- minimal binary size (349 KB core MinSizeRel)
-- minimal memory footprint (target: < 5 MB peak RSS)
+- minimal binary size (366 KB release with LTO, 175 exported symbols)
+- minimal memory footprint (5–6 MB peak RSS measured)
 - zero dependencies beyond libc, optional SQLite and libcurl
 - Zig reference implementation archived in `archive/zig-reference/`
 
@@ -25,7 +25,19 @@ Key extension points:
 - `src/runtime/` (`sc_runtime_t`) — execution environments
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
 
-Current scale: **400+ source + header files, ~70K+ lines of C, ~28K+ lines of tests, 2,000+ tests**.
+Current scale: **400+ source + header files, ~70K+ lines of C, ~28K+ lines of tests, 2,150+ tests**.
+
+Performance baseline (macOS aarch64, MinSizeRel+LTO):
+
+| Metric                   | Measured               |
+| ------------------------ | ---------------------- |
+| Binary size              | 366 KB (374,376 bytes) |
+| Text section             | 336 KB                 |
+| Exported symbols         | 175                    |
+| Cold-start (`--version`) | 6–27 ms avg            |
+| Peak RSS (`--version`)   | ~5.7 MB                |
+| Peak RSS (test suite)    | ~5.9 MB                |
+| Test throughput          | 1,050+ tests/sec       |
 
 Build and test:
 
@@ -49,7 +61,8 @@ These codebase realities should drive every design decision:
 2. **Binary size and memory are hard product constraints**
    - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
-   - Current release binary: 349 KB (core) / 430 KB (full).
+   - Current release binary: 366 KB (with LTO). Top modules by object size:
+     config (49 KB), main (34 KB), control_protocol (32 KB), cli_commands (23 KB).
 
 3. **Security-critical surfaces are first-class**
    - `src/gateway/gateway.c`, `src/security/`, `src/tools/`, `src/runtime/` carry high blast radius.
