@@ -113,6 +113,8 @@ sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
             }
         } else if (strcmp(a, "--tui") == 0) {
             out->use_tui = 1;
+        } else if (strcmp(a, "--demo") == 0) {
+            out->demo_mode = 1;
         }
     }
     return SC_OK;
@@ -214,6 +216,15 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Config error: %s\n", SC_CODENAME, sc_error_string(err));
         return err;
+    }
+
+    if (parsed_args.demo_mode) {
+        fprintf(stderr, "[seaclaw] Demo mode — using local Ollama (no API key required)\n");
+        fprintf(stderr, "[seaclaw] Make sure Ollama is running: ollama serve\n");
+        cfg.default_provider = "ollama";
+        cfg.default_model = "llama3.2";
+        cfg.memory.backend = "none";
+        cfg.memory_backend = "none";
     }
 
     const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";

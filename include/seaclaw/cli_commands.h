@@ -13,5 +13,6 @@ sc_error_t cmd_models(sc_allocator_t *alloc, int argc, char **argv);
 sc_error_t cmd_auth(sc_allocator_t *alloc, int argc, char **argv);
 sc_error_t cmd_update(sc_allocator_t *alloc, int argc, char **argv);
 sc_error_t cmd_sandbox(sc_allocator_t *alloc, int argc, char **argv);
+sc_error_t cmd_init(sc_allocator_t *alloc, int argc, char **argv);
 
 #endif /* SC_CLI_COMMANDS_H */

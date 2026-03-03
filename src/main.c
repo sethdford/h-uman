@@ -92,7 +92,8 @@ static sc_error_t cmd_skills(sc_allocator_t *alloc, int argc, char **argv);
 static sc_error_t cmd_migrate(sc_allocator_t *alloc, int argc, char **argv);
 
 static const sc_command_t commands[] = {
-    {"agent", "Start interactive agent session", cmd_agent},
+    {"agent", "Start interactive agent (--demo: use local Ollama)", cmd_agent},
+    {"init", "Initialize config file", cmd_init},
     {"gateway", "Start webhook gateway server", cmd_gateway},
     {"mcp", "Run as MCP server (stdin/stdout JSON-RPC)", cmd_mcp},
     {"service", "Run as background service (daemonize)", cmd_service},
@@ -366,14 +367,17 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     /* ── Create provider ──────────────────────────────────────────────── */
     const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
     size_t prov_name_len = strlen(prov_name);
-    const char *api_key = sc_config_default_provider_key(&cfg);
-    size_t api_key_len = api_key ? strlen(api_key) : 0;
-    const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
-    size_t base_url_len = base_url ? strlen(base_url) : 0;
 
     sc_provider_t provider;
-    err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
-                             base_url_len, &provider);
+    err = sc_provider_create_from_config(alloc, &cfg, prov_name, prov_name_len, &provider);
+    if (err == SC_ERR_NOT_SUPPORTED) {
+        const char *api_key = sc_config_default_provider_key(&cfg);
+        size_t api_key_len = api_key ? strlen(api_key) : 0;
+        const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
+        size_t base_url_len = base_url ? strlen(base_url) : 0;
+        err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
+                                 base_url_len, &provider);
+    }
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", SC_CODENAME, prov_name,
                 sc_error_string(err));
@@ -1127,13 +1131,16 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
     if (with_agent) {
         const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
         size_t prov_name_len = strlen(prov_name);
-        const char *api_key = sc_config_default_provider_key(&cfg);
-        size_t api_key_len = api_key ? strlen(api_key) : 0;
-        const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
-        size_t base_url_len = base_url ? strlen(base_url) : 0;
 
-        err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
-                                 base_url_len, &provider);
+        err = sc_provider_create_from_config(alloc, &cfg, prov_name, prov_name_len, &provider);
+        if (err == SC_ERR_NOT_SUPPORTED) {
+            const char *api_key = sc_config_default_provider_key(&cfg);
+            size_t api_key_len = api_key ? strlen(api_key) : 0;
+            const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
+            size_t base_url_len = base_url ? strlen(base_url) : 0;
+            err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len,
+                                     base_url, base_url_len, &provider);
+        }
         if (err != SC_OK) {
             fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", SC_CODENAME, prov_name,
                     sc_error_string(err));

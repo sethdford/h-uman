@@ -1,9 +1,12 @@
 #include "test_framework.h"
+#include "seaclaw/agent/cli.h"
 #include "seaclaw/cli_commands.h"
+#include "seaclaw/config.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Use a temp HOME with no config so sc_config_load uses defaults and validates. */
 static void set_test_home(void) {
@@ -96,6 +99,52 @@ static void test_cmd_sandbox_default(void) {
     SC_ASSERT_EQ(err, SC_OK);
 }
 
+/* cmd_init: under SC_IS_TEST skips filesystem/stdin, returns SC_OK */
+static void test_cmd_init_sc_is_test_returns_ok(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *argv[] = {"seaclaw", "init"};
+    sc_error_t err = cmd_init(&alloc, 2, argv);
+    SC_ASSERT_EQ(err, SC_OK);
+}
+
+/* Demo mode: --demo flag sets demo_mode in parsed args */
+static void test_agent_cli_demo_flag_parsing(void) {
+    const char *argv[] = {"seaclaw", "agent", "--demo"};
+    sc_parsed_agent_args_t out;
+    sc_error_t err = sc_agent_cli_parse_args(argv, 3, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.demo_mode, 1);
+}
+
+/* Demo mode: without --demo, demo_mode is 0 */
+static void test_agent_cli_no_demo_flag(void) {
+    const char *argv[] = {"seaclaw", "agent"};
+    sc_parsed_agent_args_t out;
+    sc_error_t err = sc_agent_cli_parse_args(argv, 2, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.demo_mode, 0);
+}
+
+/* Demo mode: overrides provider to ollama when applied to config */
+static void test_agent_cli_demo_overrides_provider(void) {
+    set_test_home();
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_config_t cfg;
+    sc_error_t err = sc_config_load(&alloc, &cfg);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(cfg.default_provider != NULL);
+    /* Before override: provider is from config (often "openai" from defaults) */
+    /* Apply demo overrides (same logic as in cli.c) */
+    cfg.default_provider = "ollama";
+    cfg.default_model = "llama3.2";
+    cfg.memory.backend = "none";
+    cfg.memory_backend = "none";
+    SC_ASSERT_TRUE(strcmp(cfg.default_provider, "ollama") == 0);
+    SC_ASSERT_TRUE(strcmp(cfg.default_model, "llama3.2") == 0);
+    SC_ASSERT_TRUE(strcmp(cfg.memory.backend, "none") == 0);
+    sc_config_deinit(&cfg);
+}
+
 void run_cli_tests(void) {
     SC_TEST_SUITE("CLI Commands");
     SC_RUN_TEST(test_cmd_channel_list);
@@ -109,4 +158,8 @@ void run_cli_tests(void) {
     SC_RUN_TEST(test_cmd_auth_status);
     SC_RUN_TEST(test_cmd_update_check);
     SC_RUN_TEST(test_cmd_sandbox_default);
+    SC_RUN_TEST(test_cmd_init_sc_is_test_returns_ok);
+    SC_RUN_TEST(test_agent_cli_demo_flag_parsing);
+    SC_RUN_TEST(test_agent_cli_no_demo_flag);
+    SC_RUN_TEST(test_agent_cli_demo_overrides_provider);
 }

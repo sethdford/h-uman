@@ -14,6 +14,7 @@ typedef struct sc_parsed_agent_args {
     double temperature_override;
     int has_temperature;
     int use_tui;
+    int demo_mode;
 } sc_parsed_agent_args_t;
 
 sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,

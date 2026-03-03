@@ -11,7 +11,87 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#define SC_INIT_CONFIG_DIR  ".seaclaw"
+#define SC_INIT_CONFIG_FILE "config.json"
+#define SC_INIT_MAX_PATH    1024
+
+/* Starter config JSON for seaclaw init */
+static const char SC_INIT_DEFAULT_JSON[] =
+    "{\n"
+    "  \"default_provider\": \"openai\",\n"
+    "  \"default_model\": \"gpt-4o\",\n"
+    "  \"max_tokens\": 4096,\n"
+    "  \"memory\": {\n"
+    "    \"backend\": \"sqlite\"\n"
+    "  },\n"
+    "  \"gateway\": {\n"
+    "    \"enabled\": false,\n"
+    "    \"port\": 3000\n"
+    "  }\n"
+    "}\n";
+
+/* ── init ────────────────────────────────────────────────────────────────── */
+sc_error_t cmd_init(sc_allocator_t *alloc, int argc, char **argv) {
+    (void)alloc;
+    (void)argc;
+    (void)argv;
+
+#ifdef SC_IS_TEST
+    /* In test mode: skip filesystem and stdin, succeed immediately. */
+    return SC_OK;
+#else
+    const char *home = getenv("HOME");
+    if (!home)
+        home = ".";
+
+    char config_path[SC_INIT_MAX_PATH];
+    int n = snprintf(config_path, sizeof(config_path), "%s/%s/%s", home, SC_INIT_CONFIG_DIR,
+                     SC_INIT_CONFIG_FILE);
+    if (n <= 0 || (size_t)n >= sizeof(config_path))
+        return SC_ERR_INVALID_ARGUMENT;
+
+    if (access(config_path, F_OK) == 0) {
+        printf("Config already exists. Overwrite? [y/N] ");
+        fflush(stdout);
+        int c = getchar();
+        if (c != 'y' && c != 'Y') {
+            printf("Aborted.\n");
+            return SC_ERR_CANCELLED;
+        }
+        while (c != '\n' && c != EOF)
+            c = getchar();
+    }
+
+    char dir_path[SC_INIT_MAX_PATH];
+    n = snprintf(dir_path, sizeof(dir_path), "%s/%s", home, SC_INIT_CONFIG_DIR);
+    if (n <= 0 || (size_t)n >= sizeof(dir_path))
+        return SC_ERR_INVALID_ARGUMENT;
+
+    if (mkdir(dir_path, 0700) != 0 && errno != EEXIST)
+        return SC_ERR_IO;
+
+    FILE *f = fopen(config_path, "w");
+    if (!f)
+        return SC_ERR_IO;
+
+    size_t len = sizeof(SC_INIT_DEFAULT_JSON) - 1;
+    if (fwrite(SC_INIT_DEFAULT_JSON, 1, len, f) != len) {
+        fclose(f);
+        return SC_ERR_IO;
+    }
+    fclose(f);
+
+    printf("Created ~/.seaclaw/config.json\n");
+    printf("Set your API key: export OPENAI_API_KEY=sk-...\n");
+    printf("Start chatting: seaclaw agent\n");
+    return SC_OK;
+#endif /* !SC_IS_TEST */
+}
 
 /* ── channel ─────────────────────────────────────────────────────────────── */
 sc_error_t cmd_channel(sc_allocator_t *alloc, int argc, char **argv) {
