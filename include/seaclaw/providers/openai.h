@@ -9,4 +9,6 @@
 sc_error_t sc_openai_create(sc_allocator_t *alloc, const char *api_key, size_t api_key_len,
                             const char *base_url, size_t base_url_len, sc_provider_t *out);
 
+void sc_openai_set_ws_streaming(sc_provider_t *p, bool enabled);
+
 #endif /* SC_PROVIDERS_OPENAI_H */

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(__unix__) || defined(__APPLE__)
+#include <signal.h>
 #include <unistd.h>
 #endif
 #include "seaclaw/agent.h"
@@ -11,6 +12,7 @@
 #include "seaclaw/agent/spawn.h"
 #include "seaclaw/bus.h"
 #include "seaclaw/channel.h"
+#include "seaclaw/channels/thread_binding.h"
 #include "seaclaw/cli_commands.h"
 #include "seaclaw/config.h"
 #include "seaclaw/core/allocator.h"
@@ -539,7 +541,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 
     sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
 
-    sc_agent_pool_t *agent_pool = sc_agent_pool_create(alloc, 4);
+    sc_agent_pool_t *agent_pool = sc_agent_pool_create(alloc, cfg.agent.pool_max_concurrent);
+    sc_mailbox_t *svc_mailbox = sc_mailbox_create(alloc, 64);
 
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
@@ -608,6 +611,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         return err;
     }
     agent.agent_pool = agent_pool;
+    agent.mailbox = svc_mailbox;
     agent.policy_engine = NULL;
     if (cfg.policy.enabled)
         agent.policy_engine = sc_policy_engine_create(alloc);
@@ -936,6 +940,7 @@ static sc_error_t cmd_agent(sc_allocator_t *alloc, int argc, char **argv) {
 typedef struct gw_agent_bridge {
     sc_agent_t *agent;
     sc_bus_t *bus;
+    sc_thread_binding_t *thread_binding;
 } gw_agent_bridge_t;
 
 static bool gw_agent_on_message(sc_bus_event_type_t type, const sc_bus_event_t *ev,
@@ -1064,12 +1069,31 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         policy.net_proxy = &gw_net_proxy;
     }
 
+    /* ── Agent state (declared early so tools get memory pointer) ─────── */
+    sc_provider_t provider = {0};
+    sc_agent_t agent = {0};
+    sc_memory_t memory = {0};
+    sc_embedder_t gw_embedder = {0};
+    sc_vector_store_t gw_vector_store = {0};
+    sc_retrieval_engine_t gw_retrieval_engine = {0};
+    gw_agent_bridge_t agent_bridge = {0};
+    bool agent_active = false;
+
+    if (with_agent)
+        memory = service_create_memory(alloc, &cfg, ws);
+
+    sc_agent_pool_t *gw_agent_pool = sc_agent_pool_create(alloc, cfg.agent.pool_max_concurrent);
+    sc_thread_binding_t *gw_thread_binding = sc_thread_binding_create(alloc, 64);
+
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
-    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg, NULL, cron, NULL, &tools,
+    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
+                                  memory.vtable ? &memory : NULL, cron, gw_agent_pool, &tools,
                                   &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (memory.vtable && memory.vtable->deinit)
+            memory.vtable->deinit(memory.ctx);
         sc_cost_tracker_deinit(&costs);
         sc_session_manager_deinit(&sessions);
         if (cron)
@@ -1101,16 +1125,7 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
     sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
     gw_config.app_ctx = &app_ctx;
 
-    /* ── Optional agent integration ────────────────────────────────────── */
-    sc_provider_t provider = {0};
-    sc_agent_t agent = {0};
-    sc_memory_t memory = {0};
-    sc_embedder_t gw_embedder = {0};
-    sc_vector_store_t gw_vector_store = {0};
-    sc_retrieval_engine_t gw_retrieval_engine = {0};
-    gw_agent_bridge_t agent_bridge = {0};
-    bool agent_active = false;
-
+    /* ── Optional agent integration (provider + retrieval) ─────────────── */
     if (with_agent) {
         const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
         size_t prov_name_len = strlen(prov_name);
@@ -1133,7 +1148,6 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         uint32_t max_hist =
             cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
 
-        memory = service_create_memory(alloc, &cfg, ws);
         gw_embedder = sc_embedder_local_create(alloc);
         gw_vector_store = sc_vector_store_mem_create(alloc);
         gw_retrieval_engine =
@@ -1156,11 +1170,13 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         sc_agent_set_retrieval_engine(&agent, &gw_retrieval_engine);
         agent_active = true;
 
+        agent.agent_pool = gw_agent_pool;
         agent.policy_engine = NULL;
         if (cfg.policy.enabled)
             agent.policy_engine = sc_policy_engine_create(alloc);
         agent_bridge.agent = &agent;
         agent_bridge.bus = &bus;
+        agent_bridge.thread_binding = gw_thread_binding;
         sc_bus_subscribe(&bus, gw_agent_on_message, &agent_bridge, SC_BUS_MESSAGE_RECEIVED);
 
         fprintf(stderr, "[%s] gateway+agent mode (provider=%s tools=%zu)\n", SC_CODENAME, prov_name,
@@ -1189,6 +1205,12 @@ cleanup:
     if (memory.vtable && memory.vtable->deinit)
         memory.vtable->deinit(memory.ctx);
     sc_tools_destroy_default(alloc, tools, tools_count);
+    if (agent_active && agent.policy_engine)
+        sc_policy_engine_destroy(agent.policy_engine);
+    if (gw_thread_binding)
+        sc_thread_binding_destroy(gw_thread_binding);
+    if (gw_agent_pool)
+        sc_agent_pool_destroy(gw_agent_pool);
     if (policy.tracker)
         sc_rate_tracker_destroy(policy.tracker);
     if (gw_sb_storage)
@@ -1209,8 +1231,17 @@ static int run_command(sc_allocator_t *alloc, int argc, char **argv, sc_command_
     return 1;
 }
 
+static void handle_sighup(int sig) {
+    (void)sig;
+    sc_config_set_reload_requested();
+}
+
 int main(int argc, char *argv[]) {
     sc_allocator_t alloc = sc_system_allocator();
+
+#if defined(__unix__) || defined(__APPLE__)
+    signal(SIGHUP, handle_sighup);
+#endif
 
     if (argc >= 2) {
         if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {

@@ -9,4 +9,6 @@
 
 sc_error_t sc_message_create(sc_allocator_t *alloc, sc_channel_t *channel, sc_tool_t *out);
 
+void sc_message_tool_set_channel(sc_tool_t *tool, sc_channel_t *channel);
+
 #endif

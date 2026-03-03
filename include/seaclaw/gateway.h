@@ -67,4 +67,6 @@ void sc_gateway_config_from_cfg(const struct sc_config_gateway *cfg_gw, sc_gatew
 sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port,
                           const sc_gateway_config_t *config);
 
+bool sc_gateway_path_is(const char *path, const char *base);
+
 #endif /* SC_GATEWAY_H */

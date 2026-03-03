@@ -766,4 +766,18 @@ void run_roadmap_tests(void) {
     SC_RUN_TEST(test_daemon_start_returns_valid);
     SC_RUN_TEST(test_update_check_returns_valid);
     SC_RUN_TEST(test_update_check_null_buf);
+    SC_TEST_SUITE("Integration");
+    SC_RUN_TEST(test_integ_config_defaults);
+    SC_RUN_TEST(test_integ_config_parse_pool);
+    SC_RUN_TEST(test_integ_config_parse_policy);
+    SC_RUN_TEST(test_integ_agent_fields);
+    SC_RUN_TEST(test_integ_factory_pool);
+    SC_RUN_TEST(test_integ_factory_null_pool);
+    SC_RUN_TEST(test_integ_policy_deny);
+    SC_RUN_TEST(test_integ_policy_allow);
+    SC_RUN_TEST(test_integ_profile_coding);
+    SC_RUN_TEST(test_integ_pool_roundtrip);
+    SC_RUN_TEST(test_integ_mailbox_roundtrip);
+    SC_RUN_TEST(test_integ_thread_binding);
+    SC_RUN_TEST(test_integ_plugin_registry);
 }

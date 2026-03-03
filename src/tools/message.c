@@ -92,6 +92,13 @@ static const sc_tool_vtable_t message_vtable = {
     .deinit = message_deinit,
 };
 
+void sc_message_tool_set_channel(sc_tool_t *tool, sc_channel_t *channel) {
+    if (!tool || !tool->ctx || tool->vtable != &message_vtable)
+        return;
+    sc_message_ctx_t *mc = (sc_message_ctx_t *)tool->ctx;
+    mc->channel = channel;
+}
+
 sc_error_t sc_message_create(sc_allocator_t *alloc, sc_channel_t *channel, sc_tool_t *out) {
     (void)alloc;
     sc_message_ctx_t *c = (sc_message_ctx_t *)calloc(1, sizeof(*c));

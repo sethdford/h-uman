@@ -38,6 +38,7 @@
 #include "seaclaw/tools/memory_store.h"
 #include "seaclaw/tools/message.h"
 #include "seaclaw/tools/notebook.h"
+#include "seaclaw/tools/pdf.h"
 #include "seaclaw/tools/pushover.h"
 #include "seaclaw/tools/schedule.h"
 #include "seaclaw/tools/schema.h"
@@ -50,7 +51,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_TOOLS_COUNT 43
+#define SC_TOOLS_COUNT 44
 
 static sc_error_t add_tool_ws(sc_allocator_t *alloc, sc_tool_t *tools, size_t *idx, const char *ws,
                               size_t ws_len, sc_security_policy_t *policy,
@@ -288,6 +289,11 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc, const char *workspace_
     idx++;
 
     err = sc_agent_spawn_tool_create(alloc, agent_pool, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_pdf_create(alloc, &tools[idx]);
     if (err != SC_OK)
         goto fail;
     idx++;

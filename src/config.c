@@ -816,9 +816,33 @@ static sc_error_t parse_agent(sc_allocator_t *a, sc_config_t *cfg, const sc_json
     double mts = sc_json_get_number(obj, "message_timeout_secs", cfg->agent.message_timeout_secs);
     if (mts >= 0)
         cfg->agent.message_timeout_secs = (uint64_t)mts;
+    double pmc = sc_json_get_number(obj, "pool_max_concurrent", cfg->agent.pool_max_concurrent);
+    if (pmc >= 1 && pmc <= 64)
+        cfg->agent.pool_max_concurrent = (uint32_t)pmc;
+    const char *dp = sc_json_get_string(obj, "default_profile");
+    if (dp) {
+        if (cfg->agent.default_profile)
+            a->free(a->ctx, cfg->agent.default_profile, strlen(cfg->agent.default_profile) + 1);
+        cfg->agent.default_profile = sc_strdup(a, dp);
+    }
     return SC_OK;
 }
-
+static sc_error_t parse_policy_cfg(sc_allocator_t *a, sc_config_t *cfg,
+                                   const sc_json_value_t *obj) {
+    (void)a;
+    if (!obj || obj->type != SC_JSON_OBJECT)
+        return SC_OK;
+    cfg->policy.enabled = sc_json_get_bool(obj, "enabled", cfg->policy.enabled);
+    return SC_OK;
+}
+static sc_error_t parse_plugins_cfg(sc_allocator_t *a, sc_config_t *cfg,
+                                    const sc_json_value_t *obj) {
+    (void)a;
+    if (!obj || obj->type != SC_JSON_OBJECT)
+        return SC_OK;
+    cfg->plugins.enabled = sc_json_get_bool(obj, "enabled", cfg->plugins.enabled);
+    return SC_OK;
+}
 static sc_error_t parse_heartbeat(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
     (void)a;
     if (!obj || obj->type != SC_JSON_OBJECT)
@@ -1272,6 +1296,12 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
     if (mcp_obj)
         parse_mcp_servers(a, cfg, mcp_obj);
 
+    sc_json_value_t *policy_obj = sc_json_object_get(root, "policy");
+    if (policy_obj)
+        parse_policy_cfg(a, cfg, policy_obj);
+    sc_json_value_t *plugins_obj = sc_json_object_get(root, "plugins");
+    if (plugins_obj)
+        parse_plugins_cfg(a, cfg, plugins_obj);
     sc_json_value_t *sec = sc_json_object_get(root, "security");
     if (sec && sec->type == SC_JSON_OBJECT) {
         double al = sc_json_get_number(sec, "autonomy_level", cfg->security.autonomy_level);
@@ -2012,4 +2042,15 @@ size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char
             return cfg->channels.channel_config_counts[i];
     }
     return 0;
+}
+
+#include <stdatomic.h>
+static volatile _Atomic int sc_reload_flag = 0;
+
+void sc_config_set_reload_requested(void) {
+    atomic_store(&sc_reload_flag, 1);
+}
+
+bool sc_config_get_and_clear_reload_requested(void) {
+    return atomic_exchange(&sc_reload_flag, 0) != 0;
 }

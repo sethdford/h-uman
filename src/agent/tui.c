@@ -5,6 +5,7 @@
  */
 #include "seaclaw/agent/tui.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/design_tokens.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -269,15 +270,16 @@ static void draw(sc_tui_state_t *state) {
         char title[256];
         int n;
         int off = 0;
-        off = snprintf(title, sizeof(title), " SeaClaw \xe2\x94\x82 %s/%s \xe2\x94\x82 %zu tools",
+        off = snprintf(title, sizeof(title),
+                       " SeaClaw " SC_BOX_VERT " %s/%s " SC_BOX_VERT " %zu tools",
                        state->provider_name ? state->provider_name : "?",
                        state->model_name ? state->model_name : "?", state->tools_count);
         if (state->session_cost_usd > 0.001 && off > 0 && (size_t)off < sizeof(title) - 20) {
-            off += snprintf(title + off, sizeof(title) - (size_t)off, " \xe2\x94\x82 $%.2f",
+            off += snprintf(title + off, sizeof(title) - (size_t)off, " " SC_BOX_VERT " $%.2f",
                             state->session_cost_usd);
         }
         if (state->tab_count > 1 && off > 0 && (size_t)off < sizeof(title) - 20) {
-            off += snprintf(title + off, sizeof(title) - (size_t)off, " \xe2\x94\x82 tab %d/%d",
+            off += snprintf(title + off, sizeof(title) - (size_t)off, " " SC_BOX_VERT " tab %d/%d",
                             state->active_tab + 1, state->tab_count);
         }
         n = off;
@@ -365,7 +367,7 @@ static void draw(sc_tui_state_t *state) {
             sc_tui_tool_entry_t *last = &state->tool_log[state->tool_log_count - 1];
             if (last->done) {
                 n = snprintf(status, sizeof(status), " %s %s (%llums)",
-                             last->success ? "\xe2\x9c\x93" : "\xe2\x9c\x97", last->name,
+                             last->success ? SC_CHECK : SC_CROSS, last->name,
                              (unsigned long long)last->duration_ms);
             } else {
                 n = snprintf(status, sizeof(status), " %s %s...", frame, last->name);
@@ -380,7 +382,7 @@ static void draw(sc_tui_state_t *state) {
             draw_text(l.w - hint_len - 1, l.status_y, hint, hint_len, FG_DIM, BG_STATUS);
     } else {
         char status[128];
-        int n = snprintf(status, sizeof(status), " Ready \xe2\x94\x82 %zu messages",
+        int n = snprintf(status, sizeof(status), " Ready " SC_BOX_VERT " %zu messages",
                          state->agent ? state->agent->history_count : 0);
         if (n > 0)
             draw_text(0, l.status_y, status, l.w, FG_STATUS, BG_STATUS);

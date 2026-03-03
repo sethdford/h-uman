@@ -7,6 +7,7 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/cron.h"
+#include "seaclaw/design_tokens.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
 #include "seaclaw/memory/retrieval.h"
@@ -43,13 +44,7 @@
 #define SC_CODENAME     "SeaClaw"
 #define SC_CLI_MAX_PATH 1024
 
-/* ── ANSI escape helpers ─────────────────────────────────────────────── */
-#define SC_ANSI_RESET       "\033[0m"
-#define SC_ANSI_BOLD        "\033[1m"
-#define SC_ANSI_DIM         "\033[2m"
-#define SC_ANSI_CYAN        "\033[36m"
-#define SC_ANSI_GREEN       "\033[32m"
-#define SC_ANSI_YELLOW      "\033[33m"
+/* ── ANSI escape helpers (from design_tokens.h) ─────────────────────── */
 #define SC_ANSI_HIDE_CURSOR "\033[?25l"
 #define SC_ANSI_SHOW_CURSOR "\033[?25h"
 #define SC_ANSI_CLEAR_LINE  "\033[2K\r"
@@ -262,8 +257,8 @@ static void run_spinner_loop(agent_turn_ctx_t *tctx) {
         if (!cli_stream_started) {
             int width = get_terminal_width();
             const char *label = " Thinking...";
-            printf(SC_ANSI_CLEAR_LINE SC_ANSI_CYAN "%s" SC_ANSI_RESET SC_ANSI_DIM
-                                                   "%s" SC_ANSI_RESET,
+            printf(SC_ANSI_CLEAR_LINE SC_COLOR_ACCENT "%s" SC_COLOR_RESET SC_COLOR_DIM
+                                                      "%s" SC_COLOR_RESET,
                    spinner_frames[frame % SPINNER_FRAME_COUNT], label);
             (void)width;
             fflush(stdout);
@@ -286,11 +281,12 @@ static void run_spinner_loop(agent_turn_ctx_t *tctx) {
 
 /* ── Print welcome banner ────────────────────────────────────────────── */
 static void print_banner(const char *prov_name, const char *model, size_t tools_count) {
-    printf(SC_ANSI_BOLD SC_ANSI_CYAN "%s" SC_ANSI_RESET " v%s\n", SC_CODENAME, sc_version_string());
-    printf(SC_ANSI_DIM "Provider: %s | Model: %s | Tools: %zu" SC_ANSI_RESET "\n", prov_name,
+    printf(SC_COLOR_BOLD SC_COLOR_ACCENT "%s" SC_COLOR_RESET " v%s\n", SC_CODENAME,
+           sc_version_string());
+    printf(SC_COLOR_DIM "Provider: %s | Model: %s | Tools: %zu" SC_COLOR_RESET "\n", prov_name,
            (model[0] ? model : "(default)"), tools_count);
-    printf("Type your message, or " SC_ANSI_DIM "'exit'" SC_ANSI_RESET " to leave. " SC_ANSI_DIM
-           "Ctrl+C cancels a running turn." SC_ANSI_RESET "\n\n");
+    printf("Type your message, or " SC_COLOR_DIM "'exit'" SC_COLOR_RESET " to leave. " SC_COLOR_DIM
+           "Ctrl+C cancels a running turn." SC_COLOR_RESET "\n\n");
 }
 
 /* ── Main CLI loop ───────────────────────────────────────────────────── */
@@ -416,10 +412,14 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
 
+    sc_agent_pool_t *cli_agent_pool = sc_agent_pool_create(alloc, cfg.agent.pool_max_concurrent);
+    sc_mailbox_t *cli_mailbox = sc_mailbox_create(alloc, 64);
+
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
     err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
-                                  memory.vtable ? &memory : NULL, cron, NULL, &tools, &tools_count);
+                                  memory.vtable ? &memory : NULL, cron, cli_agent_pool, &tools,
+                                  &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
         if (cron)
@@ -468,8 +468,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         sc_config_deinit(&cfg);
         return err;
     }
-    agent.agent_pool = NULL /*agent_pool*/;
-    agent.mailbox = NULL /*mailbox*/;
+    agent.agent_pool = cli_agent_pool;
+    agent.mailbox = cli_mailbox;
     agent.policy_engine = NULL;
 
     if (cfg.policy.enabled) {
@@ -480,7 +480,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         const sc_agent_profile_t *prof =
             sc_agent_profile_by_name(cfg.agent.default_profile, strlen(cfg.agent.default_profile));
         if (prof) {
-            if (prof->preferred_model && prof->preferred_model[0] && !"") {
+            if (prof->preferred_model && prof->preferred_model[0] && !parsed_args.model_override) {
                 char *old = agent.model_name;
                 size_t old_len = agent.model_name_len;
                 agent.model_name =
@@ -543,6 +543,14 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         if (log_fp)
             fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
+        if (otel_observer.vtable && otel_observer.vtable->deinit)
+            otel_observer.vtable->deinit(otel_observer.ctx);
+        if (agent.policy_engine)
+            sc_policy_engine_destroy(agent.policy_engine);
+        if (cli_mailbox)
+            sc_mailbox_destroy(cli_mailbox);
+        if (cli_agent_pool)
+            sc_agent_pool_destroy(cli_agent_pool);
         if (policy.tracker)
             sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
@@ -563,7 +571,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     print_banner(prov_name, model, tools_count);
 
     while (1) {
-        printf(SC_ANSI_BOLD SC_ANSI_GREEN "> " SC_ANSI_RESET);
+        printf(SC_COLOR_BOLD SC_COLOR_SUCCESS "> " SC_COLOR_RESET);
         fflush(stdout);
 
         size_t line_len = 0;
@@ -605,15 +613,15 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         run_spinner_loop(&tctx);
 
         if (g_cancel && !tctx.done) {
-            printf(SC_ANSI_CLEAR_LINE SC_ANSI_SHOW_CURSOR SC_ANSI_YELLOW "Cancelled." SC_ANSI_RESET
-                                                                         "\n");
+            printf(SC_ANSI_CLEAR_LINE SC_ANSI_SHOW_CURSOR SC_COLOR_WARNING
+                   "Cancelled." SC_COLOR_RESET "\n");
         }
 
         pthread_join(tid, NULL);
         err = tctx.err;
 
         if (err == SC_ERR_CANCELLED) {
-            printf(SC_ANSI_DIM "Turn cancelled by user." SC_ANSI_RESET "\n");
+            printf(SC_COLOR_DIM "Turn cancelled by user." SC_COLOR_RESET "\n");
         } else if (err != SC_OK) {
             fprintf(stderr, "[error] %s\n", sc_error_string(err));
         } else if (tctx.response && tctx.response_len > 0) {
@@ -649,7 +657,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         alloc->free(alloc->ctx, line, line_len + 1);
     }
 
-    printf("\n" SC_ANSI_DIM "Goodbye." SC_ANSI_RESET "\n");
+    printf("\n" SC_COLOR_DIM "Goodbye." SC_COLOR_RESET "\n");
     g_active_agent = NULL;
     sc_agent_deinit(&agent);
     if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
@@ -665,6 +673,14 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     if (log_fp)
         fclose(log_fp);
     sc_tools_destroy_default(alloc, tools, tools_count);
+    if (otel_observer.vtable && otel_observer.vtable->deinit)
+        otel_observer.vtable->deinit(otel_observer.ctx);
+    if (agent.policy_engine)
+        sc_policy_engine_destroy(agent.policy_engine);
+    if (cli_mailbox)
+        sc_mailbox_destroy(cli_mailbox);
+    if (cli_agent_pool)
+        sc_agent_pool_destroy(cli_agent_pool);
     if (cron)
         sc_cron_destroy(cron, alloc);
     if (policy.tracker)

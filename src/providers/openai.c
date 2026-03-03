@@ -6,6 +6,7 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/provider.h"
 #include "seaclaw/providers/sse.h"
+#include "seaclaw/websocket/websocket.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@ typedef struct sc_openai_ctx {
     size_t api_key_len;
     char *base_url; /* owned, optional override */
     size_t base_url_len;
+    bool ws_streaming; /* prefer WebSocket over SSE for streaming */
 } sc_openai_ctx_t;
 
 /* Perform HTTP POST. In test mode returns mock response. */
@@ -528,6 +530,119 @@ static size_t openai_stream_write_cb(const char *data, size_t len, void *userdat
 }
 #endif /* !SC_IS_TEST */
 
+/* WebSocket streaming: convert base URL to wss:// and stream via WS frames.
+ * Returns SC_ERR_NOT_SUPPORTED if WS connect fails, signaling SSE fallback. */
+#if !SC_IS_TEST && defined(SC_GATEWAY_POSIX)
+static sc_error_t openai_stream_ws(sc_openai_ctx_t *oc, sc_allocator_t *alloc,
+                                   const char *body, size_t body_len,
+                                   sc_stream_callback_t callback, void *callback_ctx,
+                                   sc_stream_chat_result_t *out) {
+    const char *base = oc->base_url ? oc->base_url : "https://api.openai.com/v1/chat/completions";
+    char ws_url[512];
+    const char *p = base;
+    if (strncmp(p, "https://", 8) == 0) {
+        int n = snprintf(ws_url, sizeof(ws_url), "wss://%s", p + 8);
+        if (n <= 0 || (size_t)n >= sizeof(ws_url))
+            return SC_ERR_NOT_SUPPORTED;
+    } else if (strncmp(p, "http://", 7) == 0) {
+        int n = snprintf(ws_url, sizeof(ws_url), "ws://%s", p + 7);
+        if (n <= 0 || (size_t)n >= sizeof(ws_url))
+            return SC_ERR_NOT_SUPPORTED;
+    } else {
+        return SC_ERR_NOT_SUPPORTED;
+    }
+
+    char auth_hdr[300];
+    if (oc->api_key && oc->api_key_len > 0)
+        snprintf(auth_hdr, sizeof(auth_hdr), "Bearer %.*s", (int)oc->api_key_len, oc->api_key);
+    else
+        auth_hdr[0] = '\0';
+
+    sc_ws_conn_t *ws = sc_ws_connect(alloc, ws_url, NULL);
+    if (!ws)
+        return SC_ERR_NOT_SUPPORTED;
+
+    sc_error_t err = sc_ws_send(ws, body, body_len, false);
+    if (err != SC_OK) {
+        sc_ws_close(ws);
+        return SC_ERR_NOT_SUPPORTED;
+    }
+
+    char *content_buf = NULL;
+    size_t content_len = 0, content_cap = 0;
+
+    for (;;) {
+        char *frame = NULL;
+        size_t frame_len = 0;
+        bool is_binary = false;
+        err = sc_ws_recv(ws, alloc, &frame, &frame_len, &is_binary);
+        if (err != SC_OK || !frame)
+            break;
+
+        if (frame_len >= 6 && memcmp(frame, "[DONE]", 6) == 0) {
+            alloc->free(alloc->ctx, frame, frame_len);
+            break;
+        }
+
+        sc_json_value_t *root = NULL;
+        if (sc_json_parse(alloc, frame, frame_len, &root) == SC_OK && root) {
+            sc_json_value_t *choices = sc_json_object_get(root, "choices");
+            if (choices && choices->type == SC_JSON_ARRAY &&
+                choices->data.array.count > 0) {
+                sc_json_value_t *c0 = choices->data.array.items[0];
+                sc_json_value_t *delta = sc_json_object_get(c0, "delta");
+                if (delta) {
+                    const char *text = sc_json_get_string(delta, "content");
+                    if (text) {
+                        size_t tlen = strlen(text);
+                        sc_stream_chunk_t chunk = {
+                            .delta = text, .delta_len = tlen,
+                            .is_final = false, .token_count = 1,
+                        };
+                        callback(callback_ctx, &chunk);
+                        if (content_len + tlen >= content_cap) {
+                            size_t nc = content_cap ? content_cap * 2 : 256;
+                            if (nc < content_len + tlen + 1)
+                                nc = content_len + tlen + 1;
+                            char *nb = (char *)alloc->alloc(alloc->ctx, nc);
+                            if (nb) {
+                                if (content_buf) {
+                                    memcpy(nb, content_buf, content_len);
+                                    alloc->free(alloc->ctx, content_buf, content_cap);
+                                }
+                                content_buf = nb;
+                                content_cap = nc;
+                            }
+                        }
+                        if (content_buf && content_len + tlen < content_cap) {
+                            memcpy(content_buf + content_len, text, tlen);
+                            content_len += tlen;
+                            content_buf[content_len] = '\0';
+                        }
+                    }
+                }
+            }
+            sc_json_free(alloc, root);
+        }
+        alloc->free(alloc->ctx, frame, frame_len);
+    }
+
+    sc_ws_close(ws);
+
+    sc_stream_chunk_t final_chunk = {
+        .delta = NULL, .delta_len = 0, .is_final = true, .token_count = 0,
+    };
+    callback(callback_ctx, &final_chunk);
+
+    if (content_buf && content_len > 0) {
+        out->content = sc_strndup(alloc, content_buf, content_len);
+        out->content_len = content_len;
+        alloc->free(alloc->ctx, content_buf, content_cap);
+    }
+    return SC_OK;
+}
+#endif /* !SC_IS_TEST && SC_GATEWAY_POSIX */
+
 static sc_error_t openai_stream_chat(void *ctx, sc_allocator_t *alloc,
                                      const sc_chat_request_t *request, const char *model,
                                      size_t model_len, double temperature,
@@ -733,4 +848,11 @@ sc_error_t sc_openai_create(sc_allocator_t *alloc, const char *api_key, size_t a
     out->ctx = oc;
     out->vtable = &openai_vtable;
     return SC_OK;
+}
+
+void sc_openai_set_ws_streaming(sc_provider_t *p, bool enabled) {
+    if (!p || !p->ctx)
+        return;
+    sc_openai_ctx_t *oc = (sc_openai_ctx_t *)p->ctx;
+    oc->ws_streaming = enabled;
 }

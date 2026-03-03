@@ -112,10 +112,16 @@ static bool rate_limit_allow(sc_gateway_state_t *gw, const char *ip) {
 /* ── Path matching ──────────────────────────────────────────────────────── */
 
 static bool path_is(const char *path, const char *base) {
+    if (!path || !base)
+        return false;
     size_t n = strlen(base);
     if (strncmp(path, base, n) != 0)
         return false;
     return path[n] == '\0' || (path[n] == '/' && path[n + 1] == '\0');
+}
+
+bool sc_gateway_path_is(const char *path, const char *base) {
+    return path_is(path, base);
 }
 
 static bool is_webhook_path(const char *path) {
@@ -345,7 +351,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         return;
     }
 
-    if (path_is(path, "/ready")) {
+    if (path_is(path, "/ready") || path_is(path, "/readyz")) {
         sc_allocator_t alloc = sc_system_allocator();
         sc_readiness_result_t r = sc_health_check_readiness(&alloc);
         char *json = sc_sprintf(&alloc, "{\"status\":\"%s\",\"checks\":[]}",
@@ -358,7 +364,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         return;
     }
 
-    if (path_is(path, "/health")) {
+    if (path_is(path, "/health") || path_is(path, "/healthz")) {
         send_json(fd, 200, "{\"status\":\"ok\"}");
         return;
     }

@@ -15,6 +15,7 @@ typedef struct sc_provider_entry {
     char *api_key;
     char *base_url;
     bool native_tools;
+    bool ws_streaming;
 } sc_provider_entry_t;
 
 typedef struct sc_diagnostics_config {
@@ -288,5 +289,10 @@ const char *sc_config_get_provider_base_url(const sc_config_t *cfg, const char *
 bool sc_config_get_provider_native_tools(const sc_config_t *cfg, const char *name);
 const char *sc_config_get_web_search_provider(const sc_config_t *cfg);
 size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char *key);
+bool sc_config_get_provider_ws_streaming(const sc_config_t *cfg, const char *name);
+
+/* Config hot-reload support */
+void sc_config_set_reload_requested(void);
+bool sc_config_get_and_clear_reload_requested(void);
 
 #endif /* SC_CONFIG_H */
