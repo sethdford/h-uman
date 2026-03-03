@@ -24,12 +24,13 @@ typedef struct sc_delegate_ctx {
 #ifdef SC_HAS_TOOLS_ADVANCED
     sc_tool_t claude_code_tool;
     bool has_claude_code;
+#else
+    char _pad;
 #endif
 } sc_delegate_ctx_t;
 
 static sc_error_t delegate_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                    sc_tool_result_t *out) {
-    sc_delegate_ctx_t *dctx = (sc_delegate_ctx_t *)ctx;
     if (!args || !out) {
         *out = sc_tool_result_fail("invalid args", 12);
         return SC_ERR_INVALID_ARGUMENT;
@@ -45,7 +46,7 @@ static sc_error_t delegate_execute(void *ctx, sc_allocator_t *alloc, const sc_js
         return SC_OK;
     }
 #if SC_IS_TEST
-    (void)dctx;
+    (void)ctx;
     size_t need = 25 + strlen(agent) + strlen(prompt);
     char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
     if (!msg) {
@@ -59,9 +60,15 @@ static sc_error_t delegate_execute(void *ctx, sc_allocator_t *alloc, const sc_js
     return SC_OK;
 #else
 #ifdef SC_HAS_TOOLS_ADVANCED
-    if (strcmp(agent, "claude_code") == 0 && dctx && dctx->has_claude_code) {
-        return dctx->claude_code_tool.vtable->execute(dctx->claude_code_tool.ctx, alloc, args, out);
+    {
+        sc_delegate_ctx_t *dctx = (sc_delegate_ctx_t *)ctx;
+        if (strcmp(agent, "claude_code") == 0 && dctx && dctx->has_claude_code) {
+            return dctx->claude_code_tool.vtable->execute(dctx->claude_code_tool.ctx, alloc, args,
+                                                          out);
+        }
     }
+#else
+    (void)ctx;
 #endif
 
     size_t need = 48 + strlen(agent);
@@ -122,6 +129,8 @@ sc_error_t sc_delegate_create(sc_allocator_t *alloc, sc_security_policy_t *polic
 #ifdef SC_HAS_TOOLS_ADVANCED
     sc_error_t err = sc_claude_code_create(alloc, policy, &c->claude_code_tool);
     c->has_claude_code = (err == SC_OK);
+#else
+    (void)policy;
 #endif
 
     out->ctx = c;

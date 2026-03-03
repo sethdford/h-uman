@@ -439,7 +439,7 @@ static sc_error_t compatible_stream_chat(void *ctx, sc_allocator_t *alloc,
         out->content = resp.content;
         out->content_len = resp.content_len;
     } else if (resp.content) {
-        alloc->free(alloc->ctx, resp.content, resp.content_len + 1);
+        alloc->free(alloc->ctx, (void *)resp.content, resp.content_len + 1);
     }
     return SC_OK;
 #endif

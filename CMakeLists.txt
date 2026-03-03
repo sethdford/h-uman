@@ -23,6 +23,10 @@ option(SC_ENABLE_RUNTIME_EXOTIC "Build exotic runtime adapters (WASM, Cloudflare
 option(SC_ENABLE_TOOLS_BROWSER "Build browser automation tools (browser, screenshot, browser_open)" ON)
 option(SC_ENABLE_TOOLS_ADVANCED "Build advanced tools (composio, claude_code, canvas, notebook, database)" ON)
 option(SC_ENABLE_OTEL "Build OpenTelemetry observability exporter" ON)
+option(SC_ENABLE_CRON "Build cron scheduler support" ON)
+option(SC_ENABLE_PUSH "Build push notification support (FCM/APNS)" ON)
+option(SC_ENABLE_UPDATE "Build update check/apply support" ON)
+option(SC_ENABLE_SKILLS "Build skillforge support" ON)
 
 # WASM build: cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON ..
 
@@ -142,13 +146,12 @@ if(SC_ENABLE_ALL_CHANNELS)
 endif()
 
 # --- Memory engine sources (conditionally added) ---
-set(MEMORY_ENGINE_SOURCES)
-if(SC_ENABLE_NONE_ENGINE)
-    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/none.c)
-endif()
-if(SC_ENABLE_MARKDOWN_ENGINE)
-    list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/markdown.c)
-endif()
+# none.c and markdown.c are always compiled — migration depends on them.
+# The SC_HAS_*_ENGINE flags only control registry visibility.
+set(MEMORY_ENGINE_SOURCES
+    src/memory/engines/none.c
+    src/memory/engines/markdown.c
+)
 if(SC_ENABLE_MEMORY_LRU_ENGINE)
     list(APPEND MEMORY_ENGINE_SOURCES src/memory/engines/memory_lru.c)
 endif()
@@ -278,6 +281,7 @@ set(SC_CORE_SOURCES
     ${CHANNEL_SOURCES}
     ${MEMORY_ENGINE_SOURCES}
     src/memory/engines/registry.c
+    src/memory/factory.c
     src/memory/util.c
     src/memory/lifecycle/cache.c
     src/memory/lifecycle/hygiene.c
@@ -514,6 +518,18 @@ endif()
 if(SC_ENABLE_OTEL)
     target_compile_definitions(seaclaw_core PRIVATE SC_HAS_OTEL=1)
 endif()
+if(SC_ENABLE_CRON)
+    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_CRON=1)
+endif()
+if(SC_ENABLE_PUSH)
+    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_PUSH=1)
+endif()
+if(SC_ENABLE_UPDATE)
+    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_UPDATE=1)
+endif()
+if(SC_ENABLE_SKILLS)
+    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_SKILLS=1)
+endif()
 
 # --- Compile definitions for enabled channels (for conditional compilation in source) ---
 if(SC_ENABLE_CLI)
@@ -577,13 +593,9 @@ if(SC_ENABLE_DISPATCH)
     target_compile_definitions(seaclaw_core PRIVATE SC_HAS_DISPATCH=1)
 endif()
 
-# --- Compile definitions for enabled memory engines ---
-if(SC_ENABLE_NONE_ENGINE)
-    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_NONE_ENGINE=1)
-endif()
-if(SC_ENABLE_MARKDOWN_ENGINE)
-    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_MARKDOWN_ENGINE=1)
-endif()
+# --- Compile definitions for memory engines ---
+# none + markdown are always compiled (migration depends on them), so always define.
+target_compile_definitions(seaclaw_core PRIVATE SC_HAS_NONE_ENGINE=1 SC_HAS_MARKDOWN_ENGINE=1)
 if(SC_ENABLE_MEMORY_LRU_ENGINE)
     target_compile_definitions(seaclaw_core PRIVATE SC_HAS_MEMORY_LRU_ENGINE=1)
 endif()
@@ -846,7 +858,7 @@ target_include_directories(seaclaw_core_test PUBLIC ${SC_ROOT}/include)
 target_include_directories(seaclaw_core_test PRIVATE ${SC_ROOT}/asm/generic)
 target_compile_definitions(seaclaw_core_test PRIVATE SC_IS_TEST=1)
 # Tests always have all module groups available
-target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_PERIPHERALS=1 SC_HAS_TUNNELS=1 SC_HAS_RUNTIME_EXOTIC=1 SC_HAS_TOOLS_BROWSER=1 SC_HAS_TOOLS_ADVANCED=1 SC_HAS_OTEL=1)
+target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_PERIPHERALS=1 SC_HAS_TUNNELS=1 SC_HAS_RUNTIME_EXOTIC=1 SC_HAS_TOOLS_BROWSER=1 SC_HAS_TOOLS_ADVANCED=1 SC_HAS_OTEL=1 SC_HAS_CRON=1 SC_HAS_PUSH=1 SC_HAS_UPDATE=1 SC_HAS_SKILLS=1)
 if(Threads_FOUND)
     target_link_libraries(seaclaw_core_test PUBLIC Threads::Threads)
 endif()
@@ -899,12 +911,7 @@ if(SC_ENABLE_DINGTALK)
     target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_DINGTALK=1)
 endif()
 target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_SIGNAL=1 SC_HAS_NOSTR=1 SC_HAS_QQ=1 SC_HAS_MAIXCAM=1 SC_HAS_DISPATCH=1 SC_HAS_THREAD_BINDING=1)
-if(SC_ENABLE_NONE_ENGINE)
-    target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_NONE_ENGINE=1)
-endif()
-if(SC_ENABLE_MARKDOWN_ENGINE)
-    target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_MARKDOWN_ENGINE=1)
-endif()
+target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_NONE_ENGINE=1 SC_HAS_MARKDOWN_ENGINE=1)
 if(SC_ENABLE_MEMORY_LRU_ENGINE)
     target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_MEMORY_LRU_ENGINE=1)
 endif()
@@ -1139,8 +1146,8 @@ if(SC_BUILD_WASM)
     message(STATUS "WASM target: seaclaw.wasm (requires wasm32-wasi toolchain)")
 endif()
 
-# Compiler warnings (-Werror disabled to allow unused params in tool stubs)
-target_compile_options(seaclaw_core PRIVATE -Wall -Wextra -Wpedantic)
+# Compiler warnings
+target_compile_options(seaclaw_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(seaclaw PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(seaclaw_tests PRIVATE -Wall -Wextra -Wpedantic)
 

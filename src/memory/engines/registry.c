@@ -16,6 +16,7 @@ static size_t descriptor_count(void);
  * Descriptor definitions (one per enabled backend)
  * ────────────────────────────────────────────────────────────────────────── */
 
+#ifdef SC_HAS_NONE_ENGINE
 static const sc_backend_descriptor_t desc_none = {
     .name = "none",
     .label = "None — disable persistent memory",
@@ -30,7 +31,9 @@ static const sc_backend_descriptor_t desc_none = {
     .needs_db_path = false,
     .needs_workspace = false,
 };
+#endif
 
+#ifdef SC_HAS_MARKDOWN_ENGINE
 static const sc_backend_descriptor_t desc_markdown = {
     .name = "markdown",
     .label = "Markdown files — simple, human-readable",
@@ -45,6 +48,7 @@ static const sc_backend_descriptor_t desc_markdown = {
     .needs_db_path = false,
     .needs_workspace = true,
 };
+#endif
 
 static const sc_backend_descriptor_t desc_memory = {
     .name = "memory",
@@ -125,6 +129,7 @@ static const sc_backend_descriptor_t desc_redis = {
 };
 #endif
 
+#ifdef SC_HAS_LUCID_ENGINE
 static const sc_backend_descriptor_t desc_lucid = {
     .name = "lucid",
     .label = "Lucid — SQLite-backed with contextual retrieval",
@@ -139,7 +144,9 @@ static const sc_backend_descriptor_t desc_lucid = {
     .needs_db_path = true,
     .needs_workspace = false,
 };
+#endif
 
+#ifdef SC_HAS_LANCEDB_ENGINE
 static const sc_backend_descriptor_t desc_lancedb = {
     .name = "lancedb",
     .label = "LanceDB — SQLite-backed with vector search",
@@ -154,6 +161,7 @@ static const sc_backend_descriptor_t desc_lancedb = {
     .needs_db_path = true,
     .needs_workspace = false,
 };
+#endif
 
 /* Known names (all possible backends, not necessarily enabled) */
 static const char *const known_names[] = {

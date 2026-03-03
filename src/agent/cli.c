@@ -10,6 +10,7 @@
 #include "seaclaw/design_tokens.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
+#include "seaclaw/memory/factory.h"
 #include "seaclaw/memory/retrieval.h"
 #include "seaclaw/memory/vector.h"
 #include "seaclaw/observability/log_observer.h"
@@ -69,100 +70,7 @@ static void sigint_handler(int sig) {
         g_active_agent->cancel_requested = 1;
 }
 
-/* ── Memory from config ──────────────────────────────────────────────── */
-static sc_memory_t create_memory_from_config(sc_allocator_t *alloc, const sc_config_t *cfg,
-                                             const char *ws) {
-    const char *backend = cfg->memory.backend;
-    if (!backend)
-        backend = "markdown";
-
-    if (strcmp(backend, "sqlite") == 0) {
-        const char *path = cfg->memory.sqlite_path;
-        char buf[SC_CLI_MAX_PATH];
-        if (!path) {
-            const char *home = getenv("HOME");
-            if (home) {
-                int n = snprintf(buf, sizeof(buf), "%s/.seaclaw/memory.db", home);
-                if (n > 0 && (size_t)n < sizeof(buf))
-                    path = buf;
-            }
-        }
-        if (path)
-            return sc_sqlite_memory_create(alloc, path);
-        return sc_markdown_memory_create(alloc, ws);
-    }
-
-    if (strcmp(backend, "none") == 0)
-        return sc_none_memory_create(alloc);
-
-    if (strcmp(backend, "lru") == 0 || strcmp(backend, "memory") == 0)
-        return sc_memory_lru_create(alloc, 256);
-
-    if (strcmp(backend, "lancedb") == 0) {
-        char buf2[SC_CLI_MAX_PATH];
-        const char *home = getenv("HOME");
-        if (home) {
-            int n = snprintf(buf2, sizeof(buf2), "%s/.seaclaw/lancedb", home);
-            if (n > 0 && (size_t)n < sizeof(buf2))
-                return sc_lancedb_memory_create(alloc, buf2);
-        }
-        return sc_lancedb_memory_create(alloc, ".seaclaw/lancedb");
-    }
-
-    if (strcmp(backend, "lucid") == 0) {
-        char buf2[SC_CLI_MAX_PATH];
-        const char *home = getenv("HOME");
-        if (home) {
-            int n = snprintf(buf2, sizeof(buf2), "%s/.seaclaw/lucid.db", home);
-            if (n > 0 && (size_t)n < sizeof(buf2))
-                return sc_lucid_memory_create(alloc, buf2, ws);
-        }
-        return sc_lucid_memory_create(alloc, ".seaclaw/lucid.db", ws);
-    }
-
-#ifdef SC_ENABLE_POSTGRES
-    if (strcmp(backend, "postgres") == 0) {
-        const char *url = cfg->memory.postgres_url;
-        if (!url)
-            url = "postgres://localhost/seaclaw";
-        const char *schema = cfg->memory.postgres_schema;
-        if (!schema)
-            schema = "public";
-        const char *table = cfg->memory.postgres_table;
-        if (!table)
-            table = "memories";
-        return sc_postgres_memory_create(alloc, url, schema, table);
-    }
-#endif
-
-#ifdef SC_ENABLE_REDIS_ENGINE
-    if (strcmp(backend, "redis") == 0) {
-        const char *host = cfg->memory.redis_host;
-        if (!host)
-            host = "localhost";
-        unsigned short port = cfg->memory.redis_port;
-        if (!port)
-            port = 6379;
-        const char *prefix = cfg->memory.redis_key_prefix;
-        if (!prefix)
-            prefix = "sc_mem";
-        return sc_redis_memory_create(alloc, host, port, prefix);
-    }
-#endif
-
-    if (strcmp(backend, "api") == 0) {
-        const char *base = cfg->memory.api_base_url;
-        if (!base)
-            base = "https://api.example.com/memory";
-        const char *key = cfg->memory.api_key;
-        uint32_t timeout = cfg->memory.api_timeout_ms;
-        if (!timeout)
-            timeout = 5000;
-        return sc_api_memory_create(alloc, base, key, timeout);
-    }
-
-    return sc_markdown_memory_create(alloc, ws);
-}
+/* ── Memory from config — delegates to shared factory ────────────────── */
 
 /* ── Arg parsing ─────────────────────────────────────────────────────── */
 sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
@@ -403,7 +311,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             observer = sc_log_observer_create(alloc, log_fp);
     }
 
-    sc_memory_t memory = create_memory_from_config(alloc, &cfg, ws);
+    sc_memory_t memory = sc_memory_create_from_config(alloc, &cfg, ws);
     sc_session_store_t session_store = {0};
     if (memory.vtable &&
         strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)

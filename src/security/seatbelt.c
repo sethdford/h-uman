@@ -54,12 +54,11 @@ static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc,
     (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
-    sc_seatbelt_ctx_t *sb = (sc_seatbelt_ctx_t *)ctx;
     if (!buf || !out_count)
         return SC_ERR_INVALID_ARGUMENT;
 
 #if SC_IS_TEST
-    /* In test mode: pass-through without calling sandbox-exec */
+    (void)ctx;
     if (buf_count < argc)
         return SC_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
@@ -67,6 +66,7 @@ static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc,
     *out_count = argc;
     return SC_OK;
 #else
+    sc_seatbelt_ctx_t *sb = (sc_seatbelt_ctx_t *)ctx;
     const size_t prefix_len = 3;
     if (buf_count < prefix_len + argc)
         return SC_ERR_INVALID_ARGUMENT;

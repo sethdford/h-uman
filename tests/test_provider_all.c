@@ -2178,7 +2178,7 @@ static void test_ollama_stream_chat_test_mode(void) {
     SC_ASSERT(err == SC_OK);
     SC_ASSERT(result.content != NULL);
     SC_ASSERT(result.content_len == 4);
-    alloc.free(alloc.ctx, result.content, result.content_len + 1);
+    alloc.free(alloc.ctx, (void *)result.content, result.content_len + 1);
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 
@@ -2204,7 +2204,7 @@ static void test_openrouter_stream_chat_test_mode(void) {
     SC_ASSERT(err == SC_OK);
     SC_ASSERT(result.content != NULL);
     SC_ASSERT(result.content_len == 4);
-    alloc.free(alloc.ctx, result.content, result.content_len + 1);
+    alloc.free(alloc.ctx, (void *)result.content, result.content_len + 1);
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 
@@ -2232,7 +2232,7 @@ static void test_compatible_stream_chat_test_mode(void) {
     SC_ASSERT(err == SC_OK);
     SC_ASSERT(result.content != NULL);
     SC_ASSERT(result.content_len == 4);
-    alloc.free(alloc.ctx, result.content, result.content_len + 1);
+    alloc.free(alloc.ctx, (void *)result.content, result.content_len + 1);
     prov.vtable->deinit(prov.ctx, &alloc);
 }
 

@@ -2,6 +2,7 @@
 #include "seaclaw/config.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/memory.h"
+#include "seaclaw/memory/factory.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/update.h"
 #include "seaclaw/version.h"
@@ -79,29 +80,6 @@ sc_error_t cmd_hardware(sc_allocator_t *alloc, int argc, char **argv) {
 }
 
 /* ── memory ─────────────────────────────────────────────────────────────── */
-static sc_memory_t cmd_memory_open(sc_allocator_t *alloc, const sc_config_t *cfg) {
-    const char *backend = cfg->memory.backend;
-    if (!backend)
-        backend = "markdown";
-    if (strcmp(backend, "sqlite") == 0) {
-        const char *path = cfg->memory.sqlite_path;
-        char buf[1024];
-        if (!path) {
-            const char *home = getenv("HOME");
-            if (home) {
-                int n = snprintf(buf, sizeof(buf), "%s/.seaclaw/memory.db", home);
-                if (n > 0 && (size_t)n < sizeof(buf))
-                    path = buf;
-            }
-        }
-        if (path)
-            return sc_sqlite_memory_create(alloc, path);
-    }
-    if (strcmp(backend, "none") == 0)
-        return sc_none_memory_create(alloc);
-    const char *ws = cfg->workspace_dir ? cfg->workspace_dir : ".";
-    return sc_markdown_memory_create(alloc, ws);
-}
 
 sc_error_t cmd_memory(sc_allocator_t *alloc, int argc, char **argv) {
     if (argc < 3) {
@@ -114,7 +92,8 @@ sc_error_t cmd_memory(sc_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "Config error: %s\n", sc_error_string(err));
         return err;
     }
-    sc_memory_t mem = cmd_memory_open(alloc, &cfg);
+    const char *ws = cfg.workspace_dir ? cfg.workspace_dir : ".";
+    sc_memory_t mem = sc_memory_create_from_config(alloc, &cfg, ws);
     if (!mem.vtable) {
         printf("Memory backend: none (not configured)\n");
         sc_config_deinit(&cfg);

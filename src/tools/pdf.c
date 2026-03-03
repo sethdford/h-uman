@@ -33,7 +33,7 @@ static sc_error_t pdf_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
         *out = sc_tool_result_fail("missing path", 12);
         return SC_OK;
     }
-    double max_pages = sc_json_get_number(args, "max_pages", 0);
+    int max_pages = (int)sc_json_get_number(args, "max_pages", 0);
 
 #if SC_IS_TEST
     {

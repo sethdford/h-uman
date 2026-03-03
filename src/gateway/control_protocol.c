@@ -2,7 +2,6 @@
 #include "seaclaw/bus.h"
 #include "seaclaw/channel_catalog.h"
 #include "seaclaw/config.h"
-#include "../config_internal.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
