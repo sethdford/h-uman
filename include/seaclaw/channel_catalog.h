@@ -26,6 +26,7 @@ typedef enum sc_channel_id {
     SC_CHANNEL_MAIXCAM,
     SC_CHANNEL_NOSTR,
     SC_CHANNEL_WEB,
+    SC_CHANNEL_VOICE,
     SC_CHANNEL_COUNT
 } sc_channel_id_t;
 
