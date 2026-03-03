@@ -276,6 +276,20 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc, const sc_chat
         }
     }
 
+    if (request->response_format && request->response_format_len > 0) {
+        if ((request->response_format_len >= 11 &&
+             memcmp(request->response_format, "json_object", 11) == 0) ||
+            (request->response_format_len >= 4 &&
+             memcmp(request->response_format, "json", 4) == 0)) {
+            sc_json_value_t *rf_obj = sc_json_object_new(alloc);
+            if (rf_obj) {
+                sc_json_object_set(alloc, rf_obj, "type",
+                    sc_json_string_new(alloc, "json", 4));
+                sc_json_object_set(alloc, root, "response_format", rf_obj);
+            }
+        }
+    }
+
     char *body = NULL;
     size_t body_len = 0;
     sc_error_t err = sc_json_stringify(alloc, root, &body, &body_len);
@@ -578,6 +592,20 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
                                sc_json_string_new(alloc, m->content, m->content_len));
         }
         sc_json_array_push(alloc, msgs_arr, obj);
+    }
+
+    if (request->response_format && request->response_format_len > 0) {
+        if ((request->response_format_len >= 11 &&
+             memcmp(request->response_format, "json_object", 11) == 0) ||
+            (request->response_format_len >= 4 &&
+             memcmp(request->response_format, "json", 4) == 0)) {
+            sc_json_value_t *rf_obj = sc_json_object_new(alloc);
+            if (rf_obj) {
+                sc_json_object_set(alloc, rf_obj, "type",
+                    sc_json_string_new(alloc, "json", 4));
+                sc_json_object_set(alloc, root, "response_format", rf_obj);
+            }
+        }
     }
 
     char *body = NULL;

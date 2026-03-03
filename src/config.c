@@ -1313,6 +1313,14 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
         return SC_ERR_JSON_PARSE;
     }
 
+    sc_error_t mig_err = sc_config_migrate(a, root);
+    if (mig_err != SC_OK) {
+        sc_json_free(a, root);
+        return mig_err;
+    }
+
+    cfg->config_version = (int)sc_json_get_number(root, "config_version", 1.0);
+
     const char *workspace = sc_json_get_string(root, "workspace");
     if (workspace && strstr(workspace, "..")) {
         workspace = NULL; /* Reject path traversal */

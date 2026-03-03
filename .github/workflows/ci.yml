@@ -19,6 +19,25 @@ jobs:
         with:
           asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
 
+  cross-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM64 cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Configure (ARM64 cross-compile)
+        run: |
+          cmake -B build-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DSC_ENABLE_CURL=OFF \
+            -DSC_ENABLE_TLS=OFF \
+            -DSC_ENABLE_SQLITE=OFF
+      - name: Build (ARM64)
+        run: cmake --build build-arm64 -j$(nproc)
+      - name: Verify binary
+        run: file build-arm64/seaclaw | grep -i "aarch64\|ARM"
+
   minimal-build:
     runs-on: ubuntu-latest
     steps:
@@ -260,6 +279,22 @@ jobs:
           nix_path: nixpkgs=channel:nixpkgs-unstable
       - run: nix build --no-link --print-build-logs
       - run: nix flake check
+
+  ollama-integration:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Pull tinyllama
+        run: ollama pull tinyllama
+      - name: Build
+        run: |
+          cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
+          cmake --build build -j$(nproc)
+      - name: Run integration tests
+        run: ./build/seaclaw_tests
 
   docs:
     runs-on: ubuntu-latest
