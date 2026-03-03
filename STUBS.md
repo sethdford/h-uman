@@ -9,12 +9,13 @@ Last updated: 2026-03-03
 | Source files (src/ + include/) | **~466**               |
 | Lines of C/H/ASM code          | **~55K**               |
 | Test files                     | 73                     |
-| Tests passing                  | **2,194/2,194 (100%)** |
+| Tests passing                  | **2,212/2,212 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **398 KB**             |
+| Peak RSS (test suite)          | **~5.1 MB**            |
 
 ## Channels — Honest Status
 
-### Full send + receive (7 channels)
+### Full send + receive (9 channels)
 
 | Channel  | send()         | listen()                   | Config Required               |
 | -------- | -------------- | -------------------------- | ----------------------------- |
@@ -26,13 +27,13 @@ Last updated: 2026-03-03
 | Email    | curl SMTP      | curl IMAP poll             | SMTP/IMAP config              |
 | iMessage | AppleScript    | chat.db SQLite poll        | `default_target` (macOS only) |
 | Signal   | signal-cli RPC | signal-cli poll            | `http_url`, `account`         |
+| Matrix   | HTTP PUT       | /sync long-poll            | `homeserver`, `access_token`  |
+| IRC      | TCP socket     | select()+recv() on socket  | `server`, `port`              |
 
-### Send only — no inbound polling (11 channels)
+### Send only — no inbound polling (9 channels)
 
 | Channel    | send()         | listen()            | Config Required                       |
 | ---------- | -------------- | ------------------- | ------------------------------------- |
-| Matrix     | HTTP PUT       | Not implemented     | `homeserver`, `access_token`          |
-| IRC        | TCP socket     | Not implemented     | `server`, `port`                      |
 | LINE       | Push API       | Webhook only        | `channel_token`                       |
 | Lark       | HTTP API       | Webhook only        | `app_id`, `app_secret`                |
 | Mattermost | HTTP API       | Webhook only        | `url`, `token`                        |
@@ -73,9 +74,9 @@ data to avoid side effects. Highlights:
 | openai       | SSE + **WS** | `OPENAI_API_KEY`                  |
 | anthropic    | Yes (SSE)    | `ANTHROPIC_API_KEY`               |
 | gemini       | Yes (SSE)    | `GEMINI_API_KEY`                  |
-| ollama       | No           | None (local)                      |
-| openrouter   | No           | `OPENROUTER_API_KEY`              |
-| compatible   | No           | Per-provider or `SEACLAW_API_KEY` |
+| ollama       | Yes (SSE)    | None (local)                      |
+| openrouter   | Yes (SSE)    | `OPENROUTER_API_KEY`              |
+| compatible   | Yes (SSE)    | Per-provider or `SEACLAW_API_KEY` |
 | claude_cli   | No           | `ANTHROPIC_API_KEY`               |
 | codex_cli    | No           | `OPENAI_API_KEY`                  |
 | openai-codex | No           | API key from config               |
@@ -155,12 +156,10 @@ cron._, skills._, models.list, usage.summary, push.\*, update.check/run, exec.
 
 ## What Remains Stubbed
 
-| Area                   | Status  | Notes                               |
-| ---------------------- | ------- | ----------------------------------- |
-| postgres/redis/lancedb | Stub    | Memory engines — need external libs |
-| store_pgvector         | Stub    | Vector store — needs libpq          |
-| update.check/run       | Stub    | Always returns "up_to_date"         |
-| nodes.list             | Partial | Single hardcoded "local" node       |
+| Area                   | Status | Notes                               |
+| ---------------------- | ------ | ----------------------------------- |
+| postgres/redis/lancedb | Stub   | Memory engines — need external libs |
+| store_pgvector         | Stub   | Vector store — needs libpq          |
 
 ## Web UI Dashboard
 

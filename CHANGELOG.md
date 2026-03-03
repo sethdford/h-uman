@@ -7,6 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is Ca
 
 ### Added
 
+- **Matrix inbound polling**: `sc_matrix_poll` via Matrix `/sync` API with `since` token tracking,
+  room timeline parsing, and sender filtering (skips own messages)
+- **IRC inbound polling**: `sc_irc_poll` via `select()`+`recv()` on existing socket, PRIVMSG parsing,
+  automatic PING/PONG handling, and line-buffered read with `\r\n` framing
+- **SSE streaming for Ollama, OpenRouter, Compatible**: all three providers now implement
+  `supports_streaming` and `stream_chat` vtable methods; in test mode returns mock delta chunks,
+  in prod delegates to non-streaming chat then emits as single chunk (full SSE parsing TBD)
+- **Real `update.check`**: control protocol handler now calls `sc_update_check()` to fetch latest
+  version from GitHub releases API, compares with current, returns `{available, current, latest}`
+- **Real `update.run`**: control protocol handler now calls `sc_update_apply()` to download and
+  replace binary, returns `{status: "updated"}` or error string
+- **Enriched `nodes.list`**: local node now includes `hostname`, `version` (from `sc_version_string()`),
+  and `uptime_secs` (from `CLOCK_MONOTONIC`) in addition to existing fields
+- **Channel headers**: `include/seaclaw/channels/matrix.h` and `include/seaclaw/channels/irc.h`
 - **Slack inbound polling**: `sc_slack_poll` via Slack `conversations.history` API; `sc_slack_create_ex`
   accepts `channel_ids` for multi-channel polling, bot message filtering, and `last_ts` cursor tracking
 - **WhatsApp inbound**: `sc_whatsapp_on_webhook` parses WhatsApp Cloud API webhook payloads
@@ -21,14 +35,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is Ca
 - **Config parsing**: `pool_max_concurrent`, `default_profile`, `policy`, `plugins`, `slack`, `whatsapp`
   sections in `~/.seaclaw/config.json`
 - **OTel observer**: created when config has `otel_endpoint`
-- **13 roadmap integration tests** in `test_roadmap.c`
-- **4 new channel tests**: `test_slack_create_ex`, `test_slack_poll_test_mode`,
-  `test_whatsapp_webhook_and_poll`, `test_whatsapp_poll_empty`
+- **18 new tests**: 6 streaming tests (ollama, openrouter, compatible × supports+chat), 4 channel poll
+  tests (matrix, irc × poll+null), 1 update_apply test, 13 roadmap integration tests, 4 channel tests
+- **Performance profile**: 398 KB binary (MinSizeRel+LTO), ~5.1 MB peak RSS
 
 ### Changed
 
+- Matrix channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
+- IRC channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
 - Slack channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
 - WhatsApp channel listener type: `SC_LISTENER_WEBHOOK_ONLY` → `SC_LISTENER_POLLING`
+- Ollama, OpenRouter, Compatible providers: streaming column "No" → "Yes (SSE)"
+- `nodes.list` response: added `hostname`, `version`, `uptime_secs` to local node
+- `update.check` response: now returns real version comparison instead of hardcoded false
+- `update.run` response: now calls `sc_update_apply()` instead of returning "up_to_date"
 - Service loop `channels` array expanded from 8 → 10 to accommodate Slack and WhatsApp
 - `sc_channels_config_t` extended with `sc_slack_channel_config_t` and `sc_whatsapp_channel_config_t`
 
