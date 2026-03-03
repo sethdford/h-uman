@@ -28,6 +28,17 @@ die() { printf "${RED}error:${NC} %s\n" "$1" >&2; exit 1; }
 info() { printf "${GREEN}==>${NC} ${BOLD}%s${NC}\n" "$1"; }
 warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
 
+case "${1:-}" in
+    -h|--help)
+        echo "Usage: $(basename "$0") [version]"
+        echo "  version  Semantic version (e.g. 0.2.0, 2026.3.15)"
+        echo ""
+        echo "If no version is given, prompts interactively."
+        echo "Runs tests, bumps version, generates changelog, creates git tag."
+        exit 0
+        ;;
+esac
+
 VERSION="${1:-}"
 if [ -z "$VERSION" ]; then
     LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
