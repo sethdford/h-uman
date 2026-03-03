@@ -344,6 +344,21 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
   }
 
+  private _updateWelcome(): void {
+    const welcome = this.shadowRoot?.querySelector("sc-welcome") as
+      | (HTMLElement & { markStep: (k: string) => void })
+      | null;
+    if (!welcome) return;
+    if (this.gateway?.status === "connected") welcome.markStep("connect");
+    if (this.gatewayOperational) welcome.markStep("health");
+    if (this.channels.some((ch) => ch.configured)) welcome.markStep("channel");
+    if (this.sessions.length > 0) welcome.markStep("chat");
+  }
+
+  private _navigate(tab: string): void {
+    this.dispatchEvent(new CustomEvent("navigate", { detail: tab, bubbles: true, composed: true }));
+  }
+
   private get gatewayOperational(): boolean {
     const s = (this.health.status ?? "").toLowerCase();
     return s === "ok" || s === "operational" || s === "healthy";
