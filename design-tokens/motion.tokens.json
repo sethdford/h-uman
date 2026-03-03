@@ -2,9 +2,9 @@
   "$description": "Motion tokens — duration, easing, spring, choreography, and purpose-based transitions",
   "duration": {
     "instant": {
-      "$value": "0ms",
+      "$value": "50ms",
       "$type": "duration",
-      "$description": "No perceptible delay"
+      "$description": "Imperceptible delay"
     },
     "fast": {
       "$value": "100ms",
@@ -15,6 +15,11 @@
       "$value": "200ms",
       "$type": "duration",
       "$description": "Standard transitions"
+    },
+    "moderate": {
+      "$value": "300ms",
+      "$type": "duration",
+      "$description": "Moderate transitions"
     },
     "slow": {
       "$value": "350ms",

@@ -7,7 +7,7 @@ Scope: entire repository.
 
 seaclaw is a C11 autonomous AI assistant runtime optimized for:
 
-- minimal binary size (414 KB release with LTO, 175 exported symbols)
+- minimal binary size (430 KB release with LTO, 175 exported symbols)
 - minimal memory footprint (5–6 MB peak RSS measured)
 - zero dependencies beyond libc, optional SQLite and libcurl
 - Zig reference implementation archived in `archive/zig-reference/`
@@ -29,15 +29,15 @@ Current scale: **~466 source + header files, ~70K+ lines of C, ~28K+ lines of te
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
-| Metric                   | Measured               |
-| ------------------------ | ---------------------- |
-| Binary size              | 414 KB (407,464 bytes) |
-| Text section             | 280 KB                 |
-| Exported symbols         | 175                    |
-| Cold-start (`--version`) | 6–27 ms avg            |
-| Peak RSS (`--version`)   | ~5.7 MB                |
-| Peak RSS (test suite)    | ~5.9 MB                |
-| Test throughput          | 1,050+ tests/sec       |
+| Metric                   | Measured         |
+| ------------------------ | ---------------- |
+| Binary size              | 430 KB           |
+| Text section             | 280 KB           |
+| Exported symbols         | 175              |
+| Cold-start (`--version`) | 6–27 ms avg      |
+| Peak RSS (`--version`)   | ~5.7 MB          |
+| Peak RSS (test suite)    | ~5.9 MB          |
+| Test throughput          | 1,050+ tests/sec |
 
 Build and test:
 
@@ -61,7 +61,7 @@ These codebase realities should drive every design decision:
 2. **Binary size and memory are hard product constraints**
    - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
-   - Current release binary: 414 KB (with LTO). Top modules by object size:
+   - Current release binary: 430 KB (with LTO). Top modules by object size:
      config (74 KB), agent (52 KB), control_protocol (45 KB), cli (36 KB).
 
 3. **Security-critical surfaces are first-class**
@@ -141,7 +141,7 @@ src/
   agent/                agent loop, context, planner, compaction, dispatcher
   channels/             20 channel implementations (cli, telegram, discord, slack, ...)
   providers/            50+ AI provider implementations (9 core + 41 compatible services)
-  tools/                46 tool implementations
+  tools/                53 tool implementations
   memory/               SQLite + markdown + LRU backends, embeddings, vector search
   security/             policy, pairing, secrets, sandbox backends (landlock, firejail, bwrap)
   runtime/              runtime adapters (native, docker, wasm, cloudflare)

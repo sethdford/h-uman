@@ -56,28 +56,61 @@
       "$type": "color"
     },
 
+    "shadow-xs": {
+      "$value": "0 1px 1px rgba(0,0,0,0.3)",
+      "$type": "shadow"
+    },
     "shadow-sm": {
-      "$value": "0 1px 2px rgba(0, 0, 0, 0.5)",
+      "$value": "0 1px 2px rgba(0,0,0,0.3), 0 2px 6px rgba(0,8,20,0.25)",
       "$type": "shadow"
     },
     "shadow-md": {
-      "$value": "0 4px 12px rgba(0, 0, 0, 0.6)",
+      "$value": "0 2px 4px rgba(0,0,0,0.25), 0 8px 20px rgba(0,8,20,0.3), 0 1px 2px rgba(0,0,0,0.2)",
       "$type": "shadow"
     },
     "shadow-lg": {
-      "$value": "0 8px 24px rgba(2, 8, 20, 0.7)",
+      "$value": "0 4px 8px rgba(0,0,0,0.3), 0 16px 40px rgba(0,8,20,0.35), 0 2px 4px rgba(0,0,0,0.2)",
+      "$type": "shadow"
+    },
+    "shadow-xl": {
+      "$value": "0 8px 16px rgba(0,0,0,0.35), 0 32px 64px rgba(0,8,20,0.4), 0 2px 4px rgba(0,0,0,0.2)",
       "$type": "shadow"
     },
     "shadow-card": {
-      "$value": "0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(2, 8, 20, 0.12)",
+      "$value": "0 1px 3px rgba(0,0,0,0.2), 0 6px 16px rgba(0,8,20,0.2)",
       "$type": "shadow"
+    },
+    "shadow-glow-accent": {
+      "$value": "0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(20,184,166,0.15)",
+      "$type": "shadow"
+    },
+    "shadow-inset": {
+      "$value": "inset 0 1px 2px rgba(0,0,0,0.06)",
+      "$type": "shadow"
+    },
+    "surface-gradient": {
+      "$value": "linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0.1) 100%)",
+      "$type": "string"
+    },
+    "surface-glow": {
+      "$value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.06) 0%, transparent 70%)",
+      "$type": "string"
+    },
+    "button-gradient-primary": {
+      "$value": "linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.15) 100%)",
+      "$type": "string"
+    },
+    "hero-gradient": {
+      "$value": "linear-gradient(135deg, rgba(20,184,166,0.1) 0%, rgba(16,185,129,0.06) 50%, transparent 100%)",
+      "$type": "string"
     }
   },
   "light": {
-    "$description": "Light theme — sandy shore, clear sky",
+    "$description": "Light theme — sandy shore, clear sky, ocean spring day",
     "bg": { "$value": "{color.neutral.900}", "$type": "color" },
     "bg-inset": { "$value": "{color.neutral.800}", "$type": "color" },
-    "bg-surface": { "$value": "{color.neutral.1000}", "$type": "color" },
+    "bg-surface": { "$value": "#ffffff", "$type": "color" },
+    "bg-warm": { "$value": "#fafcfe", "$type": "color" },
     "bg-elevated": { "$value": "{color.neutral.850}", "$type": "color" },
     "bg-overlay": { "$value": "{color.neutral.1000}", "$type": "color" },
 
@@ -85,12 +118,13 @@
     "text-muted": { "$value": "#4a6a8a", "$type": "color" },
     "text-faint": { "$value": "{color.neutral.600}", "$type": "color" },
 
-    "accent": { "$value": "{color.teal.light-500}", "$type": "color" },
+    "accent": { "$value": "#14b8a6", "$type": "color" },
     "accent-hover": { "$value": "{color.teal.light-600}", "$type": "color" },
     "accent-subtle": {
       "$value": "{color.teal.light-subtle}",
       "$type": "color"
     },
+    "accent-light": { "$value": "#99f6e4", "$type": "color" },
     "accent-strong": { "$value": "{color.teal.light-400}", "$type": "color" },
     "on-accent": { "$value": "#ffffff", "$type": "color" },
 
@@ -123,21 +157,53 @@
       "$type": "color"
     },
 
+    "shadow-xs": {
+      "$value": "0 1px 1px rgba(0,30,60,0.04)",
+      "$type": "shadow"
+    },
     "shadow-sm": {
-      "$value": "0 1px 2px rgba(11, 26, 42, 0.06)",
+      "$value": "0 1px 2px rgba(0,30,60,0.05), 0 2px 4px rgba(0,30,60,0.04)",
       "$type": "shadow"
     },
     "shadow-md": {
-      "$value": "0 4px 12px rgba(11, 26, 42, 0.08)",
+      "$value": "0 2px 4px rgba(0,30,60,0.04), 0 6px 16px rgba(0,30,60,0.06), 0 1px 2px rgba(0,30,60,0.03)",
       "$type": "shadow"
     },
     "shadow-lg": {
-      "$value": "0 8px 24px rgba(11, 26, 42, 0.12)",
+      "$value": "0 4px 8px rgba(0,30,60,0.04), 0 12px 32px rgba(0,30,60,0.08), 0 2px 4px rgba(0,30,60,0.03)",
+      "$type": "shadow"
+    },
+    "shadow-xl": {
+      "$value": "0 8px 16px rgba(0,30,60,0.06), 0 24px 48px rgba(0,30,60,0.1), 0 2px 4px rgba(0,30,60,0.03)",
       "$type": "shadow"
     },
     "shadow-card": {
-      "$value": "0 1px 2px rgba(11, 26, 42, 0.04), 0 4px 16px rgba(11, 26, 42, 0.06)",
+      "$value": "0 1px 3px rgba(0,30,60,0.04), 0 4px 12px rgba(0,30,60,0.03)",
       "$type": "shadow"
+    },
+    "shadow-glow-accent": {
+      "$value": "0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(20,184,166,0.15)",
+      "$type": "shadow"
+    },
+    "shadow-inset": {
+      "$value": "inset 0 1px 2px rgba(0,0,0,0.06)",
+      "$type": "shadow"
+    },
+    "surface-gradient": {
+      "$value": "linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(246,249,252,0.4) 100%)",
+      "$type": "string"
+    },
+    "surface-glow": {
+      "$value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.04) 0%, transparent 70%)",
+      "$type": "string"
+    },
+    "button-gradient-primary": {
+      "$value": "linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(0,0,0,0.05) 100%)",
+      "$type": "string"
+    },
+    "hero-gradient": {
+      "$value": "linear-gradient(135deg, rgba(20,184,166,0.08) 0%, rgba(16,185,129,0.04) 50%, transparent 100%)",
+      "$type": "string"
     }
   },
   "high-contrast": {

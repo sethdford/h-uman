@@ -44,8 +44,9 @@ object SCTokens {
 
     // Colors (Light)
     object Light {
-        val accent = Color(0xFF0D9488)
+        val accent = Color(0xFF14B8A6)
         val accentHover = Color(0xFF0F766E)
+        val accentLight = Color(0xFF99F6E4)
         val accentStrong = Color(0xFF14B8A6)
         val accentSubtle = Color(0x1A0D9488)
         val backdropOverlay = Color(0x4D000000)
@@ -54,6 +55,7 @@ object SCTokens {
         val bgInset = Color(0xFFEAF0F6)
         val bgOverlay = Color(0xFFFFFFFF)
         val bgSurface = Color(0xFFFFFFFF)
+        val bgWarm = Color(0xFFFAFCFE)
         val border = Color(0xFFD4DFE9)
         val borderSubtle = Color(0xFFF0F4F8)
         val disabledOverlay = Color(0x0A000000)
@@ -125,7 +127,8 @@ object SCTokens {
 
     // Duration (milliseconds)
     val durationFast = 100L
-    val durationInstant = 0L
+    val durationInstant = 50L
+    val durationModerate = 300L
     val durationNormal = 200L
     val durationSlow = 350L
     val durationSlower = 500L

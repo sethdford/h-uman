@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsx build.ts",
-    "docs": "npx tsx generate-docs.ts"
+    "docs": "npx tsx generate-docs.ts",
+    "check": "npm run build"
   },
   "devDependencies": {
     "tsx": "^4.21.0"

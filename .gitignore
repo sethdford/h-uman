@@ -76,3 +76,4 @@ ui/e2e-screenshots/
 # E2E test artifacts (screenshots, ad-hoc scripts)
 ui/e2e-*.png
 ui/e2e-*.mjs
+ui/e2e-final-browser/

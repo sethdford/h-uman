@@ -40,8 +40,9 @@ public enum SCTokens {
 
     // MARK: - Colors (Light)
     public enum Light {
-        public static let accent = Color(hex: 0x0D9488)
+        public static let accent = Color(hex: 0x14B8A6)
         public static let accentHover = Color(hex: 0x0F766E)
+        public static let accentLight = Color(hex: 0x99F6E4)
         public static let accentStrong = Color(hex: 0x14B8A6)
         public static let accentSubtle = Color(red: 0.051, green: 0.5804, blue: 0.5333, opacity: 0.1)
         public static let backdropOverlay = Color(red: 0, green: 0, blue: 0, opacity: 0.3)
@@ -50,6 +51,7 @@ public enum SCTokens {
         public static let bgInset = Color(hex: 0xEAF0F6)
         public static let bgOverlay = Color(hex: 0xFFFFFF)
         public static let bgSurface = Color(hex: 0xFFFFFF)
+        public static let bgWarm = Color(hex: 0xFAFCFE)
         public static let border = Color(hex: 0xD4DFE9)
         public static let borderSubtle = Color(hex: 0xF0F4F8)
         public static let disabledOverlay = Color(red: 0, green: 0, blue: 0, opacity: 0.04)
@@ -109,7 +111,8 @@ public enum SCTokens {
 
     // MARK: - Duration
     public static let durationFast: Double = 0.1
-    public static let durationInstant: Double = 0
+    public static let durationInstant: Double = 0.05
+    public static let durationModerate: Double = 0.3
     public static let durationNormal: Double = 0.2
     public static let durationSlow: Double = 0.35
     public static let durationSlower: Double = 0.5

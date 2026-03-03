@@ -48,7 +48,12 @@ function collectTokens(obj: unknown, prefix = ""): TokenMap {
   return result;
 }
 
-/** Resolve {path.to.token} references in place; repeat until stable */
+/**
+ * Resolve {path.to.token} references in place; repeat until stable.
+ * Gradient tokens (surface-gradient, surface-glow, etc.) use raw string values
+ * and are emitted as-is in CSS — they contain linear-gradient/radial-gradient
+ * and cannot be resolved like color tokens.
+ */
 function resolveRefs(tokens: TokenMap): TokenMap {
   const resolved = { ...tokens };
   let changed = true;
@@ -803,11 +808,13 @@ function generateSwift(tokens: TokenMap): string {
   }
   lines.push("");
 
-  // Spring
+  // Spring (discover from tokens)
   lines.push("    // MARK: - Motion (Spring)");
-  const springNames = ["micro", "standard", "expressive", "dramatic"];
+  const springNames = Object.keys(tokens)
+    .filter((k) => k.match(/^spring\.[\w-]+\.stiffness$/))
+    .map((k) => k.split(".")[1]);
   for (const name of springNames) {
-    const stiff = tokens[`spring.${name}.stiffness`] as number;
+    const stiff = tokens[`spring.${name}.stiffness`] as number | undefined;
     const damp = tokens[`spring.${name}.damping`] as number;
     const mass = (tokens[`spring.${name}.mass`] as number) ?? 1;
     if (stiff == null || damp == null) continue;
@@ -1043,15 +1050,17 @@ function generateKotlin(tokens: TokenMap): string {
   }
   lines.push("");
 
-  // Spring (stiffness, damping, mass)
+  // Spring (stiffness, damping, mass) — discover from tokens
   lines.push("    // Spring (stiffness, damping, mass)");
-  const springNames = ["micro", "standard", "expressive", "dramatic"];
-  for (const name of springNames) {
+  const kotlinSpringNames = Object.keys(tokens)
+    .filter((k) => k.match(/^spring\.[\w-]+\.stiffness$/))
+    .map((k) => k.split(".")[1]);
+  for (const name of kotlinSpringNames) {
     const stiff = tokens[`spring.${name}.stiffness`] as number | undefined;
     const damp = tokens[`spring.${name}.damping`] as number | undefined;
     const mass = (tokens[`spring.${name}.mass`] as number | undefined) ?? 1;
     if (stiff == null || damp == null) continue;
-    const capName = name.charAt(0).toUpperCase() + name.slice(1);
+    const capName = toPascalCase(name);
     lines.push(`    val spring${capName}Stiffness = ${stiff}f`);
     lines.push(`    val spring${capName}Damping = ${damp}f`);
     lines.push(`    val spring${capName}Mass = ${mass}f`);
@@ -1164,6 +1173,14 @@ function toKotlinCase(s: string): string {
       .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
       .join("")
   );
+}
+
+/** Convert name to PascalCase (e.g. standard -> Standard, some-name -> SomeName) */
+function toPascalCase(s: string): string {
+  return s
+    .split("-")
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join("");
 }
 
 /** Convert token suffix to Kotlin camelCase (e.g. overlay-heavy -> overlayHeavy) */

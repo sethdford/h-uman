@@ -1,0 +1,7 @@
+{
+  "name": "seaclaw",
+  "private": true,
+  "scripts": {
+    "check": "cd ui && npm run check && cd ../website && npm run check && cd ../design-tokens && npm run check"
+  }
+}
