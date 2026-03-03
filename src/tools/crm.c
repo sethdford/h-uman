@@ -26,7 +26,7 @@
 #define HUBSPOT_API "https://api.hubapi.com"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } crm_ctx_t;
 
 static sc_error_t crm_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
@@ -114,13 +114,13 @@ static sc_error_t crm_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
         const char *company = sc_json_get_string(args, "company");
         const char *phone = sc_json_get_string(args, "phone");
         char *body = sc_sprintf(alloc,
-            "{\"properties\":{%s%s%s%s%s%s%s%s%s%s%s%s}}",
+            "{\"properties\":{%s%s%s%s%s%s%s%s%s%s%s%s%s%s}}",
             email_val ? "\"email\":\"" : "", email_val ? email_val : "", email_val ? "\"" : "",
             (email_val && name_val) ? "," : "",
             name_val ? "\"firstname\":\"" : "", name_val ? name_val : "", name_val ? "\"" : "",
-            (name_val && company) ? "," : "",
+            ((name_val || email_val) && company) ? "," : "",
             company ? "\"company\":\"" : "", company ? company : "", company ? "\"" : "",
-            phone ? ",\"phone\":\"" : "");
+            phone ? ",\"phone\":\"" : "", phone ? phone : "", phone ? "\"" : "");
         sc_http_response_t resp = {0};
         sc_error_t err = sc_http_post_json(alloc,
             HUBSPOT_API "/crm/v3/objects/contacts", auth,

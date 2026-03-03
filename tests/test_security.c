@@ -1071,13 +1071,23 @@ static void test_net_proxy_max_domains(void) {
 
 /* --- sandbox API smoke tests --- */
 static void test_sandbox_noop_available(void) {
-    /* noop sandbox is always available */
-    SC_ASSERT(1);
+    sc_noop_sandbox_ctx_t ctx;
+    sc_sandbox_t sb = sc_noop_sandbox_get(&ctx);
+    SC_ASSERT_TRUE(sc_sandbox_is_available(&sb));
+    SC_ASSERT_STR_EQ(sc_sandbox_name(&sb), "none");
 }
 
 static void test_sandbox_noop_wrap_passthrough(void) {
-    /* wrapping with noop should pass through unchanged */
-    SC_ASSERT(1);
+    sc_noop_sandbox_ctx_t ctx;
+    sc_sandbox_t sb = sc_noop_sandbox_get(&ctx);
+    const char *argv[] = {"echo", "hello"};
+    const char *out[8];
+    size_t out_count = 0;
+    sc_error_t err = sc_sandbox_wrap_command(&sb, argv, 2, out, 8, &out_count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out_count, 2u);
+    SC_ASSERT_STR_EQ(out[0], "echo");
+    SC_ASSERT_STR_EQ(out[1], "hello");
 }
 
 static void test_observer_noop(void) {

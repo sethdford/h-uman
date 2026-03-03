@@ -5,6 +5,7 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/arena.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/core/json.h"
 #include "seaclaw/core/slice.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -307,6 +308,8 @@ sc_error_t sc_config_parse_json(sc_config_t *cfg, const char *content, size_t le
 void sc_config_apply_env_overrides(sc_config_t *cfg);
 sc_error_t sc_config_save(const sc_config_t *cfg);
 sc_error_t sc_config_validate(const sc_config_t *cfg);
+sc_error_t sc_config_validate_strict(const sc_config_t *cfg, const sc_json_value_t *root,
+                                     bool strict);
 const char *sc_config_get_provider_key(const sc_config_t *cfg, const char *name);
 const char *sc_config_default_provider_key(const sc_config_t *cfg);
 bool sc_config_provider_requires_api_key(const char *provider);

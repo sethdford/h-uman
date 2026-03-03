@@ -290,6 +290,33 @@ static void test_openai_temperature_passthrough(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_openai_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openai_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "gpt-4", 4, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openai_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openai_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "gpt-4", .model_len = 4,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "gpt-4", 4, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 /* ─── Anthropic ──────────────────────────────────────────────────────────── */
 static void test_anthropic_create_with_base_url(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -665,6 +692,33 @@ static void test_gemini_stream_chat_mock(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_gemini_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_gemini_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "gemini-pro", 10, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_gemini_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_gemini_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "gemini-pro", .model_len = 10,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "gemini-pro", 10, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 /* ─── Ollama ─────────────────────────────────────────────────────────────── */
 static void test_ollama_create_succeeds(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -813,6 +867,33 @@ static void test_ollama_local_model_format(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_ollama_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_ollama_create(&alloc, NULL, 0, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "llama2", 6, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_ollama_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_ollama_create(&alloc, NULL, 0, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "llama2", .model_len = 6,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "llama2", 6, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 /* ─── OpenRouter ──────────────────────────────────────────────────────────── */
 static void test_openrouter_create_succeeds(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -929,6 +1010,33 @@ static void test_openrouter_chat_with_tools_mock(void) {
     sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "openai/gpt-4", 12, 0.7, &resp);
     SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_NOT_SUPPORTED);
     sc_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openrouter_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openrouter_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "anthropic/claude-3", 18, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openrouter_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openrouter_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "openai/gpt-4", .model_len = 14,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "openai/gpt-4", 14, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK)
+        sc_chat_response_free(&alloc, &resp);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }
@@ -1201,6 +1309,33 @@ static void test_compatible_chat_with_tools_mock(void) {
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_EQ(resp.tool_calls_count, 1u);
     sc_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_compatible_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_compatible_create(&alloc, "key", 3, "http://localhost:1234", 21, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "model", 5, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_compatible_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_compatible_create(&alloc, "key", 3, "http://localhost:1234", 21, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "model", .model_len = 5,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "model", 5, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK)
+        sc_chat_response_free(&alloc, &resp);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }
@@ -1735,10 +1870,48 @@ static void test_codex_cli_supports_native_tools(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_codex_cli_chat_mock(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_codex_cli_create(&alloc, NULL, 0, NULL, 0, &prov);
+    sc_chat_message_t msgs[1] = {make_user_msg("hello", 5)};
+    sc_chat_request_t req = make_simple_request(msgs, 1);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "codex-mini", 10, 0.7, &resp);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(resp.content);
+    if (resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_codex_cli_create_null_alloc_fails(void) {
+    sc_provider_t prov;
+    sc_error_t err = sc_provider_create(NULL, "codex_cli", 9, NULL, 0, NULL, 0, &prov);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
 static void test_codex_cli_deinit_no_crash(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_provider_t prov;
     sc_codex_cli_create(&alloc, NULL, 0, NULL, 0, &prov);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_codex_cli_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_codex_cli_create(&alloc, NULL, 0, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "codex-mini", .model_len = 10,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "codex-mini", 10, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }
@@ -1763,10 +1936,68 @@ static void test_openai_codex_get_name(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_openai_codex_supports_native_tools(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openai_codex_create(&alloc, NULL, 0, NULL, 0, &prov);
+    SC_ASSERT_FALSE(prov.vtable->supports_native_tools(prov.ctx));
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openai_codex_chat_mock(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openai_codex_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_message_t msgs[1] = {make_user_msg("hi", 2)};
+    sc_chat_request_t req = make_simple_request(msgs, 1);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "o4-mini", 7, 0.7, &resp);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(resp.content);
+    if (resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openai_codex_create_null_alloc_fails(void) {
+    sc_provider_t prov;
+    sc_error_t err = sc_provider_create(NULL, "openai-codex", 12, "key", 3, NULL, 0, &prov);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
 static void test_openai_codex_deinit_no_crash(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_provider_t prov;
     sc_openai_codex_create(&alloc, "k", 1, NULL, 0, &prov);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openai_codex_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openai_codex_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "o4-mini", 7, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_openai_codex_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_openai_codex_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "o4-mini", .model_len = 7,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "o4-mini", 7, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }
@@ -2243,6 +2474,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_openai_get_name);
     SC_RUN_TEST(test_openai_supports_native_tools);
     SC_RUN_TEST(test_openai_chat_mock);
+    SC_RUN_TEST(test_openai_chat_null_request_returns_error);
+    SC_RUN_TEST(test_openai_chat_empty_messages_graceful);
     SC_RUN_TEST(test_openai_deinit_no_crash);
     SC_RUN_TEST(test_openai_create_empty_key);
     SC_RUN_TEST(test_openai_create_with_base_url);
@@ -2251,6 +2484,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_openai_stream_chat_mock);
     SC_RUN_TEST(test_openai_model_passthrough);
     SC_RUN_TEST(test_openai_temperature_passthrough);
+    SC_RUN_TEST(test_openai_chat_null_request_returns_error);
+    SC_RUN_TEST(test_openai_chat_empty_messages_graceful);
 
     SC_RUN_TEST(test_anthropic_create_succeeds);
     SC_RUN_TEST(test_anthropic_create_null_alloc_fails);
@@ -2265,6 +2500,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_anthropic_max_tokens_in_request);
     SC_RUN_TEST(test_anthropic_stream_chat_mock);
     SC_RUN_TEST(test_anthropic_tool_call_format);
+    SC_RUN_TEST(test_anthropic_chat_null_request_returns_error);
+    SC_RUN_TEST(test_anthropic_chat_empty_messages_graceful);
 
     SC_RUN_TEST(test_gemini_create_succeeds);
     SC_RUN_TEST(test_gemini_create_null_alloc_fails);
@@ -2279,6 +2516,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_gemini_chat_with_tools_mock);
     SC_RUN_TEST(test_gemini_model_gemini2_flash);
     SC_RUN_TEST(test_gemini_stream_chat_mock);
+    SC_RUN_TEST(test_gemini_chat_null_request_returns_error);
+    SC_RUN_TEST(test_gemini_chat_empty_messages_graceful);
 
     SC_RUN_TEST(test_ollama_create_succeeds);
     SC_RUN_TEST(test_ollama_create_null_alloc_fails);
@@ -2291,6 +2530,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_ollama_no_api_key_required);
     SC_RUN_TEST(test_ollama_chat_with_tools_mock);
     SC_RUN_TEST(test_ollama_local_model_format);
+    SC_RUN_TEST(test_ollama_chat_null_request_returns_error);
+    SC_RUN_TEST(test_ollama_chat_empty_messages_graceful);
 
     SC_RUN_TEST(test_openrouter_create_succeeds);
     SC_RUN_TEST(test_openrouter_create_null_alloc_fails);
@@ -2301,6 +2542,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_openrouter_create_empty_key);
     SC_RUN_TEST(test_openrouter_model_routing);
     SC_RUN_TEST(test_openrouter_chat_with_tools_mock);
+    SC_RUN_TEST(test_openrouter_chat_null_request_returns_error);
+    SC_RUN_TEST(test_openrouter_chat_empty_messages_graceful);
 
     SC_RUN_TEST(test_compatible_create_succeeds);
     SC_RUN_TEST(test_compatible_create_null_alloc_fails);
@@ -2325,6 +2568,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_factory_cerebras_chat_mock);
     SC_RUN_TEST(test_factory_xai_chat_mock);
     SC_RUN_TEST(test_compatible_chat_with_tools_mock);
+    SC_RUN_TEST(test_compatible_chat_null_request_returns_error);
+    SC_RUN_TEST(test_compatible_chat_empty_messages_graceful);
 
     SC_RUN_TEST(test_claude_cli_create_succeeds);
     SC_RUN_TEST(test_claude_cli_create_null_alloc_fails);
@@ -2404,9 +2649,14 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_codex_cli_create_succeeds);
     SC_RUN_TEST(test_codex_cli_get_name);
     SC_RUN_TEST(test_codex_cli_supports_native_tools);
+    SC_RUN_TEST(test_codex_cli_chat_mock);
+    SC_RUN_TEST(test_codex_cli_create_null_alloc_fails);
     SC_RUN_TEST(test_codex_cli_deinit_no_crash);
     SC_RUN_TEST(test_openai_codex_create_succeeds);
     SC_RUN_TEST(test_openai_codex_get_name);
+    SC_RUN_TEST(test_openai_codex_supports_native_tools);
+    SC_RUN_TEST(test_openai_codex_chat_mock);
+    SC_RUN_TEST(test_openai_codex_create_null_alloc_fails);
     SC_RUN_TEST(test_openai_codex_deinit_no_crash);
 
     SC_RUN_TEST(test_reliable_create_simple);

@@ -23,7 +23,7 @@
     "{\"type\":\"number\"}},\"required\":[\"action\",\"platform\"]}"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } social_ctx_t;
 
 static sc_error_t social_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,

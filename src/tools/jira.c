@@ -26,7 +26,7 @@
     "{\"type\":\"string\"}},\"required\":[\"action\"]}"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } jira_ctx_t;
 
 static sc_error_t jira_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
@@ -187,24 +187,22 @@ static sc_error_t jira_execute(void *ctx, sc_allocator_t *alloc, const sc_json_v
         if (!issue_key) { *out = sc_tool_result_fail("missing issue_key", 17); return SC_OK; }
         const char *status = sc_json_get_string(args, "status");
         const char *assignee = sc_json_get_string(args, "assignee");
-        char *body = sc_sprintf(alloc, "{\"fields\":{%s%s%s%s%s%s}}",
+        if (!status && !assignee) {
+            *out = sc_tool_result_fail("update needs status or assignee", 31);
+            return SC_OK;
+        }
+        char *body = sc_sprintf(alloc, "{\"fields\":{%s%s%s%s%s%s%s}}",
             assignee ? "\"assignee\":{\"accountId\":\"" : "",
             assignee ? assignee : "", assignee ? "\"}" : "",
             (assignee && status) ? "," : "",
-            status ? "\"status\":{\"name\":\"" : "",
-            status ? status : "");
-        if (status) {
-            size_t bl = body ? strlen(body) : 0;
-            if (body) alloc->free(alloc->ctx, body, bl + 1);
-            body = sc_sprintf(alloc, "{\"fields\":{%s%s%s}}",
-                assignee ? "\"assignee\":{\"accountId\":\"" : "",
-                assignee ? assignee : "", assignee ? "\"}" : "");
-        }
+            status ? "\"labels\":[\"" : "",
+            status ? status : "", status ? "\"]" : "");
+        if (!body) { *out = sc_tool_result_fail("alloc failed", 12); return SC_OK; }
         char url[512];
         snprintf(url, sizeof(url), "%s/rest/api/3/issue/%s", base_url, issue_key);
         sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, url, auth, body, body ? strlen(body) : 0, &resp);
-        if (body) alloc->free(alloc->ctx, body, strlen(body) + 1);
+        sc_error_t err = sc_http_post_json(alloc, url, auth, body, strlen(body), &resp);
+        alloc->free(alloc->ctx, body, strlen(body) + 1);
         if (err != SC_OK) {
             if (resp.owned && resp.body) sc_http_response_free(alloc, &resp);
             *out = sc_tool_result_fail("failed to update issue", 22);

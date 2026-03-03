@@ -19,7 +19,7 @@
     "(default: plain)\"}},\"required\":[\"message\",\"channels\"]}"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } broadcast_ctx_t;
 
 static sc_error_t broadcast_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,

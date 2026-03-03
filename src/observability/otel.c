@@ -63,7 +63,7 @@ static void otel_record_event(void *ctx, const sc_observer_event_t *event) {
     sc_otel_ctx_t *c = (sc_otel_ctx_t *)ctx;
     if (!c || !event || !c->enable_logs || !c->endpoint)
         return;
-#if !SC_IS_TEST
+#if !SC_IS_TEST && defined(SC_HTTP_CURL)
     char body[2048];
     const char *svc = c->service_name ? c->service_name : "seaclaw";
     int n = snprintf(body, sizeof(body),
@@ -90,7 +90,7 @@ static void otel_record_metric(void *ctx, const sc_observer_metric_t *metric) {
     sc_otel_ctx_t *c = (sc_otel_ctx_t *)ctx;
     if (!c || !metric || !c->enable_metrics || !c->endpoint)
         return;
-#if !SC_IS_TEST
+#if !SC_IS_TEST && defined(SC_HTTP_CURL)
     char body[2048];
     const char *svc = c->service_name ? c->service_name : "seaclaw";
     int n = snprintf(body, sizeof(body),

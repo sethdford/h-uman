@@ -33,7 +33,7 @@ static void test_keyword_basic_match(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1); /* skip when SQLite disabled */
+    (void)0; /* skip when SQLite disabled */
 #endif
 }
 
@@ -62,7 +62,7 @@ static void test_keyword_case_insensitive(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -88,7 +88,7 @@ static void test_keyword_no_match_returns_empty(void) {
 
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -133,7 +133,7 @@ static void test_rrf_combines_rankings(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -166,7 +166,7 @@ static void test_mmr_diversifies_results(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -211,7 +211,7 @@ static void test_keyword_limit_respected(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -322,7 +322,7 @@ static void test_retrieval_engine_with_sqlite_backend(void) {
     eng.vtable->deinit(eng.ctx, &alloc);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -346,7 +346,7 @@ static void test_semantic_retrieve_with_local_embedder(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 
@@ -370,7 +370,7 @@ static void test_hybrid_retrieve_with_vector(void) {
     sc_retrieval_result_free(&alloc, &res);
     mem.vtable->deinit(mem.ctx);
 #else
-    SC_ASSERT_TRUE(1);
+    (void)0;
 #endif
 }
 

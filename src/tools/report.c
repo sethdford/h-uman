@@ -23,7 +23,7 @@
     "weekly_status, incident_report, financial_summary)\"}},\"required\":[\"action\"]}"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } report_ctx_t;
 
 static sc_error_t report_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,

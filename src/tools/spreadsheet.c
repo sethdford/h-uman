@@ -29,7 +29,7 @@
 #define SS_BUF_INIT 8192
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } ss_ctx_t;
 
 static size_t csv_count_fields(const char *line, char delim) {

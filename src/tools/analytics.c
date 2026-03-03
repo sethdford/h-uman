@@ -23,7 +23,7 @@
     "\"description\":\"GA OAuth2 token\"}},\"required\":[\"action\"]}"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } analytics_ctx_t;
 
 static sc_error_t analytics_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,

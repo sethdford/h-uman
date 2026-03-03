@@ -959,7 +959,7 @@
         catalogSegmented.value = "day";
       }
       document.getElementById("segmented-value-control")?.addEventListener("change", (e) => {
-        const val = (e.target as HTMLSelectElement).value;
+        const val = e.target.value;
         if (segmentedPreview) segmentedPreview.value = val;
       });
 

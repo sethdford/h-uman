@@ -18,7 +18,7 @@
     "\"description\":\"Maximum pages to extract (default: all)\"}},\"required\":[\"path\"]}"
 
 typedef struct sc_pdf_ctx {
-    int placeholder;
+    char _unused;
 } sc_pdf_ctx_t;
 
 static sc_error_t pdf_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,

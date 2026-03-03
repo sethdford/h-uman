@@ -215,6 +215,7 @@ set(SC_CORE_SOURCES
     src/config.c
     src/config_serialize.c
     src/config_getters.c
+    src/config_validate.c
     src/config_types.c
     src/config_mutator.c
     src/config_parse.c
@@ -1115,6 +1116,7 @@ set(SC_TEST_SOURCES
     tests/test_channel_all.c
     tests/test_channel_integration.c
     tests/test_config_extended.c
+    tests/test_config_validation.c
     tests/test_json_extended.c
     tests/test_security_extended.c
     tests/test_core_extended.c
@@ -1258,7 +1260,47 @@ add_custom_target(sbom
 )
 
 # Fuzz testing (requires Clang with libFuzzer)
+option(SC_ENABLE_FUZZ "Build security-critical fuzz harnesses (JSON, config, tool params)" OFF)
 option(SC_ENABLE_FUZZING "Build fuzz testing harnesses" OFF)
+if(SC_ENABLE_FUZZ)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "SC_ENABLE_FUZZ requires Clang compiler")
+    endif()
+    enable_language(CXX)
+    set(FUZZ_SANITIZE "-fsanitize=fuzzer,address")
+    set(FUZZ_FRAME "-fno-omit-frame-pointer")
+    if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        set(FUZZ_EXTRA_LINK "-L/opt/homebrew/opt/llvm/lib/c++" "-L/opt/homebrew/opt/llvm/lib/unwind")
+        set(FUZZ_EXTRA_LIBS "unwind" "c++")
+    else()
+        set(FUZZ_EXTRA_LINK "")
+        set(FUZZ_EXTRA_LIBS "")
+    endif()
+
+    add_executable(fuzz_json_parse fuzz/fuzz_json_parse.c)
+    set_target_properties(fuzz_json_parse PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_json_parse PRIVATE SC_IS_TEST=1)
+    target_compile_options(fuzz_json_parse PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_json_parse PRIVATE seaclaw_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_json_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_json_parse PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_config_load fuzz/fuzz_config_load.c)
+    set_target_properties(fuzz_config_load PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_config_load PRIVATE SC_IS_TEST=1)
+    target_compile_options(fuzz_config_load PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_config_load PRIVATE seaclaw_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_config_load PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_config_load PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+
+    add_executable(fuzz_tool_params fuzz/fuzz_tool_params.c)
+    set_target_properties(fuzz_tool_params PROPERTIES LINKER_LANGUAGE CXX)
+    target_compile_definitions(fuzz_tool_params PRIVATE SC_IS_TEST=1)
+    target_compile_options(fuzz_tool_params PRIVATE -Wall -Wextra -Wpedantic)
+    target_link_libraries(fuzz_tool_params PRIVATE seaclaw_core_test ${FUZZ_EXTRA_LIBS})
+    target_compile_options(fuzz_tool_params PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
+    target_link_options(fuzz_tool_params PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+endif()
 if(SC_ENABLE_FUZZING)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "Fuzzing requires Clang compiler")
@@ -1292,6 +1334,27 @@ if(SC_ENABLE_FUZZING)
     target_link_libraries(fuzz_url_validation PRIVATE seaclaw_core ${FUZZ_EXTRA_LIBS})
     target_compile_options(fuzz_url_validation PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME})
     target_link_options(fuzz_url_validation PRIVATE ${FUZZ_SANITIZE} ${FUZZ_FRAME} ${FUZZ_EXTRA_LINK})
+endif()
+
+# Benchmark suite (micro-benchmarks of core operations)
+option(SC_ENABLE_BENCH "Build seaclaw_bench executable for core operation benchmarks" OFF)
+if(SC_ENABLE_BENCH)
+    set(BENCH_SOURCES
+        bench/bench_main.c
+        bench/bench_json.c
+        bench/bench_memory.c
+        bench/bench_config.c
+        bench/bench_runner.c
+    )
+    add_executable(seaclaw_bench ${BENCH_SOURCES})
+    target_link_libraries(seaclaw_bench seaclaw_core)
+    target_include_directories(seaclaw_bench PRIVATE ${SC_ROOT})
+    target_compile_definitions(seaclaw_bench PRIVATE SC_IS_TEST=1)
+    target_compile_options(seaclaw_bench PRIVATE -Wall -Wextra -Wpedantic -O2)
+    if(SC_ENABLE_ASAN)
+        message(STATUS "Bench: seaclaw_bench built without ASan for performance measurement")
+    endif()
+    message(STATUS "Bench: seaclaw_bench enabled")
 endif()
 
 # Benchmark target

@@ -29,7 +29,7 @@
 #define GCAL_API "https://www.googleapis.com/calendar/v3/calendars/"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } calendar_ctx_t;
 
 static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,

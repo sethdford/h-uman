@@ -26,7 +26,7 @@
     "[\"action\"]}"
 
 typedef struct {
-    int placeholder;
+    char _unused;
 } invoice_ctx_t;
 
 static sc_error_t invoice_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
