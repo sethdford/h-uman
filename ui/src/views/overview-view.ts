@@ -307,7 +307,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     this.loading = true;
     this.error = "";
     try {
-      const [healthRes, capRes, chRes, sessRes, updateRes] = await Promise.all([
+      const [healthRes, capRes, chRes, sessRes, updateRes, actRes] = await Promise.all([
         gw.request<HealthRes>("health", {}).catch(() => ({})),
         gw.request<CapabilitiesRes>("capabilities", {}).catch(() => ({})),
         gw
@@ -317,6 +317,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
           .request<{ sessions?: SessionItem[] }>("sessions.list", {})
           .catch(() => ({ sessions: [] })),
         gw.request<UpdateInfo>("update.check", {}).catch(() => ({})),
+        gw
+          .request<{ events?: ActivityEvent[] }>("activity.recent", {})
+          .catch(() => ({ events: [] })),
       ]);
       this.health = healthRes as HealthRes;
       this.capabilities = capRes as CapabilitiesRes;
@@ -325,6 +328,11 @@ export class ScOverviewView extends GatewayAwareLitElement {
       const sessPayload = sessRes as { sessions?: SessionItem[] };
       this.sessions = sessPayload?.sessions ?? [];
       this.updateInfo = (updateRes as UpdateInfo) ?? {};
+      const actPayload = actRes as { events?: ActivityEvent[] };
+      if (actPayload?.events?.length && this.activityEvents.length === 0) {
+        this.activityEvents = actPayload.events;
+      }
+      this._updateWelcome();
     } catch (e) {
       this.error = e instanceof Error ? e.message : "Failed to load overview";
       this.health = {};
