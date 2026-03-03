@@ -5,105 +5,196 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SeaClaw Component Catalog</title>
     <style>
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      :root { --catalog-sidebar-width: 220px; }
+      [data-theme="light"] {
+        color-scheme: light;
+        --sc-bg: #fafafa; --sc-bg-inset: #f0f0f2; --sc-bg-surface: #ffffff;
+        --sc-bg-elevated: #f4f4f5; --sc-bg-overlay: #ffffff;
+        --sc-text: #18181b; --sc-text-muted: #71717a; --sc-text-faint: #a1a1aa;
+        --sc-accent: #e11d48; --sc-accent-hover: #be123c; --sc-accent-subtle: rgba(225,29,72,0.08);
+        --sc-accent-strong: #f43f5e; --sc-border: #e4e4e7; --sc-border-subtle: #f4f4f5;
+        --sc-success: #16a34a; --sc-success-dim: rgba(22,163,74,0.1);
+        --sc-warning: #ca8a04; --sc-warning-dim: rgba(202,138,4,0.1);
+        --sc-error: #dc2626; --sc-error-dim: rgba(220,38,38,0.1);
+        --sc-info: #2563eb; --sc-info-dim: rgba(37,99,235,0.1);
+        --sc-shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+        --sc-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+        --sc-shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
       }
-      body {
-        font-family:
-          "Avenir",
-          "Avenir Next",
-          -apple-system,
-          system-ui,
-          sans-serif;
-        background: #0c0c0c;
-        color: #ebebeb;
-        padding: 2rem;
+      [data-theme="dark"] {
+        color-scheme: dark;
+        --sc-bg: #0c0c0c; --sc-bg-inset: #111111; --sc-bg-surface: #161616;
+        --sc-bg-elevated: #1e1e1e; --sc-bg-overlay: #252525;
+        --sc-text: #ebebeb; --sc-text-muted: #8a8a8a; --sc-text-faint: #525252;
+        --sc-accent: #f97066; --sc-accent-hover: #fb8a82; --sc-accent-subtle: rgba(249,112,102,0.12);
+        --sc-accent-strong: #ff5c50; --sc-border: #262626; --sc-border-subtle: #1e1e1e;
+        --sc-success: #22c55e; --sc-success-dim: rgba(34,197,94,0.15);
+        --sc-warning: #eab308; --sc-warning-dim: rgba(234,179,8,0.15);
+        --sc-error: #ef4444; --sc-error-dim: rgba(239,68,68,0.15);
+        --sc-info: #3b82f6; --sc-info-dim: rgba(59,130,246,0.15);
+        --sc-shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+        --sc-shadow-md: 0 4px 12px rgba(0,0,0,0.5);
+        --sc-shadow-lg: 0 8px 24px rgba(0,0,0,0.6);
       }
-      h1 {
-        font-size: 2rem;
-        font-weight: 900;
-        margin-bottom: 2rem;
-      }
-      h2 {
-        font-size: 1.25rem;
-        font-weight: 700;
-        margin: 2rem 0 1rem;
-        color: #f97066;
-      }
-      .section {
-        padding: 1.5rem;
-        background: #161616;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
-      }
-      .row {
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-        align-items: center;
-        margin-bottom: 1rem;
-      }
-      .label {
-        font-size: 0.75rem;
-        color: #737373;
-        margin-bottom: 0.5rem;
-      }
-      @media (prefers-color-scheme: light) {
-        body {
-          background: #fafafa;
-          color: #18181b;
-        }
-        .section {
-          background: #ffffff;
-        }
-        .label {
-          color: #71717a;
-        }
-      }
+      body { font-family: var(--sc-font); background: var(--sc-bg); color: var(--sc-text); min-height: 100vh; display: flex; }
+      .catalog-nav { position: fixed; left: 0; top: 0; bottom: 0; width: var(--catalog-sidebar-width); background: var(--sc-bg-surface); border-right: 1px solid var(--sc-border); padding: var(--sc-space-lg); overflow-y: auto; z-index: 100; }
+      .catalog-nav h3 { font-size: var(--sc-text-sm); font-weight: var(--sc-weight-semibold); color: var(--sc-text-muted); text-transform: uppercase; letter-spacing: var(--sc-tracking-xs); margin-bottom: var(--sc-space-md); }
+      .catalog-nav a { display: block; font-size: var(--sc-text-sm); color: var(--sc-text-muted); text-decoration: none; padding: var(--sc-space-xs) var(--sc-space-sm); border-radius: var(--sc-radius-sm); margin-bottom: var(--sc-space-xs); transition: color var(--sc-duration-fast), background var(--sc-duration-fast); }
+      .catalog-nav a:hover { color: var(--sc-text); background: var(--sc-bg-elevated); }
+      .catalog-nav a:focus-visible { outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring); outline-offset: 2px; }
+      .catalog-main { flex: 1; margin-left: var(--catalog-sidebar-width); padding: var(--sc-space-xl); }
+      .catalog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sc-space-2xl); flex-wrap: wrap; gap: var(--sc-space-md); }
+      .catalog-header h1 { font-size: var(--sc-text-2xl); font-weight: var(--sc-weight-bold); }
+      .theme-toggle { display: flex; gap: var(--sc-space-xs); padding: var(--sc-space-xs); background: var(--sc-bg-elevated); border: 1px solid var(--sc-border); border-radius: var(--sc-radius); }
+      .theme-toggle button { padding: var(--sc-space-sm) var(--sc-space-md); background: transparent; border: none; border-radius: var(--sc-radius-sm); font-family: var(--sc-font); font-size: var(--sc-text-sm); color: var(--sc-text-muted); cursor: pointer; transition: all var(--sc-duration-fast); }
+      .theme-toggle button:hover { color: var(--sc-text); }
+      .theme-toggle button[aria-pressed="true"] { background: var(--sc-accent); color: var(--sc-on-accent); }
+      .component-section { margin-bottom: var(--sc-space-2xl); scroll-margin-top: var(--sc-space-md); }
+      .component-section h2 { font-size: var(--sc-text-xl); font-weight: var(--sc-weight-semibold); color: var(--sc-accent); margin-bottom: var(--sc-space-lg); }
+      .playground { display: grid; grid-template-columns: 1fr auto; gap: var(--sc-space-xl); align-items: start; margin-bottom: var(--sc-space-lg); }
+      @media (max-width: 640px) { .playground { grid-template-columns: 1fr; } }
+      .preview { min-height: 80px; display: flex; align-items: center; justify-content: center; padding: var(--sc-space-lg); background: var(--sc-bg); border-radius: var(--sc-radius-lg); border: 1px solid var(--sc-border-subtle); }
+      .controls { min-width: 200px; padding: var(--sc-space-md); background: var(--sc-bg-elevated); border: 1px solid var(--sc-border); border-radius: var(--sc-radius-lg); }
+      .controls label { display: flex; flex-direction: column; gap: var(--sc-space-xs); margin-bottom: var(--sc-space-md); font-size: var(--sc-text-sm); font-weight: var(--sc-weight-medium); }
+      .controls label:last-child { margin-bottom: 0; }
+      .controls select, .controls input[type="text"], .controls input[type="number"] { padding: var(--sc-space-sm) var(--sc-space-md); font-family: var(--sc-font); font-size: var(--sc-text-sm); background: var(--sc-bg-inset); border: 1px solid var(--sc-border); border-radius: var(--sc-radius-sm); color: var(--sc-text); }
+      .controls input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--sc-accent); }
+      .variants { margin-top: var(--sc-space-lg); }
+      .variants h3 { font-size: var(--sc-text-sm); font-weight: var(--sc-weight-medium); color: var(--sc-text-muted); margin-bottom: var(--sc-space-md); }
+      .variants .row { display: flex; gap: var(--sc-space-md); flex-wrap: wrap; align-items: center; }
+      .code-snippet { margin-top: var(--sc-space-lg); padding: var(--sc-space-md); background: var(--sc-bg-inset); border-radius: var(--sc-radius); font-family: var(--sc-font-mono); font-size: var(--sc-text-sm); overflow-x: auto; }
+      .code-snippet code { color: var(--sc-text); }
     </style>
   </head>
   <body>
-    <h1>SeaClaw Component Catalog</h1>
+    <nav class="catalog-nav">
+      <h3>Components</h3>
+      <a href="#sc-button">sc-button</a>
+      <a href="#sc-badge">sc-badge</a>
+      <a href="#sc-card">sc-card</a>
+      <a href="#sc-modal">sc-modal</a>
+      <a href="#sc-tooltip">sc-tooltip</a>
+      <a href="#sc-empty-state">sc-empty-state</a>
+      <a href="#sc-skeleton">sc-skeleton</a>
+      <a href="#sc-sheet">sc-sheet</a>
+      <a href="#sc-toast">sc-toast</a>
+      <a href="#sc-tabs">sc-tabs</a>
+      <a href="#sc-avatar">sc-avatar</a>
+      <a href="#sc-progress">sc-progress</a>
+      <a href="#sc-input">sc-input</a>
+      <a href="#sc-select">sc-select</a>
+      <a href="#sc-dropdown">sc-dropdown</a>
+      <a href="#sc-dialog">sc-dialog</a>
+    </nav>
+    <main class="catalog-main">
+      <header class="catalog-header">
+        <h1>SeaClaw Component Catalog</h1>
+        <div class="theme-toggle" role="group" aria-label="Theme">
+          <button type="button" id="theme-dark" aria-pressed="true">Dark</button>
+          <button type="button" id="theme-light" aria-pressed="false">Light</button>
+        </div>
+      </header>
 
-    <h2>Buttons</h2>
-    <div class="section">
-      <div class="label">Variants</div>
-      <div class="row">
-        <sc-button variant="primary">Primary</sc-button>
-        <sc-button variant="secondary">Secondary</sc-button>
-        <sc-button variant="destructive">Destructive</sc-button>
-        <sc-button variant="ghost">Ghost</sc-button>
-      </div>
-      <div class="label">Sizes</div>
-      <div class="row">
-        <sc-button size="sm">Small</sc-button>
-        <sc-button size="md">Medium</sc-button>
-        <sc-button size="lg">Large</sc-button>
-      </div>
-      <div class="label">States</div>
-      <div class="row">
-        <sc-button disabled>Disabled</sc-button>
-        <sc-button loading>Loading</sc-button>
-      </div>
-    </div>
+      <section class="component-section" id="sc-button">
+        <h2>sc-button</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-button id="btn-preview" variant="primary">Button</sc-button>
+          </div>
+          <div class="controls">
+            <label>variant
+              <select data-target="btn-preview" data-prop="variant">
+                <option value="primary">primary</option>
+                <option value="secondary">secondary</option>
+                <option value="ghost">ghost</option>
+                <option value="destructive">destructive</option>
+              </select>
+            </label>
+            <label>size
+              <select data-target="btn-preview" data-prop="size">
+                <option value="sm">sm</option>
+                <option value="md" selected>md</option>
+                <option value="lg">lg</option>
+              </select>
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="btn-preview" data-prop="disabled">
+            </label>
+            <label>loading
+              <input type="checkbox" data-target="btn-preview" data-prop="loading">
+            </label>
+            <label>label
+              <input type="text" data-target="btn-preview" data-prop="textContent" value="Button">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-button variant="primary"&gt;Click me&lt;/sc-button&gt;</code></pre></div>
+        <div class="variants">
+          <h3>All Variants</h3>
+          <div class="row">
+            <sc-button variant="primary">Primary</sc-button>
+            <sc-button variant="secondary">Secondary</sc-button>
+            <sc-button variant="ghost">Ghost</sc-button>
+            <sc-button variant="destructive">Destructive</sc-button>
+            <sc-button disabled>Disabled</sc-button>
+            <sc-button loading>Loading</sc-button>
+          </div>
+        </div>
+      </section>
 
-    <h2>Badges</h2>
-    <div class="section">
-      <div class="row">
-        <sc-badge variant="success">Success</sc-badge>
-        <sc-badge variant="warning">Warning</sc-badge>
-        <sc-badge variant="error">Error</sc-badge>
-        <sc-badge variant="info">Info</sc-badge>
-        <sc-badge variant="neutral">Neutral</sc-badge>
-      </div>
-      <div class="row">
-        <sc-badge variant="success" dot>With dot</sc-badge>
-      </div>
-    </div>
+      <section class="component-section" id="sc-badge">
+        <h2>sc-badge</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-badge id="badge-preview" variant="success">Badge</sc-badge>
+          </div>
+          <div class="controls">
+            <label>variant
+              <select data-target="badge-preview" data-prop="variant">
+                <option value="success">success</option>
+                <option value="warning">warning</option>
+                <option value="error">error</option>
+                <option value="info">info</option>
+                <option value="neutral">neutral</option>
+              </select>
+            </label>
+            <label>dot
+              <input type="checkbox" data-target="badge-preview" data-prop="dot">
+            </label>
+            <label>label
+              <input type="text" data-target="badge-preview" data-prop="textContent" value="Badge">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-badge variant="success"&gt;Success&lt;/sc-badge&gt;</code></pre></div>
+        <div class="variants"><h3>All Variants</h3><div class="row">
+          <sc-badge variant="success">Success</sc-badge>
+          <sc-badge variant="warning">Warning</sc-badge>
+          <sc-badge variant="error">Error</sc-badge>
+          <sc-badge variant="info">Info</sc-badge>
+          <sc-badge variant="neutral">Neutral</sc-badge>
+          <sc-badge variant="success" dot>With dot</sc-badge>
+        </div></div>
+      </section>
 
-    <h2>Cards</h2>
+      <section class="component-section" id="sc-card">
+        <h2>sc-card</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 280px;">
+            <sc-card id="card-preview">Card content goes here.</sc-card>
+          </div>
+          <div class="controls">
+            <label>hoverable
+              <input type="checkbox" data-target="card-preview" data-prop="hoverable">
+            </label>
+            <label>clickable
+              <input type="checkbox" data-target="card-preview" data-prop="clickable">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-card hoverable&gt;Card content&lt;/sc-card&gt;</code></pre></div>
+        <div class="variants"><h3>All Variants</h3><div class="row">
     <div class="section">
       <div class="row">
         <sc-card style="width: 200px; padding: 1rem">Default card</sc-card>
@@ -111,37 +202,119 @@
       </div>
     </div>
 
-    <h2>Skeleton</h2>
-    <div class="section">
-      <div class="row">
-        <sc-skeleton variant="line" style="width: 200px"></sc-skeleton>
-        <sc-skeleton variant="circle"></sc-skeleton>
-      </div>
-    </div>
+      <section class="component-section" id="sc-input">
+        <h2>sc-input</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 200px;">
+            <sc-input id="input-preview" label="Email" placeholder="you@example.com" style="min-width: 200px"></sc-input>
+          </div>
+          <div class="controls">
+            <label>label
+              <input type="text" data-target="input-preview" data-prop="label" value="Email">
+            </label>
+            <label>placeholder
+              <input type="text" data-target="input-preview" data-prop="placeholder" value="you@example.com">
+            </label>
+            <label>size
+              <select data-target="input-preview" data-prop="size">
+                <option value="sm">sm</option>
+                <option value="md" selected>md</option>
+                <option value="lg">lg</option>
+              </select>
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="input-preview" data-prop="disabled">
+            </label>
+            <label>error
+              <input type="text" data-target="input-preview" data-prop="error" placeholder="Leave empty for no error">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-input label="Email" placeholder="you@example.com"&gt;&lt;/sc-input&gt;</code></pre></div>
+        <div class="variants"><h3>All Variants</h3><div class="row">
+          <sc-input size="sm" placeholder="Small" style="min-width: 160px"></sc-input>
+          <sc-input size="md" placeholder="Medium" style="min-width: 200px"></sc-input>
+          <sc-input size="lg" placeholder="Large" style="min-width: 200px"></sc-input>
+          <sc-input placeholder="With error" error="This field is required" style="min-width: 200px"></sc-input>
+          <sc-input placeholder="Disabled" disabled style="min-width: 200px"></sc-input>
+        </div></div>
+      </section>
 
-    <h2>Empty State</h2>
-    <div class="section">
-      <sc-empty-state
-        heading="No data yet"
-        description="Start by creating your first item."
-      ></sc-empty-state>
-    </div>
+      <section class="component-section" id="sc-select">
+        <h2>sc-select</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 200px;">
+            <sc-select id="select-preview" label="Choose an option" placeholder="Select..." style="min-width: 200px"></sc-select>
+          </div>
+          <div class="controls">
+            <label>label
+              <input type="text" data-target="select-preview" data-prop="label" value="Choose an option">
+            </label>
+            <label>placeholder
+              <input type="text" data-target="select-preview" data-prop="placeholder" value="Select...">
+            </label>
+            <label>size
+              <select data-target="select-preview" data-prop="size">
+                <option value="sm">sm</option>
+                <option value="md" selected>md</option>
+                <option value="lg">lg</option>
+              </select>
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="select-preview" data-prop="disabled">
+            </label>
+            <label>error
+              <input type="text" data-target="select-preview" data-prop="error" placeholder="Leave empty for no error">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-select label="Choose" placeholder="Select..." options='[{"value":"a","label":"Option A"}]'&gt;&lt;/sc-select&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row">
+          <sc-select id="catalog-select" label="Choose an option" placeholder="Select..." style="min-width: 200px"></sc-select>
+          <sc-select label="Status" placeholder="Select status" error="Please select a status" style="min-width: 200px"></sc-select>
+        </div></div>
+      </section>
 
-    <h2>Tooltip</h2>
-    <div class="section">
-      <div class="row">
-        <sc-tooltip text="Hover to see tooltip">Hover me</sc-tooltip>
-      </div>
-    </div>
+      <section class="component-section" id="sc-dropdown">
+        <h2>sc-dropdown</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-dropdown id="dropdown-preview" align="start">
+              <sc-button id="dropdown-trigger">Actions</sc-button>
+            </sc-dropdown>
+          </div>
+          <div class="controls">
+            <label>align
+              <select data-target="dropdown-preview" data-prop="align">
+                <option value="start" selected>start</option>
+                <option value="end">end</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-dropdown align="start"&gt;&lt;sc-button&gt;Actions&lt;/sc-button&gt;&lt;/sc-dropdown&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row">
+          <sc-dropdown id="catalog-dropdown" align="start">
+            <sc-button id="dropdown-trigger-demo">Actions</sc-button>
+          </sc-dropdown>
+        </div></div>
+      </section>
 
-    <h2>Toast (click to demo)</h2>
-    <div class="section">
-      <div class="row">
-        <sc-button variant="primary" id="toast-success">Success Toast</sc-button>
-        <sc-button variant="secondary" id="toast-error">Error Toast</sc-button>
-        <sc-button variant="ghost" id="toast-info">Info Toast</sc-button>
-      </div>
-    </div>
+      <section class="component-section" id="sc-dialog">
+        <h2>sc-dialog</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-button variant="primary" id="dialog-default">Default Dialog</sc-button>
+            <sc-button variant="destructive" id="dialog-danger">Danger Dialog</sc-button>
+            <sc-dialog id="catalog-dialog"></sc-dialog>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-dialog open title="Confirm" message="Are you sure?"&gt;&lt;/sc-dialog&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row">
+          <sc-button variant="primary" id="dialog-demo-default">Default</sc-button>
+          <sc-button variant="destructive" id="dialog-demo-danger">Danger</sc-button>
+        </div></div>
+      </section>
 
     <sc-toast></sc-toast>
 
@@ -156,23 +329,189 @@
       import "/src/components/sc-skeleton.js";
       import "/src/components/sc-sheet.js";
       import "/src/components/sc-toast.js";
+      import "/src/components/sc-avatar.js";
+      import "/src/components/sc-tabs.js";
+      import "/src/components/sc-progress.js";
+      import "/src/components/sc-input.js";
+      import "/src/components/sc-select.js";
+      import "/src/components/sc-dropdown.js";
+      import "/src/components/sc-dialog.js";
 
+      // Theme toggle
+      function setTheme(theme) {
+        document.documentElement.setAttribute("data-theme", theme);
+        document.documentElement.style.colorScheme = theme;
+        document.getElementById("theme-dark")?.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+        document.getElementById("theme-light")?.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
+        try {
+          localStorage.setItem("catalog-theme", theme);
+        } catch (_) {}
+      }
+      const savedTheme = localStorage.getItem("catalog-theme");
+      const initialTheme = (savedTheme === "light" || savedTheme === "dark") ? savedTheme : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      setTheme(initialTheme);
+      document.getElementById("theme-dark")?.addEventListener("click", () => setTheme("dark"));
+      document.getElementById("theme-light")?.addEventListener("click", () => setTheme("light"));
+
+      // Prop controls
+      document.querySelectorAll("[data-target]").forEach((control) => {
+        const handler = (e) => {
+          const target = document.getElementById(control.dataset.target);
+          if (!target) return;
+          const prop = control.dataset.prop;
+          if (control.type === "checkbox") {
+            target[prop] = control.checked;
+          } else if (prop === "textContent") {
+            target.textContent = e.target.value;
+          } else if (control.type === "number" && prop === "value") {
+            target[prop] = parseFloat(e.target.value) || 0;
+          } else {
+            target[prop] = e.target.value;
+          }
+        };
+        control.addEventListener("input", handler);
+        control.addEventListener("change", handler);
+      });
+
+      // Modal
+      document.getElementById("modal-trigger")?.addEventListener("click", () => {
+        document.getElementById("modal-preview").open = true;
+      });
+      document.getElementById("modal-demo")?.addEventListener("click", () => {
+        const demo = document.createElement("sc-modal");
+        demo.heading = "Demo Modal";
+        const p = document.createElement("p");
+        p.textContent = "This is a demo modal.";
+        demo.appendChild(p);
+        document.body.appendChild(demo);
+        demo.open = true;
+        demo.addEventListener("close", () => {
+          demo.open = false;
+          demo.remove();
+        });
+      });
+      document.getElementById("modal-preview")?.addEventListener("close", () => {
+        document.getElementById("modal-preview").open = false;
+      });
+
+      // Sheet
+      document.getElementById("sheet-trigger")?.addEventListener("click", () => {
+        document.getElementById("sheet-preview").open = true;
+      });
+      document.getElementById("sheet-demo")?.addEventListener("click", () => {
+        const demo = document.createElement("sc-sheet");
+        const p = document.createElement("p");
+        p.textContent = "Demo sheet content.";
+        demo.appendChild(p);
+        document.body.appendChild(demo);
+        demo.open = true;
+        demo.addEventListener("close", () => {
+          demo.open = false;
+          demo.remove();
+        });
+      });
+      document.getElementById("sheet-preview")?.addEventListener("close", () => {
+        document.getElementById("sheet-preview").open = false;
+      });
+
+      // Tabs
+      const tabsPreview = document.getElementById("tabs-preview");
+      if (tabsPreview) {
+        tabsPreview.tabs = [
+          { id: "overview", label: "Overview" },
+          { id: "chat", label: "Chat" },
+          { id: "settings", label: "Settings" },
+        ];
+        tabsPreview.value = "overview";
+      }
+      document.getElementById("tabs-value-control")?.addEventListener("change", (e) => {
+        if (tabsPreview) tabsPreview.value = e.target.value;
+      });
+      const catalogTabs = document.getElementById("catalog-tabs");
+      if (catalogTabs) {
+        catalogTabs.tabs = [
+          { id: "overview", label: "Overview" },
+          { id: "chat", label: "Chat" },
+          { id: "settings", label: "Settings" },
+        ];
+      }
+
+      // Toast
       const ScToastClass = customElements.get("sc-toast");
       function showToast(variant) {
         if (ScToastClass?.show) {
-          ScToastClass.show({
-            message: `This is a ${variant} notification`,
-            variant,
-            duration: 3000,
-          });
+          ScToastClass.show({ message: `This is a ${variant} notification`, variant, duration: 3000 });
         }
       }
+      ["toast-success", "toast-error", "toast-info", "toast-success-v", "toast-error-v", "toast-info-v", "toast-warning-v"].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+          const v = id.includes("success") ? "success" : id.includes("error") ? "error" : id.includes("warning") ? "warning" : "info";
+          btn.addEventListener("click", () => showToast(v));
+        }
+      });
 
-      document
-        .getElementById("toast-success")
-        ?.addEventListener("click", () => showToast("success"));
-      document.getElementById("toast-error")?.addEventListener("click", () => showToast("error"));
-      document.getElementById("toast-info")?.addEventListener("click", () => showToast("info"));
+      // Select options
+      const selectOpts = [
+        { value: "opt1", label: "Option 1" },
+        { value: "opt2", label: "Option 2" },
+        { value: "opt3", label: "Option 3" },
+      ];
+      const selectPreview = document.getElementById("select-preview");
+      const catalogSelectEl = document.getElementById("catalog-select");
+      if (selectPreview) selectPreview.options = selectOpts;
+      if (catalogSelectEl) catalogSelectEl.options = selectOpts;
+
+      // Dropdown
+      const dropdownItems = [
+        { id: "edit", label: "Edit", icon: "wrench" },
+        { id: "delete", label: "Delete", icon: "zap" },
+        { id: "div1", label: "", divider: true },
+        { id: "settings", label: "Settings", icon: "settings", disabled: true },
+      ];
+      const dropdownPreview = document.getElementById("dropdown-preview");
+      const catalogDropdown = document.getElementById("catalog-dropdown");
+      if (dropdownPreview) dropdownPreview.items = dropdownItems;
+      if (catalogDropdown) catalogDropdown.items = dropdownItems;
+      document.getElementById("dropdown-trigger")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (dropdownPreview) dropdownPreview.open = !dropdownPreview.open;
+      });
+      document.getElementById("dropdown-trigger-demo")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (catalogDropdown) catalogDropdown.open = !catalogDropdown.open;
+      });
+      dropdownPreview?.addEventListener("sc-close", () => { dropdownPreview.open = false; });
+      catalogDropdown?.addEventListener("sc-close", () => { catalogDropdown.open = false; });
+
+      // Dialog
+      const catalogDialog = document.getElementById("catalog-dialog");
+      function openDialog(opts) {
+        catalogDialog.title = opts.title;
+        catalogDialog.message = opts.message;
+        catalogDialog.variant = opts.variant;
+        catalogDialog.confirmLabel = opts.confirmLabel;
+        catalogDialog.cancelLabel = opts.cancelLabel;
+        catalogDialog.open = true;
+      }
+      document.getElementById("dialog-default")?.addEventListener("click", () => openDialog({
+        title: "Confirm action", message: "Are you sure you want to proceed?", variant: "default",
+        confirmLabel: "Confirm", cancelLabel: "Cancel",
+      }));
+      document.getElementById("dialog-danger")?.addEventListener("click", () => openDialog({
+        title: "Delete item", message: "This action cannot be undone. Are you sure?", variant: "danger",
+        confirmLabel: "Delete", cancelLabel: "Cancel",
+      }));
+      document.getElementById("dialog-demo-default")?.addEventListener("click", () => openDialog({
+        title: "Confirm action", message: "Are you sure?", variant: "default",
+        confirmLabel: "Confirm", cancelLabel: "Cancel",
+      }));
+      document.getElementById("dialog-demo-danger")?.addEventListener("click", () => openDialog({
+        title: "Delete item", message: "Cannot be undone.", variant: "danger",
+        confirmLabel: "Delete", cancelLabel: "Cancel",
+      }));
+      catalogDialog?.addEventListener("sc-confirm", () => { catalogDialog.open = false; });
+      catalogDialog?.addEventListener("sc-cancel", () => { catalogDialog.open = false; });
     </script>
   </body>
 </html>

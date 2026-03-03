@@ -146,3 +146,129 @@ describe("sc-progress", () => {
     expect(el.indeterminate).toBe(true);
   });
 });
+
+describe("sc-input", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-input.js");
+    expect(customElements.get("sc-input")).toBeDefined();
+  });
+
+  it("should reflect value and default properties", async () => {
+    const { ScInput } = await import("./sc-input.js");
+    const el = new ScInput();
+    expect(el.value).toBe("");
+    expect(el.type).toBe("text");
+    expect(el.size).toBe("md");
+  });
+
+  it("should fire sc-input event on input", async () => {
+    const { ScInput } = await import("./sc-input.js");
+    const el = new ScInput();
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector("input") as HTMLInputElement;
+    let fired = false;
+    el.addEventListener("sc-input", () => {
+      fired = true;
+    });
+    input.value = "test";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await el.updateComplete;
+    expect(fired).toBe(true);
+    document.body.removeChild(el);
+  });
+});
+
+describe("sc-select", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-select.js");
+    expect(customElements.get("sc-select")).toBeDefined();
+  });
+
+  it("should reflect default properties", async () => {
+    const { ScSelect } = await import("./sc-select.js");
+    const el = new ScSelect();
+    expect(el.value).toBe("");
+    expect(el.size).toBe("md");
+    expect(el.options).toEqual([]);
+  });
+
+  it("should accept options array", async () => {
+    const { ScSelect } = await import("./sc-select.js");
+    const el = new ScSelect();
+    el.options = [
+      { value: "a", label: "Option A" },
+      { value: "b", label: "Option B" },
+    ];
+    expect(el.options).toHaveLength(2);
+  });
+});
+
+describe("sc-dropdown", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-dropdown.js");
+    expect(customElements.get("sc-dropdown")).toBeDefined();
+  });
+
+  it("should default to closed", async () => {
+    const { ScDropdown } = await import("./sc-dropdown.js");
+    const el = new ScDropdown();
+    expect(el.open).toBe(false);
+  });
+
+  it("should reflect align property", async () => {
+    const { ScDropdown } = await import("./sc-dropdown.js");
+    const el = new ScDropdown();
+    el.align = "end";
+    expect(el.align).toBe("end");
+  });
+});
+
+describe("sc-dialog", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-dialog.js");
+    expect(customElements.get("sc-dialog")).toBeDefined();
+  });
+
+  it("should default to closed", async () => {
+    const { ScDialog } = await import("./sc-dialog.js");
+    const el = new ScDialog();
+    expect(el.open).toBe(false);
+  });
+
+  it("should fire sc-confirm on confirm button click", async () => {
+    const { ScDialog } = await import("./sc-dialog.js");
+    const el = new ScDialog();
+    el.open = true;
+    el.title = "Test";
+    el.message = "Test message";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-confirm", () => {
+      fired = true;
+    });
+    const confirmBtn = el.shadowRoot?.querySelector(".btn-confirm-default, .btn-confirm-danger");
+    (confirmBtn as HTMLElement)?.click();
+    expect(fired).toBe(true);
+    document.body.removeChild(el);
+  });
+
+  it("should fire sc-cancel on cancel button click", async () => {
+    const { ScDialog } = await import("./sc-dialog.js");
+    const el = new ScDialog();
+    el.open = true;
+    el.title = "Test";
+    el.message = "Test message";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-cancel", () => {
+      fired = true;
+    });
+    const cancelBtn = el.shadowRoot?.querySelector(".btn-cancel");
+    (cancelBtn as HTMLElement)?.click();
+    expect(fired).toBe(true);
+    document.body.removeChild(el);
+  });
+});
