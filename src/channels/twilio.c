@@ -106,6 +106,9 @@ static sc_error_t twilio_send(void *ctx, const char *target, size_t target_len, 
     (void)target_len;
     if (!c || !message)
         return SC_ERR_INVALID_ARGUMENT;
+    if (!c->account_sid || c->account_sid_len == 0 || !c->auth_token || c->auth_token_len == 0 ||
+        !c->from_number || c->from_number_len == 0 || !c->to_number || c->to_number_len == 0)
+        return SC_ERR_CHANNEL_NOT_CONFIGURED;
     twilio_queue_push(c, "test-sender", 11, message, message_len);
     return SC_OK;
 #else

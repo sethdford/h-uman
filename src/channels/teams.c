@@ -70,6 +70,8 @@ static sc_error_t teams_send(void *ctx, const char *target, size_t target_len, c
 #if SC_IS_TEST
     if (!c || !message)
         return SC_ERR_INVALID_ARGUMENT;
+    if (!c->webhook_url || c->webhook_url_len == 0)
+        return SC_ERR_CHANNEL_NOT_CONFIGURED;
     teams_queue_push(c, "test-sender", 11, message, message_len);
     return SC_OK;
 #else

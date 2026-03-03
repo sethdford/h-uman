@@ -57,6 +57,8 @@ static sc_error_t google_chat_send(void *ctx, const char *target, size_t target_
     (void)message_len;
     if (!c || !message)
         return SC_ERR_INVALID_ARGUMENT;
+    if (!c->webhook_url || c->webhook_url_len == 0)
+        return SC_ERR_CHANNEL_NOT_CONFIGURED;
     return SC_OK;
 #else
     if (!c || !c->alloc)

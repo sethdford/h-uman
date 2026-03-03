@@ -362,6 +362,175 @@ static void test_rpi_capabilities_no_flash(void) {
     p.vtable->destroy(p.ctx, &alloc);
 }
 
+/* ── Mock tests (SC_IS_TEST: no real serial/probe-rs/GPIO) ────────────────── */
+
+static void test_mock_arduino_create_name_read_write_deinit(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_arduino_peripheral_create(&alloc, "/dev/cu.usbmodem0", 17);
+    SC_ASSERT_NOT_NULL(p.ctx);
+    SC_ASSERT_NOT_NULL(p.vtable);
+
+    SC_ASSERT_STR_EQ(p.vtable->name(p.ctx), "arduino");
+
+    sc_peripheral_error_t init_err = p.vtable->init_peripheral(p.ctx);
+    SC_ASSERT_EQ(init_err, SC_PERIPHERAL_ERR_NONE);
+
+    uint8_t val = 0xFF;
+    sc_peripheral_error_t rerr = p.vtable->read(p.ctx, 0, &val);
+    SC_ASSERT_EQ(rerr, SC_PERIPHERAL_ERR_NONE);
+    SC_ASSERT_EQ(val, 0u);
+
+    sc_peripheral_error_t werr = p.vtable->write(p.ctx, 1, 1);
+    SC_ASSERT_EQ(werr, SC_PERIPHERAL_ERR_NONE);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
+static void test_mock_stm32_create_name_read_write_deinit(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_stm32_peripheral_create(&alloc, "STM32F401RETx", 14);
+    SC_ASSERT_NOT_NULL(p.ctx);
+    SC_ASSERT_NOT_NULL(p.vtable);
+
+    SC_ASSERT_STR_EQ(p.vtable->board_type(p.ctx), "nucleo");
+    SC_ASSERT_TRUE(strlen(p.vtable->name(p.ctx)) > 0);
+
+    sc_peripheral_error_t init_err = p.vtable->init_peripheral(p.ctx);
+    SC_ASSERT_EQ(init_err, SC_PERIPHERAL_ERR_NONE);
+
+    uint8_t val = 0xFF;
+    sc_peripheral_error_t rerr = p.vtable->read(p.ctx, 0x08000000, &val);
+    SC_ASSERT_EQ(rerr, SC_PERIPHERAL_ERR_NONE);
+    SC_ASSERT_EQ(val, 0u);
+
+    sc_peripheral_error_t werr = p.vtable->write(p.ctx, 0x40000000, 0xAB);
+    SC_ASSERT_EQ(werr, SC_PERIPHERAL_ERR_NONE);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
+static void test_mock_rpi_create_name_read_write_deinit(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_rpi_peripheral_create(&alloc);
+    SC_ASSERT_NOT_NULL(p.ctx);
+    SC_ASSERT_NOT_NULL(p.vtable);
+
+    SC_ASSERT_STR_EQ(p.vtable->name(p.ctx), "rpi-gpio");
+
+    sc_peripheral_error_t init_err = p.vtable->init_peripheral(p.ctx);
+    SC_ASSERT_EQ(init_err, SC_PERIPHERAL_ERR_NONE);
+
+    uint8_t val = 0xFF;
+    sc_peripheral_error_t rerr = p.vtable->read(p.ctx, 17, &val);
+    SC_ASSERT_EQ(rerr, SC_PERIPHERAL_ERR_NONE);
+    SC_ASSERT_EQ(val, 0u);
+
+    sc_peripheral_error_t werr = p.vtable->write(p.ctx, 18, 1);
+    SC_ASSERT_EQ(werr, SC_PERIPHERAL_ERR_NONE);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
+/* ── Error cases ─────────────────────────────────────────────────────────── */
+
+static void test_error_arduino_create_null_allocator(void) {
+    sc_peripheral_t p = sc_arduino_peripheral_create(NULL, "/dev/ttyUSB0", 11);
+    SC_ASSERT_NULL(p.ctx);
+    SC_ASSERT_NULL(p.vtable);
+}
+
+static void test_error_stm32_create_null_allocator(void) {
+    sc_peripheral_t p = sc_stm32_peripheral_create(NULL, "STM32F401RETx", 14);
+    SC_ASSERT_NULL(p.ctx);
+    SC_ASSERT_NULL(p.vtable);
+}
+
+static void test_error_rpi_create_null_allocator(void) {
+    sc_peripheral_t p = sc_rpi_peripheral_create(NULL);
+    SC_ASSERT_NULL(p.ctx);
+    SC_ASSERT_NULL(p.vtable);
+}
+
+static void test_error_factory_create_null_allocator(void) {
+    sc_peripheral_config_t config = { 0 };
+    sc_peripheral_t p;
+    sc_error_t err = sc_peripheral_create(NULL, "arduino", 7, &config, &p);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_error_arduino_create_null_serial_port(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_arduino_peripheral_create(&alloc, NULL, 0);
+    SC_ASSERT_NULL(p.ctx);
+    SC_ASSERT_NULL(p.vtable);
+}
+
+static void test_error_stm32_create_null_chip(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_stm32_peripheral_create(&alloc, NULL, 0);
+    SC_ASSERT_NULL(p.ctx);
+    SC_ASSERT_NULL(p.vtable);
+}
+
+static void test_error_read_write_uninitialized_arduino(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_arduino_peripheral_create(&alloc, "/dev/ttyUSB0", 11);
+    SC_ASSERT_NOT_NULL(p.ctx);
+    /* Do NOT call init_peripheral */
+
+    uint8_t val;
+    sc_peripheral_error_t rerr = p.vtable->read(p.ctx, 0, &val);
+    SC_ASSERT_EQ(rerr, SC_PERIPHERAL_ERR_NOT_CONNECTED);
+
+    sc_peripheral_error_t werr = p.vtable->write(p.ctx, 1, 1);
+    SC_ASSERT_EQ(werr, SC_PERIPHERAL_ERR_NOT_CONNECTED);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
+static void test_error_read_write_uninitialized_stm32(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_stm32_peripheral_create(&alloc, "STM32F401RETx", 14);
+    SC_ASSERT_NOT_NULL(p.ctx);
+    /* Do NOT call init_peripheral */
+
+    uint8_t val;
+    sc_peripheral_error_t rerr = p.vtable->read(p.ctx, 0x08000000, &val);
+    SC_ASSERT_EQ(rerr, SC_PERIPHERAL_ERR_NOT_CONNECTED);
+
+    sc_peripheral_error_t werr = p.vtable->write(p.ctx, 0x40000000, 0x01);
+    SC_ASSERT_EQ(werr, SC_PERIPHERAL_ERR_NOT_CONNECTED);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
+static void test_error_read_write_uninitialized_rpi(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_rpi_peripheral_create(&alloc);
+    SC_ASSERT_NOT_NULL(p.ctx);
+    /* Do NOT call init_peripheral */
+
+    uint8_t val;
+    sc_peripheral_error_t rerr = p.vtable->read(p.ctx, 17, &val);
+    SC_ASSERT_EQ(rerr, SC_PERIPHERAL_ERR_NOT_CONNECTED);
+
+    sc_peripheral_error_t werr = p.vtable->write(p.ctx, 18, 1);
+    SC_ASSERT_EQ(werr, SC_PERIPHERAL_ERR_NOT_CONNECTED);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
+static void test_error_read_null_out_value(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_peripheral_t p = sc_arduino_peripheral_create(&alloc, "/dev/ttyUSB0", 11);
+    p.vtable->init_peripheral(p.ctx);
+
+    sc_peripheral_error_t err = p.vtable->read(p.ctx, 0, NULL);
+    SC_ASSERT_EQ(err, SC_PERIPHERAL_ERR_INVALID_ADDRESS);
+
+    p.vtable->destroy(p.ctx, &alloc);
+}
+
 void run_peripheral_tests(void) {
     SC_TEST_SUITE("peripheral");
     SC_RUN_TEST(test_factory_arduino_create);
@@ -396,4 +565,17 @@ void run_peripheral_tests(void) {
     SC_RUN_TEST(test_arduino_capabilities_flash_size);
     SC_RUN_TEST(test_stm32_capabilities_flash_size);
     SC_RUN_TEST(test_rpi_capabilities_no_flash);
+    SC_RUN_TEST(test_mock_arduino_create_name_read_write_deinit);
+    SC_RUN_TEST(test_mock_stm32_create_name_read_write_deinit);
+    SC_RUN_TEST(test_mock_rpi_create_name_read_write_deinit);
+    SC_RUN_TEST(test_error_arduino_create_null_allocator);
+    SC_RUN_TEST(test_error_stm32_create_null_allocator);
+    SC_RUN_TEST(test_error_rpi_create_null_allocator);
+    SC_RUN_TEST(test_error_factory_create_null_allocator);
+    SC_RUN_TEST(test_error_arduino_create_null_serial_port);
+    SC_RUN_TEST(test_error_stm32_create_null_chip);
+    SC_RUN_TEST(test_error_read_write_uninitialized_arduino);
+    SC_RUN_TEST(test_error_read_write_uninitialized_stm32);
+    SC_RUN_TEST(test_error_read_write_uninitialized_rpi);
+    SC_RUN_TEST(test_error_read_null_out_value);
 }
