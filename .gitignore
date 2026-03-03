@@ -77,3 +77,7 @@ ui/e2e-screenshots/
 ui/e2e-*.png
 ui/e2e-*.mjs
 ui/e2e-final-browser/
+ui/e2e-part1/
+ui/e2e-part2/
+ui/e2e-final-fixes/
+ui/e2e-targeted/

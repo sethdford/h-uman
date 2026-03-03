@@ -387,3 +387,177 @@ describe("sc-dialog", () => {
     document.body.removeChild(el);
   });
 });
+
+describe("sc-slider", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-slider.js");
+    expect(customElements.get("sc-slider")).toBeDefined();
+  });
+
+  it("should reflect default properties", async () => {
+    const { ScSlider } = await import("./sc-slider.js");
+    const el = new ScSlider();
+    expect(el.value).toBe(50);
+    expect(el.min).toBe(0);
+    expect(el.max).toBe(100);
+    expect(el.step).toBe(1);
+    expect(el.showValue).toBe(true);
+  });
+
+  it("should have ARIA attributes", async () => {
+    const { ScSlider } = await import("./sc-slider.js");
+    const el = new ScSlider();
+    el.label = "Volume";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector("input[type='range']");
+    expect(input?.getAttribute("role")).toBe("slider");
+    expect(input?.getAttribute("aria-valuemin")).toBe("0");
+    expect(input?.getAttribute("aria-valuemax")).toBe("100");
+    expect(input?.getAttribute("aria-valuenow")).toBe("50");
+    document.body.removeChild(el);
+  });
+
+  it("should fire sc-change when value changes", async () => {
+    const { ScSlider } = await import("./sc-slider.js");
+    const el = new ScSlider();
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: { value: number } | null = null;
+    el.addEventListener("sc-change", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    const input = el.shadowRoot?.querySelector("input") as HTMLInputElement;
+    input.value = "75";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await el.updateComplete;
+    expect(detail?.value).toBe(75);
+    document.body.removeChild(el);
+  });
+});
+
+describe("sc-search", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-search.js");
+    expect(customElements.get("sc-search")).toBeDefined();
+  });
+
+  it("should reflect default properties", async () => {
+    const { ScSearch } = await import("./sc-search.js");
+    const el = new ScSearch();
+    expect(el.value).toBe("");
+    expect(el.placeholder).toBe("Search...");
+    expect(el.size).toBe("md");
+  });
+
+  it("should have role search", async () => {
+    const { ScSearch } = await import("./sc-search.js");
+    const el = new ScSearch();
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const wrapper = el.shadowRoot?.querySelector(".wrapper");
+    expect(wrapper?.getAttribute("role")).toBe("search");
+    document.body.removeChild(el);
+  });
+});
+
+describe("sc-segmented-control", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-segmented-control.js");
+    expect(customElements.get("sc-segmented-control")).toBeDefined();
+  });
+
+  it("should reflect options and value", async () => {
+    const { ScSegmentedControl } = await import("./sc-segmented-control.js");
+    const el = new ScSegmentedControl();
+    el.options = [
+      { value: "a", label: "Option A" },
+      { value: "b", label: "Option B" },
+    ];
+    el.value = "b";
+    expect(el.options).toHaveLength(2);
+    expect(el.value).toBe("b");
+  });
+
+  it("should have role tablist and tab", async () => {
+    const { ScSegmentedControl } = await import("./sc-segmented-control.js");
+    const el = new ScSegmentedControl();
+    el.options = [
+      { value: "a", label: "A" },
+      { value: "b", label: "B" },
+    ];
+    el.value = "a";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const container = el.shadowRoot?.querySelector(".container");
+    expect(container?.getAttribute("role")).toBe("tablist");
+    const tabs = el.shadowRoot?.querySelectorAll("[role='tab']");
+    expect(tabs?.length).toBe(2);
+    const activeTab = el.shadowRoot?.querySelector(".segment.active");
+    expect(activeTab?.getAttribute("aria-selected")).toBe("true");
+    document.body.removeChild(el);
+  });
+});
+
+describe("sc-data-table", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-data-table.js");
+    expect(customElements.get("sc-data-table")).toBeDefined();
+  });
+
+  it("should render columns and rows", async () => {
+    const { ScDataTable } = await import("./sc-data-table.js");
+    const el = new ScDataTable();
+    el.columns = [
+      { key: "name", label: "Name" },
+      { key: "value", label: "Value" },
+    ];
+    el.rows = [{ name: "Foo", value: 42 }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const ths = el.shadowRoot?.querySelectorAll("th");
+    const tds = el.shadowRoot?.querySelectorAll("td");
+    expect(ths?.length).toBe(2);
+    expect(tds?.length).toBe(2);
+    document.body.removeChild(el);
+  });
+
+  it("should use thead and tbody with th scope", async () => {
+    const { ScDataTable } = await import("./sc-data-table.js");
+    const el = new ScDataTable();
+    el.columns = [{ key: "col", label: "Col" }];
+    el.rows = [{}];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const th = el.shadowRoot?.querySelector("th");
+    expect(th?.getAttribute("scope")).toBe("col");
+    document.body.removeChild(el);
+  });
+});
+
+describe("sc-date-picker", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-date-picker.js");
+    expect(customElements.get("sc-date-picker")).toBeDefined();
+  });
+
+  it("should reflect default properties", async () => {
+    const { ScDatePicker } = await import("./sc-date-picker.js");
+    const el = new ScDatePicker();
+    expect(el.value).toBe("");
+    expect(el.label).toBe("");
+    expect(el.disabled).toBe(false);
+  });
+
+  it("should have label associated with input", async () => {
+    const { ScDatePicker } = await import("./sc-date-picker.js");
+    const el = new ScDatePicker();
+    el.label = "Date";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const label = el.shadowRoot?.querySelector("label");
+    const input = el.shadowRoot?.querySelector("input");
+    expect(label?.getAttribute("for")).toBe(input?.id);
+    document.body.removeChild(el);
+  });
+});

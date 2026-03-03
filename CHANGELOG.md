@@ -3,6 +3,35 @@
 All notable changes to seaclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is CalVer (`YYYY.M.D`).
 
+## [2026.3.3d] - 2026-03-03
+
+### Added
+
+- **APNS push notifications**: ES256 JWT P8 signing via OpenSSL for Apple Push Notification
+  service — completes the push notification system (FCM was already implemented)
+- **OTel HTTP export**: `otel_record_event` and `otel_record_metric` now POST OTLP JSON
+  payloads to `/v1/logs` and `/v1/metrics` on the configured collector endpoint
+- **Dispatch channel wired**: `SC_CHANNEL_DISPATCH` added to enum and channel catalog
+- **4 new UI components**: `sc-data-table`, `sc-date-picker`, `sc-search`, `sc-segmented-control`
+- **Design tokens**: motion tokens, expanded semantic tokens, platform token sync (iOS/Android)
+- **Lighthouse CI**: `.lighthouserc.json` for automated performance/accessibility auditing
+- **8 orphaned tests wired**: `test_new_features.c` (PDF, health, config, ws_streaming) now runs
+
+### Fixed
+
+- Removed orphan `SC_CHANNEL_WEBHOOK` enum value (unused)
+- Fixed `thread_binding.c` duplicate in CMakeLists.txt
+- Fixed STUBS.md tool count (66 → 54, matches actual factory)
+- Filled production API paths: social (LinkedIn post/read), jira (get/comment/update),
+  crm (contact_create/deal_create/deal_update/notes), calendar (DELETE graceful response)
+- `.gitignore` now covers all E2E screenshot directories
+
+### Changed
+
+- Test count: 2,258 → 2,266 (8 previously orphaned tests now running)
+- UI design-tokens sync across CSS, iOS (Swift), Android (Kotlin)
+- Website documentation updates (gateway, docker, cron, MCP, migration, TUI, vector, hardware)
+
 ## [2026.3.3c] - 2026-03-03
 
 ### Added

@@ -91,6 +91,11 @@
       <a href="#sc-textarea">sc-textarea</a>
       <a href="#sc-popover">sc-popover</a>
       <a href="#sc-breadcrumb">sc-breadcrumb</a>
+      <a href="#sc-slider">sc-slider</a>
+      <a href="#sc-search">sc-search</a>
+      <a href="#sc-segmented-control">sc-segmented-control</a>
+      <a href="#sc-data-table">sc-data-table</a>
+      <a href="#sc-date-picker">sc-date-picker</a>
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
@@ -561,6 +566,132 @@
         <div class="code-snippet"><pre><code>&lt;sc-progress value="60" variant="success" label="Upload"&gt;&lt;/sc-progress&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-slider">
+        <h2>sc-slider</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 240px;">
+            <sc-slider id="slider-preview" value="50" label="Volume" min="0" max="100"></sc-slider>
+          </div>
+          <div class="controls">
+            <label>value
+              <input type="number" data-target="slider-preview" data-prop="value" value="50" min="0" max="100">
+            </label>
+            <label>label
+              <input type="text" data-target="slider-preview" data-prop="label" value="Volume">
+            </label>
+            <label>showValue
+              <input type="checkbox" data-target="slider-preview" data-prop="showValue" checked>
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="slider-preview" data-prop="disabled">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-slider value="50" label="Volume" min="0" max="100"&gt;&lt;/sc-slider&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-search">
+        <h2>sc-search</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 240px;">
+            <sc-search id="search-preview" placeholder="Search..." style="min-width: 200px"></sc-search>
+          </div>
+          <div class="controls">
+            <label>placeholder
+              <input type="text" data-target="search-preview" data-prop="placeholder" value="Search...">
+            </label>
+            <label>size
+              <select data-target="search-preview" data-prop="size">
+                <option value="sm">sm</option>
+                <option value="md" selected>md</option>
+                <option value="lg">lg</option>
+              </select>
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="search-preview" data-prop="disabled">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-search placeholder="Search..."&gt;&lt;/sc-search&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-segmented-control">
+        <h2>sc-segmented-control</h2>
+        <div class="playground">
+          <div class="preview">
+            <sc-segmented-control id="segmented-preview"></sc-segmented-control>
+          </div>
+          <div class="controls">
+            <label>value
+              <select id="segmented-value-control">
+                <option value="day" selected>day</option>
+                <option value="week">week</option>
+                <option value="month">month</option>
+              </select>
+            </label>
+            <label>size
+              <select data-target="segmented-preview" data-prop="size">
+                <option value="sm">sm</option>
+                <option value="md" selected>md</option>
+                <option value="lg">lg</option>
+              </select>
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="segmented-preview" data-prop="disabled">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-segmented-control .options=${'[{value:"day",label:"Day"}]'} value="day"&gt;&lt;/sc-segmented-control&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row">
+          <sc-segmented-control id="catalog-segmented"></sc-segmented-control>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-data-table">
+        <h2>sc-data-table</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; overflow-x: auto;">
+            <sc-data-table id="table-preview"></sc-data-table>
+          </div>
+          <div class="controls">
+            <label>striped
+              <input type="checkbox" data-target="table-preview" data-prop="striped" checked>
+            </label>
+            <label>hoverable
+              <input type="checkbox" data-target="table-preview" data-prop="hoverable" checked>
+            </label>
+            <label>compact
+              <input type="checkbox" data-target="table-preview" data-prop="compact">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-data-table .columns=${'[{"key":"name","label":"Name"}]'} .rows=${'[{"name":"Alice"}]'}&gt;&lt;/sc-data-table&gt;</code></pre></div>
+        <div class="variants"><h3>Demo</h3><div class="row" style="width: 100%;">
+          <sc-data-table id="catalog-table"></sc-data-table>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-date-picker">
+        <h2>sc-date-picker</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 200px;">
+            <sc-date-picker id="date-picker-preview" label="Select date" style="min-width: 200px"></sc-date-picker>
+          </div>
+          <div class="controls">
+            <label>label
+              <input type="text" data-target="date-picker-preview" data-prop="label" value="Select date">
+            </label>
+            <label>disabled
+              <input type="checkbox" data-target="date-picker-preview" data-prop="disabled">
+            </label>
+            <label>error
+              <input type="text" data-target="date-picker-preview" data-prop="error" placeholder="Leave empty for no error">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-date-picker label="Date" value="2025-01-15"&gt;&lt;/sc-date-picker&gt;</code></pre></div>
+      </section>
+
     <sc-toast></sc-toast>
 
     <script type="module">
@@ -586,6 +717,11 @@
       import "/src/components/sc-textarea.js";
       import "/src/components/sc-popover.js";
       import "/src/components/sc-breadcrumb.js";
+      import "/src/components/sc-slider.js";
+      import "/src/components/sc-search.js";
+      import "/src/components/sc-segmented-control.js";
+      import "/src/components/sc-data-table.js";
+      import "/src/components/sc-date-picker.js";
 
       // Theme toggle
       function setTheme(theme) {
@@ -797,6 +933,57 @@
         const popover = document.getElementById("popover-preview");
         if (popover) popover.open = false;
       });
+
+      // Slider
+      const sliderPreview = document.getElementById("slider-preview");
+      if (sliderPreview) {
+        sliderPreview.addEventListener("sc-change", (e) => {
+          sliderPreview.value = e.detail.value;
+        });
+      }
+
+      // Segmented control
+      const segmentedOpts = [
+        { value: "day", label: "Day" },
+        { value: "week", label: "Week" },
+        { value: "month", label: "Month" },
+      ];
+      const segmentedPreview = document.getElementById("segmented-preview");
+      const catalogSegmented = document.getElementById("catalog-segmented");
+      if (segmentedPreview) {
+        segmentedPreview.options = segmentedOpts;
+        segmentedPreview.value = "day";
+      }
+      if (catalogSegmented) {
+        catalogSegmented.options = segmentedOpts;
+        catalogSegmented.value = "day";
+      }
+      document.getElementById("segmented-value-control")?.addEventListener("change", (e) => {
+        const val = (e.target as HTMLSelectElement).value;
+        if (segmentedPreview) segmentedPreview.value = val;
+      });
+
+      // Data table
+      const tableColumns = [
+        { key: "name", label: "Name" },
+        { key: "role", label: "Role" },
+        { key: "status", label: "Status", align: "right" },
+      ];
+      const tableRows = [
+        { name: "Alice", role: "Admin", status: "Active" },
+        { name: "Bob", role: "User", status: "Pending" },
+        { name: "Charlie", role: "Viewer", status: "Active" },
+      ];
+      const tablePreview = document.getElementById("table-preview");
+      const catalogTable = document.getElementById("catalog-table");
+      if (tablePreview) {
+        tablePreview.columns = tableColumns;
+        tablePreview.rows = tableRows;
+      }
+      if (catalogTable) {
+        catalogTable.columns = tableColumns;
+        catalogTable.rows = tableRows;
+      }
 
       // Breadcrumb
       const breadcrumbItems = [

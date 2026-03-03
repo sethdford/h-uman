@@ -31,7 +31,7 @@ export class ScSegmentedControl extends LitElement {
       gap: 0;
     }
 
-    .container:disabled {
+    .container[aria-disabled="true"] {
       opacity: var(--sc-opacity-disabled);
       cursor: not-allowed;
     }
@@ -144,7 +144,7 @@ export class ScSegmentedControl extends LitElement {
     if (this.options.length === 0) return html``;
 
     return html`
-      <div class="container" role="tablist" ?disabled=${this.disabled}>
+      <div class="container" role="tablist" aria-disabled=${this.disabled ? "true" : "false"}>
         <div class="indicator" style=${this._indicatorStyle} aria-hidden="true"></div>
         ${this.options.map(
           (opt, i) => html`

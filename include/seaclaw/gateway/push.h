@@ -17,6 +17,9 @@ typedef struct sc_push_config {
     const char *server_key;
     size_t server_key_len;
     const char *endpoint;
+    const char *key_id;
+    const char *team_id;
+    const char *bundle_id;
 } sc_push_config_t;
 
 typedef struct sc_push_token {

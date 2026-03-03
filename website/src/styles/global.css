@@ -209,11 +209,13 @@
   /* ── Glass ── */
   .glass {
     background: var(--color-surface-elevated);
-    backdrop-filter: blur(20px) saturate(1.8);
-    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(24px) saturate(1.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
+    box-shadow:
+      var(--shadow-md),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 
   .glass-premium {
@@ -242,22 +244,28 @@
     width: 200%;
     height: 200%;
     background:
+      conic-gradient(
+        from 0deg at 50% 50%,
+        rgba(249, 112, 102, 0.18) 0deg,
+        transparent 60deg,
+        rgba(59, 130, 246, 0.12) 120deg,
+        transparent 180deg,
+        rgba(249, 112, 102, 0.15) 240deg,
+        transparent 300deg,
+        rgba(168, 85, 247, 0.1) 340deg,
+        rgba(249, 112, 102, 0.18) 360deg
+      ),
       radial-gradient(
         ellipse at 20% 50%,
-        rgba(249, 112, 102, 0.15) 0%,
+        rgba(249, 112, 102, 0.12) 0%,
         transparent 50%
       ),
       radial-gradient(
         ellipse at 80% 20%,
-        rgba(59, 130, 246, 0.1) 0%,
-        transparent 50%
-      ),
-      radial-gradient(
-        ellipse at 40% 80%,
-        rgba(249, 112, 102, 0.08) 0%,
+        rgba(59, 130, 246, 0.08) 0%,
         transparent 50%
       );
-    animation: mesh-drift 20s ease-in-out infinite alternate;
+    animation: mesh-drift 25s ease-in-out infinite alternate;
   }
 
   @keyframes mesh-drift {
@@ -284,6 +292,32 @@
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     pointer-events: none;
     z-index: 1;
+  }
+
+  /* ── Gradient text shimmer ── */
+  .text-gradient {
+    background: linear-gradient(
+      135deg,
+      var(--color-accent) 0%,
+      #ff8a80 25%,
+      var(--color-accent) 50%,
+      #a855f7 75%,
+      var(--color-accent) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: shimmer 8s linear infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 0% center;
+    }
+    100% {
+      background-position: 200% center;
+    }
   }
 
   /* ── Scroll progress indicator ── */
@@ -325,11 +359,46 @@
     opacity: 1;
   }
 
+  /* ── Spotlight card effect ── */
+  .card-spotlight {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card-spotlight::after {
+    content: "";
+    position: absolute;
+    top: var(--mouse-y, 50%);
+    left: var(--mouse-x, 50%);
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(
+      circle,
+      var(--color-accent-glow) 0%,
+      transparent 70%
+    );
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .card-spotlight:hover::after {
+    opacity: 1;
+  }
+
+  .card-spotlight > * {
+    position: relative;
+    z-index: 1;
+  }
+
   .glass-nav {
     background: var(--color-surface-elevated);
     backdrop-filter: blur(24px) saturate(1.8);
     -webkit-backdrop-filter: blur(24px) saturate(1.8);
     border-bottom: 1px solid var(--color-border);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   }
 
   /* ── Typography ── */
@@ -374,15 +443,34 @@
     padding: var(--space-3) var(--space-8);
     border-radius: var(--radius-full);
     font-size: 0.9375rem;
-    font-weight: 500;
-    background: var(--color-accent);
+    font-weight: 600;
+    background: linear-gradient(
+      135deg,
+      var(--color-accent),
+      var(--color-accent-hover)
+    );
     color: #fff;
     transition: all var(--duration-normal) var(--ease-out);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
   }
 
   .btn-primary:hover {
-    background: var(--color-accent-hover);
-    box-shadow: var(--shadow-glow);
+    background: linear-gradient(
+      135deg,
+      var(--color-accent-hover),
+      var(--color-accent)
+    );
+    box-shadow:
+      var(--shadow-glow),
+      0 4px 12px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   }
 
   .btn-outline {
@@ -420,6 +508,10 @@
   }
 
   /* ── Comparison table ── */
+  .comparison-table {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
   .comparison-table th,
   .comparison-table td {
     border-bottom: 1px solid var(--color-border);
@@ -427,9 +519,22 @@
   .comparison-table thead th {
     border-bottom-width: 2px;
     border-color: var(--color-border-strong);
+    font-weight: 700;
+    font-size: 0.875rem;
+    padding: var(--space-4);
+  }
+  .comparison-table tbody tr {
+    transition: background var(--duration-fast);
+  }
+  .comparison-table tbody tr:hover {
+    background: var(--color-accent-light);
   }
   .comparison-table tbody tr:last-child td {
     border-bottom: none;
+  }
+  .comparison-table td:first-child {
+    font-weight: 500;
+    color: var(--color-text);
   }
 
   /* ── Logo float ── */
@@ -441,6 +546,32 @@
     50% {
       transform: translateY(-6px);
     }
+  }
+
+  /* ── Architecture node pulse ── */
+  @keyframes node-pulse {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 0 transparent);
+    }
+    50% {
+      filter: drop-shadow(0 0 8px var(--color-accent-glow));
+    }
+  }
+
+  .arch-node:hover circle {
+    stroke: var(--color-accent) !important;
+    stroke-width: 2;
+    transition: all 0.3s ease;
+  }
+
+  .arch-node:hover text {
+    fill: var(--color-text) !important;
+    transition: fill 0.3s ease;
+  }
+
+  #arch-core circle {
+    animation: node-pulse 3s ease-in-out infinite;
   }
 }
 
@@ -477,9 +608,14 @@
   .cta-title,
   .cta-sub,
   .cta-buttons,
-  .number-item {
+  .number-item,
+  .text-gradient {
     opacity: 1 !important;
     transform: none !important;
+  }
+
+  .text-gradient {
+    animation: none !important;
   }
 }
 

@@ -101,7 +101,7 @@ const tools = [
           style={`filter: drop-shadow(0 0 40px var(--color-accent-glow)); animation: float 6s ease-in-out infinite;`}
         />
         <h1 class="hero-headline font-sans font-black text-[clamp(2.5rem,7vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em; font-weight: 900;">
-          Bring AI to every device on&nbsp;Earth.
+          Bring AI to <span class="text-gradient">every</span> device on&nbsp;Earth.
         </h1>
         <p class="hero-desc text-[clamp(1.05rem,2.2vw,1.3rem)] leading-relaxed mb-10 opacity-0 max-w-2xl mx-auto" style="color: var(--color-text-secondary)">
           A complete autonomous AI agent runtime in <strong style="color: var(--color-text)">430&nbsp;kilobytes</strong> of pure&nbsp;C.<br />
@@ -122,7 +122,7 @@ const tools = [
           {[
             { count: 430, suffix: " KB", label: "Binary" },
             { count: 2, prefix: "<", suffix: " ms", label: "Startup" },
-            { count: 2258, label: "Tests" },
+            { count: 2266, label: "Tests" },
             { count: 50, suffix: "+", label: "Providers" },
             { count: 20, label: "Channels" },
             { count: 53, label: "Tools" },
@@ -178,7 +178,7 @@ const tools = [
             { icon: iconCircuitBoard, title: "Edge", desc: "Raspberry Pi, ARM SBCs. Under 5 MB RAM. Under 2 ms startup. Runs headless on boot." },
             { icon: iconCpu, title: "Embedded", desc: "Arduino, STM32, Nucleo. Serial JSON protocol. Hardware peripherals via vtable interface." },
           ].map(({ icon, title, desc }) => (
-            <div class="spectrum-card card-glow opacity-0 glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1" style={`--tw-shadow: var(--shadow-md);`}>
+            <div class="spectrum-card card-glow card-spotlight opacity-0 glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1" style={`--tw-shadow: var(--shadow-md);`}>
               <span class="w-8 h-8 mx-auto mb-4 flex items-center justify-center [&>svg]:flex-shrink-0" style="color: var(--color-text-tertiary)" set:html={icon} />
               <h3 class="text-lg font-semibold mb-3" style="color: var(--color-text)">{title}</h3>
               <p class="text-[14px] leading-relaxed" style="color: var(--color-text-secondary)">{desc}</p>
@@ -319,7 +319,7 @@ const tools = [
             <thead>
               <tr>
                 <th class="text-left p-3">Feature</th>
-                <th class="p-3" style="color: var(--color-accent, #f97066);">SeaClaw</th>
+                <th class="p-3" style="color: var(--color-accent); font-weight: 900;">SeaClaw</th>
                 <th class="p-3 opacity-60">Claude Code</th>
                 <th class="p-3 opacity-60">OpenAI Codex</th>
               </tr>
@@ -372,11 +372,11 @@ const tools = [
         const outputEl = document.getElementById("terminal-output");
         if (outputEl) {
           outputEl.innerHTML = [
-            '<div><span style="color:rgba(255,255,255,0.3)">$ </span><span style="color:rgba(255,255,255,0.8)">git clone https://github.com/sethdford/seaclaw.git</span></div>',
-            '<div><span style="color:rgba(255,255,255,0.3)">$ </span><span style="color:rgba(255,255,255,0.8)">cd seaclaw && mkdir -p build && cd build</span></div>',
-            '<div><span style="color:rgba(255,255,255,0.3)">$ </span><span style="color:rgba(255,255,255,0.8)">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build .</span></div>',
+            '<div><span style="color:#6ee7b7">$ </span><span style="color:#e2e8f0">git clone https://github.com/sethdford/seaclaw.git</span></div>',
+            '<div><span style="color:#6ee7b7">$ </span><span style="color:#e2e8f0">cd seaclaw && mkdir -p build && cd build</span></div>',
+            '<div><span style="color:#6ee7b7">$ </span><span style="color:#e2e8f0">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build .</span></div>',
             '<div><span style="color:rgba(255,255,255,0.45)">[100%] Built target seaclaw</span></div>',
-            '<div><span style="color:rgba(255,255,255,0.3)">$ </span><span style="color:rgba(255,255,255,0.8)">ls -lh seaclaw</span></div>',
+            '<div><span style="color:#6ee7b7">$ </span><span style="color:#e2e8f0">ls -lh seaclaw</span></div>',
             '<div><span style="color:rgba(255,255,255,0.45)">-rwxr-xr-x  1 user  staff  </span><span style="color:var(--color-accent)">430K</span><span style="color:rgba(255,255,255,0.45)">  seaclaw</span></div>',
           ].join("");
         }
@@ -524,11 +524,11 @@ const tools = [
 
               if (line.prompt) {
                 const p = document.createElement("span");
-                p.style.color = "rgba(255,255,255,0.3)";
+                p.style.color = "#6ee7b7";
                 p.textContent = "$ ";
                 div.appendChild(p);
                 const t = document.createElement("span");
-                t.style.color = "rgba(255,255,255,0.8)";
+                t.style.color = "#e2e8f0";
                 div.appendChild(t);
                 container.appendChild(div);
                 let ci = 0;
@@ -573,6 +573,14 @@ const tools = [
           gsap.fromTo(".cta-sub", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".cta-sub", start: "top 85%" } });
           gsap.fromTo(".cta-buttons", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".cta-buttons", start: "top 85%" } });
 
+          // ═══ SPOTLIGHT CARDS ═══
+          document.querySelectorAll(".card-spotlight").forEach((card) => {
+            card.addEventListener("mousemove", (e) => {
+              const rect = (card as HTMLElement).getBoundingClientRect();
+              (card as HTMLElement).style.setProperty("--mouse-x", (e as MouseEvent).clientX - rect.left + "px");
+              (card as HTMLElement).style.setProperty("--mouse-y", (e as MouseEvent).clientY - rect.top + "px");
+            });
+          });
         });
       }
     </script>
