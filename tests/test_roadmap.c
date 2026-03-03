@@ -1,4 +1,9 @@
 #include "test_framework.h"
+#include "seaclaw/update.h"
+#include "seaclaw/daemon.h"
+#include "seaclaw/multimodal.h"
+#include "seaclaw/voice.h"
+#include "seaclaw/websocket.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/agent/spawn.h"
@@ -500,6 +505,48 @@ static void test_profile_by_name_null(void) {
     SC_ASSERT_NULL(sc_agent_profile_by_name("", 0));
 }
 
+
+static void test_websocket_wss_not_supported(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_websocket_t ws;
+    memset(&ws, 0, sizeof(ws));
+    sc_error_t err = sc_websocket_connect(&ws, &a, "wss://example.com/ws");
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_voice_tts_not_supported(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_voice_config_t vc;
+    memset(&vc, 0, sizeof(vc));
+    sc_error_t err = sc_voice_tts_synthesize(&a, &vc, "hello", 5, NULL, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_voice_stt_not_supported(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_voice_config_t vc;
+    memset(&vc, 0, sizeof(vc));
+    sc_error_t err = sc_voice_stt_transcribe(&a, &vc, NULL, 0, NULL, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_multimodal_image_analyze_not_supported(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_error_t err = sc_multimodal_analyze_image(&a, NULL, NULL, 0, NULL, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_daemon_start_not_supported(void) {
+    sc_error_t err = sc_daemon_start(NULL);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_update_check_not_supported(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_error_t err = sc_update_check(&a, NULL, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
 void run_roadmap_tests(void) {
     SC_TEST_SUITE("Roadmap: Agent Pool (1A)");
     SC_RUN_TEST(test_pool_create_destroy);
@@ -570,4 +617,8 @@ void run_roadmap_tests(void) {
     SC_TEST_SUITE("Roadmap: Plugin System (5B)");
     SC_RUN_TEST(test_plugin_registry);
     SC_RUN_TEST(test_plugin_bad_version);
+
+    SC_TEST_SUITE("Roadmap: Stub Boundaries (6)");
+    SC_RUN_TEST(test_daemon_start_not_supported);
+    SC_RUN_TEST(test_update_check_not_supported);
 }
