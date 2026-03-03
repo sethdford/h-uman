@@ -118,14 +118,17 @@ export class ScCommandPalette extends LitElement {
     }
 
     .panel {
-      background: var(--sc-bg-overlay);
-      box-shadow: var(--sc-shadow-lg);
-      border-radius: var(--sc-radius-lg);
+      background: color-mix(in srgb, var(--sc-bg-overlay) 85%, transparent);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: var(--sc-shadow-xl);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--sc-radius-xl);
       max-width: 560px;
       width: 100%;
       margin: 0 var(--sc-space-md);
       box-sizing: border-box;
-      animation: sc-scale-in var(--sc-duration-normal) var(--sc-ease-out);
+      animation: sc-bounce-in var(--sc-duration-moderate) var(--sc-ease-out);
     }
 
     .input-wrap {

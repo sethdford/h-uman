@@ -54,27 +54,33 @@ export class ScCard extends LitElement {
 
     .card.hoverable {
       transition:
-        transform var(--sc-duration-fast) var(--sc-ease-out),
-        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+        transform var(--sc-duration-normal) var(--sc-spring-out),
+        box-shadow var(--sc-duration-normal) var(--sc-ease-out);
     }
     .card.hoverable:hover {
-      transform: translateY(-2px);
-      box-shadow: var(--sc-shadow-md);
+      transform: translateY(-4px);
+      box-shadow: var(--sc-shadow-lg);
     }
     .card.hoverable:active {
-      transform: translateY(0);
+      transform: translateY(-1px);
       box-shadow: var(--sc-shadow-sm);
+      transition-duration: 80ms;
     }
 
     .card.clickable {
       cursor: pointer;
       transition:
-        transform var(--sc-duration-fast) var(--sc-ease-out),
-        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+        transform var(--sc-duration-normal) var(--sc-spring-out),
+        box-shadow var(--sc-duration-normal) var(--sc-ease-out);
+    }
+    .card.clickable:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--sc-shadow-lg);
     }
     .card.clickable:active {
-      transform: translateY(0) scale(0.99);
+      transform: translateY(-1px) scale(0.98);
       box-shadow: var(--sc-shadow-sm);
+      transition-duration: 80ms;
     }
     .card.clickable:focus-visible {
       outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);

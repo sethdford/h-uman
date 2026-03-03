@@ -68,9 +68,11 @@ static sc_error_t social_execute(void *ctx, sc_allocator_t *alloc, const sc_json
     const char *token = sc_json_get_string(args, "access_token");
     if (!token || strlen(token) == 0) {
         char *msg = sc_sprintf(alloc, "missing access_token for %s", platform);
-        *out = sc_tool_result_fail(msg, msg ? strlen(msg) : 0);
-        if (msg)
-            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        if (msg) {
+            *out = sc_tool_result_fail_owned(msg, strlen(msg));
+        } else {
+            *out = sc_tool_result_fail("missing access_token", 20);
+        }
         return SC_OK;
     }
 

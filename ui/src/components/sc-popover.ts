@@ -25,8 +25,10 @@ export class ScPopover extends LitElement {
     .popover {
       position: absolute;
       z-index: var(--sc-z-popover);
-      background: var(--sc-bg-overlay);
-      border: 1px solid var(--sc-border);
+      background: color-mix(in srgb, var(--sc-bg-overlay) 88%, transparent);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: var(--sc-radius-lg);
       box-shadow: var(--sc-shadow-lg);
       padding: var(--sc-space-md);
@@ -36,7 +38,7 @@ export class ScPopover extends LitElement {
       transition:
         opacity var(--sc-duration-fast) var(--sc-ease-out),
         visibility var(--sc-duration-fast),
-        transform var(--sc-duration-fast) var(--sc-ease-out);
+        transform var(--sc-duration-normal) var(--sc-spring-out);
     }
 
     .popover.open {

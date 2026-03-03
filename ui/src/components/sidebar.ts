@@ -61,10 +61,10 @@ export class ScSidebar extends LitElement {
       flex-direction: column;
       width: var(--sc-sidebar-width);
       min-width: var(--sc-sidebar-width);
-      background: color-mix(in srgb, var(--sc-bg-surface), transparent 3%);
-      backdrop-filter: blur(var(--sc-blur-sm, 4px));
-      -webkit-backdrop-filter: blur(var(--sc-blur-sm, 4px));
-      border-right: 1px solid var(--sc-border-subtle);
+      background: color-mix(in srgb, var(--sc-bg-surface) 82%, transparent);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
       transition: width var(--sc-duration-normal) var(--sc-ease-out);
       overflow: hidden;
     }

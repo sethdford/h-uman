@@ -482,6 +482,36 @@ body {
   }
 }
 
+@keyframes sc-thumb-slide-on {
+  0% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(1.15rem) scaleX(1.1) scaleY(0.92);
+  }
+  75% {
+    transform: translateX(0.92rem) scaleX(0.97) scaleY(1.02);
+  }
+  100% {
+    transform: translateX(1rem) scaleX(1) scaleY(1);
+  }
+}
+
+@keyframes sc-thumb-slide-off {
+  0% {
+    transform: translateX(1rem);
+  }
+  50% {
+    transform: translateX(-0.1rem) scaleX(1.1) scaleY(0.92);
+  }
+  75% {
+    transform: translateX(0.06rem) scaleX(0.97) scaleY(1.02);
+  }
+  100% {
+    transform: translateX(0) scaleX(1) scaleY(1);
+  }
+}
+
 /* ─── View Transitions ─────────────────────────────────────────────── */
 ::view-transition-old(main-content) {
   animation: var(--sc-duration-normal) var(--sc-spring-out) both sc-fade-out;
