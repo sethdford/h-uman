@@ -1,22 +1,22 @@
-#include "seaclaw/tunnel.h"
-#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
-#include <stdlib.h>
+#include "seaclaw/tunnel.h"
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #define sc_popen(cmd, mode) _popen(cmd, mode)
-#define sc_pclose(f) _pclose(f)
+#define sc_pclose(f)        _pclose(f)
 #else
 #include <unistd.h>
 #define sc_popen(cmd, mode) popen(cmd, mode)
-#define sc_pclose(f) pclose(f)
+#define sc_pclose(f)        pclose(f)
 #endif
 
 #define SC_PORT_PLACEHOLDER "{port}"
-#define SC_CMD_MAX 2048
+#define SC_CMD_MAX          2048
 
 typedef struct sc_custom_tunnel {
     char *public_url;
@@ -29,8 +29,8 @@ typedef struct sc_custom_tunnel {
 
 static void impl_stop(void *ctx);
 
-static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
-    char **public_url_out, size_t *url_len) {
+static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port, char **public_url_out,
+                                    size_t *url_len) {
     sc_custom_tunnel_t *self = (sc_custom_tunnel_t *)ctx;
 
     impl_stop(ctx);
@@ -38,7 +38,8 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
 #if SC_IS_TEST
     (void)local_port;
     char *mock = sc_strdup(self->alloc, "https://custom-mock.example.net");
-    if (!mock) return SC_TUNNEL_ERR_START_FAILED;
+    if (!mock)
+        return SC_TUNNEL_ERR_START_FAILED;
     if (self->public_url)
         self->alloc->free(self->alloc->ctx, self->public_url, strlen(self->public_url) + 1);
     self->public_url = mock;
@@ -56,22 +57,25 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
     if (!placeholder) {
         /* No placeholder: use template as-is (user may have fixed port) */
         size_t copy_len = self->command_template_len;
-        if (copy_len >= sizeof(cmd)) copy_len = sizeof(cmd) - 1;
+        if (copy_len >= sizeof(cmd))
+            copy_len = sizeof(cmd) - 1;
         memcpy(cmd, self->command_template, copy_len);
         cmd[copy_len] = '\0';
     } else {
         size_t before = (size_t)(placeholder - self->command_template);
         size_t after = self->command_template_len - before - strlen(SC_PORT_PLACEHOLDER);
-        if (before + 8 + after >= sizeof(cmd)) return SC_TUNNEL_ERR_INVALID_COMMAND;
+        if (before + 8 + after >= sizeof(cmd))
+            return SC_TUNNEL_ERR_INVALID_COMMAND;
         memcpy(cmd, self->command_template, before);
-        int n = snprintf(cmd + before, sizeof(cmd) - before, "%u%s",
-            (unsigned)local_port, placeholder + strlen(SC_PORT_PLACEHOLDER));
+        int n = snprintf(cmd + before, sizeof(cmd) - before, "%u%s", (unsigned)local_port,
+                         placeholder + strlen(SC_PORT_PLACEHOLDER));
         if (n < 0 || (size_t)n >= sizeof(cmd) - before)
             return SC_TUNNEL_ERR_INVALID_COMMAND;
     }
 
     FILE *f = sc_popen(cmd, "r");
-    if (!f) return SC_TUNNEL_ERR_PROCESS_SPAWN;
+    if (!f)
+        return SC_TUNNEL_ERR_PROCESS_SPAWN;
 
     self->child_handle = f;
     self->running = true;
@@ -89,7 +93,8 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
     }
 
     if (!found_url || strlen(found_url) == 0) {
-        if (found_url) self->alloc->free(self->alloc->ctx, found_url, strlen(found_url) + 1);
+        if (found_url)
+            self->alloc->free(self->alloc->ctx, found_url, strlen(found_url) + 1);
         sc_pclose(f);
         self->child_handle = NULL;
         self->running = false;
@@ -152,11 +157,12 @@ static const sc_tunnel_vtable_t custom_vtable = {
     .is_running = impl_is_running,
 };
 
-sc_tunnel_t sc_custom_tunnel_create(sc_allocator_t *alloc,
-    const char *command_template, size_t command_template_len) {
-    sc_custom_tunnel_t *self = (sc_custom_tunnel_t *)alloc->alloc(alloc->ctx,
-        sizeof(sc_custom_tunnel_t));
-    if (!self) return (sc_tunnel_t){ .ctx = NULL, .vtable = NULL };
+sc_tunnel_t sc_custom_tunnel_create(sc_allocator_t *alloc, const char *command_template,
+                                    size_t command_template_len) {
+    sc_custom_tunnel_t *self =
+        (sc_custom_tunnel_t *)alloc->alloc(alloc->ctx, sizeof(sc_custom_tunnel_t));
+    if (!self)
+        return (sc_tunnel_t){.ctx = NULL, .vtable = NULL};
     self->public_url = NULL;
     self->running = false;
     self->child_handle = NULL;

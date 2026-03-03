@@ -1,9 +1,9 @@
-#include "seaclaw/peripheral.h"
-#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
-#include <string.h>
+#include "seaclaw/peripheral.h"
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifndef SC_IS_TEST
 #ifdef __linux__
@@ -40,7 +40,8 @@ static sc_peripheral_error_t impl_init(void *ctx) {
 #ifndef SC_IS_TEST
 #ifdef __linux__
     int fd = open("/sys/class/gpio", O_RDONLY);
-    if (fd < 0) return SC_PERIPHERAL_ERR_DEVICE_NOT_FOUND;
+    if (fd < 0)
+        return SC_PERIPHERAL_ERR_DEVICE_NOT_FOUND;
     close(fd);
 
     fd = open("/proc/device-tree/model", O_RDONLY);
@@ -78,9 +79,12 @@ static sc_peripheral_error_t impl_init(void *ctx) {
 
 static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_value) {
     sc_rpi_ctx_t *s = (sc_rpi_ctx_t *)ctx;
-    if (!out_value) return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
-    if (!s->connected) return SC_PERIPHERAL_ERR_NOT_CONNECTED;
-    if (addr >= 64) return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
+    if (!out_value)
+        return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
+    if (!s->connected)
+        return SC_PERIPHERAL_ERR_NOT_CONNECTED;
+    if (addr >= 64)
+        return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
 
 #ifndef SC_IS_TEST
 #ifdef __linux__
@@ -104,11 +108,13 @@ static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_va
     }
 
     fd = open(val_path, O_RDONLY);
-    if (fd < 0) return SC_PERIPHERAL_ERR_IO;
+    if (fd < 0)
+        return SC_PERIPHERAL_ERR_IO;
     char buf[4];
     ssize_t n = read(fd, buf, sizeof(buf));
     close(fd);
-    if (n <= 0) return SC_PERIPHERAL_ERR_IO;
+    if (n <= 0)
+        return SC_PERIPHERAL_ERR_IO;
     *out_value = (buf[0] == '1') ? 1 : 0;
     return SC_PERIPHERAL_ERR_NONE;
 #else
@@ -124,8 +130,10 @@ static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_va
 static sc_peripheral_error_t impl_write(void *ctx, uint32_t addr, uint8_t data) {
     (void)data;
     sc_rpi_ctx_t *s = (sc_rpi_ctx_t *)ctx;
-    if (!s->connected) return SC_PERIPHERAL_ERR_NOT_CONNECTED;
-    if (addr >= 64) return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
+    if (!s->connected)
+        return SC_PERIPHERAL_ERR_NOT_CONNECTED;
+    if (addr >= 64)
+        return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
 
 #ifndef SC_IS_TEST
 #ifdef __linux__
@@ -149,7 +157,8 @@ static sc_peripheral_error_t impl_write(void *ctx, uint32_t addr, uint8_t data) 
     }
 
     fd = open(val_path, O_WRONLY);
-    if (fd < 0) return SC_PERIPHERAL_ERR_IO;
+    if (fd < 0)
+        return SC_PERIPHERAL_ERR_IO;
     const char *val = (data != 0) ? "1" : "0";
     write(fd, val, 1);
     close(fd);
@@ -208,14 +217,16 @@ static const sc_peripheral_vtable_t rpi_vtable = {
 };
 
 sc_peripheral_t sc_rpi_peripheral_create(sc_allocator_t *alloc) {
-    if (!alloc) return (sc_peripheral_t){ .ctx = NULL, .vtable = NULL };
+    if (!alloc)
+        return (sc_peripheral_t){.ctx = NULL, .vtable = NULL};
 
     sc_rpi_ctx_t *s = (sc_rpi_ctx_t *)alloc->alloc(alloc->ctx, sizeof(sc_rpi_ctx_t));
-    if (!s) return (sc_peripheral_t){ .ctx = NULL, .vtable = NULL };
+    if (!s)
+        return (sc_peripheral_t){.ctx = NULL, .vtable = NULL};
 
     s->alloc = alloc;
     s->board_name[0] = '\0';
     s->connected = false;
 
-    return (sc_peripheral_t){ .ctx = s, .vtable = &rpi_vtable };
+    return (sc_peripheral_t){.ctx = s, .vtable = &rpi_vtable};
 }

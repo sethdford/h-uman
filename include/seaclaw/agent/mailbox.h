@@ -3,9 +3,9 @@
 
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 typedef enum sc_msg_type {
     SC_MSG_TASK,
@@ -34,18 +34,14 @@ void sc_mailbox_destroy(sc_mailbox_t *mbox);
 sc_error_t sc_mailbox_register(sc_mailbox_t *mbox, uint64_t agent_id);
 sc_error_t sc_mailbox_unregister(sc_mailbox_t *mbox, uint64_t agent_id);
 
-sc_error_t sc_mailbox_send(sc_mailbox_t *mbox,
-    uint64_t from_agent, uint64_t to_agent,
-    sc_msg_type_t type,
-    const char *payload, size_t payload_len,
-    uint64_t correlation_id);
+sc_error_t sc_mailbox_send(sc_mailbox_t *mbox, uint64_t from_agent, uint64_t to_agent,
+                           sc_msg_type_t type, const char *payload, size_t payload_len,
+                           uint64_t correlation_id);
 
-sc_error_t sc_mailbox_recv(sc_mailbox_t *mbox, uint64_t agent_id,
-    sc_message_t *out);
+sc_error_t sc_mailbox_recv(sc_mailbox_t *mbox, uint64_t agent_id, sc_message_t *out);
 
-sc_error_t sc_mailbox_broadcast(sc_mailbox_t *mbox,
-    uint64_t from_agent, sc_msg_type_t type,
-    const char *payload, size_t payload_len);
+sc_error_t sc_mailbox_broadcast(sc_mailbox_t *mbox, uint64_t from_agent, sc_msg_type_t type,
+                                const char *payload, size_t payload_len);
 
 size_t sc_mailbox_pending_count(sc_mailbox_t *mbox, uint64_t agent_id);
 

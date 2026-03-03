@@ -6,7 +6,7 @@
 #include "seaclaw/security.h"
 #include "seaclaw/tool.h"
 
-sc_error_t sc_apply_patch_create(sc_allocator_t *alloc,
-    sc_security_policy_t *policy, sc_tool_t *out);
+sc_error_t sc_apply_patch_create(sc_allocator_t *alloc, sc_security_policy_t *policy,
+                                 sc_tool_t *out);
 
 #endif

@@ -1,30 +1,39 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef __linux__
 #include <unistd.h>
 static bool firejail_binary_exists(void) {
-    if (access("/usr/bin/firejail", X_OK) == 0) return true;
-    if (access("/usr/local/bin/firejail", X_OK) == 0) return true;
+    if (access("/usr/bin/firejail", X_OK) == 0)
+        return true;
+    if (access("/usr/local/bin/firejail", X_OK) == 0)
+        return true;
     return false;
 }
 #endif
 
-static sc_error_t firejail_wrap(void *ctx, const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t firejail_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+                                size_t buf_count, size_t *out_count) {
 #ifndef __linux__
-    (void)ctx; (void)argv; (void)argc; (void)buf; (void)buf_count; (void)out_count;
+    (void)ctx;
+    (void)argv;
+    (void)argc;
+    (void)buf;
+    (void)buf_count;
+    (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
     sc_firejail_ctx_t *fj = (sc_firejail_ctx_t *)ctx;
     const size_t base_prefix = 5;
     size_t extra = fj->extra_args_len;
     size_t total_prefix = base_prefix + extra;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < total_prefix + argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < total_prefix + argc)
+        return SC_ERR_INVALID_ARGUMENT;
 
     buf[0] = "firejail";
     buf[1] = fj->private_arg;
@@ -82,8 +91,7 @@ sc_sandbox_t sc_firejail_sandbox_get(sc_firejail_ctx_t *ctx) {
 void sc_firejail_sandbox_init(sc_firejail_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     if (workspace_dir) {
-        int n = snprintf(ctx->private_arg, 256,
-            "--private=%s", workspace_dir);
+        int n = snprintf(ctx->private_arg, 256, "--private=%s", workspace_dir);
         if (n > 0 && n < 256)
             ctx->private_len = (size_t)n;
         else {
@@ -93,9 +101,10 @@ void sc_firejail_sandbox_init(sc_firejail_ctx_t *ctx, const char *workspace_dir)
     }
 }
 
-void sc_firejail_sandbox_set_extra_args(sc_firejail_ctx_t *ctx,
-    const char *const *args, size_t args_len) {
-    if (!ctx) return;
+void sc_firejail_sandbox_set_extra_args(sc_firejail_ctx_t *ctx, const char *const *args,
+                                        size_t args_len) {
+    if (!ctx)
+        return;
     ctx->extra_args = args;
     ctx->extra_args_len = args_len;
 }

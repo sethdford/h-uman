@@ -1,9 +1,9 @@
-#include "seaclaw/tunnel.h"
-#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
+#include "seaclaw/tunnel.h"
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 typedef struct sc_none_tunnel {
     char *url;
@@ -11,8 +11,8 @@ typedef struct sc_none_tunnel {
     sc_allocator_t *alloc;
 } sc_none_tunnel_t;
 
-static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
-    char **public_url_out, size_t *url_len) {
+static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port, char **public_url_out,
+                                    size_t *url_len) {
     sc_none_tunnel_t *self = (sc_none_tunnel_t *)ctx;
     (void)local_port;
 
@@ -22,7 +22,8 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
     }
 
     char *u = sc_sprintf(self->alloc, "http://localhost:%u", (unsigned)local_port);
-    if (!u) return SC_TUNNEL_ERR_START_FAILED;
+    if (!u)
+        return SC_TUNNEL_ERR_START_FAILED;
 
     self->url = u;
     self->running = true;
@@ -71,7 +72,8 @@ static const sc_tunnel_vtable_t none_vtable = {
 
 sc_tunnel_t sc_none_tunnel_create(sc_allocator_t *alloc) {
     sc_none_tunnel_t *self = (sc_none_tunnel_t *)alloc->alloc(alloc->ctx, sizeof(sc_none_tunnel_t));
-    if (!self) return (sc_tunnel_t){ .ctx = NULL, .vtable = NULL };
+    if (!self)
+        return (sc_tunnel_t){.ctx = NULL, .vtable = NULL};
     self->url = NULL;
     self->running = false;
     self->alloc = alloc;

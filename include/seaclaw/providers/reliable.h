@@ -1,9 +1,9 @@
 #ifndef SC_RELIABLE_H
 #define SC_RELIABLE_H
 
-#include "seaclaw/provider.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/provider.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -35,20 +35,13 @@ typedef struct sc_reliable_model_fallback_entry {
  * In SC_IS_TEST: skips sleep, retries immediately.
  * Multi-provider: tries inner, then each extra in order for each model in the chain.
  * Model fallback: for model X, if configured, tries [X, fallback1, fallback2, ...] */
-sc_error_t sc_reliable_create(sc_allocator_t *alloc,
-    sc_provider_t inner,
-    uint32_t max_retries,
-    uint64_t backoff_ms,
-    sc_provider_t *out);
+sc_error_t sc_reliable_create(sc_allocator_t *alloc, sc_provider_t inner, uint32_t max_retries,
+                              uint64_t backoff_ms, sc_provider_t *out);
 
-sc_error_t sc_reliable_create_ex(sc_allocator_t *alloc,
-    sc_provider_t inner,
-    uint32_t max_retries,
-    uint64_t backoff_ms,
-    const sc_reliable_provider_entry_t *extras,
-    size_t extras_count,
-    const sc_reliable_model_fallback_entry_t *model_fallbacks,
-    size_t model_fallbacks_count,
-    sc_provider_t *out);
+sc_error_t sc_reliable_create_ex(sc_allocator_t *alloc, sc_provider_t inner, uint32_t max_retries,
+                                 uint64_t backoff_ms, const sc_reliable_provider_entry_t *extras,
+                                 size_t extras_count,
+                                 const sc_reliable_model_fallback_entry_t *model_fallbacks,
+                                 size_t model_fallbacks_count, sc_provider_t *out);
 
 #endif /* SC_RELIABLE_H */

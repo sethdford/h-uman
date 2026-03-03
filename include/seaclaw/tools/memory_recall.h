@@ -7,7 +7,6 @@
 #include "seaclaw/tool.h"
 #include <stddef.h>
 
-sc_error_t sc_memory_recall_create(sc_allocator_t *alloc,
-    sc_memory_t *memory, sc_tool_t *out);
+sc_error_t sc_memory_recall_create(sc_allocator_t *alloc, sc_memory_t *memory, sc_tool_t *out);
 
 #endif

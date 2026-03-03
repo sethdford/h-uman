@@ -18,7 +18,7 @@
  * Returns byte count written to response_buf, or negative on error. */
 SC_IMPORT("seaclaw", "http_fetch")
 int sc_host_http_fetch(const char *url, int url_len, const char *method, int method_len,
-    const char *body, int body_len, char *response_buf, int buf_len);
+                       const char *body, int body_len, char *response_buf, int buf_len);
 
 /* Log message to host. level: 0=debug, 1=info, 2=warn, 3=error */
 SC_IMPORT("seaclaw", "log")

@@ -6,9 +6,8 @@
 #define SC_CHOICE_BUF_SIZE 64
 
 #ifdef SC_IS_TEST
-sc_error_t sc_choices_prompt(const char *question,
-    const sc_choice_t *choices, size_t count,
-    sc_choice_result_t *out) {
+sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, size_t count,
+                             sc_choice_result_t *out) {
     (void)question;
     if (!choices || !out || count == 0)
         return SC_ERR_INVALID_ARGUMENT;
@@ -29,9 +28,8 @@ bool sc_choices_confirm(const char *question, bool default_yes) {
     return default_yes;
 }
 #else
-sc_error_t sc_choices_prompt(const char *question,
-    const sc_choice_t *choices, size_t count,
-    sc_choice_result_t *out) {
+sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, size_t count,
+                             sc_choice_result_t *out) {
     if (!question || !choices || !out || count == 0)
         return SC_ERR_INVALID_ARGUMENT;
 

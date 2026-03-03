@@ -29,7 +29,7 @@ typedef struct sc_runtime_vtable {
      * argv_in/argc_in: original command; argv_out/max_out: wrapped command buffer.
      * Returns count of args written to argv_out. */
     sc_error_t (*wrap_command)(void *ctx, const char **argv_in, size_t argc_in,
-        const char **argv_out, size_t max_out, size_t *argc_out);
+                               const char **argv_out, size_t max_out, size_t *argc_out);
 } sc_runtime_vtable_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -44,8 +44,8 @@ typedef enum sc_runtime_kind {
 } sc_runtime_kind_t;
 
 sc_runtime_t sc_runtime_native(void);
-sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb,
-    const char *image, const char *workspace);
+sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb, const char *image,
+                               const char *workspace);
 sc_runtime_t sc_runtime_wasm(uint64_t memory_limit_mb);
 sc_runtime_t sc_runtime_cloudflare(void);
 

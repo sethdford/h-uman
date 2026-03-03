@@ -7,7 +7,6 @@
 #include "seaclaw/tool.h"
 #include <stddef.h>
 
-sc_error_t sc_message_create(sc_allocator_t *alloc,
-    sc_channel_t *channel, sc_tool_t *out);
+sc_error_t sc_message_create(sc_allocator_t *alloc, sc_channel_t *channel, sc_tool_t *out);
 
 #endif

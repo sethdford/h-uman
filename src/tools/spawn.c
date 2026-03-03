@@ -1,21 +1,22 @@
-#include "seaclaw/tool.h"
+#include "seaclaw/config.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/process_util.h"
+#include "seaclaw/core/string.h"
 #include "seaclaw/security.h"
 #include "seaclaw/security/sandbox.h"
-#include "seaclaw/config.h"
+#include "seaclaw/tool.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-
+#include <string.h>
 
 #define SC_SPAWN_NAME "spawn"
 #define SC_SPAWN_DESC "Spawn child process"
-#define SC_SPAWN_PARAMS "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},\"args\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"command\"]}"
-#define SC_SPAWN_MAX_ARGS 64
+#define SC_SPAWN_PARAMS                                                                          \
+    "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"},\"args\":{\"type\":" \
+    "\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"command\"]}"
+#define SC_SPAWN_MAX_ARGS   64
 #define SC_SPAWN_MAX_OUTPUT 65536
 
 typedef struct sc_spawn_ctx {
@@ -24,10 +25,8 @@ typedef struct sc_spawn_ctx {
     sc_security_policy_t *policy;
 } sc_spawn_ctx_t;
 
-static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
-    const sc_json_value_t *args,
-    sc_tool_result_t *out)
-{
+static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                                sc_tool_result_t *out) {
     sc_spawn_ctx_t *c = (sc_spawn_ctx_t *)ctx;
     if (!c || !args || !out) {
         *out = sc_tool_result_fail("invalid args", 12);
@@ -40,10 +39,9 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     }
     {
         static const char *const SHELL_CMDS[] = {
-            "/bin/sh", "/bin/bash", "/bin/zsh", "/bin/csh", "/bin/ksh",
-            "/usr/bin/sh", "/usr/bin/bash", "/usr/bin/zsh",
-            "sh", "bash", "zsh", "csh", "ksh", NULL
-        };
+            "/bin/sh",     "/bin/bash",     "/bin/zsh",     "/bin/csh", "/bin/ksh",
+            "/usr/bin/sh", "/usr/bin/bash", "/usr/bin/zsh", "sh",       "bash",
+            "zsh",         "csh",           "ksh",          NULL};
         for (const char *const *b = SHELL_CMDS; *b; b++) {
             if (strcmp(cmd, *b) == 0) {
                 *out = sc_tool_result_fail(
@@ -54,7 +52,10 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     }
 #if SC_IS_TEST
     char *msg = sc_strndup(alloc, "(spawn disabled in test)", 24);
-    if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msg) {
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     *out = sc_tool_result_ok_owned(msg, 24);
     return SC_OK;
 #else
@@ -88,10 +89,12 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     sc_json_value_t *args_arr = sc_json_object_get(args, "args");
     if (args_arr && args_arr->type == SC_JSON_ARRAY && args_arr->data.array.len > 0) {
         size_t n = args_arr->data.array.len;
-        if (n > SC_SPAWN_MAX_ARGS) n = SC_SPAWN_MAX_ARGS;
+        if (n > SC_SPAWN_MAX_ARGS)
+            n = SC_SPAWN_MAX_ARGS;
         for (size_t i = 0; i < n && argc < SC_SPAWN_MAX_ARGS + 1; i++) {
             sc_json_value_t *item = args_arr->data.array.items[i];
-            if (!item) continue;
+            if (!item)
+                continue;
             if (item->type == SC_JSON_STRING && item->data.string.ptr) {
                 argv_buf[argc++] = item->data.string.ptr;
             } else if (item->type == SC_JSON_NUMBER) {
@@ -123,33 +126,32 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     const char *sandbox_argv[SC_SPAWN_MAX_ARGS + 16];
     const char *const *run_argv = argv_buf;
 
-    if (c->policy && c->policy->sandbox &&
-        sc_sandbox_is_available(c->policy->sandbox)) {
+    if (c->policy && c->policy->sandbox && sc_sandbox_is_available(c->policy->sandbox)) {
         size_t wrapped_count = 0;
-        if (sc_sandbox_wrap_command(c->policy->sandbox,
-                argv_buf, argc, sandbox_argv,
-                SC_SPAWN_MAX_ARGS + 16, &wrapped_count) == SC_OK &&
-                wrapped_count > 0) {
+        if (sc_sandbox_wrap_command(c->policy->sandbox, argv_buf, argc, sandbox_argv,
+                                    SC_SPAWN_MAX_ARGS + 16, &wrapped_count) == SC_OK &&
+            wrapped_count > 0) {
             sandbox_argv[wrapped_count] = NULL;
             run_argv = sandbox_argv;
         }
     }
 
     sc_run_result_t run = {0};
-    sc_error_t err = sc_process_run_with_policy(alloc, run_argv, cwd,
-        SC_SPAWN_MAX_OUTPUT, c->policy, &run);
+    sc_error_t err =
+        sc_process_run_with_policy(alloc, run_argv, cwd, SC_SPAWN_MAX_OUTPUT, c->policy, &run);
 
     /* Free any number-arg copies we allocated */
     if (args_arr && args_arr->type == SC_JSON_ARRAY) {
         for (size_t i = 1; i < argc; i++) {
-            sc_json_value_t *item = (i <= args_arr->data.array.len) ?
-                args_arr->data.array.items[i - 1] : NULL;
+            sc_json_value_t *item =
+                (i <= args_arr->data.array.len) ? args_arr->data.array.items[i - 1] : NULL;
             if (item && item->type == SC_JSON_NUMBER && argv_buf[i]) {
                 sc_str_free(alloc, (char *)argv_buf[i]);
             }
         }
     }
-    if (cwd) alloc->free(alloc->ctx, (void *)cwd, c->workspace_dir_len + 1);
+    if (cwd)
+        alloc->free(alloc->ctx, (void *)cwd, c->workspace_dir_len + 1);
 
     if (err != SC_OK) {
         sc_run_result_free(alloc, &run);
@@ -158,7 +160,8 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
     }
 
     size_t out_len = run.stdout_len + (run.stderr_len ? run.stderr_len + 2 : 0) + 64;
-    if (run.stderr_len && !run.success) out_len += 32;
+    if (run.stderr_len && !run.success)
+        out_len += 32;
     char *msg = (char *)alloc->alloc(alloc->ctx, out_len);
     if (!msg) {
         sc_run_result_free(alloc, &run);
@@ -175,7 +178,8 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
         size_t n = run.stdout_len < out_len - off - 1 ? run.stdout_len : out_len - off - 1;
         memcpy(msg + off, run.stdout_buf, n);
         off += n;
-        if (run.stderr_len > 0) msg[off++] = '\n';
+        if (run.stderr_len > 0)
+            msg[off++] = '\n';
     }
     if (run.stderr_len > 0) {
         size_t n = run.stderr_len < out_len - off - 1 ? run.stderr_len : out_len - off - 1;
@@ -197,27 +201,43 @@ static sc_error_t spawn_execute(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static const char *spawn_name(void *ctx) { (void)ctx; return SC_SPAWN_NAME; }
-static const char *spawn_description(void *ctx) { (void)ctx; return SC_SPAWN_DESC; }
-static const char *spawn_parameters_json(void *ctx) { (void)ctx; return SC_SPAWN_PARAMS; }
-static void spawn_deinit(void *ctx, sc_allocator_t *alloc) { (void)alloc; if (ctx) free(ctx); }
+static const char *spawn_name(void *ctx) {
+    (void)ctx;
+    return SC_SPAWN_NAME;
+}
+static const char *spawn_description(void *ctx) {
+    (void)ctx;
+    return SC_SPAWN_DESC;
+}
+static const char *spawn_parameters_json(void *ctx) {
+    (void)ctx;
+    return SC_SPAWN_PARAMS;
+}
+static void spawn_deinit(void *ctx, sc_allocator_t *alloc) {
+    (void)alloc;
+    if (ctx)
+        free(ctx);
+}
 
 static const sc_tool_vtable_t spawn_vtable = {
-    .execute = spawn_execute, .name = spawn_name,
-    .description = spawn_description, .parameters_json = spawn_parameters_json,
+    .execute = spawn_execute,
+    .name = spawn_name,
+    .description = spawn_description,
+    .parameters_json = spawn_parameters_json,
     .deinit = spawn_deinit,
 };
 
-sc_error_t sc_spawn_create(sc_allocator_t *alloc,
-    const char *workspace_dir, size_t workspace_dir_len,
-    sc_security_policy_t *policy,
-    sc_tool_t *out)
-{
+sc_error_t sc_spawn_create(sc_allocator_t *alloc, const char *workspace_dir,
+                           size_t workspace_dir_len, sc_security_policy_t *policy, sc_tool_t *out) {
     sc_spawn_ctx_t *c = (sc_spawn_ctx_t *)calloc(1, sizeof(*c));
-    if (!c) return SC_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return SC_ERR_OUT_OF_MEMORY;
     if (workspace_dir && workspace_dir_len > 0) {
         c->workspace_dir = sc_strndup(alloc, workspace_dir, workspace_dir_len);
-        if (!c->workspace_dir) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        if (!c->workspace_dir) {
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         c->workspace_dir_len = workspace_dir_len;
     }
     c->policy = policy;

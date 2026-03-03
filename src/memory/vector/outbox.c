@@ -18,38 +18,44 @@ struct sc_embedding_outbox {
 };
 
 sc_embedding_outbox_t *sc_embedding_outbox_create(sc_allocator_t *alloc) {
-    if (!alloc) return NULL;
-    sc_embedding_outbox_t *ob = (sc_embedding_outbox_t *)alloc->alloc(alloc->ctx,
-        sizeof(sc_embedding_outbox_t));
-    if (!ob) return NULL;
+    if (!alloc)
+        return NULL;
+    sc_embedding_outbox_t *ob =
+        (sc_embedding_outbox_t *)alloc->alloc(alloc->ctx, sizeof(sc_embedding_outbox_t));
+    if (!ob)
+        return NULL;
     memset(ob, 0, sizeof(*ob));
     ob->alloc = alloc;
     return ob;
 }
 
 void sc_embedding_outbox_destroy(sc_allocator_t *alloc, sc_embedding_outbox_t *ob) {
-    if (!ob || !alloc) return;
+    if (!ob || !alloc)
+        return;
     for (size_t i = 0; i < ob->count; i++) {
-        if (ob->items[i].id) alloc->free(alloc->ctx, ob->items[i].id, ob->items[i].id_len + 1);
-        if (ob->items[i].text) alloc->free(alloc->ctx, ob->items[i].text, ob->items[i].text_len + 1);
+        if (ob->items[i].id)
+            alloc->free(alloc->ctx, ob->items[i].id, ob->items[i].id_len + 1);
+        if (ob->items[i].text)
+            alloc->free(alloc->ctx, ob->items[i].text, ob->items[i].text_len + 1);
     }
-    if (ob->items) alloc->free(alloc->ctx, ob->items,
-        ob->capacity * sizeof(outbox_item_t));
+    if (ob->items)
+        alloc->free(alloc->ctx, ob->items, ob->capacity * sizeof(outbox_item_t));
     alloc->free(alloc->ctx, ob, sizeof(sc_embedding_outbox_t));
 }
 
-sc_error_t sc_embedding_outbox_enqueue(sc_embedding_outbox_t *ob,
-    const char *id, size_t id_len,
-    const char *text, size_t text_len) {
-    if (!ob || !ob->alloc) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_embedding_outbox_enqueue(sc_embedding_outbox_t *ob, const char *id, size_t id_len,
+                                       const char *text, size_t text_len) {
+    if (!ob || !ob->alloc)
+        return SC_ERR_INVALID_ARGUMENT;
 
     if (ob->count >= ob->capacity) {
         size_t new_cap = ob->capacity == 0 ? 8 : ob->capacity * 2;
         size_t old_sz = ob->capacity * sizeof(outbox_item_t);
         size_t new_sz = new_cap * sizeof(outbox_item_t);
-        outbox_item_t *tmp = (outbox_item_t *)ob->alloc->realloc(ob->alloc->ctx,
-            ob->items, old_sz, new_sz);
-        if (!tmp) return SC_ERR_OUT_OF_MEMORY;
+        outbox_item_t *tmp =
+            (outbox_item_t *)ob->alloc->realloc(ob->alloc->ctx, ob->items, old_sz, new_sz);
+        if (!tmp)
+            return SC_ERR_OUT_OF_MEMORY;
         ob->items = tmp;
         ob->capacity = new_cap;
     }
@@ -63,11 +69,9 @@ sc_error_t sc_embedding_outbox_enqueue(sc_embedding_outbox_t *ob,
     return SC_OK;
 }
 
-sc_error_t sc_embedding_outbox_flush(sc_embedding_outbox_t *ob,
-    sc_allocator_t *alloc,
-    sc_embedding_provider_t *provider,
-    sc_embedding_outbox_flush_cb callback,
-    void *userdata) {
+sc_error_t sc_embedding_outbox_flush(sc_embedding_outbox_t *ob, sc_allocator_t *alloc,
+                                     sc_embedding_provider_t *provider,
+                                     sc_embedding_outbox_flush_cb callback, void *userdata) {
     if (!ob || !alloc || !provider || !provider->vtable || !provider->vtable->embed)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -86,8 +90,10 @@ sc_error_t sc_embedding_outbox_flush(sc_embedding_outbox_t *ob,
 
     /* Clear queue after flush */
     for (size_t i = 0; i < ob->count; i++) {
-        if (ob->items[i].id) alloc->free(alloc->ctx, ob->items[i].id, ob->items[i].id_len + 1);
-        if (ob->items[i].text) alloc->free(alloc->ctx, ob->items[i].text, ob->items[i].text_len + 1);
+        if (ob->items[i].id)
+            alloc->free(alloc->ctx, ob->items[i].id, ob->items[i].id_len + 1);
+        if (ob->items[i].text)
+            alloc->free(alloc->ctx, ob->items[i].text, ob->items[i].text_len + 1);
     }
     ob->count = 0;
     return SC_OK;

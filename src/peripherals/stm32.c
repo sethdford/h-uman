@@ -1,23 +1,23 @@
-#include "seaclaw/peripheral.h"
-#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
+#include "seaclaw/peripheral.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifndef SC_IS_TEST
 #ifndef _WIN32
-#include <unistd.h>
-#include <sys/wait.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 #endif
 
 typedef struct sc_stm32_ctx {
     sc_allocator_t *alloc;
-    char *chip;          /* e.g. STM32F401RETx, owned */
+    char *chip; /* e.g. STM32F401RETx, owned */
     size_t chip_len;
     char board_name[64];
     bool connected;
@@ -47,7 +47,8 @@ static sc_peripheral_error_t impl_init(void *ctx) {
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "probe-rs info 2>/dev/null");
     FILE *f = popen(cmd, "r");
-    if (!f) return SC_PERIPHERAL_ERR_DEVICE_NOT_FOUND;
+    if (!f)
+        return SC_PERIPHERAL_ERR_DEVICE_NOT_FOUND;
 
     char buf[512];
     size_t total = 0;
@@ -76,17 +77,19 @@ static sc_peripheral_error_t impl_init(void *ctx) {
 
 static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_value) {
     sc_stm32_ctx_t *s = (sc_stm32_ctx_t *)ctx;
-    if (!out_value) return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
-    if (!s->connected) return SC_PERIPHERAL_ERR_NOT_CONNECTED;
+    if (!out_value)
+        return SC_PERIPHERAL_ERR_INVALID_ADDRESS;
+    if (!s->connected)
+        return SC_PERIPHERAL_ERR_NOT_CONNECTED;
 
 #ifndef SC_IS_TEST
 #ifndef _WIN32
     char cmd[256];
-    snprintf(cmd, sizeof(cmd),
-        "probe-rs read --chip %.*s 0x%x 1 2>/dev/null",
-        (int)s->chip_len, s->chip, (unsigned)addr);
+    snprintf(cmd, sizeof(cmd), "probe-rs read --chip %.*s 0x%x 1 2>/dev/null", (int)s->chip_len,
+             s->chip, (unsigned)addr);
     FILE *f = popen(cmd, "r");
-    if (!f) return SC_PERIPHERAL_ERR_IO;
+    if (!f)
+        return SC_PERIPHERAL_ERR_IO;
     char buf[16];
     if (!fgets(buf, sizeof(buf), f)) {
         pclose(f);
@@ -108,16 +111,17 @@ static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_va
 
 static sc_peripheral_error_t impl_write(void *ctx, uint32_t addr, uint8_t data) {
     sc_stm32_ctx_t *s = (sc_stm32_ctx_t *)ctx;
-    if (!s->connected) return SC_PERIPHERAL_ERR_NOT_CONNECTED;
+    if (!s->connected)
+        return SC_PERIPHERAL_ERR_NOT_CONNECTED;
 
 #ifndef SC_IS_TEST
 #ifndef _WIN32
     char cmd[256];
-    snprintf(cmd, sizeof(cmd),
-        "probe-rs write --chip %.*s 0x%x %02x 2>/dev/null",
-        (int)s->chip_len, s->chip, (unsigned)addr, (unsigned)data);
+    snprintf(cmd, sizeof(cmd), "probe-rs write --chip %.*s 0x%x %02x 2>/dev/null", (int)s->chip_len,
+             s->chip, (unsigned)addr, (unsigned)data);
     int r = system(cmd);
-    if (r != 0) return SC_PERIPHERAL_ERR_IO;
+    if (r != 0)
+        return SC_PERIPHERAL_ERR_IO;
     return SC_PERIPHERAL_ERR_NONE;
 #else
     return SC_PERIPHERAL_ERR_UNSUPPORTED_OPERATION;
@@ -131,17 +135,19 @@ static sc_peripheral_error_t impl_write(void *ctx, uint32_t addr, uint8_t data) 
 
 static sc_peripheral_error_t impl_flash(void *ctx, const char *firmware_path, size_t path_len) {
     sc_stm32_ctx_t *s = (sc_stm32_ctx_t *)ctx;
-    if (!s->connected) return SC_PERIPHERAL_ERR_NOT_CONNECTED;
-    if (!firmware_path || path_len == 0) return SC_PERIPHERAL_ERR_FLASH_FAILED;
+    if (!s->connected)
+        return SC_PERIPHERAL_ERR_NOT_CONNECTED;
+    if (!firmware_path || path_len == 0)
+        return SC_PERIPHERAL_ERR_FLASH_FAILED;
 
 #ifndef SC_IS_TEST
 #ifndef _WIN32
     char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-        "probe-rs download --chip %.*s %.*s 2>/dev/null",
-        (int)s->chip_len, s->chip, (int)path_len, firmware_path);
+    snprintf(cmd, sizeof(cmd), "probe-rs download --chip %.*s %.*s 2>/dev/null", (int)s->chip_len,
+             s->chip, (int)path_len, firmware_path);
     int r = system(cmd);
-    if (r != 0) return SC_PERIPHERAL_ERR_FLASH_FAILED;
+    if (r != 0)
+        return SC_PERIPHERAL_ERR_FLASH_FAILED;
     return SC_PERIPHERAL_ERR_NONE;
 #else
     return SC_PERIPHERAL_ERR_UNSUPPORTED_OPERATION;
@@ -191,19 +197,19 @@ static const sc_peripheral_vtable_t stm32_vtable = {
     .destroy = impl_destroy,
 };
 
-sc_peripheral_t sc_stm32_peripheral_create(sc_allocator_t *alloc,
-    const char *chip, size_t chip_len)
-{
+sc_peripheral_t sc_stm32_peripheral_create(sc_allocator_t *alloc, const char *chip,
+                                           size_t chip_len) {
     if (!alloc || !chip || chip_len == 0) {
-        return (sc_peripheral_t){ .ctx = NULL, .vtable = NULL };
+        return (sc_peripheral_t){.ctx = NULL, .vtable = NULL};
     }
     sc_stm32_ctx_t *s = (sc_stm32_ctx_t *)alloc->alloc(alloc->ctx, sizeof(sc_stm32_ctx_t));
-    if (!s) return (sc_peripheral_t){ .ctx = NULL, .vtable = NULL };
+    if (!s)
+        return (sc_peripheral_t){.ctx = NULL, .vtable = NULL};
 
     char *chip_copy = sc_strndup(alloc, chip, chip_len);
     if (!chip_copy) {
         alloc->free(alloc->ctx, s, sizeof(sc_stm32_ctx_t));
-        return (sc_peripheral_t){ .ctx = NULL, .vtable = NULL };
+        return (sc_peripheral_t){.ctx = NULL, .vtable = NULL};
     }
 
     s->alloc = alloc;
@@ -212,5 +218,5 @@ sc_peripheral_t sc_stm32_peripheral_create(sc_allocator_t *alloc,
     s->board_name[0] = '\0';
     s->connected = false;
 
-    return (sc_peripheral_t){ .ctx = s, .vtable = &stm32_vtable };
+    return (sc_peripheral_t){.ctx = s, .vtable = &stm32_vtable};
 }

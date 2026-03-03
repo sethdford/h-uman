@@ -7,7 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-sc_error_t sc_web_fetch_create(sc_allocator_t *alloc,
-    uint32_t max_chars, sc_tool_t *out);
+sc_error_t sc_web_fetch_create(sc_allocator_t *alloc, uint32_t max_chars, sc_tool_t *out);
 
 #endif

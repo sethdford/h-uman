@@ -7,9 +7,7 @@
 #include "seaclaw/tool.h"
 #include <stddef.h>
 
-sc_error_t sc_web_search_create(sc_allocator_t *alloc,
-    const sc_config_t *config,
-    const char *api_key, size_t api_key_len,
-    sc_tool_t *out);
+sc_error_t sc_web_search_create(sc_allocator_t *alloc, const sc_config_t *config,
+                                const char *api_key, size_t api_key_len, sc_tool_t *out);
 
 #endif

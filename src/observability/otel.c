@@ -32,14 +32,18 @@ struct sc_span {
 };
 
 static void otel_record_event(void *ctx, const sc_observer_event_t *event) {
-    (void)ctx; (void)event;
+    (void)ctx;
+    (void)event;
 }
 
 static void otel_record_metric(void *ctx, const sc_observer_metric_t *metric) {
-    (void)ctx; (void)metric;
+    (void)ctx;
+    (void)metric;
 }
 
-static void otel_flush(void *ctx) { (void)ctx; }
+static void otel_flush(void *ctx) {
+    (void)ctx;
+}
 
 static const char *otel_observer_name(void *ctx) {
     (void)ctx;
@@ -48,10 +52,13 @@ static const char *otel_observer_name(void *ctx) {
 
 static void otel_deinit(void *ctx) {
     sc_otel_ctx_t *c = (sc_otel_ctx_t *)ctx;
-    if (!c || !c->alloc) return;
+    if (!c || !c->alloc)
+        return;
     sc_allocator_t *alloc = c->alloc;
-    if (c->endpoint) alloc->free(alloc->ctx, c->endpoint, strlen(c->endpoint) + 1);
-    if (c->service_name) alloc->free(alloc->ctx, c->service_name, strlen(c->service_name) + 1);
+    if (c->endpoint)
+        alloc->free(alloc->ctx, c->endpoint, strlen(c->endpoint) + 1);
+    if (c->service_name)
+        alloc->free(alloc->ctx, c->service_name, strlen(c->service_name) + 1);
     alloc->free(alloc->ctx, c, sizeof(*c));
 }
 
@@ -63,19 +70,19 @@ static const sc_observer_vtable_t otel_vtable = {
     .deinit = otel_deinit,
 };
 
-sc_error_t sc_otel_observer_create(sc_allocator_t *alloc,
-    const sc_otel_config_t *cfg, sc_observer_t *out)
-{
-    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_otel_observer_create(sc_allocator_t *alloc, const sc_otel_config_t *cfg,
+                                   sc_observer_t *out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_otel_ctx_t *c = (sc_otel_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
-    if (!c) return SC_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return SC_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     if (cfg) {
-        c->endpoint = cfg->endpoint
-            ? sc_strndup(alloc, cfg->endpoint, cfg->endpoint_len) : NULL;
-        c->service_name = cfg->service_name
-            ? sc_strndup(alloc, cfg->service_name, cfg->service_name_len) : NULL;
+        c->endpoint = cfg->endpoint ? sc_strndup(alloc, cfg->endpoint, cfg->endpoint_len) : NULL;
+        c->service_name =
+            cfg->service_name ? sc_strndup(alloc, cfg->service_name, cfg->service_name_len) : NULL;
         c->enable_traces = cfg->enable_traces;
         c->enable_metrics = cfg->enable_metrics;
         c->enable_logs = cfg->enable_logs;
@@ -86,9 +93,11 @@ sc_error_t sc_otel_observer_create(sc_allocator_t *alloc,
 }
 
 sc_span_t *sc_span_start(sc_allocator_t *alloc, const char *name, size_t name_len) {
-    if (!alloc || !name) return NULL;
+    if (!alloc || !name)
+        return NULL;
     sc_span_t *s = (sc_span_t *)alloc->alloc(alloc->ctx, sizeof(*s));
-    if (!s) return NULL;
+    if (!s)
+        return NULL;
     memset(s, 0, sizeof(*s));
     s->alloc = alloc;
     s->name = sc_strndup(alloc, name, name_len);
@@ -97,7 +106,8 @@ sc_span_t *sc_span_start(sc_allocator_t *alloc, const char *name, size_t name_le
 }
 
 void sc_span_set_attr_str(sc_span_t *span, const char *key, const char *value) {
-    if (!span || !key || span->attr_count >= MAX_ATTRS) return;
+    if (!span || !key || span->attr_count >= MAX_ATTRS)
+        return;
     sc_attr_t *a = &span->attrs[span->attr_count++];
     a->kind = ATTR_STR;
     a->key = sc_strndup(span->alloc, key, strlen(key));
@@ -105,7 +115,8 @@ void sc_span_set_attr_str(sc_span_t *span, const char *key, const char *value) {
 }
 
 void sc_span_set_attr_int(sc_span_t *span, const char *key, int64_t value) {
-    if (!span || !key || span->attr_count >= MAX_ATTRS) return;
+    if (!span || !key || span->attr_count >= MAX_ATTRS)
+        return;
     sc_attr_t *a = &span->attrs[span->attr_count++];
     a->kind = ATTR_INT;
     a->key = sc_strndup(span->alloc, key, strlen(key));
@@ -113,7 +124,8 @@ void sc_span_set_attr_int(sc_span_t *span, const char *key, int64_t value) {
 }
 
 void sc_span_set_attr_double(sc_span_t *span, const char *key, double value) {
-    if (!span || !key || span->attr_count >= MAX_ATTRS) return;
+    if (!span || !key || span->attr_count >= MAX_ATTRS)
+        return;
     sc_attr_t *a = &span->attrs[span->attr_count++];
     a->kind = ATTR_DBL;
     a->key = sc_strndup(span->alloc, key, strlen(key));
@@ -121,14 +133,17 @@ void sc_span_set_attr_double(sc_span_t *span, const char *key, double value) {
 }
 
 sc_error_t sc_span_end(sc_span_t *span, sc_allocator_t *alloc) {
-    if (!span || !alloc) return SC_ERR_INVALID_ARGUMENT;
+    if (!span || !alloc)
+        return SC_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < span->attr_count; i++) {
         sc_attr_t *a = &span->attrs[i];
-        if (a->key) alloc->free(alloc->ctx, a->key, strlen(a->key) + 1);
+        if (a->key)
+            alloc->free(alloc->ctx, a->key, strlen(a->key) + 1);
         if (a->kind == ATTR_STR && a->str_val)
             alloc->free(alloc->ctx, a->str_val, strlen(a->str_val) + 1);
     }
-    if (span->name) alloc->free(alloc->ctx, span->name, strlen(span->name) + 1);
+    if (span->name)
+        alloc->free(alloc->ctx, span->name, strlen(span->name) + 1);
     alloc->free(alloc->ctx, span, sizeof(*span));
     return SC_OK;
 }

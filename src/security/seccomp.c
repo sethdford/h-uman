@@ -1,6 +1,6 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
 #include <string.h>
 
 /*
@@ -19,14 +19,14 @@
  */
 
 #ifdef __linux__
-#include <linux/seccomp.h>
-#include <linux/filter.h>
+#include <errno.h>
 #include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <stddef.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include <errno.h>
-#include <stddef.h>
 
 #if defined(__x86_64__)
 #define SC_SECCOMP_AUDIT_ARCH AUDIT_ARCH_X86_64
@@ -59,14 +59,16 @@ static bool seccomp_supported(void) {
      *  -1/other  = seccomp known but query failed → assume supported
      */
     int r = prctl(PR_GET_SECCOMP, 0, 0, 0, 0);
-    if (r >= 0) return true;
+    if (r >= 0)
+        return true;
     return errno != EINVAL;
 #endif
 }
 
 /* BPF instruction helpers */
 #define BPF_STMT_SC(code, k) ((struct sock_filter){(unsigned short)(code), 0, 0, (unsigned int)(k)})
-#define BPF_JUMP_SC(code, k, jt, jf) ((struct sock_filter){(unsigned short)(code), (jt), (jf), (unsigned int)(k)})
+#define BPF_JUMP_SC(code, k, jt, jf) \
+    ((struct sock_filter){(unsigned short)(code), (jt), (jf), (unsigned int)(k)})
 
 /*
  * Install seccomp-BPF filter. Called after fork(), before child runs.
@@ -136,23 +138,16 @@ static sc_error_t seccomp_apply(void *ctx) {
 
     /* Network syscalls to block when allow_network is false */
     static const int network_syscalls[] = {
-        SYS_socket,
-        SYS_connect,
-        SYS_bind,
-        SYS_listen,
-        SYS_accept,
+        SYS_socket,  SYS_connect,  SYS_bind,    SYS_listen,  SYS_accept,
 #ifdef SYS_accept4
         SYS_accept4,
 #endif
-        SYS_sendto,
-        SYS_recvfrom,
-        SYS_sendmsg,
-        SYS_recvmsg,
+        SYS_sendto,  SYS_recvfrom, SYS_sendmsg, SYS_recvmsg,
     };
 
     const size_t n_blocked = sizeof(blocked_syscalls) / sizeof(blocked_syscalls[0]);
-    const size_t n_network = sc->allow_network ? 0
-        : sizeof(network_syscalls) / sizeof(network_syscalls[0]);
+    const size_t n_network =
+        sc->allow_network ? 0 : sizeof(network_syscalls) / sizeof(network_syscalls[0]);
 
     /*
      * BPF program layout:
@@ -171,31 +166,26 @@ static sc_error_t seccomp_apply(void *ctx) {
     size_t idx = 0;
 
     /* Load architecture */
-    filter[idx++] = BPF_STMT_SC(BPF_LD | BPF_W | BPF_ABS,
-        offsetof(struct seccomp_data, arch));
+    filter[idx++] = BPF_STMT_SC(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch));
     /* Verify architecture matches */
-    filter[idx++] = BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K,
-        SC_SECCOMP_AUDIT_ARCH, 1, 0);
+    filter[idx++] = BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K, SC_SECCOMP_AUDIT_ARCH, 1, 0);
     filter[idx++] = BPF_STMT_SC(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS);
 
     /* Load syscall number */
-    filter[idx++] = BPF_STMT_SC(BPF_LD | BPF_W | BPF_ABS,
-        offsetof(struct seccomp_data, nr));
+    filter[idx++] = BPF_STMT_SC(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr));
 
     /* Block dangerous syscalls */
     for (size_t i = 0; i < n_blocked; i++) {
-        filter[idx++] = BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K,
-            (unsigned int)blocked_syscalls[i], 0, 1);
-        filter[idx++] = BPF_STMT_SC(BPF_RET | BPF_K,
-            SECCOMP_RET_ERRNO | (EPERM & 0xFFFF));
+        filter[idx++] =
+            BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K, (unsigned int)blocked_syscalls[i], 0, 1);
+        filter[idx++] = BPF_STMT_SC(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & 0xFFFF));
     }
 
     /* Block network syscalls if not allowed */
     for (size_t i = 0; i < n_network; i++) {
-        filter[idx++] = BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K,
-            (unsigned int)network_syscalls[i], 0, 1);
-        filter[idx++] = BPF_STMT_SC(BPF_RET | BPF_K,
-            SECCOMP_RET_ERRNO | (EPERM & 0xFFFF));
+        filter[idx++] =
+            BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K, (unsigned int)network_syscalls[i], 0, 1);
+        filter[idx++] = BPF_STMT_SC(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & 0xFFFF));
     }
 
     /* Allow everything else */
@@ -217,15 +207,22 @@ static sc_error_t seccomp_apply(void *ctx) {
 }
 #endif /* __linux__ */
 
-static sc_error_t seccomp_wrap(void *ctx, const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t seccomp_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+                               size_t buf_count, size_t *out_count) {
 #ifndef __linux__
-    (void)ctx; (void)argv; (void)argc; (void)buf; (void)buf_count; (void)out_count;
+    (void)ctx;
+    (void)argv;
+    (void)argc;
+    (void)buf;
+    (void)buf_count;
+    (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
     (void)ctx;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < argc)
+        return SC_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;
@@ -276,8 +273,7 @@ sc_sandbox_t sc_seccomp_sandbox_get(sc_seccomp_ctx_t *ctx) {
     return sb;
 }
 
-void sc_seccomp_sandbox_init(sc_seccomp_ctx_t *ctx, const char *workspace_dir,
-    bool allow_network) {
+void sc_seccomp_sandbox_init(sc_seccomp_ctx_t *ctx, const char *workspace_dir, bool allow_network) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->allow_network = allow_network;
     if (workspace_dir) {

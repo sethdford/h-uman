@@ -1,23 +1,26 @@
-#include "seaclaw/tool.h"
-#include <stdint.h>
 #include "seaclaw/tools/cron_runs.h"
-#include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/cron.h"
+#include "seaclaw/tool.h"
+#include <stdint.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
-#define CRON_RUNS_PARAMS "{\"type\":\"object\",\"properties\":{\"job_id\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}},\"required\":[\"job_id\"]}"
+#define CRON_RUNS_PARAMS                                                                         \
+    "{\"type\":\"object\",\"properties\":{\"job_id\":{\"type\":\"string\"},\"limit\":{\"type\":" \
+    "\"integer\"}},\"required\":[\"job_id\"]}"
 
-typedef struct { sc_cron_scheduler_t *sched; } sc_cron_tool_ctx_t;
+typedef struct {
+    sc_cron_scheduler_t *sched;
+} sc_cron_tool_ctx_t;
 
-static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
-    const sc_json_value_t *args, sc_tool_result_t *out)
-{
+static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                                    sc_tool_result_t *out) {
     sc_cron_tool_ctx_t *tctx = (sc_cron_tool_ctx_t *)ctx;
     (void)tctx;
     if (!args || !out) {
@@ -39,7 +42,8 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
     (void)job_id;
     double limit_val = sc_json_get_number(args, "limit", 10);
     size_t limit = (size_t)(limit_val > 0 ? limit_val : 10);
-    if (limit > 100) limit = 100;
+    if (limit > 100)
+        limit = 100;
 
 #if SC_IS_TEST
     sc_cron_scheduler_t *sched = sc_cron_create(alloc, 100, true);
@@ -63,11 +67,14 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
         *out = sc_tool_result_fail("out of memory", 12);
         return SC_ERR_OUT_OF_MEMORY;
     }
-    if (sc_json_buf_append_raw(&buf, "[", 1) != SC_OK) goto fail;
+    if (sc_json_buf_append_raw(&buf, "[", 1) != SC_OK)
+        goto fail;
     for (size_t i = 0; i < count; i++) {
-        if (i > 0) sc_json_buf_append_raw(&buf, ",", 1);
+        if (i > 0)
+            sc_json_buf_append_raw(&buf, ",", 1);
         const sc_cron_run_t *r = &runs[i];
-        if (sc_json_buf_append_raw(&buf, "{\"id\":", 6) != SC_OK) goto fail;
+        if (sc_json_buf_append_raw(&buf, "{\"id\":", 6) != SC_OK)
+            goto fail;
         char nbuf[32];
         int nlen = snprintf(nbuf, sizeof(nbuf), "%llu", (unsigned long long)r->id);
         sc_json_buf_append_raw(&buf, nbuf, (size_t)nlen);
@@ -83,7 +90,13 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
     sc_json_buf_append_raw(&buf, "]", 1);
 
     char *msg = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
-    if (!msg) { fail: sc_json_buf_free(&buf); sc_cron_destroy(sched, alloc); *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msg) {
+    fail:
+        sc_json_buf_free(&buf);
+        sc_cron_destroy(sched, alloc);
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     size_t out_len = buf.len;
     memcpy(msg, buf.ptr, out_len);
     msg[out_len] = '\0';
@@ -105,11 +118,14 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
         *out = sc_tool_result_fail("out of memory", 12);
         return SC_ERR_OUT_OF_MEMORY;
     }
-    if (sc_json_buf_append_raw(&buf, "[", 1) != SC_OK) goto fail;
+    if (sc_json_buf_append_raw(&buf, "[", 1) != SC_OK)
+        goto fail;
     for (size_t i = 0; i < count; i++) {
-        if (i > 0) sc_json_buf_append_raw(&buf, ",", 1);
+        if (i > 0)
+            sc_json_buf_append_raw(&buf, ",", 1);
         const sc_cron_run_t *r = &runs[i];
-        if (sc_json_buf_append_raw(&buf, "{\"id\":", 6) != SC_OK) goto fail;
+        if (sc_json_buf_append_raw(&buf, "{\"id\":", 6) != SC_OK)
+            goto fail;
         char nbuf[32];
         int nlen = snprintf(nbuf, sizeof(nbuf), "%llu", (unsigned long long)r->id);
         sc_json_buf_append_raw(&buf, nbuf, (size_t)nlen);
@@ -125,7 +141,12 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
     sc_json_buf_append_raw(&buf, "]", 1);
 
     char *msg = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
-    if (!msg) { fail: sc_json_buf_free(&buf); *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msg) {
+    fail:
+        sc_json_buf_free(&buf);
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     size_t out_len = buf.len;
     memcpy(msg, buf.ptr, out_len);
     msg[out_len] = '\0';
@@ -135,24 +156,38 @@ static sc_error_t cron_runs_execute(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static const char *cron_runs_name(void *ctx) { (void)ctx; return "cron_runs"; }
+static const char *cron_runs_name(void *ctx) {
+    (void)ctx;
+    return "cron_runs";
+}
 static const char *cron_runs_desc(void *ctx) {
     (void)ctx;
     return "List recent execution history for a cron job.";
 }
-static const char *cron_runs_params(void *ctx) { (void)ctx; return CRON_RUNS_PARAMS; }
-static void cron_runs_deinit(void *ctx, sc_allocator_t *alloc) { (void)ctx; (void)alloc; free(ctx); }
+static const char *cron_runs_params(void *ctx) {
+    (void)ctx;
+    return CRON_RUNS_PARAMS;
+}
+static void cron_runs_deinit(void *ctx, sc_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+    free(ctx);
+}
 
 static const sc_tool_vtable_t cron_runs_vtable = {
-    .execute = cron_runs_execute, .name = cron_runs_name,
-    .description = cron_runs_desc, .parameters_json = cron_runs_params,
+    .execute = cron_runs_execute,
+    .name = cron_runs_name,
+    .description = cron_runs_desc,
+    .parameters_json = cron_runs_params,
     .deinit = cron_runs_deinit,
 };
 
 sc_error_t sc_cron_runs_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched, sc_tool_t *out) {
-    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_cron_tool_ctx_t *ctx = (sc_cron_tool_ctx_t *)calloc(1, sizeof(sc_cron_tool_ctx_t));
-    if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    if (!ctx)
+        return SC_ERR_OUT_OF_MEMORY;
     ctx->sched = sched;
     out->ctx = ctx;
     out->vtable = &cron_runs_vtable;

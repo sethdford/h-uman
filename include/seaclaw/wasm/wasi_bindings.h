@@ -3,9 +3,9 @@
 
 #ifdef __wasi__
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /* File I/O */
 int sc_wasi_fd_read(int fd, void *buf, size_t len, size_t *nread);
@@ -14,8 +14,8 @@ int sc_wasi_fd_close(int fd);
 /* path: path relative to dir_fd (use 3 for preopen /). 0 on success. */
 int sc_wasi_path_open(int dir_fd, const char *path, int *out_fd);
 /* Read entire file; caller frees buf. Returns 0 on success. */
-int sc_wasi_file_read_all(void *alloc_ctx, void *(*alloc_fn)(void *, size_t),
-    int dir_fd, const char *path, char **buf_out, size_t *len_out);
+int sc_wasi_file_read_all(void *alloc_ctx, void *(*alloc_fn)(void *, size_t), int dir_fd,
+                          const char *path, char **buf_out, size_t *len_out);
 
 /* Clock */
 int sc_wasi_clock_time_get_realtime(uint64_t *out_ns);

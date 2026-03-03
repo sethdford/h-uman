@@ -22,8 +22,6 @@ typedef struct sc_hardware_info {
  * Caller provides pre-allocated results array; count is in/out.
  * Returns SC_OK on success.
  */
-sc_error_t sc_hardware_discover(sc_allocator_t *alloc,
-    sc_hardware_info_t *results,
-    size_t *count);
+sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *results, size_t *count);
 
 #endif /* SC_HARDWARE_H */

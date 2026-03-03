@@ -58,8 +58,8 @@ size_t sc_channel_catalog_configured_count(const sc_config_t *cfg, sc_channel_id
 bool sc_channel_catalog_is_configured(const sc_config_t *cfg, sc_channel_id_t id);
 
 /* Status text for display. Caller provides buf of at least 64 bytes. */
-const char *sc_channel_catalog_status_text(const sc_config_t *cfg,
-    const sc_channel_meta_t *meta, char *buf, size_t buf_size);
+const char *sc_channel_catalog_status_text(const sc_config_t *cfg, const sc_channel_meta_t *meta,
+                                           char *buf, size_t buf_size);
 
 /* Find meta by key. */
 const sc_channel_meta_t *sc_channel_catalog_find_by_key(const char *key);

@@ -7,8 +7,8 @@
 #include "seaclaw/tool.h"
 #include <stddef.h>
 
-sc_error_t sc_browser_open_create(sc_allocator_t *alloc,
-    const char *const *allowed_domains, size_t allowed_count,
-    sc_security_policy_t *policy, sc_tool_t *out);
+sc_error_t sc_browser_open_create(sc_allocator_t *alloc, const char *const *allowed_domains,
+                                  size_t allowed_count, sc_security_policy_t *policy,
+                                  sc_tool_t *out);
 
 #endif

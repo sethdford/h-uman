@@ -1,62 +1,60 @@
 #include "seaclaw/agent/cli.h"
-#include <stdint.h>
-#include "seaclaw/agent/tui.h"
-#include "seaclaw/config.h"
 #include "seaclaw/agent.h"
-#include "seaclaw/provider.h"
-#include "seaclaw/providers/factory.h"
-#include "seaclaw/runtime.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/factory.h"
-#include "seaclaw/security.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/observability/log_observer.h"
+#include "seaclaw/agent/tui.h"
 #include "seaclaw/channels/cli.h"
+#include "seaclaw/config.h"
+#include "seaclaw/core/error.h"
+#include "seaclaw/core/string.h"
 #include "seaclaw/cron.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
 #include "seaclaw/memory/retrieval.h"
 #include "seaclaw/memory/vector.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
+#include "seaclaw/observability/log_observer.h"
+#include "seaclaw/provider.h"
+#include "seaclaw/providers/factory.h"
+#include "seaclaw/runtime.h"
+#include "seaclaw/security.h"
+#include "seaclaw/security/sandbox.h"
+#include "seaclaw/security/sandbox_internal.h"
+#include "seaclaw/tool.h"
+#include "seaclaw/tools/factory.h"
 #include "seaclaw/version.h"
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 
 #if defined(SC_GATEWAY_POSIX) && !defined(SC_IS_TEST)
-#include <pthread.h>
 #include <poll.h>
-#include <unistd.h>
-#include <termios.h>
+#include <pthread.h>
 #include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #define SC_CLI_ASYNC 1
 #else
 #define SC_CLI_ASYNC 0
 #endif
 
-#define SC_CODENAME "SeaClaw"
+#define SC_CODENAME     "SeaClaw"
 #define SC_CLI_MAX_PATH 1024
 
 /* ── ANSI escape helpers ─────────────────────────────────────────────── */
-#define SC_ANSI_RESET   "\033[0m"
-#define SC_ANSI_BOLD    "\033[1m"
-#define SC_ANSI_DIM     "\033[2m"
-#define SC_ANSI_CYAN    "\033[36m"
-#define SC_ANSI_GREEN   "\033[32m"
-#define SC_ANSI_YELLOW  "\033[33m"
+#define SC_ANSI_RESET       "\033[0m"
+#define SC_ANSI_BOLD        "\033[1m"
+#define SC_ANSI_DIM         "\033[2m"
+#define SC_ANSI_CYAN        "\033[36m"
+#define SC_ANSI_GREEN       "\033[32m"
+#define SC_ANSI_YELLOW      "\033[33m"
 #define SC_ANSI_HIDE_CURSOR "\033[?25l"
 #define SC_ANSI_SHOW_CURSOR "\033[?25h"
 #define SC_ANSI_CLEAR_LINE  "\033[2K\r"
 
 #if SC_CLI_ASYNC
 static const char *spinner_frames[] = {
-    "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
-    "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
-    "\xe2\xa0\x87", "\xe2\xa0\x8f"
-};
+    "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8", "\xe2\xa0\xbc",
+    "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7", "\xe2\xa0\x87", "\xe2\xa0\x8f"};
 #define SPINNER_FRAME_COUNT 10
 #endif
 
@@ -72,11 +70,11 @@ static void sigint_handler(int sig) {
 }
 
 /* ── Memory from config ──────────────────────────────────────────────── */
-static sc_memory_t create_memory_from_config(sc_allocator_t *alloc,
-    const sc_config_t *cfg, const char *ws)
-{
+static sc_memory_t create_memory_from_config(sc_allocator_t *alloc, const sc_config_t *cfg,
+                                             const char *ws) {
     const char *backend = cfg->memory.backend;
-    if (!backend) backend = "markdown";
+    if (!backend)
+        backend = "markdown";
 
     if (strcmp(backend, "sqlite") == 0) {
         const char *path = cfg->memory.sqlite_path;
@@ -85,10 +83,12 @@ static sc_memory_t create_memory_from_config(sc_allocator_t *alloc,
             const char *home = getenv("HOME");
             if (home) {
                 int n = snprintf(buf, sizeof(buf), "%s/.seaclaw/memory.db", home);
-                if (n > 0 && (size_t)n < sizeof(buf)) path = buf;
+                if (n > 0 && (size_t)n < sizeof(buf))
+                    path = buf;
             }
         }
-        if (path) return sc_sqlite_memory_create(alloc, path);
+        if (path)
+            return sc_sqlite_memory_create(alloc, path);
         return sc_markdown_memory_create(alloc, ws);
     }
 
@@ -123,11 +123,14 @@ static sc_memory_t create_memory_from_config(sc_allocator_t *alloc,
 #ifdef SC_ENABLE_POSTGRES
     if (strcmp(backend, "postgres") == 0) {
         const char *url = cfg->memory.postgres_url;
-        if (!url) url = "postgres://localhost/seaclaw";
+        if (!url)
+            url = "postgres://localhost/seaclaw";
         const char *schema = cfg->memory.postgres_schema;
-        if (!schema) schema = "public";
+        if (!schema)
+            schema = "public";
         const char *table = cfg->memory.postgres_table;
-        if (!table) table = "memories";
+        if (!table)
+            table = "memories";
         return sc_postgres_memory_create(alloc, url, schema, table);
     }
 #endif
@@ -135,21 +138,26 @@ static sc_memory_t create_memory_from_config(sc_allocator_t *alloc,
 #ifdef SC_ENABLE_REDIS_ENGINE
     if (strcmp(backend, "redis") == 0) {
         const char *host = cfg->memory.redis_host;
-        if (!host) host = "localhost";
+        if (!host)
+            host = "localhost";
         unsigned short port = cfg->memory.redis_port;
-        if (!port) port = 6379;
+        if (!port)
+            port = 6379;
         const char *prefix = cfg->memory.redis_key_prefix;
-        if (!prefix) prefix = "sc_mem";
+        if (!prefix)
+            prefix = "sc_mem";
         return sc_redis_memory_create(alloc, host, port, prefix);
     }
 #endif
 
     if (strcmp(backend, "api") == 0) {
         const char *base = cfg->memory.api_base_url;
-        if (!base) base = "https://api.example.com/memory";
+        if (!base)
+            base = "https://api.example.com/memory";
         const char *key = cfg->memory.api_key;
         uint32_t timeout = cfg->memory.api_timeout_ms;
-        if (!timeout) timeout = 5000;
+        if (!timeout)
+            timeout = 5000;
         return sc_api_memory_create(alloc, base, key, timeout);
     }
 
@@ -158,20 +166,34 @@ static sc_memory_t create_memory_from_config(sc_allocator_t *alloc,
 
 /* ── Arg parsing ─────────────────────────────────────────────────────── */
 sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
-    sc_parsed_agent_args_t *out) {
-    if (!argv || !out) return SC_ERR_INVALID_ARGUMENT;
+                                   sc_parsed_agent_args_t *out) {
+    if (!argv || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
     for (size_t i = 0; i < argc; i++) {
         const char *a = argv[i];
-        if (!a) continue;
+        if (!a)
+            continue;
         if (strcmp(a, "-m") == 0 || strcmp(a, "--message") == 0) {
-            if (i + 1 < argc) { out->message = argv[i + 1]; i++; }
+            if (i + 1 < argc) {
+                out->message = argv[i + 1];
+                i++;
+            }
         } else if (strcmp(a, "-s") == 0 || strcmp(a, "--session") == 0) {
-            if (i + 1 < argc) { out->session_id = argv[i + 1]; i++; }
+            if (i + 1 < argc) {
+                out->session_id = argv[i + 1];
+                i++;
+            }
         } else if (strcmp(a, "--provider") == 0) {
-            if (i + 1 < argc) { out->provider_override = argv[i + 1]; i++; }
+            if (i + 1 < argc) {
+                out->provider_override = argv[i + 1];
+                i++;
+            }
         } else if (strcmp(a, "--model") == 0) {
-            if (i + 1 < argc) { out->model_override = argv[i + 1]; i++; }
+            if (i + 1 < argc) {
+                out->model_override = argv[i + 1];
+                i++;
+            }
         } else if (strcmp(a, "--temperature") == 0) {
             if (i + 1 < argc) {
                 out->temperature_override = 0.0;
@@ -215,8 +237,8 @@ typedef struct agent_turn_ctx {
 
 static void *agent_turn_thread(void *arg) {
     agent_turn_ctx_t *ctx = (agent_turn_ctx_t *)arg;
-    ctx->err = sc_agent_turn_stream(ctx->agent, ctx->msg, ctx->msg_len,
-        cli_stream_token, NULL, &ctx->response, &ctx->response_len);
+    ctx->err = sc_agent_turn_stream(ctx->agent, ctx->msg, ctx->msg_len, cli_stream_token, NULL,
+                                    &ctx->response, &ctx->response_len);
     ctx->done = 1;
     return NULL;
 }
@@ -237,15 +259,15 @@ static void run_spinner_loop(agent_turn_ctx_t *tctx) {
         if (!cli_stream_started) {
             int width = get_terminal_width();
             const char *label = " Thinking...";
-            printf(SC_ANSI_CLEAR_LINE SC_ANSI_CYAN "%s" SC_ANSI_RESET
-                   SC_ANSI_DIM "%s" SC_ANSI_RESET,
-                spinner_frames[frame % SPINNER_FRAME_COUNT], label);
+            printf(SC_ANSI_CLEAR_LINE SC_ANSI_CYAN "%s" SC_ANSI_RESET SC_ANSI_DIM
+                                                   "%s" SC_ANSI_RESET,
+                   spinner_frames[frame % SPINNER_FRAME_COUNT], label);
             (void)width;
             fflush(stdout);
             frame++;
         }
 
-        struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+        struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN};
         poll(&pfd, 1, 80);
     }
 
@@ -261,17 +283,17 @@ static void run_spinner_loop(agent_turn_ctx_t *tctx) {
 
 /* ── Print welcome banner ────────────────────────────────────────────── */
 static void print_banner(const char *prov_name, const char *model, size_t tools_count) {
-    printf(SC_ANSI_BOLD SC_ANSI_CYAN "%s" SC_ANSI_RESET " v%s\n",
-        SC_CODENAME, sc_version_string());
-    printf(SC_ANSI_DIM "Provider: %s | Model: %s | Tools: %zu" SC_ANSI_RESET "\n",
-        prov_name, (model[0] ? model : "(default)"), tools_count);
-    printf("Type your message, or " SC_ANSI_DIM "'exit'" SC_ANSI_RESET
-           " to leave. " SC_ANSI_DIM "Ctrl+C cancels a running turn." SC_ANSI_RESET "\n\n");
+    printf(SC_ANSI_BOLD SC_ANSI_CYAN "%s" SC_ANSI_RESET " v%s\n", SC_CODENAME, sc_version_string());
+    printf(SC_ANSI_DIM "Provider: %s | Model: %s | Tools: %zu" SC_ANSI_RESET "\n", prov_name,
+           (model[0] ? model : "(default)"), tools_count);
+    printf("Type your message, or " SC_ANSI_DIM "'exit'" SC_ANSI_RESET " to leave. " SC_ANSI_DIM
+           "Ctrl+C cancels a running turn." SC_ANSI_RESET "\n\n");
 }
 
 /* ── Main CLI loop ───────────────────────────────────────────────────── */
 sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size_t argc) {
-    if (!alloc) return SC_ERR_INVALID_ARGUMENT;
+    if (!alloc)
+        return SC_ERR_INVALID_ARGUMENT;
 
     sc_parsed_agent_args_t parsed_args;
     sc_agent_cli_parse_args(argv, argc, &parsed_args);
@@ -291,11 +313,11 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     size_t base_url_len = base_url ? strlen(base_url) : 0;
 
     sc_provider_t provider;
-    err = sc_provider_create(alloc, prov_name, prov_name_len,
-        api_key, api_key_len, base_url, base_url_len, &provider);
+    err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
+                             base_url_len, &provider);
     if (err != SC_OK) {
-        fprintf(stderr, "[%s] Provider '%s' init failed: %s\n",
-            SC_CODENAME, prov_name, sc_error_string(err));
+        fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", SC_CODENAME, prov_name,
+                sc_error_string(err));
         sc_config_deinit(&cfg);
         return err;
     }
@@ -310,7 +332,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     err = sc_runtime_from_config(&cfg, &runtime);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Runtime '%s' not supported: %s\n", SC_CODENAME,
-            cfg.runtime.kind ? cfg.runtime.kind : "(null)", sc_error_string(err));
+                cfg.runtime.kind ? cfg.runtime.kind : "(null)", sc_error_string(err));
         sc_config_deinit(&cfg);
         return err;
     }
@@ -328,7 +350,9 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
 
     sc_sandbox_alloc_t sb_alloc = {
-        .ctx = alloc->ctx, .alloc = alloc->alloc, .free = alloc->free,
+        .ctx = alloc->ctx,
+        .alloc = alloc->alloc,
+        .free = alloc->free,
     };
     sc_sandbox_storage_t *sb_storage = NULL;
     sc_sandbox_t sandbox = {0};
@@ -338,8 +362,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         cfg.security.sandbox_config.backend != SC_SANDBOX_NONE) {
         sb_storage = sc_sandbox_storage_create(&sb_alloc);
         if (sb_storage) {
-            sandbox = sc_sandbox_create(cfg.security.sandbox_config.backend,
-                ws, sb_storage, &sb_alloc);
+            sandbox =
+                sc_sandbox_create(cfg.security.sandbox_config.backend, ws, sb_storage, &sb_alloc);
             if (sandbox.vtable) {
                 policy.sandbox = &sandbox;
                 if (strcmp(sc_sandbox_name(&sandbox), "firejail") == 0 &&
@@ -358,8 +382,9 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         net_proxy.deny_all = cfg.security.sandbox_config.net_proxy.deny_all;
         net_proxy.proxy_addr = cfg.security.sandbox_config.net_proxy.proxy_addr;
         net_proxy.allowed_domains_count = 0;
-        for (size_t i = 0; i < cfg.security.sandbox_config.net_proxy.allowed_domains_len
-                && i < SC_NET_PROXY_MAX_DOMAINS; i++) {
+        for (size_t i = 0; i < cfg.security.sandbox_config.net_proxy.allowed_domains_len &&
+                           i < SC_NET_PROXY_MAX_DOMAINS;
+             i++) {
             net_proxy.allowed_domains[net_proxy.allowed_domains_count++] =
                 cfg.security.sandbox_config.net_proxy.allowed_domains[i];
         }
@@ -377,61 +402,66 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     sc_memory_t memory = create_memory_from_config(alloc, &cfg, ws);
     sc_session_store_t session_store = {0};
-    if (memory.vtable && strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)
+    if (memory.vtable &&
+        strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)
         session_store = sc_sqlite_memory_get_session_store(&memory);
 
     sc_embedder_t embedder = sc_embedder_local_create(alloc);
     sc_vector_store_t vector_store = sc_vector_store_mem_create(alloc);
-    sc_retrieval_engine_t retrieval_engine = sc_retrieval_create_with_vector(
-        alloc, &memory, &embedder, &vector_store);
+    sc_retrieval_engine_t retrieval_engine =
+        sc_retrieval_create_with_vector(alloc, &memory, &embedder, &vector_store);
 
     sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
 
     sc_tool_t *tools = NULL;
     size_t tools_count = 0;
     err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
-        memory.vtable ? &memory : NULL, cron, NULL, &tools, &tools_count);
+                                  memory.vtable ? &memory : NULL, cron, NULL, &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
-        if (cron) sc_cron_destroy(cron, alloc);
+        if (cron)
+            sc_cron_destroy(cron, alloc);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
         if (vector_store.vtable && vector_store.vtable->deinit)
             vector_store.vtable->deinit(vector_store.ctx, alloc);
         if (embedder.vtable && embedder.vtable->deinit)
             embedder.vtable->deinit(embedder.ctx, alloc);
-        if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
-        if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
-        if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        if (memory.vtable && memory.vtable->deinit)
+            memory.vtable->deinit(memory.ctx);
+        if (policy.tracker)
+            sc_rate_tracker_destroy(policy.tracker);
+        if (sb_storage)
+            sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_config_deinit(&cfg);
         return err;
     }
 
     sc_agent_t agent;
-    err = sc_agent_from_config(&agent, alloc, provider,
-        tools, tools_count,
-        memory.vtable ? &memory : NULL,
-        session_store.vtable ? &session_store : NULL,
-        &observer, NULL,
-        model, strlen(model),
-        prov_name, prov_name_len,
-        temp, ws, strlen(ws), max_iters, max_hist, cfg.memory.auto_save,
-        2, NULL, 0);
+    err = sc_agent_from_config(&agent, alloc, provider, tools, tools_count,
+                               memory.vtable ? &memory : NULL,
+                               session_store.vtable ? &session_store : NULL, &observer, NULL, model,
+                               strlen(model), prov_name, prov_name_len, temp, ws, strlen(ws),
+                               max_iters, max_hist, cfg.memory.auto_save, 2, NULL, 0);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
         if (observer.vtable && observer.vtable->deinit)
             observer.vtable->deinit(observer.ctx);
-        if (log_fp) fclose(log_fp);
+        if (log_fp)
+            fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
-        if (cron) sc_cron_destroy(cron, alloc);
+        if (cron)
+            sc_cron_destroy(cron, alloc);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
         if (vector_store.vtable && vector_store.vtable->deinit)
             vector_store.vtable->deinit(vector_store.ctx, alloc);
         if (embedder.vtable && embedder.vtable->deinit)
             embedder.vtable->deinit(embedder.ctx, alloc);
-        if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
-        if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        if (policy.tracker)
+            sc_rate_tracker_destroy(policy.tracker);
+        if (sb_storage)
+            sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -445,8 +475,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             err = sc_tui_run(&tui_state);
             sc_tui_deinit(&tui_state);
         } else {
-            fprintf(stderr, "[%s] TUI not available: %s\n", SC_CODENAME,
-                sc_error_string(err));
+            fprintf(stderr, "[%s] TUI not available: %s\n", SC_CODENAME, sc_error_string(err));
         }
         sc_agent_deinit(&agent);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
@@ -455,12 +484,17 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             vector_store.vtable->deinit(vector_store.ctx, alloc);
         if (embedder.vtable && embedder.vtable->deinit)
             embedder.vtable->deinit(embedder.ctx, alloc);
-        if (memory.vtable && memory.vtable->deinit) memory.vtable->deinit(memory.ctx);
-        if (observer.vtable && observer.vtable->deinit) observer.vtable->deinit(observer.ctx);
-        if (log_fp) fclose(log_fp);
+        if (memory.vtable && memory.vtable->deinit)
+            memory.vtable->deinit(memory.ctx);
+        if (observer.vtable && observer.vtable->deinit)
+            observer.vtable->deinit(observer.ctx);
+        if (log_fp)
+            fclose(log_fp);
         sc_tools_destroy_default(alloc, tools, tools_count);
-        if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
-        if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        if (policy.tracker)
+            sc_rate_tracker_destroy(policy.tracker);
+        if (sb_storage)
+            sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -482,7 +516,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
         size_t line_len = 0;
         char *line = sc_cli_readline(alloc, &line_len);
-        if (!line) break;
+        if (!line)
+            break;
 
         if (sc_cli_is_quit_command(line, line_len)) {
             alloc->free(alloc->ctx, line, line_len + 1);
@@ -518,8 +553,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         run_spinner_loop(&tctx);
 
         if (g_cancel && !tctx.done) {
-            printf(SC_ANSI_CLEAR_LINE SC_ANSI_SHOW_CURSOR
-                   SC_ANSI_YELLOW "Cancelled." SC_ANSI_RESET "\n");
+            printf(SC_ANSI_CLEAR_LINE SC_ANSI_SHOW_CURSOR SC_ANSI_YELLOW "Cancelled." SC_ANSI_RESET
+                                                                         "\n");
         }
 
         pthread_join(tid, NULL);
@@ -542,8 +577,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         size_t response_len = 0;
         printf("Thinking...\r");
         fflush(stdout);
-        err = sc_agent_turn_stream(&agent, line, line_len,
-            cli_stream_token, NULL, &response, &response_len);
+        err = sc_agent_turn_stream(&agent, line, line_len, cli_stream_token, NULL, &response,
+                                   &response_len);
         if (!cli_stream_started) {
             printf("                    \r");
             fflush(stdout);
@@ -575,11 +610,15 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         memory.vtable->deinit(memory.ctx);
     if (observer.vtable && observer.vtable->deinit)
         observer.vtable->deinit(observer.ctx);
-    if (log_fp) fclose(log_fp);
+    if (log_fp)
+        fclose(log_fp);
     sc_tools_destroy_default(alloc, tools, tools_count);
-    if (cron) sc_cron_destroy(cron, alloc);
-    if (policy.tracker) sc_rate_tracker_destroy(policy.tracker);
-    if (sb_storage) sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+    if (cron)
+        sc_cron_destroy(cron, alloc);
+    if (policy.tracker)
+        sc_rate_tracker_destroy(policy.tracker);
+    if (sb_storage)
+        sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
     sc_config_deinit(&cfg);
     return SC_OK;
 }

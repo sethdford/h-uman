@@ -1,18 +1,18 @@
-#include "seaclaw/tunnel.h"
-#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
-#include <stdlib.h>
+#include "seaclaw/tunnel.h"
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #define sc_popen(cmd, mode) _popen(cmd, mode)
-#define sc_pclose(f) _pclose(f)
+#define sc_pclose(f)        _pclose(f)
 #else
 #include <unistd.h>
 #define sc_popen(cmd, mode) popen(cmd, mode)
-#define sc_pclose(f) pclose(f)
+#define sc_pclose(f)        pclose(f)
 #endif
 
 typedef struct sc_tailscale_tunnel {
@@ -24,8 +24,8 @@ typedef struct sc_tailscale_tunnel {
 
 static void impl_stop(void *ctx);
 
-static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
-    char **public_url_out, size_t *url_len) {
+static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port, char **public_url_out,
+                                    size_t *url_len) {
     sc_tailscale_tunnel_t *self = (sc_tailscale_tunnel_t *)ctx;
 
     impl_stop(ctx);
@@ -33,7 +33,8 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
 #if SC_IS_TEST
     (void)local_port;
     char *mock = sc_strdup(self->alloc, "https://test-tailscale.ts.net");
-    if (!mock) return SC_TUNNEL_ERR_START_FAILED;
+    if (!mock)
+        return SC_TUNNEL_ERR_START_FAILED;
     if (self->public_url)
         self->alloc->free(self->alloc->ctx, self->public_url, strlen(self->public_url) + 1);
     self->public_url = mock;
@@ -43,11 +44,11 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
     return SC_TUNNEL_ERR_OK;
 #else
     char cmd[256];
-    snprintf(cmd, sizeof(cmd), "tailscale funnel %u 2>/dev/null",
-        (unsigned)local_port);
+    snprintf(cmd, sizeof(cmd), "tailscale funnel %u 2>/dev/null", (unsigned)local_port);
 
     FILE *f = sc_popen(cmd, "r");
-    if (!f) return SC_TUNNEL_ERR_PROCESS_SPAWN;
+    if (!f)
+        return SC_TUNNEL_ERR_PROCESS_SPAWN;
 
     self->child_handle = f;
     self->running = true;
@@ -66,7 +67,9 @@ static sc_tunnel_error_t impl_start(void *ctx, uint16_t local_port,
                 }
             }
             size_t urllen = 0;
-            for (const char *p = start; *p && *p != ' ' && *p != '\n' && *p != '\r' && *p != '>' && urllen < 200; p++, urllen++)
+            for (const char *p = start;
+                 *p && *p != ' ' && *p != '\n' && *p != '\r' && *p != '>' && urllen < 200;
+                 p++, urllen++)
                 ;
             found_url = sc_strndup(self->alloc, start, urllen);
             break;
@@ -133,9 +136,10 @@ static const sc_tunnel_vtable_t tailscale_vtable = {
 };
 
 sc_tunnel_t sc_tailscale_tunnel_create(sc_allocator_t *alloc) {
-    sc_tailscale_tunnel_t *self = (sc_tailscale_tunnel_t *)alloc->alloc(alloc->ctx,
-        sizeof(sc_tailscale_tunnel_t));
-    if (!self) return (sc_tunnel_t){ .ctx = NULL, .vtable = NULL };
+    sc_tailscale_tunnel_t *self =
+        (sc_tailscale_tunnel_t *)alloc->alloc(alloc->ctx, sizeof(sc_tailscale_tunnel_t));
+    if (!self)
+        return (sc_tunnel_t){.ctx = NULL, .vtable = NULL};
     self->public_url = NULL;
     self->running = false;
     self->child_handle = NULL;

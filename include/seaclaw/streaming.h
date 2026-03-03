@@ -26,9 +26,9 @@ static inline sc_stream_chunk_t sc_stream_chunk_final(void) {
 
 /* Forward provider chunk to callback if non-skip */
 static inline void sc_stream_forward(sc_stream_callback_t callback, void *ctx,
-    const sc_stream_chunk_t *chunk)
-{
-    if (!callback || !chunk) return;
+                                     const sc_stream_chunk_t *chunk) {
+    if (!callback || !chunk)
+        return;
     if (chunk->is_final) {
         callback(ctx, chunk);
         return;

@@ -16,8 +16,8 @@
  * @param workspace_dir_len Length of workspace_dir
  * @return SC_OK if valid, SC_ERR_TOOL_VALIDATION on rejection
  */
-sc_error_t sc_tool_validate_path(const char *path,
-    const char *workspace_dir, size_t workspace_dir_len);
+sc_error_t sc_tool_validate_path(const char *path, const char *workspace_dir,
+                                 size_t workspace_dir_len);
 
 /**
  * URL validation for web tools.

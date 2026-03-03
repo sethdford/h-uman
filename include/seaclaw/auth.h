@@ -3,19 +3,19 @@
 
 #include "core/allocator.h"
 #include "core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * OAuth token
  * ────────────────────────────────────────────────────────────────────────── */
 
 typedef struct sc_oauth_token {
-    char *access_token;    /* owned */
-    char *refresh_token;   /* owned, may be NULL */
+    char *access_token;  /* owned */
+    char *refresh_token; /* owned, may be NULL */
     int64_t expires_at;
-    char *token_type;      /* owned, e.g. "Bearer" */
+    char *token_type; /* owned, e.g. "Bearer" */
 } sc_oauth_token_t;
 
 void sc_oauth_token_deinit(sc_oauth_token_t *t, sc_allocator_t *alloc);
@@ -27,17 +27,13 @@ bool sc_oauth_token_is_expired(const sc_oauth_token_t *t);
  * Credential store — ~/.seaclaw/auth.json
  * ────────────────────────────────────────────────────────────────────────── */
 
-sc_error_t sc_auth_save_credential(sc_allocator_t *alloc,
-                                   const char *provider,
+sc_error_t sc_auth_save_credential(sc_allocator_t *alloc, const char *provider,
                                    const sc_oauth_token_t *token);
 
-sc_error_t sc_auth_load_credential(sc_allocator_t *alloc,
-                                   const char *provider,
+sc_error_t sc_auth_load_credential(sc_allocator_t *alloc, const char *provider,
                                    sc_oauth_token_t *token_out);
 
-sc_error_t sc_auth_delete_credential(sc_allocator_t *alloc,
-                                     const char *provider,
-                                     bool *was_found);
+sc_error_t sc_auth_delete_credential(sc_allocator_t *alloc, const char *provider, bool *was_found);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * API key storage — get/set for a provider
@@ -45,9 +41,7 @@ sc_error_t sc_auth_delete_credential(sc_allocator_t *alloc,
 
 char *sc_auth_get_api_key(sc_allocator_t *alloc, const char *provider);
 
-sc_error_t sc_auth_set_api_key(sc_allocator_t *alloc,
-                               const char *provider,
-                               const char *api_key);
+sc_error_t sc_auth_set_api_key(sc_allocator_t *alloc, const char *provider, const char *api_key);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * OAuth device code flow (RFC 8628)
@@ -63,27 +57,20 @@ typedef struct sc_device_code {
 
 void sc_device_code_deinit(sc_device_code_t *dc, sc_allocator_t *alloc);
 
-sc_error_t sc_auth_start_device_flow(sc_allocator_t *alloc,
-                                     const char *client_id,
-                                     const char *device_auth_url,
-                                     const char *scope,
+sc_error_t sc_auth_start_device_flow(sc_allocator_t *alloc, const char *client_id,
+                                     const char *device_auth_url, const char *scope,
                                      sc_device_code_t *out);
 
-sc_error_t sc_auth_poll_device_code(sc_allocator_t *alloc,
-                                    const char *token_url,
-                                    const char *client_id,
-                                    const char *device_code,
-                                    uint32_t interval_secs,
-                                    sc_oauth_token_t *token_out);
+sc_error_t sc_auth_poll_device_code(sc_allocator_t *alloc, const char *token_url,
+                                    const char *client_id, const char *device_code,
+                                    uint32_t interval_secs, sc_oauth_token_t *token_out);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Token refresh
  * ────────────────────────────────────────────────────────────────────────── */
 
-sc_error_t sc_auth_refresh_token(sc_allocator_t *alloc,
-                                const char *token_url,
-                                const char *client_id,
-                                const char *refresh_token,
-                                sc_oauth_token_t *token_out);
+sc_error_t sc_auth_refresh_token(sc_allocator_t *alloc, const char *token_url,
+                                 const char *client_id, const char *refresh_token,
+                                 sc_oauth_token_t *token_out);
 
 #endif /* SC_AUTH_H */

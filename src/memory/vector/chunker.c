@@ -1,6 +1,6 @@
-#include "seaclaw/memory/vector.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/memory/vector.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,33 +13,40 @@ static int is_space(char c) {
 }
 
 /* Find next split point: sentence end (.!? + space), paragraph (\n\n), or word boundary. */
-static const char *find_split_point(const char *p, const char *end,
-    size_t max_from_start, size_t min_chunk) {
+static const char *find_split_point(const char *p, const char *end, size_t max_from_start,
+                                    size_t min_chunk) {
     const char *best = NULL;
     size_t best_dist = 0;
 
     for (const char *s = p; s < end && (size_t)(s - p) < max_from_start; s++) {
         if (s + 1 < end && *s == '\n' && *(s + 1) == '\n') {
             size_t d = (size_t)(s - p);
-            if (d >= min_chunk) return s + 2;
+            if (d >= min_chunk)
+                return s + 2;
             best = s + 2;
             best_dist = d;
         }
         if (is_sentence_end(*s) && s + 1 < end && is_space(*(s + 1))) {
             size_t d = (size_t)(s - p) + 1;
-            if (d >= min_chunk) return s + 1;
-            if (d > best_dist) { best = s + 1; best_dist = d; }
+            if (d >= min_chunk)
+                return s + 1;
+            if (d > best_dist) {
+                best = s + 1;
+                best_dist = d;
+            }
         }
         if (*s == ' ' && (size_t)(s - p) >= min_chunk)
-            if (!best || (size_t)(s - p) > best_dist) { best = s + 1; best_dist = (size_t)(s - p); }
+            if (!best || (size_t)(s - p) > best_dist) {
+                best = s + 1;
+                best_dist = (size_t)(s - p);
+            }
     }
     return best ? best : end;
 }
 
-sc_error_t sc_chunker_split(sc_allocator_t *alloc,
-    const char *text, size_t text_len,
-    const sc_chunker_options_t *opts,
-    sc_text_chunk_t **out, size_t *out_count) {
+sc_error_t sc_chunker_split(sc_allocator_t *alloc, const char *text, size_t text_len,
+                            const sc_chunker_options_t *opts, sc_text_chunk_t **out,
+                            size_t *out_count) {
     if (!alloc || !opts || !out || !out_count)
         return SC_ERR_INVALID_ARGUMENT;
     if (!text && text_len > 0)
@@ -55,8 +62,8 @@ sc_error_t sc_chunker_split(sc_allocator_t *alloc,
     size_t overlap = opts->overlap;
 
     /* Build chunks dynamically (simple: over-allocate, trim later) */
-    sc_text_chunk_t *chunks = (sc_text_chunk_t *)alloc->alloc(alloc->ctx,
-        sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+    sc_text_chunk_t *chunks = (sc_text_chunk_t *)alloc->alloc(
+        alloc->ctx, sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
     if (!chunks)
         return SC_ERR_OUT_OF_MEMORY;
 
@@ -82,27 +89,31 @@ sc_error_t sc_chunker_split(sc_allocator_t *alloc,
         chunks[count].offset = (size_t)(p - text);
         count++;
 
-        if (split >= end) break;
+        if (split >= end)
+            break;
 
         /* Advance with overlap */
         if (overlap > 0 && chunk_len > overlap) {
             p = split - overlap;
-            if (p < text) p = text;
+            if (p < text)
+                p = text;
         } else {
             p = split;
         }
     }
 
     if (count == 0) {
-        alloc->free(alloc->ctx, chunks, sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+        alloc->free(alloc->ctx, chunks,
+                    sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
         return SC_OK;
     }
 
     /* Trim to exact size */
-    sc_text_chunk_t *trimmed = (sc_text_chunk_t *)alloc->alloc(alloc->ctx,
-        sizeof(sc_text_chunk_t) * count);
+    sc_text_chunk_t *trimmed =
+        (sc_text_chunk_t *)alloc->alloc(alloc->ctx, sizeof(sc_text_chunk_t) * count);
     if (!trimmed) {
-        alloc->free(alloc->ctx, chunks, sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+        alloc->free(alloc->ctx, chunks,
+                    sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
         return SC_ERR_OUT_OF_MEMORY;
     }
     memcpy(trimmed, chunks, sizeof(sc_text_chunk_t) * count);

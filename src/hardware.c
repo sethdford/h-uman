@@ -1,9 +1,9 @@
 #include "seaclaw/hardware.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifndef SC_IS_TEST
 #ifdef __linux__
@@ -27,19 +27,18 @@
 #endif
 #endif
 
-sc_error_t sc_hardware_discover(sc_allocator_t *alloc,
-    sc_hardware_info_t *results,
-    size_t *count)
-{
-    if (!alloc || !results || !count) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *results, size_t *count) {
+    if (!alloc || !results || !count)
+        return SC_ERR_INVALID_ARGUMENT;
     size_t max_count = *count;
     size_t found = 0;
 
 #ifndef SC_IS_TEST
 #ifdef __linux__
     /* Scan /dev for ttyUSB*, ttyACM* */
-    const char *dev_prefixes[] = { "/dev/ttyUSB", "/dev/ttyACM" };
-    for (size_t p = 0; p < sizeof(dev_prefixes) / sizeof(dev_prefixes[0]) && found < max_count; p++) {
+    const char *dev_prefixes[] = {"/dev/ttyUSB", "/dev/ttyACM"};
+    for (size_t p = 0; p < sizeof(dev_prefixes) / sizeof(dev_prefixes[0]) && found < max_count;
+         p++) {
         for (int i = 0; i < 16 && found < max_count; i++) {
             char path[64];
             snprintf(path, sizeof(path), "%s%d", dev_prefixes[p], i);
@@ -88,8 +87,9 @@ sc_error_t sc_hardware_discover(sc_allocator_t *alloc,
 #endif
 #ifdef __APPLE__
     /* macOS: /dev/cu.usbmodem* for Arduino */
-    const char *dev_prefixes[] = { "/dev/cu.usbmodem", "/dev/cu.usbserial" };
-    for (size_t p = 0; p < sizeof(dev_prefixes) / sizeof(dev_prefixes[0]) && found < max_count; p++) {
+    const char *dev_prefixes[] = {"/dev/cu.usbmodem", "/dev/cu.usbserial"};
+    for (size_t p = 0; p < sizeof(dev_prefixes) / sizeof(dev_prefixes[0]) && found < max_count;
+         p++) {
         for (int i = 0; i < 16 && found < max_count; i++) {
             char path[64];
             snprintf(path, sizeof(path), "%s%d", dev_prefixes[p], i);

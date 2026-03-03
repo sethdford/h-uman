@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 #define SC_DEFAULT_AGENT_TOKEN_LIMIT 200000u
-#define SC_DEFAULT_MODEL_MAX_TOKENS   8192u
+#define SC_DEFAULT_MODEL_MAX_TOKENS  8192u
 
 typedef struct sc_cron_config {
     bool enabled;

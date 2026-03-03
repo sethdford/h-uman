@@ -1,9 +1,9 @@
 #ifndef SC_MEMORY_ENGINES_REGISTRY_H
 #define SC_MEMORY_ENGINES_REGISTRY_H
 
-#include "seaclaw/memory.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/memory.h"
 #include <stdbool.h>
 #include <stddef.h>
 

@@ -3,8 +3,8 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/interactions.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #ifdef _WIN32
 #include <direct.h>
 #else
@@ -12,21 +12,24 @@
 #include <unistd.h>
 #endif
 
-#define SC_CONFIG_DIR ".seaclaw"
+#define SC_CONFIG_DIR  ".seaclaw"
 #define SC_CONFIG_FILE "config.json"
-#define SC_MAX_PATH 1024
+#define SC_MAX_PATH    1024
 
 static char *get_config_path(char *buf, size_t buf_size) {
     const char *home = getenv("HOME");
-    if (!home) home = ".";
+    if (!home)
+        home = ".";
     int n = snprintf(buf, buf_size, "%s/%s/%s", home, SC_CONFIG_DIR, SC_CONFIG_FILE);
-    if (n <= 0 || (size_t)n >= buf_size) return NULL;
+    if (n <= 0 || (size_t)n >= buf_size)
+        return NULL;
     return buf;
 }
 
 bool sc_onboard_check_first_run(void) {
     char path[SC_MAX_PATH];
-    if (!get_config_path(path, sizeof(path))) return true;
+    if (!get_config_path(path, sizeof(path)))
+        return true;
     FILE *f = fopen(path, "rb");
     if (f) {
         fclose(f);
@@ -42,23 +45,21 @@ sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
 }
 #else
 
-static const char *const SC_AGENTS_TEMPLATE =
-    "# AGENTS.md — Project Agent Protocol\n"
-    "## Build & Test\n"
-    "- Build: `make` or `cmake .. && make`\n"
-    "- Test: `make test`\n"
-    "## Conventions\n"
-    "- Follow existing code style\n"
-    "- Write tests for new features\n"
-    "- Keep commits focused\n";
+static const char *const SC_AGENTS_TEMPLATE = "# AGENTS.md — Project Agent Protocol\n"
+                                              "## Build & Test\n"
+                                              "- Build: `make` or `cmake .. && make`\n"
+                                              "- Test: `make test`\n"
+                                              "## Conventions\n"
+                                              "- Follow existing code style\n"
+                                              "- Write tests for new features\n"
+                                              "- Keep commits focused\n";
 
-static const char *const SC_USER_TEMPLATE =
-    "# User Preferences\n"
-    "## Communication\n"
-    "- Be concise and direct\n"
-    "- Show code examples when helpful\n"
-    "## Expertise\n"
-    "- Assume intermediate programming knowledge\n";
+static const char *const SC_USER_TEMPLATE = "# User Preferences\n"
+                                            "## Communication\n"
+                                            "- Be concise and direct\n"
+                                            "- Show code examples when helpful\n"
+                                            "## Expertise\n"
+                                            "- Assume intermediate programming knowledge\n";
 
 static const char *const SC_IDENTITY_TEMPLATE =
     "# Agent Identity\n"
@@ -73,7 +74,8 @@ static bool write_template_if_missing(const char *path, const char *content) {
         return false;
     }
     FILE *f = fopen(path, "w");
-    if (!f) return false;
+    if (!f)
+        return false;
     size_t len = strlen(content);
     if (fwrite(content, 1, len, f) != len) {
         fclose(f);
@@ -84,7 +86,8 @@ static bool write_template_if_missing(const char *path, const char *content) {
 }
 
 static char *read_line(char *buf, size_t buf_size) {
-    if (!fgets(buf, (int)buf_size, stdin)) return NULL;
+    if (!fgets(buf, (int)buf_size, stdin))
+        return NULL;
     size_t len = strlen(buf);
     while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r'))
         buf[--len] = '\0';
@@ -92,7 +95,8 @@ static char *read_line(char *buf, size_t buf_size) {
 }
 
 sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
-    if (!alloc) return SC_ERR_INVALID_ARGUMENT;
+    if (!alloc)
+        return SC_ERR_INVALID_ARGUMENT;
 
     if (!sc_onboard_check_first_run()) {
         printf("Config already exists. Run 'seaclaw doctor' to check status.\n");
@@ -106,18 +110,18 @@ sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
     char *line;
 
     static const sc_choice_t provider_choices[] = {
-        { "OpenAI (GPT-4, etc.)", "openai", true },
-        { "Anthropic (Claude)", "anthropic", false },
-        { "Ollama (local)", "ollama", false },
-        { "OpenRouter", "openrouter", false },
+        {"OpenAI (GPT-4, etc.)", "openai", true},
+        {"Anthropic (Claude)", "anthropic", false},
+        {"Ollama (local)", "ollama", false},
+        {"OpenRouter", "openrouter", false},
     };
     sc_choice_result_t provider_result;
-    sc_error_t err = sc_choices_prompt("Choose your default provider:",
-        provider_choices, sizeof(provider_choices) / sizeof(provider_choices[0]),
-        &provider_result);
+    sc_error_t err =
+        sc_choices_prompt("Choose your default provider:", provider_choices,
+                          sizeof(provider_choices) / sizeof(provider_choices[0]), &provider_result);
     const char *provider = (err == SC_OK && provider_result.selected_value)
-        ? provider_result.selected_value
-        : "openai";
+                               ? provider_result.selected_value
+                               : "openai";
 
     printf("API key (or set %s env var): ", "OPENAI_API_KEY");
     fflush(stdout);
@@ -130,10 +134,12 @@ sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
     const char *model = line && line[0] ? line : "gpt-4o";
 
     const char *home = getenv("HOME");
-    if (!home) home = ".";
+    if (!home)
+        home = ".";
     char config_dir[SC_MAX_PATH];
     int n = snprintf(config_dir, sizeof(config_dir), "%s/%s", home, SC_CONFIG_DIR);
-    if (n <= 0 || (size_t)n >= sizeof(config_dir)) return SC_ERR_IO;
+    if (n <= 0 || (size_t)n >= sizeof(config_dir))
+        return SC_ERR_IO;
 
 #ifdef _WIN32
     (void)_mkdir(config_dir);
@@ -143,11 +149,13 @@ sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
 
     char config_path[SC_MAX_PATH];
     n = snprintf(config_path, sizeof(config_path), "%s/%s", config_dir, SC_CONFIG_FILE);
-    if (n <= 0 || (size_t)n >= sizeof(config_path)) return SC_ERR_IO;
+    if (n <= 0 || (size_t)n >= sizeof(config_path))
+        return SC_ERR_IO;
 
     /* Minimal config JSON */
     char *ws_dir = sc_sprintf(alloc, "%s/%s/workspace", home, SC_CONFIG_DIR);
-    if (!ws_dir) return SC_ERR_OUT_OF_MEMORY;
+    if (!ws_dir)
+        return SC_ERR_OUT_OF_MEMORY;
 
 #ifdef _WIN32
     (void)_mkdir(ws_dir);
@@ -183,8 +191,8 @@ sc_error_t sc_onboard_run(sc_allocator_t *alloc) {
     fprintf(f, "  \"default_provider\": \"%s\",\n", provider);
     fprintf(f, "  \"default_model\": \"%s\",\n", model);
     if (api_key[0])
-        fprintf(f, "  \"providers\": [{\"name\": \"%s\", \"api_key\": \"%s\"}],\n",
-            provider, api_key);
+        fprintf(f, "  \"providers\": [{\"name\": \"%s\", \"api_key\": \"%s\"}],\n", provider,
+                api_key);
     else
         fprintf(f, "  \"providers\": [],\n");
     fprintf(f, "  \"memory\": {\"backend\": \"sqlite\", \"auto_save\": true},\n");

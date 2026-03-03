@@ -1,9 +1,10 @@
-#include "seaclaw/runtime.h"
 #include "seaclaw/config.h"
+#include "seaclaw/runtime.h"
 #include <string.h>
 
 sc_error_t sc_runtime_from_config(const struct sc_config *cfg, sc_runtime_t *out) {
-    if (!cfg || !out) return SC_ERR_INVALID_ARGUMENT;
+    if (!cfg || !out)
+        return SC_ERR_INVALID_ARGUMENT;
 
     const char *kind = cfg->runtime.kind;
     if (!kind || kind[0] == '\0' || strcmp(kind, "native") == 0) {

@@ -4,15 +4,15 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/tool.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
-#define MCP_SERVER_NAME "seaclaw"
-#define MCP_SERVER_VERSION "0.1.0"
+#define MCP_SERVER_NAME      "seaclaw"
+#define MCP_SERVER_VERSION   "0.1.0"
 #define MCP_PROTOCOL_VERSION "2024-11-05"
-#define MCP_LINE_BUF_INIT 4096
+#define MCP_LINE_BUF_INIT    4096
 
 struct sc_mcp_host {
     sc_allocator_t *alloc;
@@ -22,15 +22,13 @@ struct sc_mcp_host {
     bool initialized;
 };
 
-sc_error_t sc_mcp_host_create(sc_allocator_t *alloc,
-    sc_tool_t *tools, size_t tool_count,
-    sc_memory_t *memory,
-    sc_mcp_host_t **out)
-{
-    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
-    sc_mcp_host_t *srv = (sc_mcp_host_t *)alloc->alloc(
-        alloc->ctx, sizeof(*srv));
-    if (!srv) return SC_ERR_OUT_OF_MEMORY;
+sc_error_t sc_mcp_host_create(sc_allocator_t *alloc, sc_tool_t *tools, size_t tool_count,
+                              sc_memory_t *memory, sc_mcp_host_t **out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_mcp_host_t *srv = (sc_mcp_host_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
+    if (!srv)
+        return SC_ERR_OUT_OF_MEMORY;
     srv->alloc = alloc;
     srv->tools = tools;
     srv->tool_count = tool_count;
@@ -42,19 +40,26 @@ sc_error_t sc_mcp_host_create(sc_allocator_t *alloc,
 
 /* ── JSON-RPC response helpers ─────────────────────────────────────────── */
 
-static sc_error_t write_response(sc_allocator_t *alloc,
-    const char *id_raw, const char *result_json)
-{
+static sc_error_t write_response(sc_allocator_t *alloc, const char *id_raw,
+                                 const char *result_json) {
     sc_json_buf_t buf;
-    if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_init(&buf, alloc) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
 
     sc_error_t err = SC_OK;
     err = sc_json_buf_append_raw(&buf, "{\"jsonrpc\":\"2.0\",\"id\":", 22);
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, id_raw, strlen(id_raw));
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, ",\"result\":", 10);
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, result_json, strlen(result_json));
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "}\n", 2);
-    if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, id_raw, strlen(id_raw));
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, ",\"result\":", 10);
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, result_json, strlen(result_json));
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, "}\n", 2);
+    if (err != SC_OK) {
+        sc_json_buf_free(&buf);
+        return err;
+    }
 
     fwrite(buf.ptr, 1, buf.len, stdout);
     fflush(stdout);
@@ -62,24 +67,33 @@ static sc_error_t write_response(sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t write_error(sc_allocator_t *alloc,
-    const char *id_raw, int code, const char *message)
-{
+static sc_error_t write_error(sc_allocator_t *alloc, const char *id_raw, int code,
+                              const char *message) {
     sc_json_buf_t buf;
-    if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_init(&buf, alloc) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
 
     char code_buf[16];
     snprintf(code_buf, sizeof(code_buf), "%d", code);
 
     sc_error_t err = SC_OK;
     err = sc_json_buf_append_raw(&buf, "{\"jsonrpc\":\"2.0\",\"id\":", 22);
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, id_raw, strlen(id_raw));
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, ",\"error\":{\"code\":", 17);
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, code_buf, strlen(code_buf));
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, ",\"message\":", 11);
-    if (err == SC_OK) err = sc_json_append_string(&buf, message, strlen(message));
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "}}\n", 3);
-    if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, id_raw, strlen(id_raw));
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, ",\"error\":{\"code\":", 17);
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, code_buf, strlen(code_buf));
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, ",\"message\":", 11);
+    if (err == SC_OK)
+        err = sc_json_append_string(&buf, message, strlen(message));
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, "}}\n", 3);
+    if (err != SC_OK) {
+        sc_json_buf_free(&buf);
+        return err;
+    }
 
     fwrite(buf.ptr, 1, buf.len, stdout);
     fflush(stdout);
@@ -89,53 +103,68 @@ static sc_error_t write_error(sc_allocator_t *alloc,
 
 /* ── Handler: initialize ───────────────────────────────────────────────── */
 
-static sc_error_t handle_initialize(sc_mcp_host_t *srv, const char *id_raw)
-{
+static sc_error_t handle_initialize(sc_mcp_host_t *srv, const char *id_raw) {
     srv->initialized = true;
-    const char *result =
-        "{\"protocolVersion\":\"" MCP_PROTOCOL_VERSION "\","
-        "\"capabilities\":{\"tools\":{},\"resources\":{}},"
-        "\"serverInfo\":{\"name\":\"" MCP_SERVER_NAME "\","
-        "\"version\":\"" MCP_SERVER_VERSION "\"}}";
+    const char *result = "{\"protocolVersion\":\"" MCP_PROTOCOL_VERSION "\","
+                         "\"capabilities\":{\"tools\":{},\"resources\":{}},"
+                         "\"serverInfo\":{\"name\":\"" MCP_SERVER_NAME "\","
+                         "\"version\":\"" MCP_SERVER_VERSION "\"}}";
     return write_response(srv->alloc, id_raw, result);
 }
 
 /* ── Handler: tools/list ───────────────────────────────────────────────── */
 
-static sc_error_t handle_tools_list(sc_mcp_host_t *srv, const char *id_raw)
-{
+static sc_error_t handle_tools_list(sc_mcp_host_t *srv, const char *id_raw) {
     sc_allocator_t *alloc = srv->alloc;
     sc_json_buf_t buf;
-    if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_init(&buf, alloc) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
 
     sc_error_t err = sc_json_buf_append_raw(&buf, "{\"tools\":[", 10);
     for (size_t i = 0; i < srv->tool_count && err == SC_OK; i++) {
-        if (i > 0) err = sc_json_buf_append_raw(&buf, ",", 1);
-        if (err != SC_OK) break;
+        if (i > 0)
+            err = sc_json_buf_append_raw(&buf, ",", 1);
+        if (err != SC_OK)
+            break;
 
-        const char *name = srv->tools[i].vtable->name
-            ? srv->tools[i].vtable->name(srv->tools[i].ctx) : "";
+        const char *name =
+            srv->tools[i].vtable->name ? srv->tools[i].vtable->name(srv->tools[i].ctx) : "";
         const char *desc = srv->tools[i].vtable->description
-            ? srv->tools[i].vtable->description(srv->tools[i].ctx) : "";
+                               ? srv->tools[i].vtable->description(srv->tools[i].ctx)
+                               : "";
         const char *params = srv->tools[i].vtable->parameters_json
-            ? srv->tools[i].vtable->parameters_json(srv->tools[i].ctx) : "{}";
+                                 ? srv->tools[i].vtable->parameters_json(srv->tools[i].ctx)
+                                 : "{}";
 
         err = sc_json_buf_append_raw(&buf, "{\"name\":", 8);
-        if (err == SC_OK) err = sc_json_append_string(&buf, name, strlen(name));
-        if (err == SC_OK) err = sc_json_buf_append_raw(&buf, ",\"description\":", 15);
-        if (err == SC_OK) err = sc_json_append_string(&buf, desc, strlen(desc));
-        if (err == SC_OK) err = sc_json_buf_append_raw(&buf, ",\"inputSchema\":", 15);
-        if (err == SC_OK) err = sc_json_buf_append_raw(&buf, params, strlen(params));
-        if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "}", 1);
+        if (err == SC_OK)
+            err = sc_json_append_string(&buf, name, strlen(name));
+        if (err == SC_OK)
+            err = sc_json_buf_append_raw(&buf, ",\"description\":", 15);
+        if (err == SC_OK)
+            err = sc_json_append_string(&buf, desc, strlen(desc));
+        if (err == SC_OK)
+            err = sc_json_buf_append_raw(&buf, ",\"inputSchema\":", 15);
+        if (err == SC_OK)
+            err = sc_json_buf_append_raw(&buf, params, strlen(params));
+        if (err == SC_OK)
+            err = sc_json_buf_append_raw(&buf, "}", 1);
     }
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "]}", 2);
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, "]}", 2);
 
-    if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+    if (err != SC_OK) {
+        sc_json_buf_free(&buf);
+        return err;
+    }
 
     /* Null-terminate for write_response */
     size_t result_len = buf.len;
     char *result = (char *)alloc->alloc(alloc->ctx, result_len + 1);
-    if (!result) { sc_json_buf_free(&buf); return SC_ERR_OUT_OF_MEMORY; }
+    if (!result) {
+        sc_json_buf_free(&buf);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     memcpy(result, buf.ptr, result_len);
     result[result_len] = '\0';
     sc_json_buf_free(&buf);
@@ -147,9 +176,8 @@ static sc_error_t handle_tools_list(sc_mcp_host_t *srv, const char *id_raw)
 
 /* ── Handler: tools/call ───────────────────────────────────────────────── */
 
-static sc_error_t handle_tools_call(sc_mcp_host_t *srv,
-    const char *id_raw, sc_json_value_t *params)
-{
+static sc_error_t handle_tools_call(sc_mcp_host_t *srv, const char *id_raw,
+                                    sc_json_value_t *params) {
     sc_allocator_t *alloc = srv->alloc;
 
     const char *tool_name = sc_json_get_string(params, "name");
@@ -158,9 +186,12 @@ static sc_error_t handle_tools_call(sc_mcp_host_t *srv,
 
     sc_tool_t *tool = NULL;
     for (size_t i = 0; i < srv->tool_count; i++) {
-        const char *n = srv->tools[i].vtable->name
-            ? srv->tools[i].vtable->name(srv->tools[i].ctx) : "";
-        if (strcmp(n, tool_name) == 0) { tool = &srv->tools[i]; break; }
+        const char *n =
+            srv->tools[i].vtable->name ? srv->tools[i].vtable->name(srv->tools[i].ctx) : "";
+        if (strcmp(n, tool_name) == 0) {
+            tool = &srv->tools[i];
+            break;
+        }
     }
     if (!tool)
         return write_error(alloc, id_raw, -32602, "Unknown tool");
@@ -181,13 +212,13 @@ static sc_error_t handle_tools_call(sc_mcp_host_t *srv,
         return SC_ERR_OUT_OF_MEMORY;
     }
 
-    const char *text = result.success
-        ? (result.output ? result.output : "")
-        : (result.error_msg ? result.error_msg : "error");
+    const char *text = result.success ? (result.output ? result.output : "")
+                                      : (result.error_msg ? result.error_msg : "error");
     size_t text_len = result.success ? result.output_len : result.error_msg_len;
 
     err = sc_json_buf_append_raw(&buf, "{\"content\":[{\"type\":\"text\",\"text\":", 34);
-    if (err == SC_OK) err = sc_json_append_string(&buf, text, text_len);
+    if (err == SC_OK)
+        err = sc_json_append_string(&buf, text, text_len);
     if (err == SC_OK) {
         if (result.success)
             err = sc_json_buf_append_raw(&buf, "}]}", 3);
@@ -197,10 +228,16 @@ static sc_error_t handle_tools_call(sc_mcp_host_t *srv,
 
     sc_tool_result_free(alloc, &result);
 
-    if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+    if (err != SC_OK) {
+        sc_json_buf_free(&buf);
+        return err;
+    }
 
     char *res_str = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
-    if (!res_str) { sc_json_buf_free(&buf); return SC_ERR_OUT_OF_MEMORY; }
+    if (!res_str) {
+        sc_json_buf_free(&buf);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     memcpy(res_str, buf.ptr, buf.len);
     res_str[buf.len] = '\0';
     size_t res_len = buf.len;
@@ -213,37 +250,46 @@ static sc_error_t handle_tools_call(sc_mcp_host_t *srv,
 
 /* ── Handler: resources/list ─────────────────────────────────────────────── */
 
-static sc_error_t handle_resources_list(sc_mcp_host_t *srv, const char *id_raw)
-{
+static sc_error_t handle_resources_list(sc_mcp_host_t *srv, const char *id_raw) {
     sc_allocator_t *alloc = srv->alloc;
     sc_json_buf_t buf;
-    if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_init(&buf, alloc) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
 
     sc_error_t err = sc_json_buf_append_raw(&buf, "{\"resources\":[", 14);
 
     /* Always expose config resource */
     if (err == SC_OK)
         err = sc_json_buf_append_raw(&buf,
-            "{\"uri\":\"seaclaw://config\","
-            "\"name\":\"Configuration\","
-            "\"description\":\"Current seaclaw configuration\","
-            "\"mimeType\":\"application/json\"}", 130);
+                                     "{\"uri\":\"seaclaw://config\","
+                                     "\"name\":\"Configuration\","
+                                     "\"description\":\"Current seaclaw configuration\","
+                                     "\"mimeType\":\"application/json\"}",
+                                     130);
 
     /* If memory is available, expose memory resource */
     if (err == SC_OK && srv->memory && srv->memory->vtable) {
         err = sc_json_buf_append_raw(&buf,
-            ",{\"uri\":\"seaclaw://memory\","
-            "\"name\":\"Memory\","
-            "\"description\":\"Agent memory entries\","
-            "\"mimeType\":\"application/json\"}", 126);
+                                     ",{\"uri\":\"seaclaw://memory\","
+                                     "\"name\":\"Memory\","
+                                     "\"description\":\"Agent memory entries\","
+                                     "\"mimeType\":\"application/json\"}",
+                                     126);
     }
 
-    if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "]}", 2);
+    if (err == SC_OK)
+        err = sc_json_buf_append_raw(&buf, "]}", 2);
 
-    if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+    if (err != SC_OK) {
+        sc_json_buf_free(&buf);
+        return err;
+    }
 
     char *result = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
-    if (!result) { sc_json_buf_free(&buf); return SC_ERR_OUT_OF_MEMORY; }
+    if (!result) {
+        sc_json_buf_free(&buf);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     memcpy(result, buf.ptr, buf.len);
     result[buf.len] = '\0';
     size_t result_len = buf.len;
@@ -256,12 +302,12 @@ static sc_error_t handle_resources_list(sc_mcp_host_t *srv, const char *id_raw)
 
 /* ── Handler: resources/read ─────────────────────────────────────────────── */
 
-static sc_error_t handle_resources_read(sc_mcp_host_t *srv,
-    const char *id_raw, sc_json_value_t *params)
-{
+static sc_error_t handle_resources_read(sc_mcp_host_t *srv, const char *id_raw,
+                                        sc_json_value_t *params) {
     sc_allocator_t *alloc = srv->alloc;
     const char *uri = sc_json_get_string(params, "uri");
-    if (!uri) return write_error(alloc, id_raw, -32602, "Missing uri");
+    if (!uri)
+        return write_error(alloc, id_raw, -32602, "Missing uri");
 
     if (strcmp(uri, "seaclaw://config") == 0) {
         const char *result =
@@ -274,14 +320,14 @@ static sc_error_t handle_resources_read(sc_mcp_host_t *srv,
     if (strcmp(uri, "seaclaw://memory") == 0) {
         if (!srv->memory || !srv->memory->vtable || !srv->memory->vtable->recall) {
             return write_response(alloc, id_raw,
-                "{\"contents\":[{\"uri\":\"seaclaw://memory\","
-                "\"mimeType\":\"application/json\","
-                "\"text\":\"[]\"}]}");
+                                  "{\"contents\":[{\"uri\":\"seaclaw://memory\","
+                                  "\"mimeType\":\"application/json\","
+                                  "\"text\":\"[]\"}]}");
         }
         sc_memory_entry_t *entries = NULL;
         size_t count = 0;
-        sc_error_t err = srv->memory->vtable->recall(srv->memory->ctx, alloc,
-            "", 0, 10, NULL, 0, &entries, &count);
+        sc_error_t err = srv->memory->vtable->recall(srv->memory->ctx, alloc, "", 0, 10, NULL, 0,
+                                                     &entries, &count);
         if (err != SC_OK || count == 0) {
             if (entries) {
                 for (size_t i = 0; i < count; i++)
@@ -289,9 +335,9 @@ static sc_error_t handle_resources_read(sc_mcp_host_t *srv,
                 alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
             }
             return write_response(alloc, id_raw,
-                "{\"contents\":[{\"uri\":\"seaclaw://memory\","
-                "\"mimeType\":\"application/json\","
-                "\"text\":\"[]\"}]}");
+                                  "{\"contents\":[{\"uri\":\"seaclaw://memory\","
+                                  "\"mimeType\":\"application/json\","
+                                  "\"text\":\"[]\"}]}");
         }
         /* Build JSON with entry count; free entries */
         for (size_t i = 0; i < count; i++)
@@ -299,17 +345,27 @@ static sc_error_t handle_resources_read(sc_mcp_host_t *srv,
         alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
 
         sc_json_buf_t buf;
-        if (sc_json_buf_init(&buf, alloc) != SC_OK) return SC_ERR_OUT_OF_MEMORY;
-        err = sc_json_buf_append_raw(&buf, "{\"contents\":[{\"uri\":\"seaclaw://memory\","
-            "\"mimeType\":\"application/json\",\"text\":\"", 80);
+        if (sc_json_buf_init(&buf, alloc) != SC_OK)
+            return SC_ERR_OUT_OF_MEMORY;
+        err = sc_json_buf_append_raw(&buf,
+                                     "{\"contents\":[{\"uri\":\"seaclaw://memory\","
+                                     "\"mimeType\":\"application/json\",\"text\":\"",
+                                     80);
         char count_str[32];
         int n = snprintf(count_str, sizeof(count_str), "[%zu entries]", count);
         if (err == SC_OK && n > 0)
             err = sc_json_buf_append_raw(&buf, count_str, (size_t)n);
-        if (err == SC_OK) err = sc_json_buf_append_raw(&buf, "\"}]}", 4);
-        if (err != SC_OK) { sc_json_buf_free(&buf); return err; }
+        if (err == SC_OK)
+            err = sc_json_buf_append_raw(&buf, "\"}]}", 4);
+        if (err != SC_OK) {
+            sc_json_buf_free(&buf);
+            return err;
+        }
         char *result = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
-        if (!result) { sc_json_buf_free(&buf); return SC_ERR_OUT_OF_MEMORY; }
+        if (!result) {
+            sc_json_buf_free(&buf);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         memcpy(result, buf.ptr, buf.len);
         result[buf.len] = '\0';
         size_t result_len = buf.len;
@@ -324,22 +380,27 @@ static sc_error_t handle_resources_read(sc_mcp_host_t *srv,
 
 /* ── Main loop ─────────────────────────────────────────────────────────── */
 
-static sc_error_t read_stdin_line(sc_allocator_t *alloc, char **out,
-    size_t *out_len, size_t *out_alloc_size)
-{
+static sc_error_t read_stdin_line(sc_allocator_t *alloc, char **out, size_t *out_len,
+                                  size_t *out_alloc_size) {
     size_t cap = MCP_LINE_BUF_INIT;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
-    if (!buf) return SC_ERR_OUT_OF_MEMORY;
+    if (!buf)
+        return SC_ERR_OUT_OF_MEMORY;
     size_t len = 0;
 
     int ch;
     while ((ch = fgetc(stdin)) != EOF) {
-        if (ch == '\n') break;
-        if (ch == '\r') continue;
+        if (ch == '\n')
+            break;
+        if (ch == '\r')
+            continue;
         if (len + 1 >= cap) {
             size_t new_cap = cap * 2;
             char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
-            if (!nb) { alloc->free(alloc->ctx, buf, cap); return SC_ERR_OUT_OF_MEMORY; }
+            if (!nb) {
+                alloc->free(alloc->ctx, buf, cap);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
             buf = nb;
             cap = new_cap;
         }
@@ -358,9 +419,9 @@ static sc_error_t read_stdin_line(sc_allocator_t *alloc, char **out,
     return SC_OK;
 }
 
-sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv)
-{
-    if (!srv) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv) {
+    if (!srv)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_allocator_t *alloc = srv->alloc;
 
     for (;;) {
@@ -368,8 +429,10 @@ sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv)
         size_t line_len = 0;
         size_t line_alloc = 0;
         sc_error_t err = read_stdin_line(alloc, &line, &line_len, &line_alloc);
-        if (err == SC_ERR_IO) return SC_OK; /* EOF — clean shutdown */
-        if (err != SC_OK) return err;
+        if (err == SC_ERR_IO)
+            return SC_OK; /* EOF — clean shutdown */
+        if (err != SC_OK)
+            return err;
         if (line_len == 0) {
             alloc->free(alloc->ctx, line, line_alloc);
             continue;
@@ -379,7 +442,8 @@ sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv)
         err = sc_json_parse(alloc, line, line_len, &req);
         alloc->free(alloc->ctx, line, line_alloc);
 
-        if (err != SC_OK || !req) continue; /* skip malformed input */
+        if (err != SC_OK || !req)
+            continue; /* skip malformed input */
 
         const char *method = sc_json_get_string(req, "method");
         sc_json_value_t *id_val = sc_json_object_get(req, "id");
@@ -393,8 +457,8 @@ sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv)
                 snprintf(id_buf, sizeof(id_buf), "%d", (int)id_val->data.number);
             } else if (id_val->type == SC_JSON_STRING) {
                 snprintf(id_buf, sizeof(id_buf), "\"%.*s\"",
-                    (int)(id_val->data.string.len < 50 ? id_val->data.string.len : 50),
-                    id_val->data.string.ptr);
+                         (int)(id_val->data.string.len < 50 ? id_val->data.string.len : 50),
+                         id_val->data.string.ptr);
             }
         }
 
@@ -434,9 +498,9 @@ sc_error_t sc_mcp_host_run(sc_mcp_host_t *srv)
     }
 }
 
-void sc_mcp_host_destroy(sc_mcp_host_t *srv)
-{
-    if (!srv) return;
+void sc_mcp_host_destroy(sc_mcp_host_t *srv) {
+    if (!srv)
+        return;
     sc_allocator_t *alloc = srv->alloc;
     alloc->free(alloc->ctx, srv, sizeof(*srv));
 }

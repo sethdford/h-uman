@@ -1,8 +1,8 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 /*
  * Apple Seatbelt sandbox using sandbox-exec with SBPL (Sandbox Profile Language).
@@ -21,40 +21,47 @@
 #include <unistd.h>
 #endif
 
-static const char *seatbelt_profile_fmt =
-    "(version 1)"
-    "(deny default)"
-    "(allow process*)"
-    "(allow sysctl*)"
-    "(allow signal)"
-    "(allow ipc*)"
-    "(allow mach*)"
-    "(allow file-ioctl)"
-    "(allow file-read*)"
-    "(allow file-write* (subpath \"/dev\"))"
-    "(allow file-write* (subpath \"/tmp\"))"
-    "(allow file-write* (subpath \"/private/tmp\"))"
-    "(allow file-write* (subpath \"/private/var/folders\"))"
-    "(allow file-write* (subpath \"/var/folders\"))"
-    "(allow file-write* (subpath \"%s\"))"
-    "(deny file-write* (subpath \"/System\"))"
-    "(deny file-write* (subpath \"/usr\"))"
-    "(deny file-write* (subpath \"/Library\"))"
-    "(deny file-write* (subpath \"/bin\"))"
-    "(deny file-write* (subpath \"/sbin\"))"
-    "(deny network*)";
+static const char *seatbelt_profile_fmt = "(version 1)"
+                                          "(deny default)"
+                                          "(allow process*)"
+                                          "(allow sysctl*)"
+                                          "(allow signal)"
+                                          "(allow ipc*)"
+                                          "(allow mach*)"
+                                          "(allow file-ioctl)"
+                                          "(allow file-read*)"
+                                          "(allow file-write* (subpath \"/dev\"))"
+                                          "(allow file-write* (subpath \"/tmp\"))"
+                                          "(allow file-write* (subpath \"/private/tmp\"))"
+                                          "(allow file-write* (subpath \"/private/var/folders\"))"
+                                          "(allow file-write* (subpath \"/var/folders\"))"
+                                          "(allow file-write* (subpath \"%s\"))"
+                                          "(deny file-write* (subpath \"/System\"))"
+                                          "(deny file-write* (subpath \"/usr\"))"
+                                          "(deny file-write* (subpath \"/Library\"))"
+                                          "(deny file-write* (subpath \"/bin\"))"
+                                          "(deny file-write* (subpath \"/sbin\"))"
+                                          "(deny network*)";
 
-static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+                                size_t buf_count, size_t *out_count) {
 #ifndef __APPLE__
-    (void)ctx; (void)argv; (void)argc; (void)buf; (void)buf_count; (void)out_count;
+    (void)ctx;
+    (void)argv;
+    (void)argc;
+    (void)buf;
+    (void)buf_count;
+    (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
     sc_seatbelt_ctx_t *sb = (sc_seatbelt_ctx_t *)ctx;
     const size_t prefix_len = 3;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < prefix_len + argc) return SC_ERR_INVALID_ARGUMENT;
-    if (sb->profile_len == 0) return SC_ERR_INTERNAL;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < prefix_len + argc)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (sb->profile_len == 0)
+        return SC_ERR_INTERNAL;
 
     buf[0] = "sandbox-exec";
     buf[1] = "-p";
@@ -118,8 +125,8 @@ void sc_seatbelt_sandbox_init(sc_seatbelt_ctx_t *ctx, const char *workspace_dir)
     memcpy(ctx->workspace_dir, ws, wlen);
     ctx->workspace_dir[wlen] = '\0';
 
-    int n = snprintf(ctx->profile, sizeof(ctx->profile),
-        seatbelt_profile_fmt, ctx->workspace_dir, ctx->workspace_dir);
+    int n = snprintf(ctx->profile, sizeof(ctx->profile), seatbelt_profile_fmt, ctx->workspace_dir,
+                     ctx->workspace_dir);
     if (n > 0 && (size_t)n < sizeof(ctx->profile))
         ctx->profile_len = (size_t)n;
     else

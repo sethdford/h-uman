@@ -1,8 +1,8 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 /*
  * Windows AppContainer sandbox.
@@ -26,10 +26,15 @@
 #include <windows.h>
 #endif
 
-static sc_error_t appcontainer_wrap(void *ctx, const char *const *argv,
-    size_t argc, const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t appcontainer_wrap(void *ctx, const char *const *argv, size_t argc,
+                                    const char **buf, size_t buf_count, size_t *out_count) {
 #ifndef _WIN32
-    (void)ctx; (void)argv; (void)argc; (void)buf; (void)buf_count; (void)out_count;
+    (void)ctx;
+    (void)argv;
+    (void)argc;
+    (void)buf;
+    (void)buf_count;
+    (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
     /*
@@ -38,8 +43,10 @@ static sc_error_t appcontainer_wrap(void *ctx, const char *const *argv,
      * through; the real isolation is in apply().
      */
     (void)ctx;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < argc)
+        return SC_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;
@@ -71,17 +78,16 @@ static sc_error_t appcontainer_apply(void *ctx) {
     (void)ac;
 
     HANDLE job = CreateJobObjectA(NULL, NULL);
-    if (!job) return SC_ERR_IO;
+    if (!job)
+        return SC_ERR_IO;
 
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
     memset(&info, 0, sizeof(info));
     info.BasicLimitInformation.LimitFlags =
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
-        JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
     info.ProcessMemoryLimit = 512 * 1024 * 1024; /* 512 MB */
 
-    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-        &info, sizeof(info))) {
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
         CloseHandle(job);
         return SC_ERR_IO;
     }
@@ -139,8 +145,7 @@ sc_sandbox_t sc_appcontainer_sandbox_get(sc_appcontainer_ctx_t *ctx) {
     return sb;
 }
 
-void sc_appcontainer_sandbox_init(sc_appcontainer_ctx_t *ctx,
-    const char *workspace_dir) {
+void sc_appcontainer_sandbox_init(sc_appcontainer_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     if (workspace_dir) {
         size_t len = strlen(workspace_dir);

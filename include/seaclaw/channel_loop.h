@@ -3,17 +3,17 @@
 
 #include "core/allocator.h"
 #include "core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Loop state — shared between supervisor and polling thread
  * ────────────────────────────────────────────────────────────────────────── */
 
 typedef struct sc_channel_loop_state {
-    int64_t last_activity;    /* epoch seconds, updated after each poll */
-    bool stop_requested;      /* set by supervisor to request stop */
+    int64_t last_activity; /* epoch seconds, updated after each poll */
+    bool stop_requested;   /* set by supervisor to request stop */
 } sc_channel_loop_state_t;
 
 /* Initialize loop state. */
@@ -44,16 +44,12 @@ typedef struct sc_channel_loop_msg {
     char content[4096];
 } sc_channel_loop_msg_t;
 
-typedef sc_error_t (*sc_channel_loop_poll_fn)(void *channel_ctx,
-                                               sc_allocator_t *alloc,
-                                               sc_channel_loop_msg_t *msgs,
-                                               size_t max_msgs,
-                                               size_t *out_count);
+typedef sc_error_t (*sc_channel_loop_poll_fn)(void *channel_ctx, sc_allocator_t *alloc,
+                                              sc_channel_loop_msg_t *msgs, size_t max_msgs,
+                                              size_t *out_count);
 
-typedef sc_error_t (*sc_channel_loop_dispatch_fn)(void *agent_ctx,
-                                                   const char *session_key,
-                                                   const char *content,
-                                                   char **response_out);
+typedef sc_error_t (*sc_channel_loop_dispatch_fn)(void *agent_ctx, const char *session_key,
+                                                  const char *content, char **response_out);
 
 typedef struct sc_channel_loop_ctx {
     sc_allocator_t *alloc;
@@ -68,8 +64,7 @@ typedef struct sc_channel_loop_ctx {
 } sc_channel_loop_ctx_t;
 
 /* One poll iteration: poll, dispatch each message, optionally evict. */
-sc_error_t sc_channel_loop_tick(sc_channel_loop_ctx_t *ctx,
-                                sc_channel_loop_state_t *state,
+sc_error_t sc_channel_loop_tick(sc_channel_loop_ctx_t *ctx, sc_channel_loop_state_t *state,
                                 int *messages_processed);
 
 #endif /* SC_CHANNEL_LOOP_H */

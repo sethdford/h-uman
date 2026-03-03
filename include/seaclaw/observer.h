@@ -24,15 +24,46 @@ typedef enum sc_observer_event_tag {
 typedef struct sc_observer_event {
     sc_observer_event_tag_t tag;
     union {
-        struct { const char *provider; const char *model; } agent_start;
-        struct { const char *provider; const char *model; size_t messages_count; } llm_request;
-        struct { const char *provider; const char *model; uint64_t duration_ms; bool success; const char *error_message; } llm_response;
-        struct { uint64_t duration_ms; uint64_t tokens_used; } agent_end;
-        struct { const char *tool; } tool_call_start;
-        struct { const char *tool; uint64_t duration_ms; bool success; const char *detail; } tool_call;
-        struct { uint32_t iterations; } tool_iterations_exhausted;
-        struct { const char *channel; const char *direction; } channel_message;
-        struct { const char *component; const char *message; } err;
+        struct {
+            const char *provider;
+            const char *model;
+        } agent_start;
+        struct {
+            const char *provider;
+            const char *model;
+            size_t messages_count;
+        } llm_request;
+        struct {
+            const char *provider;
+            const char *model;
+            uint64_t duration_ms;
+            bool success;
+            const char *error_message;
+        } llm_response;
+        struct {
+            uint64_t duration_ms;
+            uint64_t tokens_used;
+        } agent_end;
+        struct {
+            const char *tool;
+        } tool_call_start;
+        struct {
+            const char *tool;
+            uint64_t duration_ms;
+            bool success;
+            const char *detail;
+        } tool_call;
+        struct {
+            uint32_t iterations;
+        } tool_iterations_exhausted;
+        struct {
+            const char *channel;
+            const char *direction;
+        } channel_message;
+        struct {
+            const char *component;
+            const char *message;
+        } err;
     } data;
 } sc_observer_event_t;
 
@@ -68,7 +99,8 @@ static inline void sc_observer_record_event(sc_observer_t obs, const sc_observer
         obs.vtable->record_event(obs.ctx, event);
 }
 
-static inline void sc_observer_record_metric(sc_observer_t obs, const sc_observer_metric_t *metric) {
+static inline void sc_observer_record_metric(sc_observer_t obs,
+                                             const sc_observer_metric_t *metric) {
     if (obs.vtable && obs.vtable->record_metric)
         obs.vtable->record_metric(obs.ctx, metric);
 }
@@ -101,8 +133,7 @@ typedef struct sc_metrics_observer_ctx {
     uint64_t queue_depth;
 } sc_metrics_observer_ctx_t;
 sc_observer_t sc_observer_metrics_create(sc_metrics_observer_ctx_t *ctx);
-uint64_t sc_observer_metrics_get(sc_metrics_observer_ctx_t *ctx,
-    sc_observer_metric_tag_t tag);
+uint64_t sc_observer_metrics_get(sc_metrics_observer_ctx_t *ctx, sc_observer_metric_tag_t tag);
 
 /** Composite observer — fans out to multiple observers. */
 typedef struct sc_composite_observer_ctx {
@@ -110,7 +141,7 @@ typedef struct sc_composite_observer_ctx {
     size_t count;
 } sc_composite_observer_ctx_t;
 sc_observer_t sc_observer_composite_create(sc_composite_observer_ctx_t *ctx,
-    sc_observer_t *observers, size_t count);
+                                           sc_observer_t *observers, size_t count);
 
 /** Registry — create observer from backend string (log, verbose, noop, none). */
 sc_observer_t sc_observer_registry_create(const char *backend, void *user_ctx);

@@ -11,7 +11,7 @@
 #include <pthread.h>
 #endif
 
-#define SC_POOL_MAX_SLOTS 64
+#define SC_POOL_MAX_SLOTS    64
 #define SC_POOL_DEFAULT_ITER 25
 
 typedef struct sc_pool_slot {
@@ -54,18 +54,23 @@ struct sc_agent_pool {
 static size_t running_locked(sc_agent_pool_t *p) {
     size_t n = 0;
     for (uint32_t i = 0; i < SC_POOL_MAX_SLOTS; i++)
-        if (p->used[i] && p->slots[i].status == SC_AGENT_RUNNING) n++;
+        if (p->used[i] && p->slots[i].status == SC_AGENT_RUNNING)
+            n++;
     return n;
 }
 
 static sc_pool_slot_t *find_slot(sc_agent_pool_t *p, uint64_t id) {
     for (uint32_t i = 0; i < SC_POOL_MAX_SLOTS; i++)
-        if (p->used[i] && p->slots[i].agent_id == id) return &p->slots[i];
+        if (p->used[i] && p->slots[i].agent_id == id)
+            return &p->slots[i];
     return NULL;
 }
 
 static void free_str(sc_allocator_t *a, char **s) {
-    if (*s) { a->free(a->ctx, *s, strlen(*s) + 1); *s = NULL; }
+    if (*s) {
+        a->free(a->ctx, *s, strlen(*s) + 1);
+        *s = NULL;
+    }
 }
 
 static void slot_free(sc_allocator_t *a, sc_pool_slot_t *s) {
@@ -90,12 +95,16 @@ static void slot_deinit_agent(sc_allocator_t *a, sc_pool_slot_t *s) {
 }
 
 static char *dup_opt(sc_allocator_t *a, const char *s, size_t len) {
-    if (!s || len == 0) return NULL;
+    if (!s || len == 0)
+        return NULL;
     return sc_strndup(a, s, len);
 }
 
 #if defined(SC_GATEWAY_POSIX) && (!defined(SC_IS_TEST) || SC_IS_TEST == 0)
-typedef struct { sc_agent_pool_t *pool; uint32_t slot; } sc_spawn_tctx_t;
+typedef struct {
+    sc_agent_pool_t *pool;
+    uint32_t slot;
+} sc_spawn_tctx_t;
 
 static void *spawn_thread(void *arg) {
     sc_spawn_tctx_t *tc = (sc_spawn_tctx_t *)arg;
@@ -106,13 +115,13 @@ static void *spawn_thread(void *arg) {
     sc_provider_t prov = {0};
     bool created_prov = false;
 
-    if (s->cancelled) goto done;
+    if (s->cancelled)
+        goto done;
 
     const char *pn = s->provider_name ? s->provider_name : "openai";
     const char *ak = s->api_key ? s->api_key : "";
     const char *bu = s->base_url ? s->base_url : "";
-    if (sc_provider_create(a, pn, strlen(pn), ak, strlen(ak),
-            bu, strlen(bu), &prov) != SC_OK) {
+    if (sc_provider_create(a, pn, strlen(pn), ak, strlen(ak), bu, strlen(bu), &prov) != SC_OK) {
         result = sc_strndup(a, "(provider create failed)", 24);
         goto done;
     }
@@ -122,23 +131,27 @@ static void *spawn_thread(void *arg) {
     double temp = s->temperature > 0.0 ? s->temperature : 0.7;
     const char *ws = (s->workspace_dir && s->workspace_dir[0]) ? s->workspace_dir : ".";
     uint32_t mi = s->max_iterations > 0 ? s->max_iterations : SC_POOL_DEFAULT_ITER;
-    const char *sys = (s->system_prompt && s->system_prompt[0])
-        ? s->system_prompt : "You are a helpful assistant.";
+    const char *sys = (s->system_prompt && s->system_prompt[0]) ? s->system_prompt
+                                                                : "You are a helpful assistant.";
     const char *task = s->task ? s->task : "";
     size_t task_len = s->task ? strlen(s->task) : 0;
 
     if (s->mode == SC_SPAWN_PERSISTENT) {
         sc_agent_t *ag = (sc_agent_t *)a->alloc(a->ctx, sizeof(sc_agent_t));
-        if (!ag) { result = sc_strndup(a, "(oom)", 5); goto done; }
+        if (!ag) {
+            result = sc_strndup(a, "(oom)", 5);
+            goto done;
+        }
         memset(ag, 0, sizeof(*ag));
-        if (sc_agent_from_config(ag, a, prov, NULL, 0, NULL, NULL, NULL, s->policy,
-                mdl, strlen(mdl), pn, strlen(pn), temp, ws, strlen(ws),
-                mi, 50, false, 2, sys, strlen(sys)) != SC_OK) {
+        if (sc_agent_from_config(ag, a, prov, NULL, 0, NULL, NULL, NULL, s->policy, mdl,
+                                 strlen(mdl), pn, strlen(pn), temp, ws, strlen(ws), mi, 50, false,
+                                 2, sys, strlen(sys)) != SC_OK) {
             a->free(a->ctx, ag, sizeof(*ag));
             result = sc_strndup(a, "(agent create failed)", 21);
             goto done;
         }
-        char *resp = NULL; size_t rlen = 0;
+        char *resp = NULL;
+        size_t rlen = 0;
         sc_error_t e = sc_agent_turn(ag, task, task_len, &resp, &rlen);
         if (e == SC_OK && resp && rlen > 0) {
             result = sc_strndup(a, resp, rlen);
@@ -146,27 +159,31 @@ static void *spawn_thread(void *arg) {
         } else if (resp) {
             a->free(a->ctx, resp, rlen + 1);
         }
-        if (!result) result = sc_strndup(a, "(no response)", 13);
+        if (!result)
+            result = sc_strndup(a, "(no response)", 13);
 
         pthread_mutex_lock(&pool->mu);
         if (s->cancelled) {
-            sc_agent_deinit(ag); a->free(a->ctx, ag, sizeof(*ag));
+            sc_agent_deinit(ag);
+            a->free(a->ctx, ag, sizeof(*ag));
             s->status = SC_AGENT_CANCELLED;
         } else {
             s->persistent_agent = ag;
-            s->result = result; result = NULL;
+            s->result = result;
+            result = NULL;
             s->status = SC_AGENT_IDLE;
         }
         pthread_mutex_unlock(&pool->mu);
     } else {
         sc_agent_t ag = {0};
-        if (sc_agent_from_config(&ag, a, prov, NULL, 0, NULL, NULL, NULL, s->policy,
-                mdl, strlen(mdl), pn, strlen(pn), temp, ws, strlen(ws),
-                mi, 50, false, 2, sys, strlen(sys)) != SC_OK) {
+        if (sc_agent_from_config(&ag, a, prov, NULL, 0, NULL, NULL, NULL, s->policy, mdl,
+                                 strlen(mdl), pn, strlen(pn), temp, ws, strlen(ws), mi, 50, false,
+                                 2, sys, strlen(sys)) != SC_OK) {
             result = sc_strndup(a, "(agent create failed)", 21);
             goto done;
         }
-        char *resp = NULL; size_t rlen = 0;
+        char *resp = NULL;
+        size_t rlen = 0;
         sc_agent_turn(&ag, task, task_len, &resp, &rlen);
         if (resp && rlen > 0) {
             result = sc_strndup(a, resp, rlen);
@@ -175,7 +192,8 @@ static void *spawn_thread(void *arg) {
             a->free(a->ctx, resp, rlen + 1);
         }
         sc_agent_deinit(&ag);
-        if (!result) result = sc_strndup(a, "(no response)", 13);
+        if (!result)
+            result = sc_strndup(a, "(no response)", 13);
     }
 
 done:
@@ -185,9 +203,13 @@ done:
     pthread_mutex_lock(&pool->mu);
     if (s->status != SC_AGENT_IDLE && s->status != SC_AGENT_CANCELLED) {
         s->status = s->cancelled ? SC_AGENT_CANCELLED : SC_AGENT_COMPLETED;
-        if (result) { s->result = result; result = NULL; }
+        if (result) {
+            s->result = result;
+            result = NULL;
+        }
     }
-    if (result) a->free(a->ctx, result, strlen(result) + 1);
+    if (result)
+        a->free(a->ctx, result, strlen(result) + 1);
     s->thread_valid = false;
     pthread_mutex_unlock(&pool->mu);
     a->free(a->ctx, tc, sizeof(*tc));
@@ -196,9 +218,11 @@ done:
 #endif
 
 sc_agent_pool_t *sc_agent_pool_create(sc_allocator_t *alloc, uint32_t max_concurrent) {
-    if (!alloc) return NULL;
+    if (!alloc)
+        return NULL;
     sc_agent_pool_t *p = (sc_agent_pool_t *)alloc->alloc(alloc->ctx, sizeof(*p));
-    if (!p) return NULL;
+    if (!p)
+        return NULL;
     memset(p, 0, sizeof(*p));
     p->alloc = alloc;
     p->next_id = 1;
@@ -213,12 +237,14 @@ sc_agent_pool_t *sc_agent_pool_create(sc_allocator_t *alloc, uint32_t max_concur
 }
 
 void sc_agent_pool_destroy(sc_agent_pool_t *pool) {
-    if (!pool) return;
+    if (!pool)
+        return;
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&pool->mu);
 #endif
     for (uint32_t i = 0; i < SC_POOL_MAX_SLOTS; i++) {
-        if (!pool->used[i]) continue;
+        if (!pool->used[i])
+            continue;
         sc_pool_slot_t *s = &pool->slots[i];
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
         if (s->thread_valid) {
@@ -240,12 +266,11 @@ void sc_agent_pool_destroy(sc_agent_pool_t *pool) {
     pool->alloc->free(pool->alloc->ctx, pool, sizeof(*pool));
 }
 
-sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool,
-    const sc_spawn_config_t *cfg,
-    const char *task, size_t task_len,
-    const char *label, uint64_t *out_id)
-{
-    if (!pool || !cfg || !out_id) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool, const sc_spawn_config_t *cfg,
+                               const char *task, size_t task_len, const char *label,
+                               uint64_t *out_id) {
+    if (!pool || !cfg || !out_id)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_allocator_t *a = pool->alloc;
 
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
@@ -259,7 +284,10 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool,
     }
     uint32_t si = SC_POOL_MAX_SLOTS;
     for (uint32_t i = 0; i < SC_POOL_MAX_SLOTS; i++)
-        if (!pool->used[i]) { si = i; break; }
+        if (!pool->used[i]) {
+            si = i;
+            break;
+        }
     if (si >= SC_POOL_MAX_SLOTS) {
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
         pthread_mutex_unlock(&pool->mu);
@@ -288,20 +316,24 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool,
 
 #if defined(SC_IS_TEST) && SC_IS_TEST == 1
     s->result = sc_sprintf(a, "(spawned: %s)", s->label ? s->label : "agent");
-    if (!s->result) s->result = sc_strndup(a, "(spawned)", 9);
+    if (!s->result)
+        s->result = sc_strndup(a, "(spawned)", 9);
     s->status = (cfg->mode == SC_SPAWN_PERSISTENT) ? SC_AGENT_IDLE : SC_AGENT_COMPLETED;
 #elif defined(SC_GATEWAY_POSIX)
     {
         sc_spawn_tctx_t *tc = (sc_spawn_tctx_t *)a->alloc(a->ctx, sizeof(*tc));
         if (!tc) {
-            slot_free(a, s); pool->used[si] = false;
+            slot_free(a, s);
+            pool->used[si] = false;
             pthread_mutex_unlock(&pool->mu);
             return SC_ERR_OUT_OF_MEMORY;
         }
-        tc->pool = pool; tc->slot = si;
+        tc->pool = pool;
+        tc->slot = si;
         if (pthread_create(&s->thread, NULL, spawn_thread, tc) != 0) {
             a->free(a->ctx, tc, sizeof(*tc));
-            slot_free(a, s); pool->used[si] = false;
+            slot_free(a, s);
+            pool->used[si] = false;
             pthread_mutex_unlock(&pool->mu);
             return SC_ERR_INTERNAL;
         }
@@ -310,7 +342,8 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool,
     pthread_mutex_unlock(&pool->mu);
 #else
     s->result = sc_sprintf(a, "(spawned: %s)", s->label ? s->label : "agent");
-    if (!s->result) s->result = sc_strndup(a, "(spawned)", 9);
+    if (!s->result)
+        s->result = sc_strndup(a, "(spawned)", 9);
     s->status = (cfg->mode == SC_SPAWN_PERSISTENT) ? SC_AGENT_IDLE : SC_AGENT_COMPLETED;
 #endif
 
@@ -318,26 +351,33 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool,
     return SC_OK;
 }
 
-sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool,
-    uint64_t agent_id, const char *message, size_t message_len,
-    char **out_response, size_t *out_response_len)
-{
-    if (!pool || !out_response || !out_response_len) return SC_ERR_INVALID_ARGUMENT;
-    *out_response = NULL; *out_response_len = 0;
+sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool, uint64_t agent_id, const char *message,
+                               size_t message_len, char **out_response, size_t *out_response_len) {
+    if (!pool || !out_response || !out_response_len)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out_response = NULL;
+    *out_response_len = 0;
 
 #if defined(SC_IS_TEST) && SC_IS_TEST == 1
-    (void)agent_id; (void)message; (void)message_len;
+    (void)agent_id;
+    (void)message;
+    (void)message_len;
     *out_response = sc_strndup(pool->alloc, "(query response)", 16);
     *out_response_len = 16;
     return SC_OK;
 #else
 #if !defined(SC_GATEWAY_POSIX)
-    (void)agent_id; (void)message; (void)message_len;
+    (void)agent_id;
+    (void)message;
+    (void)message_len;
     return SC_ERR_NOT_SUPPORTED;
 #else
     pthread_mutex_lock(&pool->mu);
     sc_pool_slot_t *s = find_slot(pool, agent_id);
-    if (!s) { pthread_mutex_unlock(&pool->mu); return SC_ERR_NOT_FOUND; }
+    if (!s) {
+        pthread_mutex_unlock(&pool->mu);
+        return SC_ERR_NOT_FOUND;
+    }
     if (s->status != SC_AGENT_IDLE || !s->persistent_agent) {
         pthread_mutex_unlock(&pool->mu);
         return SC_ERR_INVALID_ARGUMENT;
@@ -346,7 +386,8 @@ sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool,
     sc_agent_t *ag = (sc_agent_t *)s->persistent_agent;
     pthread_mutex_unlock(&pool->mu);
 
-    char *resp = NULL; size_t rlen = 0;
+    char *resp = NULL;
+    size_t rlen = 0;
     sc_error_t err = sc_agent_turn(ag, message, message_len, &resp, &rlen);
 
     pthread_mutex_lock(&pool->mu);
@@ -357,7 +398,8 @@ sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool,
         *out_response = sc_strndup(pool->alloc, resp, rlen);
         *out_response_len = rlen;
     }
-    if (resp) pool->alloc->free(pool->alloc->ctx, resp, rlen + 1);
+    if (resp)
+        pool->alloc->free(pool->alloc->ctx, resp, rlen + 1);
     pthread_mutex_unlock(&pool->mu);
     return err;
 #endif
@@ -365,7 +407,8 @@ sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool,
 }
 
 sc_agent_status_t sc_agent_pool_status(sc_agent_pool_t *pool, uint64_t agent_id) {
-    if (!pool) return SC_AGENT_FAILED;
+    if (!pool)
+        return SC_AGENT_FAILED;
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&pool->mu);
 #endif
@@ -378,7 +421,8 @@ sc_agent_status_t sc_agent_pool_status(sc_agent_pool_t *pool, uint64_t agent_id)
 }
 
 const char *sc_agent_pool_result(sc_agent_pool_t *pool, uint64_t agent_id) {
-    if (!pool) return NULL;
+    if (!pool)
+        return NULL;
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&pool->mu);
 #endif
@@ -391,7 +435,8 @@ const char *sc_agent_pool_result(sc_agent_pool_t *pool, uint64_t agent_id) {
 }
 
 sc_error_t sc_agent_pool_cancel(sc_agent_pool_t *pool, uint64_t agent_id) {
-    if (!pool) return SC_ERR_INVALID_ARGUMENT;
+    if (!pool)
+        return SC_ERR_INVALID_ARGUMENT;
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&pool->mu);
 #endif
@@ -414,7 +459,8 @@ sc_error_t sc_agent_pool_cancel(sc_agent_pool_t *pool, uint64_t agent_id) {
 }
 
 size_t sc_agent_pool_running_count(sc_agent_pool_t *pool) {
-    if (!pool) return 0;
+    if (!pool)
+        return 0;
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&pool->mu);
 #endif
@@ -426,23 +472,27 @@ size_t sc_agent_pool_running_count(sc_agent_pool_t *pool) {
 }
 
 sc_error_t sc_agent_pool_list(sc_agent_pool_t *pool, sc_allocator_t *alloc,
-    sc_agent_pool_info_t **out, size_t *out_count)
-{
-    if (!pool || !alloc || !out || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    *out = NULL; *out_count = 0;
+                              sc_agent_pool_info_t **out, size_t *out_count) {
+    if (!pool || !alloc || !out || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
     size_t n = 0;
     for (uint32_t i = 0; i < SC_POOL_MAX_SLOTS; i++)
-        if (pool->used[i]) n++;
-    if (n == 0) return SC_OK;
-    sc_agent_pool_info_t *arr = (sc_agent_pool_info_t *)alloc->alloc(
-        alloc->ctx, n * sizeof(*arr));
-    if (!arr) return SC_ERR_OUT_OF_MEMORY;
+        if (pool->used[i])
+            n++;
+    if (n == 0)
+        return SC_OK;
+    sc_agent_pool_info_t *arr = (sc_agent_pool_info_t *)alloc->alloc(alloc->ctx, n * sizeof(*arr));
+    if (!arr)
+        return SC_ERR_OUT_OF_MEMORY;
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&pool->mu);
 #endif
     size_t j = 0;
     for (uint32_t i = 0; i < SC_POOL_MAX_SLOTS && j < n; i++) {
-        if (!pool->used[i]) continue;
+        if (!pool->used[i])
+            continue;
         sc_pool_slot_t *s = &pool->slots[i];
         arr[j].agent_id = s->agent_id;
         arr[j].status = s->status;
@@ -456,6 +506,7 @@ sc_error_t sc_agent_pool_list(sc_agent_pool_t *pool, sc_allocator_t *alloc,
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_unlock(&pool->mu);
 #endif
-    *out = arr; *out_count = n;
+    *out = arr;
+    *out_count = n;
     return SC_OK;
 }

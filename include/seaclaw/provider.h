@@ -47,7 +47,10 @@ typedef enum sc_content_part_tag {
 typedef struct sc_content_part {
     sc_content_part_tag_t tag;
     union {
-        struct { const char *ptr; size_t len; } text;
+        struct {
+            const char *ptr;
+            size_t len;
+        } text;
         sc_content_part_image_url_t image_url;
         sc_content_part_image_base64_t image_base64;
     } data;
@@ -59,14 +62,14 @@ typedef struct sc_chat_message {
     sc_role_t role;
     const char *content;
     size_t content_len;
-    const char *name;      /* optional, for tool results */
-    size_t name_len;       /* 0 if name is NULL */
-    const char *tool_call_id; /* optional */
-    size_t tool_call_id_len; /* 0 if tool_call_id is NULL */
+    const char *name;                       /* optional, for tool results */
+    size_t name_len;                        /* 0 if name is NULL */
+    const char *tool_call_id;               /* optional */
+    size_t tool_call_id_len;                /* 0 if tool_call_id is NULL */
     const sc_content_part_t *content_parts; /* optional, NULL if not used */
-    size_t content_parts_count;              /* 0 if content_parts is NULL */
-    const sc_tool_call_t *tool_calls; /* optional, for assistant messages */
-    size_t tool_calls_count;          /* 0 if tool_calls is NULL */
+    size_t content_parts_count;             /* 0 if content_parts is NULL */
+    const sc_tool_call_t *tool_calls;       /* optional, for assistant messages */
+    size_t tool_calls_count;                /* 0 if tool_calls is NULL */
 } sc_chat_message_t;
 
 typedef struct sc_tool_call {
@@ -85,15 +88,15 @@ typedef struct sc_token_usage {
 } sc_token_usage_t;
 
 typedef struct sc_chat_response {
-    const char *content;       /* optional, NULL if none */
-    size_t content_len;        /* 0 if content is NULL */
+    const char *content; /* optional, NULL if none */
+    size_t content_len;  /* 0 if content is NULL */
     const sc_tool_call_t *tool_calls;
     size_t tool_calls_count;
     sc_token_usage_t usage;
     const char *model;
     size_t model_len;
     const char *reasoning_content; /* optional, NULL if none */
-    size_t reasoning_content_len; /* 0 if reasoning_content is NULL */
+    size_t reasoning_content_len;  /* 0 if reasoning_content is NULL */
 } sc_chat_response_t;
 
 typedef struct sc_stream_chunk {
@@ -104,7 +107,7 @@ typedef struct sc_stream_chunk {
 } sc_stream_chunk_t;
 
 typedef struct sc_stream_chat_result {
-    const char *content;       /* optional, NULL if none */
+    const char *content; /* optional, NULL if none */
     size_t content_len;
     sc_token_usage_t usage;
     const char *model;
@@ -127,11 +130,11 @@ typedef struct sc_chat_request {
     size_t messages_count;
     const char *model;
     size_t model_len;
-    double temperature;       /* default 0.7 */
-    uint32_t max_tokens;      /* 0 = provider default */
-    const sc_tool_spec_t *tools; /* optional, NULL if none */
-    size_t tools_count;       /* 0 if tools is NULL */
-    uint64_t timeout_secs;    /* 0 = no limit */
+    double temperature;           /* default 0.7 */
+    uint32_t max_tokens;          /* 0 = provider default */
+    const sc_tool_spec_t *tools;  /* optional, NULL if none */
+    size_t tools_count;           /* 0 if tools is NULL */
+    uint64_t timeout_secs;        /* 0 = no limit */
     const char *reasoning_effort; /* optional, NULL = don't send */
     size_t reasoning_effort_len;
 } sc_chat_request_t;
@@ -149,18 +152,14 @@ typedef struct sc_provider {
 
 typedef struct sc_provider_vtable {
     /* Required */
-    sc_error_t (*chat_with_system)(void *ctx, sc_allocator_t *alloc,
-        const char *system_prompt, size_t system_prompt_len,
-        const char *message, size_t message_len,
-        const char *model, size_t model_len,
-        double temperature,
-        char **out, size_t *out_len);
+    sc_error_t (*chat_with_system)(void *ctx, sc_allocator_t *alloc, const char *system_prompt,
+                                   size_t system_prompt_len, const char *message,
+                                   size_t message_len, const char *model, size_t model_len,
+                                   double temperature, char **out, size_t *out_len);
 
-    sc_error_t (*chat)(void *ctx, sc_allocator_t *alloc,
-        const sc_chat_request_t *request,
-        const char *model, size_t model_len,
-        double temperature,
-        sc_chat_response_t *out);
+    sc_error_t (*chat)(void *ctx, sc_allocator_t *alloc, const sc_chat_request_t *request,
+                       const char *model, size_t model_len, double temperature,
+                       sc_chat_response_t *out);
 
     bool (*supports_native_tools)(void *ctx);
     const char *(*get_name)(void *ctx);
@@ -168,18 +167,15 @@ typedef struct sc_provider_vtable {
 
     /* Optional — may be NULL */
     void (*warmup)(void *ctx);
-    sc_error_t (*chat_with_tools)(void *ctx, sc_allocator_t *alloc,
-        const sc_chat_request_t *req,
-        sc_chat_response_t *out);
+    sc_error_t (*chat_with_tools)(void *ctx, sc_allocator_t *alloc, const sc_chat_request_t *req,
+                                  sc_chat_response_t *out);
     bool (*supports_streaming)(void *ctx);
     bool (*supports_vision)(void *ctx);
     bool (*supports_vision_for_model)(void *ctx, const char *model, size_t model_len);
-    sc_error_t (*stream_chat)(void *ctx, sc_allocator_t *alloc,
-        const sc_chat_request_t *request,
-        const char *model, size_t model_len,
-        double temperature,
-        sc_stream_callback_t callback, void *callback_ctx,
-        sc_stream_chat_result_t *out);
+    sc_error_t (*stream_chat)(void *ctx, sc_allocator_t *alloc, const sc_chat_request_t *request,
+                              const char *model, size_t model_len, double temperature,
+                              sc_stream_callback_t callback, void *callback_ctx,
+                              sc_stream_chat_result_t *out);
 } sc_provider_vtable_t;
 
 /* Free allocations in a chat response (content, model, tool_calls and their strings). */

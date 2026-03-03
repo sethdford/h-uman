@@ -13,6 +13,7 @@ bool sc_helpers_is_reasoning_model(const char *model, size_t model_len);
 char *sc_helpers_extract_openai_content(sc_allocator_t *alloc, const char *body, size_t body_len);
 
 /* Extract text content from Anthropic-style JSON response (content[0].text) */
-char *sc_helpers_extract_anthropic_content(sc_allocator_t *alloc, const char *body, size_t body_len);
+char *sc_helpers_extract_anthropic_content(sc_allocator_t *alloc, const char *body,
+                                           size_t body_len);
 
 #endif /* SC_PROVIDERS_HELPERS_H */

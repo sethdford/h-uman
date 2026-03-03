@@ -13,7 +13,7 @@ typedef enum sc_adaptive_strategy {
 
 typedef struct sc_adaptive_config {
     bool enabled;
-    unsigned keyword_max_tokens;  /* <= this -> keyword_only */
+    unsigned keyword_max_tokens; /* <= this -> keyword_only */
     unsigned vector_min_tokens;  /* >= this -> vector_only or hybrid */
 } sc_adaptive_config_t;
 
@@ -27,6 +27,6 @@ typedef struct sc_query_analysis {
 
 /* Analyze query and recommend strategy. Pure function, no allocations. */
 sc_query_analysis_t sc_adaptive_analyze_query(const char *query, size_t query_len,
-    const sc_adaptive_config_t *config);
+                                              const sc_adaptive_config_t *config);
 
 #endif /* SC_MEMORY_RETRIEVAL_ADAPTIVE_H */

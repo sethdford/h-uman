@@ -19,8 +19,8 @@ typedef struct sc_otel_config {
 
 typedef struct sc_span sc_span_t;
 
-sc_error_t sc_otel_observer_create(sc_allocator_t *alloc,
-    const sc_otel_config_t *cfg, sc_observer_t *out);
+sc_error_t sc_otel_observer_create(sc_allocator_t *alloc, const sc_otel_config_t *cfg,
+                                   sc_observer_t *out);
 
 sc_span_t *sc_span_start(sc_allocator_t *alloc, const char *name, size_t name_len);
 void sc_span_set_attr_str(sc_span_t *span, const char *key, const char *value);

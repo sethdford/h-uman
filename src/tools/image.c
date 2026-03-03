@@ -1,27 +1,27 @@
-#include "seaclaw/tool.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/tool.h"
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SC_IMAGE_MAX_SIZE (5 * 1024 * 1024)
 
 #define SC_IMAGE_NAME "image"
 #define SC_IMAGE_DESC "Analyze an image file: detect format, size, and dimensions."
-#define SC_IMAGE_PARAMS "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}"
+#define SC_IMAGE_PARAMS                                                                            \
+    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]" \
+    "}"
 
 typedef struct sc_image_ctx {
     char *api_key;
     size_t api_key_len;
 } sc_image_ctx_t;
 
-static sc_error_t image_execute(void *ctx, sc_allocator_t *alloc,
-    const sc_json_value_t *args,
-    sc_tool_result_t *out)
-{
+static sc_error_t image_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                                sc_tool_result_t *out) {
     (void)ctx;
     if (!args || !out) {
         *out = sc_tool_result_fail("invalid args", 12);
@@ -35,7 +35,10 @@ static sc_error_t image_execute(void *ctx, sc_allocator_t *alloc,
 #if SC_IS_TEST
     size_t need = 20 + strlen(path);
     char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
-    if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msg) {
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     int n = snprintf(msg, need + 1, "File: %s\nFormat: unknown\nSize: 0 bytes", path);
     size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
     msg[len] = '\0';
@@ -74,17 +77,22 @@ static sc_error_t image_execute(void *ctx, sc_allocator_t *alloc,
         fmt = "png";
     else if (nread >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF)
         fmt = "jpeg";
-    else if (nread >= 6 && header[0] == 'G' && header[1] == 'I' && header[2] == 'F' && header[3] == '8')
+    else if (nread >= 6 && header[0] == 'G' && header[1] == 'I' && header[2] == 'F' &&
+             header[3] == '8')
         fmt = "gif";
-    else if (nread >= 12 && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
-             && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P')
+    else if (nread >= 12 && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' &&
+             header[3] == 'F' && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' &&
+             header[11] == 'P')
         fmt = "webp";
     else if (nread >= 2 && header[0] == 'B' && header[1] == 'M')
         fmt = "bmp";
 
     size_t need = 32 + strlen(path) + strlen(fmt);
     char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
-    if (!msg) { *out = sc_tool_result_fail("out of memory", 12); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msg) {
+        *out = sc_tool_result_fail("out of memory", 12);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     int n = snprintf(msg, need + 1, "File: %s\nFormat: %s\nSize: %ld bytes", path, fmt, (long)sz);
     size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
     msg[len] = '\0';
@@ -93,31 +101,47 @@ static sc_error_t image_execute(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static const char *image_name(void *ctx) { (void)ctx; return SC_IMAGE_NAME; }
-static const char *image_description(void *ctx) { (void)ctx; return SC_IMAGE_DESC; }
-static const char *image_parameters_json(void *ctx) { (void)ctx; return SC_IMAGE_PARAMS; }
+static const char *image_name(void *ctx) {
+    (void)ctx;
+    return SC_IMAGE_NAME;
+}
+static const char *image_description(void *ctx) {
+    (void)ctx;
+    return SC_IMAGE_DESC;
+}
+static const char *image_parameters_json(void *ctx) {
+    (void)ctx;
+    return SC_IMAGE_PARAMS;
+}
 static void image_deinit(void *ctx, sc_allocator_t *alloc) {
     (void)alloc;
     sc_image_ctx_t *c = (sc_image_ctx_t *)ctx;
-    if (c && c->api_key) { free(c->api_key); free(c); }
+    if (c && c->api_key) {
+        free(c->api_key);
+        free(c);
+    }
 }
 
 static const sc_tool_vtable_t image_vtable = {
-    .execute = image_execute, .name = image_name,
-    .description = image_description, .parameters_json = image_parameters_json,
+    .execute = image_execute,
+    .name = image_name,
+    .description = image_description,
+    .parameters_json = image_parameters_json,
     .deinit = image_deinit,
 };
 
-sc_error_t sc_image_create(sc_allocator_t *alloc,
-    const char *api_key, size_t api_key_len,
-    sc_tool_t *out)
-{
+sc_error_t sc_image_create(sc_allocator_t *alloc, const char *api_key, size_t api_key_len,
+                           sc_tool_t *out) {
     (void)alloc;
     sc_image_ctx_t *c = (sc_image_ctx_t *)calloc(1, sizeof(*c));
-    if (!c) return SC_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return SC_ERR_OUT_OF_MEMORY;
     if (api_key && api_key_len > 0) {
         c->api_key = (char *)malloc(api_key_len + 1);
-        if (!c->api_key) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        if (!c->api_key) {
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         memcpy(c->api_key, api_key, api_key_len);
         c->api_key[api_key_len] = '\0';
         c->api_key_len = api_key_len;

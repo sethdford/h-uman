@@ -1,20 +1,20 @@
 #ifndef SC_AGENT_TUI_H
 #define SC_AGENT_TUI_H
 
+#include "seaclaw/agent.h"
 #include "seaclaw/core/allocator.h"
-#include <stdint.h>
 #include "seaclaw/core/error.h"
 #include "seaclaw/observer.h"
-#include "seaclaw/agent.h"
+#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <signal.h>
+#include <stdint.h>
 
-#define SC_TUI_INPUT_MAX     4096
-#define SC_TUI_OUTPUT_MAX    65536
-#define SC_TUI_TOOL_MAX      64
-#define SC_TUI_HISTORY_MAX   128
-#define SC_TUI_TAB_MAX       8
+#define SC_TUI_INPUT_MAX   4096
+#define SC_TUI_OUTPUT_MAX  65536
+#define SC_TUI_TOOL_MAX    64
+#define SC_TUI_HISTORY_MAX 128
+#define SC_TUI_TAB_MAX     8
 
 typedef struct sc_tui_tool_entry {
     char name[64];
@@ -37,7 +37,7 @@ typedef struct sc_tui_tab_snapshot {
     int output_scroll;
     sc_tui_tool_entry_t tool_log[SC_TUI_TOOL_MAX];
     size_t tool_log_count;
-    sc_owned_message_t *history;    /* saved agent history (owned) */
+    sc_owned_message_t *history; /* saved agent history (owned) */
     size_t history_count;
     size_t history_cap;
     uint64_t total_tokens;
@@ -82,12 +82,11 @@ typedef struct sc_tui_state {
     /* Multi-tab (Tier 3.2) */
     int active_tab;
     int tab_count;
-    sc_tui_tab_snapshot_t *tabs;    /* heap array of tab snapshots */
+    sc_tui_tab_snapshot_t *tabs; /* heap array of tab snapshots */
 } sc_tui_state_t;
 
-sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc,
-    sc_agent_t *agent, const char *provider_name,
-    const char *model_name, size_t tools_count);
+sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc, sc_agent_t *agent,
+                       const char *provider_name, const char *model_name, size_t tools_count);
 
 sc_error_t sc_tui_run(sc_tui_state_t *state);
 

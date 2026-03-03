@@ -1,16 +1,17 @@
-#include "seaclaw/memory/lifecycle.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/memory.h"
-#include <string.h>
-#include <stdio.h>
-#include <time.h>
+#include "seaclaw/memory/lifecycle.h"
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 /* Parse ISO8601 timestamp (YYYY-MM-DDTHH:MM:SSZ) to seconds since epoch.
  * Returns 0 on parse failure (treat as very old). */
 static uint64_t parse_timestamp_epoch(const char *ts, size_t ts_len) {
-    if (!ts || ts_len < 19) return 0;
+    if (!ts || ts_len < 19)
+        return 0;
     int y, mo, d, h, mi, s;
     if (sscanf(ts, "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &s) != 6)
         return 0;
@@ -32,8 +33,10 @@ static uint64_t parse_timestamp_epoch(const char *ts, size_t ts_len) {
 
 /* Compare entries by content for deduplication */
 static bool content_equal(const sc_memory_entry_t *a, const sc_memory_entry_t *b) {
-    if (a->content_len != b->content_len) return false;
-    if (!a->content || !b->content) return a->content == b->content;
+    if (a->content_len != b->content_len)
+        return false;
+    if (!a->content || !b->content)
+        return a->content == b->content;
     return memcmp(a->content, b->content, a->content_len) == 0;
 }
 
@@ -45,7 +48,7 @@ static bool timestamp_newer(const sc_memory_entry_t *a, const sc_memory_entry_t 
 }
 
 sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
-    const sc_hygiene_config_t *config, sc_hygiene_stats_t *stats) {
+                                 const sc_hygiene_config_t *config, sc_hygiene_stats_t *stats) {
     if (!alloc || !memory || !memory->vtable || !config || !stats)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -54,7 +57,8 @@ sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
     sc_memory_entry_t *entries = NULL;
     size_t count = 0;
     sc_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
     if (!entries || count == 0) {
         stats->entries_scanned = 0;
         return SC_OK;
@@ -63,7 +67,8 @@ sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
     stats->entries_scanned = count;
     bool *to_remove = (bool *)alloc->alloc(alloc->ctx, count * sizeof(bool));
     if (!to_remove) {
-        for (size_t i = 0; i < count; i++) sc_memory_entry_free_fields(alloc, &entries[i]);
+        for (size_t i = 0; i < count; i++)
+            sc_memory_entry_free_fields(alloc, &entries[i]);
         alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
         return SC_ERR_OUT_OF_MEMORY;
     }
@@ -90,10 +95,13 @@ sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
 
     if (config->deduplicate) {
         for (size_t i = 0; i < count; i++) {
-            if (to_remove[i]) continue;
+            if (to_remove[i])
+                continue;
             for (size_t j = i + 1; j < count; j++) {
-                if (to_remove[j]) continue;
-                if (!content_equal(&entries[i], &entries[j])) continue;
+                if (to_remove[j])
+                    continue;
+                if (!content_equal(&entries[i], &entries[j]))
+                    continue;
                 if (timestamp_newer(&entries[i], &entries[j]))
                     to_remove[j] = true;
                 else
@@ -110,10 +118,12 @@ sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
             size_t oldest = count;
             uint64_t oldest_ts = UINT64_MAX;
             for (size_t i = 0; i < count; i++) {
-                if (to_remove[i]) continue;
-                uint64_t t = entries[i].timestamp && entries[i].timestamp_len
-                    ? parse_timestamp_epoch(entries[i].timestamp, entries[i].timestamp_len)
-                    : 0;
+                if (to_remove[i])
+                    continue;
+                uint64_t t =
+                    entries[i].timestamp && entries[i].timestamp_len
+                        ? parse_timestamp_epoch(entries[i].timestamp, entries[i].timestamp_len)
+                        : 0;
                 if (t < oldest_ts) {
                     oldest_ts = t;
                     oldest = i;
@@ -125,13 +135,15 @@ sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
     }
 
     for (size_t i = 0; i < count; i++) {
-        if (!to_remove[i]) continue;
+        if (!to_remove[i])
+            continue;
         bool deleted = false;
         const char *key = entries[i].key;
         size_t key_len = entries[i].key_len;
         if (key && key_len > 0) {
             memory->vtable->forget(memory->ctx, key, key_len, &deleted);
-            if (deleted) stats->entries_removed++;
+            if (deleted)
+                stats->entries_removed++;
         }
     }
 

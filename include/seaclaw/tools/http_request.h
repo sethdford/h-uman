@@ -7,7 +7,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-sc_error_t sc_http_request_create(sc_allocator_t *alloc,
-    bool allow_http, sc_tool_t *out);
+sc_error_t sc_http_request_create(sc_allocator_t *alloc, bool allow_http, sc_tool_t *out);
 
 #endif

@@ -21,9 +21,8 @@ typedef struct sc_choice_result {
  * Prints numbered options; reads user input (number or Enter for default).
  * In SC_IS_TEST mode, always returns the default choice.
  */
-sc_error_t sc_choices_prompt(const char *question,
-    const sc_choice_t *choices, size_t count,
-    sc_choice_result_t *out);
+sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, size_t count,
+                             sc_choice_result_t *out);
 
 /**
  * Yes/No shorthand. Returns true for yes, false for no.

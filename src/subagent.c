@@ -1,10 +1,10 @@
 #include "seaclaw/subagent.h"
-#include <stdint.h>
-#include "seaclaw/core/string.h"
 #include "seaclaw/agent.h"
 #include "seaclaw/config.h"
+#include "seaclaw/core/string.h"
 #include "seaclaw/providers/factory.h"
 #include "seaclaw/security.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -13,7 +13,7 @@
 #include <pthread.h>
 #endif
 
-#define SC_MAX_TASKS 64
+#define SC_MAX_TASKS              64
 #define SC_DEFAULT_MAX_CONCURRENT 4
 
 typedef struct sc_task_state {
@@ -79,8 +79,8 @@ static void *subagent_thread_fn(void *arg) {
         size_t base_url_len = base_url ? strlen(base_url) : 0;
 
         sc_provider_t provider = {0};
-        if (sc_provider_create(alloc, prov, prov_len, api_key, api_key_len,
-                base_url, base_url_len, &provider) == SC_OK) {
+        if (sc_provider_create(alloc, prov, prov_len, api_key, api_key_len, base_url, base_url_len,
+                               &provider) == SC_OK) {
             const char *model = mgr->cfg->default_model ? mgr->cfg->default_model : "";
             size_t model_len = strlen(model);
             double temp = mgr->cfg->temperature > 0.0 ? mgr->cfg->temperature : 0.7;
@@ -88,16 +88,15 @@ static void *subagent_thread_fn(void *arg) {
             size_t ws_len = strlen(ws);
 
             sc_agent_t agent = {0};
-            if (sc_agent_from_config(&agent, alloc, provider,
-                    NULL, 0, NULL, NULL, NULL, NULL,
-                    model, model_len, prov, prov_len, temp,
-                    ws, ws_len, 25, 50, false, 2, NULL, 0) == SC_OK) {
+            if (sc_agent_from_config(&agent, alloc, provider, NULL, 0, NULL, NULL, NULL, NULL,
+                                     model, model_len, prov, prov_len, temp, ws, ws_len, 25, 50,
+                                     false, 2, NULL, 0) == SC_OK) {
                 char *resp = NULL;
                 size_t resp_len = 0;
                 const char *sys = "You are a helpful assistant. Answer concisely.";
-                sc_error_t err = sc_agent_run_single(&agent,
-                    sys, strlen(sys), ts->task, ts->task ? strlen(ts->task) : 0,
-                    &resp, &resp_len);
+                sc_error_t err =
+                    sc_agent_run_single(&agent, sys, strlen(sys), ts->task,
+                                        ts->task ? strlen(ts->task) : 0, &resp, &resp_len);
                 sc_agent_deinit(&agent);
                 if (err == SC_OK && resp && resp_len > 0) {
                     result_str = sc_strndup(alloc, resp, resp_len);
@@ -115,7 +114,8 @@ static void *subagent_thread_fn(void *arg) {
 
     if (!result_str) {
         result_str = sc_strndup(alloc, ts->task, ts->task ? strlen(ts->task) : 0);
-        if (!result_str) result_str = sc_strndup(alloc, "(no result)", 11);
+        if (!result_str)
+            result_str = sc_strndup(alloc, "(no result)", 11);
     }
 
     pthread_mutex_lock(&mgr->mutex);
@@ -159,8 +159,8 @@ sc_subagent_manager_t *sc_subagent_create(sc_allocator_t *alloc, const sc_config
     if (!alloc)
         return NULL;
 
-    sc_subagent_manager_t *mgr = (sc_subagent_manager_t *)alloc->alloc(
-        alloc->ctx, sizeof(sc_subagent_manager_t));
+    sc_subagent_manager_t *mgr =
+        (sc_subagent_manager_t *)alloc->alloc(alloc->ctx, sizeof(sc_subagent_manager_t));
     if (!mgr)
         return NULL;
 
@@ -224,10 +224,9 @@ void sc_subagent_destroy(sc_allocator_t *alloc, sc_subagent_manager_t *mgr) {
     alloc->free(alloc->ctx, mgr, sizeof(sc_subagent_manager_t));
 }
 
-sc_error_t sc_subagent_spawn(sc_subagent_manager_t *mgr,
-    const char *task, size_t task_len,
-    const char *label, const char *channel, const char *chat_id,
-    uint64_t *out_task_id) {
+sc_error_t sc_subagent_spawn(sc_subagent_manager_t *mgr, const char *task, size_t task_len,
+                             const char *label, const char *channel, const char *chat_id,
+                             uint64_t *out_task_id) {
     (void)channel;
     (void)chat_id;
 
@@ -295,10 +294,10 @@ sc_error_t sc_subagent_spawn(sc_subagent_manager_t *mgr,
     ts->status = SC_TASK_COMPLETED;
     ts->completed_at = (int64_t)time(NULL);
 #else
-    sc_thread_ctx_t *ctx = (sc_thread_ctx_t *)alloc->alloc(
-        alloc->ctx, sizeof(sc_thread_ctx_t));
+    sc_thread_ctx_t *ctx = (sc_thread_ctx_t *)alloc->alloc(alloc->ctx, sizeof(sc_thread_ctx_t));
     if (!ctx) {
-        if (ts->label) alloc->free(alloc->ctx, ts->label, strlen(ts->label) + 1);
+        if (ts->label)
+            alloc->free(alloc->ctx, ts->label, strlen(ts->label) + 1);
         alloc->free(alloc->ctx, ts->task, strlen(ts->task) + 1);
         mgr->task_used[slot] = false;
         pthread_mutex_unlock(&mgr->mutex);
@@ -309,7 +308,8 @@ sc_error_t sc_subagent_spawn(sc_subagent_manager_t *mgr,
 
     if (pthread_create(&ts->thread, NULL, subagent_thread_fn, ctx) != 0) {
         alloc->free(alloc->ctx, ctx, sizeof(sc_thread_ctx_t));
-        if (ts->label) alloc->free(alloc->ctx, ts->label, strlen(ts->label) + 1);
+        if (ts->label)
+            alloc->free(alloc->ctx, ts->label, strlen(ts->label) + 1);
         alloc->free(alloc->ctx, ts->task, strlen(ts->task) + 1);
         mgr->task_used[slot] = false;
         pthread_mutex_unlock(&mgr->mutex);
@@ -377,7 +377,8 @@ size_t sc_subagent_running_count(sc_subagent_manager_t *mgr) {
 }
 
 sc_error_t sc_subagent_cancel(sc_subagent_manager_t *mgr, uint64_t task_id) {
-    if (!mgr) return SC_ERR_INVALID_ARGUMENT;
+    if (!mgr)
+        return SC_ERR_INVALID_ARGUMENT;
 
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&mgr->mutex);
@@ -399,20 +400,24 @@ sc_error_t sc_subagent_cancel(sc_subagent_manager_t *mgr, uint64_t task_id) {
 }
 
 sc_error_t sc_subagent_get_all(sc_subagent_manager_t *mgr, sc_allocator_t *alloc,
-    sc_subagent_task_info_t **out, size_t *out_count) {
-    if (!mgr || !alloc || !out || !out_count) return SC_ERR_INVALID_ARGUMENT;
+                               sc_subagent_task_info_t **out, size_t *out_count) {
+    if (!mgr || !alloc || !out || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
 
     size_t n = 0;
     for (uint32_t i = 0; i < SC_MAX_TASKS; i++) {
-        if (mgr->task_used[i]) n++;
+        if (mgr->task_used[i])
+            n++;
     }
-    if (n == 0) return SC_OK;
+    if (n == 0)
+        return SC_OK;
 
-    sc_subagent_task_info_t *arr = (sc_subagent_task_info_t *)alloc->alloc(
-        alloc->ctx, n * sizeof(sc_subagent_task_info_t));
-    if (!arr) return SC_ERR_OUT_OF_MEMORY;
+    sc_subagent_task_info_t *arr =
+        (sc_subagent_task_info_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_subagent_task_info_t));
+    if (!arr)
+        return SC_ERR_OUT_OF_MEMORY;
 
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
     pthread_mutex_lock(&mgr->mutex);
@@ -420,7 +425,8 @@ sc_error_t sc_subagent_get_all(sc_subagent_manager_t *mgr, sc_allocator_t *alloc
 
     size_t j = 0;
     for (uint32_t i = 0; i < SC_MAX_TASKS && j < n; i++) {
-        if (!mgr->task_used[i]) continue;
+        if (!mgr->task_used[i])
+            continue;
         sc_task_state_t *ts = &mgr->tasks[i];
         arr[j].task_id = ts->task_id;
         arr[j].status = ts->status;

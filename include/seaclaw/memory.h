@@ -38,9 +38,9 @@ typedef struct sc_memory_entry {
     sc_memory_category_t category;
     const char *timestamp;
     size_t timestamp_len;
-    const char *session_id;  /* optional, NULL if none */
-    size_t session_id_len;    /* 0 if session_id is NULL */
-    double score;             /* optional, NAN if not set */
+    const char *session_id; /* optional, NULL if none */
+    size_t session_id_len;  /* 0 if session_id is NULL */
+    double score;           /* optional, NAN if not set */
 } sc_memory_entry_t;
 
 typedef struct sc_message_entry {
@@ -62,17 +62,14 @@ typedef struct sc_session_store {
 } sc_session_store_t;
 
 typedef struct sc_session_store_vtable {
-    sc_error_t (*save_message)(void *ctx,
-        const char *session_id, size_t session_id_len,
-        const char *role, size_t role_len,
-        const char *content, size_t content_len);
-    sc_error_t (*load_messages)(void *ctx, sc_allocator_t *alloc,
-        const char *session_id, size_t session_id_len,
-        sc_message_entry_t **out, size_t *out_count);
-    sc_error_t (*clear_messages)(void *ctx,
-        const char *session_id, size_t session_id_len);
-    sc_error_t (*clear_auto_saved)(void *ctx,
-        const char *session_id, size_t session_id_len); /* NULL = all sessions */
+    sc_error_t (*save_message)(void *ctx, const char *session_id, size_t session_id_len,
+                               const char *role, size_t role_len, const char *content,
+                               size_t content_len);
+    sc_error_t (*load_messages)(void *ctx, sc_allocator_t *alloc, const char *session_id,
+                                size_t session_id_len, sc_message_entry_t **out, size_t *out_count);
+    sc_error_t (*clear_messages)(void *ctx, const char *session_id, size_t session_id_len);
+    sc_error_t (*clear_auto_saved)(void *ctx, const char *session_id,
+                                   size_t session_id_len); /* NULL = all sessions */
 } sc_session_store_vtable_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -88,26 +85,19 @@ typedef struct sc_memory {
 
 typedef struct sc_memory_vtable {
     const char *(*name)(void *ctx);
-    sc_error_t (*store)(void *ctx,
-        const char *key, size_t key_len,
-        const char *content, size_t content_len,
-        const sc_memory_category_t *category,
-        const char *session_id, size_t session_id_len);
-    sc_error_t (*recall)(void *ctx, sc_allocator_t *alloc,
-        const char *query, size_t query_len,
-        size_t limit,
-        const char *session_id, size_t session_id_len,
-        sc_memory_entry_t **out, size_t *out_count);
-    sc_error_t (*get)(void *ctx, sc_allocator_t *alloc,
-        const char *key, size_t key_len,
-        sc_memory_entry_t *out, bool *found);
+    sc_error_t (*store)(void *ctx, const char *key, size_t key_len, const char *content,
+                        size_t content_len, const sc_memory_category_t *category,
+                        const char *session_id, size_t session_id_len);
+    sc_error_t (*recall)(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+                         size_t limit, const char *session_id, size_t session_id_len,
+                         sc_memory_entry_t **out, size_t *out_count);
+    sc_error_t (*get)(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
+                      sc_memory_entry_t *out, bool *found);
     sc_error_t (*list)(void *ctx, sc_allocator_t *alloc,
-        const sc_memory_category_t *category, /* NULL = all */
-        const char *session_id, size_t session_id_len,
-        sc_memory_entry_t **out, size_t *out_count);
-    sc_error_t (*forget)(void *ctx,
-        const char *key, size_t key_len,
-        bool *deleted);
+                       const sc_memory_category_t *category, /* NULL = all */
+                       const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+                       size_t *out_count);
+    sc_error_t (*forget)(void *ctx, const char *key, size_t key_len, bool *deleted);
     sc_error_t (*count)(void *ctx, size_t *out);
     bool (*health_check)(void *ctx);
     void (*deinit)(void *ctx);

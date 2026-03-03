@@ -2,8 +2,8 @@
 #define SC_PLATFORM_H
 
 #include "core/allocator.h"
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Environment and paths

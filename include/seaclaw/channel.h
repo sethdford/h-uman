@@ -46,15 +46,15 @@ typedef struct sc_channel_message {
     const char *channel;
     size_t channel_len;
     uint64_t timestamp;
-    const char *reply_target;   /* optional, NULL if none */
-    size_t reply_target_len;     /* 0 if reply_target is NULL */
-    int64_t message_id;         /* platform message ID, -1 if none */
-    const char *first_name;     /* optional, sender's first name */
+    const char *reply_target; /* optional, NULL if none */
+    size_t reply_target_len;  /* 0 if reply_target is NULL */
+    int64_t message_id;       /* platform message ID, -1 if none */
+    const char *first_name;   /* optional, sender's first name */
     size_t first_name_len;
     bool is_group;
-    const char *sender_uuid;   /* optional, Signal privacy mode */
+    const char *sender_uuid; /* optional, Signal privacy mode */
     size_t sender_uuid_len;
-    const char *group_id;      /* optional, Signal group chats */
+    const char *group_id; /* optional, Signal group chats */
     size_t group_id_len;
 } sc_channel_message_t;
 
@@ -73,19 +73,15 @@ typedef struct sc_channel {
 typedef struct sc_channel_vtable {
     sc_error_t (*start)(void *ctx);
     void (*stop)(void *ctx);
-    sc_error_t (*send)(void *ctx,
-        const char *target, size_t target_len,
-        const char *message, size_t message_len,
-        const char *const *media, size_t media_count);
+    sc_error_t (*send)(void *ctx, const char *target, size_t target_len, const char *message,
+                       size_t message_len, const char *const *media, size_t media_count);
     const char *(*name)(void *ctx);
     bool (*health_check)(void *ctx);
 
     /* Optional — may be NULL. If send_event is NULL, runtime uses send() for final. */
-    sc_error_t (*send_event)(void *ctx,
-        const char *target, size_t target_len,
-        const char *message, size_t message_len,
-        const char *const *media, size_t media_count,
-        sc_outbound_stage_t stage);
+    sc_error_t (*send_event)(void *ctx, const char *target, size_t target_len, const char *message,
+                             size_t message_len, const char *const *media, size_t media_count,
+                             sc_outbound_stage_t stage);
     sc_error_t (*start_typing)(void *ctx, const char *recipient, size_t recipient_len);
     sc_error_t (*stop_typing)(void *ctx, const char *recipient, size_t recipient_len);
 } sc_channel_vtable_t;

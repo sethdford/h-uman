@@ -1,11 +1,11 @@
-#include "seaclaw/memory/vector.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/memory/vector.h"
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #define SC_EMBED_DIM SC_EMBEDDING_DIM
 
@@ -31,15 +31,15 @@ static float next_rand(uint32_t *state) {
 
 #if SC_IS_TEST
 /* In test mode: deterministic pseudo-random 384-dim vector from text hash */
-static sc_error_t embed_test_impl(void *ctx, sc_allocator_t *alloc,
-    const char *text, size_t text_len,
-    sc_embedding_t *out) {
+static sc_error_t embed_test_impl(void *ctx, sc_allocator_t *alloc, const char *text,
+                                  size_t text_len, sc_embedding_t *out) {
     (void)ctx;
     if (!alloc || !text || !out)
         return SC_ERR_INVALID_ARGUMENT;
 
     uint32_t seed = hash_str(text, text_len);
-    if (seed == 0) seed = 1;
+    if (seed == 0)
+        seed = 1;
 
     out->values = (float *)alloc->alloc(alloc->ctx, SC_EMBED_DIM * sizeof(float));
     if (!out->values)
@@ -66,9 +66,8 @@ static int is_word_char(unsigned char c) {
 }
 
 /* Non-test: hash-projected bag-of-words "embedding" */
-static sc_error_t embed_impl(void *ctx, sc_allocator_t *alloc,
-    const char *text, size_t text_len,
-    sc_embedding_t *out) {
+static sc_error_t embed_impl(void *ctx, sc_allocator_t *alloc, const char *text, size_t text_len,
+                             sc_embedding_t *out) {
     (void)ctx;
     if (!alloc || !out)
         return SC_ERR_INVALID_ARGUMENT;
@@ -88,7 +87,8 @@ static sc_error_t embed_impl(void *ctx, sc_allocator_t *alloc,
     while (p < end) {
         while (p < end && !is_word_char((unsigned char)*p))
             p++;
-        if (p >= end) break;
+        if (p >= end)
+            break;
 
         const char *start = p;
         while (p < end && is_word_char((unsigned char)*p))
@@ -113,9 +113,8 @@ static sc_error_t embed_impl(void *ctx, sc_allocator_t *alloc,
 }
 #endif
 
-static sc_error_t embed_wrapper(void *ctx, sc_allocator_t *alloc,
-    const char *text, size_t text_len,
-    sc_embedding_t *out) {
+static sc_error_t embed_wrapper(void *ctx, sc_allocator_t *alloc, const char *text, size_t text_len,
+                                sc_embedding_t *out) {
 #if SC_IS_TEST
     return embed_test_impl(ctx, alloc, text, text_len, out);
 #else
@@ -123,13 +122,10 @@ static sc_error_t embed_wrapper(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static sc_error_t embed_batch_impl(void *ctx, sc_allocator_t *alloc,
-    const char **texts, const size_t *text_lens, size_t count,
-    sc_embedding_t *out) {
+static sc_error_t embed_batch_impl(void *ctx, sc_allocator_t *alloc, const char **texts,
+                                   const size_t *text_lens, size_t count, sc_embedding_t *out) {
     for (size_t i = 0; i < count; i++) {
-        sc_error_t err = embed_wrapper(ctx, alloc,
-            texts[i], text_lens[i],
-            &out[i]);
+        sc_error_t err = embed_wrapper(ctx, alloc, texts[i], text_lens[i], &out[i]);
         if (err != SC_OK) {
             for (size_t j = 0; j < i; j++)
                 sc_embedding_free(alloc, &out[j]);
@@ -157,12 +153,14 @@ static const sc_embedder_vtable_t local_vtable = {
 };
 
 sc_embedder_t sc_embedder_local_create(sc_allocator_t *alloc) {
-    sc_embedder_t emb = { .ctx = NULL, .vtable = &local_vtable };
-    if (!alloc) return emb;
+    sc_embedder_t emb = {.ctx = NULL, .vtable = &local_vtable};
+    if (!alloc)
+        return emb;
 
-    local_embedder_ctx_t *ctx = (local_embedder_ctx_t *)alloc->alloc(alloc->ctx,
-        sizeof(local_embedder_ctx_t));
-    if (!ctx) return emb;
+    local_embedder_ctx_t *ctx =
+        (local_embedder_ctx_t *)alloc->alloc(alloc->ctx, sizeof(local_embedder_ctx_t));
+    if (!ctx)
+        return emb;
     ctx->alloc = alloc;
 
     emb.ctx = ctx;

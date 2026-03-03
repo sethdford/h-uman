@@ -2,8 +2,8 @@
 #define SC_CONTEXT_TOKENS_H
 
 #include "seaclaw/config_types.h"
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 uint64_t sc_context_tokens_default(void);
 uint64_t sc_context_tokens_lookup(const char *model_ref, size_t len);

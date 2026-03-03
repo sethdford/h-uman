@@ -1,6 +1,6 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
 #include <string.h>
 
 /*
@@ -41,16 +41,22 @@ static sc_error_t landlock_seccomp_apply(void *ctx) {
 #endif
 }
 
-static sc_error_t landlock_seccomp_wrap(void *ctx,
-    const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t landlock_seccomp_wrap(void *ctx, const char *const *argv, size_t argc,
+                                        const char **buf, size_t buf_count, size_t *out_count) {
 #ifndef __linux__
-    (void)ctx; (void)argv; (void)argc; (void)buf; (void)buf_count; (void)out_count;
+    (void)ctx;
+    (void)argv;
+    (void)argc;
+    (void)buf;
+    (void)buf_count;
+    (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
     (void)ctx;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < argc)
+        return SC_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;
@@ -100,8 +106,8 @@ sc_sandbox_t sc_landlock_seccomp_sandbox_get(sc_landlock_seccomp_ctx_t *ctx) {
     return sb;
 }
 
-void sc_landlock_seccomp_sandbox_init(sc_landlock_seccomp_ctx_t *ctx,
-    const char *workspace_dir, bool allow_network) {
+void sc_landlock_seccomp_sandbox_init(sc_landlock_seccomp_ctx_t *ctx, const char *workspace_dir,
+                                      bool allow_network) {
     memset(ctx, 0, sizeof(*ctx));
     sc_landlock_sandbox_init(&ctx->landlock, workspace_dir);
     sc_seccomp_sandbox_init(&ctx->seccomp, workspace_dir, allow_network);

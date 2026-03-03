@@ -7,12 +7,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-sc_error_t sc_nostr_create(sc_allocator_t *alloc,
-    const char *nak_path, size_t nak_path_len,
-    const char *bot_pubkey, size_t bot_pubkey_len,
-    const char *relay_url, size_t relay_url_len,
-    const char *seckey_hex, size_t seckey_len,
-    sc_channel_t *out);
+sc_error_t sc_nostr_create(sc_allocator_t *alloc, const char *nak_path, size_t nak_path_len,
+                           const char *bot_pubkey, size_t bot_pubkey_len, const char *relay_url,
+                           size_t relay_url_len, const char *seckey_hex, size_t seckey_len,
+                           sc_channel_t *out);
 void sc_nostr_destroy(sc_channel_t *ch);
 
 /** Returns true if channel has relay and seckey configured (required for send). */

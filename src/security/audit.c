@@ -1,16 +1,16 @@
 #include "seaclaw/security/audit.h"
-#include "seaclaw/security.h"
-#include "seaclaw/crypto.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/crypto.h"
+#include "seaclaw/security.h"
 #include <stdint.h>
-#include <string.h>
-#include <time.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #define SC_AUDIT_JSON_BUF_SIZE 4096
-#define SC_AUDIT_MAX_PATH 1024
-#define SC_AUDIT_HMAC_LEN 32
+#define SC_AUDIT_MAX_PATH      1024
+#define SC_AUDIT_HMAC_LEN      32
 
 static uint64_t g_audit_next_id = 0;
 
@@ -22,34 +22,43 @@ static void audit_secure_zero(void *p, size_t n) {
     __asm__ __volatile__("" : : "r"(p) : "memory");
 #else
     volatile unsigned char *vp = (volatile unsigned char *)p;
-    while (n--) *vp++ = 0;
+    while (n--)
+        *vp++ = 0;
 #endif
 }
 
 const char *sc_audit_event_type_string(sc_audit_event_type_t t) {
     switch (t) {
-        case SC_AUDIT_COMMAND_EXECUTION: return "command_execution";
-        case SC_AUDIT_FILE_ACCESS:       return "file_access";
-        case SC_AUDIT_CONFIG_CHANGE:     return "config_change";
-        case SC_AUDIT_AUTH_SUCCESS:      return "auth_success";
-        case SC_AUDIT_AUTH_FAILURE:      return "auth_failure";
-        case SC_AUDIT_POLICY_VIOLATION:  return "policy_violation";
-        case SC_AUDIT_SECURITY_EVENT:    return "security_event";
-        default:                         return "unknown";
+    case SC_AUDIT_COMMAND_EXECUTION:
+        return "command_execution";
+    case SC_AUDIT_FILE_ACCESS:
+        return "file_access";
+    case SC_AUDIT_CONFIG_CHANGE:
+        return "config_change";
+    case SC_AUDIT_AUTH_SUCCESS:
+        return "auth_success";
+    case SC_AUDIT_AUTH_FAILURE:
+        return "auth_failure";
+    case SC_AUDIT_POLICY_VIOLATION:
+        return "policy_violation";
+    case SC_AUDIT_SECURITY_EVENT:
+        return "security_event";
+    default:
+        return "unknown";
     }
 }
 
 sc_audit_severity_t sc_audit_event_severity(sc_audit_event_type_t t) {
     switch (t) {
-        case SC_AUDIT_AUTH_FAILURE:
-        case SC_AUDIT_POLICY_VIOLATION:
-            return SC_AUDIT_SEV_HIGH;
-        case SC_AUDIT_COMMAND_EXECUTION:
-        case SC_AUDIT_FILE_ACCESS:
-        case SC_AUDIT_CONFIG_CHANGE:
-            return SC_AUDIT_SEV_MEDIUM;
-        default:
-            return SC_AUDIT_SEV_LOW;
+    case SC_AUDIT_AUTH_FAILURE:
+    case SC_AUDIT_POLICY_VIOLATION:
+        return SC_AUDIT_SEV_HIGH;
+    case SC_AUDIT_COMMAND_EXECUTION:
+    case SC_AUDIT_FILE_ACCESS:
+    case SC_AUDIT_CONFIG_CHANGE:
+        return SC_AUDIT_SEV_MEDIUM;
+    default:
+        return SC_AUDIT_SEV_LOW;
     }
 }
 
@@ -58,7 +67,8 @@ bool sc_audit_should_log(sc_audit_event_type_t type, sc_audit_severity_t min_sev
 }
 
 static size_t escape_json_string(const char *s, char *out, size_t out_cap) {
-    if (!s || out_cap == 0) return 0;
+    if (!s || out_cap == 0)
+        return 0;
     size_t n = 0;
     for (; *s && n + 2 < out_cap; s++) {
         if (*s == '"' || *s == '\\') {
@@ -74,7 +84,8 @@ static size_t escape_json_string(const char *s, char *out, size_t out_cap) {
 }
 
 void sc_audit_event_init(sc_audit_event_t *ev, sc_audit_event_type_t type) {
-    if (!ev) return;
+    if (!ev)
+        return;
     ev->timestamp_s = (int64_t)time(NULL);
     ev->event_id = __sync_add_and_fetch(&g_audit_next_id, 1);
     ev->event_type = type;
@@ -94,156 +105,176 @@ void sc_audit_event_init(sc_audit_event_t *ev, sc_audit_event_type_t type) {
     ev->security.sandbox_backend = NULL;
 }
 
-void sc_audit_event_with_actor(sc_audit_event_t *ev,
-    const char *channel, const char *user_id, const char *username) {
-    if (!ev) return;
+void sc_audit_event_with_actor(sc_audit_event_t *ev, const char *channel, const char *user_id,
+                               const char *username) {
+    if (!ev)
+        return;
     ev->actor.channel = channel;
     ev->actor.user_id = user_id;
     ev->actor.username = username;
 }
 
-void sc_audit_event_with_action(sc_audit_event_t *ev,
-    const char *command, const char *risk_level, bool approved, bool allowed) {
-    if (!ev) return;
+void sc_audit_event_with_action(sc_audit_event_t *ev, const char *command, const char *risk_level,
+                                bool approved, bool allowed) {
+    if (!ev)
+        return;
     ev->action.command = command;
     ev->action.risk_level = risk_level;
     ev->action.approved = approved;
     ev->action.allowed = allowed;
 }
 
-void sc_audit_event_with_result(sc_audit_event_t *ev,
-    bool success, int32_t exit_code, uint64_t duration_ms, const char *err_msg) {
-    if (!ev) return;
+void sc_audit_event_with_result(sc_audit_event_t *ev, bool success, int32_t exit_code,
+                                uint64_t duration_ms, const char *err_msg) {
+    if (!ev)
+        return;
     ev->result.success = success;
     ev->result.exit_code = exit_code;
     ev->result.duration_ms = duration_ms;
     ev->result.err_msg = err_msg;
 }
 
-void sc_audit_event_with_security(sc_audit_event_t *ev,
-    const char *sandbox_backend) {
-    if (!ev) return;
+void sc_audit_event_with_security(sc_audit_event_t *ev, const char *sandbox_backend) {
+    if (!ev)
+        return;
     ev->security.sandbox_backend = sandbox_backend;
 }
 
-size_t sc_audit_event_write_json(const sc_audit_event_t *ev,
-    char *buf, size_t buf_size) {
-    if (!ev || !buf || buf_size < 64) return 0;
+size_t sc_audit_event_write_json(const sc_audit_event_t *ev, char *buf, size_t buf_size) {
+    if (!ev || !buf || buf_size < 64)
+        return 0;
 
-    int n = snprintf(buf, buf_size,
-        "{\"timestamp_s\":%ld,\"event_id\":%lu,\"event_type\":\"%s\"",
-        (long)ev->timestamp_s,
-        (unsigned long)ev->event_id,
-        sc_audit_event_type_string(ev->event_type));
-    if (n < 0 || (size_t)n >= buf_size) return 0;
+    int n = snprintf(buf, buf_size, "{\"timestamp_s\":%ld,\"event_id\":%lu,\"event_type\":\"%s\"",
+                     (long)ev->timestamp_s, (unsigned long)ev->event_id,
+                     sc_audit_event_type_string(ev->event_type));
+    if (n < 0 || (size_t)n >= buf_size)
+        return 0;
     size_t pos = (size_t)n;
 
     if (ev->actor.channel) {
         char esc[256];
         size_t elen = escape_json_string(ev->actor.channel, esc, sizeof(esc));
         esc[elen] = '\0';
-        n = snprintf(buf + pos, buf_size - pos,
-            ",\"actor\":{\"channel\":\"%s\"", esc);
-        if (n < 0 || (size_t)n >= buf_size - pos) return pos;
+        n = snprintf(buf + pos, buf_size - pos, ",\"actor\":{\"channel\":\"%s\"", esc);
+        if (n < 0 || (size_t)n >= buf_size - pos)
+            return pos;
         pos += (size_t)n;
         if (ev->actor.user_id) {
             elen = escape_json_string(ev->actor.user_id, esc, sizeof(esc));
             esc[elen] = '\0';
             n = snprintf(buf + pos, buf_size - pos, ",\"user_id\":\"%s\"", esc);
-            if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
         }
         if (ev->actor.username) {
             elen = escape_json_string(ev->actor.username, esc, sizeof(esc));
             esc[elen] = '\0';
             n = snprintf(buf + pos, buf_size - pos, ",\"username\":\"%s\"", esc);
-            if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
         }
         n = snprintf(buf + pos, buf_size - pos, "}");
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
     }
 
-    if (ev->action.command || ev->action.risk_level ||
-        ev->action.approved || ev->action.allowed) {
+    if (ev->action.command || ev->action.risk_level || ev->action.approved || ev->action.allowed) {
         n = snprintf(buf + pos, buf_size - pos, ",\"action\":{");
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
         bool need_comma = false;
         if (ev->action.command) {
             /* Before writing command to audit log, truncate long commands */
             char safe_cmd[512];
             size_t cmd_len = strlen(ev->action.command);
-            if (cmd_len > 500) cmd_len = 500;
+            if (cmd_len > 500)
+                cmd_len = 500;
             memcpy(safe_cmd, ev->action.command, cmd_len);
             safe_cmd[cmd_len] = '\0';
             char esc[512];
             size_t elen = escape_json_string(safe_cmd, esc, sizeof(esc));
-            if (elen >= sizeof(esc)) elen = sizeof(esc) - 1;
+            if (elen >= sizeof(esc))
+                elen = sizeof(esc) - 1;
             esc[elen] = '\0';
             n = snprintf(buf + pos, buf_size - pos, "\"command\":\"%s\"", esc);
-            if (n >= 0 && (size_t)n < buf_size - pos) { pos += (size_t)n; need_comma = true; }
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
         }
         if (ev->action.risk_level) {
             char esc[64];
             size_t elen = escape_json_string(ev->action.risk_level, esc, sizeof(esc));
             esc[elen] = '\0';
             n = snprintf(buf + pos, buf_size - pos, "%s\"risk_level\":\"%s\"",
-                need_comma ? "," : "", esc);
-            if (n >= 0 && (size_t)n < buf_size - pos) { pos += (size_t)n; need_comma = true; }
+                         need_comma ? "," : "", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
         }
         n = snprintf(buf + pos, buf_size - pos, "%s\"approved\":%s,\"allowed\":%s}",
-            need_comma ? "," : "",
-            ev->action.approved ? "true" : "false",
-            ev->action.allowed ? "true" : "false");
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+                     need_comma ? "," : "", ev->action.approved ? "true" : "false",
+                     ev->action.allowed ? "true" : "false");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
     }
 
     if (ev->result.duration_ms > 0 || ev->result.err_msg) {
-        n = snprintf(buf + pos, buf_size - pos,
-            ",\"result\":{\"success\":%s",
-            ev->result.success ? "true" : "false");
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+        n = snprintf(buf + pos, buf_size - pos, ",\"result\":{\"success\":%s",
+                     ev->result.success ? "true" : "false");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
         if (ev->result.exit_code >= 0) {
             n = snprintf(buf + pos, buf_size - pos, ",\"exit_code\":%d", ev->result.exit_code);
-            if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
         }
         if (ev->result.duration_ms > 0) {
             n = snprintf(buf + pos, buf_size - pos, ",\"duration_ms\":%lu",
-                (unsigned long)ev->result.duration_ms);
-            if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+                         (unsigned long)ev->result.duration_ms);
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
         }
         if (ev->result.err_msg) {
             char esc[256];
             size_t elen = escape_json_string(ev->result.err_msg, esc, sizeof(esc));
             esc[elen] = '\0';
             n = snprintf(buf + pos, buf_size - pos, ",\"error\":\"%s\"", esc);
-            if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
         }
         n = snprintf(buf + pos, buf_size - pos, "}");
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
     }
 
-    n = snprintf(buf + pos, buf_size - pos,
-        ",\"security\":{\"policy_violation\":%s",
-        ev->security.policy_violation ? "true" : "false");
-    if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+    n = snprintf(buf + pos, buf_size - pos, ",\"security\":{\"policy_violation\":%s",
+                 ev->security.policy_violation ? "true" : "false");
+    if (n >= 0 && (size_t)n < buf_size - pos)
+        pos += (size_t)n;
     if (ev->security.rate_limit_remaining > 0) {
         n = snprintf(buf + pos, buf_size - pos, ",\"rate_limit_remaining\":%u",
-            ev->security.rate_limit_remaining);
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+                     ev->security.rate_limit_remaining);
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
     }
     if (ev->security.sandbox_backend) {
         char esc[64];
         size_t elen = escape_json_string(ev->security.sandbox_backend, esc, sizeof(esc));
         esc[elen] = '\0';
         n = snprintf(buf + pos, buf_size - pos, ",\"sandbox_backend\":\"%s\"", esc);
-        if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
     }
     n = snprintf(buf + pos, buf_size - pos, "}}");
-    if (n >= 0 && (size_t)n < buf_size - pos) pos += (size_t)n;
+    if (n >= 0 && (size_t)n < buf_size - pos)
+        pos += (size_t)n;
 
     return pos;
 }
 
-#define SC_AUDIT_MAX_KEY_HISTORY 64
+#define SC_AUDIT_MAX_KEY_HISTORY  64
 #define SC_AUDIT_KEY_HISTORY_LINE 128
 
 struct sc_audit_logger {
@@ -269,28 +300,33 @@ static void get_key_history_path(const char *key_path, char *out, size_t out_cap
             return;
         }
     }
-    if (out_cap > 0) out[0] = '\0';
+    if (out_cap > 0)
+        out[0] = '\0';
 }
 
-static sc_error_t append_key_to_history(const char *key_path,
-    int64_t timestamp_s, const unsigned char *key, size_t key_len) {
+static sc_error_t append_key_to_history(const char *key_path, int64_t timestamp_s,
+                                        const unsigned char *key, size_t key_len) {
     char hist_path[SC_AUDIT_MAX_PATH];
     get_key_history_path(key_path, hist_path, sizeof(hist_path));
-    if (hist_path[0] == '\0') return SC_ERR_IO;
+    if (hist_path[0] == '\0')
+        return SC_ERR_IO;
 
     char hex_key[128];
-    if (key_len * 2 + 1 >= sizeof(hex_key)) return SC_ERR_INVALID_ARGUMENT;
+    if (key_len * 2 + 1 >= sizeof(hex_key))
+        return SC_ERR_INVALID_ARGUMENT;
     sc_hex_encode(key, key_len, hex_key);
 
     FILE *f = fopen(hist_path, "a");
-    if (!f) return SC_ERR_IO;
+    if (!f)
+        return SC_ERR_IO;
     int n = fprintf(f, "%ld %s\n", (long)timestamp_s, hex_key);
     fclose(f);
     return (n > 0) ? SC_OK : SC_ERR_IO;
 }
 
 static sc_error_t load_or_create_audit_key(const char *key_path,
-    unsigned char key[SC_AUDIT_HMAC_LEN], sc_allocator_t *alloc) {
+                                           unsigned char key[SC_AUDIT_HMAC_LEN],
+                                           sc_allocator_t *alloc) {
     (void)alloc;
     FILE *f = fopen(key_path, "rb");
     if (f) {
@@ -303,8 +339,7 @@ static sc_error_t load_or_create_audit_key(const char *key_path,
             n--;
         hex_buf[n] = '\0';
         size_t dlen;
-        sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf),
-            key, SC_AUDIT_HMAC_LEN, &dlen);
+        sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf), key, SC_AUDIT_HMAC_LEN, &dlen);
         if (err != SC_OK || dlen != SC_AUDIT_HMAC_LEN)
             return SC_ERR_CRYPTO_DECRYPT;
         return SC_OK;
@@ -312,10 +347,12 @@ static sc_error_t load_or_create_audit_key(const char *key_path,
 
     /* Create new key from /dev/urandom */
     f = fopen("/dev/urandom", "rb");
-    if (!f) return SC_ERR_CRYPTO_ENCRYPT;
+    if (!f)
+        return SC_ERR_CRYPTO_ENCRYPT;
     size_t n = fread(key, 1, SC_AUDIT_HMAC_LEN, f);
     fclose(f);
-    if (n != SC_AUDIT_HMAC_LEN) return SC_ERR_CRYPTO_ENCRYPT;
+    if (n != SC_AUDIT_HMAC_LEN)
+        return SC_ERR_CRYPTO_ENCRYPT;
 
 #ifndef _WIN32
     const char *slash = strrchr(key_path, '/');
@@ -356,7 +393,8 @@ static void bootstrap_prev_hmac_from_log(sc_audit_logger_t *logger) {
         size_t len = strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
             line[--len] = '\0';
-        if (len == 0) continue;
+        if (len == 0)
+            continue;
         if (strstr(line, "\"hmac\":\"") != NULL) {
             has_hmac = true;
             if (len < sizeof(last_with_hmac)) {
@@ -371,8 +409,7 @@ static void bootstrap_prev_hmac_from_log(sc_audit_logger_t *logger) {
         if (p) {
             p += 8;
             size_t hex_len;
-            sc_error_t err = sc_hex_decode(p, 64, logger->prev_hmac,
-                SC_AUDIT_HMAC_LEN, &hex_len);
+            sc_error_t err = sc_hex_decode(p, 64, logger->prev_hmac, SC_AUDIT_HMAC_LEN, &hex_len);
             if (err == SC_OK && hex_len == SC_AUDIT_HMAC_LEN) {
                 logger->chain_initialized = true;
                 return;
@@ -383,13 +420,15 @@ static void bootstrap_prev_hmac_from_log(sc_audit_logger_t *logger) {
     logger->chain_initialized = true;
 }
 
-sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc,
-    const sc_audit_config_t *config, const char *base_dir) {
-    if (!alloc || !config || !base_dir) return NULL;
+sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc, const sc_audit_config_t *config,
+                                          const char *base_dir) {
+    if (!alloc || !config || !base_dir)
+        return NULL;
 
     size_t base_len = strlen(base_dir);
     size_t path_len = strlen(config->log_path);
-    if (base_len + path_len + 3 > SC_AUDIT_MAX_PATH) return NULL;
+    if (base_len + path_len + 3 > SC_AUDIT_MAX_PATH)
+        return NULL;
 
     char path[SC_AUDIT_MAX_PATH];
     if (base_len > 0 && base_dir[base_len - 1] == '/')
@@ -403,9 +442,10 @@ sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc,
     else
         snprintf(key_path, sizeof(key_path), "%s/.audit_hmac_key", base_dir);
 
-    sc_audit_logger_t *logger = (sc_audit_logger_t *)alloc->alloc(alloc->ctx,
-        sizeof(sc_audit_logger_t));
-    if (!logger) return NULL;
+    sc_audit_logger_t *logger =
+        (sc_audit_logger_t *)alloc->alloc(alloc->ctx, sizeof(sc_audit_logger_t));
+    if (!logger)
+        return NULL;
     memset(logger, 0, sizeof(*logger));
 
     logger->log_path = (char *)alloc->alloc(alloc->ctx, strlen(path) + 1);
@@ -438,7 +478,8 @@ sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc,
 }
 
 void sc_audit_logger_destroy(sc_audit_logger_t *logger, sc_allocator_t *alloc) {
-    if (!logger || !alloc) return;
+    if (!logger || !alloc)
+        return;
     if (logger->log_path) {
         size_t len = strlen(logger->log_path) + 1;
         alloc->free(alloc->ctx, logger->log_path, len);
@@ -452,23 +493,26 @@ void sc_audit_logger_destroy(sc_audit_logger_t *logger, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, logger, sizeof(sc_audit_logger_t));
 }
 
-sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger,
-    const sc_audit_event_t *event) {
-    if (!logger || !event) return SC_ERR_INVALID_ARGUMENT;
-    if (!logger->config.enabled) return SC_OK;
+sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger, const sc_audit_event_t *event) {
+    if (!logger || !event)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (!logger->config.enabled)
+        return SC_OK;
 
     /* Check scheduled rotation */
     if (logger->rotation_interval_hours > 0) {
         time_t now = time(NULL);
         if (now - logger->last_rotation_time >= (time_t)(logger->rotation_interval_hours * 3600)) {
             sc_error_t rerr = sc_audit_rotate_key(logger);
-            if (rerr != SC_OK) return rerr;
+            if (rerr != SC_OK)
+                return rerr;
         }
     }
 
     char json_buf[SC_AUDIT_JSON_BUF_SIZE];
     size_t json_len = sc_audit_event_write_json(event, json_buf, sizeof(json_buf));
-    if (json_len == 0) return SC_ERR_INVALID_ARGUMENT;
+    if (json_len == 0)
+        return SC_ERR_INVALID_ARGUMENT;
 
     /* HMAC chain: HMAC(prev_hmac || entry_json without hmac) */
     unsigned char hmac_input[32 + SC_AUDIT_JSON_BUF_SIZE];
@@ -476,16 +520,18 @@ sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger,
         return SC_ERR_INVALID_ARGUMENT;
     memcpy(hmac_input, logger->prev_hmac, SC_AUDIT_HMAC_LEN);
     memcpy(hmac_input + SC_AUDIT_HMAC_LEN, json_buf, json_len);
-    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN,
-        hmac_input, SC_AUDIT_HMAC_LEN + json_len, logger->prev_hmac);
+    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN, hmac_input, SC_AUDIT_HMAC_LEN + json_len,
+                   logger->prev_hmac);
 
     /* Replace trailing }} with },"hmac":"<64hex>"} */
     char hmac_hex[65];
     sc_hex_encode(logger->prev_hmac, SC_AUDIT_HMAC_LEN, hmac_hex);
-    if (json_len < 2) return SC_ERR_INVALID_ARGUMENT;
-    size_t base = json_len - 1;  /* position of final } */
-    size_t needed = 9 + 64 + 2;  /* ,"hmac":" + hex + "} */
-    if (base + needed >= sizeof(json_buf)) return SC_ERR_INVALID_ARGUMENT;
+    if (json_len < 2)
+        return SC_ERR_INVALID_ARGUMENT;
+    size_t base = json_len - 1; /* position of final } */
+    size_t needed = 9 + 64 + 2; /* ,"hmac":" + hex + "} */
+    if (base + needed >= sizeof(json_buf))
+        return SC_ERR_INVALID_ARGUMENT;
     memcpy(json_buf + base, ",\"hmac\":\"", 9);
     memcpy(json_buf + base + 9, hmac_hex, 64);
     json_buf[base + 9 + 64] = '"';
@@ -494,7 +540,8 @@ sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger,
     json_len = base + 9 + 64 + 2;
 
     FILE *f = fopen(logger->log_path, "a");
-    if (!f) return SC_ERR_IO;
+    if (!f)
+        return SC_ERR_IO;
 
     size_t written = fwrite(json_buf, 1, json_len, f);
     if (written != json_len) {
@@ -510,23 +557,23 @@ sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger,
     return SC_OK;
 }
 
-sc_error_t sc_audit_logger_log_command(sc_audit_logger_t *logger,
-    const sc_audit_cmd_log_t *entry) {
-    if (!logger || !entry) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_audit_logger_log_command(sc_audit_logger_t *logger, const sc_audit_cmd_log_t *entry) {
+    if (!logger || !entry)
+        return SC_ERR_INVALID_ARGUMENT;
 
     sc_audit_event_t ev;
     sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
     sc_audit_event_with_actor(&ev, entry->channel, NULL, NULL);
-    sc_audit_event_with_action(&ev,
-        entry->command, entry->risk_level,
-        entry->approved, entry->allowed);
+    sc_audit_event_with_action(&ev, entry->command, entry->risk_level, entry->approved,
+                               entry->allowed);
     sc_audit_event_with_result(&ev, entry->success, -1, entry->duration_ms, NULL);
 
     return sc_audit_logger_log(logger, &ev);
 }
 
 void sc_audit_set_rotation_interval(sc_audit_logger_t *logger, uint32_t hours) {
-    if (!logger) return;
+    if (!logger)
+        return;
     logger->rotation_interval_hours = hours;
     if (hours > 0)
         logger->last_rotation_time = time(NULL);
@@ -534,17 +581,20 @@ void sc_audit_set_rotation_interval(sc_audit_logger_t *logger, uint32_t hours) {
 
 #if defined(SC_IS_TEST) && SC_IS_TEST
 void sc_audit_test_set_last_rotation_epoch(sc_audit_logger_t *logger, time_t epoch) {
-    if (logger) logger->last_rotation_time = epoch;
+    if (logger)
+        logger->last_rotation_time = epoch;
 }
 #endif
 
 sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
-    if (!logger) return SC_ERR_INVALID_ARGUMENT;
+    if (!logger)
+        return SC_ERR_INVALID_ARGUMENT;
 
     /* 1. Generate new key from /dev/urandom */
     unsigned char new_key[SC_AUDIT_HMAC_LEN];
     FILE *frand = fopen("/dev/urandom", "rb");
-    if (!frand) return SC_ERR_CRYPTO_ENCRYPT;
+    if (!frand)
+        return SC_ERR_CRYPTO_ENCRYPT;
     size_t n = fread(new_key, 1, SC_AUDIT_HMAC_LEN, frand);
     fclose(frand);
     if (n != SC_AUDIT_HMAC_LEN) {
@@ -553,8 +603,8 @@ sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
     }
 
     /* 2. Append OLD key to history before overwriting */
-    sc_error_t err = append_key_to_history(logger->key_path,
-        (int64_t)time(NULL), logger->audit_key, SC_AUDIT_HMAC_LEN);
+    sc_error_t err = append_key_to_history(logger->key_path, (int64_t)time(NULL), logger->audit_key,
+                                           SC_AUDIT_HMAC_LEN);
     if (err != SC_OK) {
         audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
         return err;
@@ -571,8 +621,8 @@ sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
     char rotation_json[512];
     time_t now = time(NULL);
     int rn = snprintf(rotation_json, sizeof(rotation_json),
-        "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\"}",
-        (long)now, old_hash_hex);
+                      "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\"}",
+                      (long)now, old_hash_hex);
     if (rn < 0 || (size_t)rn >= sizeof(rotation_json)) {
         audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
         return SC_ERR_INVALID_ARGUMENT;
@@ -588,14 +638,15 @@ sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
     memcpy(hmac_input, logger->prev_hmac, SC_AUDIT_HMAC_LEN);
     memcpy(hmac_input + SC_AUDIT_HMAC_LEN, rotation_json, rotation_len);
     unsigned char rotation_hmac[SC_AUDIT_HMAC_LEN];
-    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN,
-        hmac_input, SC_AUDIT_HMAC_LEN + rotation_len, rotation_hmac);
+    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN, hmac_input,
+                   SC_AUDIT_HMAC_LEN + rotation_len, rotation_hmac);
 
     /* 6. Append HMAC to rotation entry */
     char hmac_hex[65];
     sc_hex_encode(rotation_hmac, SC_AUDIT_HMAC_LEN, hmac_hex);
     char full_entry[600];
-    rn = snprintf(full_entry, sizeof(full_entry),
+    rn = snprintf(
+        full_entry, sizeof(full_entry),
         "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\",\"hmac\":\"%s\"}\n",
         (long)now, old_hash_hex, hmac_hex);
     if (rn < 0 || (size_t)rn >= sizeof(full_entry)) {
@@ -640,7 +691,8 @@ sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
 }
 
 sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]) {
-    if (!base_dir || !key) return SC_ERR_INVALID_ARGUMENT;
+    if (!base_dir || !key)
+        return SC_ERR_INVALID_ARGUMENT;
     char key_path[SC_AUDIT_MAX_PATH];
     size_t base_len = strlen(base_dir);
     if (base_len > 0 && base_dir[base_len - 1] == '/')
@@ -648,24 +700,27 @@ sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]) {
     else
         snprintf(key_path, sizeof(key_path), "%s/.audit_hmac_key", base_dir);
     FILE *f = fopen(key_path, "rb");
-    if (!f) return SC_ERR_IO;
+    if (!f)
+        return SC_ERR_IO;
     char hex_buf[80];
     size_t n = fread(hex_buf, 1, sizeof(hex_buf) - 1, f);
     fclose(f);
     hex_buf[n] = '\0';
-    while (n > 0 && (hex_buf[n - 1] == ' ' || hex_buf[n - 1] == '\t' ||
-                     hex_buf[n - 1] == '\n' || hex_buf[n - 1] == '\r'))
+    while (n > 0 && (hex_buf[n - 1] == ' ' || hex_buf[n - 1] == '\t' || hex_buf[n - 1] == '\n' ||
+                     hex_buf[n - 1] == '\r'))
         n--;
     hex_buf[n] = '\0';
     size_t dlen;
     sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf), key, 32, &dlen);
-    if (err != SC_OK || dlen != 32) return SC_ERR_CRYPTO_DECRYPT;
+    if (err != SC_OK || dlen != 32)
+        return SC_ERR_CRYPTO_DECRYPT;
     return SC_OK;
 }
 
-static sc_error_t load_keys_from_base_dir(const char *base_dir,
-    unsigned char keys[SC_AUDIT_MAX_KEY_HISTORY][SC_AUDIT_HMAC_LEN],
-    size_t *out_count) {
+static sc_error_t
+load_keys_from_base_dir(const char *base_dir,
+                        unsigned char keys[SC_AUDIT_MAX_KEY_HISTORY][SC_AUDIT_HMAC_LEN],
+                        size_t *out_count) {
     char key_path[SC_AUDIT_MAX_PATH];
     size_t base_len = strlen(base_dir);
     if (base_len > 0 && base_dir[base_len - 1] == '/')
@@ -686,13 +741,14 @@ static sc_error_t load_keys_from_base_dir(const char *base_dir,
             size_t ll = strlen(hist_line);
             while (ll > 0 && (hist_line[ll - 1] == '\n' || hist_line[ll - 1] == '\r'))
                 hist_line[--ll] = '\0';
-            if (ll < 70) continue;  /* Need timestamp + space + 64 hex */
+            if (ll < 70)
+                continue; /* Need timestamp + space + 64 hex */
             const char *space = strchr(hist_line, ' ');
-            if (!space || (size_t)(space - hist_line) < 10) continue;
+            if (!space || (size_t)(space - hist_line) < 10)
+                continue;
             const char *hex = space + 1;
             size_t dlen;
-            sc_error_t err = sc_hex_decode(hex, strlen(hex),
-                keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
+            sc_error_t err = sc_hex_decode(hex, strlen(hex), keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
             if (err == SC_OK && dlen == SC_AUDIT_HMAC_LEN)
                 idx++;
         }
@@ -701,25 +757,25 @@ static sc_error_t load_keys_from_base_dir(const char *base_dir,
 
     /* Add current key from .audit_hmac_key */
     FILE *fk = fopen(key_path, "rb");
-    if (!fk) return SC_ERR_IO;
+    if (!fk)
+        return SC_ERR_IO;
     char hex_buf[80];
     size_t n = fread(hex_buf, 1, sizeof(hex_buf) - 1, fk);
     fclose(fk);
     hex_buf[n] = '\0';
-    while (n > 0 && (hex_buf[n - 1] == ' ' || hex_buf[n - 1] == '\t' ||
-                     hex_buf[n - 1] == '\n' || hex_buf[n - 1] == '\r'))
+    while (n > 0 && (hex_buf[n - 1] == ' ' || hex_buf[n - 1] == '\t' || hex_buf[n - 1] == '\n' ||
+                     hex_buf[n - 1] == '\r'))
         hex_buf[--n] = '\0';
     size_t dlen;
-    sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf),
-        keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
-    if (err != SC_OK || dlen != SC_AUDIT_HMAC_LEN) return SC_ERR_CRYPTO_DECRYPT;
+    sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf), keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
+    if (err != SC_OK || dlen != SC_AUDIT_HMAC_LEN)
+        return SC_ERR_CRYPTO_DECRYPT;
     idx++;
     *out_count = idx;
     return SC_OK;
 }
 
-static void derive_base_dir_from_log_path(const char *audit_file_path,
-    char *base_dir, size_t cap) {
+static void derive_base_dir_from_log_path(const char *audit_file_path, char *base_dir, size_t cap) {
     const char *slash = strrchr(audit_file_path, '/');
     if (slash && slash > audit_file_path) {
         size_t dlen = (size_t)(slash - audit_file_path);
@@ -729,12 +785,13 @@ static void derive_base_dir_from_log_path(const char *audit_file_path,
             return;
         }
     }
-    if (cap > 0) base_dir[0] = '\0';
+    if (cap > 0)
+        base_dir[0] = '\0';
 }
 
-sc_error_t sc_audit_verify_chain(const char *audit_file_path,
-    const unsigned char *key) {
-    if (!audit_file_path) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_audit_verify_chain(const char *audit_file_path, const unsigned char *key) {
+    if (!audit_file_path)
+        return SC_ERR_INVALID_ARGUMENT;
 
     /* Single-key mode when key provided */
     unsigned char single_key[SC_AUDIT_HMAC_LEN];
@@ -749,14 +806,17 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
     } else {
         char base_dir[SC_AUDIT_MAX_PATH];
         derive_base_dir_from_log_path(audit_file_path, base_dir, sizeof(base_dir));
-        if (base_dir[0] == '\0') return SC_ERR_INVALID_ARGUMENT;
+        if (base_dir[0] == '\0')
+            return SC_ERR_INVALID_ARGUMENT;
         sc_error_t lerr = load_keys_from_base_dir(base_dir, key_ring, &key_count);
-        if (lerr != SC_OK) return lerr;
+        if (lerr != SC_OK)
+            return lerr;
         cur_key = key_ring[0];
     }
 
     FILE *f = fopen(audit_file_path, "rb");
-    if (!f) return SC_ERR_IO;
+    if (!f)
+        return SC_ERR_IO;
 
     unsigned char prev_hmac[SC_AUDIT_HMAC_LEN];
     memset(prev_hmac, 0, SC_AUDIT_HMAC_LEN);
@@ -766,16 +826,17 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
         size_t len = strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
             line[--len] = '\0';
-        if (len == 0) continue;
+        if (len == 0)
+            continue;
 
         const char *hmac_start = strstr(line, "\"hmac\":\"");
         if (!hmac_start) {
             fclose(f);
-            return SC_ERR_PARSE;  /* Entry without hmac - chain broken */
+            return SC_ERR_PARSE; /* Entry without hmac - chain broken */
         }
         const char *hmac_hex = hmac_start + 8;
         if (len < (size_t)(hmac_hex - line) + 64)
-            continue;  /* Malformed, skip (would fail decode) */
+            continue; /* Malformed, skip (would fail decode) */
 
         /* Build entry without hmac: everything before ,"hmac":" plus } */
         if (hmac_start <= line + 1) {
@@ -807,14 +868,13 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
         memcpy(hmac_input, prev_hmac, SC_AUDIT_HMAC_LEN);
         memcpy(hmac_input + SC_AUDIT_HMAC_LEN, entry_without_hmac, entry_len);
         unsigned char computed[SC_AUDIT_HMAC_LEN];
-        sc_hmac_sha256(cur_key, SC_AUDIT_HMAC_LEN, hmac_input,
-            SC_AUDIT_HMAC_LEN + entry_len, computed);
+        sc_hmac_sha256(cur_key, SC_AUDIT_HMAC_LEN, hmac_input, SC_AUDIT_HMAC_LEN + entry_len,
+                       computed);
 
         /* Decode stored hmac and compare */
         unsigned char stored[SC_AUDIT_HMAC_LEN];
         size_t stored_len;
-        sc_error_t err = sc_hex_decode(hmac_hex, 64, stored,
-            SC_AUDIT_HMAC_LEN, &stored_len);
+        sc_error_t err = sc_hex_decode(hmac_hex, 64, stored, SC_AUDIT_HMAC_LEN, &stored_len);
         if (err != SC_OK || stored_len != SC_AUDIT_HMAC_LEN) {
             fclose(f);
             return SC_ERR_CRYPTO_DECRYPT;
@@ -824,7 +884,7 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path,
             diff |= computed[i] ^ stored[i];
         if (diff != 0) {
             fclose(f);
-            return SC_ERR_CRYPTO_DECRYPT;  /* Tampering detected */
+            return SC_ERR_CRYPTO_DECRYPT; /* Tampering detected */
         }
         memcpy(prev_hmac, computed, SC_AUDIT_HMAC_LEN);
 

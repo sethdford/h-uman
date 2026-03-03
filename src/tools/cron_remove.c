@@ -1,23 +1,24 @@
-#include "seaclaw/tool.h"
-#include <stdint.h>
-#include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
+#include "seaclaw/cron.h"
+#include "seaclaw/tool.h"
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SC_CRON_REMOVE_NAME "cron_remove"
 #define SC_CRON_REMOVE_DESC "Remove cron job"
-#define SC_CRON_REMOVE_PARAMS "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}"
+#define SC_CRON_REMOVE_PARAMS \
+    "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}"
 
-typedef struct { sc_cron_scheduler_t *sched; } sc_cron_tool_ctx_t;
+typedef struct {
+    sc_cron_scheduler_t *sched;
+} sc_cron_tool_ctx_t;
 
-static sc_error_t cron_remove_execute(void *ctx, sc_allocator_t *alloc,
-    const sc_json_value_t *args,
-    sc_tool_result_t *out)
-{
+static sc_error_t cron_remove_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                                      sc_tool_result_t *out) {
     sc_cron_tool_ctx_t *tctx = (sc_cron_tool_ctx_t *)ctx;
     (void)tctx;
     if (!args || !out) {
@@ -81,21 +82,38 @@ static sc_error_t cron_remove_execute(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static const char *cron_remove_name(void *ctx) { (void)ctx; return SC_CRON_REMOVE_NAME; }
-static const char *cron_remove_description(void *ctx) { (void)ctx; return SC_CRON_REMOVE_DESC; }
-static const char *cron_remove_parameters_json(void *ctx) { (void)ctx; return SC_CRON_REMOVE_PARAMS; }
-static void cron_remove_deinit(void *ctx, sc_allocator_t *alloc) { (void)alloc; if (ctx) free(ctx); }
+static const char *cron_remove_name(void *ctx) {
+    (void)ctx;
+    return SC_CRON_REMOVE_NAME;
+}
+static const char *cron_remove_description(void *ctx) {
+    (void)ctx;
+    return SC_CRON_REMOVE_DESC;
+}
+static const char *cron_remove_parameters_json(void *ctx) {
+    (void)ctx;
+    return SC_CRON_REMOVE_PARAMS;
+}
+static void cron_remove_deinit(void *ctx, sc_allocator_t *alloc) {
+    (void)alloc;
+    if (ctx)
+        free(ctx);
+}
 
 static const sc_tool_vtable_t cron_remove_vtable = {
-    .execute = cron_remove_execute, .name = cron_remove_name,
-    .description = cron_remove_description, .parameters_json = cron_remove_parameters_json,
+    .execute = cron_remove_execute,
+    .name = cron_remove_name,
+    .description = cron_remove_description,
+    .parameters_json = cron_remove_parameters_json,
     .deinit = cron_remove_deinit,
 };
 
-sc_error_t sc_cron_remove_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched, sc_tool_t *out) {
+sc_error_t sc_cron_remove_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched,
+                                 sc_tool_t *out) {
     (void)alloc;
     sc_cron_tool_ctx_t *ctx = (sc_cron_tool_ctx_t *)calloc(1, sizeof(sc_cron_tool_ctx_t));
-    if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    if (!ctx)
+        return SC_ERR_OUT_OF_MEMORY;
     ctx->sched = sched;
     out->ctx = ctx;
     out->vtable = &cron_remove_vtable;

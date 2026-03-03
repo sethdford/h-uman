@@ -29,18 +29,17 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
 }
 #endif
 
-static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    sc_http_response_t *out)
-{
-    if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
+static sc_error_t sc_http_get_impl(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                                   sc_http_response_t *out) {
+    if (!alloc || !url || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     (void)auth_header;
 
     const char *mock = "{\"status\":\"ok\",\"mock\":\"sc_http_get\"}";
     size_t mock_len = strlen(mock);
     char *body = (char *)alloc->alloc(alloc->ctx, mock_len + 1);
-    if (!body) return SC_ERR_OUT_OF_MEMORY;
+    if (!body)
+        return SC_ERR_OUT_OF_MEMORY;
     memcpy(body, mock, mock_len + 1);
 
     out->body = body;
@@ -51,26 +50,24 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_response_t *out)
-{
+static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc, const char *url,
+                                         const char *auth_header, const char *extra_headers,
+                                         const char *json_body, size_t json_body_len,
+                                         sc_http_response_t *out) {
     (void)url;
     (void)auth_header;
     (void)extra_headers;
     (void)json_body;
     (void)json_body_len;
 
-    const char *mock = "{\"choices\":[{\"message\":{\"content\":\"Hello from mock HTTP\"}}],"
+    const char *mock =
+        "{\"choices\":[{\"message\":{\"content\":\"Hello from mock HTTP\"}}],"
         "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15},"
         "\"model\":\"gpt-4\"}";
     size_t mock_len = strlen(mock);
     char *body = (char *)alloc->alloc(alloc->ctx, mock_len + 1);
-    if (!body) return SC_ERR_OUT_OF_MEMORY;
+    if (!body)
+        return SC_ERR_OUT_OF_MEMORY;
     memcpy(body, mock, mock_len + 1);
 
     out->body = body;
@@ -122,13 +119,15 @@ typedef struct write_ctx {
 static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
     write_ctx_t *w = (write_ctx_t *)userdata;
     size_t n = size * nmemb;
-    if (n == 0) return 0;
+    if (n == 0)
+        return 0;
     if (w->len + n + 1 > w->cap) {
         size_t new_cap = w->cap ? w->cap * 2 : 4096;
-        while (new_cap < w->len + n + 1) new_cap *= 2;
-        char *nbuf = (char *)w->alloc->realloc(w->alloc->ctx, w->buf,
-            w->cap ? w->cap : 0, new_cap);
-        if (!nbuf) return 0;
+        while (new_cap < w->len + n + 1)
+            new_cap *= 2;
+        char *nbuf = (char *)w->alloc->realloc(w->alloc->ctx, w->buf, w->cap ? w->cap : 0, new_cap);
+        if (!nbuf)
+            return 0;
         w->buf = nbuf;
         w->cap = new_cap;
     }
@@ -139,7 +138,8 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
 }
 
 static void add_header(struct curl_slist **list, const char *header) {
-    if (header && header[0]) *list = curl_slist_append(*list, header);
+    if (header && header[0])
+        *list = curl_slist_append(*list, header);
 }
 
 /* ── Connection pool: reuse curl handles to avoid TCP/TLS handshake ── */
@@ -158,7 +158,8 @@ static CURL *curl_pool_acquire(void) {
 }
 
 static void curl_pool_release(CURL *h) {
-    if (!h) return;
+    if (!h)
+        return;
     if (curl_pool_count < SC_CURL_POOL_SIZE) {
         curl_pool[curl_pool_count++] = h;
     } else {
@@ -179,15 +180,14 @@ static void curl_setup_common(CURL *curl) {
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 }
 
-static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    sc_http_response_t *out)
-{
-    if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
+static sc_error_t sc_http_get_impl(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                                   sc_http_response_t *out) {
+    if (!alloc || !url || !out)
+        return SC_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_pool_acquire();
-    if (!curl) return SC_ERR_NOT_SUPPORTED;
+    if (!curl)
+        return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
 
@@ -199,7 +199,7 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
             add_header(&headers, auth_buf);
     }
 
-    write_ctx_t w = { .buf = NULL, .len = 0, .cap = 0, .alloc = alloc };
+    write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
@@ -225,7 +225,8 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
-        if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
+        if (res == CURLE_OPERATION_TIMEDOUT)
+            return SC_ERR_TIMEOUT;
         return SC_ERR_IO;
     }
 
@@ -237,15 +238,14 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *extra_headers,
-    sc_http_response_t *out)
-{
-    if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
+static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc, const char *url,
+                                      const char *extra_headers, sc_http_response_t *out) {
+    if (!alloc || !url || !out)
+        return SC_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_pool_acquire();
-    if (!curl) return SC_ERR_NOT_SUPPORTED;
+    if (!curl)
+        return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
 
@@ -259,15 +259,18 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
                 char line[512];
                 memcpy(line, p, linelen);
                 line[linelen] = '\0';
-                if (linelen > 0 && line[linelen - 1] == '\r') line[--linelen] = '\0';
-                if (linelen > 0) add_header(&headers, line);
+                if (linelen > 0 && line[linelen - 1] == '\r')
+                    line[--linelen] = '\0';
+                if (linelen > 0)
+                    add_header(&headers, line);
             }
-            if (!eol) break;
+            if (!eol)
+                break;
             p = eol + 1;
         }
     }
 
-    write_ctx_t w = { .buf = NULL, .len = 0, .cap = 0, .alloc = alloc };
+    write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
@@ -293,7 +296,8 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
-        if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
+        if (res == CURLE_OPERATION_TIMEDOUT)
+            return SC_ERR_TIMEOUT;
         return SC_ERR_IO;
     }
 
@@ -305,18 +309,16 @@ static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_response_t *out)
-{
-    if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
+static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc, const char *url,
+                                         const char *auth_header, const char *extra_headers,
+                                         const char *json_body, size_t json_body_len,
+                                         sc_http_response_t *out) {
+    if (!alloc || !url || !out)
+        return SC_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_pool_acquire();
-    if (!curl) return SC_ERR_NOT_SUPPORTED;
+    if (!curl)
+        return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
 
@@ -337,15 +339,17 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
                 char line[512];
                 memcpy(line, p, linelen);
                 line[linelen] = '\0';
-                if (line[linelen - 1] == '\r') line[--linelen] = '\0';
+                if (line[linelen - 1] == '\r')
+                    line[--linelen] = '\0';
                 add_header(&headers, line);
             }
-            if (!eol) break;
+            if (!eol)
+                break;
             p = eol + 1;
         }
     }
 
-    write_ctx_t w = { .buf = NULL, .len = 0, .cap = 0, .alloc = alloc };
+    write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
@@ -377,7 +381,8 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
-        if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
+        if (res == CURLE_OPERATION_TIMEDOUT)
+            return SC_ERR_TIMEOUT;
         return SC_ERR_IO;
     }
 
@@ -397,23 +402,21 @@ typedef struct {
 static size_t write_cb_stream(void *ptr, size_t size, size_t nmemb, void *userdata) {
     stream_ctx_t *s = (stream_ctx_t *)userdata;
     size_t n = size * nmemb;
-    if (n == 0 || !s->callback) return 0;
+    if (n == 0 || !s->callback)
+        return 0;
     return s->callback((const char *)ptr, n, s->userdata);
 }
 
-static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_stream_cb callback,
-    void *userdata)
-{
-    if (!alloc || !url || !callback) return SC_ERR_INVALID_ARGUMENT;
+static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc, const char *url,
+                                                const char *auth_header, const char *extra_headers,
+                                                const char *json_body, size_t json_body_len,
+                                                sc_http_stream_cb callback, void *userdata) {
+    if (!alloc || !url || !callback)
+        return SC_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_pool_acquire();
-    if (!curl) return SC_ERR_NOT_SUPPORTED;
+    if (!curl)
+        return SC_ERR_NOT_SUPPORTED;
 
     struct curl_slist *headers = NULL;
     char auth_buf[512];
@@ -432,10 +435,12 @@ static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
                 char line[512];
                 memcpy(line, p, linelen);
                 line[linelen] = '\0';
-                if (line[linelen - 1] == '\r') line[--linelen] = '\0';
+                if (line[linelen - 1] == '\r')
+                    line[--linelen] = '\0';
                 add_header(&headers, line);
             }
-            if (!eol) break;
+            if (!eol)
+                break;
             p = eol + 1;
         }
     }
@@ -445,7 +450,7 @@ static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
         curl_pool_release(curl);
         return SC_ERR_INVALID_ARGUMENT;
     }
-    stream_ctx_t ctx = { .callback = callback, .userdata = userdata };
+    stream_ctx_t ctx = {.callback = callback, .userdata = userdata};
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)json_body_len);
@@ -459,17 +464,15 @@ static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
     curl_pool_release(curl);
 
     if (res != CURLE_OK) {
-        if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
+        if (res == CURLE_OPERATION_TIMEDOUT)
+            return SC_ERR_TIMEOUT;
         return SC_ERR_IO;
     }
     return SC_OK;
 }
 #else
-static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    sc_http_response_t *out)
-{
+static sc_error_t sc_http_get_impl(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                                   sc_http_response_t *out) {
     (void)alloc;
     (void)url;
     (void)auth_header;
@@ -477,14 +480,10 @@ static sc_error_t sc_http_get_impl(sc_allocator_t *alloc,
     return SC_ERR_NOT_SUPPORTED;
 }
 
-static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_response_t *out)
-{
+static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc, const char *url,
+                                         const char *auth_header, const char *extra_headers,
+                                         const char *json_body, size_t json_body_len,
+                                         sc_http_response_t *out) {
     (void)alloc;
     (void)url;
     (void)auth_header;
@@ -495,15 +494,10 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc,
     return SC_ERR_NOT_SUPPORTED;
 }
 
-static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_stream_cb callback,
-    void *userdata)
-{
+static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc, const char *url,
+                                                const char *auth_header, const char *extra_headers,
+                                                const char *json_body, size_t json_body_len,
+                                                sc_http_stream_cb callback, void *userdata) {
     (void)alloc;
     (void)url;
     (void)auth_header;
@@ -517,59 +511,39 @@ static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
 #endif
 #endif
 
-sc_error_t sc_http_post_json(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_response_t *out)
-{
-    return sc_http_post_json_impl(alloc, url, auth_header, NULL,
-        json_body, json_body_len, out);
+sc_error_t sc_http_post_json(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                             const char *json_body, size_t json_body_len, sc_http_response_t *out) {
+    return sc_http_post_json_impl(alloc, url, auth_header, NULL, json_body, json_body_len, out);
 }
 
-sc_error_t sc_http_post_json_ex(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_response_t *out)
-{
-    return sc_http_post_json_impl(alloc, url, auth_header, extra_headers,
-        json_body, json_body_len, out);
+sc_error_t sc_http_post_json_ex(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                                const char *extra_headers, const char *json_body,
+                                size_t json_body_len, sc_http_response_t *out) {
+    return sc_http_post_json_impl(alloc, url, auth_header, extra_headers, json_body, json_body_len,
+                                  out);
 }
 
-sc_error_t sc_http_get(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    sc_http_response_t *out)
-{
+sc_error_t sc_http_get(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                       sc_http_response_t *out) {
     return sc_http_get_impl(alloc, url, auth_header, out);
 }
 
 #if defined(SC_HTTP_CURL) && !SC_IS_TEST
 #include <curl/curl.h>
-sc_error_t sc_http_get_ex(sc_allocator_t *alloc,
-    const char *url,
-    const char *extra_headers,
-    sc_http_response_t *out)
-{
+sc_error_t sc_http_get_ex(sc_allocator_t *alloc, const char *url, const char *extra_headers,
+                          sc_http_response_t *out) {
     return sc_http_get_ex_impl(alloc, url, extra_headers, out);
 }
 
-sc_error_t sc_http_request(sc_allocator_t *alloc,
-    const char *url,
-    const char *method,
-    const char *extra_headers,
-    const char *body,
-    size_t body_len,
-    sc_http_response_t *out)
-{
-    if (!alloc || !url || !method || !out) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_http_request(sc_allocator_t *alloc, const char *url, const char *method,
+                           const char *extra_headers, const char *body, size_t body_len,
+                           sc_http_response_t *out) {
+    if (!alloc || !url || !method || !out)
+        return SC_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_pool_acquire();
-    if (!curl) return SC_ERR_NOT_SUPPORTED;
+    if (!curl)
+        return SC_ERR_NOT_SUPPORTED;
 
     memset(out, 0, sizeof(*out));
 
@@ -583,15 +557,18 @@ sc_error_t sc_http_request(sc_allocator_t *alloc,
                 char line[512];
                 memcpy(line, p, linelen);
                 line[linelen] = '\0';
-                if (linelen > 0 && line[linelen - 1] == '\r') line[--linelen] = '\0';
-                if (linelen > 0) add_header(&headers, line);
+                if (linelen > 0 && line[linelen - 1] == '\r')
+                    line[--linelen] = '\0';
+                if (linelen > 0)
+                    add_header(&headers, line);
             }
-            if (!eol) break;
+            if (!eol)
+                break;
             p = eol + 1;
         }
     }
 
-    write_ctx_t w = { .buf = NULL, .len = 0, .cap = 0, .alloc = alloc };
+    write_ctx_t w = {.buf = NULL, .len = 0, .cap = 0, .alloc = alloc};
     w.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!w.buf) {
         curl_slist_free_all(headers);
@@ -627,7 +604,8 @@ sc_error_t sc_http_request(sc_allocator_t *alloc,
 
     if (res != CURLE_OK) {
         alloc->free(alloc->ctx, w.buf, w.cap);
-        if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
+        if (res == CURLE_OPERATION_TIMEDOUT)
+            return SC_ERR_TIMEOUT;
         return SC_ERR_IO;
     }
 
@@ -639,55 +617,57 @@ sc_error_t sc_http_request(sc_allocator_t *alloc,
     return SC_OK;
 }
 #else
-sc_error_t sc_http_get_ex(sc_allocator_t *alloc,
-    const char *url,
-    const char *extra_headers,
-    sc_http_response_t *out)
-{
-    (void)alloc;(void)url;(void)extra_headers;(void)out;
+sc_error_t sc_http_get_ex(sc_allocator_t *alloc, const char *url, const char *extra_headers,
+                          sc_http_response_t *out) {
+    (void)alloc;
+    (void)url;
+    (void)extra_headers;
+    (void)out;
     return SC_ERR_NOT_SUPPORTED;
 }
 
-sc_error_t sc_http_request(sc_allocator_t *alloc,
-    const char *url,
-    const char *method,
-    const char *extra_headers,
-    const char *body,
-    size_t body_len,
-    sc_http_response_t *out)
-{
-    (void)alloc;(void)url;(void)method;(void)extra_headers;(void)body;(void)body_len;(void)out;
+sc_error_t sc_http_request(sc_allocator_t *alloc, const char *url, const char *method,
+                           const char *extra_headers, const char *body, size_t body_len,
+                           sc_http_response_t *out) {
+    (void)alloc;
+    (void)url;
+    (void)method;
+    (void)extra_headers;
+    (void)body;
+    (void)body_len;
+    (void)out;
     return SC_ERR_NOT_SUPPORTED;
 }
 #endif
 
 #if defined(SC_HTTP_CURL) && !SC_IS_TEST
-sc_error_t sc_http_post_json_stream(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_stream_cb callback,
-    void *userdata)
-{
-    return sc_http_post_json_stream_impl(alloc, url, auth_header, extra_headers,
-        json_body, json_body_len, callback, userdata);
+sc_error_t sc_http_post_json_stream(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                                    const char *extra_headers, const char *json_body,
+                                    size_t json_body_len, sc_http_stream_cb callback,
+                                    void *userdata) {
+    return sc_http_post_json_stream_impl(alloc, url, auth_header, extra_headers, json_body,
+                                         json_body_len, callback, userdata);
 }
 #else
-sc_error_t sc_http_post_json_stream(sc_allocator_t *alloc,
-    const char *url, const char *auth_header, const char *extra_headers,
-    const char *json_body, size_t json_body_len,
-    sc_http_stream_cb callback, void *userdata)
-{
-    (void)alloc;(void)url;(void)auth_header;(void)extra_headers;
-    (void)json_body;(void)json_body_len;(void)callback;(void)userdata;
+sc_error_t sc_http_post_json_stream(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                                    const char *extra_headers, const char *json_body,
+                                    size_t json_body_len, sc_http_stream_cb callback,
+                                    void *userdata) {
+    (void)alloc;
+    (void)url;
+    (void)auth_header;
+    (void)extra_headers;
+    (void)json_body;
+    (void)json_body_len;
+    (void)callback;
+    (void)userdata;
     return SC_ERR_NOT_SUPPORTED;
 }
 #endif
 
 void sc_http_response_free(sc_allocator_t *alloc, sc_http_response_t *resp) {
-    if (!resp || !alloc) return;
+    if (!resp || !alloc)
+        return;
     if (resp->owned && resp->body) {
         size_t sz = resp->body_cap ? resp->body_cap : resp->body_len + 1;
         alloc->free(alloc->ctx, resp->body, sz);

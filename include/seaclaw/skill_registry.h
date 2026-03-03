@@ -5,7 +5,8 @@
 #include "seaclaw/core/error.h"
 #include <stddef.h>
 
-#define SC_SKILL_REGISTRY_URL "https://raw.githubusercontent.com/seaclaw/skill-registry/main/registry.json"
+#define SC_SKILL_REGISTRY_URL \
+    "https://raw.githubusercontent.com/seaclaw/skill-registry/main/registry.json"
 
 /**
  * Registry entry — one skill from the remote registry index.
@@ -16,7 +17,7 @@ typedef struct sc_skill_registry_entry {
     char *version;
     char *author;
     char *url;
-    char *tags;  /* comma-separated, or NULL */
+    char *tags; /* comma-separated, or NULL */
 } sc_skill_registry_entry_t;
 
 /**
@@ -25,10 +26,10 @@ typedef struct sc_skill_registry_entry {
  * Caller frees entries with sc_skill_registry_entries_free.
  */
 sc_error_t sc_skill_registry_search(sc_allocator_t *alloc, const char *query,
-    sc_skill_registry_entry_t **out_entries, size_t *out_count);
+                                    sc_skill_registry_entry_t **out_entries, size_t *out_count);
 
-void sc_skill_registry_entries_free(sc_allocator_t *alloc,
-    sc_skill_registry_entry_t *entries, size_t count);
+void sc_skill_registry_entries_free(sc_allocator_t *alloc, sc_skill_registry_entry_t *entries,
+                                    size_t count);
 
 /**
  * Install a skill from the registry by name.

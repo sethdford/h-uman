@@ -19,14 +19,14 @@ typedef enum sc_plan_step_status {
 } sc_plan_step_status_t;
 
 typedef struct sc_plan_step {
-    char *tool_name;      /* owned */
-    char *args_json;       /* owned; JSON object string */
-    char *description;     /* optional, owned */
+    char *tool_name;   /* owned */
+    char *args_json;   /* owned; JSON object string */
+    char *description; /* optional, owned */
     sc_plan_step_status_t status;
 } sc_plan_step_t;
 
 typedef struct sc_plan {
-    sc_plan_step_t *steps;  /* owned array */
+    sc_plan_step_t *steps; /* owned array */
     size_t steps_count;
     size_t steps_cap;
 } sc_plan_t;
@@ -35,9 +35,8 @@ typedef struct sc_plan {
  *   {"steps": [{"tool": "name", "args": {...}, "description": "..."}, ...]}
  * or {"steps": [{"name": "tool_name", "arguments": {...}}, ...]}
  * Caller must call sc_plan_free. */
-sc_error_t sc_planner_create_plan(sc_allocator_t *alloc,
-    const char *goal_json, size_t goal_json_len,
-    sc_plan_t **out);
+sc_error_t sc_planner_create_plan(sc_allocator_t *alloc, const char *goal_json,
+                                  size_t goal_json_len, sc_plan_t **out);
 
 /* Get next pending step, or NULL if none. Does not modify step status. */
 sc_plan_step_t *sc_planner_next_step(const sc_plan_t *plan);

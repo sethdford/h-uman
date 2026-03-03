@@ -66,58 +66,46 @@ typedef struct sc_resolved_route {
     sc_matched_by_t matched_by;
 } sc_resolved_route_t;
 
-const char *sc_agent_routing_normalize_id(char *buf, size_t buf_size,
-                                          const char *input, size_t len);
+const char *sc_agent_routing_normalize_id(char *buf, size_t buf_size, const char *input,
+                                          size_t len);
 
-const char *sc_agent_routing_resolve_linked_peer(
-    const char *peer_id, size_t peer_len,
-    const sc_identity_link_t *links, size_t links_len);
+const char *sc_agent_routing_resolve_linked_peer(const char *peer_id, size_t peer_len,
+                                                 const sc_identity_link_t *links, size_t links_len);
 
-sc_error_t sc_agent_routing_build_session_key(
-    sc_allocator_t *alloc,
-    const char *agent_id, const char *channel,
-    const sc_peer_ref_t *peer,
-    char **out_key);
+sc_error_t sc_agent_routing_build_session_key(sc_allocator_t *alloc, const char *agent_id,
+                                              const char *channel, const sc_peer_ref_t *peer,
+                                              char **out_key);
 
 sc_error_t sc_agent_routing_build_session_key_with_scope(
-    sc_allocator_t *alloc,
-    const char *agent_id, const char *channel,
-    const sc_peer_ref_t *peer,
-    sc_dm_scope_t dm_scope,
-    const char *account_id,
-    const sc_identity_link_t *identity_links, size_t links_len,
-    char **out_key);
+    sc_allocator_t *alloc, const char *agent_id, const char *channel, const sc_peer_ref_t *peer,
+    sc_dm_scope_t dm_scope, const char *account_id, const sc_identity_link_t *identity_links,
+    size_t links_len, char **out_key);
 
-sc_error_t sc_agent_routing_build_main_session_key(
-    sc_allocator_t *alloc, const char *agent_id, char **out_key);
+sc_error_t sc_agent_routing_build_main_session_key(sc_allocator_t *alloc, const char *agent_id,
+                                                   char **out_key);
 
-sc_error_t sc_agent_routing_build_thread_session_key(
-    sc_allocator_t *alloc, const char *base_key, const char *thread_id, char **out_key);
+sc_error_t sc_agent_routing_build_thread_session_key(sc_allocator_t *alloc, const char *base_key,
+                                                     const char *thread_id, char **out_key);
 
 int sc_agent_routing_resolve_thread_parent(const char *key, size_t *out_prefix_len);
 
-const char *sc_agent_routing_find_default_agent(
-    const sc_named_agent_config_t *agents, size_t agents_len);
+const char *sc_agent_routing_find_default_agent(const sc_named_agent_config_t *agents,
+                                                size_t agents_len);
 
 bool sc_agent_routing_peer_matches(const sc_peer_ref_t *a, const sc_peer_ref_t *b);
 
-bool sc_agent_routing_binding_matches_scope(
-    const sc_agent_binding_t *binding, const sc_route_input_t *input);
+bool sc_agent_routing_binding_matches_scope(const sc_agent_binding_t *binding,
+                                            const sc_route_input_t *input);
 
-sc_error_t sc_agent_routing_resolve_route(
-    sc_allocator_t *alloc,
-    const sc_route_input_t *input,
-    const sc_agent_binding_t *bindings, size_t bindings_len,
-    const sc_named_agent_config_t *agents, size_t agents_len,
-    sc_resolved_route_t *out);
+sc_error_t sc_agent_routing_resolve_route(sc_allocator_t *alloc, const sc_route_input_t *input,
+                                          const sc_agent_binding_t *bindings, size_t bindings_len,
+                                          const sc_named_agent_config_t *agents, size_t agents_len,
+                                          sc_resolved_route_t *out);
 
 sc_error_t sc_agent_routing_resolve_route_with_session(
-    sc_allocator_t *alloc,
-    const sc_route_input_t *input,
-    const sc_agent_binding_t *bindings, size_t bindings_len,
-    const sc_named_agent_config_t *agents, size_t agents_len,
-    const sc_session_config_t *session,
-    sc_resolved_route_t *out);
+    sc_allocator_t *alloc, const sc_route_input_t *input, const sc_agent_binding_t *bindings,
+    size_t bindings_len, const sc_named_agent_config_t *agents, size_t agents_len,
+    const sc_session_config_t *session, sc_resolved_route_t *out);
 
 void sc_agent_routing_free_route(sc_allocator_t *alloc, sc_resolved_route_t *route);
 

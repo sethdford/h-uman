@@ -1,5 +1,5 @@
-#include "seaclaw/tunnel.h"
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/tunnel.h"
 #include <string.h>
 
 static const char *tunnel_err_strings[] = {
@@ -19,25 +19,26 @@ const char *sc_tunnel_error_string(sc_tunnel_error_t err) {
 }
 
 sc_tunnel_t sc_tunnel_create(sc_allocator_t *alloc, const sc_tunnel_config_t *config) {
-    if (!alloc) return (sc_tunnel_t){ .ctx = NULL, .vtable = NULL };
-    if (!config) return sc_none_tunnel_create(alloc);
+    if (!alloc)
+        return (sc_tunnel_t){.ctx = NULL, .vtable = NULL};
+    if (!config)
+        return sc_none_tunnel_create(alloc);
 
     switch (config->provider) {
-        case SC_TUNNEL_NONE:
-            return sc_none_tunnel_create(alloc);
-        case SC_TUNNEL_CLOUDFLARE:
-            return sc_cloudflare_tunnel_create(alloc,
-                config->cloudflare_token, config->cloudflare_token_len);
-        case SC_TUNNEL_NGROK:
-            return sc_ngrok_tunnel_create(alloc,
-                config->ngrok_auth_token, config->ngrok_auth_token_len,
-                config->ngrok_domain, config->ngrok_domain_len);
-        case SC_TUNNEL_TAILSCALE:
-            return sc_tailscale_tunnel_create(alloc);
-        case SC_TUNNEL_CUSTOM:
-            return sc_custom_tunnel_create(alloc,
-                config->custom_start_cmd, config->custom_start_cmd_len);
-        default:
-            return sc_none_tunnel_create(alloc);
+    case SC_TUNNEL_NONE:
+        return sc_none_tunnel_create(alloc);
+    case SC_TUNNEL_CLOUDFLARE:
+        return sc_cloudflare_tunnel_create(alloc, config->cloudflare_token,
+                                           config->cloudflare_token_len);
+    case SC_TUNNEL_NGROK:
+        return sc_ngrok_tunnel_create(alloc, config->ngrok_auth_token, config->ngrok_auth_token_len,
+                                      config->ngrok_domain, config->ngrok_domain_len);
+    case SC_TUNNEL_TAILSCALE:
+        return sc_tailscale_tunnel_create(alloc);
+    case SC_TUNNEL_CUSTOM:
+        return sc_custom_tunnel_create(alloc, config->custom_start_cmd,
+                                       config->custom_start_cmd_len);
+    default:
+        return sc_none_tunnel_create(alloc);
     }
 }

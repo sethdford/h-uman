@@ -3,9 +3,9 @@
 
 #include "core/allocator.h"
 #include "core/error.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Process state — starting, running, stopping
@@ -35,12 +35,11 @@ typedef struct sc_state_manager {
     sc_allocator_t *alloc;
     sc_process_state_t process_state;
     sc_state_data_t data;
-    char *state_path;  /* owned, for persistence; NULL if none */
+    char *state_path; /* owned, for persistence; NULL if none */
 } sc_state_manager_t;
 
 /* Initialize. state_path may be NULL (no persistence). */
-sc_error_t sc_state_manager_init(sc_state_manager_t *mgr,
-                                 sc_allocator_t *alloc,
+sc_error_t sc_state_manager_init(sc_state_manager_t *mgr, sc_allocator_t *alloc,
                                  const char *state_path);
 
 /* Free resources. */
@@ -53,16 +52,11 @@ void sc_state_set_process(sc_state_manager_t *mgr, sc_process_state_t state);
 sc_process_state_t sc_state_get_process(const sc_state_manager_t *mgr);
 
 /* Set last active channel/chat (for heartbeat routing). */
-void sc_state_set_last_channel(sc_state_manager_t *mgr,
-                                const char *channel,
-                                const char *chat_id);
+void sc_state_set_last_channel(sc_state_manager_t *mgr, const char *channel, const char *chat_id);
 
 /* Get last channel/chat. */
-void sc_state_get_last_channel(const sc_state_manager_t *mgr,
-                                char *channel_out,
-                                size_t channel_size,
-                                char *chat_id_out,
-                                size_t chat_id_size);
+void sc_state_get_last_channel(const sc_state_manager_t *mgr, char *channel_out,
+                               size_t channel_size, char *chat_id_out, size_t chat_id_size);
 
 /* Save to disk (if state_path set). */
 sc_error_t sc_state_save(sc_state_manager_t *mgr);

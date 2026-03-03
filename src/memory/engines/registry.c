@@ -1,9 +1,9 @@
 #include "seaclaw/memory/engines/registry.h"
-#include "seaclaw/memory/engines.h"
 #include "seaclaw/core/allocator.h"
-#include <string.h>
-#include <stdlib.h>
+#include "seaclaw/memory/engines.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Static descriptors for enabled backends. Build options control which exist.
  * Returns pointer to array of descriptor pointers. */
@@ -20,12 +20,13 @@ static const sc_backend_descriptor_t desc_none = {
     .name = "none",
     .label = "None — disable persistent memory",
     .auto_save_default = false,
-    .capabilities = {
-        .supports_keyword_rank = false,
-        .supports_session_store = false,
-        .supports_transactions = false,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = false,
+            .supports_session_store = false,
+            .supports_transactions = false,
+            .supports_outbox = false,
+        },
     .needs_db_path = false,
     .needs_workspace = false,
 };
@@ -34,12 +35,13 @@ static const sc_backend_descriptor_t desc_markdown = {
     .name = "markdown",
     .label = "Markdown files — simple, human-readable",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = false,
-        .supports_session_store = false,
-        .supports_transactions = false,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = false,
+            .supports_session_store = false,
+            .supports_transactions = false,
+            .supports_outbox = false,
+        },
     .needs_db_path = false,
     .needs_workspace = true,
 };
@@ -48,12 +50,13 @@ static const sc_backend_descriptor_t desc_memory = {
     .name = "memory",
     .label = "In-memory LRU — no persistence, ideal for testing",
     .auto_save_default = false,
-    .capabilities = {
-        .supports_keyword_rank = false,
-        .supports_session_store = false,
-        .supports_transactions = false,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = false,
+            .supports_session_store = false,
+            .supports_transactions = false,
+            .supports_outbox = false,
+        },
     .needs_db_path = false,
     .needs_workspace = false,
 };
@@ -62,12 +65,13 @@ static const sc_backend_descriptor_t desc_sqlite = {
     .name = "sqlite",
     .label = "SQLite with FTS5 search (recommended)",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = true,
-        .supports_session_store = true,
-        .supports_transactions = true,
-        .supports_outbox = true,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = true,
+            .supports_session_store = true,
+            .supports_transactions = true,
+            .supports_outbox = true,
+        },
     .needs_db_path = true,
     .needs_workspace = false,
 };
@@ -77,12 +81,13 @@ static const sc_backend_descriptor_t desc_postgres = {
     .name = "postgres",
     .label = "PostgreSQL — remote/shared memory store",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = false,
-        .supports_session_store = true,
-        .supports_transactions = true,
-        .supports_outbox = true,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = false,
+            .supports_session_store = true,
+            .supports_transactions = true,
+            .supports_outbox = true,
+        },
     .needs_db_path = false,
     .needs_workspace = false,
 };
@@ -92,12 +97,13 @@ static const sc_backend_descriptor_t desc_api = {
     .name = "api",
     .label = "Remote API — delegated memory via HTTP",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = false,
-        .supports_session_store = false,
-        .supports_transactions = false,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = false,
+            .supports_session_store = false,
+            .supports_transactions = false,
+            .supports_outbox = false,
+        },
     .needs_db_path = false,
     .needs_workspace = false,
 };
@@ -107,12 +113,13 @@ static const sc_backend_descriptor_t desc_redis = {
     .name = "redis",
     .label = "Redis — in-memory key-value store",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = false,
-        .supports_session_store = false,
-        .supports_transactions = false,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = false,
+            .supports_session_store = false,
+            .supports_transactions = false,
+            .supports_outbox = false,
+        },
     .needs_db_path = false,
     .needs_workspace = false,
 };
@@ -122,12 +129,13 @@ static const sc_backend_descriptor_t desc_lucid = {
     .name = "lucid",
     .label = "Lucid — SQLite-backed with contextual retrieval",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = true,
-        .supports_session_store = true,
-        .supports_transactions = true,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = true,
+            .supports_session_store = true,
+            .supports_transactions = true,
+            .supports_outbox = false,
+        },
     .needs_db_path = true,
     .needs_workspace = false,
 };
@@ -136,12 +144,13 @@ static const sc_backend_descriptor_t desc_lancedb = {
     .name = "lancedb",
     .label = "LanceDB — SQLite-backed with vector search",
     .auto_save_default = true,
-    .capabilities = {
-        .supports_keyword_rank = true,
-        .supports_session_store = false,
-        .supports_transactions = true,
-        .supports_outbox = false,
-    },
+    .capabilities =
+        {
+            .supports_keyword_rank = true,
+            .supports_session_store = false,
+            .supports_transactions = true,
+            .supports_outbox = false,
+        },
     .needs_db_path = true,
     .needs_workspace = false,
 };
@@ -193,13 +202,16 @@ static size_t descriptor_count(void) {
 #endif
 
 const sc_backend_descriptor_t *sc_registry_find_backend(const char *name, size_t name_len) {
-    if (!name) return NULL;
+    if (!name)
+        return NULL;
     size_t n;
     const sc_backend_descriptor_t *const *list = get_descriptors(&n);
-    if (!list) return NULL;
+    if (!list)
+        return NULL;
     for (size_t i = 0; i < n; i++) {
         const sc_backend_descriptor_t *d = list[i];
-        if (!d) continue;
+        if (!d)
+            continue;
         size_t dlen = strlen(d->name);
         if (dlen == name_len && memcmp(d->name, name, name_len) == 0)
             return d;
@@ -208,7 +220,8 @@ const sc_backend_descriptor_t *sc_registry_find_backend(const char *name, size_t
 }
 
 bool sc_registry_is_known_backend(const char *name, size_t name_len) {
-    if (!name) return false;
+    if (!name)
+        return false;
     for (size_t i = 0; i < known_count; i++) {
         size_t dlen = strlen(known_names[i]);
         if (dlen == name_len && memcmp(known_names[i], name, name_len) == 0)
@@ -218,11 +231,15 @@ bool sc_registry_is_known_backend(const char *name, size_t name_len) {
 }
 
 const char *sc_registry_engine_token_for_backend(const char *name, size_t name_len) {
-    if (!name) return NULL;
-    static const struct { const char *n; const char *t; } map[] = {
-        {"none", "none"}, {"markdown", "markdown"}, {"memory", "memory"},
-        {"api", "api"}, {"sqlite", "sqlite"}, {"lucid", "lucid"},
-        {"redis", "redis"}, {"lancedb", "lancedb"}, {"postgres", "postgres"},
+    if (!name)
+        return NULL;
+    static const struct {
+        const char *n;
+        const char *t;
+    } map[] = {
+        {"none", "none"},   {"markdown", "markdown"}, {"memory", "memory"},
+        {"api", "api"},     {"sqlite", "sqlite"},     {"lucid", "lucid"},
+        {"redis", "redis"}, {"lancedb", "lancedb"},   {"postgres", "postgres"},
     };
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         size_t dlen = strlen(map[i].n);
@@ -246,15 +263,21 @@ char *sc_registry_format_enabled_backends(sc_allocator_t *alloc) {
     /* Estimate size: names + commas + spaces */
     size_t total = 0;
     for (size_t i = 0; i < n; i++) {
-        if (list[i]) total += strlen(list[i]->name) + 2;
+        if (list[i])
+            total += strlen(list[i]->name) + 2;
     }
     char *buf = (char *)alloc->alloc(alloc->ctx, total + 1);
-    if (!buf) return NULL;
+    if (!buf)
+        return NULL;
     char *p = buf;
     for (size_t i = 0; i < n; i++) {
         const sc_backend_descriptor_t *d = list[i];
-        if (!d) continue;
-        if (i > 0) { *p++ = ','; *p++ = ' '; }
+        if (!d)
+            continue;
+        if (i > 0) {
+            *p++ = ',';
+            *p++ = ' ';
+        }
         size_t len = strlen(d->name);
         memcpy(p, d->name, len + 1);
         p += len;

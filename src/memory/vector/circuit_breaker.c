@@ -32,23 +32,23 @@ void sc_circuit_breaker_init(sc_circuit_breaker_t *cb, uint32_t threshold, uint3
 
 bool sc_circuit_breaker_allow(sc_circuit_breaker_t *cb) {
     switch (cb->state) {
-        case SC_CB_CLOSED:
+    case SC_CB_CLOSED:
+        return true;
+    case SC_CB_OPEN: {
+        int64_t now = nano_ts();
+        if (now - cb->last_failure_ns >= (int64_t)cb->cooldown_ns) {
+            cb->state = SC_CB_HALF_OPEN;
+            cb->half_open_probe_sent = true;
             return true;
-        case SC_CB_OPEN: {
-            int64_t now = nano_ts();
-            if (now - cb->last_failure_ns >= (int64_t)cb->cooldown_ns) {
-                cb->state = SC_CB_HALF_OPEN;
-                cb->half_open_probe_sent = true;
-                return true;
-            }
-            return false;
         }
-        case SC_CB_HALF_OPEN:
-            if (!cb->half_open_probe_sent) {
-                cb->half_open_probe_sent = true;
-                return true;
-            }
-            return false;
+        return false;
+    }
+    case SC_CB_HALF_OPEN:
+        if (!cb->half_open_probe_sent) {
+            cb->half_open_probe_sent = true;
+            return true;
+        }
+        return false;
     }
     return false;
 }
@@ -60,7 +60,8 @@ void sc_circuit_breaker_record_success(sc_circuit_breaker_t *cb) {
 }
 
 void sc_circuit_breaker_record_failure(sc_circuit_breaker_t *cb) {
-    if (cb->failure_count < 0xFFFFFFFFu) cb->failure_count++;
+    if (cb->failure_count < 0xFFFFFFFFu)
+        cb->failure_count++;
     cb->last_failure_ns = nano_ts();
 
     if (cb->state == SC_CB_HALF_OPEN ||

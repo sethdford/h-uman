@@ -17,19 +17,19 @@
 #include "core/string.h"
 
 /* Subsystems */
-#include "skillforge.h"
-#include "onboard.h"
 #include "daemon.h"
 #include "migration.h"
+#include "onboard.h"
+#include "skillforge.h"
 
 /* Vtable interfaces (Phase 2) */
-#include "provider.h"
 #include "channel.h"
-#include "tool.h"
+#include "hardware.h"
 #include "memory.h"
 #include "observer.h"
-#include "runtime.h"
 #include "peripheral.h"
-#include "hardware.h"
+#include "provider.h"
+#include "runtime.h"
+#include "tool.h"
 
 #endif /* SC_SEACLAW_H */

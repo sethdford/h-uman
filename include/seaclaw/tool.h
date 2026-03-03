@@ -18,40 +18,56 @@ typedef struct sc_tool_result {
     size_t output_len;
     const char *error_msg;
     size_t error_msg_len;
-    bool output_owned;      /* true = caller must free output; false = static/borrowed */
-    bool error_msg_owned;   /* true = caller must free error_msg */
-    bool needs_approval;    /* true = tool needs user approval to proceed */
+    bool output_owned;    /* true = caller must free output; false = static/borrowed */
+    bool error_msg_owned; /* true = caller must free error_msg */
+    bool needs_approval;  /* true = tool needs user approval to proceed */
 } sc_tool_result_t;
 
 static inline sc_tool_result_t sc_tool_result_ok(const char *output, size_t len) {
     return (sc_tool_result_t){
-        .success = true, .output = output, .output_len = len,
-        .error_msg = NULL, .error_msg_len = 0,
-        .output_owned = false, .error_msg_owned = false,
+        .success = true,
+        .output = output,
+        .output_len = len,
+        .error_msg = NULL,
+        .error_msg_len = 0,
+        .output_owned = false,
+        .error_msg_owned = false,
     };
 }
 
 static inline sc_tool_result_t sc_tool_result_ok_owned(const char *output, size_t len) {
     return (sc_tool_result_t){
-        .success = true, .output = output, .output_len = len,
-        .error_msg = NULL, .error_msg_len = 0,
-        .output_owned = true, .error_msg_owned = false,
+        .success = true,
+        .output = output,
+        .output_len = len,
+        .error_msg = NULL,
+        .error_msg_len = 0,
+        .output_owned = true,
+        .error_msg_owned = false,
     };
 }
 
 static inline sc_tool_result_t sc_tool_result_fail(const char *error_msg, size_t len) {
     return (sc_tool_result_t){
-        .success = false, .output = "", .output_len = 0,
-        .error_msg = error_msg, .error_msg_len = len,
-        .output_owned = false, .error_msg_owned = false,
+        .success = false,
+        .output = "",
+        .output_len = 0,
+        .error_msg = error_msg,
+        .error_msg_len = len,
+        .output_owned = false,
+        .error_msg_owned = false,
     };
 }
 
 static inline sc_tool_result_t sc_tool_result_fail_owned(const char *error_msg, size_t len) {
     return (sc_tool_result_t){
-        .success = false, .output = "", .output_len = 0,
-        .error_msg = error_msg, .error_msg_len = len,
-        .output_owned = false, .error_msg_owned = true,
+        .success = false,
+        .output = "",
+        .output_len = 0,
+        .error_msg = error_msg,
+        .error_msg_len = len,
+        .output_owned = false,
+        .error_msg_owned = true,
     };
 }
 
@@ -77,9 +93,8 @@ typedef struct sc_tool {
 
 /* args: JSON object (sc_json_value_t with type SC_JSON_OBJECT) */
 typedef struct sc_tool_vtable {
-    sc_error_t (*execute)(void *ctx, sc_allocator_t *alloc,
-        const sc_json_value_t *args,
-        sc_tool_result_t *out);
+    sc_error_t (*execute)(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                          sc_tool_result_t *out);
     const char *(*name)(void *ctx);
     const char *(*description)(void *ctx);
     const char *(*parameters_json)(void *ctx);
@@ -102,12 +117,12 @@ typedef struct sc_tool_vtable {
  * ────────────────────────────────────────────────────────────────────────── */
 
 #define SC_TOOL_IMPL(Prefix, execute_fn, name_fn, desc_fn, params_fn, deinit_fn) \
-    static const sc_tool_vtable_t Prefix##_vtable = { \
-        .execute = execute_fn, \
-        .name = name_fn, \
-        .description = desc_fn, \
-        .parameters_json = params_fn, \
-        .deinit = deinit_fn, \
+    static const sc_tool_vtable_t Prefix##_vtable = {                            \
+        .execute = execute_fn,                                                   \
+        .name = name_fn,                                                         \
+        .description = desc_fn,                                                  \
+        .parameters_json = params_fn,                                            \
+        .deinit = deinit_fn,                                                     \
     }
 
 #endif /* SC_TOOL_H */

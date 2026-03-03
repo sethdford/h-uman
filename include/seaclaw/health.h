@@ -11,10 +11,10 @@
  * ────────────────────────────────────────────────────────────────────────── */
 
 typedef struct sc_component_health {
-    char status[32];       /* "ok", "error", "starting" */
+    char status[32]; /* "ok", "error", "starting" */
     char updated_at[32];
     char last_ok[32];
-    char last_error[256];  /* last error message if status=error */
+    char last_error[256]; /* last error message if status=error */
     uint64_t restart_count;
 } sc_component_health_t;
 
@@ -25,7 +25,7 @@ typedef struct sc_component_health {
 typedef struct sc_health_snapshot {
     uint32_t pid;
     uint64_t uptime_seconds;
-    sc_component_health_t *components;  /* caller owns, may be NULL */
+    sc_component_health_t *components; /* caller owns, may be NULL */
     size_t component_count;
 } sc_health_snapshot_t;
 
@@ -41,7 +41,7 @@ typedef enum sc_readiness_status {
 typedef struct sc_component_check {
     const char *name;
     bool healthy;
-    const char *message;  /* optional */
+    const char *message; /* optional */
 } sc_component_check_t;
 
 typedef struct sc_readiness_result {

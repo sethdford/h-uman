@@ -4,16 +4,16 @@
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 typedef CRITICAL_SECTION sc_mutex_t;
-#define sc_mutex_init(m)   InitializeCriticalSection(m)
-#define sc_mutex_lock(m)   EnterCriticalSection(m)
-#define sc_mutex_unlock(m) LeaveCriticalSection(m)
+#define sc_mutex_init(m)    InitializeCriticalSection(m)
+#define sc_mutex_lock(m)    EnterCriticalSection(m)
+#define sc_mutex_unlock(m)  LeaveCriticalSection(m)
 #define sc_mutex_destroy(m) DeleteCriticalSection(m)
 #else
 #include <pthread.h>
 typedef pthread_mutex_t sc_mutex_t;
-#define sc_mutex_init(m)   pthread_mutex_init(m, NULL)
-#define sc_mutex_lock(m)   pthread_mutex_lock(m)
-#define sc_mutex_unlock(m) pthread_mutex_unlock(m)
+#define sc_mutex_init(m)    pthread_mutex_init(m, NULL)
+#define sc_mutex_lock(m)    pthread_mutex_lock(m)
+#define sc_mutex_unlock(m)  pthread_mutex_unlock(m)
 #define sc_mutex_destroy(m) pthread_mutex_destroy(m)
 #endif
 
@@ -28,15 +28,15 @@ static void ensure_mutex(void) {
 }
 
 void sc_bus_init(sc_bus_t *bus) {
-    if (!bus) return;
+    if (!bus)
+        return;
     memset(bus, 0, sizeof(*bus));
 }
 
-sc_error_t sc_bus_subscribe(sc_bus_t *bus,
-                            sc_bus_subscriber_fn fn,
-                            void *user_ctx,
+sc_error_t sc_bus_subscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx,
                             sc_bus_event_type_t filter) {
-    if (!bus || !fn) return SC_ERR_INVALID_ARGUMENT;
+    if (!bus || !fn)
+        return SC_ERR_INVALID_ARGUMENT;
     ensure_mutex();
     sc_mutex_lock(&s_bus_mutex);
     if (bus->count >= SC_BUS_MAX_SUBSCRIBERS) {
@@ -52,14 +52,13 @@ sc_error_t sc_bus_subscribe(sc_bus_t *bus,
 }
 
 void sc_bus_unsubscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx) {
-    if (!bus || !fn) return;
+    if (!bus || !fn)
+        return;
     ensure_mutex();
     sc_mutex_lock(&s_bus_mutex);
     for (size_t i = 0; i < bus->count; i++) {
-        if (bus->subscribers[i].fn == fn &&
-            bus->subscribers[i].user_ctx == user_ctx) {
-            memmove(&bus->subscribers[i],
-                    &bus->subscribers[i + 1],
+        if (bus->subscribers[i].fn == fn && bus->subscribers[i].user_ctx == user_ctx) {
+            memmove(&bus->subscribers[i], &bus->subscribers[i + 1],
                     (bus->count - 1 - i) * sizeof(sc_bus_subscriber_t));
             bus->count--;
             break;
@@ -69,12 +68,14 @@ void sc_bus_unsubscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx) 
 }
 
 void sc_bus_publish(sc_bus_t *bus, const sc_bus_event_t *ev) {
-    if (!bus || !ev) return;
+    if (!bus || !ev)
+        return;
     ensure_mutex();
     sc_mutex_lock(&s_bus_mutex);
     sc_bus_subscriber_t snapshot[SC_BUS_MAX_SUBSCRIBERS];
     size_t n = bus->count;
-    if (n > SC_BUS_MAX_SUBSCRIBERS) n = SC_BUS_MAX_SUBSCRIBERS;
+    if (n > SC_BUS_MAX_SUBSCRIBERS)
+        n = SC_BUS_MAX_SUBSCRIBERS;
     memcpy(snapshot, bus->subscribers, n * sizeof(sc_bus_subscriber_t));
     sc_mutex_unlock(&s_bus_mutex);
 
@@ -88,29 +89,29 @@ void sc_bus_publish(sc_bus_t *bus, const sc_bus_event_t *ev) {
     }
 }
 
-void sc_bus_publish_simple(sc_bus_t *bus,
-                           sc_bus_event_type_t type,
-                           const char *channel,
-                           const char *id,
-                           const char *message) {
+void sc_bus_publish_simple(sc_bus_t *bus, sc_bus_event_type_t type, const char *channel,
+                           const char *id, const char *message) {
     sc_bus_event_t ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = type;
     if (channel) {
         size_t cl = strlen(channel);
-        if (cl >= SC_BUS_CHANNEL_LEN) cl = SC_BUS_CHANNEL_LEN - 1;
+        if (cl >= SC_BUS_CHANNEL_LEN)
+            cl = SC_BUS_CHANNEL_LEN - 1;
         memcpy(ev.channel, channel, cl);
         ev.channel[cl] = '\0';
     }
     if (id) {
         size_t il = strlen(id);
-        if (il >= SC_BUS_ID_LEN) il = SC_BUS_ID_LEN - 1;
+        if (il >= SC_BUS_ID_LEN)
+            il = SC_BUS_ID_LEN - 1;
         memcpy(ev.id, id, il);
         ev.id[il] = '\0';
     }
     if (message) {
         size_t ml = strlen(message);
-        if (ml >= SC_BUS_MSG_LEN) ml = SC_BUS_MSG_LEN - 1;
+        if (ml >= SC_BUS_MSG_LEN)
+            ml = SC_BUS_MSG_LEN - 1;
         memcpy(ev.message, message, ml);
         ev.message[ml] = '\0';
     }

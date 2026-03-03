@@ -1,16 +1,16 @@
-#include "seaclaw/provider.h"
-#include <stdint.h>
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/core/http.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
-#include "seaclaw/core/http.h"
+#include "seaclaw/provider.h"
 #include "seaclaw/providers/sse.h"
-#include <string.h>
-#include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#define SC_ANTHROPIC_URL "https://api.anthropic.com/v1/messages"
+#define SC_ANTHROPIC_URL                "https://api.anthropic.com/v1/messages"
 #define SC_ANTHROPIC_DEFAULT_MAX_TOKENS 4096
 
 typedef struct sc_anthropic_ctx {
@@ -20,19 +20,15 @@ typedef struct sc_anthropic_ctx {
     size_t base_url_len;
 } sc_anthropic_ctx_t;
 
-static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
-    const sc_chat_request_t *request,
-    const char *model, size_t model_len,
-    double temperature,
-    sc_chat_response_t *out);
+static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc, const sc_chat_request_t *request,
+                                 const char *model, size_t model_len, double temperature,
+                                 sc_chat_response_t *out);
 
 static sc_error_t anthropic_chat_with_system(void *ctx, sc_allocator_t *alloc,
-    const char *system_prompt, size_t system_prompt_len,
-    const char *message, size_t message_len,
-    const char *model, size_t model_len,
-    double temperature,
-    char **out, size_t *out_len)
-{
+                                             const char *system_prompt, size_t system_prompt_len,
+                                             const char *message, size_t message_len,
+                                             const char *model, size_t model_len,
+                                             double temperature, char **out, size_t *out_len) {
     sc_chat_message_t msgs[2];
     msgs[0].role = SC_ROLE_SYSTEM;
     msgs[0].content = system_prompt;
@@ -71,11 +67,13 @@ static sc_error_t anthropic_chat_with_system(void *ctx, sc_allocator_t *alloc,
     sc_chat_response_t resp;
     memset(&resp, 0, sizeof(resp));
     sc_error_t err = anthropic_chat(ctx, alloc, &req, model, model_len, temperature, &resp);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
 
     if (resp.content && resp.content_len > 0) {
         *out = sc_strndup(alloc, resp.content, resp.content_len);
-        if (!*out) return SC_ERR_OUT_OF_MEMORY;
+        if (!*out)
+            return SC_ERR_OUT_OF_MEMORY;
         *out_len = resp.content_len;
     } else {
         *out = NULL;
@@ -84,15 +82,15 @@ static sc_error_t anthropic_chat_with_system(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
-    const sc_chat_request_t *request,
-    const char *model, size_t model_len,
-    double temperature,
-    sc_chat_response_t *out)
-{
+static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc, const sc_chat_request_t *request,
+                                 const char *model, size_t model_len, double temperature,
+                                 sc_chat_response_t *out) {
     sc_anthropic_ctx_t *ac = (sc_anthropic_ctx_t *)ctx;
-    if (!ac || !request || !out) return SC_ERR_INVALID_ARGUMENT;
-    (void)model; (void)model_len; (void)temperature;
+    if (!ac || !request || !out)
+        return SC_ERR_INVALID_ARGUMENT;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
 
 #if SC_IS_TEST
     memset(out, 0, sizeof(*out));
@@ -129,12 +127,14 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
         return SC_ERR_PROVIDER_AUTH;
 
     sc_json_value_t *root = sc_json_object_new(alloc);
-    if (!root) return SC_ERR_OUT_OF_MEMORY;
+    if (!root)
+        return SC_ERR_OUT_OF_MEMORY;
 
     sc_json_value_t *model_val = sc_json_string_new(alloc, model, model_len);
     sc_json_object_set(alloc, root, "model", model_val);
 
-    uint32_t max_tokens = request->max_tokens ? request->max_tokens : SC_ANTHROPIC_DEFAULT_MAX_TOKENS;
+    uint32_t max_tokens =
+        request->max_tokens ? request->max_tokens : SC_ANTHROPIC_DEFAULT_MAX_TOKENS;
     sc_json_object_set(alloc, root, "max_tokens", sc_json_number_new(alloc, (double)max_tokens));
     sc_json_object_set(alloc, root, "temperature", sc_json_number_new(alloc, temperature));
 
@@ -153,33 +153,48 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
     }
 
     sc_json_value_t *msgs_arr = sc_json_array_new(alloc);
-    if (!msgs_arr) { sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msgs_arr) {
+        sc_json_free(alloc, root);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     sc_json_object_set(alloc, root, "messages", msgs_arr);
 
     for (size_t i = 0; i < request->messages_count; i++) {
         const sc_chat_message_t *m = &request->messages[i];
-        if (m->role == SC_ROLE_SYSTEM) continue;
+        if (m->role == SC_ROLE_SYSTEM)
+            continue;
 
         if (m->role == SC_ROLE_TOOL) {
             /* Coalesce consecutive tool messages into one user message with tool_result blocks */
             sc_json_value_t *content_arr = sc_json_array_new(alloc);
-            if (!content_arr) { sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+            if (!content_arr) {
+                sc_json_free(alloc, root);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
             size_t j = i;
             while (j < request->messages_count && request->messages[j].role == SC_ROLE_TOOL) {
                 const sc_chat_message_t *tm = &request->messages[j];
                 if (tm->tool_call_id && tm->content) {
                     sc_json_value_t *tr = sc_json_object_new(alloc);
                     if (tr) {
-                        sc_json_object_set(alloc, tr, "type", sc_json_string_new(alloc, "tool_result", 11));
-                        sc_json_object_set(alloc, tr, "tool_use_id", sc_json_string_new(alloc, tm->tool_call_id, tm->tool_call_id_len));
-                        sc_json_object_set(alloc, tr, "content", sc_json_string_new(alloc, tm->content, tm->content_len));
+                        sc_json_object_set(alloc, tr, "type",
+                                           sc_json_string_new(alloc, "tool_result", 11));
+                        sc_json_object_set(
+                            alloc, tr, "tool_use_id",
+                            sc_json_string_new(alloc, tm->tool_call_id, tm->tool_call_id_len));
+                        sc_json_object_set(alloc, tr, "content",
+                                           sc_json_string_new(alloc, tm->content, tm->content_len));
                         sc_json_array_push(alloc, content_arr, tr);
                     }
                 }
                 j++;
             }
             sc_json_value_t *obj = sc_json_object_new(alloc);
-            if (!obj) { sc_json_free(alloc, content_arr); sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+            if (!obj) {
+                sc_json_free(alloc, content_arr);
+                sc_json_free(alloc, root);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
             sc_json_object_set(alloc, obj, "role", sc_json_string_new(alloc, "user", 4));
             sc_json_object_set(alloc, obj, "content", content_arr);
             sc_json_array_push(alloc, msgs_arr, obj);
@@ -188,25 +203,36 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
         }
 
         sc_json_value_t *obj = sc_json_object_new(alloc);
-        if (!obj) { sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+        if (!obj) {
+            sc_json_free(alloc, root);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
 
         const char *role_str = (m->role == SC_ROLE_ASSISTANT) ? "assistant" : "user";
-        sc_json_object_set(alloc, obj, "role", sc_json_string_new(alloc, role_str, strlen(role_str)));
+        sc_json_object_set(alloc, obj, "role",
+                           sc_json_string_new(alloc, role_str, strlen(role_str)));
         if (m->role == SC_ROLE_ASSISTANT && m->tool_calls && m->tool_calls_count > 0) {
             sc_json_value_t *content_arr = sc_json_array_new(alloc);
             if (content_arr) {
                 for (size_t k = 0; k < m->tool_calls_count; k++) {
                     const sc_tool_call_t *tc = &m->tool_calls[k];
                     sc_json_value_t *tu = sc_json_object_new(alloc);
-                    if (!tu) { sc_json_free(alloc, content_arr); sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+                    if (!tu) {
+                        sc_json_free(alloc, content_arr);
+                        sc_json_free(alloc, root);
+                        return SC_ERR_OUT_OF_MEMORY;
+                    }
                     sc_json_object_set(alloc, tu, "type", sc_json_string_new(alloc, "tool_use", 8));
                     if (tc->id && tc->id_len > 0)
-                        sc_json_object_set(alloc, tu, "id", sc_json_string_new(alloc, tc->id, tc->id_len));
+                        sc_json_object_set(alloc, tu, "id",
+                                           sc_json_string_new(alloc, tc->id, tc->id_len));
                     if (tc->name && tc->name_len > 0)
-                        sc_json_object_set(alloc, tu, "name", sc_json_string_new(alloc, tc->name, tc->name_len));
+                        sc_json_object_set(alloc, tu, "name",
+                                           sc_json_string_new(alloc, tc->name, tc->name_len));
                     if (tc->arguments && tc->arguments_len > 0) {
                         sc_json_value_t *input_val = NULL;
-                        if (sc_json_parse(alloc, tc->arguments, tc->arguments_len, &input_val) == SC_OK)
+                        if (sc_json_parse(alloc, tc->arguments, tc->arguments_len, &input_val) ==
+                            SC_OK)
                             sc_json_object_set(alloc, tu, "input", input_val);
                     }
                     sc_json_array_push(alloc, content_arr, tu);
@@ -224,13 +250,24 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
         if (tools_arr) {
             for (size_t i = 0; i < request->tools_count; i++) {
                 sc_json_value_t *tool_obj = sc_json_object_new(alloc);
-                if (!tool_obj) { sc_json_free(alloc, tools_arr); sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
-                sc_json_object_set(alloc, tool_obj, "name", sc_json_string_new(alloc, request->tools[i].name, request->tools[i].name_len));
-                sc_json_object_set(alloc, tool_obj, "description", sc_json_string_new(alloc,
-                    request->tools[i].description ? request->tools[i].description : "", request->tools[i].description_len));
-                if (request->tools[i].parameters_json && request->tools[i].parameters_json_len > 0) {
+                if (!tool_obj) {
+                    sc_json_free(alloc, tools_arr);
+                    sc_json_free(alloc, root);
+                    return SC_ERR_OUT_OF_MEMORY;
+                }
+                sc_json_object_set(
+                    alloc, tool_obj, "name",
+                    sc_json_string_new(alloc, request->tools[i].name, request->tools[i].name_len));
+                sc_json_object_set(
+                    alloc, tool_obj, "description",
+                    sc_json_string_new(
+                        alloc, request->tools[i].description ? request->tools[i].description : "",
+                        request->tools[i].description_len));
+                if (request->tools[i].parameters_json &&
+                    request->tools[i].parameters_json_len > 0) {
                     sc_json_value_t *schema = NULL;
-                    if (sc_json_parse(alloc, request->tools[i].parameters_json, request->tools[i].parameters_json_len, &schema) == SC_OK)
+                    if (sc_json_parse(alloc, request->tools[i].parameters_json,
+                                      request->tools[i].parameters_json_len, &schema) == SC_OK)
                         sc_json_object_set(alloc, tool_obj, "input_schema", schema);
                 }
                 sc_json_array_push(alloc, tools_arr, tool_obj);
@@ -243,9 +280,11 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
     size_t body_len = 0;
     sc_error_t err = sc_json_stringify(alloc, root, &body, &body_len);
     sc_json_free(alloc, root);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
 
-    const char *base = ac->base_url && ac->base_url_len > 0 ? ac->base_url : "https://api.anthropic.com/v1";
+    const char *base =
+        ac->base_url && ac->base_url_len > 0 ? ac->base_url : "https://api.anthropic.com/v1";
     size_t base_len = ac->base_url_len ? ac->base_url_len : 29;
     char url_buf[512];
     int n = snprintf(url_buf, sizeof(url_buf), "%.*s/messages", (int)base_len, base);
@@ -255,9 +294,8 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
     }
 
     char extra_buf[512];
-    n = snprintf(extra_buf, sizeof(extra_buf),
-        "x-api-key: %.*s\r\nanthropic-version: 2023-06-01",
-        (int)ac->api_key_len, ac->api_key);
+    n = snprintf(extra_buf, sizeof(extra_buf), "x-api-key: %.*s\r\nanthropic-version: 2023-06-01",
+                 (int)ac->api_key_len, ac->api_key);
     if (n <= 0 || (size_t)n >= sizeof(extra_buf)) {
         alloc->free(alloc->ctx, body, body_len);
         return SC_ERR_INVALID_ARGUMENT;
@@ -266,19 +304,23 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
     sc_http_response_t hresp = {0};
     err = sc_http_post_json_ex(alloc, url_buf, NULL, extra_buf, body, body_len, &hresp);
     alloc->free(alloc->ctx, body, body_len);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
 
     if (hresp.status_code < 200 || hresp.status_code >= 300) {
         sc_http_response_free(alloc, &hresp);
-        if (hresp.status_code == 401) return SC_ERR_PROVIDER_AUTH;
-        if (hresp.status_code == 429) return SC_ERR_PROVIDER_RATE_LIMITED;
+        if (hresp.status_code == 401)
+            return SC_ERR_PROVIDER_AUTH;
+        if (hresp.status_code == 429)
+            return SC_ERR_PROVIDER_RATE_LIMITED;
         return SC_ERR_PROVIDER_RESPONSE;
     }
 
     sc_json_value_t *parsed = NULL;
     err = sc_json_parse(alloc, hresp.body, hresp.body_len, &parsed);
     sc_http_response_free(alloc, &hresp);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
 
     memset(out, 0, sizeof(*out));
     sc_json_value_t *content_arr = sc_json_object_get(parsed, "content");
@@ -298,10 +340,13 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
                 }
             } else if (block_type && strcmp(block_type, "tool_use") == 0) {
                 const char *tname = sc_json_get_string(block, "name");
-                if (!tname) continue;
+                if (!tname)
+                    continue;
                 if (!tcs) {
-                    tcs = (sc_tool_call_t *)alloc->alloc(alloc->ctx, block_count * sizeof(sc_tool_call_t));
-                    if (!tcs) break;
+                    tcs = (sc_tool_call_t *)alloc->alloc(alloc->ctx,
+                                                         block_count * sizeof(sc_tool_call_t));
+                    if (!tcs)
+                        break;
                     memset(tcs, 0, block_count * sizeof(sc_tool_call_t));
                 }
                 const char *tid = sc_json_get_string(block, "id");
@@ -336,9 +381,15 @@ static sc_error_t anthropic_chat(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static bool anthropic_supports_native_tools(void *ctx) { (void)ctx; return true; }
+static bool anthropic_supports_native_tools(void *ctx) {
+    (void)ctx;
+    return true;
+}
 
-static bool anthropic_supports_streaming(void *ctx) { (void)ctx; return true; }
+static bool anthropic_supports_streaming(void *ctx) {
+    (void)ctx;
+    return true;
+}
 
 #if !SC_IS_TEST
 typedef struct anthropic_stream_ctx {
@@ -357,18 +408,24 @@ static bool event_eq(const char *event_type, size_t len, const char *expected) {
     return len == elen && memcmp(event_type, expected, len) == 0;
 }
 
-static void append_content_anthropic(anthropic_stream_ctx_t *s, const char *delta, size_t delta_len) {
-    if (!delta || delta_len == 0) return;
+static void append_content_anthropic(anthropic_stream_ctx_t *s, const char *delta,
+                                     size_t delta_len) {
+    if (!delta || delta_len == 0)
+        return;
     while (s->content_len + delta_len + 1 > s->content_cap) {
         size_t new_cap = s->content_cap ? s->content_cap * 2 : 256;
-        while (new_cap < s->content_len + delta_len + 1) new_cap *= 2;
+        while (new_cap < s->content_len + delta_len + 1)
+            new_cap *= 2;
         char *n;
         if (s->content_buf) {
             n = (char *)s->alloc->realloc(s->alloc->ctx, s->content_buf, s->content_cap, new_cap);
         } else {
             n = (char *)s->alloc->alloc(s->alloc->ctx, new_cap);
         }
-        if (!n) { s->last_error = SC_ERR_OUT_OF_MEMORY; return; }
+        if (!n) {
+            s->last_error = SC_ERR_OUT_OF_MEMORY;
+            return;
+        }
         s->content_buf = n;
         s->content_cap = new_cap;
     }
@@ -377,9 +434,11 @@ static void append_content_anthropic(anthropic_stream_ctx_t *s, const char *delt
     s->content_buf[s->content_len] = '\0';
 }
 
-static void extract_anthropic_delta(anthropic_stream_ctx_t *s, const char *json_str, size_t json_len) {
+static void extract_anthropic_delta(anthropic_stream_ctx_t *s, const char *json_str,
+                                    size_t json_len) {
     sc_json_value_t *parsed = NULL;
-    if (sc_json_parse(s->alloc, json_str, json_len, &parsed) != SC_OK) return;
+    if (sc_json_parse(s->alloc, json_str, json_len, &parsed) != SC_OK)
+        return;
     const char *type = sc_json_get_string(parsed, "type");
     if (!type || strcmp(type, "content_block_delta") != 0) {
         sc_json_free(s->alloc, parsed);
@@ -407,13 +466,14 @@ static void extract_anthropic_delta(anthropic_stream_ctx_t *s, const char *json_
     sc_json_free(s->alloc, parsed);
 }
 
-static void anthropic_sse_event_cb(const char *event_type, size_t event_type_len,
-    const char *data, size_t data_len, void *userdata)
-{
+static void anthropic_sse_event_cb(const char *event_type, size_t event_type_len, const char *data,
+                                   size_t data_len, void *userdata) {
     anthropic_stream_ctx_t *s = (anthropic_stream_ctx_t *)userdata;
-    if (s->last_error != SC_OK) return;
+    if (s->last_error != SC_OK)
+        return;
     if (event_eq(event_type, event_type_len, "message_stop")) {
-        sc_stream_chunk_t chunk = { .delta = NULL, .delta_len = 0, .is_final = true, .token_count = 0 };
+        sc_stream_chunk_t chunk = {
+            .delta = NULL, .delta_len = 0, .is_final = true, .token_count = 0};
         s->callback(s->callback_ctx, &chunk);
         return;
     }
@@ -434,20 +494,21 @@ static size_t anthropic_stream_write_cb(const char *data, size_t len, void *user
 #endif /* !SC_IS_TEST */
 
 static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
-    const sc_chat_request_t *request,
-    const char *model, size_t model_len,
-    double temperature,
-    sc_stream_callback_t callback, void *callback_ctx,
-    sc_stream_chat_result_t *out)
-{
+                                        const sc_chat_request_t *request, const char *model,
+                                        size_t model_len, double temperature,
+                                        sc_stream_callback_t callback, void *callback_ctx,
+                                        sc_stream_chat_result_t *out) {
     sc_anthropic_ctx_t *ac = (sc_anthropic_ctx_t *)ctx;
-    if (!ac || !request || !callback || !out) return SC_ERR_INVALID_ARGUMENT;
-    (void)model; (void)model_len; (void)temperature;
+    if (!ac || !request || !callback || !out)
+        return SC_ERR_INVALID_ARGUMENT;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
 
     memset(out, 0, sizeof(*out));
 
 #if SC_IS_TEST
-    const char *chunks[] = { "Hello ", "from ", "Anthropic" };
+    const char *chunks[] = {"Hello ", "from ", "Anthropic"};
     for (int i = 0; i < 3; i++) {
         sc_stream_chunk_t c = {
             .delta = chunks[i],
@@ -458,7 +519,7 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
         callback(callback_ctx, &c);
     }
     {
-        sc_stream_chunk_t c = { .delta = NULL, .delta_len = 0, .is_final = true, .token_count = 3 };
+        sc_stream_chunk_t c = {.delta = NULL, .delta_len = 0, .is_final = true, .token_count = 3};
         callback(callback_ctx, &c);
     }
     out->content = sc_strndup(alloc, "Hello from Anthropic", 19);
@@ -466,13 +527,16 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
     out->usage.completion_tokens = 3;
     return SC_OK;
 #else
-    if (!ac->api_key || ac->api_key_len == 0) return SC_ERR_PROVIDER_AUTH;
+    if (!ac->api_key || ac->api_key_len == 0)
+        return SC_ERR_PROVIDER_AUTH;
 
     sc_json_value_t *root = sc_json_object_new(alloc);
-    if (!root) return SC_ERR_OUT_OF_MEMORY;
+    if (!root)
+        return SC_ERR_OUT_OF_MEMORY;
 
     sc_json_object_set(alloc, root, "model", sc_json_string_new(alloc, model, model_len));
-    uint32_t max_tokens = request->max_tokens ? request->max_tokens : SC_ANTHROPIC_DEFAULT_MAX_TOKENS;
+    uint32_t max_tokens =
+        request->max_tokens ? request->max_tokens : SC_ANTHROPIC_DEFAULT_MAX_TOKENS;
     sc_json_object_set(alloc, root, "max_tokens", sc_json_number_new(alloc, (double)max_tokens));
     sc_json_object_set(alloc, root, "temperature", sc_json_number_new(alloc, temperature));
     sc_json_object_set(alloc, root, "stream", sc_json_bool_new(alloc, true));
@@ -487,21 +551,31 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
         }
     }
     if (system_prompt && system_len > 0) {
-        sc_json_object_set(alloc, root, "system", sc_json_string_new(alloc, system_prompt, system_len));
+        sc_json_object_set(alloc, root, "system",
+                           sc_json_string_new(alloc, system_prompt, system_len));
     }
 
     sc_json_value_t *msgs_arr = sc_json_array_new(alloc);
-    if (!msgs_arr) { sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+    if (!msgs_arr) {
+        sc_json_free(alloc, root);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     sc_json_object_set(alloc, root, "messages", msgs_arr);
     for (size_t i = 0; i < request->messages_count; i++) {
         const sc_chat_message_t *m = &request->messages[i];
-        if (m->role == SC_ROLE_SYSTEM) continue;
+        if (m->role == SC_ROLE_SYSTEM)
+            continue;
         sc_json_value_t *obj = sc_json_object_new(alloc);
-        if (!obj) { sc_json_free(alloc, root); return SC_ERR_OUT_OF_MEMORY; }
+        if (!obj) {
+            sc_json_free(alloc, root);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         const char *role_str = (m->role == SC_ROLE_ASSISTANT) ? "assistant" : "user";
-        sc_json_object_set(alloc, obj, "role", sc_json_string_new(alloc, role_str, strlen(role_str)));
+        sc_json_object_set(alloc, obj, "role",
+                           sc_json_string_new(alloc, role_str, strlen(role_str)));
         if (m->content && m->content_len > 0) {
-            sc_json_object_set(alloc, obj, "content", sc_json_string_new(alloc, m->content, m->content_len));
+            sc_json_object_set(alloc, obj, "content",
+                               sc_json_string_new(alloc, m->content, m->content_len));
         }
         sc_json_array_push(alloc, msgs_arr, obj);
     }
@@ -510,9 +584,11 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
     size_t body_len = 0;
     sc_error_t err = sc_json_stringify(alloc, root, &body, &body_len);
     sc_json_free(alloc, root);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
 
-    const char *base = ac->base_url && ac->base_url_len > 0 ? ac->base_url : "https://api.anthropic.com/v1";
+    const char *base =
+        ac->base_url && ac->base_url_len > 0 ? ac->base_url : "https://api.anthropic.com/v1";
     size_t base_len = ac->base_url_len ? ac->base_url_len : 29;
     char url_buf[512];
     int n = snprintf(url_buf, sizeof(url_buf), "%.*s/messages", (int)base_len, base);
@@ -523,16 +599,21 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
 
     char extra_buf[512];
     n = snprintf(extra_buf, sizeof(extra_buf),
-        "x-api-key: %.*s\r\nanthropic-version: 2023-06-01\r\nAccept: text/event-stream",
-        (int)ac->api_key_len, ac->api_key);
+                 "x-api-key: %.*s\r\nanthropic-version: 2023-06-01\r\nAccept: text/event-stream",
+                 (int)ac->api_key_len, ac->api_key);
     if (n <= 0 || (size_t)n >= sizeof(extra_buf)) {
         alloc->free(alloc->ctx, body, body_len);
         return SC_ERR_INVALID_ARGUMENT;
     }
 
     anthropic_stream_ctx_t sctx = {
-        .alloc = alloc, .callback = callback, .callback_ctx = callback_ctx,
-        .last_error = SC_OK, .content_buf = NULL, .content_len = 0, .content_cap = 0,
+        .alloc = alloc,
+        .callback = callback,
+        .callback_ctx = callback_ctx,
+        .last_error = SC_OK,
+        .content_buf = NULL,
+        .content_len = 0,
+        .content_cap = 0,
     };
     err = sc_sse_parser_init(&sctx.parser, alloc);
     if (err != SC_OK) {
@@ -540,12 +621,14 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
         return err;
     }
     err = sc_http_post_json_stream(alloc, url_buf, NULL, extra_buf, body, body_len,
-        anthropic_stream_write_cb, &sctx);
+                                   anthropic_stream_write_cb, &sctx);
     sc_sse_parser_deinit(&sctx.parser);
     alloc->free(alloc->ctx, body, body_len);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
     if (sctx.last_error != SC_OK) {
-        if (sctx.content_buf) alloc->free(alloc->ctx, sctx.content_buf, sctx.content_cap);
+        if (sctx.content_buf)
+            alloc->free(alloc->ctx, sctx.content_buf, sctx.content_cap);
         return sctx.last_error;
     }
     if (sctx.content_buf && sctx.content_len > 0) {
@@ -557,14 +640,20 @@ static sc_error_t anthropic_stream_chat(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static const char *anthropic_get_name(void *ctx) { (void)ctx; return "anthropic"; }
+static const char *anthropic_get_name(void *ctx) {
+    (void)ctx;
+    return "anthropic";
+}
 
 static void anthropic_deinit(void *ctx, sc_allocator_t *alloc) {
     (void)alloc;
     sc_anthropic_ctx_t *ac = (sc_anthropic_ctx_t *)ctx;
-    if (!ac) return;
-    if (ac->api_key) free(ac->api_key);
-    if (ac->base_url) free(ac->base_url);
+    if (!ac)
+        return;
+    if (ac->api_key)
+        free(ac->api_key);
+    if (ac->base_url)
+        free(ac->base_url);
     free(ac);
 }
 
@@ -574,23 +663,26 @@ static const sc_provider_vtable_t anthropic_vtable = {
     .supports_native_tools = anthropic_supports_native_tools,
     .get_name = anthropic_get_name,
     .deinit = anthropic_deinit,
-    .warmup = NULL, .chat_with_tools = NULL,
+    .warmup = NULL,
+    .chat_with_tools = NULL,
     .supports_streaming = anthropic_supports_streaming,
-    .supports_vision = NULL, .supports_vision_for_model = NULL,
+    .supports_vision = NULL,
+    .supports_vision_for_model = NULL,
     .stream_chat = anthropic_stream_chat,
 };
 
-sc_error_t sc_anthropic_create(sc_allocator_t *alloc,
-    const char *api_key, size_t api_key_len,
-    const char *base_url, size_t base_url_len,
-    sc_provider_t *out)
-{
+sc_error_t sc_anthropic_create(sc_allocator_t *alloc, const char *api_key, size_t api_key_len,
+                               const char *base_url, size_t base_url_len, sc_provider_t *out) {
     (void)alloc;
     sc_anthropic_ctx_t *ac = (sc_anthropic_ctx_t *)calloc(1, sizeof(*ac));
-    if (!ac) return SC_ERR_OUT_OF_MEMORY;
+    if (!ac)
+        return SC_ERR_OUT_OF_MEMORY;
     if (api_key && api_key_len > 0) {
         ac->api_key = (char *)malloc(api_key_len + 1);
-        if (!ac->api_key) { free(ac); return SC_ERR_OUT_OF_MEMORY; }
+        if (!ac->api_key) {
+            free(ac);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         memcpy(ac->api_key, api_key, api_key_len);
         ac->api_key[api_key_len] = '\0';
         ac->api_key_len = api_key_len;
@@ -598,7 +690,8 @@ sc_error_t sc_anthropic_create(sc_allocator_t *alloc,
     if (base_url && base_url_len > 0) {
         ac->base_url = (char *)malloc(base_url_len + 1);
         if (!ac->base_url) {
-            if (ac->api_key) free(ac->api_key);
+            if (ac->api_key)
+                free(ac->api_key);
             free(ac);
             return SC_ERR_OUT_OF_MEMORY;
         }

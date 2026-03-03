@@ -2,25 +2,25 @@
  * Limitations: no shell tool, no process spawning, config from WASI fs or defaults. */
 #ifdef __wasi__
 
-#include <stdio.h>
-#include <string.h>
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/allocator.h"
 #include "seaclaw/agent.h"
 #include "seaclaw/config.h"
-#include "seaclaw/wasm/wasm_alloc.h"
-#include "seaclaw/wasm/wasm_provider.h"
-#include "seaclaw/wasm/wasm_channel.h"
+#include "seaclaw/core/allocator.h"
+#include "seaclaw/core/error.h"
 #include "seaclaw/wasm/wasi_bindings.h"
+#include "seaclaw/wasm/wasm_alloc.h"
+#include "seaclaw/wasm/wasm_channel.h"
+#include "seaclaw/wasm/wasm_provider.h"
+#include <stdio.h>
+#include <string.h>
 
-#define SC_VERSION "0.1.0"
-#define SC_CODENAME "SeaClaw"
+#define SC_VERSION           "0.1.0"
+#define SC_CODENAME          "SeaClaw"
 #define SC_WASI_PREOPEN_ROOT 3
 
 static void print_usage(void) {
     const char *msg = "Usage: seaclaw agent [options]\n"
-        "  agent  Start interactive CLI (stdin/stdout)\n"
-        "  -h     Show help\n";
+                      "  agent  Start interactive CLI (stdin/stdout)\n"
+                      "  -h     Show help\n";
     size_t n = 0;
     sc_wasi_fd_write(1, msg, strlen(msg), &n);
 }
@@ -41,8 +41,7 @@ static int run_agent_loop(sc_allocator_t *alloc) {
 
     const char *api_key = getenv("OPENAI_API_KEY");
     size_t api_key_len = api_key ? strlen(api_key) : 0;
-    sc_error_t err = sc_wasm_provider_create(alloc,
-        api_key, api_key_len, NULL, 0, &provider);
+    sc_error_t err = sc_wasm_provider_create(alloc, api_key, api_key_len, NULL, 0, &provider);
     if (err != SC_OK) {
         const char *msg = "Error: OPENAI_API_KEY not set or provider create failed.\n";
         size_t n = 0;
@@ -58,14 +57,10 @@ static int run_agent_loop(sc_allocator_t *alloc) {
 
     const char *model = "gpt-4o-mini";
     const char *workspace = ".";
-    err = sc_agent_from_config(&agent, alloc, provider,
-        NULL, 0,  /* no tools: shell not available in WASM */
-        NULL, NULL, NULL, NULL,
-        model, strlen(model),
-        "wasm_openai", 11,
-        0.7,
-        workspace, 1,
-        10, 30, false, 0, NULL, 0);
+    err = sc_agent_from_config(&agent, alloc, provider, NULL,
+                               0, /* no tools: shell not available in WASM */
+                               NULL, NULL, NULL, NULL, model, strlen(model), "wasm_openai", 11, 0.7,
+                               workspace, 1, 10, 30, false, 0, NULL, 0);
     if (err != SC_OK) {
         sc_wasm_channel_destroy(&channel);
         provider.vtable->deinit(provider.ctx, alloc);
@@ -86,18 +81,17 @@ static int run_agent_loop(sc_allocator_t *alloc) {
     for (;;) {
         size_t line_len = 0;
         char *line = sc_wasm_channel_readline(alloc, &line_len);
-        if (!line) break;
+        if (!line)
+            break;
 
         if (line_len >= 4 && (line[0] == 'e' || line[0] == 'E') &&
-            (line[1] == 'x' || line[1] == 'X') &&
-            (line[2] == 'i' || line[2] == 'I') &&
+            (line[1] == 'x' || line[1] == 'X') && (line[2] == 'i' || line[2] == 'I') &&
             (line[3] == 't' || line[3] == 'T')) {
             alloc->free(alloc->ctx, line, line_len + 1);
             break;
         }
         if (line_len >= 4 && (line[0] == 'q' || line[0] == 'Q') &&
-            (line[1] == 'u' || line[1] == 'U') &&
-            (line[2] == 'i' || line[2] == 'I') &&
+            (line[1] == 'u' || line[1] == 'U') && (line[2] == 'i' || line[2] == 'I') &&
             (line[3] == 't' || line[3] == 'T')) {
             alloc->free(alloc->ctx, line, line_len + 1);
             break;

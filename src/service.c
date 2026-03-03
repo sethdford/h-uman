@@ -4,8 +4,8 @@
 
 #if defined(SC_GATEWAY_POSIX) && (!defined(SC_IS_TEST) || SC_IS_TEST == 0)
 #include <pthread.h>
-#include <unistd.h>
 #include <time.h>
+#include <unistd.h>
 #endif
 
 static volatile bool sc_service_running = false;
@@ -27,7 +27,7 @@ static void *service_thread_fn(void *arg) {
            !sc_channel_loop_should_stop(g_loop_state)) {
         int processed = 0;
         sc_channel_loop_tick(g_loop_ctx, g_loop_state, &processed);
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 };
+        struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000};
         nanosleep(&ts, NULL);
     }
     return NULL;

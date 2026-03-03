@@ -2,12 +2,12 @@
 #include <stdint.h>
 #if defined(__linux__) && !SC_IS_TEST
 #include <fcntl.h>
-#include <unistd.h>
 #include <termios.h>
+#include <unistd.h>
 #endif
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct sc_maixcam_ctx {
     sc_allocator_t *alloc;
@@ -18,22 +18,25 @@ typedef struct sc_maixcam_ctx {
 
 static sc_error_t maixcam_start(void *ctx) {
     sc_maixcam_ctx_t *c = (sc_maixcam_ctx_t *)ctx;
-    if (!c) return SC_ERR_INVALID_ARGUMENT;
+    if (!c)
+        return SC_ERR_INVALID_ARGUMENT;
     c->running = true;
     return SC_OK;
 }
 
 static void maixcam_stop(void *ctx) {
     sc_maixcam_ctx_t *c = (sc_maixcam_ctx_t *)ctx;
-    if (c) c->running = false;
+    if (c)
+        c->running = false;
 }
 
-static sc_error_t maixcam_send(void *ctx,
-    const char *target, size_t target_len,
-    const char *message, size_t message_len,
-    const char *const *media, size_t media_count)
-{
-    (void)target; (void)target_len; (void)media; (void)media_count;
+static sc_error_t maixcam_send(void *ctx, const char *target, size_t target_len,
+                               const char *message, size_t message_len, const char *const *media,
+                               size_t media_count) {
+    (void)target;
+    (void)target_len;
+    (void)media;
+    (void)media_count;
 #if SC_IS_TEST
     (void)ctx;
     (void)message;
@@ -46,7 +49,8 @@ static sc_error_t maixcam_send(void *ctx,
         return SC_ERR_NOT_SUPPORTED; /* No serial device configured */
     }
     int fd = open(c->host, O_WRONLY | O_NOCTTY);
-    if (fd < 0) return SC_ERR_IO;
+    if (fd < 0)
+        return SC_ERR_IO;
     struct termios tty;
     if (tcgetattr(fd, &tty) != 0) {
         close(fd);
@@ -61,7 +65,7 @@ static sc_error_t maixcam_send(void *ctx,
     }
     char buf[4096];
     int n = snprintf(buf, sizeof(buf), "{\"type\":\"message\",\"content\":\"%.*s\"}\n",
-        (int)message_len, message);
+                     (int)message_len, message);
     if (n > 0 && (size_t)n < sizeof(buf)) {
         ssize_t w = write(fd, buf, (size_t)n);
         close(fd);
@@ -78,36 +82,49 @@ static sc_error_t maixcam_send(void *ctx,
 #endif
 }
 
-static const char *maixcam_name(void *ctx) { (void)ctx; return "maixcam"; }
+static const char *maixcam_name(void *ctx) {
+    (void)ctx;
+    return "maixcam";
+}
 static bool maixcam_health_check(void *ctx) {
     sc_maixcam_ctx_t *c = (sc_maixcam_ctx_t *)ctx;
     return c && c->running;
 }
 
 static const sc_channel_vtable_t maixcam_vtable = {
-    .start = maixcam_start, .stop = maixcam_stop, .send = maixcam_send,
-    .name = maixcam_name, .health_check = maixcam_health_check,
-    .send_event = NULL, .start_typing = NULL, .stop_typing = NULL,
+    .start = maixcam_start,
+    .stop = maixcam_stop,
+    .send = maixcam_send,
+    .name = maixcam_name,
+    .health_check = maixcam_health_check,
+    .send_event = NULL,
+    .start_typing = NULL,
+    .stop_typing = NULL,
 };
 
-sc_error_t sc_maixcam_create(sc_allocator_t *alloc,
-    const char *host, size_t host_len,
-    uint16_t port,
-    sc_channel_t *out)
-{
-    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_maixcam_create(sc_allocator_t *alloc, const char *host, size_t host_len,
+                             uint16_t port, sc_channel_t *out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_maixcam_ctx_t *c = (sc_maixcam_ctx_t *)calloc(1, sizeof(*c));
-    if (!c) return SC_ERR_OUT_OF_MEMORY;
+    if (!c)
+        return SC_ERR_OUT_OF_MEMORY;
     c->alloc = alloc;
     c->port = port;
     if (host && host_len > 0) {
         c->host = (char *)malloc(host_len + 1);
-        if (!c->host) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        if (!c->host) {
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         memcpy(c->host, host, host_len);
         c->host[host_len] = '\0';
     } else {
         c->host = strdup("0.0.0.0");
-        if (!c->host) { free(c); return SC_ERR_OUT_OF_MEMORY; }
+        if (!c->host) {
+            free(c);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
     }
     out->ctx = c;
     out->vtable = &maixcam_vtable;
@@ -117,7 +134,8 @@ sc_error_t sc_maixcam_create(sc_allocator_t *alloc,
 void sc_maixcam_destroy(sc_channel_t *ch) {
     if (ch && ch->ctx) {
         sc_maixcam_ctx_t *c = (sc_maixcam_ctx_t *)ch->ctx;
-        if (c->host) free(c->host);
+        if (c->host)
+            free(c->host);
         free(c);
         ch->ctx = NULL;
         ch->vtable = NULL;

@@ -29,7 +29,7 @@ static bool impl_supports_long_running(void *ctx) {
 
 static uint64_t impl_memory_budget(void *ctx) {
     (void)ctx;
-    return 5 * 1024 * 1024;  /* 5 MB */
+    return 5 * 1024 * 1024; /* 5 MB */
 }
 
 static const sc_runtime_vtable_t native_vtable = {

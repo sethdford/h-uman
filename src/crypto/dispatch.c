@@ -16,18 +16,15 @@ extern void sc_chacha20_decrypt_generic(const uint8_t key[32], const uint8_t non
                                         uint32_t counter, const uint8_t *in, uint8_t *out,
                                         size_t len);
 extern void sc_sha256_generic(const uint8_t *data, size_t len, uint8_t out[32]);
-extern void sc_hmac_sha256_generic(const uint8_t *key, size_t key_len,
-                                   const uint8_t *msg, size_t msg_len,
-                                   uint8_t out[32]);
+extern void sc_hmac_sha256_generic(const uint8_t *key, size_t key_len, const uint8_t *msg,
+                                   size_t msg_len, uint8_t out[32]);
 
 #if defined(__x86_64__)
 extern void sc_sha256_x86_64(const uint8_t *data, size_t len, uint8_t out[32]);
 
 static bool has_sha_ni(void) {
     uint32_t eax, ebx, ecx, edx;
-    __asm__ __volatile__("cpuid"
-                         : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
-                         : "a"(7), "c"(0));
+    __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
     return (ebx >> 29) & 1;
 }
 
@@ -35,15 +32,13 @@ static bool sha_ni_checked = false;
 static bool sha_ni_available = false;
 #endif
 
-void sc_chacha20_encrypt(const uint8_t key[32], const uint8_t nonce[12],
-                         uint32_t counter, const uint8_t *in, uint8_t *out,
-                         size_t len) {
+void sc_chacha20_encrypt(const uint8_t key[32], const uint8_t nonce[12], uint32_t counter,
+                         const uint8_t *in, uint8_t *out, size_t len) {
     sc_chacha20_encrypt_generic(key, nonce, counter, in, out, len);
 }
 
-void sc_chacha20_decrypt(const uint8_t key[32], const uint8_t nonce[12],
-                         uint32_t counter, const uint8_t *in, uint8_t *out,
-                         size_t len) {
+void sc_chacha20_decrypt(const uint8_t key[32], const uint8_t nonce[12], uint32_t counter,
+                         const uint8_t *in, uint8_t *out, size_t len) {
     sc_chacha20_decrypt_generic(key, nonce, counter, in, out, len);
 }
 
@@ -61,8 +56,7 @@ void sc_sha256(const uint8_t *data, size_t len, uint8_t out[32]) {
     sc_sha256_generic(data, len, out);
 }
 
-void sc_hmac_sha256(const uint8_t *key, size_t key_len,
-                    const uint8_t *msg, size_t msg_len,
+void sc_hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *msg, size_t msg_len,
                     uint8_t out[32]) {
     sc_hmac_sha256_generic(key, key_len, msg, msg_len, out);
 }

@@ -4,9 +4,9 @@
 #include "core/allocator.h"
 #include "core/error.h"
 #include "core/json.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * JSON helpers — null-terminated string convenience wrappers over core/json.
@@ -20,13 +20,9 @@ sc_error_t sc_json_util_append_string(sc_json_buf_t *buf, const char *s);
 sc_error_t sc_json_util_append_key(sc_json_buf_t *buf, const char *key);
 
 /* Append "key":"value" (both JSON-escaped). */
-sc_error_t sc_json_util_append_key_value(sc_json_buf_t *buf,
-                                          const char *key,
-                                          const char *value);
+sc_error_t sc_json_util_append_key_value(sc_json_buf_t *buf, const char *key, const char *value);
 
 /* Append "key":<integer>. */
-sc_error_t sc_json_util_append_key_int(sc_json_buf_t *buf,
-                                       const char *key,
-                                       int64_t value);
+sc_error_t sc_json_util_append_key_int(sc_json_buf_t *buf, const char *key, int64_t value);
 
 #endif /* SC_JSON_UTIL_H */

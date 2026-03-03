@@ -29,7 +29,7 @@ typedef struct sc_peripheral_capabilities {
     size_t board_name_len;
     const char *board_type;
     size_t board_type_len;
-    const char *gpio_pins;      /* e.g. "0,1,2,3" or "" */
+    const char *gpio_pins; /* e.g. "0,1,2,3" or "" */
     size_t gpio_pins_len;
     uint32_t flash_size_kb;
     bool has_serial;
@@ -40,7 +40,7 @@ typedef struct sc_peripheral_capabilities {
 
 typedef struct sc_gpio_read_result {
     sc_peripheral_error_t err;
-    uint8_t value;  /* valid when err == SC_PERIPHERAL_ERR_NONE */
+    uint8_t value; /* valid when err == SC_PERIPHERAL_ERR_NONE */
 } sc_gpio_read_result_t;
 
 typedef struct sc_gpio_write_result {
@@ -75,9 +75,9 @@ typedef struct sc_peripheral_vtable {
  * ────────────────────────────────────────────────────────────────────────── */
 
 typedef struct sc_peripheral_config {
-    const char *serial_port;   /* for arduino */
+    const char *serial_port; /* for arduino */
     size_t serial_port_len;
-    const char *chip;         /* for stm32, e.g. STM32F401RETx */
+    const char *chip; /* for stm32, e.g. STM32F401RETx */
     size_t chip_len;
 } sc_peripheral_config_t;
 
@@ -85,16 +85,14 @@ typedef struct sc_peripheral_config {
  * Create peripheral by type ("arduino", "stm32", "rpi").
  * Returns SC_OK and fills *out on success; SC_ERR_NOT_SUPPORTED for unknown type.
  */
-sc_error_t sc_peripheral_create(sc_allocator_t *alloc,
-    const char *type, size_t type_len,
-    const sc_peripheral_config_t *config,
-    sc_peripheral_t *out);
+sc_error_t sc_peripheral_create(sc_allocator_t *alloc, const char *type, size_t type_len,
+                                const sc_peripheral_config_t *config, sc_peripheral_t *out);
 
 /* Implementation-specific constructors (for factory use) */
-sc_peripheral_t sc_arduino_peripheral_create(sc_allocator_t *alloc,
-    const char *serial_port, size_t serial_port_len);
-sc_peripheral_t sc_stm32_peripheral_create(sc_allocator_t *alloc,
-    const char *chip, size_t chip_len);
+sc_peripheral_t sc_arduino_peripheral_create(sc_allocator_t *alloc, const char *serial_port,
+                                             size_t serial_port_len);
+sc_peripheral_t sc_stm32_peripheral_create(sc_allocator_t *alloc, const char *chip,
+                                           size_t chip_len);
 sc_peripheral_t sc_rpi_peripheral_create(sc_allocator_t *alloc);
 
 #endif /* SC_PERIPHERAL_H */

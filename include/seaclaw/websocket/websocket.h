@@ -14,26 +14,18 @@
 
 typedef struct sc_ws_client sc_ws_client_t;
 
-sc_error_t sc_ws_connect(sc_allocator_t *alloc,
-    const char *url,
-    sc_ws_client_t **out);
+sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t **out);
 
-sc_error_t sc_ws_send(sc_ws_client_t *ws,
-    const char *data,
-    size_t data_len);
+sc_error_t sc_ws_send(sc_ws_client_t *ws, const char *data, size_t data_len);
 
-sc_error_t sc_ws_recv(sc_ws_client_t *ws,
-    sc_allocator_t *alloc,
-    char **data_out,
-    size_t *data_len_out);
+sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out,
+                      size_t *data_len_out);
 
 void sc_ws_close(sc_ws_client_t *ws, sc_allocator_t *alloc);
 
 /* Frame helpers (for testing and custom use) */
-size_t sc_ws_build_frame(char *buf, size_t buf_size,
-    unsigned opcode,
-    const char *payload, size_t payload_len,
-    const unsigned char mask_key[4]);
+size_t sc_ws_build_frame(char *buf, size_t buf_size, unsigned opcode, const char *payload,
+                         size_t payload_len, const unsigned char mask_key[4]);
 
 void sc_ws_apply_mask(char *payload, size_t len, const unsigned char mask_key[4]);
 

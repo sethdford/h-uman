@@ -15,7 +15,7 @@ typedef struct sc_expanded_query {
 } sc_expanded_query_t;
 
 sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t raw_len,
-    sc_expanded_query_t *out);
+                           sc_expanded_query_t *out);
 void sc_expanded_query_free(sc_allocator_t *alloc, sc_expanded_query_t *eq);
 
 #endif /* SC_MEMORY_RETRIEVAL_QUERY_EXPANSION_H */

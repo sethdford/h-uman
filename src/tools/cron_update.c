@@ -1,21 +1,25 @@
-#include "seaclaw/tool.h"
-#include <stdint.h>
 #include "seaclaw/tools/cron_update.h"
-#include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
+#include "seaclaw/cron.h"
+#include "seaclaw/tool.h"
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define CRON_UPDATE_PARAMS "{\"type\":\"object\",\"properties\":{\"job_id\":{\"type\":\"string\"},\"expression\":{\"type\":\"string\"},\"command\":{\"type\":\"string\"},\"enabled\":{\"type\":\"boolean\"}},\"required\":[\"job_id\"]}"
+#define CRON_UPDATE_PARAMS                                                                        \
+    "{\"type\":\"object\",\"properties\":{\"job_id\":{\"type\":\"string\"},\"expression\":{"      \
+    "\"type\":\"string\"},\"command\":{\"type\":\"string\"},\"enabled\":{\"type\":\"boolean\"}}," \
+    "\"required\":[\"job_id\"]}"
 
-typedef struct { sc_cron_scheduler_t *sched; } sc_cron_tool_ctx_t;
+typedef struct {
+    sc_cron_scheduler_t *sched;
+} sc_cron_tool_ctx_t;
 
-static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
-    const sc_json_value_t *args, sc_tool_result_t *out)
-{
+static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                                      sc_tool_result_t *out) {
     sc_cron_tool_ctx_t *tctx = (sc_cron_tool_ctx_t *)ctx;
     (void)tctx;
     if (!args || !out) {
@@ -40,7 +44,8 @@ static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
     bool enabled_val = sc_json_get_bool(args, "enabled", true);
     const bool *enabled_ptr = (sc_json_object_get(args, "enabled") != NULL) ? &enabled_val : NULL;
     if (!expr && !cmd && !enabled_ptr) {
-        *out = sc_tool_result_fail("Nothing to update — provide expression, command, or enabled", 55);
+        *out =
+            sc_tool_result_fail("Nothing to update — provide expression, command, or enabled", 55);
         return SC_OK;
     }
 
@@ -63,7 +68,8 @@ static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
         *out = sc_tool_result_fail("update failed", 13);
         return err;
     }
-    char *msg = sc_sprintf(alloc, "{\"updated\":true,\"job_id\":\"%llu\"}", (unsigned long long)job_id);
+    char *msg =
+        sc_sprintf(alloc, "{\"updated\":true,\"job_id\":\"%llu\"}", (unsigned long long)job_id);
     if (!msg) {
         *out = sc_tool_result_fail("out of memory", 12);
         return SC_ERR_OUT_OF_MEMORY;
@@ -81,7 +87,8 @@ static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
         *out = sc_tool_result_fail("update failed", 13);
         return err;
     }
-    char *msg = sc_sprintf(alloc, "{\"updated\":true,\"job_id\":\"%llu\"}", (unsigned long long)job_id);
+    char *msg =
+        sc_sprintf(alloc, "{\"updated\":true,\"job_id\":\"%llu\"}", (unsigned long long)job_id);
     if (!msg) {
         *out = sc_tool_result_fail("out of memory", 12);
         return SC_ERR_OUT_OF_MEMORY;
@@ -91,24 +98,39 @@ static sc_error_t cron_update_execute(void *ctx, sc_allocator_t *alloc,
 #endif
 }
 
-static const char *cron_update_name(void *ctx) { (void)ctx; return "cron_update"; }
+static const char *cron_update_name(void *ctx) {
+    (void)ctx;
+    return "cron_update";
+}
 static const char *cron_update_desc(void *ctx) {
     (void)ctx;
     return "Update a cron job: change expression, command, or enable/disable it.";
 }
-static const char *cron_update_params(void *ctx) { (void)ctx; return CRON_UPDATE_PARAMS; }
-static void cron_update_deinit(void *ctx, sc_allocator_t *alloc) { (void)ctx; (void)alloc; free(ctx); }
+static const char *cron_update_params(void *ctx) {
+    (void)ctx;
+    return CRON_UPDATE_PARAMS;
+}
+static void cron_update_deinit(void *ctx, sc_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+    free(ctx);
+}
 
 static const sc_tool_vtable_t cron_update_vtable = {
-    .execute = cron_update_execute, .name = cron_update_name,
-    .description = cron_update_desc, .parameters_json = cron_update_params,
+    .execute = cron_update_execute,
+    .name = cron_update_name,
+    .description = cron_update_desc,
+    .parameters_json = cron_update_params,
     .deinit = cron_update_deinit,
 };
 
-sc_error_t sc_cron_update_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched, sc_tool_t *out) {
-    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_cron_update_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched,
+                                 sc_tool_t *out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_cron_tool_ctx_t *ctx = (sc_cron_tool_ctx_t *)calloc(1, sizeof(sc_cron_tool_ctx_t));
-    if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    if (!ctx)
+        return SC_ERR_OUT_OF_MEMORY;
     ctx->sched = sched;
     out->ctx = ctx;
     out->vtable = &cron_update_vtable;

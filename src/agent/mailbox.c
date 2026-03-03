@@ -43,9 +43,11 @@ static bool inbox_full(sc_inbox_t *ib) {
 }
 
 sc_mailbox_t *sc_mailbox_create(sc_allocator_t *alloc, uint32_t max_agents) {
-    if (!alloc || max_agents == 0) return NULL;
+    if (!alloc || max_agents == 0)
+        return NULL;
     sc_mailbox_t *m = (sc_mailbox_t *)alloc->alloc(alloc->ctx, sizeof(*m));
-    if (!m) return NULL;
+    if (!m)
+        return NULL;
     memset(m, 0, sizeof(*m));
     m->alloc = alloc;
     m->max_agents = max_agents;
@@ -66,10 +68,12 @@ sc_mailbox_t *sc_mailbox_create(sc_allocator_t *alloc, uint32_t max_agents) {
 }
 
 void sc_mailbox_destroy(sc_mailbox_t *mbox) {
-    if (!mbox) return;
+    if (!mbox)
+        return;
     for (uint32_t i = 0; i < mbox->max_agents; i++) {
         sc_inbox_t *ib = &mbox->inboxes[i];
-        if (!ib->registered) continue;
+        if (!ib->registered)
+            continue;
         while (ib->head != ib->tail) {
             sc_message_t *msg = &ib->msgs[ib->head];
             if (msg->payload)
@@ -85,8 +89,10 @@ void sc_mailbox_destroy(sc_mailbox_t *mbox) {
 }
 
 sc_error_t sc_mailbox_register(sc_mailbox_t *mbox, uint64_t agent_id) {
-    if (!mbox) return SC_ERR_INVALID_ARGUMENT;
-    if (find_inbox(mbox, agent_id)) return SC_OK;
+    if (!mbox)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (find_inbox(mbox, agent_id))
+        return SC_OK;
     for (uint32_t i = 0; i < mbox->max_agents; i++) {
         if (!mbox->inboxes[i].registered) {
             memset(&mbox->inboxes[i], 0, sizeof(sc_inbox_t));
@@ -99,9 +105,11 @@ sc_error_t sc_mailbox_register(sc_mailbox_t *mbox, uint64_t agent_id) {
 }
 
 sc_error_t sc_mailbox_unregister(sc_mailbox_t *mbox, uint64_t agent_id) {
-    if (!mbox) return SC_ERR_INVALID_ARGUMENT;
+    if (!mbox)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_inbox_t *ib = find_inbox(mbox, agent_id);
-    if (!ib) return SC_ERR_NOT_FOUND;
+    if (!ib)
+        return SC_ERR_NOT_FOUND;
     while (ib->head != ib->tail) {
         sc_message_t *msg = &ib->msgs[ib->head];
         if (msg->payload)
@@ -112,16 +120,17 @@ sc_error_t sc_mailbox_unregister(sc_mailbox_t *mbox, uint64_t agent_id) {
     return SC_OK;
 }
 
-sc_error_t sc_mailbox_send(sc_mailbox_t *mbox,
-    uint64_t from_agent, uint64_t to_agent,
-    sc_msg_type_t type, const char *payload, size_t payload_len,
-    uint64_t correlation_id)
-{
-    if (!mbox) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_mailbox_send(sc_mailbox_t *mbox, uint64_t from_agent, uint64_t to_agent,
+                           sc_msg_type_t type, const char *payload, size_t payload_len,
+                           uint64_t correlation_id) {
+    if (!mbox)
+        return SC_ERR_INVALID_ARGUMENT;
     (void)from_agent;
     sc_inbox_t *ib = find_inbox(mbox, to_agent);
-    if (!ib) return SC_ERR_NOT_FOUND;
-    if (inbox_full(ib)) return SC_ERR_OUT_OF_MEMORY;
+    if (!ib)
+        return SC_ERR_NOT_FOUND;
+    if (inbox_full(ib))
+        return SC_ERR_OUT_OF_MEMORY;
 
     sc_message_t *msg = &ib->msgs[ib->tail];
     msg->type = type;
@@ -136,37 +145,43 @@ sc_error_t sc_mailbox_send(sc_mailbox_t *mbox,
 }
 
 sc_error_t sc_mailbox_recv(sc_mailbox_t *mbox, uint64_t agent_id, sc_message_t *out) {
-    if (!mbox || !out) return SC_ERR_INVALID_ARGUMENT;
+    if (!mbox || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_inbox_t *ib = find_inbox(mbox, agent_id);
-    if (!ib) return SC_ERR_NOT_FOUND;
-    if (ib->head == ib->tail) return SC_ERR_NOT_FOUND;
+    if (!ib)
+        return SC_ERR_NOT_FOUND;
+    if (ib->head == ib->tail)
+        return SC_ERR_NOT_FOUND;
     *out = ib->msgs[ib->head];
     ib->head = (ib->head + 1) % SC_INBOX_CAP;
     return SC_OK;
 }
 
-sc_error_t sc_mailbox_broadcast(sc_mailbox_t *mbox,
-    uint64_t from_agent, sc_msg_type_t type,
-    const char *payload, size_t payload_len)
-{
-    if (!mbox) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_mailbox_broadcast(sc_mailbox_t *mbox, uint64_t from_agent, sc_msg_type_t type,
+                                const char *payload, size_t payload_len) {
+    if (!mbox)
+        return SC_ERR_INVALID_ARGUMENT;
     for (uint32_t i = 0; i < mbox->max_agents; i++) {
         sc_inbox_t *ib = &mbox->inboxes[i];
-        if (!ib->registered || ib->agent_id == from_agent) continue;
+        if (!ib->registered || ib->agent_id == from_agent)
+            continue;
         sc_mailbox_send(mbox, from_agent, ib->agent_id, type, payload, payload_len, 0);
     }
     return SC_OK;
 }
 
 size_t sc_mailbox_pending_count(sc_mailbox_t *mbox, uint64_t agent_id) {
-    if (!mbox) return 0;
+    if (!mbox)
+        return 0;
     sc_inbox_t *ib = find_inbox(mbox, agent_id);
-    if (!ib) return 0;
+    if (!ib)
+        return 0;
     return inbox_count(ib);
 }
 
 void sc_message_free(sc_allocator_t *alloc, sc_message_t *msg) {
-    if (!alloc || !msg) return;
+    if (!alloc || !msg)
+        return;
     if (msg->payload) {
         alloc->free(alloc->ctx, msg->payload, msg->payload_len + 1);
         msg->payload = NULL;

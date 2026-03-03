@@ -17,15 +17,12 @@
  * @param out_len Output length of cleaned string
  * @return SC_OK on success
  */
-sc_error_t sc_schema_clean(sc_allocator_t *alloc,
-    const char *schema_json, size_t schema_len,
-    const char *provider_name,
-    char **out_cleaned, size_t *out_len);
+sc_error_t sc_schema_clean(sc_allocator_t *alloc, const char *schema_json, size_t schema_len,
+                           const char *provider_name, char **out_cleaned, size_t *out_len);
 
 /**
  * Validate that a schema has a "type" field (root is object with "type" key).
  */
-bool sc_schema_validate(sc_allocator_t *alloc,
-    const char *schema_json, size_t schema_len);
+bool sc_schema_validate(sc_allocator_t *alloc, const char *schema_json, size_t schema_len);
 
 #endif /* SC_TOOLS_SCHEMA_CLEAN_H */

@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-sc_error_t sc_screenshot_create(sc_allocator_t *alloc, bool enabled,
-    sc_security_policy_t *policy, sc_tool_t *out);
+sc_error_t sc_screenshot_create(sc_allocator_t *alloc, bool enabled, sc_security_policy_t *policy,
+                                sc_tool_t *out);
 
 #endif

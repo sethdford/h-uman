@@ -1,8 +1,8 @@
 #ifndef SC_SERVICE_H
 #define SC_SERVICE_H
 
-#include "seaclaw/core/error.h"
 #include "seaclaw/channel_loop.h"
+#include "seaclaw/core/error.h"
 #include <stdbool.h>
 
 void sc_service_configure(sc_channel_loop_ctx_t *ctx, sc_channel_loop_state_t *state);

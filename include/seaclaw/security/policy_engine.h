@@ -32,9 +32,9 @@ typedef struct sc_policy_engine sc_policy_engine_t;
 sc_policy_engine_t *sc_policy_engine_create(sc_allocator_t *alloc);
 void sc_policy_engine_destroy(sc_policy_engine_t *engine);
 
-sc_error_t sc_policy_engine_add_rule(sc_policy_engine_t *engine,
-    const char *name, sc_policy_match_t match,
-    sc_policy_action_t action, const char *message);
+sc_error_t sc_policy_engine_add_rule(sc_policy_engine_t *engine, const char *name,
+                                     sc_policy_match_t match, sc_policy_action_t action,
+                                     const char *message);
 
 typedef struct sc_policy_eval_ctx {
     const char *tool_name;
@@ -49,7 +49,7 @@ typedef struct sc_policy_result {
 } sc_policy_result_t;
 
 sc_policy_result_t sc_policy_engine_evaluate(sc_policy_engine_t *engine,
-    const sc_policy_eval_ctx_t *ctx);
+                                             const sc_policy_eval_ctx_t *ctx);
 
 size_t sc_policy_engine_rule_count(sc_policy_engine_t *engine);
 

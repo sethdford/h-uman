@@ -15,16 +15,15 @@ typedef struct sc_sse_parser {
     sc_allocator_t *alloc;
 } sc_sse_parser_t;
 
-typedef void (*sc_sse_event_cb)(const char *event_type, size_t event_type_len,
-    const char *data, size_t data_len, void *userdata);
+typedef void (*sc_sse_event_cb)(const char *event_type, size_t event_type_len, const char *data,
+                                size_t data_len, void *userdata);
 
 sc_error_t sc_sse_parser_init(sc_sse_parser_t *p, sc_allocator_t *alloc);
 void sc_sse_parser_deinit(sc_sse_parser_t *p);
 
 /* Feed raw bytes. Calls callback for each complete event. */
-sc_error_t sc_sse_parser_feed(sc_sse_parser_t *p,
-    const char *bytes, size_t len,
-    sc_sse_event_cb callback, void *userdata);
+sc_error_t sc_sse_parser_feed(sc_sse_parser_t *p, const char *bytes, size_t len,
+                              sc_sse_event_cb callback, void *userdata);
 
 /* ── Line-level parsing (for tests and simple use) ── */
 typedef enum sc_sse_line_result_tag {
@@ -40,7 +39,7 @@ typedef struct sc_sse_line_result {
 } sc_sse_line_result_t;
 
 sc_error_t sc_sse_parse_line(sc_allocator_t *alloc, const char *line, size_t line_len,
-    sc_sse_line_result_t *out);
+                             sc_sse_line_result_t *out);
 
 char *sc_sse_extract_delta_content(sc_allocator_t *alloc, const char *json_str, size_t json_len);
 

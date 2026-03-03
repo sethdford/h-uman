@@ -1,20 +1,20 @@
-#include "seaclaw/memory.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
-#include <string.h>
+#include "seaclaw/memory.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
-#include <time.h>
+#include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
 #define sc_mkdir(path) _mkdir(path)
 #else
-#include <unistd.h>
 #include <dirent.h>
+#include <unistd.h>
 #define sc_mkdir(path) mkdir((path), 0755)
 #endif
 
@@ -30,23 +30,29 @@ static const char *impl_name(void *ctx) {
 }
 
 static const char *category_to_string(const sc_memory_category_t *cat) {
-    if (!cat) return "core";
+    if (!cat)
+        return "core";
     switch (cat->tag) {
-        case SC_MEMORY_CATEGORY_CORE: return "core";
-        case SC_MEMORY_CATEGORY_DAILY: return "daily";
-        case SC_MEMORY_CATEGORY_CONVERSATION: return "conversation";
-        case SC_MEMORY_CATEGORY_CUSTOM:
-            if (cat->data.custom.name && cat->data.custom.name_len > 0)
-                return cat->data.custom.name;
-            return "custom";
-        default: return "core";
+    case SC_MEMORY_CATEGORY_CORE:
+        return "core";
+    case SC_MEMORY_CATEGORY_DAILY:
+        return "daily";
+    case SC_MEMORY_CATEGORY_CONVERSATION:
+        return "conversation";
+    case SC_MEMORY_CATEGORY_CUSTOM:
+        if (cat->data.custom.name && cat->data.custom.name_len > 0)
+            return cat->data.custom.name;
+        return "custom";
+    default:
+        return "core";
     }
 }
 
 static char *key_to_filename(const char *key, size_t key_len, sc_allocator_t *alloc) {
     /* Sanitize key for filename: replace invalid chars with _ */
     char *out = (char *)alloc->alloc(alloc->ctx, key_len + 8);
-    if (!out) return NULL;
+    if (!out)
+        return NULL;
     size_t j = 0;
     for (size_t i = 0; i < key_len && j < key_len + 4; i++) {
         char c = key[i];
@@ -63,7 +69,8 @@ static char *key_to_filename(const char *key, size_t key_len, sc_allocator_t *al
 static void ensure_dir(const char *path) {
     char tmp[1024];
     size_t len = strlen(path);
-    if (len >= sizeof(tmp)) return;
+    if (len >= sizeof(tmp))
+        return;
     memcpy(tmp, path, len + 1);
     for (char *p = tmp + 1; *p; p++) {
         if (*p == '/' || *p == '\\') {
@@ -76,20 +83,20 @@ static void ensure_dir(const char *path) {
     sc_mkdir(tmp);
 }
 
-static sc_error_t impl_store(void *ctx,
-    const char *key, size_t key_len,
-    const char *content, size_t content_len,
-    const sc_memory_category_t *category,
-    const char *session_id, size_t session_id_len) {
+static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const sc_memory_category_t *category,
+                             const char *session_id, size_t session_id_len) {
     sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
     const char *cat_str = category_to_string(category);
 
     char *filename = key_to_filename(key, key_len, self->alloc);
-    if (!filename) return SC_ERR_OUT_OF_MEMORY;
+    if (!filename)
+        return SC_ERR_OUT_OF_MEMORY;
 
     char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
-    if (!fullpath) return SC_ERR_OUT_OF_MEMORY;
+    if (!fullpath)
+        return SC_ERR_OUT_OF_MEMORY;
 
     ensure_dir(self->dir);
 
@@ -105,19 +112,19 @@ static sc_error_t impl_store(void *ctx,
         return SC_ERR_OUT_OF_MEMORY;
     }
     int n = snprintf(header, header_len, "---\nkey: %.*s\ncategory: %s\ntimestamp: %s\n",
-        (int)key_len, key, cat_str, ts);
+                     (int)key_len, key, cat_str, ts);
     if (session_id && session_id_len > 0)
-        n += snprintf(header + n, header_len - (size_t)n, "session_id: %.*s\n",
-            (int)session_id_len, session_id);
+        n += snprintf(header + n, header_len - (size_t)n, "session_id: %.*s\n", (int)session_id_len,
+                      session_id);
     n += snprintf(header + n, header_len - (size_t)n, "---\n\n");
 
     FILE *f = fopen(fullpath, "w");
     self->alloc->free(self->alloc->ctx, header, header_len);
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
-    if (!f) return SC_ERR_MEMORY_STORE;
+    if (!f)
+        return SC_ERR_MEMORY_STORE;
 
-    fprintf(f, "---\nkey: %.*s\ncategory: %s\ntimestamp: %s\n",
-        (int)key_len, key, cat_str, ts);
+    fprintf(f, "---\nkey: %.*s\ncategory: %s\ntimestamp: %s\n", (int)key_len, key, cat_str, ts);
     if (session_id && session_id_len > 0)
         fprintf(f, "session_id: %.*s\n", (int)session_id_len, session_id);
     fprintf(f, "---\n\n%.*s", (int)content_len, content);
@@ -125,18 +132,17 @@ static sc_error_t impl_store(void *ctx,
     return SC_OK;
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
-    const char *query, size_t query_len,
-    size_t limit,
-    const char *session_id, size_t session_id_len,
-    sc_memory_entry_t **out, size_t *out_count) {
+static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+                              size_t limit, const char *session_id, size_t session_id_len,
+                              sc_memory_entry_t **out, size_t *out_count) {
     sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
 
-    sc_memory_entry_t *entries = (sc_memory_entry_t *)alloc->alloc(alloc->ctx,
-        limit * sizeof(sc_memory_entry_t));
-    if (!entries) return SC_ERR_OUT_OF_MEMORY;
+    sc_memory_entry_t *entries =
+        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+    if (!entries)
+        return SC_ERR_OUT_OF_MEMORY;
 
     size_t count = 0;
 #ifndef _WIN32
@@ -149,14 +155,17 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
     struct dirent *e;
     while (count < limit && (e = readdir(d)) != NULL) {
         size_t nlen = strlen(e->d_name);
-        if (nlen < 4 || strcmp(e->d_name + nlen - 3, ".md") != 0) continue;
+        if (nlen < 4 || strcmp(e->d_name + nlen - 3, ".md") != 0)
+            continue;
 
         char *path = sc_sprintf(self->alloc, "%s/%s", self->dir, e->d_name);
-        if (!path) continue;
+        if (!path)
+            continue;
 
         FILE *f = fopen(path, "r");
         self->alloc->free(self->alloc->ctx, path, strlen(path) + 1);
-        if (!f) continue;
+        if (!f)
+            continue;
 
         char line[4096];
         char key[256] = {0};
@@ -170,34 +179,46 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
 
         while (fgets(line, sizeof(line), f) && content_len < sizeof(content_buf) - 1) {
             if (strncmp(line, "---", 3) == 0) {
-                if (!in_front) in_front = true;
-                else { front_done = true; continue; }
+                if (!in_front)
+                    in_front = true;
+                else {
+                    front_done = true;
+                    continue;
+                }
                 continue;
             }
             if (!front_done) {
                 if (strncmp(line, "key:", 4) == 0) {
                     const char *v = line + 4;
-                    while (*v == ' ') v++;
+                    while (*v == ' ')
+                        v++;
                     size_t kv = 0;
-                    while (*v && *v != '\n' && kv < sizeof(key) - 1) key[kv++] = *v++;
+                    while (*v && *v != '\n' && kv < sizeof(key) - 1)
+                        key[kv++] = *v++;
                     key[kv] = '\0';
                 } else if (strncmp(line, "category:", 9) == 0) {
                     const char *v = line + 9;
-                    while (*v == ' ') v++;
+                    while (*v == ' ')
+                        v++;
                     size_t cv = 0;
-                    while (*v && *v != '\n' && cv < sizeof(category) - 1) category[cv++] = *v++;
+                    while (*v && *v != '\n' && cv < sizeof(category) - 1)
+                        category[cv++] = *v++;
                     category[cv] = '\0';
                 } else if (strncmp(line, "timestamp:", 10) == 0) {
                     const char *v = line + 10;
-                    while (*v == ' ') v++;
+                    while (*v == ' ')
+                        v++;
                     size_t tv = 0;
-                    while (*v && *v != '\n' && tv < sizeof(timestamp) - 1) timestamp[tv++] = *v++;
+                    while (*v && *v != '\n' && tv < sizeof(timestamp) - 1)
+                        timestamp[tv++] = *v++;
                     timestamp[tv] = '\0';
                 } else if (strncmp(line, "session_id:", 11) == 0) {
                     const char *v = line + 11;
-                    while (*v == ' ') v++;
+                    while (*v == ' ')
+                        v++;
                     size_t sv = 0;
-                    while (*v && *v != '\n' && sv < sizeof(sess) - 1) sess[sv++] = *v++;
+                    while (*v && *v != '\n' && sv < sizeof(sess) - 1)
+                        sess[sv++] = *v++;
                     sess[sv] = '\0';
                 }
             } else {
@@ -218,14 +239,17 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
         bool contains = false;
         if (query_len > 0) {
             for (size_t i = 0; i + query_len <= content_len && !contains; i++)
-                if (memcmp(content_buf + i, query, query_len) == 0) contains = true;
+                if (memcmp(content_buf + i, query, query_len) == 0)
+                    contains = true;
             if (!contains && strlen(key) >= query_len)
                 for (size_t i = 0; i + query_len <= strlen(key) && !contains; i++)
-                    if (memcmp(key + i, query, query_len) == 0) contains = true;
+                    if (memcmp(key + i, query, query_len) == 0)
+                        contains = true;
         } else {
             contains = true;
         }
-        if (!contains) continue;
+        if (!contains)
+            continue;
 
         entries[count].id = sc_strdup(alloc, path ? path : e->d_name);
         entries[count].id_len = strlen(entries[count].id);
@@ -258,21 +282,23 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc,
-    const char *key, size_t key_len,
-    sc_memory_entry_t *out, bool *found) {
+static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
+                           sc_memory_entry_t *out, bool *found) {
     sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
     *found = false;
 
     char *filename = key_to_filename(key, key_len, self->alloc);
-    if (!filename) return SC_ERR_OUT_OF_MEMORY;
+    if (!filename)
+        return SC_ERR_OUT_OF_MEMORY;
     char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
-    if (!fullpath) return SC_ERR_OUT_OF_MEMORY;
+    if (!fullpath)
+        return SC_ERR_OUT_OF_MEMORY;
 
     FILE *f = fopen(fullpath, "r");
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
-    if (!f) return SC_OK;
+    if (!f)
+        return SC_OK;
 
     char line[4096];
     char category[64] = "core";
@@ -283,22 +309,27 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc,
 
     while (fgets(line, sizeof(line), f) && content_len < sizeof(content_buf) - 1) {
         if (strncmp(line, "---", 3) == 0) {
-            if (front_done) continue;
+            if (front_done)
+                continue;
             front_done = true;
             continue;
         }
         if (!front_done) {
             if (strncmp(line, "category:", 9) == 0) {
                 const char *v = line + 9;
-                while (*v == ' ') v++;
+                while (*v == ' ')
+                    v++;
                 size_t cv = 0;
-                while (*v && *v != '\n' && cv < sizeof(category) - 1) category[cv++] = *v++;
+                while (*v && *v != '\n' && cv < sizeof(category) - 1)
+                    category[cv++] = *v++;
                 category[cv] = '\0';
             } else if (strncmp(line, "timestamp:", 10) == 0) {
                 const char *v = line + 10;
-                while (*v == ' ') v++;
+                while (*v == ' ')
+                    v++;
                 size_t tv = 0;
-                while (*v && *v != '\n' && tv < sizeof(timestamp) - 1) timestamp[tv++] = *v++;
+                while (*v && *v != '\n' && tv < sizeof(timestamp) - 1)
+                    timestamp[tv++] = *v++;
                 timestamp[tv] = '\0';
             }
         } else {
@@ -329,25 +360,25 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc,
-    const sc_memory_category_t *category,
-    const char *session_id, size_t session_id_len,
-    sc_memory_entry_t **out, size_t *out_count) {
+static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+                            size_t *out_count) {
     (void)category;
     return impl_recall(ctx, alloc, "", 0, 1024, session_id, session_id_len, out, out_count);
 }
 
-static sc_error_t impl_forget(void *ctx,
-    const char *key, size_t key_len,
-    bool *deleted) {
+static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
     sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
     *deleted = false;
     char *filename = key_to_filename(key, key_len, self->alloc);
-    if (!filename) return SC_OK;
+    if (!filename)
+        return SC_OK;
     char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
-    if (!fullpath) return SC_OK;
-    if (remove(fullpath) == 0) *deleted = true;
+    if (!fullpath)
+        return SC_OK;
+    if (remove(fullpath) == 0)
+        *deleted = true;
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
     return SC_OK;
 }
@@ -357,11 +388,13 @@ static sc_error_t impl_count(void *ctx, size_t *out) {
     *out = 0;
 #ifndef _WIN32
     DIR *d = opendir(self->dir);
-    if (!d) return SC_OK;
+    if (!d)
+        return SC_OK;
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         size_t nlen = strlen(e->d_name);
-        if (nlen >= 4 && strcmp(e->d_name + nlen - 3, ".md") == 0) (*out)++;
+        if (nlen >= 4 && strcmp(e->d_name + nlen - 3, ".md") == 0)
+            (*out)++;
     }
     closedir(d);
 #endif
@@ -393,16 +426,19 @@ static const sc_memory_vtable_t markdown_vtable = {
 };
 
 sc_memory_t sc_markdown_memory_create(sc_allocator_t *alloc, const char *dir_path) {
-    if (!alloc || !dir_path) return (sc_memory_t){ .ctx = NULL, .vtable = NULL };
+    if (!alloc || !dir_path)
+        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
     ensure_dir(dir_path);
     size_t len = strlen(dir_path);
     char *dir = sc_strndup(alloc, dir_path, len);
-    if (!dir) return (sc_memory_t){ .ctx = NULL, .vtable = NULL };
+    if (!dir)
+        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
 
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_markdown_memory_t));
+    sc_markdown_memory_t *self =
+        (sc_markdown_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_markdown_memory_t));
     if (!self) {
         alloc->free(alloc->ctx, dir, len + 1);
-        return (sc_memory_t){ .ctx = NULL, .vtable = NULL };
+        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
     }
     self->dir = dir;
     self->dir_len = len;

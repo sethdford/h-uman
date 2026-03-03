@@ -47,7 +47,8 @@ typedef struct sc_tunnel {
 } sc_tunnel_t;
 
 typedef struct sc_tunnel_vtable {
-    sc_tunnel_error_t (*start)(void *ctx, uint16_t local_port, char **public_url_out, size_t *url_len);
+    sc_tunnel_error_t (*start)(void *ctx, uint16_t local_port, char **public_url_out,
+                               size_t *url_len);
     void (*stop)(void *ctx);
     void (*deinit)(void *ctx, sc_allocator_t *alloc);
     const char *(*public_url)(void *ctx);
@@ -61,13 +62,13 @@ typedef struct sc_tunnel_vtable {
 
 typedef struct sc_tunnel_config {
     sc_tunnel_provider_t provider;
-    const char *cloudflare_token;   /* for cloudflare */
+    const char *cloudflare_token; /* for cloudflare */
     size_t cloudflare_token_len;
-    const char *ngrok_auth_token;    /* for ngrok */
+    const char *ngrok_auth_token; /* for ngrok */
     size_t ngrok_auth_token_len;
-    const char *ngrok_domain;        /* optional */
+    const char *ngrok_domain; /* optional */
     size_t ngrok_domain_len;
-    const char *custom_start_cmd;    /* for custom */
+    const char *custom_start_cmd; /* for custom */
     size_t custom_start_cmd_len;
 } sc_tunnel_config_t;
 
@@ -79,13 +80,11 @@ sc_tunnel_t sc_tunnel_create(sc_allocator_t *alloc, const sc_tunnel_config_t *co
 
 /* Implementation-specific constructors (for factory use) */
 sc_tunnel_t sc_none_tunnel_create(sc_allocator_t *alloc);
-sc_tunnel_t sc_cloudflare_tunnel_create(sc_allocator_t *alloc,
-    const char *token, size_t token_len);
-sc_tunnel_t sc_ngrok_tunnel_create(sc_allocator_t *alloc,
-    const char *auth_token, size_t auth_token_len,
-    const char *domain, size_t domain_len);
+sc_tunnel_t sc_cloudflare_tunnel_create(sc_allocator_t *alloc, const char *token, size_t token_len);
+sc_tunnel_t sc_ngrok_tunnel_create(sc_allocator_t *alloc, const char *auth_token,
+                                   size_t auth_token_len, const char *domain, size_t domain_len);
 sc_tunnel_t sc_tailscale_tunnel_create(sc_allocator_t *alloc);
-sc_tunnel_t sc_custom_tunnel_create(sc_allocator_t *alloc,
-    const char *command_template, size_t command_template_len);
+sc_tunnel_t sc_custom_tunnel_create(sc_allocator_t *alloc, const char *command_template,
+                                    size_t command_template_len);
 
 #endif /* SC_TUNNEL_H */

@@ -1,8 +1,8 @@
-#include "seaclaw/memory.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
-#include <string.h>
+#include "seaclaw/memory.h"
 #include <math.h>
+#include <string.h>
 
 typedef struct sc_none_memory {
     sc_allocator_t *alloc;
@@ -13,11 +13,9 @@ static const char *impl_name(void *ctx) {
     return "none";
 }
 
-static sc_error_t impl_store(void *ctx,
-    const char *key, size_t key_len,
-    const char *content, size_t content_len,
-    const sc_memory_category_t *category,
-    const char *session_id, size_t session_id_len) {
+static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const sc_memory_category_t *category,
+                             const char *session_id, size_t session_id_len) {
     (void)ctx;
     (void)key;
     (void)key_len;
@@ -29,11 +27,9 @@ static sc_error_t impl_store(void *ctx,
     return SC_OK;
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
-    const char *query, size_t query_len,
-    size_t limit,
-    const char *session_id, size_t session_id_len,
-    sc_memory_entry_t **out, size_t *out_count) {
+static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+                              size_t limit, const char *session_id, size_t session_id_len,
+                              sc_memory_entry_t **out, size_t *out_count) {
     (void)ctx;
     (void)alloc;
     (void)query;
@@ -46,9 +42,8 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc,
-    const char *key, size_t key_len,
-    sc_memory_entry_t *out, bool *found) {
+static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
+                           sc_memory_entry_t *out, bool *found) {
     (void)ctx;
     (void)alloc;
     (void)key;
@@ -58,10 +53,9 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc,
-    const sc_memory_category_t *category,
-    const char *session_id, size_t session_id_len,
-    sc_memory_entry_t **out, size_t *out_count) {
+static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+                            size_t *out_count) {
     (void)ctx;
     (void)alloc;
     (void)category;
@@ -72,9 +66,7 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc,
     return SC_OK;
 }
 
-static sc_error_t impl_forget(void *ctx,
-    const char *key, size_t key_len,
-    bool *deleted) {
+static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
     (void)ctx;
     (void)key;
     (void)key_len;
@@ -114,7 +106,8 @@ static const sc_memory_vtable_t none_vtable = {
 
 sc_memory_t sc_none_memory_create(sc_allocator_t *alloc) {
     sc_none_memory_t *self = (sc_none_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_none_memory_t));
-    if (!self) return (sc_memory_t){ .ctx = NULL, .vtable = NULL };
+    if (!self)
+        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
     self->alloc = alloc;
     return (sc_memory_t){
         .ctx = self,

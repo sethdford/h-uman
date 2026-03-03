@@ -1,30 +1,30 @@
-#include "seaclaw/tools/web_search_providers.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/http.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/tools/web_search_providers.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define BRAVE_API_URL "https://api.search.brave.com/res/v1/web/search"
 
-sc_error_t sc_web_search_brave(sc_allocator_t *alloc,
-    const char *query, size_t query_len,
-    int count, const char *api_key,
-    sc_tool_result_t *out)
-{
-    if (!alloc || !query || !api_key || !out) return SC_ERR_INVALID_ARGUMENT;
-    if (query_len == 0 || count < 1 || count > 10) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_web_search_brave(sc_allocator_t *alloc, const char *query, size_t query_len,
+                               int count, const char *api_key, sc_tool_result_t *out) {
+    if (!alloc || !query || !api_key || !out)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (query_len == 0 || count < 1 || count > 10)
+        return SC_ERR_INVALID_ARGUMENT;
 
     char *encoded = NULL;
     size_t enc_len = 0;
     sc_error_t err = sc_web_search_url_encode(alloc, query, query_len, &encoded, &enc_len);
-    if (err != SC_OK) return err;
+    if (err != SC_OK)
+        return err;
 
     char url_buf[1024];
-    int n = snprintf(url_buf, sizeof(url_buf), "%s?q=%.*s&count=%d",
-        BRAVE_API_URL, (int)enc_len, encoded, count);
+    int n = snprintf(url_buf, sizeof(url_buf), "%s?q=%.*s&count=%d", BRAVE_API_URL, (int)enc_len,
+                     encoded, count);
     alloc->free(alloc->ctx, encoded, enc_len + 1); /* url_encode returns exact len+1 */
     if (n <= 0 || (size_t)n >= sizeof(url_buf)) {
         *out = sc_tool_result_fail("URL too long", 13);
@@ -32,8 +32,8 @@ sc_error_t sc_web_search_brave(sc_allocator_t *alloc,
     }
 
     char headers_buf[512];
-    snprintf(headers_buf, sizeof(headers_buf),
-        "X-Subscription-Token: %s\nAccept: application/json", api_key);
+    snprintf(headers_buf, sizeof(headers_buf), "X-Subscription-Token: %s\nAccept: application/json",
+             api_key);
 
     sc_http_response_t resp = {0};
     err = sc_http_get_ex(alloc, url_buf, headers_buf, &resp);
@@ -77,18 +77,25 @@ sc_error_t sc_web_search_brave(sc_allocator_t *alloc,
     }
     size_t len = 0;
     n = snprintf(buf, cap, "Results for: %.*s\n\n", (int)query_len, query);
-    if (n > 0) len = (size_t)n;
+    if (n > 0)
+        len = (size_t)n;
 
     int max_r = count;
-    if (max_r > (int)results->data.array.len) max_r = (int)results->data.array.len;
+    if (max_r > (int)results->data.array.len)
+        max_r = (int)results->data.array.len;
     for (int i = 0; i < max_r; i++) {
         sc_json_value_t *item = results->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT) continue;
+        if (!item || item->type != SC_JSON_OBJECT)
+            continue;
         const char *title = sc_json_get_string(item, "title");
         const char *url = sc_json_get_string(item, "url");
         const char *desc = sc_json_get_string(item, "description");
-        if (!title) title = ""; if (!url) url = "";
-        if (!desc) desc = "";
+        if (!title)
+            title = "";
+        if (!url)
+            url = "";
+        if (!desc)
+            desc = "";
 
         char line[1024];
         int ln = snprintf(line, sizeof(line), "%d. %s\n   %s\n   %s\n\n", i + 1, title, url, desc);
@@ -98,8 +105,10 @@ sc_error_t sc_web_search_brave(sc_allocator_t *alloc,
         } else if (ln > 0) {
             size_t new_cap = cap * 2;
             char *nbuf = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
-            if (!nbuf) break;
-            buf = nbuf; cap = new_cap;
+            if (!nbuf)
+                break;
+            buf = nbuf;
+            cap = new_cap;
             memcpy(buf + len, line, (size_t)ln + 1);
             len += (size_t)ln;
         }

@@ -1,7 +1,7 @@
-#include "seaclaw/memory/retrieval.h"
-#include "seaclaw/memory.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/memory.h"
+#include "seaclaw/memory/retrieval.h"
 
 #define SC_RRF_K 60
 /* RRF: score = sum(1/(k+rank)) - used when combining keyword + semantic */
@@ -9,11 +9,9 @@
 /* Hybrid retrieval: keyword + optional semantic, combined with RRF when both available.
  * When vector store is not wired, uses keyword only. This is intentional:
  * hybrid = best available (keyword + semantic when both exist). */
-sc_error_t sc_hybrid_retrieve(sc_allocator_t *alloc, sc_memory_t *backend,
-    sc_embedder_t *embedder, sc_vector_store_t *vector_store,
-    const char *query, size_t query_len,
-    const sc_retrieval_options_t *opts,
-    sc_retrieval_result_t *out) {
+sc_error_t sc_hybrid_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, sc_embedder_t *embedder,
+                              sc_vector_store_t *vector_store, const char *query, size_t query_len,
+                              const sc_retrieval_options_t *opts, sc_retrieval_result_t *out) {
     (void)embedder;
     (void)vector_store;
     return sc_keyword_retrieve(alloc, backend, query, query_len, opts, out);

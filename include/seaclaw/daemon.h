@@ -1,10 +1,10 @@
 #ifndef SC_DAEMON_H
 #define SC_DAEMON_H
 
-#include "core/error.h"
-#include "core/allocator.h"
 #include "channel.h"
 #include "channel_loop.h"
+#include "core/allocator.h"
+#include "core/error.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
@@ -21,7 +21,7 @@ struct sc_agent;
 
 typedef struct sc_service_channel {
     void *channel_ctx;
-    sc_channel_t *channel;      /* full channel vtable — used for sending replies */
+    sc_channel_t *channel; /* full channel vtable — used for sending replies */
     sc_channel_loop_poll_fn poll_fn;
     uint32_t interval_ms;
     int64_t last_poll_ms;
@@ -35,7 +35,7 @@ typedef struct sc_service_channel {
  * In SC_IS_TEST mode: runs one tick and returns.
  */
 sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
-    sc_service_channel_t *channels, size_t channel_count,
-    struct sc_agent *agent);
+                          sc_service_channel_t *channels, size_t channel_count,
+                          struct sc_agent *agent);
 
 #endif /* SC_DAEMON_H */

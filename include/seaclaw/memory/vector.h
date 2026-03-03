@@ -5,7 +5,7 @@
 #include "seaclaw/core/error.h"
 #include <stddef.h>
 
-#define SC_EMBEDDING_DIM 384  /* small model default */
+#define SC_EMBEDDING_DIM 384 /* small model default */
 
 typedef struct sc_embedding {
     float *values;
@@ -30,12 +30,10 @@ typedef struct sc_embedder {
 } sc_embedder_t;
 
 typedef struct sc_embedder_vtable {
-    sc_error_t (*embed)(void *ctx, sc_allocator_t *alloc,
-        const char *text, size_t text_len,
-        sc_embedding_t *out);
-    sc_error_t (*embed_batch)(void *ctx, sc_allocator_t *alloc,
-        const char **texts, const size_t *text_lens, size_t count,
-        sc_embedding_t *out);
+    sc_error_t (*embed)(void *ctx, sc_allocator_t *alloc, const char *text, size_t text_len,
+                        sc_embedding_t *out);
+    sc_error_t (*embed_batch)(void *ctx, sc_allocator_t *alloc, const char **texts,
+                              const size_t *text_lens, size_t count, sc_embedding_t *out);
     size_t (*dimensions)(void *ctx);
     void (*deinit)(void *ctx, sc_allocator_t *alloc);
 } sc_embedder_vtable_t;
@@ -49,13 +47,10 @@ typedef struct sc_vector_store {
 } sc_vector_store_t;
 
 typedef struct sc_vector_store_vtable {
-    sc_error_t (*insert)(void *ctx, sc_allocator_t *alloc,
-        const char *id, size_t id_len,
-        const sc_embedding_t *embedding,
-        const char *content, size_t content_len);
-    sc_error_t (*search)(void *ctx, sc_allocator_t *alloc,
-        const sc_embedding_t *query, size_t limit,
-        sc_vector_entry_t **out, size_t *out_count);
+    sc_error_t (*insert)(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len,
+                         const sc_embedding_t *embedding, const char *content, size_t content_len);
+    sc_error_t (*search)(void *ctx, sc_allocator_t *alloc, const sc_embedding_t *query,
+                         size_t limit, sc_vector_entry_t **out, size_t *out_count);
     sc_error_t (*remove)(void *ctx, const char *id, size_t id_len);
     size_t (*count)(void *ctx);
     void (*deinit)(void *ctx, sc_allocator_t *alloc);
@@ -73,10 +68,9 @@ typedef struct sc_text_chunk {
     size_t offset;
 } sc_text_chunk_t;
 
-sc_error_t sc_chunker_split(sc_allocator_t *alloc,
-    const char *text, size_t text_len,
-    const sc_chunker_options_t *opts,
-    sc_text_chunk_t **out, size_t *out_count);
+sc_error_t sc_chunker_split(sc_allocator_t *alloc, const char *text, size_t text_len,
+                            const sc_chunker_options_t *opts, sc_text_chunk_t **out,
+                            size_t *out_count);
 void sc_chunker_free(sc_allocator_t *alloc, sc_text_chunk_t *chunks, size_t count);
 
 /* Utility */

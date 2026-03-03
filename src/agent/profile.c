@@ -2,21 +2,25 @@
 #include <string.h>
 
 static const char *coding_tools[] = {
-    "shell", "file_read", "file_write", "file_edit", "git",
-    "web_search", "apply_patch", "notebook",
+    "shell", "file_read", "file_write", "file_edit", "git", "web_search", "apply_patch", "notebook",
 };
 
 static const char *ops_tools[] = {
-    "shell", "file_read", "file_write", "web_fetch",
-    "cron_add", "cron_list", "schedule", "hardware_info",
+    "shell",    "file_read", "file_write", "web_fetch",
+    "cron_add", "cron_list", "schedule",   "hardware_info",
 };
 
 static const char *messaging_tools[] = {
-    "message", "memory_store", "memory_recall", "web_search",
+    "message",
+    "memory_store",
+    "memory_recall",
+    "web_search",
 };
 
 static const char *minimal_tools[] = {
-    "web_search", "memory_store", "memory_recall",
+    "web_search",
+    "memory_store",
+    "memory_recall",
 };
 
 static const sc_agent_profile_t profiles[] = {
@@ -81,22 +85,24 @@ static const sc_agent_profile_t profiles[] = {
 
 const sc_agent_profile_t *sc_agent_profile_get(sc_agent_profile_type_t type) {
     for (size_t i = 0; i < PROFILE_COUNT; i++)
-        if (profiles[i].type == type) return &profiles[i];
+        if (profiles[i].type == type)
+            return &profiles[i];
     return NULL;
 }
 
 const sc_agent_profile_t *sc_agent_profile_by_name(const char *name, size_t name_len) {
-    if (!name || name_len == 0) return NULL;
+    if (!name || name_len == 0)
+        return NULL;
     for (size_t i = 0; i < PROFILE_COUNT; i++) {
-        if (strlen(profiles[i].name) == name_len &&
-            memcmp(profiles[i].name, name, name_len) == 0)
+        if (strlen(profiles[i].name) == name_len && memcmp(profiles[i].name, name, name_len) == 0)
             return &profiles[i];
     }
     return NULL;
 }
 
 sc_error_t sc_agent_profile_list(const sc_agent_profile_t **out, size_t *count) {
-    if (!out || !count) return SC_ERR_INVALID_ARGUMENT;
+    if (!out || !count)
+        return SC_ERR_INVALID_ARGUMENT;
     *out = profiles;
     *count = PROFILE_COUNT;
     return SC_OK;

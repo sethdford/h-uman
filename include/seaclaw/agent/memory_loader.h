@@ -19,17 +19,15 @@ typedef struct sc_memory_loader {
     size_t max_context_chars;
 } sc_memory_loader_t;
 
-sc_error_t sc_memory_loader_init(sc_memory_loader_t *loader,
-    sc_allocator_t *alloc, sc_memory_t *memory,
-    sc_retrieval_engine_t *retrieval_engine,
-    size_t max_entries, size_t max_context_chars);
+sc_error_t sc_memory_loader_init(sc_memory_loader_t *loader, sc_allocator_t *alloc,
+                                 sc_memory_t *memory, sc_retrieval_engine_t *retrieval_engine,
+                                 size_t max_entries, size_t max_context_chars);
 
 /* Load relevant memories for a query and format them as markdown text.
  * Returns SC_OK with *out_context=NULL, *out_context_len=0 if no memories.
  * Caller owns returned string; free with alloc. */
-sc_error_t sc_memory_loader_load(sc_memory_loader_t *loader,
-    const char *query, size_t query_len,
-    const char *session_id, size_t session_id_len,
-    char **out_context, size_t *out_context_len);
+sc_error_t sc_memory_loader_load(sc_memory_loader_t *loader, const char *query, size_t query_len,
+                                 const char *session_id, size_t session_id_len, char **out_context,
+                                 size_t *out_context_len);
 
 #endif /* SC_AGENT_MEMORY_LOADER_H */

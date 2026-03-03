@@ -12,7 +12,7 @@
  * Gateway config
  * ────────────────────────────────────────────────────────────────────────── */
 
-#define SC_GATEWAY_MAX_BODY_SIZE 65536
+#define SC_GATEWAY_MAX_BODY_SIZE      65536
 #define SC_GATEWAY_RATE_LIMIT_PER_MIN 60
 
 /* Forward declarations */
@@ -55,8 +55,7 @@ typedef struct sc_gateway_state sc_gateway_state_t;
 
 struct sc_config_gateway;
 
-void sc_gateway_config_from_cfg(const struct sc_config_gateway *cfg_gw,
-                               sc_gateway_config_t *out);
+void sc_gateway_config_from_cfg(const struct sc_config_gateway *cfg_gw, sc_gateway_config_t *out);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * API
@@ -65,8 +64,7 @@ void sc_gateway_config_from_cfg(const struct sc_config_gateway *cfg_gw,
 /* Run the gateway server (HTTP + WebSocket + static files). Blocks until stopped.
  * POSIX only: uses socket/bind/listen/accept + poll for multiplexing.
  * In tests, does NOT bind to a port if SC_GATEWAY_TEST_MODE is defined. */
-sc_error_t sc_gateway_run(sc_allocator_t *alloc,
-    const char *host, uint16_t port,
-    const sc_gateway_config_t *config);
+sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port,
+                          const sc_gateway_config_t *config);
 
 #endif /* SC_GATEWAY_H */

@@ -17,7 +17,7 @@ typedef struct sc_parsed_agent_args {
 } sc_parsed_agent_args_t;
 
 sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
-    sc_parsed_agent_args_t *out);
+                                   sc_parsed_agent_args_t *out);
 
 sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size_t argc);
 

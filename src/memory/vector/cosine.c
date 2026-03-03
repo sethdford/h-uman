@@ -1,5 +1,5 @@
-#include "seaclaw/memory/vector.h"
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/memory/vector.h"
 #include <math.h>
 
 void sc_embedding_free(sc_allocator_t *alloc, sc_embedding_t *e) {
@@ -11,7 +11,8 @@ void sc_embedding_free(sc_allocator_t *alloc, sc_embedding_t *e) {
 }
 
 void sc_vector_entries_free(sc_allocator_t *alloc, sc_vector_entry_t *entries, size_t count) {
-    if (!alloc || !entries) return;
+    if (!alloc || !entries)
+        return;
     for (size_t i = 0; i < count; i++) {
         if (entries[i].id)
             alloc->free(alloc->ctx, (void *)entries[i].id, entries[i].id_len + 1);

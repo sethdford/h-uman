@@ -6,41 +6,49 @@
 #include <windows.h>
 #define SC_IS_WIN 1
 #else
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
 #define SC_IS_WIN 0
 #endif
 
 char *sc_platform_get_env(sc_allocator_t *alloc, const char *name) {
-    if (!alloc || !name) return NULL;
+    if (!alloc || !name)
+        return NULL;
 #if SC_IS_WIN
     (void)alloc;
     /* Windows getenv returns pointer to process env block; dupe for ownership */
     const char *v = getenv(name);
-    if (!v) return NULL;
+    if (!v)
+        return NULL;
     size_t len = strlen(v) + 1;
     char *out = alloc->alloc(alloc->ctx, len);
-    if (!out) return NULL;
+    if (!out)
+        return NULL;
     memcpy(out, v, len);
     return out;
 #else
     const char *v = getenv(name);
-    if (!v) return NULL;
+    if (!v)
+        return NULL;
     size_t len = strlen(v) + 1;
     char *out = alloc->alloc(alloc->ctx, len);
-    if (!out) return NULL;
+    if (!out)
+        return NULL;
     memcpy(out, v, len);
     return out;
 #endif
 }
 
 char *sc_platform_get_home_dir(sc_allocator_t *alloc) {
-    if (!alloc) return NULL;
+    if (!alloc)
+        return NULL;
 #if SC_IS_WIN
     char *prof = sc_platform_get_env(alloc, "USERPROFILE");
-    if (prof) return prof;
+    if (prof)
+        return prof;
     char *drive = sc_platform_get_env(alloc, "HOMEDRIVE");
-    if (!drive) return NULL;
+    if (!drive)
+        return NULL;
     char *path = sc_platform_get_env(alloc, "HOMEPATH");
     if (!path) {
         alloc->free(alloc->ctx, drive, strlen(drive) + 1);
@@ -64,27 +72,33 @@ char *sc_platform_get_home_dir(sc_allocator_t *alloc) {
 }
 
 char *sc_platform_get_temp_dir(sc_allocator_t *alloc) {
-    if (!alloc) return NULL;
+    if (!alloc)
+        return NULL;
 #if SC_IS_WIN
     char *v = sc_platform_get_env(alloc, "TEMP");
-    if (v) return v;
+    if (v)
+        return v;
     v = sc_platform_get_env(alloc, "TMP");
-    if (v) return v;
+    if (v)
+        return v;
     {
         const char *def = "C:\\Temp";
         size_t len = strlen(def) + 1;
         char *out = alloc->alloc(alloc->ctx, len);
-        if (out) memcpy(out, def, len);
+        if (out)
+            memcpy(out, def, len);
         return out;
     }
 #else
     char *v = sc_platform_get_env(alloc, "TMPDIR");
-    if (v) return v;
+    if (v)
+        return v;
     {
         const char *def = "/tmp";
         size_t len = strlen(def) + 1;
         char *out = alloc->alloc(alloc->ctx, len);
-        if (out) memcpy(out, def, len);
+        if (out)
+            memcpy(out, def, len);
         return out;
     }
 #endif
@@ -106,5 +120,9 @@ const char *sc_platform_get_shell_flag(void) {
 #endif
 }
 
-bool sc_platform_is_windows(void) { return SC_IS_WIN ? true : false; }
-bool sc_platform_is_unix(void) { return SC_IS_WIN ? false : true; }
+bool sc_platform_is_windows(void) {
+    return SC_IS_WIN ? true : false;
+}
+bool sc_platform_is_unix(void) {
+    return SC_IS_WIN ? false : true;
+}

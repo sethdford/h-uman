@@ -3,8 +3,8 @@
 
 #include "core/allocator.h"
 #include "core/error.h"
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Event types
@@ -24,8 +24,8 @@ typedef enum sc_bus_event_type {
  * ────────────────────────────────────────────────────────────────────────── */
 
 #define SC_BUS_CHANNEL_LEN 32
-#define SC_BUS_ID_LEN 128
-#define SC_BUS_MSG_LEN 256
+#define SC_BUS_ID_LEN      128
+#define SC_BUS_MSG_LEN     256
 
 typedef struct sc_bus_event {
     sc_bus_event_type_t type;
@@ -39,14 +39,13 @@ typedef struct sc_bus_event {
  * Subscriber callback. Return false to unsubscribe.
  * ────────────────────────────────────────────────────────────────────────── */
 
-typedef bool (*sc_bus_subscriber_fn)(sc_bus_event_type_t type,
-                                     const sc_bus_event_t *ev,
+typedef bool (*sc_bus_subscriber_fn)(sc_bus_event_type_t type, const sc_bus_event_t *ev,
                                      void *user_ctx);
 
 typedef struct sc_bus_subscriber {
     sc_bus_subscriber_fn fn;
     void *user_ctx;
-    sc_bus_event_type_t filter;  /* SC_BUS_EVENT_COUNT = all events */
+    sc_bus_event_type_t filter; /* SC_BUS_EVENT_COUNT = all events */
 } sc_bus_subscriber_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -64,9 +63,7 @@ typedef struct sc_bus {
 void sc_bus_init(sc_bus_t *bus);
 
 /* Subscribe. Returns SC_ERR_ALREADY_EXISTS if full. filter=SC_BUS_EVENT_COUNT for all. */
-sc_error_t sc_bus_subscribe(sc_bus_t *bus,
-                            sc_bus_subscriber_fn fn,
-                            void *user_ctx,
+sc_error_t sc_bus_subscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx,
                             sc_bus_event_type_t filter);
 
 /* Unsubscribe by fn+ctx. */
@@ -76,10 +73,7 @@ void sc_bus_unsubscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx);
 void sc_bus_publish(sc_bus_t *bus, const sc_bus_event_t *ev);
 
 /* Convenience: publish with minimal fields. */
-void sc_bus_publish_simple(sc_bus_t *bus,
-                           sc_bus_event_type_t type,
-                           const char *channel,
-                           const char *id,
-                           const char *message);
+void sc_bus_publish_simple(sc_bus_t *bus, sc_bus_event_type_t type, const char *channel,
+                           const char *id, const char *message);
 
 #endif /* SC_BUS_H */

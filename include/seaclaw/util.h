@@ -1,8 +1,8 @@
 #ifndef SC_UTIL_H
 #define SC_UTIL_H
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* ──────────────────────────────────────────────────────────────────────────
  * General utilities
@@ -15,8 +15,7 @@ size_t sc_util_trim(char *s, size_t len);
 char *sc_util_strdup(void *ctx, void *(*alloc)(void *, size_t), const char *s);
 
 /* Free string allocated with sc_util_strdup (must pass exact size). */
-void sc_util_strfree(void *ctx, void (*free_fn)(void *, void *, size_t),
-                    char *s);
+void sc_util_strfree(void *ctx, void (*free_fn)(void *, void *, size_t), char *s);
 
 /* Compare strings case-insensitively. Returns 0 if equal. */
 int sc_util_strcasecmp(const char *a, const char *b);

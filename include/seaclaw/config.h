@@ -106,7 +106,7 @@ typedef struct sc_telegram_channel_config {
     size_t allow_from_count;
 } sc_telegram_channel_config_t;
 
-#define SC_MCP_SERVERS_MAX 16
+#define SC_MCP_SERVERS_MAX     16
 #define SC_MCP_SERVER_ARGS_MAX 16
 
 typedef struct sc_mcp_server_entry {
@@ -163,8 +163,12 @@ typedef struct sc_config_gateway {
     size_t cors_origins_len;
 } sc_config_gateway_t;
 
-typedef struct sc_secrets_config { bool encrypt; } sc_secrets_config_t;
-typedef struct sc_browser_config { bool enabled; } sc_browser_config_t;
+typedef struct sc_secrets_config {
+    bool encrypt;
+} sc_secrets_config_t;
+typedef struct sc_browser_config {
+    bool enabled;
+} sc_browser_config_t;
 typedef struct sc_security_config {
     char *sandbox;
     uint8_t autonomy_level;
@@ -185,7 +189,9 @@ typedef struct sc_tools_config {
     size_t disabled_tools_len;
 } sc_tools_config_t;
 
-typedef struct sc_identity_config { char *format; } sc_identity_config_t;
+typedef struct sc_identity_config {
+    char *format;
+} sc_identity_config_t;
 
 typedef struct sc_cost_config {
     bool enabled;

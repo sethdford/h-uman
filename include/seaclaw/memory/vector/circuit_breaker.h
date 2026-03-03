@@ -2,8 +2,8 @@
 #define SC_MEMORY_VECTOR_CIRCUIT_BREAKER_H
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum sc_cb_state {
     SC_CB_CLOSED,

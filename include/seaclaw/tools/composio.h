@@ -6,9 +6,7 @@
 #include "seaclaw/tool.h"
 #include <stddef.h>
 
-sc_error_t sc_composio_create(sc_allocator_t *alloc,
-    const char *api_key, size_t api_key_len,
-    const char *entity_id, size_t entity_id_len,
-    sc_tool_t *out);
+sc_error_t sc_composio_create(sc_allocator_t *alloc, const char *api_key, size_t api_key_len,
+                              const char *entity_id, size_t entity_id_len, sc_tool_t *out);
 
 #endif

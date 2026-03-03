@@ -20,7 +20,7 @@ typedef enum sc_migration_target {
 typedef struct sc_migration_config {
     sc_migration_source_t source;
     sc_migration_target_t target;
-    const char *source_path;   /* db path for sqlite, dir for markdown */
+    const char *source_path; /* db path for sqlite, dir for markdown */
     size_t source_path_len;
     const char *target_path;
     size_t target_path_len;
@@ -42,10 +42,8 @@ typedef void (*sc_migration_progress_fn)(void *ctx, size_t current, size_t total
  * Supports: none→sqlite, sqlite→markdown, markdown→sqlite.
  * Uses memory vtable: read from source via list/get, write to target via store.
  */
-sc_error_t sc_migration_run(sc_allocator_t *alloc,
-    const sc_migration_config_t *cfg,
-    sc_migration_stats_t *out_stats,
-    sc_migration_progress_fn progress,
-    void *progress_ctx);
+sc_error_t sc_migration_run(sc_allocator_t *alloc, const sc_migration_config_t *cfg,
+                            sc_migration_stats_t *out_stats, sc_migration_progress_fn progress,
+                            void *progress_ctx);
 
 #endif /* SC_MIGRATION_H */

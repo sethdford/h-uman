@@ -2,8 +2,8 @@
 #define SC_JSON_H
 
 #include "allocator.h"
-#include "slice.h"
 #include "error.h"
+#include "slice.h"
 #include <stdbool.h>
 
 typedef enum sc_json_type {
@@ -29,9 +29,20 @@ struct sc_json_value {
     union {
         bool boolean;
         double number;
-        struct { char *ptr; size_t len; } string;
-        struct { sc_json_value_t **items; size_t len; size_t cap; } array;
-        struct { sc_json_pair_t *pairs; size_t len; size_t cap; } object;
+        struct {
+            char *ptr;
+            size_t len;
+        } string;
+        struct {
+            sc_json_value_t **items;
+            size_t len;
+            size_t cap;
+        } array;
+        struct {
+            sc_json_pair_t *pairs;
+            size_t len;
+            size_t cap;
+        } object;
     } data;
 };
 
@@ -47,8 +58,8 @@ sc_json_value_t *sc_json_array_new(sc_allocator_t *alloc);
 sc_json_value_t *sc_json_object_new(sc_allocator_t *alloc);
 
 sc_error_t sc_json_array_push(sc_allocator_t *alloc, sc_json_value_t *arr, sc_json_value_t *val);
-sc_error_t sc_json_object_set(sc_allocator_t *alloc, sc_json_value_t *obj,
-                              const char *key, sc_json_value_t *val);
+sc_error_t sc_json_object_set(sc_allocator_t *alloc, sc_json_value_t *obj, const char *key,
+                              sc_json_value_t *val);
 sc_json_value_t *sc_json_object_get(const sc_json_value_t *obj, const char *key);
 bool sc_json_object_remove(sc_allocator_t *alloc, sc_json_value_t *obj, const char *key);
 
@@ -56,8 +67,8 @@ const char *sc_json_get_string(const sc_json_value_t *val, const char *key);
 double sc_json_get_number(const sc_json_value_t *val, const char *key, double default_val);
 bool sc_json_get_bool(const sc_json_value_t *val, const char *key, bool default_val);
 
-sc_error_t sc_json_stringify(sc_allocator_t *alloc, const sc_json_value_t *val,
-                             char **out, size_t *out_len);
+sc_error_t sc_json_stringify(sc_allocator_t *alloc, const sc_json_value_t *val, char **out,
+                             size_t *out_len);
 
 typedef struct sc_json_buf {
     char *ptr;
@@ -73,7 +84,8 @@ sc_error_t sc_json_append_string(sc_json_buf_t *buf, const char *str, size_t str
 sc_error_t sc_json_append_key(sc_json_buf_t *buf, const char *key, size_t key_len);
 sc_error_t sc_json_append_key_value(sc_json_buf_t *buf, const char *key, size_t key_len,
                                     const char *value, size_t value_len);
-sc_error_t sc_json_append_key_int(sc_json_buf_t *buf, const char *key, size_t key_len, long long value);
+sc_error_t sc_json_append_key_int(sc_json_buf_t *buf, const char *key, size_t key_len,
+                                  long long value);
 sc_error_t sc_json_append_key_bool(sc_json_buf_t *buf, const char *key, size_t key_len, bool value);
 
 #endif

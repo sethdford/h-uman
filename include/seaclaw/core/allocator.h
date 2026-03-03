@@ -1,14 +1,14 @@
 #ifndef SC_ALLOCATOR_H
 #define SC_ALLOCATOR_H
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct sc_allocator {
     void *ctx;
-    void* (*alloc)(void *ctx, size_t size);
-    void* (*realloc)(void *ctx, void *ptr, size_t old_size, size_t new_size);
-    void  (*free)(void *ctx, void *ptr, size_t size);
+    void *(*alloc)(void *ctx, size_t size);
+    void *(*realloc)(void *ctx, void *ptr, size_t old_size, size_t new_size);
+    void (*free)(void *ctx, void *ptr, size_t size);
 } sc_allocator_t;
 
 sc_allocator_t sc_system_allocator(void);

@@ -1,37 +1,45 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
 #include <string.h>
 
 #ifdef __linux__
 #include <unistd.h>
 static bool bwrap_binary_exists(void) {
-    if (access("/usr/bin/bwrap", X_OK) == 0) return true;
-    if (access("/usr/local/bin/bwrap", X_OK) == 0) return true;
+    if (access("/usr/bin/bwrap", X_OK) == 0)
+        return true;
+    if (access("/usr/local/bin/bwrap", X_OK) == 0)
+        return true;
     return false;
 }
 #endif
 
-static sc_error_t bubblewrap_wrap(void *ctx, const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t bubblewrap_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+                                  size_t buf_count, size_t *out_count) {
 #ifndef __linux__
-    (void)ctx; (void)argv; (void)argc; (void)buf; (void)buf_count; (void)out_count;
+    (void)ctx;
+    (void)argv;
+    (void)argc;
+    (void)buf;
+    (void)buf_count;
+    (void)out_count;
     return SC_ERR_NOT_SUPPORTED;
 #else
     sc_bubblewrap_ctx_t *bw = (sc_bubblewrap_ctx_t *)ctx;
     /* bwrap --ro-bind /usr /usr --dev /dev --proc /proc --bind /tmp /tmp
        --bind WORKSPACE /workspace --unshare-all --die-with-parent <argv...> */
     const char *prefix[] = {
-        "bwrap", "--ro-bind", "/usr", "/usr",
-        "--dev", "/dev", "--proc", "/proc",
-        "--bind", "/tmp", "/tmp",
-        "--bind", bw->workspace_dir, "/workspace",
-        "--unshare-all", "--die-with-parent",
+        "bwrap",           "--ro-bind",  "/usr",          "/usr",
+        "--dev",           "/dev",       "--proc",        "/proc",
+        "--bind",          "/tmp",       "/tmp",          "--bind",
+        bw->workspace_dir, "/workspace", "--unshare-all", "--die-with-parent",
     };
     const size_t prefix_len = sizeof(prefix) / sizeof(prefix[0]);
 
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < prefix_len + argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < prefix_len + argc)
+        return SC_ERR_INVALID_ARGUMENT;
 
     for (size_t i = 0; i < prefix_len; i++)
         buf[i] = prefix[i];

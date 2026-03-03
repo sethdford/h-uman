@@ -1,9 +1,9 @@
-#include "seaclaw/runtime.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/runtime.h"
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct sc_docker_ctx {
     bool mount_workspace;
@@ -47,10 +47,12 @@ static uint64_t impl_memory_budget(void *ctx) {
 }
 
 static sc_error_t docker_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
-    const char **argv_out, size_t max_out, size_t *argc_out) {
+                                      const char **argv_out, size_t max_out, size_t *argc_out) {
     sc_docker_ctx_t *d = (sc_docker_ctx_t *)ctx;
-    if (!d->image[0]) return SC_ERR_NOT_SUPPORTED;
-    if (!argv_out || !argc_out || max_out < 5) return SC_ERR_INVALID_ARGUMENT;
+    if (!d->image[0])
+        return SC_ERR_NOT_SUPPORTED;
+    if (!argv_out || !argc_out || max_out < 5)
+        return SC_ERR_INVALID_ARGUMENT;
 
     size_t idx = 0;
     argv_out[idx++] = "docker";
@@ -93,14 +95,15 @@ static const sc_runtime_vtable_t docker_vtable = {
     .wrap_command = docker_wrap_command,
 };
 
-sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb,
-    const char *image, const char *workspace) {
-    static sc_docker_ctx_t s_docker = { false, 0, {0}, {0} };
+sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb, const char *image,
+                               const char *workspace) {
+    static sc_docker_ctx_t s_docker = {false, 0, {0}, {0}};
     s_docker.mount_workspace = mount_workspace;
     s_docker.memory_limit_mb = memory_limit_mb;
     if (image) {
         size_t len = strlen(image);
-        if (len >= sizeof(s_docker.image)) len = sizeof(s_docker.image) - 1;
+        if (len >= sizeof(s_docker.image))
+            len = sizeof(s_docker.image) - 1;
         memcpy(s_docker.image, image, len);
         s_docker.image[len] = '\0';
     } else {
@@ -108,7 +111,8 @@ sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb,
     }
     if (workspace) {
         size_t len = strlen(workspace);
-        if (len >= sizeof(s_docker.workspace)) len = sizeof(s_docker.workspace) - 1;
+        if (len >= sizeof(s_docker.workspace))
+            len = sizeof(s_docker.workspace) - 1;
         memcpy(s_docker.workspace, workspace, len);
         s_docker.workspace[len] = '\0';
     } else {

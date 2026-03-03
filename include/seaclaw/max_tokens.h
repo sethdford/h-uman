@@ -2,8 +2,8 @@
 #define SC_MAX_TOKENS_H
 
 #include "seaclaw/config_types.h"
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 uint32_t sc_max_tokens_default(void);
 uint32_t sc_max_tokens_lookup(const char *model_ref, size_t len);

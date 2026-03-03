@@ -5,7 +5,7 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/tool.h"
 
-sc_error_t sc_database_tool_create(sc_allocator_t *alloc,
-    const char *default_db_path, sc_tool_t *out);
+sc_error_t sc_database_tool_create(sc_allocator_t *alloc, const char *default_db_path,
+                                   sc_tool_t *out);
 
 #endif

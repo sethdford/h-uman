@@ -12,8 +12,6 @@ sc_error_t sc_validate_url(const char *url);
 bool sc_is_private_ip(const char *ip);
 
 /* Check if host matches domain allowlist (exact or *.domain patterns). */
-bool sc_validate_domain(const char *host,
-    const char *const *allowed,
-    size_t allowed_count);
+bool sc_validate_domain(const char *host, const char *const *allowed, size_t allowed_count);
 
 #endif

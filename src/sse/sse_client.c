@@ -1,25 +1,22 @@
 #include "seaclaw/sse/sse_client.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define SC_SSE_MAX_EVENT_SIZE (256 * 1024)
+#define SC_SSE_MAX_EVENT_SIZE  (256 * 1024)
 #define SC_SSE_MAX_BUFFER_SIZE 8192
 
 #if SC_IS_TEST
-static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    sc_sse_callback_t callback,
-    void *callback_ctx)
-{
+static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
+                                      const char *auth_header, const char *extra_headers,
+                                      sc_sse_callback_t callback, void *callback_ctx) {
     (void)url;
     (void)auth_header;
     (void)extra_headers;
 
-    if (!alloc || !callback) return SC_ERR_INVALID_ARGUMENT;
+    if (!alloc || !callback)
+        return SC_ERR_INVALID_ARGUMENT;
 
     /* Emit one mock event */
     sc_sse_event_t ev = {0};
@@ -29,7 +26,8 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
     size_t data_len = strlen(data);
 
     ev.event_type = (char *)alloc->alloc(alloc->ctx, et_len + 1);
-    if (!ev.event_type) return SC_ERR_OUT_OF_MEMORY;
+    if (!ev.event_type)
+        return SC_ERR_OUT_OF_MEMORY;
     memcpy(ev.event_type, et, et_len + 1);
     ev.event_type_len = et_len;
 
@@ -61,10 +59,8 @@ typedef struct sse_ctx {
     sc_error_t last_error;
 } sse_ctx_t;
 
-static void parse_field(const char *line, size_t line_len,
-    const char **field_out, size_t *field_len,
-    const char **value_out, size_t *value_len)
-{
+static void parse_field(const char *line, size_t line_len, const char **field_out,
+                        size_t *field_len, const char **value_out, size_t *value_len) {
     const char *colon = memchr(line, ':', line_len);
     if (colon) {
         *field_out = line;
@@ -90,24 +86,25 @@ static int field_eq(const char *a, size_t alen, const char *b) {
     return alen == blen && memcmp(a, b, alen) == 0;
 }
 
-static void flush_event(sse_ctx_t *ctx,
-    char *event_type, size_t event_type_len,
-    char *data, size_t data_len)
-{
+static void flush_event(sse_ctx_t *ctx, char *event_type, size_t event_type_len, char *data,
+                        size_t data_len) {
     sc_sse_event_t ev = {0};
     ev.event_type = event_type;
     ev.event_type_len = event_type_len;
     ev.data = data;
     ev.data_len = data_len;
     ctx->callback(ctx->callback_ctx, &ev);
-    if (event_type) ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
-    if (data) ctx->alloc->free(ctx->alloc->ctx, data, data_len + 1);
+    if (event_type)
+        ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
+    if (data)
+        ctx->alloc->free(ctx->alloc->ctx, data, data_len + 1);
 }
 
 static sc_error_t process_buffer(sse_ctx_t *ctx) {
     char *buf = ctx->buf;
     size_t len = ctx->len;
-    if (len == 0) return SC_OK;
+    if (len == 0)
+        return SC_OK;
 
     char *event_type = NULL;
     size_t event_type_len = 0;
@@ -125,7 +122,8 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
         if (*p == '\n' || (*p == '\r' && p + 1 < end && p[1] == '\n')) {
             size_t line_len = (size_t)(p - line_start);
             /* trim trailing CR */
-            if (line_len > 0 && line_start[line_len - 1] == '\r') line_len--;
+            if (line_len > 0 && line_start[line_len - 1] == '\r')
+                line_len--;
 
             if (line_len == 0) {
                 if (has_data) {
@@ -135,8 +133,10 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                         data_copy_len = data_len;
                         data_copy = (char *)ctx->alloc->alloc(ctx->alloc->ctx, data_copy_len + 1);
                         if (!data_copy) {
-                            if (event_type) ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
-                            if (data) ctx->alloc->free(ctx->alloc->ctx, data, data_cap);
+                            if (event_type)
+                                ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
+                            if (data)
+                                ctx->alloc->free(ctx->alloc->ctx, data, data_cap);
                             return SC_ERR_OUT_OF_MEMORY;
                         }
                         memcpy(data_copy, data, data_len);
@@ -195,14 +195,17 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                         size_t need = data_len + value_len + (has_data ? 1 : 0) + 1;
                         if (need > data_cap) {
                             size_t new_cap = data_cap ? data_cap * 2 : 256;
-                            while (new_cap < need) new_cap *= 2;
-                            char *nd = (char *)ctx->alloc->realloc(ctx->alloc->ctx, data,
-                                data_cap ? data_cap : 0, new_cap);
-                            if (!nd) return SC_ERR_OUT_OF_MEMORY;
+                            while (new_cap < need)
+                                new_cap *= 2;
+                            char *nd = (char *)ctx->alloc->realloc(
+                                ctx->alloc->ctx, data, data_cap ? data_cap : 0, new_cap);
+                            if (!nd)
+                                return SC_ERR_OUT_OF_MEMORY;
                             data = nd;
                             data_cap = new_cap;
                         }
-                        if (has_data) data[data_len++] = '\n';
+                        if (has_data)
+                            data[data_len++] = '\n';
                         memcpy(data + data_len, value, value_len);
                         data_len += value_len;
                         data[data_len] = '\0';
@@ -210,17 +213,20 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                         has_data = 1;
                     }
                 } else if (field_eq(field, field_len, "event")) {
-                    if (event_type) ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
+                    if (event_type)
+                        ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
                     event_type_len = value_len;
                     event_type = (char *)ctx->alloc->alloc(ctx->alloc->ctx, value_len + 1);
-                    if (!event_type) return SC_ERR_OUT_OF_MEMORY;
+                    if (!event_type)
+                        return SC_ERR_OUT_OF_MEMORY;
                     memcpy(event_type, value, value_len);
                     event_type[value_len] = '\0';
                 }
             }
 
             p++;
-            if (p < end && line_start < end && *(p - 1) == '\r' && *p == '\n') p++;
+            if (p < end && line_start < end && *(p - 1) == '\r' && *p == '\n')
+                p++;
             line_start = p;
         } else {
             p++;
@@ -249,14 +255,17 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
 static size_t sse_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
     sse_ctx_t *ctx = (sse_ctx_t *)userdata;
     size_t n = size * nmemb;
-    if (n == 0) return 0;
+    if (n == 0)
+        return 0;
 
     while (ctx->len + n + 1 > ctx->cap) {
         size_t new_cap = ctx->cap ? ctx->cap * 2 : 4096;
-        while (new_cap < ctx->len + n + 1) new_cap *= 2;
-        char *nbuf = (char *)ctx->alloc->realloc(ctx->alloc->ctx, ctx->buf,
-            ctx->cap ? ctx->cap : 0, new_cap);
-        if (!nbuf) return 0;
+        while (new_cap < ctx->len + n + 1)
+            new_cap *= 2;
+        char *nbuf = (char *)ctx->alloc->realloc(ctx->alloc->ctx, ctx->buf, ctx->cap ? ctx->cap : 0,
+                                                 new_cap);
+        if (!nbuf)
+            return 0;
         ctx->buf = nbuf;
         ctx->cap = new_cap;
     }
@@ -267,26 +276,25 @@ static size_t sse_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     sc_error_t err = process_buffer(ctx);
     if (err != SC_OK) {
         ctx->last_error = err;
-        return 0;  /* abort curl */
+        return 0; /* abort curl */
     }
     return n;
 }
 
 static void add_header(struct curl_slist **list, const char *header) {
-    if (header && header[0]) *list = curl_slist_append(*list, header);
+    if (header && header[0])
+        *list = curl_slist_append(*list, header);
 }
 
-static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    sc_sse_callback_t callback,
-    void *callback_ctx)
-{
-    if (!alloc || !url || !callback) return SC_ERR_INVALID_ARGUMENT;
+static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
+                                      const char *auth_header, const char *extra_headers,
+                                      sc_sse_callback_t callback, void *callback_ctx) {
+    if (!alloc || !url || !callback)
+        return SC_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_easy_init();
-    if (!curl) return SC_ERR_NOT_SUPPORTED;
+    if (!curl)
+        return SC_ERR_NOT_SUPPORTED;
 
     sse_ctx_t ctx = {0};
     ctx.alloc = alloc;
@@ -316,10 +324,12 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
                 char line[512];
                 memcpy(line, p, linelen);
                 line[linelen] = '\0';
-                if (linelen > 0 && line[linelen - 1] == '\r') line[--linelen] = '\0';
+                if (linelen > 0 && line[linelen - 1] == '\r')
+                    line[--linelen] = '\0';
                 add_header(&headers, line);
             }
-            if (!eol) break;
+            if (!eol)
+                break;
             p = eol + 1;
         }
     }
@@ -329,7 +339,7 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);  /* no timeout for streaming */
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L); /* no timeout for streaming */
 
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
@@ -337,21 +347,19 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
 
     alloc->free(alloc->ctx, ctx.buf, ctx.cap);
 
-    if (ctx.last_error != SC_OK) return ctx.last_error;
+    if (ctx.last_error != SC_OK)
+        return ctx.last_error;
     if (res != CURLE_OK) {
-        if (res == CURLE_OPERATION_TIMEDOUT) return SC_ERR_TIMEOUT;
+        if (res == CURLE_OPERATION_TIMEDOUT)
+            return SC_ERR_TIMEOUT;
         return SC_ERR_IO;
     }
     return SC_OK;
 }
 #else
-static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    sc_sse_callback_t callback,
-    void *callback_ctx)
-{
+static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
+                                      const char *auth_header, const char *extra_headers,
+                                      sc_sse_callback_t callback, void *callback_ctx) {
     (void)alloc;
     (void)url;
     (void)auth_header;
@@ -363,12 +371,8 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc,
 #endif
 #endif
 
-sc_error_t sc_sse_connect(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    sc_sse_callback_t callback,
-    void *callback_ctx)
-{
+sc_error_t sc_sse_connect(sc_allocator_t *alloc, const char *url, const char *auth_header,
+                          const char *extra_headers, sc_sse_callback_t callback,
+                          void *callback_ctx) {
     return sc_sse_connect_impl(alloc, url, auth_header, extra_headers, callback, callback_ctx);
 }

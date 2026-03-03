@@ -6,8 +6,7 @@
 #include "seaclaw/tool.h"
 #include <stddef.h>
 
-sc_error_t sc_spi_create(sc_allocator_t *alloc,
-    const char *device, size_t device_len,
-    sc_tool_t *out);
+sc_error_t sc_spi_create(sc_allocator_t *alloc, const char *device, size_t device_len,
+                         sc_tool_t *out);
 
 #endif

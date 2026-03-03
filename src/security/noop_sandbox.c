@@ -1,12 +1,14 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
 
-static sc_error_t noop_wrap(void *ctx, const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t noop_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+                            size_t buf_count, size_t *out_count) {
     (void)ctx;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < argc) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < argc)
+        return SC_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;

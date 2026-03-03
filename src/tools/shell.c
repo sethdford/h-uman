@@ -1,26 +1,28 @@
-#include "seaclaw/tool.h"
+#include "seaclaw/config.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
+#include "seaclaw/core/process_util.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/security.h"
 #include "seaclaw/security/sandbox.h"
-#include "seaclaw/core/process_util.h"
-#include "seaclaw/config.h"
-#include <string.h>
-#include <stdlib.h>
+#include "seaclaw/tool.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifndef _WIN32
-#include <unistd.h>
-#include <sys/wait.h>
-#include <sys/types.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #define SC_SHELL_NAME "shell"
 #define SC_SHELL_DESC "Execute shell commands. Use with caution."
-#define SC_SHELL_PARAMS "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}"
+#define SC_SHELL_PARAMS                                                                      \
+    "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[" \
+    "\"command\"]}"
 #define SC_SHELL_CMD_MAX 4096
 
 typedef struct sc_shell_ctx {
@@ -40,10 +42,8 @@ typedef struct sc_shell_ctx {
  * use it; integration left for later. Callers that have a runtime can invoke
  * wrap_command to wrap argv before exec.
  */
-static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
-    const sc_json_value_t *args,
-    sc_tool_result_t *out)
-{
+static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
+                                sc_tool_result_t *out) {
     sc_shell_ctx_t *s = (sc_shell_ctx_t *)ctx;
     if (!s || !args || !out) {
         *out = sc_tool_result_fail("invalid args", 13);
@@ -55,7 +55,10 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
         const char *stub = "(shell disabled in test mode)";
         size_t stub_len = strlen(stub);
         char *msg = sc_strndup(alloc, stub, stub_len);
-        if (!msg) { *out = sc_tool_result_fail("out of memory", 13); return SC_ERR_OUT_OF_MEMORY; }
+        if (!msg) {
+            *out = sc_tool_result_fail("out of memory", 13);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         *out = sc_tool_result_ok_owned(msg, stub_len);
     }
     return SC_OK;
@@ -126,10 +129,10 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
         setenv("PATH", "/usr/bin:/bin", 1);
 
         /* Apply network proxy env vars if configured */
-        if (s->policy && s->policy->net_proxy &&
-            s->policy->net_proxy->enabled) {
+        if (s->policy && s->policy->net_proxy && s->policy->net_proxy->enabled) {
             const char *addr = s->policy->net_proxy->proxy_addr;
-            if (!addr) addr = "http://127.0.0.1:0";
+            if (!addr)
+                addr = "http://127.0.0.1:0";
             setenv("HTTP_PROXY", addr, 1);
             setenv("HTTPS_PROXY", addr, 1);
             setenv("http_proxy", addr, 1);
@@ -146,9 +149,11 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
                         size_t off = 0;
                         for (size_t i = 0; i < s->policy->net_proxy->allowed_domains_count; i++) {
                             const char *d = s->policy->net_proxy->allowed_domains[i];
-                            if (!d) continue;
+                            if (!d)
+                                continue;
                             size_t dlen = strlen(d);
-                            if (off > 0) no_proxy[off++] = ',';
+                            if (off > 0)
+                                no_proxy[off++] = ',';
                             memcpy(no_proxy + off, d, dlen);
                             off += dlen;
                         }
@@ -162,24 +167,21 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
         }
 
         /* Apply kernel-level sandbox (Landlock, seccomp) */
-        if (s->policy && s->policy->sandbox &&
-            s->policy->sandbox->vtable &&
+        if (s->policy && s->policy->sandbox && s->policy->sandbox->vtable &&
             s->policy->sandbox->vtable->apply) {
-            sc_error_t serr = s->policy->sandbox->vtable->apply(
-                s->policy->sandbox->ctx);
+            sc_error_t serr = s->policy->sandbox->vtable->apply(s->policy->sandbox->ctx);
             if (serr != SC_OK && serr != SC_ERR_NOT_SUPPORTED)
                 _exit(125);
         }
 
         /* Wrap command with sandbox if available (argv-wrapping backends) */
-        if (s->policy && s->policy->sandbox &&
-            sc_sandbox_is_available(s->policy->sandbox)) {
-            const char *orig_argv[] = { "/bin/sh", "-c", cmd, NULL };
+        if (s->policy && s->policy->sandbox && sc_sandbox_is_available(s->policy->sandbox)) {
+            const char *orig_argv[] = {"/bin/sh", "-c", cmd, NULL};
             const char *wrapped[16];
             size_t wrapped_count = 0;
-            if (sc_sandbox_wrap_command(s->policy->sandbox,
-                    orig_argv, 3, wrapped, 15, &wrapped_count) == SC_OK &&
-                    wrapped_count > 0) {
+            if (sc_sandbox_wrap_command(s->policy->sandbox, orig_argv, 3, wrapped, 15,
+                                        &wrapped_count) == SC_OK &&
+                wrapped_count > 0) {
                 wrapped[wrapped_count] = NULL;
                 execvp(wrapped[0], (char *const *)wrapped);
                 _exit(127);
@@ -200,9 +202,11 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc,
     }
     size_t len = 0;
     for (;;) {
-        if (len >= cap - 1) break;
+        if (len >= cap - 1)
+            break;
         ssize_t n = read(fds[0], buf + len, cap - len - 1);
-        if (n <= 0) break;
+        if (n <= 0)
+            break;
         len += (size_t)n;
     }
     buf[len] = '\0';
@@ -264,7 +268,8 @@ static const char *shell_parameters_json(void *ctx) {
 }
 
 static void shell_deinit(void *ctx, sc_allocator_t *alloc) {
-    if (!ctx) return;
+    if (!ctx)
+        return;
     sc_shell_ctx_t *s = (sc_shell_ctx_t *)ctx;
     if (s->workspace_dir && alloc)
         alloc->free(alloc->ctx, (void *)s->workspace_dir, s->workspace_dir_len + 1);
@@ -279,17 +284,18 @@ static const sc_tool_vtable_t shell_vtable = {
     .deinit = shell_deinit,
 };
 
-sc_error_t sc_shell_create(sc_allocator_t *alloc,
-    const char *workspace_dir, size_t workspace_dir_len,
-    sc_security_policy_t *policy,
-    sc_tool_t *out)
-{
+sc_error_t sc_shell_create(sc_allocator_t *alloc, const char *workspace_dir,
+                           size_t workspace_dir_len, sc_security_policy_t *policy, sc_tool_t *out) {
     sc_shell_ctx_t *s = (sc_shell_ctx_t *)calloc(1, sizeof(*s));
-    if (!s) return SC_ERR_OUT_OF_MEMORY;
+    if (!s)
+        return SC_ERR_OUT_OF_MEMORY;
 
     if (workspace_dir && workspace_dir_len > 0) {
         s->workspace_dir = sc_strndup(alloc, workspace_dir, workspace_dir_len);
-        if (!s->workspace_dir) { free(s); return SC_ERR_OUT_OF_MEMORY; }
+        if (!s->workspace_dir) {
+            free(s);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
         s->workspace_dir_len = workspace_dir_len;
     }
     s->policy = policy;

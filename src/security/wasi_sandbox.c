@@ -1,8 +1,8 @@
+#include "seaclaw/core/error.h"
 #include "seaclaw/security/sandbox.h"
 #include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/core/error.h"
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 /*
  * WASI sandbox: wraps commands with a WebAssembly runtime (wasmtime or wasmer).
@@ -25,12 +25,17 @@ static bool wasi_runtime_exists(void) {
 #if SC_IS_TEST
     return false;
 #elif defined(__linux__) || defined(__APPLE__)
-    if (access("/usr/local/bin/wasmtime", X_OK) == 0) return true;
-    if (access("/usr/bin/wasmtime", X_OK) == 0) return true;
-    if (access("/opt/homebrew/bin/wasmtime", X_OK) == 0) return true;
+    if (access("/usr/local/bin/wasmtime", X_OK) == 0)
+        return true;
+    if (access("/usr/bin/wasmtime", X_OK) == 0)
+        return true;
+    if (access("/opt/homebrew/bin/wasmtime", X_OK) == 0)
+        return true;
     /* Also check wasmer as fallback */
-    if (access("/usr/local/bin/wasmer", X_OK) == 0) return true;
-    if (access("/usr/bin/wasmer", X_OK) == 0) return true;
+    if (access("/usr/local/bin/wasmer", X_OK) == 0)
+        return true;
+    if (access("/usr/bin/wasmer", X_OK) == 0)
+        return true;
     return false;
 #else
     return false;
@@ -53,13 +58,16 @@ static const char *find_wasi_runtime(void) {
     return "wasmtime";
 }
 
-static sc_error_t wasi_wrap(void *ctx, const char *const *argv, size_t argc,
-    const char **buf, size_t buf_count, size_t *out_count) {
+static sc_error_t wasi_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+                            size_t buf_count, size_t *out_count) {
     sc_wasi_sandbox_ctx_t *wc = (sc_wasi_sandbox_ctx_t *)ctx;
     const size_t prefix_len = 4;
-    if (!buf || !out_count) return SC_ERR_INVALID_ARGUMENT;
-    if (buf_count < prefix_len + argc) return SC_ERR_INVALID_ARGUMENT;
-    if (!wc->workspace_dir[0]) return SC_ERR_INVALID_ARGUMENT;
+    if (!buf || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (buf_count < prefix_len + argc)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (!wc->workspace_dir[0])
+        return SC_ERR_INVALID_ARGUMENT;
 
     buf[0] = wc->runtime_path;
     buf[1] = "run";

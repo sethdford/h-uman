@@ -48,15 +48,12 @@ typedef struct sc_agent_pool sc_agent_pool_t;
 sc_agent_pool_t *sc_agent_pool_create(sc_allocator_t *alloc, uint32_t max_concurrent);
 void sc_agent_pool_destroy(sc_agent_pool_t *pool);
 
-sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool,
-    const sc_spawn_config_t *cfg,
-    const char *task, size_t task_len,
-    const char *label, uint64_t *out_id);
+sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool, const sc_spawn_config_t *cfg,
+                               const char *task, size_t task_len, const char *label,
+                               uint64_t *out_id);
 
-sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool,
-    uint64_t agent_id,
-    const char *message, size_t message_len,
-    char **out_response, size_t *out_response_len);
+sc_error_t sc_agent_pool_query(sc_agent_pool_t *pool, uint64_t agent_id, const char *message,
+                               size_t message_len, char **out_response, size_t *out_response_len);
 
 sc_agent_status_t sc_agent_pool_status(sc_agent_pool_t *pool, uint64_t agent_id);
 const char *sc_agent_pool_result(sc_agent_pool_t *pool, uint64_t agent_id);
@@ -74,6 +71,6 @@ typedef struct sc_agent_pool_info {
 } sc_agent_pool_info_t;
 
 sc_error_t sc_agent_pool_list(sc_agent_pool_t *pool, sc_allocator_t *alloc,
-    sc_agent_pool_info_t **out, size_t *out_count);
+                              sc_agent_pool_info_t **out, size_t *out_count);
 
 #endif /* SC_AGENT_SPAWN_H */

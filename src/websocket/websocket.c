@@ -2,25 +2,25 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include <stdint.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 #ifdef SC_HAS_TLS
-#include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/ssl.h>
 #endif
 
-#define SC_WS_MAGIC "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+#define SC_WS_MAGIC             "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 #define SC_WS_MAX_FRAME_PAYLOAD (4 * 1024 * 1024)
-#define SC_WS_MAX_MSG (64 * 1024)
+#define SC_WS_MAX_MSG           (64 * 1024)
 
 /* RFC 6455 opcodes */
 #define SC_WS_OP_CONTINUATION 0
@@ -44,19 +44,16 @@ struct sc_ws_client {
 };
 
 /* Build a masked WebSocket frame into buf. Returns bytes written. */
-size_t sc_ws_build_frame(char *buf, size_t buf_size,
-    unsigned opcode,
-    const char *payload, size_t payload_len,
-    const unsigned char mask_key[4])
-{
+size_t sc_ws_build_frame(char *buf, size_t buf_size, unsigned opcode, const char *payload,
+                         size_t payload_len, const unsigned char mask_key[4]) {
     if (buf_size < 6 || payload_len > SC_WS_MAX_FRAME_PAYLOAD)
         return 0;
 
     size_t pos = 0;
-    buf[pos++] = (char)(0x80 | (opcode & 0x0F));  /* FIN=1, opcode */
+    buf[pos++] = (char)(0x80 | (opcode & 0x0F)); /* FIN=1, opcode */
 
     if (payload_len <= 125) {
-        buf[pos++] = (char)(0x80 | (payload_len & 0x7F));  /* MASK=1, len */
+        buf[pos++] = (char)(0x80 | (payload_len & 0x7F)); /* MASK=1, len */
     } else if (payload_len <= 65535) {
         buf[pos++] = (char)(0x80 | 126);
         buf[pos++] = (char)((payload_len >> 8) & 0xFF);
@@ -89,16 +86,15 @@ size_t sc_ws_build_frame(char *buf, size_t buf_size,
 }
 
 /* Apply XOR mask in-place (for server→client frames). */
-void sc_ws_apply_mask(char *payload, size_t len, const unsigned char mask_key[4])
-{
+void sc_ws_apply_mask(char *payload, size_t len, const unsigned char mask_key[4]) {
     for (size_t i = 0; i < len; i++)
         payload[i] = (char)((unsigned char)payload[i] ^ mask_key[i % 4]);
 }
 
 /* Parse WebSocket frame header. Returns 0 on success, non-zero on error. */
-int sc_ws_parse_header(const char *bytes, size_t bytes_len, sc_ws_parsed_header_t *out)
-{
-    if (bytes_len < 2 || !out) return -1;
+int sc_ws_parse_header(const char *bytes, size_t bytes_len, sc_ws_parsed_header_t *out) {
+    if (bytes_len < 2 || !out)
+        return -1;
 
     out->fin = (bytes[0] & 0x80) != 0;
     out->opcode = bytes[0] & 0x0F;
@@ -107,19 +103,23 @@ int sc_ws_parse_header(const char *bytes, size_t bytes_len, sc_ws_parsed_header_
     size_t hlen = 2;
 
     if (payload_len == 126) {
-        if (bytes_len < 4) return -1;
+        if (bytes_len < 4)
+            return -1;
         payload_len = ((uint64_t)(unsigned char)bytes[2] << 8) | (unsigned char)bytes[3];
         hlen = 4;
     } else if (payload_len == 127) {
-        if (bytes_len < 10) return -1;
+        if (bytes_len < 10)
+            return -1;
         payload_len = 0;
         for (int i = 2; i < 10; i++)
             payload_len = (payload_len << 8) | (unsigned char)bytes[i];
         hlen = 10;
     }
 
-    if (out->masked) hlen += 4;
-    if (payload_len > SC_WS_MAX_FRAME_PAYLOAD) return -1;
+    if (out->masked)
+        hlen += 4;
+    if (payload_len > SC_WS_MAX_FRAME_PAYLOAD)
+        return -1;
 
     out->payload_len = (unsigned long long)payload_len;
     out->header_bytes = hlen;
@@ -150,9 +150,8 @@ static void ws_b64_encode_16(const unsigned char *in, char *out) {
 
 /* Parse ws:// or wss://host[:port][/path] into host, port, path.
  * Sets *use_tls to 1 for wss://, 0 for ws://. Returns 0 on success. */
-static int ws_parse_url(const char *url, char *host, size_t host_size,
-    uint16_t *port, char *path, size_t path_size, int *use_tls)
-{
+static int ws_parse_url(const char *url, char *host, size_t host_size, uint16_t *port, char *path,
+                        size_t path_size, int *use_tls) {
     int is_wss = 0;
     const char *p;
     if (strncmp(url, "wss://", 6) == 0) {
@@ -165,24 +164,32 @@ static int ws_parse_url(const char *url, char *host, size_t host_size,
     } else {
         return -1;
     }
-    if (use_tls) *use_tls = is_wss;
+    if (use_tls)
+        *use_tls = is_wss;
 
     const char *host_start = p;
-    while (*p && *p != ':' && *p != '/') p++;
+    while (*p && *p != ':' && *p != '/')
+        p++;
     size_t host_len = (size_t)(p - host_start);
-    if (host_len == 0 || host_len >= host_size) return -1;
+    if (host_len == 0 || host_len >= host_size)
+        return -1;
     memcpy(host, host_start, host_len);
     host[host_len] = '\0';
 
     if (*p == ':') {
         p++;
         unsigned pt = 0;
-        while (*p >= '0' && *p <= '9') { pt = pt * 10 + (*p++ - '0'); if (pt > 65535) return -1; }
+        while (*p >= '0' && *p <= '9') {
+            pt = pt * 10 + (*p++ - '0');
+            if (pt > 65535)
+                return -1;
+        }
         *port = (uint16_t)pt;
     }
     if (*p == '/') {
         size_t path_len = strlen(p);
-        if (path_len >= path_size) return -1;
+        if (path_len >= path_size)
+            return -1;
         memcpy(path, p, path_len + 1);
     } else {
         path[0] = '/';
@@ -192,11 +199,9 @@ static int ws_parse_url(const char *url, char *host, size_t host_size,
 }
 #endif
 
-sc_error_t sc_ws_connect(sc_allocator_t *alloc,
-    const char *url,
-    sc_ws_client_t **out)
-{
-    if (!alloc || !url || !out) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t **out) {
+    if (!alloc || !url || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
 #if SC_IS_TEST
@@ -283,43 +288,51 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc,
 
     size_t req_len = 0;
     req_len += (size_t)snprintf(NULL, 0,
-        "GET %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Key: %s\r\n"
-        "Sec-WebSocket-Version: 13\r\n"
-        "\r\n",
-        path, host, key_b64) + 1;
+                                "GET %s HTTP/1.1\r\n"
+                                "Host: %s\r\n"
+                                "Upgrade: websocket\r\n"
+                                "Connection: Upgrade\r\n"
+                                "Sec-WebSocket-Key: %s\r\n"
+                                "Sec-WebSocket-Version: 13\r\n"
+                                "\r\n",
+                                path, host, key_b64) +
+               1;
     char *req = (char *)alloc->alloc(alloc->ctx, req_len);
     if (!req) {
 #ifdef SC_HAS_TLS
-        if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+        if (ssl) {
+            SSL_free(ssl);
+            SSL_CTX_free(ssl_ctx);
+        }
 #endif
         close(sockfd);
         return SC_ERR_OUT_OF_MEMORY;
     }
     (void)snprintf(req, req_len,
-        "GET %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Key: %s\r\n"
-        "Sec-WebSocket-Version: 13\r\n"
-        "\r\n",
-        path, host, key_b64);
+                   "GET %s HTTP/1.1\r\n"
+                   "Host: %s\r\n"
+                   "Upgrade: websocket\r\n"
+                   "Connection: Upgrade\r\n"
+                   "Sec-WebSocket-Key: %s\r\n"
+                   "Sec-WebSocket-Version: 13\r\n"
+                   "\r\n",
+                   path, host, key_b64);
     size_t sent = 0;
     size_t to_send = strlen(req);
     while (sent < to_send) {
 #ifdef SC_HAS_TLS
-        ssize_t n = ssl ? (ssize_t)SSL_write(ssl, req + sent, (int)(to_send - sent)) : send(sockfd, req + sent, to_send - sent, 0);
+        ssize_t n = ssl ? (ssize_t)SSL_write(ssl, req + sent, (int)(to_send - sent))
+                        : send(sockfd, req + sent, to_send - sent, 0);
 #else
         ssize_t n = send(sockfd, req + sent, to_send - sent, 0);
 #endif
         if (n <= 0) {
             alloc->free(alloc->ctx, req, req_len);
 #ifdef SC_HAS_TLS
-            if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+            if (ssl) {
+                SSL_free(ssl);
+                SSL_CTX_free(ssl_ctx);
+            }
 #endif
             close(sockfd);
             return SC_ERR_IO;
@@ -333,13 +346,18 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc,
     size_t resp_len = 0;
     while (resp_len < sizeof(resp) - 1) {
 #ifdef SC_HAS_TLS
-        ssize_t n = ssl ? (ssize_t)SSL_read(ssl, resp + resp_len, (int)(sizeof(resp) - 1 - resp_len)) : recv(sockfd, resp + resp_len, sizeof(resp) - 1 - resp_len, 0);
+        ssize_t n =
+            ssl ? (ssize_t)SSL_read(ssl, resp + resp_len, (int)(sizeof(resp) - 1 - resp_len))
+                : recv(sockfd, resp + resp_len, sizeof(resp) - 1 - resp_len, 0);
 #else
         ssize_t n = recv(sockfd, resp + resp_len, sizeof(resp) - 1 - resp_len, 0);
 #endif
         if (n <= 0) {
 #ifdef SC_HAS_TLS
-            if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+            if (ssl) {
+                SSL_free(ssl);
+                SSL_CTX_free(ssl_ctx);
+            }
 #endif
             close(sockfd);
             return SC_ERR_IO;
@@ -351,21 +369,30 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc,
     }
     if (strstr(resp, "\r\n\r\n") == NULL) {
 #ifdef SC_HAS_TLS
-        if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+        if (ssl) {
+            SSL_free(ssl);
+            SSL_CTX_free(ssl_ctx);
+        }
 #endif
         close(sockfd);
         return SC_ERR_IO;
     }
     if (!strstr(resp, "101")) {
 #ifdef SC_HAS_TLS
-        if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+        if (ssl) {
+            SSL_free(ssl);
+            SSL_CTX_free(ssl_ctx);
+        }
 #endif
         close(sockfd);
         return SC_ERR_IO; /* Expected 101 Switching Protocols */
     }
     if (!strstr(resp, "Upgrade:") || !strstr(resp, "websocket")) {
 #ifdef SC_HAS_TLS
-        if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+        if (ssl) {
+            SSL_free(ssl);
+            SSL_CTX_free(ssl_ctx);
+        }
 #endif
         close(sockfd);
         return SC_ERR_IO;
@@ -374,7 +401,10 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc,
     sc_ws_client_t *ws = (sc_ws_client_t *)alloc->alloc(alloc->ctx, sizeof(sc_ws_client_t));
     if (!ws) {
 #ifdef SC_HAS_TLS
-        if (ssl) { SSL_free(ssl); SSL_CTX_free(ssl_ctx); }
+        if (ssl) {
+            SSL_free(ssl);
+            SSL_CTX_free(ssl_ctx);
+        }
 #endif
         close(sockfd);
         return SC_ERR_OUT_OF_MEMORY;
@@ -395,17 +425,17 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc,
 #endif
 }
 
-sc_error_t sc_ws_send(sc_ws_client_t *ws,
-    const char *data,
-    size_t data_len)
-{
-    if (!ws || !data) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_ws_send(sc_ws_client_t *ws, const char *data, size_t data_len) {
+    if (!ws || !data)
+        return SC_ERR_INVALID_ARGUMENT;
 #if SC_IS_TEST
     (void)data_len;
     return SC_ERR_NOT_SUPPORTED;
 #elif defined(SC_GATEWAY_POSIX)
-    if (data_len > SC_WS_MAX_MSG) return SC_ERR_INVALID_ARGUMENT;
-    if (ws->sockfd == SC_WS_INVALID_SOCK) return SC_ERR_IO;
+    if (data_len > SC_WS_MAX_MSG)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (ws->sockfd == SC_WS_INVALID_SOCK)
+        return SC_ERR_IO;
 
     unsigned char mask_key[4];
 #if defined(__linux__) || defined(__APPLE__)
@@ -421,18 +451,20 @@ sc_error_t sc_ws_send(sc_ws_client_t *ws,
     }
 
     char buf[SC_WS_MAX_MSG + 14]; /* max header 14 bytes for len 64K */
-    size_t frame_len = sc_ws_build_frame(buf, sizeof(buf), SC_WS_OP_TEXT,
-        data, data_len, mask_key);
-    if (frame_len == 0) return SC_ERR_INVALID_ARGUMENT;
+    size_t frame_len = sc_ws_build_frame(buf, sizeof(buf), SC_WS_OP_TEXT, data, data_len, mask_key);
+    if (frame_len == 0)
+        return SC_ERR_INVALID_ARGUMENT;
 
     size_t sent = 0;
     while (sent < frame_len) {
 #ifdef SC_HAS_TLS
-        ssize_t n = ws->ssl ? (ssize_t)SSL_write(ws->ssl, buf + sent, (int)(frame_len - sent)) : send(ws->sockfd, buf + sent, frame_len - sent, 0);
+        ssize_t n = ws->ssl ? (ssize_t)SSL_write(ws->ssl, buf + sent, (int)(frame_len - sent))
+                            : send(ws->sockfd, buf + sent, frame_len - sent, 0);
 #else
         ssize_t n = send(ws->sockfd, buf + sent, frame_len - sent, 0);
 #endif
-        if (n <= 0) return SC_ERR_IO;
+        if (n <= 0)
+            return SC_ERR_IO;
         sent += (size_t)n;
     }
     return SC_OK;
@@ -442,47 +474,53 @@ sc_error_t sc_ws_send(sc_ws_client_t *ws,
 #endif
 }
 
-sc_error_t sc_ws_recv(sc_ws_client_t *ws,
-    sc_allocator_t *alloc,
-    char **data_out,
-    size_t *data_len_out)
-{
-    if (!ws || !alloc || !data_out || !data_len_out) return SC_ERR_INVALID_ARGUMENT;
+sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out,
+                      size_t *data_len_out) {
+    if (!ws || !alloc || !data_out || !data_len_out)
+        return SC_ERR_INVALID_ARGUMENT;
     *data_out = NULL;
     *data_len_out = 0;
 
 #if SC_IS_TEST
     return SC_ERR_NOT_SUPPORTED;
 #elif defined(SC_GATEWAY_POSIX)
-    if (ws->sockfd == SC_WS_INVALID_SOCK) return SC_ERR_IO;
+    if (ws->sockfd == SC_WS_INVALID_SOCK)
+        return SC_ERR_IO;
 
     for (;;) {
         char hdr_buf[14];
         size_t hdr_read = 0;
         while (hdr_read < 2) {
 #ifdef SC_HAS_TLS
-            ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, hdr_buf + hdr_read, 2 - hdr_read) : recv(ws->sockfd, hdr_buf + hdr_read, 2 - hdr_read, 0);
+            ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, hdr_buf + hdr_read, 2 - hdr_read)
+                                : recv(ws->sockfd, hdr_buf + hdr_read, 2 - hdr_read, 0);
 #else
             ssize_t n = recv(ws->sockfd, hdr_buf + hdr_read, 2 - hdr_read, 0);
 #endif
-            if (n <= 0) return SC_ERR_IO;
+            if (n <= 0)
+                return SC_ERR_IO;
             hdr_read += (size_t)n;
         }
         /* Compute full header size: 2 + (2 if len=126, 8 if len=127) + (4 if masked) */
         size_t need = 2;
         {
             uint8_t b1 = (uint8_t)hdr_buf[1];
-            if ((b1 & 0x7F) == 126) need = 4;
-            else if ((b1 & 0x7F) == 127) need = 10;
-            if (b1 & 0x80) need += 4;
+            if ((b1 & 0x7F) == 126)
+                need = 4;
+            else if ((b1 & 0x7F) == 127)
+                need = 10;
+            if (b1 & 0x80)
+                need += 4;
         }
         while (hdr_read < need) {
 #ifdef SC_HAS_TLS
-            ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, hdr_buf + hdr_read, need - hdr_read) : recv(ws->sockfd, hdr_buf + hdr_read, need - hdr_read, 0);
+            ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, hdr_buf + hdr_read, need - hdr_read)
+                                : recv(ws->sockfd, hdr_buf + hdr_read, need - hdr_read, 0);
 #else
             ssize_t n = recv(ws->sockfd, hdr_buf + hdr_read, need - hdr_read, 0);
 #endif
-            if (n <= 0) return SC_ERR_IO;
+            if (n <= 0)
+                return SC_ERR_IO;
             hdr_read += (size_t)n;
         }
 
@@ -496,11 +534,15 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws,
         char *payload = NULL;
         if (hdr.payload_len > 0) {
             payload = (char *)alloc->alloc(alloc->ctx, hdr.payload_len + 1);
-            if (!payload) return SC_ERR_OUT_OF_MEMORY;
+            if (!payload)
+                return SC_ERR_OUT_OF_MEMORY;
             size_t pl_read = 0;
             while (pl_read < hdr.payload_len) {
 #ifdef SC_HAS_TLS
-                ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, payload + pl_read, (int)(hdr.payload_len - pl_read)) : recv(ws->sockfd, payload + pl_read, hdr.payload_len - pl_read, 0);
+                ssize_t n = ws->ssl
+                                ? (ssize_t)SSL_read(ws->ssl, payload + pl_read,
+                                                    (int)(hdr.payload_len - pl_read))
+                                : recv(ws->sockfd, payload + pl_read, hdr.payload_len - pl_read, 0);
 #else
                 ssize_t n = recv(ws->sockfd, payload + pl_read, hdr.payload_len - pl_read, 0);
 #endif
@@ -523,42 +565,50 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws,
             if (hdr.payload_len <= 125) {
                 char pong_buf[128];
                 unsigned char mask[4] = {0, 0, 0, 0};
-                size_t pl = sc_ws_build_frame(pong_buf, sizeof(pong_buf),
-                    SC_WS_OP_PONG, payload ? payload : "", hdr.payload_len, mask);
+                size_t pl = sc_ws_build_frame(pong_buf, sizeof(pong_buf), SC_WS_OP_PONG,
+                                              payload ? payload : "", hdr.payload_len, mask);
                 if (pl > 0) {
                     size_t sent = 0;
                     while (sent < pl) {
 #ifdef SC_HAS_TLS
-                        ssize_t nn = ws->ssl ? (ssize_t)SSL_write(ws->ssl, pong_buf + sent, (int)(pl - sent)) : send(ws->sockfd, pong_buf + sent, pl - sent, 0);
+                        ssize_t nn =
+                            ws->ssl ? (ssize_t)SSL_write(ws->ssl, pong_buf + sent, (int)(pl - sent))
+                                    : send(ws->sockfd, pong_buf + sent, pl - sent, 0);
 #else
                         ssize_t nn = send(ws->sockfd, pong_buf + sent, pl - sent, 0);
 #endif
-                        if (nn <= 0) break;
+                        if (nn <= 0)
+                            break;
                         sent += (size_t)nn;
                     }
                 }
             }
-            if (payload) alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
+            if (payload)
+                alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             continue;
         case SC_WS_OP_PONG:
         case SC_WS_OP_CONTINUATION:
-            if (payload) alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
+            if (payload)
+                alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             continue;
         case SC_WS_OP_CLOSE:
-            if (payload) alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
+            if (payload)
+                alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             ws->sockfd = SC_WS_INVALID_SOCK;
             return SC_ERR_IO; /* Connection closed by server */
         case SC_WS_OP_TEXT:
         case SC_WS_OP_BINARY:
             *data_out = payload ? payload : (char *)alloc->alloc(alloc->ctx, 1);
             *data_len_out = hdr.payload_len;
-            if (!*data_out && hdr.payload_len > 0) return SC_ERR_OUT_OF_MEMORY;
+            if (!*data_out && hdr.payload_len > 0)
+                return SC_ERR_OUT_OF_MEMORY;
             if (hdr.payload_len == 0 && *data_out) {
                 (*data_out)[0] = '\0';
             }
             return SC_OK;
         default:
-            if (payload) alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
+            if (payload)
+                alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             continue;
         }
     }
@@ -567,24 +617,25 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws,
 #endif
 }
 
-void sc_ws_close(sc_ws_client_t *ws, sc_allocator_t *alloc)
-{
-    if (!ws) return;
+void sc_ws_close(sc_ws_client_t *ws, sc_allocator_t *alloc) {
+    if (!ws)
+        return;
 #if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
     if (ws->sockfd != SC_WS_INVALID_SOCK) {
         char close_buf[16];
         unsigned char mask[4] = {0, 0, 0, 0};
-        size_t n = sc_ws_build_frame(close_buf, sizeof(close_buf),
-            SC_WS_OP_CLOSE, "", 0, mask);
+        size_t n = sc_ws_build_frame(close_buf, sizeof(close_buf), SC_WS_OP_CLOSE, "", 0, mask);
         if (n > 0) {
             size_t sent = 0;
             while (sent < n) {
 #ifdef SC_HAS_TLS
-                ssize_t r = ws->ssl ? (ssize_t)SSL_write(ws->ssl, close_buf + sent, (int)(n - sent)) : send(ws->sockfd, close_buf + sent, n - sent, 0);
+                ssize_t r = ws->ssl ? (ssize_t)SSL_write(ws->ssl, close_buf + sent, (int)(n - sent))
+                                    : send(ws->sockfd, close_buf + sent, n - sent, 0);
 #else
                 ssize_t r = send(ws->sockfd, close_buf + sent, n - sent, 0);
 #endif
-                if (r <= 0) break;
+                if (r <= 0)
+                    break;
                 sent += (size_t)r;
             }
         }

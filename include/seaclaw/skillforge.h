@@ -12,7 +12,7 @@
 typedef struct sc_skill {
     char *name;
     char *description;
-    char *parameters;  /* JSON string, may be NULL */
+    char *parameters; /* JSON string, may be NULL */
     bool enabled;
 } sc_skill_t;
 
@@ -43,14 +43,14 @@ sc_skill_t *sc_skillforge_get_skill(const sc_skillforge_t *sf, const char *name)
 /**
  * List all registered skills. Output is owned by sf; valid until destroy.
  */
-sc_error_t sc_skillforge_list_skills(const sc_skillforge_t *sf,
-    sc_skill_t **out, size_t *out_count);
+sc_error_t sc_skillforge_list_skills(const sc_skillforge_t *sf, sc_skill_t **out,
+                                     size_t *out_count);
 
 sc_error_t sc_skillforge_enable(sc_skillforge_t *sf, const char *name);
 sc_error_t sc_skillforge_disable(sc_skillforge_t *sf, const char *name);
 
-sc_error_t sc_skillforge_execute(sc_allocator_t *alloc, const sc_skillforge_t *sf,
-    const char *name, char **out_instructions);
+sc_error_t sc_skillforge_execute(sc_allocator_t *alloc, const sc_skillforge_t *sf, const char *name,
+                                 char **out_instructions);
 
 sc_error_t sc_skillforge_install(const char *name, const char *url);
 
