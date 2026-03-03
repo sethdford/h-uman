@@ -71,6 +71,12 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->agent.compaction_max_summary_chars = 2000;
     cfg->agent.compaction_max_source_chars = 12000;
     cfg->agent.message_timeout_secs = 600;
+    cfg->agent.pool_max_concurrent = 8;
+    cfg->agent.default_profile = NULL;
+    cfg->policy.enabled = false;
+    cfg->policy.rules_json = NULL;
+    cfg->plugins.enabled = false;
+    cfg->plugins.plugin_dir = NULL;
     cfg->reliability.provider_retries = 2;
     cfg->reliability.provider_backoff_ms = 500;
     cfg->reliability.channel_initial_backoff_secs = 2;

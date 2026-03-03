@@ -1,7 +1,11 @@
 ---
 import "../styles/global.css";
 import Nav from "../components/Nav.astro";
-import { Monitor, CircuitBoard, Cloud, Cpu } from "@lucide/astro";
+
+const iconMonitor = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H108v16H80a8,8,0,0,0,0,16h96a8,8,0,0,0,0-16H148V200h60a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40ZM48,56H208a8,8,0,0,1,8,8V160H40V64A8,8,0,0,1,48,56ZM208,184H48a8,8,0,0,1-8-8v-0H216v0A8,8,0,0,1,208,184Z"/></svg>';
+const iconCircuitBoard = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M208,36H48A12,12,0,0,0,36,48V208a12,12,0,0,0,12,12H208a12,12,0,0,0,12-12V48A12,12,0,0,0,208,36Zm-4,168H52V52H204ZM116,96a12,12,0,1,1-12-12A12,12,0,0,1,116,96Zm64,64a12,12,0,1,1-12-12A12,12,0,0,1,180,160Z"/></svg>';
+const iconCloud = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M160,40A88.09,88.09,0,0,0,81.29,88.68,64,64,0,1,0,72,216h88a88,88,0,0,0,0-176Zm0,160H72a48,48,0,0,1,0-96c1.1,0,2.2,0,3.29.11A88,88,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,72,72Z"/></svg>';
+const iconCpu = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M152,96H104a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V104A8,8,0,0,0,152,96Zm-8,48H112V112h32ZM224,120H208V96a24,24,0,0,0-24-24H160V48a8,8,0,0,0-16,0V72H112V48a8,8,0,0,0-16,0V72H72A24,24,0,0,0,48,96v24H32a8,8,0,0,0,0,16H48v16H32a8,8,0,0,0,0,16H48v16a24,24,0,0,0,24,24H96v24a8,8,0,0,0,16,0V208h32v24a8,8,0,0,0,16,0V208h24a24,24,0,0,0,24-24V160h16a8,8,0,0,0,0-16H208V128h16a8,8,0,0,0,0-16Zm-32,64a8,8,0,0,1-8,8H72a8,8,0,0,1-8-8V96a8,8,0,0,1,8-8H184a8,8,0,0,1,8,8Z"/></svg>';
 
 const rawBase = import.meta.env.BASE_URL;
 const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
@@ -86,7 +90,7 @@ const tools = [
           class="hero-logo w-20 h-20 md:w-24 md:h-24 mx-auto mb-10 opacity-0"
           style={`filter: drop-shadow(0 0 40px var(--color-accent-glow)); animation: float 6s ease-in-out infinite;`}
         />
-        <h1 class="hero-headline font-serif text-[clamp(2.5rem,7vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em;">
+        <h1 class="hero-headline font-sans font-black text-[clamp(2.5rem,7vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em;">
           Bring AI to every device on&nbsp;Earth.
         </h1>
         <p class="hero-desc text-[clamp(1.05rem,2.2vw,1.3rem)] leading-relaxed mb-10 opacity-0 max-w-2xl mx-auto" style="color: var(--color-text-secondary)">
@@ -114,7 +118,7 @@ const tools = [
             { count: 43, label: "Tools" },
           ].map((stat, i, arr) => (
             <div class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`} style="border-color: var(--color-border)">
-              <div class="font-serif text-[clamp(2rem,4vw,3rem)] leading-none" style="color: var(--color-text)" data-count={stat.count} data-prefix={stat.prefix || ""} data-suffix={stat.suffix || ""}>
+              <div class="font-sans font-black text-[clamp(2rem,4vw,3rem)] leading-none" style="color: var(--color-text)" data-count={stat.count} data-prefix={stat.prefix || ""} data-suffix={stat.suffix || ""}>
                 {stat.prefix && <span class="count-prefix">{stat.prefix}</span>}
                 <span class="count-value">0</span>
                 {stat.suffix && <span class="count-suffix">{stat.suffix}</span>}
@@ -130,7 +134,7 @@ const tools = [
 
     <section class="relative min-h-[85vh] flex flex-col items-center justify-center px-6">
       <div class="max-w-2xl mx-auto text-center">
-        <h2 class="bloat-title font-serif text-[clamp(2rem,5vw,3.5rem)] mb-16 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
+        <h2 class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
           To run an AI assistant today, you need...
         </h2>
         <div class="bloat-stack flex flex-col items-center gap-3 mb-12">
@@ -153,19 +157,19 @@ const tools = [
 
     <section id="use-cases" class="py-16 md:py-32 px-6">
       <div class="max-w-5xl mx-auto">
-        <h2 class="spectrum-title font-serif text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
+        <h2 class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
           From data centers to five-dollar boards.
         </h2>
         <p class="spectrum-sub text-lg mb-16 text-center opacity-0" style="color: var(--color-text-secondary)">The same static binary. The same config. Every device.</p>
         <div class="grid md:grid-cols-4 gap-5">
           {[
-            { Icon: Cloud, title: "Cloud", desc: "Docker, WASM, Cloudflare Workers. Full gateway with webhooks, tunnels, and multi-channel routing." },
-            { Icon: Monitor, title: "Workstation", desc: "macOS, Linux, Windows. Interactive TUI, local Ollama/llama.cpp. No cloud dependency." },
-            { Icon: CircuitBoard, title: "Edge", desc: "Raspberry Pi, ARM SBCs. Under 5 MB RAM. Under 2 ms startup. Runs headless on boot." },
-            { Icon: Cpu, title: "Embedded", desc: "Arduino, STM32, Nucleo. Serial JSON protocol. Hardware peripherals via vtable interface." },
-          ].map(({ Icon, title, desc }) => (
+            { icon: iconCloud, title: "Cloud", desc: "Docker, WASM, Cloudflare Workers. Full gateway with webhooks, tunnels, and multi-channel routing." },
+            { icon: iconMonitor, title: "Workstation", desc: "macOS, Linux, Windows. Interactive TUI, local Ollama/llama.cpp. No cloud dependency." },
+            { icon: iconCircuitBoard, title: "Edge", desc: "Raspberry Pi, ARM SBCs. Under 5 MB RAM. Under 2 ms startup. Runs headless on boot." },
+            { icon: iconCpu, title: "Embedded", desc: "Arduino, STM32, Nucleo. Serial JSON protocol. Hardware peripherals via vtable interface." },
+          ].map(({ icon, title, desc }) => (
             <div class="spectrum-card opacity-0 glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1" style={`--tw-shadow: var(--shadow-md);`}>
-              <Icon class="w-8 h-8 mx-auto mb-4" style="color: var(--color-text-tertiary)" strokeWidth={1.5} />
+              <span class="w-8 h-8 mx-auto mb-4 flex items-center justify-center [&>svg]:flex-shrink-0" style="color: var(--color-text-tertiary)" set:html={icon} />
               <h3 class="text-lg font-semibold mb-3" style="color: var(--color-text)">{title}</h3>
               <p class="text-[14px] leading-relaxed" style="color: var(--color-text-secondary)">{desc}</p>
             </div>
@@ -180,7 +184,7 @@ const tools = [
       <div class="ambient-coral" style="top: 20%; left: 10%;"></div>
       <div class="ambient-blue" style="bottom: 10%; right: 15%;"></div>
       <div class="max-w-4xl mx-auto text-center">
-        <h2 class="arch-title font-serif text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
+        <h2 class="arch-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
           Swap anything. Lock in nothing.
         </h2>
         <p class="arch-sub text-lg mb-20 opacity-0" style="color: var(--color-text-secondary)">Every subsystem is a vtable interface. Change any layer with a config edit.</p>
@@ -228,7 +232,7 @@ const tools = [
 
     <section class="py-16 md:py-32 px-6">
       <div class="max-w-4xl mx-auto text-center">
-        <h2 class="providers-title font-serif text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
+        <h2 class="providers-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
           50+ providers. 21 channels. 43 tools.
         </h2>
         <p class="providers-sub text-lg mb-16 opacity-0" style="color: var(--color-text-secondary)">Connect to any AI model. Reach users on any platform.</p>
@@ -259,7 +263,7 @@ const tools = [
 
     <section class="py-16 md:py-32 px-6">
       <div class="max-w-3xl mx-auto">
-        <h2 class="terminal-title font-serif text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
+        <h2 class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
           Three commands. Zero dependencies.
         </h2>
         <p class="terminal-sub text-lg mb-12 text-center opacity-0" style="color: var(--color-text-secondary)">Clone, build, run. No containers. No interpreters. No package managers.</p>
@@ -282,7 +286,7 @@ const tools = [
       <div class="ambient-coral" style="top: 30%; left: 30%;"></div>
       <div class="ambient-blue" style="top: 40%; right: 20%;"></div>
       <div class="max-w-3xl mx-auto text-center">
-        <h2 class="cta-title font-serif text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em;">
+        <h2 class="cta-title font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em;">
           Bring AI to every device on&nbsp;Earth.
         </h2>
         <p class="cta-sub text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 opacity-0 max-w-xl mx-auto leading-relaxed" style="color: var(--color-text-secondary)">

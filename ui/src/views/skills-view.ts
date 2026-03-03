@@ -155,19 +155,20 @@ export class ScSkillsView extends GatewayAwareLitElement {
 
   private async installSkill(): Promise<void> {
     const gw = this.gateway;
-    if (!gw || !this.installUrl.trim()) return;
+    const raw = this.installUrl.trim();
+    if (!gw || !raw) return;
     this.error = "";
+    const name =
+      raw
+        .split("/")
+        .pop()
+        ?.replace(/\.skill\.json$/, "") || raw;
     try {
-      await gw.request("skills.install", {
-        name: this.installUrl.trim(),
-      });
+      await gw.request("skills.install", { name, url: raw });
       this.installUrl = "";
       await this.loadSkills();
     } catch (e) {
-      this.error =
-        e instanceof Error
-          ? e.message
-          : "Install not supported or failed (skills.install may be unavailable)";
+      this.error = e instanceof Error ? e.message : "Install failed";
     }
   }
 

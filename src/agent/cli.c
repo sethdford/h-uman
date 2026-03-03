@@ -6,6 +6,9 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/cron.h"
+#include "seaclaw/agent/profile.h"
+#include "seaclaw/observability/otel.h"
+#include "seaclaw/plugin.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
 #include "seaclaw/memory/retrieval.h"
@@ -465,6 +468,44 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         sc_config_deinit(&cfg);
         return err;
     }
+    agent.agent_pool = cli_agent_pool;
+    agent.mailbox = cli_mailbox;
+    agent.policy_engine = NULL;
+
+    if (cfg.policy.enabled) {
+        agent.policy_engine = sc_policy_engine_create(alloc);
+    }
+
+    if (cfg.agent.default_profile) {
+        const sc_agent_profile_t *prof = sc_agent_profile_by_name(cfg.agent.default_profile, strlen(cfg.agent.default_profile));
+        if (prof) {
+            if (prof->preferred_model && prof->preferred_model[0] && !parsed_args.model) {
+                char *old = agent.model_name;
+                size_t old_len = agent.model_name_len;
+                agent.model_name = sc_strndup(alloc, prof->preferred_model, strlen(prof->preferred_model));
+                agent.model_name_len = strlen(prof->preferred_model);
+                if (old) alloc->free(alloc->ctx, old, old_len + 1);
+            }
+            if (prof->temperature > 0) agent.temperature = prof->temperature;
+            if (prof->max_iterations > 0) agent.max_tool_iterations = prof->max_iterations;
+            if (prof->max_history > 0) agent.max_history_messages = prof->max_history;
+        }
+    }
+
+    sc_observer_t otel_observer = {0};
+    if (cfg.diagnostics.otel_endpoint && cfg.diagnostics.otel_endpoint[0]) {
+        sc_otel_config_t otel_cfg = {
+            .endpoint = cfg.diagnostics.otel_endpoint,
+            .endpoint_len = strlen(cfg.diagnostics.otel_endpoint),
+            .service_name = cfg.diagnostics.otel_service_name ? cfg.diagnostics.otel_service_name : "seaclaw",
+            .service_name_len = cfg.diagnostics.otel_service_name ? strlen(cfg.diagnostics.otel_service_name) : 7,
+            .enable_traces = true, .enable_metrics = true, .enable_logs = true,
+        };
+        if (sc_otel_observer_create(alloc, &otel_cfg, &otel_observer) == SC_OK && otel_observer.vtable) {
+            agent.observer = &otel_observer;
+        }
+    }
+
     sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
 
     /* TUI mode: launch split-pane terminal UI if --tui was passed */

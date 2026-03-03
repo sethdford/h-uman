@@ -1,5 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { icons } from "../icons.js";
 
 type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
@@ -14,185 +15,6 @@ interface NavSection {
   items: NavItem[];
 }
 
-/* 20×20 stroked icons, stroke-width 1.5, stroke currentColor, fill none */
-const icons = {
-  grid: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <rect x="2" y="2" width="6" height="6" />
-    <rect x="12" y="2" width="6" height="6" />
-    <rect x="2" y="12" width="6" height="6" />
-    <rect x="12" y="12" width="6" height="6" />
-  </svg>`,
-  "message-square": html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M3 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7l-2 2V4z" />
-  </svg>`,
-  clock: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <circle cx="10" cy="10" r="7" />
-    <path d="M10 6v4l2 2" />
-  </svg>`,
-  cpu: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <rect x="4" y="4" width="12" height="12" rx="1" />
-    <path
-      d="M7 4V2M13 4V2M7 18v-2M13 18v-2M4 7H2M4 13H2M18 7h2M18 13h2M2 10h2M18 10h2M4 10h12M10 4v12"
-    />
-  </svg>`,
-  box: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M3 6l7-3 7 3M3 6v8l7 3 7-3V6M10 3v14" />
-  </svg>`,
-  mic: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M10 1a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-    <path d="M15 8v1a5 5 0 0 1-10 0V8" />
-    <line x1="10" y1="16" x2="10" y2="19" />
-    <line x1="7" y1="19" x2="13" y2="19" />
-  </svg>`,
-  wrench: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M14.7 6.3a1 1 0 0 0 0-1.4l-1.4-1.4a1 1 0 0 0-1.4 0l-5 5a4 4 0 1 0 1.4 1.4l5-5z" />
-    <circle cx="6" cy="14" r="2" />
-  </svg>`,
-  radio: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M5 15h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z" />
-    <path d="M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
-    <line x1="2" y1="9" x2="18" y2="9" />
-  </svg>`,
-  puzzle: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path
-      d="M4 4h4v4c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2V4h4v12h-4v-4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v4H4V4z"
-    />
-  </svg>`,
-  timer: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <circle cx="10" cy="10" r="7" />
-    <path d="M10 6v4l3 3" />
-  </svg>`,
-  settings: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <circle cx="10" cy="10" r="2.5" />
-    <path
-      d="M10 3v1M10 16v1M16 10h1M3 10h1M14.5 5.5l.7.7M4.8 15.2l.7.7M15.2 14.5l.7-.7M4.2 4.8l.7-.7M5.5 14.5l-.7.7M15.2 4.8l-.7-.7M4.8 4.2l-.7-.7"
-    />
-  </svg>`,
-  server: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <rect x="2" y="2" width="16" height="5" rx="1" />
-    <rect x="2" y="9" width="16" height="5" rx="1" />
-    <line x1="6" y1="5" x2="6" y2="5" />
-    <line x1="10" y1="5" x2="10" y2="5" />
-    <line x1="6" y1="12" x2="6" y2="12" />
-    <line x1="10" y1="12" x2="10" y2="12" />
-  </svg>`,
-  "bar-chart": html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M4 17V14M10 17V10M16 17V6" />
-  </svg>`,
-  terminal: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <rect x="2" y="3" width="16" height="14" rx="1" />
-    <path d="M6 8l4 4-4 4M11 13h3" />
-  </svg>`,
-  chevron: html`<svg
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M12 6l-4 4 4 4" />
-  </svg>`,
-};
-
 const SECTIONS: NavSection[] = [
   {
     title: "Core",
@@ -205,8 +27,8 @@ const SECTIONS: NavSection[] = [
   {
     title: "AI",
     items: [
-      { id: "agents", label: "Agents", icon: icons.cpu },
-      { id: "models", label: "Models", icon: icons.box },
+      { id: "agents", label: "Agents", icon: icons.zap },
+      { id: "models", label: "Models", icon: icons.cpu },
       { id: "voice", label: "Voice", icon: icons.mic },
     ],
   },
@@ -326,28 +148,29 @@ export class ScSidebar extends LitElement {
       padding: var(--sc-space-sm) var(--sc-space-md);
       background: transparent;
       border: none;
-      border-left: 2px solid transparent;
+      border-left: 3px solid transparent;
       border-radius: var(--sc-radius-sm);
       font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
       cursor: pointer;
       transition:
         background var(--sc-duration-fast),
-        color var(--sc-duration-fast);
+        color var(--sc-duration-fast),
+        border-color var(--sc-duration-fast);
       margin-bottom: var(--sc-space-xs);
       text-align: left;
       font-family: inherit;
     }
 
-    .nav-item:hover {
+    .nav-item:hover:not(.active) {
       background: var(--sc-bg-elevated);
       color: var(--sc-text);
     }
 
     .nav-item.active {
       background: var(--sc-accent-subtle);
+      border-left: 3px solid var(--sc-accent);
       color: var(--sc-accent);
-      border-left-color: var(--sc-accent);
     }
 
     :host([collapsed]) .nav-item {
@@ -365,7 +188,9 @@ export class ScSidebar extends LitElement {
       height: 20px;
     }
 
-    .nav-item .icon svg {
+    .nav-item .icon svg,
+    .nav-item svg {
+      flex-shrink: 0;
       width: 100%;
       height: 100%;
     }
@@ -511,6 +336,7 @@ export class ScSidebar extends LitElement {
                       class="nav-item ${this.activeTab === item.id ? "active" : ""}"
                       ?aria-current=${this.activeTab === item.id}
                       aria-label=${item.label}
+                      title=${this.collapsed ? item.label : undefined}
                       @click=${() => this._dispatchTabChange(item.id)}
                     >
                       <span class="icon">${item.icon}</span>

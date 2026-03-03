@@ -67,7 +67,19 @@ typedef struct sc_agent_config {
     uint32_t compaction_max_summary_chars;
     uint32_t compaction_max_source_chars;
     uint64_t message_timeout_secs;
+    uint32_t pool_max_concurrent;
+    char *default_profile;
 } sc_agent_config_t;
+
+typedef struct sc_policy_config {
+    bool enabled;
+    char *rules_json;
+} sc_policy_config_t;
+
+typedef struct sc_plugins_config {
+    bool enabled;
+    char *plugin_dir;
+} sc_plugins_config_t;
 
 typedef struct sc_heartbeat_config {
     bool enabled;
@@ -257,6 +269,8 @@ typedef struct sc_config {
     sc_scheduler_config_t scheduler;
     sc_mcp_server_entry_t mcp_servers[SC_MCP_SERVERS_MAX];
     size_t mcp_servers_len;
+    sc_policy_config_t policy;
+    sc_plugins_config_t plugins;
     sc_arena_t *arena;
     sc_allocator_t allocator;
 } sc_config_t;

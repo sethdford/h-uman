@@ -14,6 +14,12 @@
 #include "seaclaw/security.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/voice.h"
+#include "seaclaw/agent/spawn.h"
+#include "seaclaw/agent/mailbox.h"
+#include "seaclaw/security/policy_engine.h"
+#include "seaclaw/agent/spawn.h"
+#include "seaclaw/agent/mailbox.h"
+#include "seaclaw/security/policy_engine.h"
 #include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -91,6 +97,10 @@ struct sc_agent {
     sc_voice_config_t *voice_config; /* optional; if NULL, TTS is skipped even if enabled */
 
     sc_arena_t *turn_arena; /* per-turn bump allocator for ephemeral allocations */
+
+    sc_agent_pool_t *agent_pool;
+    sc_mailbox_t *mailbox;
+    sc_policy_engine_t *policy_engine;
 };
 
 /* Create agent from minimal config (no full config loader yet). */
