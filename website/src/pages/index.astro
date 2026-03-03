@@ -220,16 +220,17 @@ const tools = [
           </g>
 
           {[
-            { cx: 300, cy: 100, label: "Providers" },
-            { cx: 441, cy: 159, label: "Channels" },
-            { cx: 500, cy: 300, label: "Memory" },
-            { cx: 441, cy: 441, label: "Tools" },
-            { cx: 300, cy: 500, label: "Security" },
-            { cx: 159, cy: 441, label: "Runtime" },
-            { cx: 100, cy: 300, label: "Tunnels" },
-            { cx: 159, cy: 159, label: "Hardware" },
-          ].map(({ cx, cy, label }) => (
-            <g class="arch-node opacity-0">
+            { cx: 300, cy: 100, label: "Providers", tip: "50+ AI model providers: OpenAI, Anthropic, Ollama, and more" },
+            { cx: 441, cy: 159, label: "Channels", tip: "20 messaging channels: Telegram, Discord, Slack, iMessage" },
+            { cx: 500, cy: 300, label: "Memory", tip: "SQLite + FTS5 + vector embeddings for persistent context" },
+            { cx: 441, cy: 441, label: "Tools", tip: "53 tools: shell, files, git, browser, web search, hardware" },
+            { cx: 300, cy: 500, label: "Security", tip: "Sandbox, AEAD encryption, path traversal protection" },
+            { cx: 159, cy: 441, label: "Runtime", tip: "Native, Docker, WASM, Cloudflare Workers" },
+            { cx: 100, cy: 300, label: "Tunnels", tip: "Cloudflare, ngrok, Tailscale for webhook exposure" },
+            { cx: 159, cy: 159, label: "Hardware", tip: "Arduino, STM32, Raspberry Pi peripherals" },
+          ].map(({ cx, cy, label, tip }) => (
+            <g class="arch-node opacity-0" style="cursor: pointer;">
+              <title>{tip}</title>
               <circle cx={cx} cy={cy} r="30" fill="var(--color-node-fill)" stroke="var(--color-node-stroke)" stroke-width="1" filter="url(#node-shadow)" />
               <text x={cx} y={cy + 4} text-anchor="middle" fill="var(--color-text-secondary)" font-size="10" font-family="var(--font-sans)">{label}</text>
             </g>
