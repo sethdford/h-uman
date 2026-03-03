@@ -585,7 +585,7 @@ config.c Config loading/merging (~/.seaclaw/config.json)
 ...
 
 include/seaclaw/ Public C headers
-tests/ 69 test files, 2,148+ tests
+tests/ 69 test files, 2,150+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ```

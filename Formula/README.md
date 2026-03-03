@@ -10,13 +10,13 @@ Since there is no stable release tag yet, the formula is **head-only** and insta
 
 ```bash
 # Install directly from the local formula file
-brew install --HEAD /Users/sethford/Documents/nullclaw/Formula/seaclaw.rb
+brew install --HEAD /path/to/seaclaw/Formula/seaclaw.rb
 ```
 
 Or, using the repo path relative to your clone:
 
 ```bash
-cd /path/to/nullclaw
+cd /path/to/seaclaw
 brew install --HEAD ./Formula/seaclaw.rb
 ```
 

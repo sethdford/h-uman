@@ -143,7 +143,7 @@ src/
 
 include/seaclaw/       public C headers
 
-tests/                 60+ test files, 2,000+ tests
+tests/                 65+ test files, 2,000+ tests
 
 asm/                   platform-specific assembly (aarch64, x86_64, generic C)
 

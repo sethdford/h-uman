@@ -29,6 +29,9 @@ inputs:
   extra-apt:
     description: Additional apt packages to install
     default: ""
+  target:
+    description: CMake build target (empty for all)
+    default: ""
   extra-cmake-flags:
     description: Additional CMake flags
     default: ""
@@ -69,4 +72,7 @@ runs:
 
     - name: Build
       shell: bash
-      run: cmake --build ${{ inputs.build-dir }} -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+      run: |
+        TARGET_FLAG=""
+        if [ -n "${{ inputs.target }}" ]; then TARGET_FLAG="--target ${{ inputs.target }}"; fi
+        cmake --build ${{ inputs.build-dir }} $TARGET_FLAG -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)

@@ -21,20 +21,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install sqlite3
-
-      - name: Build MinSizeRel + LTO
-        run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_CURL=ON
-          cmake --build . --target seaclaw -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: MinSizeRel
+          enable-lto: "true"
+          enable-curl: "true"
+          enable-all-channels: "true"
+          target: seaclaw
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -66,8 +59,7 @@ jobs:
           chmod +x seaclaw-linux-x86_64.bin seaclaw-macos-aarch64.bin
 
       - name: Package completions and man pages
-        run: |
-          tar czf seaclaw-extras.tar.gz completions/ docs/man/ install.sh LICENSE
+        run: tar czf seaclaw-extras.tar.gz completions/ docs/man/ install.sh LICENSE
 
       - name: Create release
         uses: softprops/action-gh-release@v2
