@@ -1,0 +1,44 @@
+{
+  "$description": "Elevation tokens — shadow definitions mapped to semantic levels",
+  "elevation": {
+    "0": {
+      "$value": "none",
+      "$type": "shadow",
+      "$description": "Flat surface — no elevation"
+    },
+    "1": {
+      "$value": "0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15)",
+      "$type": "shadow",
+      "$description": "Card, raised surface"
+    },
+    "2": {
+      "$value": "0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15)",
+      "$type": "shadow",
+      "$description": "Dropdown, popover"
+    },
+    "3": {
+      "$value": "0 4px 8px 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.3)",
+      "$type": "shadow",
+      "$description": "Modal, dialog"
+    },
+    "4": {
+      "$value": "0 6px 10px 4px rgba(0,0,0,0.15), 0 2px 3px rgba(0,0,0,0.3)",
+      "$type": "shadow",
+      "$description": "Toast, snackbar"
+    },
+    "5": {
+      "$value": "0 8px 12px 6px rgba(0,0,0,0.15), 0 4px 4px rgba(0,0,0,0.3)",
+      "$type": "shadow",
+      "$description": "Tooltip, highest layer"
+    }
+  },
+  "elevation-role": {
+    "$description": "Semantic elevation assignments",
+    "surface": { "$value": 0, "$type": "number" },
+    "card": { "$value": 1, "$type": "number" },
+    "dropdown": { "$value": 2, "$type": "number" },
+    "modal": { "$value": 3, "$type": "number" },
+    "toast": { "$value": 4, "$type": "number" },
+    "tooltip": { "$value": 5, "$type": "number" }
+  }
+}

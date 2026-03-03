@@ -1,0 +1,30 @@
+{
+  "$description": "Responsive breakpoint tokens",
+  "breakpoint": {
+    "sm": {
+      "$value": "640px",
+      "$type": "dimension",
+      "$description": "Small — mobile landscape"
+    },
+    "md": {
+      "$value": "768px",
+      "$type": "dimension",
+      "$description": "Medium — tablets"
+    },
+    "lg": {
+      "$value": "1024px",
+      "$type": "dimension",
+      "$description": "Large — desktop"
+    },
+    "xl": {
+      "$value": "1280px",
+      "$type": "dimension",
+      "$description": "Extra-large — wide desktop"
+    },
+    "2xl": {
+      "$value": "1536px",
+      "$type": "dimension",
+      "$description": "2x extra-large — ultrawide"
+    }
+  }
+}

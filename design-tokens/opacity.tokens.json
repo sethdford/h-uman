@@ -1,0 +1,45 @@
+{
+  "$description": "Opacity tokens — state layers, overlays, and disabled states",
+  "opacity": {
+    "disabled": {
+      "$value": 0.38,
+      "$type": "number",
+      "$description": "Disabled elements"
+    },
+    "hover": {
+      "$value": 0.08,
+      "$type": "number",
+      "$description": "Hover state layer"
+    },
+    "focus": {
+      "$value": 0.12,
+      "$type": "number",
+      "$description": "Focus state layer"
+    },
+    "pressed": {
+      "$value": 0.12,
+      "$type": "number",
+      "$description": "Pressed/active state layer"
+    },
+    "dragged": {
+      "$value": 0.16,
+      "$type": "number",
+      "$description": "Drag state layer"
+    },
+    "overlay-light": {
+      "$value": 0.08,
+      "$type": "number",
+      "$description": "Light scrim overlay"
+    },
+    "overlay-medium": {
+      "$value": 0.32,
+      "$type": "number",
+      "$description": "Medium scrim/backdrop"
+    },
+    "overlay-heavy": {
+      "$value": 0.64,
+      "$type": "number",
+      "$description": "Heavy scrim (modal backdrop)"
+    }
+  }
+}

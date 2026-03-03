@@ -402,6 +402,24 @@ static void test_irc_health_check(void) {
     SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
     sc_irc_destroy(&ch);
 }
+
+static void test_irc_poll_test_mode_impl(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_irc_create(&alloc, "irc.example.com", 15, 6667, &ch);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    err = sc_irc_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 0);
+    sc_irc_destroy(&ch);
+}
+
+static void test_irc_poll_null_args_impl(void) {
+    sc_error_t err = sc_irc_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
 #endif
 
 /* ─── LINE ────────────────────────────────────────────────────────────────── */
@@ -1129,24 +1147,6 @@ static void test_web_send_empty_target(void) {
 }
 #endif
 
-static void test_irc_poll_test_mode(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_channel_t ch = {0};
-    sc_error_t err = sc_irc_create(&alloc, "irc.example.com", 15, 6667, &ch);
-    SC_ASSERT(err == SC_OK);
-    sc_channel_loop_msg_t msgs[4];
-    size_t count = 99;
-    err = sc_irc_poll(ch.ctx, &alloc, msgs, 4, &count);
-    SC_ASSERT(err == SC_OK);
-    SC_ASSERT(count == 0);
-    sc_irc_destroy(&ch);
-}
-
-static void test_irc_poll_null_args(void) {
-    sc_error_t err = sc_irc_poll(NULL, NULL, NULL, 0, NULL);
-    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
-}
-
 void run_channel_all_tests(void) {
     SC_TEST_SUITE("Channel All");
 
@@ -1239,8 +1239,8 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_irc_name);
     SC_RUN_TEST(test_irc_health_check);
     SC_RUN_TEST(test_irc_send);
-    SC_RUN_TEST(test_irc_poll_test_mode);
-    SC_RUN_TEST(test_irc_poll_null_args);
+    SC_RUN_TEST(test_irc_poll_test_mode_impl);
+    SC_RUN_TEST(test_irc_poll_null_args_impl);
 #endif
 #if SC_HAS_LINE
     SC_RUN_TEST(test_line_start_stop_lifecycle);

@@ -8,6 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { execFileSync } from "child_process";
 
 const REM_PX = 16;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -262,12 +263,26 @@ function main() {
   );
 
   const header = generateCHeader(tokens);
-  writeOutput(
-    outdir,
-    path.join(ROOT, "include", "seaclaw", "design_tokens.h"),
-    "design_tokens.h",
-    header,
-  );
+  const headerPath = outdir
+    ? path.join(outdir, "design_tokens.h")
+    : path.join(ROOT, "include", "seaclaw", "design_tokens.h");
+  writeOutput(outdir, headerPath, "design_tokens.h", header);
+
+  try {
+    execFileSync("clang-format", ["-i", headerPath], { stdio: "ignore" });
+  } catch {
+    try {
+      execFileSync(
+        "/opt/homebrew/opt/llvm/bin/clang-format",
+        ["-i", headerPath],
+        {
+          stdio: "ignore",
+        },
+      );
+    } catch {
+      /* clang-format not available — skip */
+    }
+  }
 
   console.log("Done.");
 }
@@ -1055,7 +1070,7 @@ function generateCHeader(tokens: TokenMap): string {
       typeof val === "string" && val.startsWith("#")
         ? hexToAnsi256(val)
         : fallbacks[macro];
-    colorLines.push(`#define ${macro}   "\\033[38;5;${code}m"`);
+    colorLines.push(`#define ${macro} "\\033[38;5;${code}m"`);
   }
   return `/* Auto-generated from design-tokens/ — do not edit manually */
 #ifndef SC_DESIGN_TOKENS_H
@@ -1063,20 +1078,20 @@ function generateCHeader(tokens: TokenMap): string {
 
 /* ANSI 256-color codes for semantic colors (from dark theme tokens) */
 ${colorLines.join("\n")}
-#define SC_COLOR_RESET    "\\033[0m"
-#define SC_COLOR_BOLD     "\\033[1m"
-#define SC_COLOR_DIM      "\\033[2m"
+#define SC_COLOR_RESET "\\033[0m"
+#define SC_COLOR_BOLD "\\033[1m"
+#define SC_COLOR_DIM "\\033[2m"
 
 /* Box-drawing characters (UTF-8) */
-#define SC_BOX_VERT       "\\xe2\\x94\\x82"  /* │ */
-#define SC_BOX_HORIZ      "\\xe2\\x94\\x80"  /* ─ */
-#define SC_BOX_TL         "\\xe2\\x94\\x8c"  /* ┌ */
-#define SC_BOX_TR         "\\xe2\\x94\\x90"  /* ┐ */
-#define SC_BOX_BL         "\\xe2\\x94\\x94"  /* └ */
-#define SC_BOX_BR         "\\xe2\\x94\\x98"  /* ┘ */
-#define SC_CHEVRON        "\\xe2\\x9d\\xaf"  /* ❯ */
-#define SC_CHECK          "\\xe2\\x9c\\x93"  /* ✓ */
-#define SC_CROSS          "\\xe2\\x9c\\x97"  /* ✗ */
+#define SC_BOX_VERT "\\xe2\\x94\\x82"
+#define SC_BOX_HORIZ "\\xe2\\x94\\x80"
+#define SC_BOX_TL "\\xe2\\x94\\x8c"
+#define SC_BOX_TR "\\xe2\\x94\\x90"
+#define SC_BOX_BL "\\xe2\\x94\\x94"
+#define SC_BOX_BR "\\xe2\\x94\\x98"
+#define SC_CHEVRON "\\xe2\\x9d\\xaf"
+#define SC_CHECK "\\xe2\\x9c\\x93"
+#define SC_CROSS "\\xe2\\x9c\\x97"
 
 #endif /* SC_DESIGN_TOKENS_H */
 `;
