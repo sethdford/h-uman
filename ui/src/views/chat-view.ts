@@ -242,14 +242,52 @@ export class ScChatView extends GatewayAwareLitElement {
     .message.assistant .message-meta {
       align-self: flex-start;
     }
-    .message pre {
+    .code-block {
       background: var(--sc-bg);
-      padding: var(--sc-space-sm);
       border-radius: var(--sc-radius-sm);
-      overflow-x: auto;
+      overflow: hidden;
       margin: var(--sc-space-sm) 0;
+    }
+    .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sc-space-2xs) var(--sc-space-sm);
+      background: var(--sc-bg-elevated);
+      border-bottom: 1px solid var(--sc-border);
+      font-size: var(--sc-text-xs);
+    }
+    .code-lang {
+      color: var(--sc-text-muted);
+      font-family: var(--sc-font-mono);
+    }
+    .copy-btn {
+      background: transparent;
+      border: 1px solid var(--sc-border);
+      color: var(--sc-text-muted);
+      font-size: var(--sc-text-xs);
+      font-family: var(--sc-font);
+      padding: 2px var(--sc-space-xs);
+      border-radius: var(--sc-radius-sm);
+      cursor: pointer;
+      transition:
+        color var(--sc-duration-fast),
+        border-color var(--sc-duration-fast);
+    }
+    .copy-btn:hover {
+      color: var(--sc-text);
+      border-color: var(--sc-text-muted);
+    }
+    .code-block pre {
+      margin: 0;
+      padding: var(--sc-space-sm);
+      overflow-x: auto;
       font-family: var(--sc-font-mono);
       font-size: var(--sc-text-sm);
+    }
+    .code-block pre code {
+      background: none;
+      padding: 0;
     }
     .message code {
       font-family: var(--sc-font-mono);
@@ -258,9 +296,87 @@ export class ScChatView extends GatewayAwareLitElement {
       padding: var(--sc-space-2xs) var(--sc-space-xs);
       border-radius: var(--sc-radius-sm);
     }
-    .message pre code {
-      background: none;
-      padding: 0;
+    .md-blockquote {
+      margin: var(--sc-space-sm) 0;
+      padding: var(--sc-space-xs) var(--sc-space-md);
+      border-left: 3px solid var(--sc-accent);
+      color: var(--sc-text-muted);
+      font-style: italic;
+    }
+    .md-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: var(--sc-space-sm) 0;
+      font-size: var(--sc-text-sm);
+    }
+    .md-table th,
+    .md-table td {
+      padding: var(--sc-space-xs) var(--sc-space-sm);
+      border: 1px solid var(--sc-border);
+      text-align: left;
+    }
+    .md-table th {
+      background: var(--sc-bg-elevated);
+      font-weight: var(--sc-weight-semibold);
+    }
+    .md-list {
+      margin: var(--sc-space-xs) 0;
+      padding-left: var(--sc-space-lg);
+    }
+    .md-list li {
+      margin-bottom: var(--sc-space-2xs);
+    }
+
+    .scroll-bottom-pill {
+      position: absolute;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--sc-bg-surface);
+      border: 1px solid var(--sc-border);
+      box-shadow: var(--sc-shadow-md);
+      padding: var(--sc-space-xs) var(--sc-space-md);
+      border-radius: var(--sc-radius-full);
+      font-size: var(--sc-text-xs);
+      font-family: var(--sc-font);
+      color: var(--sc-text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-xs);
+      z-index: 5;
+      animation: sc-fade-up 0.2s var(--sc-ease-out);
+    }
+    .scroll-bottom-pill:hover {
+      background: var(--sc-bg-elevated);
+    }
+    @keyframes sc-fade-up {
+      from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    }
+    .retry-btn {
+      background: transparent;
+      border: 1px solid var(--sc-border);
+      color: var(--sc-text-muted);
+      font-size: var(--sc-text-xs);
+      font-family: var(--sc-font);
+      padding: var(--sc-space-2xs) var(--sc-space-sm);
+      border-radius: var(--sc-radius-sm);
+      cursor: pointer;
+      margin-top: var(--sc-space-xs);
+      transition:
+        color var(--sc-duration-fast),
+        border-color var(--sc-duration-fast);
+    }
+    .retry-btn:hover {
+      color: var(--sc-text);
+      border-color: var(--sc-text-muted);
     }
     .message a {
       color: var(--sc-accent-text, var(--sc-accent));
@@ -480,6 +596,8 @@ export class ScChatView extends GatewayAwareLitElement {
   @state() private isWaiting = false;
   @state() private errorBanner = "";
   @state() private connectionStatus: GatewayStatus = "disconnected";
+  @state() private showScrollPill = false;
+  @state() private lastFailedMessage = "";
   @query("#message-list") private messageList!: HTMLElement;
   @query("#chat-input") private inputEl!: HTMLTextAreaElement;
 
@@ -488,12 +606,20 @@ export class ScChatView extends GatewayAwareLitElement {
     this.connectionStatus = (e as CustomEvent<GatewayStatus>).detail;
   };
 
+  private _scrollHandler = () => {
+    const el = this.messageList;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (this.showScrollPill === atBottom) this.showScrollPill = !atBottom;
+  };
+
   override firstUpdated(): void {
     const gw = this.gateway;
     if (!gw) return;
     this.connectionStatus = gw.status;
     gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
     gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
+    this.messageList?.addEventListener("scroll", this._scrollHandler, { passive: true });
   }
 
   protected override async load(): Promise<void> {
@@ -532,6 +658,7 @@ export class ScChatView extends GatewayAwareLitElement {
     const gw = this.gateway;
     gw?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
     gw?.removeEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
+    this.messageList?.removeEventListener("scroll", this._scrollHandler);
     super.disconnectedCallback();
   }
 
@@ -683,6 +810,7 @@ export class ScChatView extends GatewayAwareLitElement {
       });
     } catch (err) {
       this.isWaiting = false;
+      this.lastFailedMessage = text;
       const msg = err instanceof Error ? err.message : "Failed to send message";
       ScToast.show({ message: msg, variant: "error" });
     }
