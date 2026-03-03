@@ -2628,7 +2628,7 @@ static void test_structured_output_null_format_no_crash(void) {
 static void test_ollama_structured_output_json_mode(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_provider_t prov;
-    sc_ollama_create(&alloc, NULL, 0, &prov);
+    sc_ollama_create(&alloc, NULL, 0, NULL, 0, &prov);
     sc_chat_message_t msgs[1] = {make_user_msg("respond in JSON", 15)};
     sc_chat_request_t req = make_simple_request(msgs, 1);
     req.response_format = "json_object";
