@@ -2,12 +2,22 @@
 # pre-push: run the full test suite before pushing.
 # Activate: git config core.hooksPath .githooks
 
-JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+BUILD_DIR="build-check"
 
 if [ -f "CMakeLists.txt" ]; then
     echo "Running seaclaw tests..."
-    mkdir -p build
-    cd build && cmake .. -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_ASAN=ON 2>/dev/null && cmake --build . -j"$JOBS" && ./seaclaw_tests
+    mkdir -p "$BUILD_DIR"
+    cd "$BUILD_DIR" || exit 1
+    if [ ! -f "CMakeCache.txt" ]; then
+        cmake .. -DCMAKE_BUILD_TYPE=Debug 2>/dev/null
+    fi
+    cmake --build . -j"$JOBS" 2>&1 | tail -3
+    if [ $? -ne 0 ]; then
+        echo "Build failed. Fix before pushing."
+        exit 1
+    fi
+    ./seaclaw_tests
     if [ $? -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
         exit 1

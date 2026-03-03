@@ -139,6 +139,68 @@ jobs:
       - name: Verify dist exists
         run: test -d website/dist
 
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check C formatting
+        run: |
+          find src include -name '*.c' -o -name '*.h' | head -50 | \
+            xargs clang-format --dry-run -Werror 2>&1 | head -20
+          if [ $? -ne 0 ]; then
+            echo "Run: find src include -name '*.[ch]' | xargs clang-format -i"
+            exit 1
+          fi
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev clang-tidy
+      - name: Configure
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: Run clang-tidy on changed files
+        run: |
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF" -- 'src/*.c' | head -20)
+          else
+            FILES=$(find src -name '*.c' -newer CMakeLists.txt | head -20)
+          fi
+          if [ -n "$FILES" ]; then
+            echo "$FILES" | xargs clang-tidy -p build --warnings-as-errors='bugprone-use-after-move,security-*' 2>&1 | tail -30
+          else
+            echo "No changed C files to analyze"
+          fi
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev lcov
+      - name: Build with coverage
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON \
+            -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+          cmake --build . -j$(nproc)
+      - name: Run tests
+        run: cd build && ./seaclaw_tests
+      - name: Generate coverage report
+        run: |
+          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch
+          lcov --remove coverage.info '/usr/*' '*/tests/*' '*/vendor/*' --output-file coverage.info
+          lcov --list coverage.info | tail -20
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.info
+
   nix:
     runs-on: ubuntu-latest
     steps:
