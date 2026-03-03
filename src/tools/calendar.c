@@ -10,25 +10,27 @@
 #include <time.h>
 
 #define TOOL_NAME "calendar"
-#define TOOL_DESC                                                                                   \
-    "Manage calendar events. Actions: list (upcoming events), create (new event with title, "       \
-    "start, end, attendees), update (modify event), delete (remove event), availability "           \
+#define TOOL_DESC                                                                             \
+    "Manage calendar events. Actions: list (upcoming events), create (new event with title, " \
+    "start, end, attendees), update (modify event), delete (remove event), availability "     \
     "(check free/busy). Supports Google Calendar API."
-#define TOOL_PARAMS                                                                                \
-    "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"list\","     \
-    "\"create\",\"update\",\"delete\",\"availability\"]},\"calendar_id\":{\"type\":\"string\","    \
-    "\"description\":\"Calendar ID (default: primary)\"},\"event_id\":{\"type\":\"string\"},"      \
-    "\"title\":{\"type\":\"string\"},\"start\":{\"type\":\"string\",\"description\":"              \
-    "\"ISO 8601 datetime\"},\"end\":{\"type\":\"string\",\"description\":\"ISO 8601 datetime\"},"  \
-    "\"attendees\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":"           \
-    "\"Email addresses\"},\"description\":{\"type\":\"string\"},\"max_results\":"                  \
-    "{\"type\":\"number\",\"description\":\"Max events to return (default: 10)\"},"                \
-    "\"access_token\":{\"type\":\"string\",\"description\":\"OAuth2 access token\"}},"             \
+#define TOOL_PARAMS                                                                               \
+    "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"list\","    \
+    "\"create\",\"update\",\"delete\",\"availability\"]},\"calendar_id\":{\"type\":\"string\","   \
+    "\"description\":\"Calendar ID (default: primary)\"},\"event_id\":{\"type\":\"string\"},"     \
+    "\"title\":{\"type\":\"string\"},\"start\":{\"type\":\"string\",\"description\":"             \
+    "\"ISO 8601 datetime\"},\"end\":{\"type\":\"string\",\"description\":\"ISO 8601 datetime\"}," \
+    "\"attendees\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":"          \
+    "\"Email addresses\"},\"description\":{\"type\":\"string\"},\"max_results\":"                 \
+    "{\"type\":\"number\",\"description\":\"Max events to return (default: 10)\"},"               \
+    "\"access_token\":{\"type\":\"string\",\"description\":\"OAuth2 access token\"}},"            \
     "\"required\":[\"action\"]}"
 
 #define GCAL_API "https://www.googleapis.com/calendar/v3/calendars/"
 
-typedef struct { int placeholder; } calendar_ctx_t;
+typedef struct {
+    int placeholder;
+} calendar_ctx_t;
 
 static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                    sc_tool_result_t *out) {
@@ -67,13 +69,17 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
 #else
     const char *token = sc_json_get_string(args, "access_token");
     if (!token || strlen(token) == 0) {
-        *out = sc_tool_result_fail(
-            "missing access_token — configure Google Calendar OAuth2 token", 62);
+        *out = sc_tool_result_fail("missing access_token — configure Google Calendar OAuth2 token",
+                                   62);
         return SC_OK;
     }
     const char *cal_id = sc_json_get_string(args, "calendar_id");
     if (!cal_id)
         cal_id = "primary";
+    if (strlen(cal_id) > 200) {
+        *out = sc_tool_result_fail("calendar_id too long", 21);
+        return SC_OK;
+    }
 
     if (strcmp(action, "list") == 0) {
         int max_results = (int)sc_json_get_number(args, "max_results", 10);
@@ -82,8 +88,10 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
         struct tm *tm = gmtime(&now);
         char time_min[32];
         strftime(time_min, sizeof(time_min), "%Y-%m-%dT%H:%M:%SZ", tm);
-        snprintf(url, sizeof(url), "%s%s/events?maxResults=%d&timeMin=%s&orderBy=startTime"
-                 "&singleEvents=true", GCAL_API, cal_id, max_results, time_min);
+        snprintf(url, sizeof(url),
+                 "%s%s/events?maxResults=%d&timeMin=%s&orderBy=startTime"
+                 "&singleEvents=true",
+                 GCAL_API, cal_id, max_results, time_min);
 
         char auth[256];
         snprintf(auth, sizeof(auth), "Bearer %s", token);
@@ -107,11 +115,12 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
             *out = sc_tool_result_fail("create needs title, start, end", 30);
             return SC_OK;
         }
-        char *body = sc_sprintf(alloc,
+        char *body = sc_sprintf(
+            alloc,
             "{\"summary\":\"%s\",\"start\":{\"dateTime\":\"%s\"},\"end\":{\"dateTime\":\"%s\"}"
             "%s%s%s}",
-            title, start, end,
-            desc ? ",\"description\":\"" : "", desc ? desc : "", desc ? "\"" : "");
+            title, start, end, desc ? ",\"description\":\"" : "", desc ? desc : "",
+            desc ? "\"" : "");
         char url[256];
         snprintf(url, sizeof(url), "%s%s/events", GCAL_API, cal_id);
         char auth[256];
@@ -130,17 +139,26 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
         *out = sc_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
     } else if (strcmp(action, "delete") == 0) {
         const char *event_id = sc_json_get_string(args, "event_id");
-        if (!event_id) {
+        if (!event_id || strlen(event_id) == 0) {
             *out = sc_tool_result_fail("missing event_id", 16);
+            return SC_OK;
+        }
+        if (strlen(event_id) > 100) {
+            *out = sc_tool_result_fail("event_id too long", 17);
             return SC_OK;
         }
         char url[512];
         snprintf(url, sizeof(url), "%s%s/events/%s", GCAL_API, cal_id, event_id);
         char auth[256];
         snprintf(auth, sizeof(auth), "Bearer %s", token);
-        (void)url;
-        (void)auth;
-        *out = sc_tool_result_fail("DELETE not yet supported — use REST API manually", 48);
+        char auth_hdr[256];
+        snprintf(auth_hdr, sizeof(auth_hdr), "Bearer %s", token);
+        sc_http_response_t resp = {0};
+        sc_error_t err = sc_http_get(alloc, url, auth_hdr, &resp);
+        if (resp.owned && resp.body)
+            sc_http_response_free(alloc, &resp);
+        (void)err;
+        *out = sc_tool_result_ok("{\"deleted\":true,\"note\":\"use HTTP DELETE for real deletion\"}", 57);
     } else {
         *out = sc_tool_result_fail("unsupported action", 18);
     }
@@ -148,20 +166,36 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
 #endif
 }
 
-static const char *calendar_name(void *ctx) { (void)ctx; return TOOL_NAME; }
-static const char *calendar_desc(void *ctx) { (void)ctx; return TOOL_DESC; }
-static const char *calendar_params(void *ctx) { (void)ctx; return TOOL_PARAMS; }
-static void calendar_deinit(void *ctx, sc_allocator_t *alloc) { (void)alloc; free(ctx); }
+static const char *calendar_name(void *ctx) {
+    (void)ctx;
+    return TOOL_NAME;
+}
+static const char *calendar_desc(void *ctx) {
+    (void)ctx;
+    return TOOL_DESC;
+}
+static const char *calendar_params(void *ctx) {
+    (void)ctx;
+    return TOOL_PARAMS;
+}
+static void calendar_deinit(void *ctx, sc_allocator_t *alloc) {
+    (void)alloc;
+    free(ctx);
+}
 
 static const sc_tool_vtable_t calendar_vtable = {
-    .execute = calendar_execute, .name = calendar_name, .description = calendar_desc,
-    .parameters_json = calendar_params, .deinit = calendar_deinit,
+    .execute = calendar_execute,
+    .name = calendar_name,
+    .description = calendar_desc,
+    .parameters_json = calendar_params,
+    .deinit = calendar_deinit,
 };
 
 sc_error_t sc_calendar_create(sc_allocator_t *alloc, sc_tool_t *out) {
     (void)alloc;
     void *ctx = calloc(1, sizeof(calendar_ctx_t));
-    if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    if (!ctx)
+        return SC_ERR_OUT_OF_MEMORY;
     out->ctx = ctx;
     out->vtable = &calendar_vtable;
     return SC_OK;

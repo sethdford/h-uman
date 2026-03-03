@@ -10,7 +10,6 @@ typedef enum sc_channel_id {
     SC_CHANNEL_TELEGRAM,
     SC_CHANNEL_DISCORD,
     SC_CHANNEL_SLACK,
-    SC_CHANNEL_WEBHOOK,
     SC_CHANNEL_IMESSAGE,
     SC_CHANNEL_MATRIX,
     SC_CHANNEL_MATTERMOST,
@@ -29,6 +28,7 @@ typedef enum sc_channel_id {
     SC_CHANNEL_TEAMS,
     SC_CHANNEL_TWILIO,
     SC_CHANNEL_GOOGLE_CHAT,
+    SC_CHANNEL_DISPATCH,
     SC_CHANNEL_COUNT
 } sc_channel_id_t;
 

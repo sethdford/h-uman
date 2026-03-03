@@ -9,8 +9,8 @@ Last updated: 2026-03-03
 | Source files (src/ + include/) | **~486**               |
 | Lines of C/H/ASM code          | **~73K+**              |
 | Test files                     | 73                     |
-| Tests passing                  | **2,258/2,258 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **414 KB**             |
+| Tests passing                  | **2,266/2,266 (100%)** |
+| Binary size (MinSizeRel+LTO)   | **430 KB**             |
 | Peak RSS (test suite)          | **~5.1 MB**            |
 
 ## Channels — Honest Status
@@ -53,7 +53,7 @@ Last updated: 2026-03-03
 | -------- | ------------------------ |
 | Dispatch | Forwards to sub-channels |
 
-## Tools — All 66 Real
+## Tools — All 54 Real (with all feature flags)
 
 Every tool has a real implementation. In test mode (`SC_IS_TEST`), they return mock
 data to avoid side effects. Highlights:

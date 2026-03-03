@@ -73,6 +73,7 @@ void run_runtime_tests(void);
 void run_channel_loop_tests(void);
 void run_util_modules_tests(void);
 void run_roadmap_tests(void);
+void run_new_features_tests(void);
 
 int main(void) {
     printf("SeaClaw Test Suite\n"); fflush(stdout);
@@ -146,6 +147,7 @@ int main(void) {
     run_channel_loop_tests();
     run_util_modules_tests();
     run_roadmap_tests();
+    run_new_features_tests();
 
     SC_TEST_REPORT();
     SC_TEST_EXIT();
