@@ -1906,54 +1906,6 @@ static void test_sse_parse_line_data_with_spaces(void) {
     if (out.delta) alloc.free(alloc.ctx, out.delta, out.delta_len + 1);
 }
 
-static void test_anthropic_chat_with_system_and_user(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov;
-    sc_error_t err = sc_anthropic_create(&alloc, "test-key", 8, NULL, 0, &prov);
-    SC_ASSERT_EQ(err, SC_OK);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
-}
-
-static void test_anthropic_max_tokens_in_request(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov;
-    sc_error_t err = sc_anthropic_create(&alloc, "test-key", 8, NULL, 0, &prov);
-    SC_ASSERT_EQ(err, SC_OK);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
-}
-
-static void test_anthropic_stream_chat_mock(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov;
-    sc_error_t err = sc_anthropic_create(&alloc, "test-key", 8, NULL, 0, &prov);
-    SC_ASSERT_EQ(err, SC_OK);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
-}
-
-static void test_anthropic_tool_call_format(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov;
-    sc_error_t err = sc_anthropic_create(&alloc, "test-key", 8, NULL, 0, &prov);
-    SC_ASSERT_EQ(err, SC_OK);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
-}
-
-static void test_openrouter_model_routing(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov;
-    sc_error_t err = sc_openrouter_create(&alloc, "test-key", 8, NULL, 0, &prov);
-    SC_ASSERT_EQ(err, SC_OK);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
-}
-
-static void test_openrouter_chat_with_tools_mock(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov;
-    sc_error_t err = sc_openrouter_create(&alloc, "test-key", 8, NULL, 0, &prov);
-    SC_ASSERT_EQ(err, SC_OK);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
-}
-
 void run_provider_all_tests(void) {
     SC_TEST_SUITE("Provider All");
     SC_RUN_TEST(test_openai_create_succeeds);
@@ -1979,7 +1931,10 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_anthropic_deinit_no_crash);
     SC_RUN_TEST(test_anthropic_create_empty_key);
     SC_RUN_TEST(test_anthropic_create_with_base_url);
-    /* test_anthropic_chat_with_system_and_user etc. disabled (#if 0 in source) */
+    SC_RUN_TEST(test_anthropic_chat_with_system_and_user);
+    SC_RUN_TEST(test_anthropic_max_tokens_in_request);
+    SC_RUN_TEST(test_anthropic_stream_chat_mock);
+    SC_RUN_TEST(test_anthropic_tool_call_format);
 
     SC_RUN_TEST(test_gemini_create_succeeds);
     SC_RUN_TEST(test_gemini_create_null_alloc_fails);
@@ -2014,7 +1969,8 @@ void run_provider_all_tests(void) {
     SC_RUN_TEST(test_openrouter_chat_mock);
     SC_RUN_TEST(test_openrouter_deinit_no_crash);
     SC_RUN_TEST(test_openrouter_create_empty_key);
-    /* test_openrouter_model_routing etc. disabled (#if 0 in source) */
+    SC_RUN_TEST(test_openrouter_model_routing);
+    SC_RUN_TEST(test_openrouter_chat_with_tools_mock);
 
     SC_RUN_TEST(test_compatible_create_succeeds);
     SC_RUN_TEST(test_compatible_create_null_alloc_fails);

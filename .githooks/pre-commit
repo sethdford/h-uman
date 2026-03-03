@@ -3,12 +3,17 @@
 # Activate: git config core.hooksPath .githooks
 
 if [ -d "src" ] && [ -f "CMakeLists.txt" ]; then
-    staged_c=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.[ch]$')
-    if [ -n "$staged_c" ]; then
-        for f in $staged_c; do
+    staged_ch=$(git diff --cached --name-only --diff-filter=ACM -- '*.c' '*.h')
+    if [ -n "$staged_ch" ]; then
+        for f in $staged_ch; do
             if grep -qn '	' "$f" 2>/dev/null; then
                 echo "Warning: tabs found in $f (project uses spaces)"
             fi
         done
+        echo "$staged_ch" | xargs clang-format --dry-run -Werror
+        if [ $? -ne 0 ]; then
+            echo "clang-format failed. Run: clang-format -i <file>"
+            exit 1
+        fi
     fi
 fi

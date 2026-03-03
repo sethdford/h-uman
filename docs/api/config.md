@@ -1,3 +1,9 @@
+---
+title: Config API
+description: Configuration loading, env overrides, and schema validation
+updated: 2026-03-02
+---
+
 # Config API
 
 Configuration loading from `~/.seaclaw/config.json`, env overrides, and schema validation.

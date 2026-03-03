@@ -1,3 +1,9 @@
+---
+title: seaclaw API Reference
+description: Public API reference organized by module for the SeaClaw C runtime
+updated: 2026-03-02
+---
+
 # seaclaw API Reference
 
 seaclaw is a C11 autonomous AI assistant runtime with a vtable-driven architecture. This reference documents the public API organized by module.

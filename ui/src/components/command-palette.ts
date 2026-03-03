@@ -137,10 +137,7 @@ function filterCommands(query: string): Command[] {
   return COMMANDS.filter((c) => c.label.toLowerCase().includes(q));
 }
 
-function highlightMatch(
-  label: string,
-  query: string,
-): string | ReturnType<typeof html> {
+function highlightMatch(label: string, query: string): string | ReturnType<typeof html> {
   const q = query.toLowerCase().trim();
   if (!q || !label.toLowerCase().includes(q)) {
     return label;
@@ -305,9 +302,7 @@ export class ScCommandPalette extends LitElement {
   }
 
   private _close(): void {
-    this.dispatchEvent(
-      new CustomEvent("close", { bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent("close", { bubbles: true, composed: true }));
   }
 
   private _execute(cmd: Command): void {
@@ -331,8 +326,7 @@ export class ScCommandPalette extends LitElement {
         break;
       case "ArrowUp":
         e.preventDefault();
-        this.selectedIndex =
-          (this.selectedIndex - 1 + items.length) % items.length;
+        this.selectedIndex = (this.selectedIndex - 1 + items.length) % items.length;
         break;
       case "Enter":
         e.preventDefault();
@@ -357,8 +351,7 @@ export class ScCommandPalette extends LitElement {
     if (!this.open) return nothing;
 
     const items = this.filteredCommands;
-    const sectionLabel = (s: Command["section"]) =>
-      s === "navigation" ? "Navigate" : "Actions";
+    const sectionLabel = (s: Command["section"]) => (s === "navigation" ? "Navigate" : "Actions");
 
     return html`
       <div
@@ -383,9 +376,7 @@ export class ScCommandPalette extends LitElement {
           </div>
           <div class="results">
             ${items.length === 0
-              ? html`<div class="item" style="color: var(--sc-text-muted)">
-                  No results
-                </div>`
+              ? html`<div class="item" style="color: var(--sc-text-muted)">No results</div>`
               : items.map(
                   (cmd, i) => html`
                     <div
@@ -396,9 +387,7 @@ export class ScCommandPalette extends LitElement {
                       @mouseenter=${() => (this.selectedIndex = i)}
                     >
                       <span class="icon">${cmd.icon}</span>
-                      <span class="label"
-                        >${highlightMatch(cmd.label, this.query)}</span
-                      >
+                      <span class="label">${highlightMatch(cmd.label, this.query)}</span>
                       <div class="meta">
                         <span class="badge">${sectionLabel(cmd.section)}</span>
                         ${cmd.shortcut

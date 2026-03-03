@@ -1,6 +1,9 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
 
 interface ChannelStatus {
   key?: string;
@@ -22,23 +25,20 @@ export class ScChannelsView extends GatewayAwareLitElement {
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 1rem;
+      gap: var(--sc-space-md);
     }
-    .card {
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      padding: 1rem;
+    .grid-full {
+      grid-column: 1 / -1;
     }
     .card-header {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 0.5rem;
+      gap: var(--sc-space-sm);
+      margin-bottom: var(--sc-space-sm);
     }
     .card-name {
-      font-weight: 600;
-      font-size: 1rem;
+      font-weight: var(--sc-weight-semibold);
+      font-size: var(--sc-text-lg);
       color: var(--sc-text);
     }
     .status-dot {
@@ -56,63 +56,11 @@ export class ScChannelsView extends GatewayAwareLitElement {
       background: var(--sc-text-muted);
     }
     .card-info {
-      font-size: 0.8125rem;
+      font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
     }
     .card-info .error {
       color: var(--sc-error);
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
-    }
-    .grid .empty-state {
-      grid-column: 1 / -1;
-    }
-    .error-banner {
-      background: var(--sc-error);
-      color: #fff;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-      font-size: var(--sc-text-sm);
     }
   `;
 
@@ -153,27 +101,35 @@ export class ScChannelsView extends GatewayAwareLitElement {
     if (this.loading) {
       return html`
         <div class="grid">
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
         </div>
       `;
     }
 
     return html`
-      ${this.error ? html`<div class="error-banner">${this.error}</div>` : nothing}
+      ${this.error
+        ? html`<sc-empty-state
+            icon="⚠️"
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
+        : nothing}
       <div class="grid">
         ${this.channels.length === 0
           ? html`
-              <div class="empty-state">
-                <div class="empty-icon">📡</div>
-                <p class="empty-title">No channels configured</p>
-                <p class="empty-desc">Configure messaging channels to receive and send messages.</p>
+              <div class="grid-full">
+                <sc-empty-state
+                  icon="📡"
+                  heading="No channels configured"
+                  description="Configure messaging channels to receive and send messages."
+                ></sc-empty-state>
               </div>
             `
           : this.channels.map(
               (ch) => html`
-                <div class="card">
+                <sc-card>
                   <div class="card-header">
                     <span class="status-dot ${this.dotClass(ch)}"></span>
                     <span class="card-name">${ch.label || ch.key || ch.name || "unnamed"}</span>
@@ -181,7 +137,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
                   <div class="card-info">
                     ${ch.error ? html`<span class="error">${ch.error}</span>` : (ch.status ?? "—")}
                   </div>
-                </div>
+                </sc-card>
               `,
             )}
       </div>

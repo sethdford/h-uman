@@ -94,9 +94,7 @@ const icons = {
     stroke-linecap="round"
     stroke-linejoin="round"
   >
-    <path
-      d="M14.7 6.3a1 1 0 0 0 0-1.4l-1.4-1.4a1 1 0 0 0-1.4 0l-5 5a4 4 0 1 0 1.4 1.4l5-5z"
-    />
+    <path d="M14.7 6.3a1 1 0 0 0 0-1.4l-1.4-1.4a1 1 0 0 0-1.4 0l-5 5a4 4 0 1 0 1.4 1.4l5-5z" />
     <circle cx="6" cy="14" r="2" />
   </svg>`,
   radio: html`<svg
@@ -107,9 +105,7 @@ const icons = {
     stroke-linecap="round"
     stroke-linejoin="round"
   >
-    <path
-      d="M5 15h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"
-    />
+    <path d="M5 15h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z" />
     <path d="M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
     <line x1="2" y1="9" x2="18" y2="9" />
   </svg>`,
@@ -466,19 +462,14 @@ export class ScSidebar extends LitElement {
 
   @property({ type: String }) activeTab = "overview";
   @property({ type: Boolean, reflect: true }) collapsed = false;
-  @property({ type: String }) connectionStatus: ConnectionStatus =
-    "disconnected";
+  @property({ type: String }) connectionStatus: ConnectionStatus = "disconnected";
 
   override render() {
     return html`
       <aside class="sidebar">
         <header class="header">
           <div class="logo" aria-hidden="true">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 32 32"
-              fill="none"
-            >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
               <path
                 d="M8 24C8 24 6 20 6 16C6 12 8 8 12 6"
                 stroke="currentColor"
@@ -517,9 +508,7 @@ export class ScSidebar extends LitElement {
                 ${section.items.map(
                   (item) => html`
                     <button
-                      class="nav-item ${this.activeTab === item.id
-                        ? "active"
-                        : ""}"
+                      class="nav-item ${this.activeTab === item.id ? "active" : ""}"
                       ?aria-current=${this.activeTab === item.id}
                       aria-label=${item.label}
                       @click=${() => this._dispatchTabChange(item.id)}
@@ -536,10 +525,7 @@ export class ScSidebar extends LitElement {
 
         <footer class="footer">
           <div class="status-row">
-            <span
-              class="status-dot ${this.connectionStatus}"
-              aria-hidden="true"
-            ></span>
+            <span class="status-dot ${this.connectionStatus}" aria-hidden="true"></span>
             <span class="status-label">${this.connectionStatus}</span>
           </div>
           <button

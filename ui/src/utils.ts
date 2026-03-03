@@ -14,8 +14,7 @@ export function formatDate(v: number | string | undefined | null): string {
 export function formatRelative(v: number | string | undefined | null): string {
   if (v == null) return "—";
   try {
-    const ts =
-      typeof v === "number" ? (v < 1e12 ? v * 1000 : v) : Date.parse(String(v));
+    const ts = typeof v === "number" ? (v < 1e12 ? v * 1000 : v) : Date.parse(String(v));
     const diff = Date.now() - ts;
     if (diff < 60000) return "just now";
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;

@@ -295,9 +295,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     return html`
       <div class="header">
         <h2>Overview</h2>
-        <sc-button variant="secondary" @click=${() => this.load()}
-          >Refresh</sc-button
-        >
+        <sc-button variant="secondary" @click=${() => this.load()}>Refresh</sc-button>
       </div>
       ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
       <div class="bento">
@@ -305,10 +303,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
         <sc-card hoverable class="bento-card gateway-card">
           <div class="stat-label">Gateway Status</div>
           <div class="gateway-content">
-            <span
-              class="status-dot ${gwOk ? "operational" : "offline"}"
-              aria-hidden="true"
-            ></span>
+            <span class="status-dot ${gwOk ? "operational" : "offline"}" aria-hidden="true"></span>
             <span class="stat-value">${gwOk ? "Operational" : "Offline"}</span>
           </div>
           <div class="gateway-version">${cap.version ?? "—"}</div>
@@ -340,9 +335,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
         <!-- 6. Channels Overview (full width) -->
         <sc-card hoverable class="bento-card channels-overview">
-          <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">
-            Channels Overview
-          </div>
+          <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">Channels Overview</div>
           ${this.channels.length === 0
             ? html`
                 <sc-empty-state
@@ -356,14 +349,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
                   ${this.channels.map(
                     (ch) => html`
                       <div class="channel-item">
-                        <span class="channel-name"
-                          >${ch.label ?? ch.key ?? "unnamed"}</span
-                        >
-                        <sc-badge
-                          variant=${ch.configured ? "success" : "neutral"}
-                          dot
-                          >${ch.status ??
-                          (ch.configured ? "Configured" : "—")}</sc-badge
+                        <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
+                        <sc-badge variant=${ch.configured ? "success" : "neutral"} dot
+                          >${ch.status ?? (ch.configured ? "Configured" : "—")}</sc-badge
                         >
                       </div>
                     `,
@@ -374,9 +362,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
         <!-- 7. Recent Sessions (full width) -->
         <sc-card hoverable class="bento-card recent-sessions">
-          <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">
-            Recent Sessions
-          </div>
+          <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">Recent Sessions</div>
           ${this.recentSessions.length === 0
             ? html`
                 <sc-empty-state

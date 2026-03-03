@@ -1,6 +1,10 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-badge.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
 
 interface ProviderItem {
   name?: string;
@@ -27,139 +31,66 @@ export class ScModelsView extends GatewayAwareLitElement {
       display: block;
     }
     h2 {
-      margin: 0 0 1rem;
-      font-size: 1.25rem;
-      font-weight: 600;
+      margin: 0 0 var(--sc-space-md);
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
     }
     .info-bar {
       display: flex;
       flex-wrap: wrap;
-      gap: 1rem;
-      padding: 0.75rem 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      margin-bottom: 1.5rem;
-      font-size: 0.875rem;
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-lg);
+      font-size: var(--sc-text-base);
     }
     .info-item {
       color: var(--sc-text-muted);
     }
     .info-item strong {
       color: var(--sc-text);
-      margin-right: 0.25rem;
+      margin-right: var(--sc-space-xs);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1rem;
-    }
-    .card {
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      padding: 1rem;
+      gap: var(--sc-space-md);
     }
     .card-header {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 0.5rem;
+      gap: var(--sc-space-sm);
+      margin-bottom: var(--sc-space-sm);
       flex-wrap: wrap;
     }
     .card-name {
-      font-weight: 600;
-      font-size: 1rem;
+      font-weight: var(--sc-weight-semibold);
+      font-size: var(--sc-text-lg);
       color: var(--sc-text);
     }
     .card-name.default {
       color: var(--sc-accent);
     }
-    .badge {
-      font-size: 0.625rem;
-      padding: 0.2rem 0.4rem;
-      border-radius: 4px;
-      background: var(--sc-bg-elevated);
-      color: var(--sc-text-muted);
-    }
-    .badge.default {
-      background: var(--sc-accent);
-      color: var(--sc-bg);
-    }
     .card-url {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       font-family: var(--sc-font-mono);
       color: var(--sc-text-muted);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      margin-top: 0.25rem;
+      margin-top: var(--sc-space-xs);
     }
     .key-status {
-      font-size: 0.8125rem;
-      margin-top: 0.5rem;
+      font-size: var(--sc-text-sm);
+      margin-top: var(--sc-space-sm);
       display: flex;
       align-items: center;
-      gap: 0.35rem;
+      gap: var(--sc-space-xs);
     }
     .key-status.has {
       color: var(--sc-success);
     }
     .key-status.missing {
       color: var(--sc-error);
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
-    }
-    .grid .empty-state {
-      grid-column: 1 / -1;
-    }
-    .error-banner {
-      background: var(--sc-error);
-      color: #fff;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-      font-size: var(--sc-text-sm);
     }
   `;
 

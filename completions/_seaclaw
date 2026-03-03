@@ -1,6 +1,6 @@
 #compdef seaclaw
 # Zsh completion for seaclaw
-# Source with: fpath=(/path/to/nullclaw/completions $fpath) && autoload -U compinit && compinit
+# Source with: fpath=(/path/to/seaclaw/completions $fpath) && autoload -U compinit && compinit
 # Or copy to: ~/.zsh/completions/_seaclaw
 
 _seaclaw() {

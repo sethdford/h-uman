@@ -1,3 +1,9 @@
+---
+title: Provider API
+description: sc_provider_t vtable for OpenAI, Anthropic, Gemini, Ollama, and other LLM backends
+updated: 2026-03-02
+---
+
 # Provider API
 
 Providers implement the `sc_provider_t` vtable to connect to LLM backends (OpenAI, Anthropic, Gemini, Ollama, etc.).

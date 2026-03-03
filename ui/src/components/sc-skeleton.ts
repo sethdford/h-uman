@@ -57,8 +57,6 @@ export class ScSkeleton extends LitElement {
       this.variant === "circle"
         ? `width: ${this.effectiveHeight}; height: ${this.effectiveHeight};`
         : `width: ${this.width}; height: ${this.effectiveHeight};`;
-    return html`
-      <div class="skeleton ${this.variant}" style="${style}"></div>
-    `;
+    return html` <div class="skeleton ${this.variant}" style="${style}"></div> `;
   }
 }

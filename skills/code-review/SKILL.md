@@ -1,6 +1,6 @@
 # Code Review
 
-Automated code review skill for NullClaw.
+Automated code review skill for SeaClaw.
 
 ## Usage
 

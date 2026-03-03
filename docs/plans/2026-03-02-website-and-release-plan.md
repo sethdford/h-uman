@@ -1,3 +1,9 @@
+---
+title: SeaClaw Website & Release Implementation Plan
+description: Task-by-task plan for Astro + Starlight site, GitHub Pages, and release
+updated: 2026-03-02
+---
+
 # SeaClaw Website & Release Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -24,7 +30,7 @@
 **Step 1:** Scaffold Astro project with Starlight
 
 ```bash
-cd /Users/sethford/Documents/nullclaw
+cd /path/to/seaclaw
 npm create astro@latest website -- --template starlight --no-git --no-install
 cd website && npm install
 npm install @astrojs/tailwind tailwindcss

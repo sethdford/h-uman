@@ -169,10 +169,10 @@ describe("GatewayClient", () => {
     });
 
     it("rejects on timeout", async () => {
-      vi.useFakeTimers();
       const client = new GatewayClient();
       await connectClient(client);
 
+      vi.useFakeTimers();
       const resPromise = client.request("slowMethod", {}, 100);
       vi.advanceTimersByTime(150);
 
@@ -189,11 +189,8 @@ describe("GatewayClient", () => {
         statuses.push(e.detail);
       }) as EventListener);
 
-      client.connect("ws://test");
+      await connectClient(client);
       expect(statuses).toContain("connecting");
-
-      mockWsInstances[0]!.simulateOpen();
-      await new Promise((r) => setTimeout(r, 0));
       expect(statuses).toContain("connected");
 
       client.disconnect();
@@ -214,6 +211,7 @@ describe("GatewayClient", () => {
           cron: true,
         },
       });
+      await new Promise((r) => setTimeout(r, 0));
 
       expect(client.features).toEqual({
         methods: ["chat.send", "sessions.list"],

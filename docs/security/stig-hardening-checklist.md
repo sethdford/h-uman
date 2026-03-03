@@ -1,3 +1,9 @@
+---
+title: seaclaw STIG Hardening Checklist
+description: DoD STIG hardening checklist for seaclaw deployments
+updated: 2026-03-02
+---
+
 # seaclaw STIG Hardening Checklist
 
 Checklist for hardening seaclaw deployments per DoD STIG requirements.

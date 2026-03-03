@@ -94,12 +94,9 @@ export class GatewayClient extends EventTarget {
       }>("connect", { client: "seaclaw-ui", version: "0.1.0" });
       if (res && typeof res === "object") {
         const payload = res as Record<string, unknown>;
-        if (payload.features)
-          this.#features = payload.features as ServerFeatures;
+        if (payload.features) this.#features = payload.features as ServerFeatures;
       }
-      this.dispatchEvent(
-        new CustomEvent("features", { detail: this.#features }),
-      );
+      this.dispatchEvent(new CustomEvent("features", { detail: this.#features }));
     } catch {
       /* connect handshake optional — gateway may not require it */
     }
@@ -108,9 +105,7 @@ export class GatewayClient extends EventTarget {
   #setStatus(s: GatewayStatus): void {
     if (this.#status === s) return;
     this.#status = s;
-    this.dispatchEvent(
-      new CustomEvent(GatewayClient.EVENT_STATUS, { detail: s }),
-    );
+    this.dispatchEvent(new CustomEvent(GatewayClient.EVENT_STATUS, { detail: s }));
   }
 
   #scheduleReconnect(): void {
@@ -147,9 +142,7 @@ export class GatewayClient extends EventTarget {
 
     if (type === "hello-ok") {
       if (data.features) this.#features = data.features as ServerFeatures;
-      this.dispatchEvent(
-        new CustomEvent("features", { detail: this.#features }),
-      );
+      this.dispatchEvent(new CustomEvent("features", { detail: this.#features }));
     }
 
     const id = data.id as string | undefined;
@@ -171,9 +164,7 @@ export class GatewayClient extends EventTarget {
         }
       }
     }
-    this.dispatchEvent(
-      new CustomEvent(GatewayClient.EVENT_MESSAGE, { detail: data }),
-    );
+    this.dispatchEvent(new CustomEvent(GatewayClient.EVENT_MESSAGE, { detail: data }));
   }
 
   request<T = unknown>(
@@ -194,8 +185,7 @@ export class GatewayClient extends EventTarget {
         }
       }, timeoutMs);
       this.#pending.set(id, {
-        resolve: (res) =>
-          resolve(((res as { result?: T }).result as T) ?? (res as T)),
+        resolve: (res) => resolve(((res as { result?: T }).result as T) ?? (res as T)),
         reject,
         timeout,
       });

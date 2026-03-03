@@ -1,3 +1,9 @@
+---
+title: SeaClaw 100% Parity — Porting Plan (COMPLETED)
+description: Historical plan for porting Zig modules to C, retained for reference
+updated: 2026-03-02
+---
+
 # SeaClaw 100% Parity — Porting Plan (COMPLETED)
 
 > **Status: COMPLETED** — All Zig modules have been ported to C. This document is retained as historical reference.

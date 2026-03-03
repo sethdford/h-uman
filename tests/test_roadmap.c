@@ -15,6 +15,7 @@
 #include "seaclaw/observability/otel.h"
 #include "seaclaw/security/replay.h"
 #include "seaclaw/plugin.h"
+#include "seaclaw/agent/profile.h"
 #include <string.h>
 #include <time.h>
 
@@ -356,6 +357,48 @@ static void test_plugin_bad_version(void) {
     sc_plugin_registry_destroy(reg);
 }
 
+static void test_profile_get_coding(void) {
+    const sc_agent_profile_t *p = sc_agent_profile_get(SC_PROFILE_CODING);
+    SC_ASSERT_NOT_NULL(p);
+    SC_ASSERT_STR_EQ(p->name, "coding");
+    SC_ASSERT(p->default_tools_count > 0);
+    SC_ASSERT_EQ(p->autonomy_level, 2);
+}
+
+static void test_profile_get_ops(void) {
+    const sc_agent_profile_t *p = sc_agent_profile_get(SC_PROFILE_OPS);
+    SC_ASSERT_NOT_NULL(p);
+    SC_ASSERT_STR_EQ(p->name, "ops");
+}
+
+static void test_profile_get_messaging(void) {
+    const sc_agent_profile_t *p = sc_agent_profile_get(SC_PROFILE_MESSAGING);
+    SC_ASSERT_NOT_NULL(p);
+    SC_ASSERT_STR_EQ(p->name, "messaging");
+}
+
+static void test_profile_get_minimal(void) {
+    const sc_agent_profile_t *p = sc_agent_profile_get(SC_PROFILE_MINIMAL);
+    SC_ASSERT_NOT_NULL(p);
+    SC_ASSERT_STR_EQ(p->name, "minimal");
+    SC_ASSERT_EQ(p->autonomy_level, 0);
+}
+
+static void test_profile_by_name(void) {
+    const sc_agent_profile_t *p = sc_agent_profile_by_name("coding", 6);
+    SC_ASSERT_NOT_NULL(p);
+    SC_ASSERT_EQ(p->type, SC_PROFILE_CODING);
+    SC_ASSERT_NULL(sc_agent_profile_by_name("nonexist", 8));
+}
+
+static void test_profile_list(void) {
+    const sc_agent_profile_t *profiles = NULL;
+    size_t count = 0;
+    SC_ASSERT_EQ(sc_agent_profile_list(&profiles, &count), SC_OK);
+    SC_ASSERT(count >= 4);
+    SC_ASSERT_NOT_NULL(profiles);
+}
+
 void run_roadmap_tests(void) {
     SC_TEST_SUITE("Roadmap: Agent Pool (1A)");
     SC_RUN_TEST(test_pool_create_destroy);
@@ -381,6 +424,14 @@ void run_roadmap_tests(void) {
     SC_TEST_SUITE("Roadmap: Agent Tools (1D+E)");
     SC_RUN_TEST(test_agent_spawn_tool);
     SC_RUN_TEST(test_agent_query_tool);
+
+    SC_TEST_SUITE("Roadmap: Agent Profiles (2)");
+    SC_RUN_TEST(test_profile_get_coding);
+    SC_RUN_TEST(test_profile_get_ops);
+    SC_RUN_TEST(test_profile_get_messaging);
+    SC_RUN_TEST(test_profile_get_minimal);
+    SC_RUN_TEST(test_profile_by_name);
+    SC_RUN_TEST(test_profile_list);
 
     SC_TEST_SUITE("Roadmap: Power Tools (3)");
     SC_RUN_TEST(test_canvas_tool);

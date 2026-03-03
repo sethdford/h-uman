@@ -1,3 +1,9 @@
+---
+title: Core API
+description: Allocator, error, JSON, string, slice, HTTP, and arena utilities
+updated: 2026-03-02
+---
+
 # Core API
 
 Core types and utilities used across seaclaw: allocator, error, JSON, string, slice, HTTP, arena.

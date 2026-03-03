@@ -1,3 +1,9 @@
+---
+title: Getting Started with SeaClaw
+description: Quick setup guide from zero to first AI chat in under 5 minutes
+updated: 2026-03-02
+---
+
 # Getting Started with SeaClaw
 
 Get from zero to your first AI chat in under 5 minutes.

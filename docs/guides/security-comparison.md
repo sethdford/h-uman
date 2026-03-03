@@ -1,12 +1,18 @@
-# Security Comparison: nullclaw vs OpenClaw
+---
+title: Security Comparison — SeaClaw vs OpenClaw
+description: Security posture comparison between SeaClaw and OpenClaw runtimes
+updated: 2026-03-02
+---
+
+# Security Comparison: SeaClaw vs OpenClaw
 
 ## 1. Executive Summary
 
-**nullclaw** is a zero-dependency, single-binary AI assistant runtime with encrypted secrets storage, multiple sandbox backends, and secure-by-default configuration. **OpenClaw** is a Node.js-based implementation with 1,200+ npm dependencies, plain-text configuration for API keys, and no built-in sandboxing for tool execution.
+**SeaClaw** is a zero-dependency, single-binary AI assistant runtime with encrypted secrets storage, multiple sandbox backends, and secure-by-default configuration. **OpenClaw** is a Node.js-based implementation with 1,200+ npm dependencies, plain-text configuration for API keys, and no built-in sandboxing for tool execution.
 
 ## 2. Supply Chain Risk
 
-### nullclaw
+### SeaClaw
 
 - **0 third-party dependencies** for the minimal core build (libc only). Optional SQLite and libcurl are system libraries.
 - Single static binary. No package manager supply chain at runtime.
@@ -24,7 +30,7 @@
 
 ## 3. Secrets Management
 
-### nullclaw
+### SeaClaw
 
 - ChaCha20-Poly1305 encrypted secrets store (`src/security/secrets.c`). API keys never stored in plain text.
 - AEAD-style encryption (ChaCha20 + HMAC-SHA256) with hardware-derived or file-based key. Non-FIPS builds use in-tree ChaCha20; FIPS builds use AES-256-GCM via OpenSSL.
@@ -37,7 +43,7 @@
 
 ## 4. Sandboxing
 
-### nullclaw
+### SeaClaw
 
 - **7 sandbox backends** for tool execution:
   - **Landlock** (Linux): Kernel LSM filesystem ACLs.
@@ -55,7 +61,7 @@
 
 ## 5. Network Security
 
-### nullclaw
+### SeaClaw
 
 - HTTPS-only enforcement. HTTP URLs rejected at the tool layer.
 - TLS certificate validation for outbound connections.
@@ -68,7 +74,7 @@
 
 ## 6. Audit and Observability
 
-### nullclaw
+### SeaClaw
 
 - Built-in audit logging (`src/security/audit.c`). Event types: command execution, file access, config change, auth success/failure, policy violation, security events.
 - Observer pattern for instrumentation. Severity levels; configurable minimum severity.
@@ -80,7 +86,7 @@
 
 ## 7. Skill/Plugin Security
 
-### nullclaw
+### SeaClaw
 
 - **SkillForge**: Skill discovery from local directories; install from URL. Skills execute within the sandbox when invoked. Explicit enable/disable. No npm-like package supply chain for skills.
 - Skills run in the same sandbox as tools (Landlock, Firejail, etc.).
@@ -91,7 +97,7 @@
 
 ## 8. Binary Integrity
 
-### nullclaw
+### SeaClaw
 
 - Single static binary. SHA-256 checksums for releases.
 - Reproducible builds supported. SBOM documents components.
@@ -102,7 +108,7 @@
 
 ## 9. Attack Surface Comparison
 
-| Aspect          | nullclaw                           | OpenClaw                 |
+| Aspect          | SeaClaw                            | OpenClaw                 |
 | --------------- | ---------------------------------- | ------------------------ |
 | Dependencies    | 0 (core); 2–3 optional system libs | 1,200+ npm packages      |
 | Secrets at rest | Encrypted (ChaCha20/AES-GCM)       | Plain text               |
@@ -114,4 +120,4 @@
 
 ## 10. Recommendation
 
-For security-conscious deployments, nullclaw provides significantly stronger defaults with zero additional configuration: encrypted secrets, sandboxed tool execution, HTTPS enforcement, and audit logging out of the box. OpenClaw offers flexibility and a large ecosystem at the cost of a wider attack surface and manual hardening.
+For security-conscious deployments, SeaClaw provides significantly stronger defaults with zero additional configuration: encrypted secrets, sandboxed tool execution, HTTPS enforcement, and audit logging out of the box. OpenClaw offers flexibility and a large ecosystem at the cost of a wider attack surface and manual hardening.

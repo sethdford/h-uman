@@ -25,7 +25,7 @@ Key extension points:
 - `src/runtime/` (`sc_runtime_t`) — execution environments
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
 
-Current scale: **449 source + header files, ~70K lines of C, ~28K lines of tests, 2,024 tests**.
+Current scale: **400+ source + header files, ~70K+ lines of C, ~28K+ lines of tests, 2,000+ tests**.
 
 Build and test:
 
@@ -62,7 +62,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `SC_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 2,024+ tests must pass at zero ASan errors**
+5. **All 2,000+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `SC_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -126,9 +126,9 @@ Required:
 src/
   main.c                CLI entrypoint and command routing
   agent/                agent loop, context, planner, compaction, dispatcher
-  channels/             20 channel implementations (cli, telegram, discord, slack, ...)
+  channels/             21 channel implementations (cli, telegram, discord, slack, ...)
   providers/            50+ AI provider implementations (9 core + 41 compatible services)
-  tools/                47 tool implementations
+  tools/                43 tool implementations
   memory/               SQLite + markdown + LRU backends, embeddings, vector search
   security/             policy, pairing, secrets, sandbox backends (landlock, firejail, bwrap)
   runtime/              runtime adapters (native, docker, wasm, cloudflare)
@@ -143,7 +143,7 @@ src/
 
 include/seaclaw/       public C headers
 
-tests/                 68 test files, 2,024 tests
+tests/                 60+ test files, 2,000+ tests
 
 asm/                   platform-specific assembly (aarch64, x86_64, generic C)
 
@@ -250,10 +250,10 @@ git config core.hooksPath .githooks
 
 Hooks:
 
-| Hook         | What it does                                                                        |
-| ------------ | ----------------------------------------------------------------------------------- |
-| `pre-commit` | Runs format checks — blocks commit if code is not formatted                         |
-| `pre-push`   | Runs `cmake --build build && ./build/seaclaw_tests` — blocks push if any test fails |
+| Hook         | What it does                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| `pre-commit` | Runs format checks — blocks commit if code is not formatted                                     |
+| `pre-push`   | Runs `cmake --build build-check && ./build-check/seaclaw_tests` — blocks push if any test fails |
 
 To bypass a hook in an emergency: `git commit --no-verify` / `git push --no-verify`.
 

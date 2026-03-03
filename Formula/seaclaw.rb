@@ -32,7 +32,7 @@ class Seaclaw < Formula
     man1.install "docs/man/seaclaw-gateway.1"
 
     bash_completion.install "completions/seaclaw.bash" => "seaclaw"
-    zsh_completion.install "completions/seaclaw.zsh" => "_seaclaw"
+    zsh_completion.install "completions/_seaclaw" => "_seaclaw"
   end
 
   test do

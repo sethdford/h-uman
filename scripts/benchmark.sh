@@ -3,7 +3,25 @@
 # Usage: ./scripts/benchmark.sh [path/to/seaclaw] [--compare FILE]
 # Measures: binary size, symbols, sections, startup time, memory, test metrics.
 
-set -e
+set -eu
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+die() { printf "${RED}error:${NC} %s\n" "$1" >&2; exit 1; }
+info() { printf "${GREEN}==>${NC} ${BOLD}%s${NC}\n" "$1"; }
+warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
+
+case "${1:-}" in
+    --help|-h)
+        printf "Usage: %s [path/to/seaclaw] [--compare FILE]\n" "$0"
+        printf "Measures: binary size, symbols, sections, startup time, memory, test metrics.\n"
+        exit 0
+        ;;
+esac
 
 # Default paths (release seaclaw, tests often in build-check with ASan)
 SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -60,9 +78,7 @@ else
 fi
 
 if [ ! -f "$SEACLAW_BIN" ]; then
-    echo "Error: seaclaw binary not found at $SEACLAW_BIN"
-    echo "Build with: mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel && cmake --build ."
-    exit 1
+    die "seaclaw binary not found at $SEACLAW_BIN. Build with: mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel && cmake --build ."
 fi
 
 # Detect OS for time/memory

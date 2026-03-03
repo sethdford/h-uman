@@ -83,8 +83,7 @@ export class ScApp extends LitElement {
       display: grid;
       grid-template-columns: var(--sc-sidebar-width) 1fr;
       height: 100%;
-      transition: grid-template-columns var(--sc-duration-normal)
-        var(--sc-ease-out);
+      transition: grid-template-columns var(--sc-duration-normal) var(--sc-ease-out);
     }
 
     .layout.collapsed {
@@ -169,9 +168,7 @@ export class ScApp extends LitElement {
     super.connectedCallback();
     this.gateway = new GatewayClientClass();
     setGateway(this.gateway);
-    this.gateway.addEventListener("status", ((
-      e: CustomEvent<GatewayStatus>,
-    ) => {
+    this.gateway.addEventListener("status", ((e: CustomEvent<GatewayStatus>) => {
       this.connectionStatus = e.detail;
     }) as EventListener);
 
@@ -185,8 +182,7 @@ export class ScApp extends LitElement {
       (window as unknown as { __VITE_WS_PROXY__?: string }).__VITE_WS_PROXY__
         ? (window as unknown as { __VITE_WS_PROXY__: string }).__VITE_WS_PROXY__
         : (() => {
-            const proto =
-              window.location.protocol === "https:" ? "wss:" : "ws:";
+            const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
             return `${proto}//${window.location.host}/ws`;
           })();
     this.gateway.connect(wsUrl);
@@ -265,9 +261,7 @@ export class ScApp extends LitElement {
     }
   }
 
-  private _onCommandExecute(
-    e: CustomEvent<{ action: string; id: string }>,
-  ): void {
+  private _onCommandExecute(e: CustomEvent<{ action: string; id: string }>): void {
     this.commandPaletteOpen = false;
     const { action, id } = e.detail;
     if (action === "navigate" && VALID_TABS.includes(id as TabId)) {
@@ -323,9 +317,7 @@ export class ScApp extends LitElement {
       case "overview":
         return html`<sc-overview-view></sc-overview-view>`;
       case "chat":
-        return html`<sc-chat-view
-          .sessionKey=${this.chatSessionKey}
-        ></sc-chat-view>`;
+        return html`<sc-chat-view .sessionKey=${this.chatSessionKey}></sc-chat-view>`;
       case "agents":
         return html`<sc-agents-view></sc-agents-view>`;
       case "sessions":

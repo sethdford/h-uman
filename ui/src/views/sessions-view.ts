@@ -2,6 +2,10 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { formatRelative } from "../utils.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
+import "../components/sc-button.js";
 
 interface SessionItem {
   key?: string;
@@ -27,44 +31,16 @@ export class ScSessionsView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1rem;
+      margin-bottom: var(--sc-space-md);
     }
     h2 {
       margin: 0;
-      font-size: 1.25rem;
-      font-weight: 600;
-    }
-    .btn {
-      padding: 0.5rem 1rem;
-      background: var(--sc-bg-elevated);
-      color: var(--sc-text);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      cursor: pointer;
-      font-size: 0.875rem;
-    }
-    .btn:hover {
-      background: var(--sc-border);
-    }
-    .btn-accent {
-      background: var(--sc-accent);
-      color: var(--sc-bg);
-      border: none;
-    }
-    .btn-accent:hover {
-      background: var(--sc-accent-hover);
-    }
-    .btn-danger {
-      background: var(--sc-error);
-      color: white;
-      border: none;
-    }
-    .btn-danger:hover {
-      background: var(--sc-error);
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
     }
     .layout {
       display: flex;
-      gap: 1rem;
+      gap: var(--sc-space-md);
       height: calc(100vh - 200px);
     }
     .session-list {
@@ -73,32 +49,28 @@ export class ScSessionsView extends GatewayAwareLitElement {
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
     }
     .session-item {
-      padding: 0.75rem 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
       cursor: pointer;
     }
     .session-item:hover {
-      border-color: var(--sc-text-muted);
+      --sc-border-subtle: var(--sc-text-muted);
     }
-    .session-item.active {
+    .session-item.active sc-card {
       border-color: var(--sc-accent);
     }
     .session-key {
-      font-size: 0.875rem;
-      font-weight: 600;
+      font-size: var(--sc-text-base);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
-      margin-bottom: 0.25rem;
+      margin-bottom: var(--sc-space-xs);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .session-meta {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
     .detail {

@@ -45,9 +45,7 @@ export class ScEmptyState extends LitElement {
     return html`
       ${this.icon ? html`<div class="icon">${this.icon}</div>` : ""}
       ${this.heading ? html`<h2 class="heading">${this.heading}</h2>` : ""}
-      ${this.description
-        ? html`<p class="description">${this.description}</p>`
-        : ""}
+      ${this.description ? html`<p class="description">${this.description}</p>` : ""}
       <div class="slot"><slot></slot></div>
     `;
   }

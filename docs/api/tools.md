@@ -1,3 +1,9 @@
+---
+title: Tools API
+description: sc_tool_t vtable for file, web, shell, memory, and other tools
+updated: 2026-03-02
+---
+
 # Tools API
 
 Tools implement the `sc_tool_t` vtable to perform actions (file read/write, web fetch, shell, memory, etc.).

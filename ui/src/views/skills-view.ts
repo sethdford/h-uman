@@ -179,10 +179,9 @@ export class ScSkillsView extends GatewayAwareLitElement {
     this.loading = true;
     this.error = "";
     try {
-      const res = (await gw.request<{ skills?: Skill[] }>(
-        "skills.list",
-        {},
-      )) as { skills?: Skill[] } | { result?: { skills?: Skill[] } };
+      const res = (await gw.request<{ skills?: Skill[] }>("skills.list", {})) as
+        | { skills?: Skill[] }
+        | { result?: { skills?: Skill[] } };
       const skills =
         (res && "skills" in res && res.skills) ||
         (res && "result" in res && res.result?.skills) ||
@@ -239,8 +238,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
             type="url"
             placeholder="https://..."
             .value=${this.installUrl}
-            @input=${(e: Event) =>
-              (this.installUrl = (e.target as HTMLInputElement).value)}
+            @input=${(e: Event) => (this.installUrl = (e.target as HTMLInputElement).value)}
           />
           <button class="btn" @click=${this.installSkill}>Install</button>
         </div>
@@ -259,9 +257,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
               <div class="empty-state">
                 <div class="empty-icon">🧩</div>
                 <p class="empty-title">No skills installed</p>
-                <p class="empty-desc">
-                  Install skills to extend your agent's capabilities.
-                </p>
+                <p class="empty-desc">Install skills to extend your agent's capabilities.</p>
               </div>
             `
           : html`
@@ -270,17 +266,13 @@ export class ScSkillsView extends GatewayAwareLitElement {
                   (skill) => html`
                     <div class="skill-card">
                       <div class="skill-name">${skill.name}</div>
-                      <div class="skill-desc">
-                        ${skill.description ?? "No description"}
-                      </div>
+                      <div class="skill-desc">${skill.description ?? "No description"}</div>
                       <div class="skill-footer">
                         <span class="status">
                           ${skill.enabled !== false ? "Enabled" : "Disabled"}
                         </span>
                         <div
-                          class="toggle ${skill.enabled !== false
-                            ? "enabled"
-                            : ""}"
+                          class="toggle ${skill.enabled !== false ? "enabled" : ""}"
                           @click=${() => this.toggleSkill(skill)}
                           role="switch"
                           aria-checked=${skill.enabled !== false}

@@ -1,3 +1,9 @@
+---
+title: Channel API
+description: sc_channel_t vtable for CLI, Telegram, Discord, Slack, and other channels
+updated: 2026-03-02
+---
+
 # Channel API
 
 Channels implement the `sc_channel_t` vtable for inbound/outbound messaging (CLI, Telegram, Discord, Slack, etc.).

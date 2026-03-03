@@ -44,7 +44,7 @@ const tools = [
     <link rel="manifest" href={`${base}site.webmanifest`} />
     <meta name="theme-color" content="#f97066" />
     <meta property="og:title" content="SeaClaw — Bring AI to every device on Earth" />
-    <meta property="og:description" content="349 KB binary. 50+ AI providers. 20 channels. 47 tools. Zero dependencies. Pure C." />
+    <meta property="og:description" content="349 KB binary. 50+ AI providers. 21 channels. 43 tools. Zero dependencies. Pure C." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://sethdford.github.io/seaclaw/" />
     <meta property="og:image" content="https://sethdford.github.io/seaclaw/og-image.png" />
@@ -52,7 +52,7 @@ const tools = [
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="SeaClaw — Bring AI to every device on Earth" />
-    <meta name="twitter:description" content="349 KB binary. 50+ AI providers. 20 channels. 47 tools. Zero dependencies. Pure C." />
+    <meta name="twitter:description" content="349 KB binary. 50+ AI providers. 21 channels. 43 tools. Zero dependencies. Pure C." />
     <meta name="twitter:image" content="https://sethdford.github.io/seaclaw/og-image.png" />
 
     <script type="application/ld+json" set:html={JSON.stringify({
@@ -108,10 +108,10 @@ const tools = [
           {[
             { count: 349, suffix: " KB", label: "Binary" },
             { count: 2, prefix: "<", suffix: " ms", label: "Startup" },
-            { count: 1987, label: "Tests" },
+            { count: 2148, label: "Tests" },
             { count: 50, suffix: "+", label: "Providers" },
             { count: 20, label: "Channels" },
-            { count: 47, label: "Tools" },
+            { count: 43, label: "Tools" },
           ].map((stat, i, arr) => (
             <div class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`} style="border-color: var(--color-border)">
               <div class="font-serif text-[clamp(2rem,4vw,3rem)] leading-none" style="color: var(--color-text)" data-count={stat.count} data-prefix={stat.prefix || ""} data-suffix={stat.suffix || ""}>
@@ -229,7 +229,7 @@ const tools = [
     <section class="py-16 md:py-32 px-6">
       <div class="max-w-4xl mx-auto text-center">
         <h2 class="providers-title font-serif text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          50+ providers. 20 channels. 47 tools.
+          50+ providers. 21 channels. 43 tools.
         </h2>
         <p class="providers-sub text-lg mb-16 opacity-0" style="color: var(--color-text-secondary)">Connect to any AI model. Reach users on any platform.</p>
         <div class="flex flex-wrap gap-3 justify-center" id="provider-grid">

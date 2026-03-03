@@ -1,3 +1,9 @@
+---
+title: Gateway API
+description: HTTP server, webhooks, Control UI, WebSocket protocol, and event bridge
+updated: 2026-03-02
+---
+
 # Gateway API
 
 The gateway provides an HTTP server for webhooks, a Control UI (SPA), WebSocket control protocol, push notifications, and event bridge.

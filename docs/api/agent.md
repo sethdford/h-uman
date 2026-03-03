@@ -1,3 +1,9 @@
+---
+title: Agent API
+description: Agent module for conversation loop, tool dispatch, and slash commands
+updated: 2026-03-02
+---
+
 # Agent API
 
 The agent orchestrates the conversation loop: provider chat, tool dispatch, history, and slash commands.

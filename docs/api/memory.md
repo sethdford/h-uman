@@ -1,3 +1,9 @@
+---
+title: Memory API
+description: sc_memory_t vtable, session store, and retrieval engines
+updated: 2026-03-02
+---
+
 # Memory API
 
 Memory backends implement the `sc_memory_t` vtable for storing and recalling context. Session store and retrieval engines extend this.

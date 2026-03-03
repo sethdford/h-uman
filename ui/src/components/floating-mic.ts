@@ -73,12 +73,8 @@ export class ScFloatingMic extends LitElement {
 
   private get hasSpeechRecognition(): boolean {
     const g =
-      typeof window !== "undefined"
-        ? (window as unknown as { SpeechRecognition?: unknown })
-        : null;
-    const w = g
-      ? (window as unknown as { webkitSpeechRecognition?: unknown })
-      : null;
+      typeof window !== "undefined" ? (window as unknown as { SpeechRecognition?: unknown }) : null;
+    const w = g ? (window as unknown as { webkitSpeechRecognition?: unknown }) : null;
     return !!(g?.SpeechRecognition ?? w?.webkitSpeechRecognition);
   }
 
@@ -220,10 +216,7 @@ export class ScFloatingMic extends LitElement {
       return a;
     };
     const active = deepActive(document) as HTMLElement | null;
-    if (
-      active &&
-      (active.tagName === "TEXTAREA" || active.tagName === "INPUT")
-    ) {
+    if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) {
       target = active as HTMLTextAreaElement | HTMLInputElement;
     }
 
@@ -237,8 +230,7 @@ export class ScFloatingMic extends LitElement {
     const end = target.selectionEnd ?? target.value.length;
     const before = target.value.slice(0, start);
     const after = target.value.slice(end);
-    const separator =
-      before && !before.endsWith(" ") && !text.startsWith(" ") ? " " : "";
+    const separator = before && !before.endsWith(" ") && !text.startsWith(" ") ? " " : "";
     const newValue = before + separator + text.trim() + after;
     target.value = newValue;
     const pos = start + separator.length + text.trim().length;
@@ -255,9 +247,7 @@ export class ScFloatingMic extends LitElement {
         <button
           class="btn ${this.isListening ? "listening" : ""}"
           ?disabled=${!this.speechSupported}
-          title=${this.speechSupported
-            ? "Start voice input (Cmd+Shift+M)"
-            : "Speech not supported"}
+          title=${this.speechSupported ? "Start voice input (Cmd+Shift+M)" : "Speech not supported"}
           @click=${this.toggleRecording}
           aria-label="Toggle voice input"
         >

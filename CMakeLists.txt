@@ -255,6 +255,7 @@ set(SC_CORE_SOURCES
     src/agent/compaction.c
     src/agent/spawn.c
     src/agent/mailbox.c
+    src/agent/profile.c
     src/agent/planner.c
     src/agent/cli.c
     src/agent/tui.c
@@ -914,6 +915,7 @@ set(SC_TEST_SOURCES
     tests/test_memory_engines_ext.c
     tests/test_runtime.c
     tests/test_util_modules.c
+    tests/test_roadmap.c
 )
 
 add_executable(seaclaw_tests ${SC_TEST_SOURCES} wasm/wasm_alloc.c)

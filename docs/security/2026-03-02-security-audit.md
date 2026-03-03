@@ -1,3 +1,9 @@
+---
+title: seaclaw Security Audit Report
+description: Full codebase security audit per OWASP Top 10 and CWE
+updated: 2026-03-02
+---
+
 # seaclaw Security Audit Report
 
 **Date:** 2026-03-02

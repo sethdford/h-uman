@@ -211,9 +211,7 @@ export class ScCronView extends GatewayAwareLitElement {
         | { jobs?: CronJob[] }
         | { result?: { jobs?: CronJob[] } };
       const jobs =
-        (res && "jobs" in res && res.jobs) ||
-        (res && "result" in res && res.result?.jobs) ||
-        [];
+        (res && "jobs" in res && res.jobs) || (res && "result" in res && res.result?.jobs) || [];
       this.jobs = Array.isArray(jobs) ? jobs : [];
     } catch (e) {
       this.error = e instanceof Error ? e.message : "Failed to load jobs";
@@ -298,9 +296,7 @@ export class ScCronView extends GatewayAwareLitElement {
               <div class="empty-state">
                 <div class="empty-icon">⏰</div>
                 <p class="empty-title">No scheduled jobs</p>
-                <p class="empty-desc">
-                  Add a cron job to run commands on a schedule.
-                </p>
+                <p class="empty-desc">Add a cron job to run commands on a schedule.</p>
               </div>
             `
           : html`
@@ -316,9 +312,7 @@ export class ScCronView extends GatewayAwareLitElement {
                             </div>`
                           : ""}
                         ${job.description
-                          ? html`<div class="job-description">
-                              ${job.description}
-                            </div>`
+                          ? html`<div class="job-description">${job.description}</div>`
                           : ""}
                         <div class="job-meta">
                           ${job.lastRun ? `Last run: ${job.lastRun}` : ""}
@@ -349,10 +343,7 @@ export class ScCronView extends GatewayAwareLitElement {
       ${this.showForm
         ? html`
             <div class="form-overlay" @click=${this.closeForm}>
-              <div
-                class="form-card"
-                @click=${(e: Event) => e.stopPropagation()}
-              >
+              <div class="form-card" @click=${(e: Event) => e.stopPropagation()}>
                 <h3 class="form-title">Add Cron Job</h3>
                 <div class="form-group">
                   <label>Expression (e.g. 0 * * * *)</label>
@@ -361,9 +352,7 @@ export class ScCronView extends GatewayAwareLitElement {
                     placeholder="0 * * * *"
                     .value=${this.formExpression}
                     @input=${(e: Event) =>
-                      (this.formExpression = (
-                        e.target as HTMLInputElement
-                      ).value)}
+                      (this.formExpression = (e.target as HTMLInputElement).value)}
                   />
                 </div>
                 <div class="form-group">
@@ -383,15 +372,11 @@ export class ScCronView extends GatewayAwareLitElement {
                     placeholder="Optional"
                     .value=${this.formDescription}
                     @input=${(e: Event) =>
-                      (this.formDescription = (
-                        e.target as HTMLInputElement
-                      ).value)}
+                      (this.formDescription = (e.target as HTMLInputElement).value)}
                   />
                 </div>
                 <div class="form-actions">
-                  <button class="btn btn-secondary" @click=${this.closeForm}>
-                    Cancel
-                  </button>
+                  <button class="btn btn-secondary" @click=${this.closeForm}>Cancel</button>
                   <button class="btn" @click=${this.submitAdd}>Add</button>
                 </div>
               </div>

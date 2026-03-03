@@ -1,10 +1,16 @@
-# Migration from OpenClaw to NullClaw (SeaClaw)
+---
+title: Migration from OpenClaw to SeaClaw
+description: Guide to migrating from OpenClaw (TypeScript) to SeaClaw (C, static binary)
+updated: 2026-03-02
+---
 
-This guide walks you through migrating from [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js) to NullClaw/SeaClaw (C, static binary). SeaClaw is a drop-in replacement that preserves your memory, config structure, and channel integrations while dramatically reducing resource usage and improving security.
+# Migration from OpenClaw to SeaClaw
+
+This guide walks you through migrating from [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js) to SeaClaw (C, static binary). SeaClaw is a drop-in replacement that preserves your memory, config structure, and channel integrations while dramatically reducing resource usage and improving security.
 
 ## Why migrate?
 
-| Benefit          | OpenClaw                                                                       | SeaClaw (NullClaw)                              |
+| Benefit          | OpenClaw                                                                       | SeaClaw                                         |
 | ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------- |
 | **Cost**         | $599+ setup (typical M-series Mac), $300+/mo API overhead from bloated runtime | $5 hardware—runs on ARM SBCs, Raspberry Pi Zero |
 | **Binary size**  | ~28 MB (npm dist)                                                              | **282 KB** core binary                          |

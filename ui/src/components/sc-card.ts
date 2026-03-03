@@ -34,11 +34,7 @@ export class ScCard extends LitElement {
   `;
 
   render() {
-    const classes = [
-      "card",
-      this.hoverable ? "hoverable" : "",
-      this.clickable ? "clickable" : "",
-    ]
+    const classes = ["card", this.hoverable ? "hoverable" : "", this.clickable ? "clickable" : ""]
       .filter(Boolean)
       .join(" ");
 

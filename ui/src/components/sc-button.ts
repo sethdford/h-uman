@@ -142,9 +142,7 @@ export class ScButton extends LitElement {
         aria-busy=${this.loading}
         aria-disabled=${this.disabled}
       >
-        ${this.loading
-          ? html`<span class="spinner" aria-hidden="true"></span>`
-          : null}
+        ${this.loading ? html`<span class="spinner" aria-hidden="true"></span>` : null}
         <span class="slot">
           <slot></slot>
         </span>

@@ -1,6 +1,10 @@
-import { html, css } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
+import "../components/sc-button.js";
 
 interface NodeItem {
   id?: string;
@@ -20,31 +24,15 @@ export class ScNodesView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1rem;
+      margin-bottom: var(--sc-space-md);
       flex-wrap: wrap;
-      gap: 0.5rem;
+      gap: var(--sc-space-sm);
     }
     h2 {
       margin: 0;
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: var(--sc-text-xl);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
-    }
-    .refresh-btn {
-      padding: 0.5rem 1rem;
-      background: var(--sc-bg-elevated);
-      color: var(--sc-text);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      font-size: 0.875rem;
-      cursor: pointer;
-    }
-    .refresh-btn:hover {
-      background: var(--sc-border);
-    }
-    .refresh-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
     }
     .nodes-grid {
       display: grid;
@@ -61,8 +49,8 @@ export class ScNodesView extends GatewayAwareLitElement {
     .node-header {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      margin-bottom: 0.5rem;
+      gap: var(--sc-space-sm);
+      margin-bottom: var(--sc-space-sm);
     }
     .status-dot {
       width: 8px;
@@ -81,91 +69,41 @@ export class ScNodesView extends GatewayAwareLitElement {
     }
     .node-id {
       font-family: var(--sc-font-mono);
-      font-size: 0.875rem;
-      font-weight: 600;
+      font-size: var(--sc-text-base);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
       word-break: break-all;
     }
     .node-type {
       display: inline-block;
-      padding: 0.2rem 0.5rem;
-      font-size: 0.7rem;
-      font-weight: 500;
+      padding: var(--sc-space-xs) var(--sc-space-sm);
+      font-size: var(--sc-text-xs);
+      font-weight: var(--sc-weight-medium);
       text-transform: lowercase;
       background: var(--sc-bg-elevated);
       color: var(--sc-text-muted);
-      border-radius: 4px;
-      margin-bottom: 0.5rem;
+      border-radius: var(--sc-radius-sm);
+      margin-bottom: var(--sc-space-sm);
     }
     .node-info {
-      font-size: 0.8125rem;
+      font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
     }
     .health-section {
-      padding: 1rem;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      margin-top: 1rem;
+      margin-top: var(--sc-space-md);
     }
     .health-title {
-      font-size: 0.875rem;
-      font-weight: 600;
+      font-size: var(--sc-text-base);
+      font-weight: var(--sc-weight-semibold);
       color: var(--sc-text);
-      margin-bottom: 0.5rem;
+      margin-bottom: var(--sc-space-sm);
     }
     .health-status {
-      font-size: 0.8125rem;
+      font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
     }
     .health-status.ok {
       color: var(--sc-success);
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
-    }
-    .error {
-      color: var(--sc-error);
-      font-size: 0.875rem;
-      margin-bottom: 1rem;
     }
   `;
 

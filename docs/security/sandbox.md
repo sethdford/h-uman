@@ -1,3 +1,9 @@
+---
+title: Sandbox Isolation System
+description: Multi-tier sandbox for isolating child processes spawned by the agent
+updated: 2026-03-02
+---
+
 # Sandbox Isolation System
 
 seaclaw provides a multi-tier sandbox system for isolating child processes spawned by the agent.

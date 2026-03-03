@@ -6,7 +6,7 @@ SeaClaw is an autonomous AI assistant runtime written in C11. MIT License.
 
 **Dependencies:**
 
-- CMake 3.14+
+- CMake 3.20+
 - C11 compiler (Clang or GCC)
 - SQLite3 (system or Homebrew)
 - libcurl (optional, `SC_ENABLE_CURL=ON`)
@@ -24,7 +24,7 @@ cmake --build . -j$(nproc)
 ./seaclaw_tests
 ```
 
-All 1,697+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
+All 2,148+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
 
 **Release build:**
 

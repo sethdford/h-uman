@@ -2,23 +2,38 @@
 # Compare two SeaClaw benchmark JSON result files.
 # Usage: ./scripts/compare-benchmarks.sh before.json after.json
 
-set -e
+set -eu
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+die() { printf "${RED}error:${NC} %s\n" "$1" >&2; exit 1; }
+info() { printf "${GREEN}==>${NC} ${BOLD}%s${NC}\n" "$1"; }
+warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
+
+case "${1:-}" in
+    --help|-h)
+        printf "Usage: %s before.json after.json\n" "$0"
+        printf "Compare two SeaClaw benchmark JSON result files.\n"
+        exit 0
+        ;;
+esac
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 before.json after.json"
-    exit 1
+    die "Usage: $0 before.json after.json"
 fi
 
 BEFORE="$1"
 AFTER="$2"
 
 if [ ! -f "$BEFORE" ]; then
-    echo "Error: $BEFORE not found"
-    exit 1
+    die "$BEFORE not found"
 fi
 if [ ! -f "$AFTER" ]; then
-    echo "Error: $AFTER not found"
-    exit 1
+    die "$AFTER not found"
 fi
 
 # Colors

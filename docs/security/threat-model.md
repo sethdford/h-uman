@@ -1,3 +1,9 @@
+---
+title: seaclaw Threat Model
+description: STRIDE threat model and security architecture for seaclaw
+updated: 2026-03-02
+---
+
 # seaclaw Threat Model
 
 **Document Version:** 1.0  

@@ -1,6 +1,9 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import "../components/sc-card.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-empty-state.js";
 
 interface ToolDef {
   name?: string;
@@ -15,7 +18,7 @@ export class ScToolsView extends GatewayAwareLitElement {
       display: block;
     }
     .search {
-      margin-bottom: 1rem;
+      margin-bottom: var(--sc-space-md);
       max-width: 400px;
     }
     .search input {
@@ -37,33 +40,30 @@ export class ScToolsView extends GatewayAwareLitElement {
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1rem;
+      gap: var(--sc-space-md);
     }
-    .card {
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      padding: 1rem;
+    .grid-full {
+      grid-column: 1 / -1;
     }
     .card-name {
-      font-weight: 600;
-      font-size: 1rem;
+      font-weight: var(--sc-weight-semibold);
+      font-size: var(--sc-text-lg);
       color: var(--sc-accent);
-      margin-bottom: 0.5rem;
+      margin-bottom: var(--sc-space-sm);
     }
     .card-desc {
-      font-size: 0.875rem;
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
-      margin-bottom: 0.75rem;
-      line-height: 1.4;
+      margin-bottom: var(--sc-space-sm);
+      line-height: var(--sc-leading-normal);
     }
     .card-schema {
-      font-size: 0.75rem;
+      font-size: var(--sc-text-xs);
       font-family: var(--sc-font-mono);
       color: var(--sc-text-muted);
       background: var(--sc-bg);
-      padding: 0.5rem;
-      border-radius: 4px;
+      padding: var(--sc-space-sm);
+      border-radius: var(--sc-radius-sm);
       max-height: 6rem;
       overflow: auto;
     }
@@ -72,60 +72,8 @@ export class ScToolsView extends GatewayAwareLitElement {
       border: none;
       color: var(--sc-accent);
       cursor: pointer;
-      font-size: 0.75rem;
-      padding: 0.25rem 0;
-    }
-    .skeleton {
-      background: linear-gradient(
-        90deg,
-        var(--sc-bg-elevated) 25%,
-        var(--sc-bg-surface) 50%,
-        var(--sc-bg-elevated) 75%
-      );
-      background-size: 200% 100%;
-      animation: sc-shimmer 1.5s ease-in-out infinite;
-      border-radius: var(--sc-radius);
-    }
-    .skeleton-line {
-      height: 1rem;
-      margin-bottom: 0.75rem;
-      border-radius: 4px;
-    }
-    .skeleton-card {
-      height: 5rem;
-      margin-bottom: 0.75rem;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--sc-text-muted);
-    }
-    .empty-icon {
-      font-size: 2.5rem;
-      margin-bottom: 1rem;
-    }
-    .empty-title {
-      font-size: var(--sc-text-lg);
-      font-weight: 600;
-      color: var(--sc-text);
-      margin: 0 0 0.5rem;
-    }
-    .empty-desc {
-      font-size: var(--sc-text-sm);
-      margin: 0;
-      max-width: 24rem;
-      margin-inline: auto;
-    }
-    .grid .empty-state {
-      grid-column: 1 / -1;
-    }
-    .error-banner {
-      background: var(--sc-error);
-      color: #fff;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-      font-size: var(--sc-text-sm);
+      font-size: var(--sc-text-xs);
+      padding: var(--sc-space-xs) 0;
     }
   `;
 
@@ -146,10 +94,7 @@ export class ScToolsView extends GatewayAwareLitElement {
     }
     this.loading = true;
     try {
-      const payload = await this.gateway.request<{ tools?: ToolDef[] }>(
-        "tools.catalog",
-        {},
-      );
+      const payload = await this.gateway.request<{ tools?: ToolDef[] }>("tools.catalog", {});
       this.tools = payload?.tools ?? [];
     } catch (e) {
       this.tools = [];
@@ -171,8 +116,7 @@ export class ScToolsView extends GatewayAwareLitElement {
     if (!q) return this.tools;
     return this.tools.filter(
       (t) =>
-        (t.name ?? "").toLowerCase().includes(q) ||
-        (t.description ?? "").toLowerCase().includes(q),
+        (t.name ?? "").toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q),
     );
   }
 
@@ -182,25 +126,24 @@ export class ScToolsView extends GatewayAwareLitElement {
     if (this.loading) {
       return html`
         <div class="search">
-          <input
-            type="text"
-            placeholder="Search tools..."
-            disabled
-            style="opacity: 0.6"
-          />
+          <input type="text" placeholder="Search tools..." disabled style="opacity: 0.6" />
         </div>
         <div class="grid">
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
-          <div class="card skeleton skeleton-card"></div>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
+          <sc-skeleton variant="card" height="80px"></sc-skeleton>
         </div>
       `;
     }
 
     return html`
       ${this.error
-        ? html`<div class="error-banner">${this.error}</div>`
+        ? html`<sc-empty-state
+            icon="⚠️"
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
         : nothing}
       <div class="search">
         <input
@@ -215,17 +158,17 @@ export class ScToolsView extends GatewayAwareLitElement {
       <div class="grid">
         ${filtered.length === 0
           ? html`
-              <div class="empty-state">
-                <div class="empty-icon">🔧</div>
-                <p class="empty-title">No tools available</p>
-                <p class="empty-desc">
-                  Tools will appear here when the gateway provides them.
-                </p>
+              <div class="grid-full">
+                <sc-empty-state
+                  icon="🔧"
+                  heading="No tools available"
+                  description="Tools will appear here when the gateway provides them."
+                ></sc-empty-state>
               </div>
             `
           : filtered.map(
               (t) => html`
-                <div class="card">
+                <sc-card>
                   <div class="card-name">${t.name ?? "unnamed"}</div>
                   <div class="card-desc">${t.description ?? ""}</div>
                   ${t.parameters != null
@@ -234,9 +177,7 @@ export class ScToolsView extends GatewayAwareLitElement {
                           class="schema-toggle"
                           @click=${() => this.toggleSchema(t.name ?? "")}
                         >
-                          ${this.expandedCards.has(t.name ?? "")
-                            ? "Hide params"
-                            : "Show params"}
+                          ${this.expandedCards.has(t.name ?? "") ? "Hide params" : "Show params"}
                         </button>
                         ${this.expandedCards.has(t.name ?? "")
                           ? html`
@@ -247,7 +188,7 @@ ${JSON.stringify(t.parameters, null, 2)}</pre
                           : ""}
                       `
                     : ""}
-                </div>
+                </sc-card>
               `,
             )}
       </div>

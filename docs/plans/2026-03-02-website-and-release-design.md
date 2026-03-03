@@ -1,3 +1,9 @@
+---
+title: SeaClaw Website & Full Release — Design Document
+description: Design for landing page, Astro + Starlight docs site, and GitHub Pages deployment
+updated: 2026-03-02
+---
+
 # SeaClaw Website & Full Release — Design Document
 
 **Date:** 2026-03-02

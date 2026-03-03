@@ -3,17 +3,32 @@ set -euo pipefail
 
 # E2E test: validates that seaclaw builds, runs unit tests, and the binary
 # starts correctly for key subcommands.
+# Usage: ./scripts/e2e-test.sh [--help]
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+die() { printf "${RED}error:${RESET} %s\n" "$1" >&2; exit 1; }
+info() { printf "${GREEN}==>${RESET} ${BOLD}%s${RESET}\n" "$1"; }
+warn() { printf "${YELLOW}warning:${RESET} %s\n" "$1"; }
+
+case "${1:-}" in
+    --help|-h)
+        printf "Usage: %s [--help]\n" "$0"
+        printf "E2E test: validates that seaclaw builds, runs unit tests, and the binary starts correctly.\n"
+        exit 0
+        ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD="$ROOT/build"
 BIN="$BUILD/seaclaw"
 TESTS="$BUILD/seaclaw_tests"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-DIM='\033[2m'
-RESET='\033[0m'
 
 pass=0
 fail=0

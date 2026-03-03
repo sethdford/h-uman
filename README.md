@@ -18,7 +18,7 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-349 KB binary · <2 ms startup · 2,024+ tests · 50+ providers · 20 channels · 47 tools · Pluggable everything
+349 KB binary · <2 ms startup · 2,148+ tests · 50+ providers · 21 channels · 43 tools · Pluggable everything
 ```
 
 ### Features
@@ -27,7 +27,7 @@ The smallest fully autonomous AI assistant infrastructure — a static C binary 
 - **Near-Zero Memory:** < 5 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
 - **Instant Startup:** <2 ms on Apple Silicon, <8 ms on a 0.8 GHz edge core.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
-- **Feature-Complete:** 50+ providers, 20 channels, 47 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
+- **Feature-Complete:** 50+ providers, 21 channels, 43 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Optional `--tui` flag.
 - **Performance-Optimized:** Per-turn arena allocator, HTTP connection pooling, HTTP/2, system prompt caching — all benefiting from C-level control.
 
@@ -57,7 +57,7 @@ SeaClaw's verified numbers (measured on macOS arm64, March 2026):
 Binary size:   349 KB core / 430 KB full (MinSizeRel + LTO)
 Peak RSS:      < 5 MB
 Startup:       <2 ms (Apple Silicon M4 Max)
-Tests:         2,024+ passing, 0 ASan errors
+Tests:         2,148+ passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -151,7 +151,7 @@ Every subsystem is a **vtable interface** — swap implementations with a config
 | **AI Models**     | `Provider`       | 50+ providers (OpenRouter, Anthropic, OpenAI, Gemini, Ollama, llama.cpp, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Perplexity, Cohere, Bedrock, etc.) | `custom:https://your-api.com` — any OpenAI-compatible API |
 | **Channels**      | `Channel`        | CLI, Telegram, Signal, Discord, Slack, iMessage, Matrix, WhatsApp, Webhook, IRC, Lark/Feishu, OneBot, Line, DingTalk, Email, Nostr, QQ, MaixCam, Mattermost    | Any messaging API                                         |
 | **Memory**        | `Memory`         | SQLite with hybrid search (FTS5 + vector cosine similarity), Markdown                                                                                          | Any persistence backend                                   |
-| **Tools**         | `Tool`           | 47 built-in: shell, file ops, git, memory, browser, screenshot, composio, http, cron, hardware, web search, delegate, and more                                 | Any capability                                            |
+| **Tools**         | `Tool`           | 43 built-in: shell, file ops, git, memory, browser, screenshot, composio, http, cron, hardware, web search, delegate, and more                                 | Any capability                                            |
 | **Observability** | `Observer`       | Noop, Log, File, Multi                                                                                                                                         | Prometheus, OTel                                          |
 | **Runtime**       | `RuntimeAdapter` | Native, Docker (sandboxed), WASM (wasmtime)                                                                                                                    | Any runtime                                               |
 | **Security**      | `Sandbox`        | Landlock, Firejail, Bubblewrap, Docker, auto-detect                                                                                                            | Any sandbox backend                                       |
@@ -519,7 +519,7 @@ Build and tests require a C11 compiler and CMake 3.16+.
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 2,024+ tests
+./seaclaw_tests                             # 2,148+ tests
 cd ..
 ```
 
@@ -554,10 +554,10 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 ```
 
 Language: C11 + ASM (aarch64, x86_64)
-Source files: 449
+Source files: 462
 Lines of code: ~70,000
-Test files: 68
-Tests: 2,024+
+Test files: 69
+Tests: 2,148+
 Binary: 349 KB core / 430 KB full (MinSizeRel + LTO)
 Peak RSS: < 5 MB
 Startup: <2 ms (Apple Silicon)
@@ -572,10 +572,10 @@ Dependencies: libc + optional SQLite, libcurl
 src/
 main.c CLI entry point + command routing
 agent/ Agent loop, context, planner, compaction, dispatcher
-channels/ 20 channel implementations (cli, telegram, discord, ...)
+channels/ 21 channel implementations (cli, telegram, discord, ...)
 providers/ 50+ AI provider implementations
 memory/ SQLite + markdown + LRU backends, embeddings, vector search
-tools/ 47 tool implementations
+tools/ 43 tool implementations
 security/ Policy, pairing, secrets, sandbox backends
 runtime/ Runtime adapters (native, docker, wasm, cloudflare)
 core/ Allocator, arena, error, json, http, string, slice
@@ -585,7 +585,7 @@ config.c Config loading/merging (~/.seaclaw/config.json)
 ...
 
 include/seaclaw/ Public C headers
-tests/ 68 test files, 2,024+ tests
+tests/ 69 test files, 2,148+ tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ```

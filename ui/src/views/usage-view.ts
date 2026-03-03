@@ -222,33 +222,23 @@ export class ScUsageView extends GatewayAwareLitElement {
               <div class="cards">
                 <div class="card">
                   <div class="card-label">Session Cost</div>
-                  <div class="card-value">
-                    ${this.formatCurrency(sessionCost)}
-                  </div>
+                  <div class="card-value">${this.formatCurrency(sessionCost)}</div>
                 </div>
                 <div class="card">
                   <div class="card-label">Daily Cost</div>
-                  <div class="card-value">
-                    ${this.formatCurrency(dailyCost)}
-                  </div>
+                  <div class="card-value">${this.formatCurrency(dailyCost)}</div>
                 </div>
                 <div class="card">
                   <div class="card-label">Monthly Cost</div>
-                  <div class="card-value">
-                    ${this.formatCurrency(monthlyCost)}
-                  </div>
+                  <div class="card-value">${this.formatCurrency(monthlyCost)}</div>
                 </div>
                 <div class="card">
                   <div class="card-label">Total Tokens</div>
-                  <div class="card-value">
-                    ${this.formatNumber(totalTokens)}
-                  </div>
+                  <div class="card-value">${this.formatNumber(totalTokens)}</div>
                 </div>
                 <div class="card">
                   <div class="card-label">Request Count</div>
-                  <div class="card-value">
-                    ${this.formatNumber(requestCount)}
-                  </div>
+                  <div class="card-value">${this.formatNumber(requestCount)}</div>
                 </div>
               </div>
 
@@ -263,9 +253,7 @@ export class ScUsageView extends GatewayAwareLitElement {
                         style="width: ${this.barPct(sessionCost, maxCost)}%"
                       ></div>
                     </div>
-                    <span class="bar-value"
-                      >${this.formatCurrency(sessionCost)}</span
-                    >
+                    <span class="bar-value">${this.formatCurrency(sessionCost)}</span>
                   </div>
                   <div class="bar-row">
                     <span class="bar-label">Daily</span>
@@ -275,9 +263,7 @@ export class ScUsageView extends GatewayAwareLitElement {
                         style="width: ${this.barPct(dailyCost, maxCost)}%"
                       ></div>
                     </div>
-                    <span class="bar-value"
-                      >${this.formatCurrency(dailyCost)}</span
-                    >
+                    <span class="bar-value">${this.formatCurrency(dailyCost)}</span>
                   </div>
                   <div class="bar-row">
                     <span class="bar-label">Monthly</span>
@@ -287,9 +273,7 @@ export class ScUsageView extends GatewayAwareLitElement {
                         style="width: ${this.barPct(monthlyCost, maxCost)}%"
                       ></div>
                     </div>
-                    <span class="bar-value"
-                      >${this.formatCurrency(monthlyCost)}</span
-                    >
+                    <span class="bar-value">${this.formatCurrency(monthlyCost)}</span>
                   </div>
                 </div>
               </div>

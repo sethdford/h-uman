@@ -14,7 +14,6 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include <string.h>
-#include <stdlib.h>
 
 #define SC_MY_TOOL_NAME "my_tool"
 #define SC_MY_TOOL_DESC "Does something useful. Describe what the tool does for the LLM."
@@ -90,11 +89,12 @@ static const sc_tool_vtable_t my_tool_vtable = {
 };
 
 sc_error_t sc_my_tool_create(sc_allocator_t *alloc, sc_tool_t *out) {
-    (void)alloc;
-    if (!out) return SC_ERR_INVALID_ARGUMENT;
+    if (!alloc || !out) return SC_ERR_INVALID_ARGUMENT;
 
-    sc_my_tool_ctx_t *ctx = (sc_my_tool_ctx_t *)calloc(1, sizeof(*ctx));
+    sc_my_tool_ctx_t *ctx =
+        (sc_my_tool_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*ctx));
     if (!ctx) return SC_ERR_OUT_OF_MEMORY;
+    memset(ctx, 0, sizeof(*ctx));
 
     out->ctx = ctx;
     out->vtable = &my_tool_vtable;

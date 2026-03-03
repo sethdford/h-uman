@@ -93,9 +93,7 @@ export class ScModal extends LitElement {
   }
 
   private _close(): void {
-    this.dispatchEvent(
-      new CustomEvent("close", { bubbles: true, composed: true }),
-    );
+    this.dispatchEvent(new CustomEvent("close", { bubbles: true, composed: true }));
   }
 
   override render() {
@@ -113,13 +111,9 @@ export class ScModal extends LitElement {
         <div class="panel" @click=${(e: MouseEvent) => e.stopPropagation()}>
           <header class="header">
             ${this.heading
-              ? html`<h2 id="modal-heading" class="heading">
-                  ${this.heading}
-                </h2>`
+              ? html`<h2 id="modal-heading" class="heading">${this.heading}</h2>`
               : nothing}
-            <button class="close-btn" aria-label="Close" @click=${this._close}>
-              ×
-            </button>
+            <button class="close-btn" aria-label="Close" @click=${this._close}>×</button>
           </header>
           <div class="body">
             <slot></slot>

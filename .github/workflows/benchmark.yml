@@ -12,16 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev libssl-dev
-
-      - name: Build (MinSizeRel)
-        run: |
-          mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
-          cmake --build . -j$(nproc)
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: MinSizeRel
+          enable-lto: "true"
+          enable-curl: "true"
 
       - name: Measure binary size
         run: |
@@ -30,33 +25,29 @@ jobs:
           echo "## Binary Size: ${SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
           echo "BINARY_SIZE_KB=${SIZE_KB}" >> $GITHUB_ENV
 
-      - name: Build tests
-        run: |
-          mkdir build-test && cd build-test
-          cmake .. -DCMAKE_BUILD_TYPE=Debug
-          cmake --build . -j$(nproc)
+      - uses: ./.github/actions/setup-build
+        with:
+          build-dir: build-test
+          enable-curl: "true"
 
       - name: Run tests + count
         run: |
-          cd build-test
-          OUTPUT=$(./seaclaw_tests 2>&1)
+          OUTPUT=$(./build-test/seaclaw_tests 2>&1)
           echo "$OUTPUT" | tail -5
           RESULT=$(echo "$OUTPUT" | grep "^--- Results:" | head -1)
           echo "## Tests: $RESULT" >> $GITHUB_STEP_SUMMARY
 
       - name: Measure startup time
         run: |
-          cd build
           START=$(date +%s%N)
-          ./seaclaw version 2>/dev/null || true
+          ./build/seaclaw version 2>/dev/null || true
           END=$(date +%s%N)
           ELAPSED_MS=$(( (END - START) / 1000000 ))
           echo "## Startup: ${ELAPSED_MS}ms" >> $GITHUB_STEP_SUMMARY
 
       - name: Measure peak RSS
         run: |
-          cd build-test
-          /usr/bin/time -v ./seaclaw_tests 2>&1 | grep "Maximum resident" | awk '{print $NF}' > /tmp/rss.txt || true
+          /usr/bin/time -v ./build-test/seaclaw_tests 2>&1 | grep "Maximum resident" | awk '{print $NF}' > /tmp/rss.txt || true
           RSS=$(cat /tmp/rss.txt 2>/dev/null || echo "N/A")
           echo "## Peak RSS: ${RSS} KB" >> $GITHUB_STEP_SUMMARY
 

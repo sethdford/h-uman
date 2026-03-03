@@ -1,6 +1,7 @@
 #!/bin/sh
 # pre-push: run the full test suite before pushing.
 # Activate: git config core.hooksPath .githooks
+# Note: ASan and coverage are CI-only (too slow for local hooks).
 
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 BUILD_DIR="build-check"
@@ -10,7 +11,7 @@ if [ -f "CMakeLists.txt" ]; then
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR" || exit 1
     if [ ! -f "CMakeCache.txt" ]; then
-        cmake .. -DCMAKE_BUILD_TYPE=Debug 2>/dev/null
+        cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON 2>/dev/null
     fi
     cmake --build . -j"$JOBS" 2>&1 | tail -3
     if [ $? -ne 0 ]; then

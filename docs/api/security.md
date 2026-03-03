@@ -1,3 +1,9 @@
+---
+title: Security API
+description: Security policy, sandbox, pairing guard, secret store, and audit logging
+updated: 2026-03-02
+---
+
 # Security API
 
 Security policy, sandbox, pairing guard, secret store, and audit logging.
