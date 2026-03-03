@@ -401,6 +401,8 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
 
     return html`
+      <sc-welcome></sc-welcome>
+
       <div class="header">
         <h2>Overview</h2>
         <sc-button variant="secondary" @click=${() => this.load()}>Refresh</sc-button>
@@ -422,7 +424,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
           <div class="stat-row">
             <div class="stat-main">
               <div class="stat-label">Providers</div>
-              <div class="stat-value">${cap.providers ?? 0}</div>
+              <div class="stat-value">
+                <sc-animated-number .value=${cap.providers ?? 0}></sc-animated-number>
+              </div>
               <div class="trend up">${icons["trend-up"]} Active</div>
             </div>
             <sc-sparkline
@@ -437,7 +441,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
           <div class="stat-row">
             <div class="stat-main">
               <div class="stat-label">Channels</div>
-              <div class="stat-value">${cap.channels ?? 0}</div>
+              <div class="stat-value">
+                <sc-animated-number .value=${cap.channels ?? 0}></sc-animated-number>
+              </div>
               <div class="trend up">${icons["trend-up"]} Configured</div>
             </div>
             <sc-sparkline
@@ -452,7 +458,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
           <div class="stat-row">
             <div class="stat-main">
               <div class="stat-label">Tools</div>
-              <div class="stat-value">${cap.tools ?? 0}</div>
+              <div class="stat-value">
+                <sc-animated-number .value=${cap.tools ?? 0}></sc-animated-number>
+              </div>
               <div class="trend flat">${icons["trend-flat"]} Stable</div>
             </div>
             <sc-sparkline
@@ -467,7 +475,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
           <div class="stat-row">
             <div class="stat-main">
               <div class="stat-label">Active Sessions</div>
-              <div class="stat-value">${this.sessions.length}</div>
+              <div class="stat-value">
+                <sc-animated-number .value=${this.sessions.length}></sc-animated-number>
+              </div>
               <div class="trend ${this.sessions.length > 0 ? "up" : "flat"}">
                 ${this.sessions.length > 0 ? icons["trend-up"] : icons["trend-flat"]}
                 ${this.sessions.length > 0 ? "Active" : "Idle"}
@@ -495,32 +505,45 @@ export class ScOverviewView extends GatewayAwareLitElement {
             `
           : nothing}
 
-        <!-- 6. Channels Overview (full width) -->
-        <sc-card hoverable class="channels-overview">
-          <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">Channels Overview</div>
-          ${this.channels.length === 0
-            ? html`
-                <sc-empty-state
-                  .icon=${icons.radio}
-                  heading="No channels"
-                  description="Configure channels in the Channels view."
-                ></sc-empty-state>
-              `
-            : html`
-                <div class="channels-inner">
-                  ${this.channels.map(
-                    (ch) => html`
-                      <div class="channel-item">
-                        <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
-                        <sc-badge variant=${ch.configured ? "success" : "neutral"} dot
-                          >${ch.status ?? (ch.configured ? "Configured" : "—")}</sc-badge
-                        >
-                      </div>
-                    `,
-                  )}
-                </div>
-              `}
-        </sc-card>
+        <!-- 6. Activity + Channels (two columns, full width) -->
+        <div class="two-col activity-section">
+          <sc-card hoverable>
+            <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">Live Activity</div>
+            <sc-activity-feed .events=${this.activityEvents}></sc-activity-feed>
+          </sc-card>
+
+          <sc-card hoverable>
+            <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">
+              Channels Overview
+            </div>
+            ${this.channels.length === 0
+              ? html`
+                  <sc-empty-state
+                    .icon=${icons.radio}
+                    heading="No channels yet"
+                    description="Connect Telegram, Discord, Slack, or any messaging platform in under a minute."
+                  >
+                    <sc-button variant="primary" @click=${() => this._navigate("channels")}>
+                      Configure a Channel
+                    </sc-button>
+                  </sc-empty-state>
+                `
+              : html`
+                  <div class="channels-inner">
+                    ${this.channels.map(
+                      (ch) => html`
+                        <div class="channel-item">
+                          <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
+                          <sc-badge variant=${ch.configured ? "success" : "neutral"} dot
+                            >${ch.status ?? (ch.configured ? "Configured" : "—")}</sc-badge
+                          >
+                        </div>
+                      `,
+                    )}
+                  </div>
+                `}
+          </sc-card>
+        </div>
 
         <!-- 7. Recent Sessions (full width) -->
         <sc-card hoverable class="recent-sessions">
@@ -529,9 +552,13 @@ export class ScOverviewView extends GatewayAwareLitElement {
             ? html`
                 <sc-empty-state
                   .icon=${icons["chat-circle"]}
-                  heading="No sessions yet"
-                  description="Start a conversation to see your sessions here."
-                ></sc-empty-state>
+                  heading="No conversations yet"
+                  description="Start your first chat to see SeaClaw in action. It only takes a moment."
+                >
+                  <sc-button variant="primary" @click=${() => this._navigate("chat")}>
+                    Start a Conversation
+                  </sc-button>
+                </sc-empty-state>
               `
             : html`
                 <table class="sessions-table">

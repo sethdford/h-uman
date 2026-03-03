@@ -191,6 +191,23 @@ static void service_signal_handler(int sig) {
 }
 #endif
 
+/* ── Streaming callback for channels with send_event ─────────────────────── */
+
+typedef struct {
+    sc_channel_t *channel;
+    const char *target;
+    size_t target_len;
+} daemon_stream_ctx_t;
+
+__attribute__((unused))
+static void daemon_stream_token(const char *delta, size_t delta_len, void *ctx) {
+    daemon_stream_ctx_t *dctx = (daemon_stream_ctx_t *)ctx;
+    if (!dctx || !dctx->channel || !dctx->channel->vtable->send_event)
+        return;
+    dctx->channel->vtable->send_event(dctx->channel->ctx, dctx->target, dctx->target_len, delta,
+                                       delta_len, NULL, 0, SC_OUTBOUND_STAGE_CHUNK);
+}
+
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
 sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,

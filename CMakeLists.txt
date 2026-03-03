@@ -1294,8 +1294,12 @@ target_compile_options(seaclaw_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(seaclaw PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(seaclaw_tests PRIVATE -Wall -Wextra -Wpedantic)
 
-# Install target
+# Install targets
 install(TARGETS seaclaw RUNTIME DESTINATION bin)
+install(FILES docs/man/seaclaw.1 DESTINATION share/man/man1 OPTIONAL)
+install(FILES docs/man/seaclaw-gateway.1 DESTINATION share/man/man1 OPTIONAL)
+install(FILES completions/seaclaw.bash DESTINATION share/bash-completion/completions RENAME seaclaw OPTIONAL)
+install(FILES completions/_seaclaw DESTINATION share/zsh/site-functions RENAME _seaclaw OPTIONAL)
 
 # SBOM Generation
 add_custom_target(sbom

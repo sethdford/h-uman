@@ -6,9 +6,9 @@ class Seaclaw < Formula
   homepage "https://seaclaw.ai"
   license "MIT"
 
-  # Bottled releases (uncomment when tarballs exist)
-  # url "https://github.com/seaclaw/seaclaw/archive/refs/tags/v0.1.0.tar.gz"
-  # sha256 "..."
+  # Tagged releases: uncomment when publishing v0.2.0+ tarballs to GitHub.
+  # url "https://github.com/seaclaw/seaclaw/archive/refs/tags/v0.2.0.tar.gz"
+  # sha256 "..."  # Run: curl -sL <url> | sha256sum
 
   head "https://github.com/seaclaw/seaclaw.git", branch: "main"
 

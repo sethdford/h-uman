@@ -175,6 +175,7 @@ export class ScChatView extends GatewayAwareLitElement {
       height: 100%;
       max-width: 720px;
       margin: 0 auto;
+      position: relative;
       width: 100%;
     }
     .status-bar {
@@ -795,11 +796,19 @@ export class ScChatView extends GatewayAwareLitElement {
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
   }
 
+  private _retry(): void {
+    if (!this.lastFailedMessage) return;
+    this.inputValue = this.lastFailedMessage;
+    this.lastFailedMessage = "";
+    this.send();
+  }
+
   private async send(): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || !this.gateway) return;
     this.messages = [...this.messages, { role: "user", content: text, ts: Date.now() }];
     this.inputValue = "";
+    this.lastFailedMessage = "";
     this.isWaiting = true;
     this.resizeTextarea();
     this.scrollToBottom();
@@ -929,18 +938,31 @@ export class ScChatView extends GatewayAwareLitElement {
               </div>`
             : nothing}
         </div>
+        ${this.showScrollPill
+          ? html`<button class="scroll-bottom-pill" @click=${() => this.scrollToBottom()}>
+              ↓ New messages
+            </button>`
+          : nothing}
+        ${this.lastFailedMessage
+          ? html`<button class="retry-btn" @click=${this._retry}>Retry last message</button>`
+          : nothing}
         <div class="input-wrap">
           <div class="input-bar">
             <textarea
               id="chat-input"
-              placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+              placeholder=${this.connectionStatus === "disconnected"
+                ? "Disconnected — reconnect to send messages"
+                : "Type a message... (Enter to send, Shift+Enter for newline)"}
               .value=${this.inputValue}
+              ?disabled=${this.connectionStatus === "disconnected"}
               @input=${this.handleInput}
               @keydown=${this.handleKeyDown}
             ></textarea>
             <button
               class="send-btn"
-              ?disabled=${!this.inputValue.trim() || this.isWaiting}
+              ?disabled=${!this.inputValue.trim() ||
+              this.isWaiting ||
+              this.connectionStatus === "disconnected"}
               @click=${() => this.send()}
               aria-label="Send"
             >

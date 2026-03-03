@@ -181,8 +181,9 @@ void sc_plugin_unload(sc_plugin_handle_t *handle) {
 
 void sc_plugin_unload_all(void) {
     while (s_loaded_count > 0) {
-        sc_plugin_handle_t *h = s_loaded[s_loaded_count - 1];
-        sc_plugin_unload(h);
+        s_loaded_count--;
+        sc_plugin_unload(s_loaded[s_loaded_count]);
+        s_loaded[s_loaded_count] = NULL;
     }
 }
 

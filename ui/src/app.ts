@@ -72,7 +72,20 @@ const MOBILE_TABS: { id: TabId; label: string; icon: ReturnType<typeof html> }[]
   { id: "chat", label: "Chat", icon: icons["message-square"] },
   { id: "agents", label: "Agents", icon: icons.zap },
   { id: "config", label: "Config", icon: icons.settings },
+];
+
+const MORE_TABS: { id: TabId; label: string; icon: ReturnType<typeof html> }[] = [
   { id: "tools", label: "Tools", icon: icons.wrench },
+  { id: "sessions", label: "Sessions", icon: icons.clock },
+  { id: "models", label: "Models", icon: icons.cpu },
+  { id: "channels", label: "Channels", icon: icons["message-square"] },
+  { id: "cron", label: "Cron", icon: icons.clock },
+  { id: "skills", label: "Skills", icon: icons.zap },
+  { id: "voice", label: "Voice", icon: icons.mic },
+  { id: "nodes", label: "Nodes", icon: icons.server },
+  { id: "usage", label: "Usage", icon: icons["bar-chart"] },
+  { id: "security", label: "Security", icon: icons.shield },
+  { id: "logs", label: "Logs", icon: icons.terminal },
 ];
 
 @customElement("sc-app")

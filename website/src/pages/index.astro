@@ -291,6 +291,77 @@ const tools = [
       </div>
     </section>
 
+    {/* ═══ DASHBOARD PREVIEW ═══ */}
+
+    <section class="py-16 md:py-32 px-6">
+      <div class="max-w-4xl mx-auto text-center">
+        <h2 class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
+          A command center, not a status page.
+        </h2>
+        <p class="dash-sub text-lg mb-12 opacity-0" style="color: var(--color-text-secondary)">
+          Real-time stats. Live activity feed. Sparkline trends. All in 430 KB.
+        </p>
+        <div class="dash-preview opacity-0 glass rounded-2xl overflow-hidden" style="box-shadow: var(--shadow-xl);">
+          <div class="flex items-center gap-2 px-5 py-3 border-b" style="background: var(--color-terminal-chrome); border-color: rgba(255,255,255,0.06);">
+            <span class="w-3 h-3 rounded-full bg-[#FF5F57]"></span>
+            <span class="w-3 h-3 rounded-full bg-[#FEBC2E]"></span>
+            <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
+            <span class="text-[11px] text-[rgba(255,255,255,0.3)] ml-2 font-mono">SeaClaw Dashboard</span>
+            <span class="ml-auto text-[11px] px-2 py-0.5 rounded-full" style="background: rgba(40,200,64,0.15); color: #28C840;">Live</span>
+          </div>
+          <div class="p-6 md:p-8" style="background: var(--color-terminal-bg);">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
+                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Providers</div>
+                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                  <span class="dash-count" data-target="50">0</span>
+                </div>
+                <div class="flex items-center gap-1 text-[11px]" style="color: #6ee7b7;">
+                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"/></svg>
+                  Active
+                </div>
+              </div>
+              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
+                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Channels</div>
+                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                  <span class="dash-count" data-target="20">0</span>
+                </div>
+                <div class="flex items-center gap-1 text-[11px]" style="color: #6ee7b7;">
+                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"/></svg>
+                  Connected
+                </div>
+              </div>
+              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
+                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Tools</div>
+                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                  <span class="dash-count" data-target="53">0</span>
+                </div>
+                <div class="flex items-center gap-1 text-[11px]" style="color: rgba(255,255,255,0.4);">
+                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M221.66,133.66l-48,48a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,221.66,133.66Z"/></svg>
+                  Stable
+                </div>
+              </div>
+              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
+                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Sessions</div>
+                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                  <span class="dash-count" data-target="5">0</span>
+                </div>
+                <div class="flex items-center gap-1 text-[11px]" style="color: #6ee7b7;">
+                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"/></svg>
+                  Active
+                </div>
+              </div>
+            </div>
+            <div id="dash-activity" class="text-left text-[13px] space-y-2" style="color: rgba(255,255,255,0.5);">
+            </div>
+          </div>
+        </div>
+        <p class="mt-6 text-sm opacity-0 dash-cta" style="color: var(--color-text-tertiary)">
+          <a href="/?demo=true" class="underline hover:opacity-80 transition-opacity" style="color: var(--color-accent)">Try the live demo</a> — no installation required.
+        </p>
+      </div>
+    </section>
+
     {/* ═══ CTA ═══ */}
 
     <section class="relative py-20 md:py-40 px-6">
@@ -386,6 +457,9 @@ const tools = [
           const target = parseInt((el as HTMLElement).dataset.count || "0");
           const valSpan = el.querySelector(".count-value");
           if (valSpan) valSpan.textContent = target > 100 ? target.toLocaleString() : target.toString();
+        });
+        document.querySelectorAll(".dash-count").forEach((el) => {
+          el.textContent = (el as HTMLElement).dataset.target || "0";
         });
       } else {
         const ctx = gsap.context(() => {
@@ -567,6 +641,51 @@ const tools = [
               }
             }
             nextLine();
+          }
+
+          // ═══ DASHBOARD PREVIEW ═══
+          gsap.fromTo(".dash-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".dash-title", start: "top 85%" } });
+          gsap.fromTo(".dash-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".dash-sub", start: "top 85%" } });
+          gsap.fromTo(".dash-cta", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out", scrollTrigger: { trigger: ".dash-cta", start: "top 90%" } });
+
+          const dashPreview = document.querySelector(".dash-preview");
+          if (dashPreview) {
+            let dashPlayed = false;
+            ScrollTrigger.create({
+              trigger: dashPreview, start: "top 80%",
+              onEnter: () => {
+                if (dashPlayed) return;
+                dashPlayed = true;
+                gsap.to(dashPreview, { opacity: 1, duration: 0.6 });
+                document.querySelectorAll(".dash-count").forEach((el, i) => {
+                  const target = parseInt((el as HTMLElement).dataset.target || "0");
+                  const obj = { val: 0 };
+                  gsap.to(obj, {
+                    val: target, duration: 1.2, ease: "power3.out", delay: 0.3 + i * 0.1,
+                    onUpdate: () => { el.textContent = Math.round(obj.val).toString(); },
+                  });
+                });
+                const actContainer = document.getElementById("dash-activity");
+                if (actContainer) {
+                  const activities = [
+                    { icon: "💬", text: "Alice via Telegram: Can you review the PR?", time: "just now" },
+                    { icon: "⚡", text: "Tool shell: git status", time: "1m ago" },
+                    { icon: "💬", text: "Bob via Discord: Deploy looks good", time: "2m ago" },
+                    { icon: "🟢", text: "Session \"Code Review\" started", time: "3m ago" },
+                  ];
+                  activities.forEach((act, i) => {
+                    setTimeout(() => {
+                      const div = document.createElement("div");
+                      div.className = "flex items-center gap-2";
+                      div.style.opacity = "0";
+                      div.innerHTML = `<span>${act.icon}</span><span style="color: rgba(255,255,255,0.7); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: rgba(255,255,255,0.3)">${act.time}</span>`;
+                      actContainer.appendChild(div);
+                      gsap.to(div, { opacity: 1, duration: 0.4 });
+                    }, 800 + i * 400);
+                  });
+                }
+              },
+            });
           }
 
           // ═══ CTA ═══

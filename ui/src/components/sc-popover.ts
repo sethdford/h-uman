@@ -167,6 +167,30 @@ export class ScPopover extends LitElement {
     if (e.key === "Escape") {
       e.preventDefault();
       this._close();
+      const trigger = this.renderRoot.querySelector<HTMLElement>(".trigger");
+      trigger?.focus();
+      return;
+    }
+    if (e.key === "Tab" && this.open) {
+      const popover = this.renderRoot.querySelector<HTMLElement>(".popover");
+      if (!popover) return;
+      const slotEl = popover.querySelector<HTMLSlotElement>("slot[name=content]");
+      const assigned = slotEl ? slotEl.assignedElements({ flatten: true }) : [];
+      const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+      const focusable = assigned.flatMap((el) => [
+        ...(el instanceof HTMLElement && el.matches(selectors) ? [el] : []),
+        ...Array.from(el.querySelectorAll<HTMLElement>(selectors)),
+      ]);
+      if (focusable.length === 0) return;
+      const last = focusable[focusable.length - 1];
+      const first = focusable[0];
+      if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
     }
   }
 

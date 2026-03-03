@@ -88,7 +88,7 @@ export class ScModal extends LitElement {
           clearTimeout(this._closeTimeout);
           this._closeTimeout = null;
         }
-        requestAnimationFrame(() => this._focusCloseButton());
+        requestAnimationFrame(() => this._focusFirst());
       } else if (changedProperties.get("open") === true) {
         this._closing = true;
         this._closeTimeout = setTimeout(() => {
@@ -104,9 +104,30 @@ export class ScModal extends LitElement {
     if (this._closeTimeout) clearTimeout(this._closeTimeout);
   }
 
-  private _focusCloseButton(): void {
-    const btn = this.renderRoot.querySelector<HTMLButtonElement>(".close-btn");
-    btn?.focus();
+  private _getFocusable(): HTMLElement[] {
+    const panel = this.renderRoot.querySelector<HTMLElement>(".panel");
+    if (!panel) return [];
+    const slottedContent = this.renderRoot.querySelector("slot:not([name])")
+      ? Array.from(
+          (this.renderRoot.querySelector("slot:not([name])") as HTMLSlotElement)?.assignedElements({
+            flatten: true,
+          }) ?? [],
+        )
+      : [];
+    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const shadowFocusable = Array.from(panel.querySelectorAll<HTMLElement>(selectors));
+    const slotFocusable = slottedContent.flatMap((el) => [
+      ...(el.matches(selectors) ? [el as HTMLElement] : []),
+      ...Array.from(el.querySelectorAll<HTMLElement>(selectors)),
+    ]);
+    return [...shadowFocusable, ...slotFocusable].filter(
+      (el) => !el.hasAttribute("disabled") && el.offsetParent !== null,
+    );
+  }
+
+  private _focusFirst(): void {
+    const focusable = this._getFocusable();
+    if (focusable.length > 0) focusable[0].focus();
   }
 
   private _onBackdropClick(e: MouseEvent): void {
@@ -118,6 +139,27 @@ export class ScModal extends LitElement {
   private _onKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       this._close();
+      return;
+    }
+    if (e.key === "Tab") {
+      const focusable = this._getFocusable();
+      if (focusable.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first || this.renderRoot.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last || this.renderRoot.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
   }
 

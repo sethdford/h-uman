@@ -128,6 +128,28 @@ jobs:
           path: ui/test-results/
           retention-days: 7
 
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc libsqlite3-dev libcurl4-openssl-dev \
+            debhelper devscripts fakeroot
+      - name: Build .deb package
+        run: bash scripts/build-deb.sh
+      - name: Verify package
+        run: |
+          dpkg-deb --info ../*.deb
+          dpkg-deb --contents ../*.deb | head -20
+      - name: Copy .deb to workspace for artifact upload
+        run: cp ../*.deb .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: "*.deb"
+
   completions:
     runs-on: ubuntu-latest
     steps:
