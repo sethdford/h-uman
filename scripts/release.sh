@@ -66,6 +66,16 @@ mkdir -p "$BUILD_DIR"
 (cd "$BUILD_DIR" && cmake .. -DCMAKE_BUILD_TYPE=Debug 2>/dev/null && cmake --build . -j"$JOBS" 2>&1 | tail -1)
 (cd "$BUILD_DIR" && ./seaclaw_tests) || die "Tests failed. Fix before releasing."
 
+info "Running benchmark and saving to history..."
+RELEASE_BUILD_DIR="build-release"
+mkdir -p "$RELEASE_BUILD_DIR"
+(cd "$RELEASE_BUILD_DIR" && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON 2>/dev/null && cmake --build . -j"$JOBS" 2>&1 | tail -1)
+if [ -x "$RELEASE_BUILD_DIR/seaclaw" ]; then
+    "$ROOT/scripts/benchmark.sh" "$RELEASE_BUILD_DIR/seaclaw" --save-history 2>&1 | grep -E "Appended|Created|Results saved"
+else
+    warn "Release binary not found — skipping benchmark"
+fi
+
 info "Updating version to $VERSION..."
 
 if grep -q 'project(seaclaw VERSION' CMakeLists.txt; then
