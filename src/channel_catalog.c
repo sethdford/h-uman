@@ -63,6 +63,15 @@ static const sc_channel_meta_t catalog[] = {
 #ifdef SC_HAS_MAIXCAM
     {SC_CHANNEL_MAIXCAM, "maixcam", "MaixCam", "", SC_LISTENER_SEND_ONLY},
 #endif
+#ifdef SC_HAS_TEAMS
+    {SC_CHANNEL_TEAMS, "teams", "Microsoft Teams", "", SC_LISTENER_POLLING},
+#endif
+#ifdef SC_HAS_TWILIO
+    {SC_CHANNEL_TWILIO, "twilio", "Twilio SMS", "", SC_LISTENER_POLLING},
+#endif
+#ifdef SC_HAS_GOOGLE_CHAT
+    {SC_CHANNEL_GOOGLE_CHAT, "google_chat", "Google Chat", "", SC_LISTENER_POLLING},
+#endif
 };
 static const size_t catalog_len = sizeof(catalog) / sizeof(catalog[0]);
 
@@ -149,6 +158,18 @@ bool sc_channel_catalog_is_build_enabled(sc_channel_id_t id) {
     case SC_CHANNEL_MAIXCAM:
         return true;
 #endif
+#ifdef SC_HAS_TEAMS
+    case SC_CHANNEL_TEAMS:
+        return true;
+#endif
+#ifdef SC_HAS_TWILIO
+    case SC_CHANNEL_TWILIO:
+        return true;
+#endif
+#ifdef SC_HAS_GOOGLE_CHAT
+    case SC_CHANNEL_GOOGLE_CHAT:
+        return true;
+#endif
     default:
         return false;
     }
@@ -230,6 +251,9 @@ bool sc_channel_catalog_requires_runtime(sc_channel_id_t id) {
     case SC_CHANNEL_QQ:
     case SC_CHANNEL_EMAIL:
     case SC_CHANNEL_IMESSAGE:
+    case SC_CHANNEL_TEAMS:
+    case SC_CHANNEL_TWILIO:
+    case SC_CHANNEL_GOOGLE_CHAT:
         return true;
     default:
         return false;

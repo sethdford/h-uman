@@ -3,6 +3,31 @@
 All notable changes to seaclaw are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning is CalVer (`YYYY.M.D`).
 
+## [2026.3.3b] - 2026-03-03
+
+### Added
+
+- **Microsoft Teams channel**: `sc_teams_create`, `sc_teams_on_webhook` (Bot Framework Activity
+  JSON parsing), `sc_teams_poll` ring buffer queue, `sc_teams_destroy`; sends via Bot Framework
+  REST API with Bearer auth
+- **Twilio SMS channel**: `sc_twilio_create`, `sc_twilio_on_webhook` (form-urlencoded `From`/`Body`
+  parsing), `sc_twilio_poll` ring buffer queue, `sc_twilio_destroy`; sends via Twilio Messages API
+  with Basic auth
+- **Google Chat channel**: `sc_google_chat_create`, `sc_google_chat_on_webhook` (Google Chat event
+  JSON parsing with `message.text`/`message.sender.name`), `sc_google_chat_poll` ring buffer queue,
+  `sc_google_chat_destroy`; sends via Google Chat Spaces API with Bearer auth
+- **3 new channel headers**: `include/seaclaw/channels/teams.h`, `twilio.h`, `google_chat.h`
+- **12 new tests**: create, health_check, webhook+poll, poll_null_args for each of Teams, Twilio,
+  Google Chat
+- **CMake options**: `SC_ENABLE_TEAMS`, `SC_ENABLE_TWILIO`, `SC_ENABLE_GOOGLE_CHAT` (all included
+  in `SC_ENABLE_ALL_CHANNELS`)
+
+### Changed
+
+- Channel catalog: 21 send+receive channels (was 18)
+- `channel_catalog.c`: added Teams, Twilio, Google Chat as `SC_LISTENER_POLLING`
+- `sc_channel_catalog_requires_runtime`: returns true for Teams, Twilio, Google Chat
+
 ## [2026.3.3] - 2026-03-03
 
 ### Added

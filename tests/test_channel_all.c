@@ -50,6 +50,15 @@
 #if SC_HAS_DINGTALK
 #include "seaclaw/channels/dingtalk.h"
 #endif
+#if SC_HAS_TEAMS
+#include "seaclaw/channels/teams.h"
+#endif
+#if SC_HAS_TWILIO
+#include "seaclaw/channels/twilio.h"
+#endif
+#if SC_HAS_GOOGLE_CHAT
+#include "seaclaw/channels/google_chat.h"
+#endif
 
 /* ─── CLI (always present) ─────────────────────────────────────────────────── */
 static void test_cli_create(void) {
@@ -1259,6 +1268,129 @@ static void test_dingtalk_poll_null_args(void) {
 }
 #endif
 
+/* ─── Teams ─────────────────────────────────────────────────────────────── */
+#if SC_HAS_TEAMS
+static void test_teams_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_teams_create(&alloc, "app-id", 6, "secret", 6, "https://example.com", 19, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "teams");
+    sc_teams_destroy(&ch);
+}
+
+static void test_teams_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_teams_create(&alloc, "app-id", 6, "secret", 6, "https://example.com", 19, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(ch.vtable->health_check(ch.ctx) == true);
+    sc_teams_destroy(&ch);
+}
+
+static void test_teams_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_teams_create(&alloc, "app-id", 6, "secret", 6, "https://example.com", 19, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_teams_on_webhook(ch.ctx, &alloc, "hello from teams", 16);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_teams_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_teams_destroy(&ch);
+}
+
+static void test_teams_poll_null_args(void) {
+    sc_error_t err = sc_teams_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+/* ─── Twilio ────────────────────────────────────────────────────────────── */
+#if SC_HAS_TWILIO
+static void test_twilio_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_twilio_create(&alloc, "ACXXXX", 6, "token", 5, "+15551234567", 12, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "twilio");
+    sc_twilio_destroy(&ch);
+}
+
+static void test_twilio_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_twilio_create(&alloc, "ACXXXX", 6, "token", 5, "+15551234567", 12, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(ch.vtable->health_check(ch.ctx) == true);
+    sc_twilio_destroy(&ch);
+}
+
+static void test_twilio_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_twilio_create(&alloc, "ACXXXX", 6, "token", 5, "+15551234567", 12, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_twilio_on_webhook(ch.ctx, &alloc, "hello from twilio", 17);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_twilio_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_twilio_destroy(&ch);
+}
+
+static void test_twilio_poll_null_args(void) {
+    sc_error_t err = sc_twilio_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
+/* ─── Google Chat ───────────────────────────────────────────────────────── */
+#if SC_HAS_GOOGLE_CHAT
+static void test_google_chat_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_google_chat_create(&alloc, "bearer-token", 12, "spaces/AAAA", 11, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "google_chat");
+    sc_google_chat_destroy(&ch);
+}
+
+static void test_google_chat_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_google_chat_create(&alloc, "bearer-token", 12, "spaces/AAAA", 11, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(ch.vtable->health_check(ch.ctx) == true);
+    sc_google_chat_destroy(&ch);
+}
+
+static void test_google_chat_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_google_chat_create(&alloc, "bearer-token", 12, "spaces/AAAA", 11, &ch);
+    SC_ASSERT(err == SC_OK);
+    err = sc_google_chat_on_webhook(ch.ctx, &alloc, "hello from gchat", 16);
+    SC_ASSERT(err == SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_google_chat_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT(err == SC_OK);
+    SC_ASSERT(count == 1);
+    sc_google_chat_destroy(&ch);
+}
+
+static void test_google_chat_poll_null_args(void) {
+    sc_error_t err = sc_google_chat_poll(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT(err == SC_ERR_INVALID_ARGUMENT);
+}
+#endif
+
 #if SC_HAS_QQ
 static void test_qq_webhook_and_poll(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -1446,5 +1578,23 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_dingtalk_health_check);
     SC_RUN_TEST(test_dingtalk_webhook_and_poll);
     SC_RUN_TEST(test_dingtalk_poll_null_args);
+#endif
+#if SC_HAS_TEAMS
+    SC_RUN_TEST(test_teams_create);
+    SC_RUN_TEST(test_teams_health_check);
+    SC_RUN_TEST(test_teams_webhook_and_poll);
+    SC_RUN_TEST(test_teams_poll_null_args);
+#endif
+#if SC_HAS_TWILIO
+    SC_RUN_TEST(test_twilio_create);
+    SC_RUN_TEST(test_twilio_health_check);
+    SC_RUN_TEST(test_twilio_webhook_and_poll);
+    SC_RUN_TEST(test_twilio_poll_null_args);
+#endif
+#if SC_HAS_GOOGLE_CHAT
+    SC_RUN_TEST(test_google_chat_create);
+    SC_RUN_TEST(test_google_chat_health_check);
+    SC_RUN_TEST(test_google_chat_webhook_and_poll);
+    SC_RUN_TEST(test_google_chat_poll_null_args);
 #endif
 }

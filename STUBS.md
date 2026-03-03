@@ -9,33 +9,36 @@ Last updated: 2026-03-03
 | Source files (src/ + include/) | **~466**               |
 | Lines of C/H/ASM code          | **~55K**               |
 | Test files                     | 73                     |
-| Tests passing                  | **2,226/2,226 (100%)** |
+| Tests passing                  | **2,238/2,238 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **398 KB**             |
 | Peak RSS (test suite)          | **~5.1 MB**            |
 
 ## Channels — Honest Status
 
-### Full send + receive (18 channels)
+### Full send + receive (21 channels)
 
-| Channel    | send()         | listen()                   | Config Required                       |
-| ---------- | -------------- | -------------------------- | ------------------------------------- |
-| CLI        | stdout         | readline                   | None                                  |
-| Telegram   | HTTP API       | Long-poll (getUpdates)     | `token`                               |
-| Discord    | HTTP API       | GET /messages poll         | `token`, `channel_ids`                |
-| Slack      | HTTP API       | conversations.history poll | `token`, `channel_ids`                |
-| WhatsApp   | Graph API      | Webhook + poll queue       | `phone_number_id`, `token`            |
-| Email      | curl SMTP      | curl IMAP poll             | SMTP/IMAP config                      |
-| iMessage   | AppleScript    | chat.db SQLite poll        | `default_target` (macOS only)         |
-| Signal     | signal-cli RPC | signal-cli poll            | `http_url`, `account`                 |
-| Matrix     | HTTP PUT       | /sync long-poll            | `homeserver`, `access_token`          |
-| IRC        | TCP socket     | select()+recv() on socket  | `server`, `port`                      |
-| LINE       | Push API       | Webhook + poll queue       | `channel_token`                       |
-| Lark       | HTTP API       | Webhook + poll queue       | `app_id`, `app_secret`                |
-| Mattermost | HTTP API       | REST /posts poll           | `url`, `token`                        |
-| OneBot     | HTTP API       | Webhook + poll queue       | `api_base`, `access_token`            |
-| DingTalk   | HTTP POST      | Webhook + poll queue       | `app_key`, `app_secret`               |
-| Nostr      | nak CLI        | nak sub relay poll         | `nak_path`, `relay_url`, `seckey_hex` |
-| QQ         | HTTP API       | Webhook + poll queue       | `app_id`, `bot_token`                 |
+| Channel     | send()         | listen()                   | Config Required                       |
+| ----------- | -------------- | -------------------------- | ------------------------------------- |
+| CLI         | stdout         | readline                   | None                                  |
+| Telegram    | HTTP API       | Long-poll (getUpdates)     | `token`                               |
+| Discord     | HTTP API       | GET /messages poll         | `token`, `channel_ids`                |
+| Slack       | HTTP API       | conversations.history poll | `token`, `channel_ids`                |
+| WhatsApp    | Graph API      | Webhook + poll queue       | `phone_number_id`, `token`            |
+| Email       | curl SMTP      | curl IMAP poll             | SMTP/IMAP config                      |
+| iMessage    | AppleScript    | chat.db SQLite poll        | `default_target` (macOS only)         |
+| Signal      | signal-cli RPC | signal-cli poll            | `http_url`, `account`                 |
+| Matrix      | HTTP PUT       | /sync long-poll            | `homeserver`, `access_token`          |
+| IRC         | TCP socket     | select()+recv() on socket  | `server`, `port`                      |
+| LINE        | Push API       | Webhook + poll queue       | `channel_token`                       |
+| Lark        | HTTP API       | Webhook + poll queue       | `app_id`, `app_secret`                |
+| Mattermost  | HTTP API       | REST /posts poll           | `url`, `token`                        |
+| OneBot      | HTTP API       | Webhook + poll queue       | `api_base`, `access_token`            |
+| DingTalk    | HTTP POST      | Webhook + poll queue       | `app_key`, `app_secret`               |
+| Nostr       | nak CLI        | nak sub relay poll         | `nak_path`, `relay_url`, `seckey_hex` |
+| QQ          | HTTP API       | Webhook + poll queue       | `app_id`, `bot_token`                 |
+| Teams       | HTTP API       | Webhook + poll queue       | `app_id`, `app_secret`                |
+| Twilio SMS  | HTTP API       | Webhook + poll queue       | `account_sid`, `auth_token`           |
+| Google Chat | HTTP API       | Webhook + poll queue       | `bearer_token`, `space_id`            |
 
 ### Send only (2 channels)
 

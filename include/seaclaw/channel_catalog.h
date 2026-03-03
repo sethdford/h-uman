@@ -26,6 +26,9 @@ typedef enum sc_channel_id {
     SC_CHANNEL_MAIXCAM,
     SC_CHANNEL_NOSTR,
     SC_CHANNEL_WEB,
+    SC_CHANNEL_TEAMS,
+    SC_CHANNEL_TWILIO,
+    SC_CHANNEL_GOOGLE_CHAT,
     SC_CHANNEL_COUNT
 } sc_channel_id_t;
 
