@@ -10,4 +10,7 @@ sc_error_t sc_provider_create(sc_allocator_t *alloc, const char *name, size_t na
                               const char *api_key, size_t api_key_len, const char *base_url,
                               size_t base_url_len, sc_provider_t *out);
 
+/** Returns base URL for compatible providers (groq, mistral, etc.), NULL if unknown. */
+const char *sc_compatible_provider_url(const char *name);
+
 #endif /* SC_PROVIDERS_FACTORY_H */

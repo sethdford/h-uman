@@ -451,6 +451,33 @@ static void test_anthropic_chat_with_system_and_user(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_anthropic_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_anthropic_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "claude-3", 8, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_anthropic_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_anthropic_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "claude-3", .model_len = 8,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "claude-3", 8, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 static void test_anthropic_max_tokens_in_request(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_provider_t prov;
@@ -517,6 +544,33 @@ static void test_anthropic_tool_call_format(void) {
     sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "claude-3", 8, 0.7, &resp);
     SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_NOT_SUPPORTED);
     sc_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_anthropic_chat_null_request_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_anthropic_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, NULL, "claude-3", 8, 0.7, &resp);
+    SC_ASSERT_NEQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_anthropic_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_anthropic_create(&alloc, "key", 3, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "claude-3", .model_len = 8,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "claude-3", 8, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK)
+        sc_chat_response_free(&alloc, &resp);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }
@@ -1405,6 +1459,22 @@ static void test_claude_cli_create_empty_key(void) {
     sc_provider_t prov;
     sc_error_t err = sc_claude_cli_create(&alloc, "", 0, NULL, 0, &prov);
     SC_ASSERT_EQ(err, SC_OK);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_claude_cli_chat_empty_messages_graceful(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_claude_cli_create(&alloc, NULL, 0, NULL, 0, &prov);
+    sc_chat_request_t req = {.messages = NULL, .messages_count = 0, .model = "claude-3", .model_len = 8,
+                             .temperature = 0.7, .max_tokens = 0, .tools = NULL, .tools_count = 0,
+                             .timeout_secs = 0, .reasoning_effort = NULL, .reasoning_effort_len = 0};
+    sc_chat_response_t resp = {0};
+    sc_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "claude-3", 8, 0.7, &resp);
+    SC_ASSERT_TRUE(err == SC_OK || err == SC_ERR_INVALID_ARGUMENT || err == SC_ERR_PROVIDER_RESPONSE);
+    if (err == SC_OK && resp.content)
+        alloc.free(alloc.ctx, (void *)resp.content, resp.content_len + 1);
     if (prov.vtable->deinit)
         prov.vtable->deinit(prov.ctx, &alloc);
 }

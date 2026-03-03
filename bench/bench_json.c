@@ -2,6 +2,7 @@
 #include "bench.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/json.h"
+#include "seaclaw/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
