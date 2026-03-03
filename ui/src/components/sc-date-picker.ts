@@ -6,6 +6,7 @@ import { icons } from "../icons.js";
 export class ScDatePicker extends LitElement {
   @property({ type: String }) value = "";
   @property({ type: String }) label = "";
+  @property({ type: String, attribute: "aria-label" }) ariaLabel = "";
   @property({ type: String }) min = "";
   @property({ type: String }) max = "";
   @property({ type: Boolean }) disabled = false;
@@ -79,7 +80,6 @@ export class ScDatePicker extends LitElement {
 
     input:focus-visible {
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 var(--sc-focus-ring-width) var(--sc-focus-ring);
       outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);
       outline-offset: var(--sc-focus-ring-offset);
     }
@@ -137,6 +137,7 @@ export class ScDatePicker extends LitElement {
             ?disabled=${this.disabled}
             aria-invalid=${this.error ? "true" : "false"}
             aria-describedby=${errorId ?? undefined}
+            aria-label=${this.label ? undefined : this.ariaLabel || undefined}
             class=${this.error ? "error" : ""}
             @change=${this._onChange}
           />

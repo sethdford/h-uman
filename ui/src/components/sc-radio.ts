@@ -12,6 +12,7 @@ export class ScRadio extends LitElement {
   @property({ type: String }) value = "";
   @property({ type: Array }) options: RadioOption[] = [];
   @property({ type: String }) name = "";
+  @property({ type: String }) label = "";
   @property({ type: Boolean }) disabled = false;
 
   @state() private _focusedIndex = 0;
@@ -165,7 +166,12 @@ export class ScRadio extends LitElement {
   override render() {
     const name = this.name || `sc-radio-${Math.random().toString(36).slice(2, 11)}`;
     return html`
-      <div class="group" role="radiogroup" @keydown=${this._onKeyDown}>
+      <div
+        class="group"
+        role="radiogroup"
+        aria-label=${this.label || undefined}
+        @keydown=${this._onKeyDown}
+      >
         ${this.options.map((opt) => {
           const isChecked = opt.value === this.value;
           const isDisabled = opt.disabled || this.disabled;

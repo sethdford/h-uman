@@ -67,7 +67,6 @@ export class ScSelect extends LitElement {
 
     select:focus-visible {
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 var(--sc-focus-ring-width) var(--sc-focus-ring);
       outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);
       outline-offset: var(--sc-focus-ring-offset);
     }
@@ -150,7 +149,7 @@ export class ScSelect extends LitElement {
             ?disabled=${this.disabled}
             aria-invalid=${this.error ? "true" : "false"}
             aria-describedby=${errorId ?? undefined}
-            aria-label=${this.label || undefined}
+            aria-label=${this.label || this.placeholder || "Select"}
             @change=${this._onChange}
           >
             ${this.placeholder
