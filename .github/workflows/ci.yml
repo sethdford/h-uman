@@ -103,6 +103,27 @@ jobs:
       - name: Run scripts/check.sh
         run: scripts/check.sh
 
+  benchmark:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: MinSizeRel
+          enable-lto: "true"
+          enable-all-channels: "true"
+      - name: Run benchmark
+        run: scripts/benchmark.sh build/seaclaw --save-history
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark-results.json
+            benchmark-history.json
+          retention-days: 90
+
   static-analysis:
     runs-on: ubuntu-latest
     continue-on-error: true
