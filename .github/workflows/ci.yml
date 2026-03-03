@@ -74,3 +74,48 @@ jobs:
           java-version: "17"
           distribution: temurin
       - run: cd apps/android && chmod +x gradlew && ./gradlew assembleDebug
+
+  completions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify completions are parseable
+        run: |
+          bash -n completions/seaclaw.bash
+          echo "bash completions: OK"
+      - name: Verify completions cover all subcommands
+        run: |
+          CMDS=$(grep -oP '\{"[a-z-]+", "' src/main.c | sed 's/{"//;s/", "//' | sort)
+          for cmd in $CMDS; do
+            if ! grep -q "$cmd" completions/seaclaw.bash; then
+              echo "MISSING in bash completions: $cmd"
+              exit 1
+            fi
+            if ! grep -q "$cmd" completions/seaclaw.zsh; then
+              echo "MISSING in zsh completions: $cmd"
+              exit 1
+            fi
+          done
+          echo "All subcommands covered in completions"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build --target release -t seaclaw:ci-test .
+      - name: Verify binary runs in container
+        run: docker run --rm seaclaw:ci-test --version
+
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: cd website && npm ci && npm run build
+      - name: Verify dist exists
+        run: test -d website/dist
