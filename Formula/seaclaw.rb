@@ -6,11 +6,11 @@ class Seaclaw < Formula
   homepage "https://seaclaw.ai"
   license "MIT"
 
-  # Tagged releases: uncomment when publishing v0.2.0+ tarballs to GitHub.
-  # url "https://github.com/seaclaw/seaclaw/archive/refs/tags/v0.2.0.tar.gz"
-  # sha256 "..."  # Run: curl -sL <url> | sha256sum
+  # Stable release (uncommented on tag push by release workflow)
+  # url "https://github.com/sethdford/seaclaw/archive/refs/tags/v0.3.0.tar.gz"
+  # sha256 "PLACEHOLDER"
 
-  head "https://github.com/seaclaw/seaclaw.git", branch: "main"
+  head "https://github.com/sethdford/seaclaw.git", branch: "main"
 
   depends_on "cmake" => :build
   depends_on "sqlite"
@@ -28,8 +28,8 @@ class Seaclaw < Formula
     system "cmake", "--build", "build"
     bin.install "build/seaclaw"
 
-    man1.install "docs/man/seaclaw.1"
-    man1.install "docs/man/seaclaw-gateway.1"
+    man1.install "docs/man/seaclaw.1" if File.exist?("docs/man/seaclaw.1")
+    man1.install "docs/man/seaclaw-gateway.1" if File.exist?("docs/man/seaclaw-gateway.1")
 
     bash_completion.install "completions/seaclaw.bash" => "seaclaw"
     zsh_completion.install "completions/_seaclaw" => "_seaclaw"
@@ -37,6 +37,5 @@ class Seaclaw < Formula
 
   test do
     assert_match "seaclaw", shell_output("#{bin}/seaclaw --version")
-    system "#{bin}/seaclaw", "--version"
   end
 end

@@ -28,7 +28,7 @@ The smallest fully autonomous AI assistant infrastructure — a static C binary 
 - **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
 - **Feature-Complete:** 50+ providers, 24 channels, 53 tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
-- **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Optional `--tui` flag.
+- **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DSC_ENABLE_TUI=ON` and run with `--tui`.
 - **Performance-Optimized:** Per-turn arena allocator, HTTP connection pooling, HTTP/2, system prompt caching — all benefiting from C-level control.
 
 ### Why seaclaw
@@ -77,6 +77,56 @@ ls -lh seaclaw
 
 /usr/bin/time -l ./seaclaw --help
 /usr/bin/time -l ./seaclaw status
+```
+
+## Installation
+
+### Homebrew (macOS / Linux)
+
+```bash
+# Head-only (from source)
+brew install --HEAD ./Formula/seaclaw.rb
+
+# With curl support
+brew install --HEAD ./Formula/seaclaw.rb --with-curl
+```
+
+### Docker
+
+```bash
+docker pull ghcr.io/sethdford/seaclaw:latest
+docker run --rm ghcr.io/sethdford/seaclaw:latest --version
+```
+
+### Nix
+
+```bash
+nix run github:sethdford/seaclaw
+# Or add to flake inputs
+nix build github:sethdford/seaclaw
+```
+
+### Debian / Ubuntu
+
+Download the `.deb` from [Releases](https://github.com/sethdford/seaclaw/releases):
+
+```bash
+sudo dpkg -i seaclaw_*.deb
+```
+
+### Install Script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sethdford/seaclaw/main/install.sh | bash
+```
+
+### From Source
+
+```bash
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+cmake --build . -j$(nproc)
+sudo cp seaclaw /usr/local/bin/
 ```
 
 ## Quick Start
