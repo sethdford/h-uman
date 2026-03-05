@@ -3,6 +3,7 @@
 
 #include "seaclaw/config_types.h"
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/security/audit.h"
 #include "seaclaw/core/arena.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"

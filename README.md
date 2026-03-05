@@ -177,9 +177,8 @@ seaclaw channel start signal
 seaclaw service install
 seaclaw service status
 
-# Migrate memory from OpenClaw
-seaclaw migrate openclaw --dry-run
-seaclaw migrate openclaw
+# Migrate memory from OpenClaw SQLite brain
+seaclaw migrate sqlite ~/.openclaw/brain.db
 ```
 
 > **Dev fallback (no global install):** prefix commands with `build/` (example: `build/seaclaw status`).
@@ -289,23 +288,23 @@ Or configure manually in the [config](#configuration).
 
 Config: `~/.seaclaw/config.json` (created by `onboard`)
 
-> **OpenClaw compatible:** seaclaw uses the same config structure as [OpenClaw](https://github.com/openclaw/openclaw) (snake_case). Providers live under `models.providers`, the default model under `agents.defaults.model.primary`, and channels use `accounts` wrappers.
-> Top-level `default_provider` / `default_model` keys are not supported.
+> **Config structure:** seaclaw uses top-level `providers` (array), `default_provider`, and `default_model`. Channels use `accounts` wrappers under `channels.<name>.accounts`.
 
 ```json
 {
   "default_temperature": 0.7,
 
-  "models": {
-    "providers": {
-      "openrouter": { "api_key": "sk-or-..." },
-      "groq": { "api_key": "gsk_..." },
-      "anthropic": {
-        "api_key": "sk-ant-...",
-        "base_url": "https://api.anthropic.com"
-      }
+  "providers": [
+    { "name": "openrouter", "api_key": "sk-or-..." },
+    { "name": "groq", "api_key": "gsk_..." },
+    {
+      "name": "anthropic",
+      "api_key": "sk-ant-...",
+      "base_url": "https://api.anthropic.com"
     }
-  },
+  ],
+  "default_provider": "openrouter",
+  "default_model": "anthropic/claude-sonnet-4",
 
   "agents": {
     "defaults": {
@@ -559,7 +558,8 @@ Use `channels.web` for browser UI events (WebChannel v1):
 | `skills publish`                                  | Publish skill to registry                              |
 | `hardware scan\|flash\|monitor`                   | Hardware device management                             |
 | `models list\|info\|benchmark`                    | Model catalog                                          |
-| `migrate openclaw [--dry-run] [--source PATH]`    | Import memory + migrate config from OpenClaw           |
+| `migrate sqlite <path>`                           | Import memories from SQLite (e.g. OpenClaw brain.db)   |
+| `migrate markdown <path>`                         | Import memories from Markdown files                    |
 
 ## Development
 

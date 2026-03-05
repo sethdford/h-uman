@@ -37,10 +37,7 @@ typedef struct sc_resource_limits {
     uint32_t max_memory_mb;
 } sc_resource_limits_t;
 
-typedef struct sc_audit_config {
-    bool enabled;
-    char *log_path;
-} sc_audit_config_t;
+/* sc_audit_config_t is defined in seaclaw/security/audit.h */
 
 typedef struct sc_scheduler_config {
     uint32_t max_concurrent;

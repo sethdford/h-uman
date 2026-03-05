@@ -109,7 +109,7 @@ typedef struct sc_audit_cmd_log {
 
 typedef struct sc_audit_config {
     bool enabled;
-    const char *log_path;
+    char *log_path;
     uint32_t max_size_mb;
 } sc_audit_config_t;
 
