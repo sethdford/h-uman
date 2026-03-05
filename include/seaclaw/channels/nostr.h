@@ -23,6 +23,11 @@ bool sc_nostr_is_configured(sc_channel_t *ch);
 #if SC_IS_TEST
 /** Test hook: get last message sent (caller must not free). */
 const char *sc_nostr_test_last_message(sc_channel_t *ch);
+
+/** Test hook: inject mock event for poll to return. */
+sc_error_t sc_nostr_test_inject_mock_event(sc_channel_t *ch, const char *session_key,
+                                           size_t session_key_len, const char *content,
+                                           size_t content_len);
 #endif
 
 #endif /* SC_CHANNELS_NOSTR_H */

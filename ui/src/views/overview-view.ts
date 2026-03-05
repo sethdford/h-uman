@@ -58,27 +58,26 @@ export class ScOverviewView extends GatewayAwareLitElement {
     :host {
       display: block;
       max-width: 1200px;
-      background-image: var(--sc-hero-gradient);
     }
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: var(--sc-space-xl);
+      margin-bottom: var(--sc-space-2xl, 2rem);
       flex-wrap: wrap;
       gap: var(--sc-space-md);
     }
     .header h2 {
       margin: 0;
-      font-size: var(--sc-text-2xl);
-      font-weight: var(--sc-weight-bold);
-      letter-spacing: -0.02em;
+      font-size: clamp(1.5rem, 2.5vw, 2rem);
+      font-weight: var(--sc-weight-bold, 700);
+      letter-spacing: -0.03em;
       color: var(--sc-text);
     }
     .bento {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: var(--sc-space-xl);
+      gap: var(--sc-space-lg, 1.5rem);
     }
     .gateway-card {
       grid-column: span 2;
@@ -90,19 +89,20 @@ export class ScOverviewView extends GatewayAwareLitElement {
       grid-column: 1 / -1;
     }
     .stat-label {
-      font-size: var(--sc-text-xs);
-      font-weight: var(--sc-weight-medium);
-      letter-spacing: 0.06em;
+      font-size: 0.6875rem;
+      font-weight: var(--sc-weight-medium, 500);
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--sc-text-muted);
+      color: var(--sc-text-faint, var(--sc-text-muted));
       margin-bottom: var(--sc-space-xs);
     }
     .stat-value {
-      font-size: var(--sc-text-3xl, 1.875rem);
-      font-weight: var(--sc-weight-bold);
-      letter-spacing: -0.03em;
+      font-size: clamp(1.5rem, 2.5vw, 2rem);
+      font-weight: var(--sc-weight-bold, 700);
+      letter-spacing: -0.04em;
       font-variant-numeric: tabular-nums;
       color: var(--sc-text);
+      line-height: 1.1;
       animation: sc-overshoot-in var(--sc-duration-moderate) var(--sc-spring-out) backwards;
     }
     .stat-row {

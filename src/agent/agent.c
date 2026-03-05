@@ -1323,6 +1323,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
                         if (agent->audit_logger) {
                             sc_audit_event_t aev;
                             sc_audit_event_init(&aev, SC_AUDIT_POLICY_VIOLATION);
+                            sc_audit_event_with_identity(&aev, agent->agent_id,
+                                agent->model_name ? agent->model_name : "unknown", NULL);
                             sc_audit_event_with_action(&aev, tn_buf[0] ? tn_buf : "unknown", "denied",
                                                        false, false);
                             sc_audit_logger_log(agent->audit_logger, &aev);
@@ -1401,6 +1403,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
                     if (agent->audit_logger) {
                         sc_audit_event_t aev;
                         sc_audit_event_init(&aev, SC_AUDIT_COMMAND_EXECUTION);
+                        sc_audit_event_with_identity(&aev, agent->agent_id,
+                            agent->model_name ? agent->model_name : "unknown", NULL);
                         sc_audit_event_with_action(&aev, tn_buf, "tool", result->success, true);
                         sc_audit_event_with_result(&aev, result->success, 0, 0,
                                                    result->success ? NULL : result->error_msg);
@@ -1440,6 +1444,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
                         if (agent->audit_logger) {
                             sc_audit_event_t aev;
                             sc_audit_event_init(&aev, SC_AUDIT_POLICY_VIOLATION);
+                            sc_audit_event_with_identity(&aev, agent->agent_id,
+                                agent->model_name ? agent->model_name : "unknown", NULL);
                             sc_audit_event_with_action(&aev, pol_tn, "denied", false, false);
                             sc_audit_logger_log(agent->audit_logger, &aev);
                         }
@@ -1501,6 +1507,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
                     if (agent->audit_logger) {
                         sc_audit_event_t aev;
                         sc_audit_event_init(&aev, SC_AUDIT_COMMAND_EXECUTION);
+                        sc_audit_event_with_identity(&aev, agent->agent_id,
+                            agent->model_name ? agent->model_name : "unknown", NULL);
                         sc_audit_event_with_action(&aev, pol_tn, "tool", result.success, true);
                         sc_audit_event_with_result(&aev, result.success, 0, 0,
                                                    result.success ? NULL : result.error_msg);

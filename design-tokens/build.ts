@@ -1068,8 +1068,7 @@ function generateSwift(tokens: TokenMap): string {
       "opacity" +
       k
         .replace("opacity.", "")
-        .replace(/-/g, "")
-        .split(".")
+        .split(/[.\-]/)
         .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
         .join("");
     lines.push(`    public static let ${name}: Double = ${v}`);

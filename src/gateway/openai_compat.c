@@ -4,6 +4,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/provider.h"
 #include "seaclaw/providers/factory.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -103,14 +104,54 @@ static void error_response(sc_allocator_t *alloc, int status, const char *messag
     sc_json_buf_free(&buf);
 }
 
+/* Build one SSE chunk event: data: {"id":"...","object":"chat.completion.chunk",...}\n\n */
+static sc_error_t append_sse_chunk(sc_json_buf_t *buf, sc_allocator_t *alloc,
+                                   const char *id, const char *model, size_t model_len,
+                                   long created, const char *delta, size_t delta_len,
+                                   bool is_final) {
+    (void)alloc;
+    if (sc_json_buf_append_raw(buf, "data: ", 6) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_append_raw(buf, "{\"id\":\"", 6) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_append_raw(buf, id, strlen(id)) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_append_raw(buf, "\",\"object\":\"chat.completion.chunk\",\"created\":", 38) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    char num[24];
+    int n = snprintf(num, sizeof(num), "%ld", created);
+    if (n > 0 && sc_json_buf_append_raw(buf, num, (size_t)n) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_append_raw(buf, ",\"model\":\"", 9) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    if (sc_json_buf_append_raw(buf, model, model_len) != SC_OK)
+        return SC_ERR_OUT_OF_MEMORY;
+    if (is_final) {
+        if (sc_json_buf_append_raw(buf,
+                "\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n", 60) != SC_OK)
+            return SC_ERR_OUT_OF_MEMORY;
+    } else {
+        if (sc_json_buf_append_raw(buf, "\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"", 44) != SC_OK)
+            return SC_ERR_OUT_OF_MEMORY;
+        if (delta && delta_len > 0 && sc_json_append_string(buf, delta, delta_len) != SC_OK)
+            return SC_ERR_OUT_OF_MEMORY;
+        if (sc_json_buf_append_raw(buf, "\"},\"finish_reason\":null}]}\n\n", 32) != SC_OK)
+            return SC_ERR_OUT_OF_MEMORY;
+    }
+    return SC_OK;
+}
+
 void sc_openai_compat_handle_chat_completions(const char *body, size_t body_len,
                                                sc_allocator_t *alloc,
                                                const sc_app_context_t *app_ctx,
                                                int *out_status, char **out_body,
-                                               size_t *out_body_len) {
+                                               size_t *out_body_len,
+                                               const char **out_content_type) {
     *out_status = 500;
     *out_body = NULL;
     *out_body_len = 0;
+    if (out_content_type)
+        *out_content_type = "application/json";
 
     if (!alloc || !out_status || !out_body || !out_body_len)
         return;
@@ -141,11 +182,7 @@ void sc_openai_compat_handle_chat_completions(const char *body, size_t body_len,
         return;
     }
 
-    if (sc_json_get_bool(root, "stream", false)) {
-        sc_json_free(alloc, root);
-        error_response(alloc, 400, "Streaming not supported", out_status, out_body, out_body_len);
-        return;
-    }
+    bool want_stream = sc_json_get_bool(root, "stream", false);
 
     const char *model_req = sc_json_get_string(root, "model");
     size_t model_len = model_req ? strlen(model_req) : 0;
@@ -221,6 +258,139 @@ void sc_openai_compat_handle_chat_completions(const char *body, size_t body_len,
 
     sc_json_free(alloc, root);
 
+    time_t now = time(NULL);
+    char id_buf[32];
+    snprintf(id_buf, sizeof(id_buf), "chatcmpl-%lx", (unsigned long)now);
+    long created_ts = (long)now;
+
+    if (want_stream) {
+        /* Simulated SSE streaming: get full response, chunk it, return as SSE body */
+        sc_json_buf_t buf;
+        if (sc_json_buf_init(&buf, alloc) != SC_OK) {
+            alloc->free(alloc->ctx, msgs, msg_count * sizeof(sc_chat_message_t));
+            error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
+            return;
+        }
+#ifdef SC_IS_TEST
+        (void)temperature;
+        (void)max_tokens;
+        alloc->free(alloc->ctx, msgs, msg_count * sizeof(sc_chat_message_t));
+        /* Mock: emit chunks "m","o","c","k" then [DONE] */
+        const char *mock_chunks[] = {"m", "o", "c", "k"};
+        for (size_t i = 0; i < sizeof(mock_chunks) / sizeof(mock_chunks[0]); i++) {
+            if (append_sse_chunk(&buf, alloc, id_buf, model, model_len_out, created_ts,
+                                mock_chunks[i], 1, false) != SC_OK) {
+                sc_json_buf_free(&buf);
+                return;
+            }
+        }
+        if (append_sse_chunk(&buf, alloc, id_buf, model, model_len_out, created_ts,
+                            NULL, 0, true) != SC_OK) {
+            sc_json_buf_free(&buf);
+            return;
+        }
+        if (sc_json_buf_append_raw(&buf, "data: [DONE]\n\n", 14) != SC_OK) {
+            sc_json_buf_free(&buf);
+            return;
+        }
+#else
+        sc_provider_t provider = {0};
+        err = sc_provider_create_from_config(alloc, cfg, provider_name, strlen(provider_name),
+                                              &provider);
+        if (err == SC_ERR_NOT_SUPPORTED) {
+            const char *api_key = sc_config_get_provider_key(cfg, provider_name);
+            size_t api_key_len = api_key ? strlen(api_key) : 0;
+            const char *base_url = sc_config_get_provider_base_url(cfg, provider_name);
+            size_t base_url_len = base_url ? strlen(base_url) : 0;
+            err = sc_provider_create(alloc, provider_name, strlen(provider_name), api_key, api_key_len,
+                                    base_url, base_url_len, &provider);
+        }
+        if (err != SC_OK) {
+            alloc->free(alloc->ctx, msgs, msg_count * sizeof(sc_chat_message_t));
+            sc_json_buf_free(&buf);
+            error_response(alloc, 503, "Provider not available", out_status, out_body, out_body_len);
+            return;
+        }
+        sc_chat_request_t req = {
+            .messages = msgs,
+            .messages_count = msg_count,
+            .model = model,
+            .model_len = model_len_out,
+            .temperature = temperature,
+            .max_tokens = max_tokens,
+            .tools = NULL,
+            .tools_count = 0,
+        };
+        sc_chat_response_t resp = {0};
+        err = provider.vtable->chat(provider.ctx, alloc, &req, model, model_len_out, temperature,
+                                    &resp);
+        alloc->free(alloc->ctx, msgs, msg_count * sizeof(sc_chat_message_t));
+        if (provider.vtable && provider.vtable->deinit)
+            provider.vtable->deinit(provider.ctx, alloc);
+        if (err != SC_OK) {
+            sc_json_buf_free(&buf);
+            error_response(alloc, 502, "Provider error", out_status, out_body, out_body_len);
+            if (resp.content)
+                sc_chat_response_free(alloc, &resp);
+            return;
+        }
+        /* Split content into word/whitespace chunks and emit SSE events */
+        const char *content = resp.content ? resp.content : "";
+        size_t content_len = resp.content ? resp.content_len : 0;
+        const char *p = content;
+        const char *end = content + content_len;
+        while (p < end) {
+            const char *start = p;
+            bool is_space = (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r');
+            if (is_space) {
+                while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+                    p++;
+            } else {
+                while (p < end && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+                    p++;
+            }
+            if (p > start) {
+                size_t chunk_len = (size_t)(p - start);
+                if (append_sse_chunk(&buf, alloc, id_buf, model, model_len_out, created_ts,
+                                     start, chunk_len, false) != SC_OK) {
+                    sc_chat_response_free(alloc, &resp);
+                    sc_json_buf_free(&buf);
+                    return;
+                }
+            }
+        }
+        if (append_sse_chunk(&buf, alloc, id_buf, model, model_len_out, created_ts,
+                            NULL, 0, true) != SC_OK) {
+            sc_chat_response_free(alloc, &resp);
+            sc_json_buf_free(&buf);
+            return;
+        }
+        sc_chat_response_free(alloc, &resp);
+        if (sc_json_buf_append_raw(&buf, "data: [DONE]\n\n", 14) != SC_OK) {
+            sc_json_buf_free(&buf);
+            return;
+        }
+#endif
+        size_t body_len = buf.len;
+        size_t n = body_len + 1;
+        char *resp_body = (char *)alloc->alloc(alloc->ctx, n);
+        if (!resp_body) {
+            sc_json_buf_free(&buf);
+            *out_body = NULL;
+            *out_body_len = 0;
+            return;
+        }
+        memcpy(resp_body, buf.ptr, body_len);
+        resp_body[body_len] = '\0';
+        sc_json_buf_free(&buf);
+        *out_status = 200;
+        *out_body = resp_body;
+        *out_body_len = body_len;
+        if (out_content_type)
+            *out_content_type = "text/event-stream";
+        return;
+    }
+
 #ifdef SC_IS_TEST
     /* In tests, skip real provider call; return mock response */
     (void)temperature;
@@ -231,8 +401,7 @@ void sc_openai_compat_handle_chat_completions(const char *body, size_t body_len,
         error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
         return;
     }
-    time_t now = time(NULL);
-    char id_buf[32];
+    now = time(NULL);
     snprintf(id_buf, sizeof(id_buf), "chatcmpl-%lx", (unsigned long)now);
     static const char mock_hdr[] = "\",\"object\":\"chat.completion\",\"created\":";
     static const char mock_tail[] =
@@ -314,8 +483,7 @@ void sc_openai_compat_handle_chat_completions(const char *body, size_t body_len,
         error_response(alloc, 500, "Out of memory", out_status, out_body, out_body_len);
         return;
     }
-    time_t now = time(NULL);
-    char id_buf[32];
+    now = time(NULL);
     snprintf(id_buf, sizeof(id_buf), "chatcmpl-%lx", (unsigned long)now);
 
     static const char oc_hdr[] = "\",\"object\":\"chat.completion\",\"created\":";

@@ -23,17 +23,28 @@ export class ScWelcome extends LitElement {
       display: block;
     }
     .welcome {
-      animation: sc-fade-in var(--sc-duration-moderate) var(--sc-ease-out);
+      animation: welcome-enter 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    @keyframes welcome-enter {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
     .greeting {
-      margin-bottom: var(--sc-space-lg);
+      margin-bottom: var(--sc-space-2xl, 2rem);
     }
     .greeting h2 {
-      font-size: var(--sc-text-2xl);
-      font-weight: var(--sc-weight-bold);
-      letter-spacing: -0.02em;
+      font-size: clamp(1.75rem, 3vw, 2.25rem);
+      font-weight: var(--sc-weight-bold, 700);
+      letter-spacing: -0.035em;
       color: var(--sc-text);
-      margin: 0 0 var(--sc-space-xs);
+      margin: 0 0 var(--sc-space-sm, 0.5rem);
+      line-height: 1.1;
     }
     .greeting p {
       font-size: var(--sc-text-base);
@@ -44,19 +55,53 @@ export class ScWelcome extends LitElement {
     .steps {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-xl);
+      gap: var(--sc-space-lg, 1.5rem);
+      margin-bottom: var(--sc-space-2xl, 2rem);
     }
     .step-card {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-sm);
+      gap: var(--sc-space-md, 1rem);
       position: relative;
       overflow: hidden;
+      cursor: pointer;
+    }
+    /* Staggered entrance for cards */
+    .step-card:nth-child(1) {
+      animation-delay: 80ms;
+    }
+    .step-card:nth-child(2) {
+      animation-delay: 140ms;
+    }
+    .step-card:nth-child(3) {
+      animation-delay: 200ms;
+    }
+    .step-card:nth-child(4) {
+      animation-delay: 260ms;
+    }
+
+    .step-icon-wrap {
+      width: 2.75rem;
+      height: 2.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--sc-radius-lg, 12px);
+      background: color-mix(in srgb, var(--sc-accent) 10%, transparent);
+      transition:
+        background 280ms ease,
+        transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .step-card:hover .step-icon-wrap {
+      background: color-mix(in srgb, var(--sc-accent) 16%, transparent);
+      transform: scale(1.05);
+    }
+    .step-icon-wrap.done {
+      background: color-mix(in srgb, var(--sc-success) 12%, transparent);
     }
     .step-icon {
-      width: 2rem;
-      height: 2rem;
+      width: 1.25rem;
+      height: 1.25rem;
       color: var(--sc-accent);
     }
     .step-icon svg {
@@ -68,8 +113,9 @@ export class ScWelcome extends LitElement {
     }
     .step-title {
       font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
+      font-weight: var(--sc-weight-semibold, 600);
       color: var(--sc-text);
+      letter-spacing: -0.01em;
     }
     .step-desc {
       font-size: var(--sc-text-sm);
@@ -82,8 +128,8 @@ export class ScWelcome extends LitElement {
       bottom: 0;
       left: 0;
       right: 0;
-      height: 3px;
-      border-radius: 0 0 var(--sc-radius-lg) var(--sc-radius-lg);
+      height: 2px;
+      border-radius: 0 0 var(--sc-radius-xl, 16px) var(--sc-radius-xl, 16px);
     }
     .step-progress.done {
       background: linear-gradient(
@@ -93,36 +139,38 @@ export class ScWelcome extends LitElement {
       );
     }
     .step-progress.pending {
-      background: color-mix(in srgb, var(--sc-border) 50%, transparent);
+      background: color-mix(in srgb, var(--sc-border) 30%, transparent);
     }
     .dismiss {
       text-align: center;
     }
     .dismiss-link {
       font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      color: var(--sc-text-faint, var(--sc-text-muted));
       background: none;
       border: none;
       cursor: pointer;
-      text-decoration: underline;
-      text-underline-offset: 2px;
+      text-decoration: none;
       font-family: var(--sc-font);
       padding: var(--sc-space-sm);
-      transition: color var(--sc-duration-fast);
+      transition: color 200ms ease;
+      letter-spacing: 0.01em;
     }
     .dismiss-link:hover {
       color: var(--sc-text);
+      text-decoration: underline;
+      text-underline-offset: 3px;
     }
     .celebration {
       text-align: center;
-      padding: var(--sc-space-xl);
+      padding: var(--sc-space-2xl, 2rem);
     }
     .celebration .check-icon {
-      width: 3rem;
-      height: 3rem;
+      width: 3.5rem;
+      height: 3.5rem;
       color: var(--sc-success);
-      margin: 0 auto var(--sc-space-md);
-      animation: sc-icon-pop var(--sc-duration-moderate) var(--sc-spring-bounce);
+      margin: 0 auto var(--sc-space-lg, 1.5rem);
+      animation: sc-icon-pop 500ms cubic-bezier(0.22, 1, 0.36, 1);
     }
     .celebration .check-icon svg {
       width: 100%;
@@ -130,12 +178,15 @@ export class ScWelcome extends LitElement {
     }
     @keyframes sc-icon-pop {
       0% {
-        transform: scale(0.5);
+        transform: scale(0);
         opacity: 0;
       }
-      50% {
-        transform: scale(1.2);
+      40% {
+        transform: scale(1.15);
         opacity: 1;
+      }
+      70% {
+        transform: scale(0.95);
       }
       100% {
         transform: scale(1);
@@ -143,14 +194,18 @@ export class ScWelcome extends LitElement {
       }
     }
     .celebration h3 {
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
+      font-size: var(--sc-text-xl, 1.25rem);
+      font-weight: var(--sc-weight-bold, 700);
+      letter-spacing: -0.02em;
       margin: 0 0 var(--sc-space-xs);
     }
     .celebration p {
       font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
       margin: 0;
+      max-width: 32ch;
+      margin-inline: auto;
+      line-height: var(--sc-leading-relaxed);
     }
   `;
 
@@ -237,12 +292,19 @@ export class ScWelcome extends LitElement {
           <h2>Welcome to SeaClaw</h2>
           <p>Let's get you set up. ${done}/${total} steps complete.</p>
         </div>
-        <div class="steps sc-stagger">
+        <div class="steps">
           ${this.steps.map(
             (step) => html`
-              <sc-card hoverable class="step-card" @click=${() => this._navigate(step.action)}>
-                <div class="step-icon ${step.done ? "done" : ""}">
-                  ${step.done ? icons.check : icons[step.icon]}
+              <sc-card
+                hoverable
+                glass
+                class="step-card"
+                @click=${() => this._navigate(step.action)}
+              >
+                <div class="step-icon-wrap ${step.done ? "done" : ""}">
+                  <div class="step-icon ${step.done ? "done" : ""}">
+                    ${step.done ? icons.check : icons[step.icon]}
+                  </div>
                 </div>
                 <div class="step-title">${step.title}</div>
                 <div class="step-desc">${step.description}</div>

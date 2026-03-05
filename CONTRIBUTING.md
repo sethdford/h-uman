@@ -24,7 +24,7 @@ cmake --build . -j$(nproc)
 ./seaclaw_tests
 ```
 
-All 2,177+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
+All 2,454+ tests must pass. AddressSanitizer must report zero errors — every allocation must be freed.
 
 **Release build:**
 

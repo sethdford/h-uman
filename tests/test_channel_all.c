@@ -601,7 +601,24 @@ static void test_email_last_message_in_test_mode(void) {
     ch.vtable->send(ch.ctx, "user@ex.com", 11, "test body", 9, NULL, 0);
     const char *last = sc_email_test_last_message(&ch);
     SC_ASSERT_NOT_NULL(last);
-    SC_ASSERT_STR_EQ(last, "test body");
+    SC_ASSERT_TRUE(strstr(last, "test body") != NULL);
+    SC_ASSERT_TRUE(strstr(last, "Content-Type") != NULL);
+    sc_email_destroy(&ch);
+}
+
+static void test_email_poll_returns_mock_emails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_email_create(&alloc, "smtp.example.com", 16, 587, "bot@example.com", 15, &ch);
+    sc_error_t err = sc_email_test_inject_mock_email(&ch, "sender@ex.com", 13, "mock subject\n\nmock body", 23);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_email_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1u);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "sender@ex.com");
+    SC_ASSERT_STR_EQ(msgs[0].content, "mock subject\n\nmock body");
     sc_email_destroy(&ch);
 }
 #endif
@@ -1551,6 +1568,7 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_email_is_configured);
 #if SC_IS_TEST
     SC_RUN_TEST(test_email_last_message_in_test_mode);
+    SC_RUN_TEST(test_email_poll_returns_mock_emails);
 #endif
     SC_RUN_TEST(test_email_set_auth);
     SC_RUN_TEST(test_email_set_imap);

@@ -10,14 +10,14 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
     </a>
     <div class="flex items-center gap-8">
       <div class="hidden md:flex items-center gap-6">
-        <a href="#use-cases" class="text-[13px] transition-colors" style="color: var(--sc-web-text-secondary)" onmouseover="this.style.color='var(--sc-web-text)'" onmouseout="this.style.color='var(--sc-web-text-secondary)'" onfocus="this.style.color='var(--sc-web-text)'" onblur="this.style.color='var(--sc-web-text-secondary)'">Use Cases</a>
-        <a href="#architecture" class="text-[13px] transition-colors" style="color: var(--sc-web-text-secondary)" onmouseover="this.style.color='var(--sc-web-text)'" onmouseout="this.style.color='var(--sc-web-text-secondary)'" onfocus="this.style.color='var(--sc-web-text)'" onblur="this.style.color='var(--sc-web-text-secondary)'">Architecture</a>
-        <a href={`${base}getting-started/installation/`} class="text-[13px] transition-colors" style="color: var(--sc-web-text-secondary)" onmouseover="this.style.color='var(--sc-web-text)'" onmouseout="this.style.color='var(--sc-web-text-secondary)'" onfocus="this.style.color='var(--sc-web-text)'" onblur="this.style.color='var(--sc-web-text-secondary)'">Docs</a>
+        <a href="#use-cases" class="nav-link text-[13px] transition-colors">Use Cases</a>
+        <a href="#architecture" class="nav-link text-[13px] transition-colors">Architecture</a>
+        <a href={`${base}getting-started/installation/`} class="nav-link text-[13px] transition-colors">Docs</a>
       </div>
-      <a href="https://github.com/sethdford/seaclaw" target="_blank" rel="noopener noreferrer" class="transition-colors" style="color: var(--sc-web-text-secondary)" onmouseover="this.style.color='var(--sc-web-text)'" onmouseout="this.style.color='var(--sc-web-text-secondary)'" aria-label="GitHub">
+      <a href="https://github.com/sethdford/seaclaw" target="_blank" rel="noopener noreferrer" class="nav-link transition-colors" aria-label="GitHub">
         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 256 256"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.42-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.55a43.81,43.81,0,0,1,.79-23.87,43.83,43.83,0,0,1,32.32,20.06A8,8,0,0,0,119.82,72h32.35a8,8,0,0,0,6.74-3.69,43.83,43.83,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,72.05a8,8,0,0,0,1.14,7.7A41.74,41.74,0,0,1,200,104Z"/></svg>
       </a>
-      <button id="mobile-menu-btn" class="md:hidden flex items-center justify-center w-8 h-8" style="color: var(--sc-web-text-secondary)" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+      <button id="mobile-menu-btn" class="md:hidden flex items-center justify-center w-8 h-8 nav-link" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
         <svg class="hamburger-icon w-5 h-5" fill="currentColor" viewBox="0 0 256 256"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"/></svg>
         <svg class="close-icon w-5 h-5 hidden" fill="currentColor" viewBox="0 0 256 256"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>
       </button>
@@ -31,6 +31,16 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
     </div>
   </div>
 </nav>
+
+<style>
+  .nav-link {
+    color: var(--sc-web-text-secondary);
+  }
+  .nav-link:hover,
+  .nav-link:focus-visible {
+    color: var(--sc-web-text);
+  }
+</style>
 
 <script>
   const btn = document.getElementById("mobile-menu-btn");

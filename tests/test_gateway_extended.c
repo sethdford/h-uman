@@ -871,7 +871,7 @@ static void test_openai_compat_chat_valid_returns_mock(void) {
     char *resp = NULL;
     size_t resp_len = 0;
     sc_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
-                                             &resp_len);
+                                             &resp_len, NULL);
     SC_ASSERT_EQ(status, 200);
     SC_ASSERT_NOT_NULL(resp);
     SC_ASSERT_TRUE(strstr(resp, "\"object\":\"chat.completion\"") != NULL);
@@ -894,13 +894,13 @@ static void test_openai_compat_chat_invalid_json_400(void) {
     char *resp = NULL;
     size_t resp_len = 0;
     sc_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
-                                             &resp_len);
+                                             &resp_len, NULL);
     SC_ASSERT_EQ(status, 400);
     if (resp)
         alloc.free(alloc.ctx, resp, resp_len + 1);
 }
 
-static void test_openai_compat_chat_streaming_400(void) {
+static void test_openai_compat_chat_stream_returns_sse(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_config_t cfg = {0};
     cfg.default_provider = "openai";
@@ -910,12 +910,27 @@ static void test_openai_compat_chat_streaming_400(void) {
     const char *body =
         "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],"
         "\"stream\":true}";
-    int status = 200;
+    int status = 500;
     char *resp = NULL;
     size_t resp_len = 0;
+    const char *content_type = NULL;
     sc_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
-                                             &resp_len);
-    SC_ASSERT_EQ(status, 400);
+                                             &resp_len, &content_type);
+    SC_ASSERT_EQ(status, 200);
+    SC_ASSERT_NOT_NULL(resp);
+    SC_ASSERT_TRUE(strstr(resp, "data: ") != NULL);
+    /* Verify stream ends with data: [DONE] */
+    int has_done = (resp_len >= 14 && memcmp(resp + resp_len - 14, "data: [DONE]\n\n", 14) == 0);
+    if (!has_done && resp_len >= 4) {
+        for (size_t i = 0; i + 4 <= resp_len; i++)
+            if (memcmp(resp + i, "DONE", 4) == 0) {
+                has_done = 1;
+                break;
+            }
+    }
+    SC_ASSERT_TRUE(has_done);
+    SC_ASSERT_TRUE(strstr(resp, "chat.completion.chunk") != NULL);
+    SC_ASSERT_TRUE(content_type != NULL && strcmp(content_type, "text/event-stream") == 0);
     if (resp)
         alloc.free(alloc.ctx, resp, resp_len + 1);
 }
@@ -932,8 +947,31 @@ static void test_openai_compat_chat_empty_messages_400(void) {
     char *resp = NULL;
     size_t resp_len = 0;
     sc_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
-                                             &resp_len);
+                                             &resp_len, NULL);
     SC_ASSERT_EQ(status, 400);
+    if (resp)
+        alloc.free(alloc.ctx, resp, resp_len + 1);
+}
+
+static void test_openai_compat_chat_stream_has_delta_content(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_config_t cfg = {0};
+    cfg.default_provider = "openai";
+    cfg.default_model = "gpt-4o";
+    sc_app_context_t app = {.config = &cfg};
+
+    const char *body =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],"
+        "\"stream\":true}";
+    int status = 500;
+    char *resp = NULL;
+    size_t resp_len = 0;
+    sc_openai_compat_handle_chat_completions(body, strlen(body), &alloc, &app, &status, &resp,
+                                             &resp_len, NULL);
+    SC_ASSERT_EQ(status, 200);
+    SC_ASSERT_NOT_NULL(resp);
+    SC_ASSERT_TRUE(strstr(resp, "\"delta\"") != NULL);
+    SC_ASSERT_TRUE(strstr(resp, "\"content\":") != NULL);
     if (resp)
         alloc.free(alloc.ctx, resp, resp_len + 1);
 }
@@ -1067,7 +1105,8 @@ void run_gateway_extended_tests(void) {
     SC_TEST_SUITE("OpenAI Compat");
     SC_RUN_TEST(test_openai_compat_chat_valid_returns_mock);
     SC_RUN_TEST(test_openai_compat_chat_invalid_json_400);
-    SC_RUN_TEST(test_openai_compat_chat_streaming_400);
+    SC_RUN_TEST(test_openai_compat_chat_stream_returns_sse);
+    SC_RUN_TEST(test_openai_compat_chat_stream_has_delta_content);
     SC_RUN_TEST(test_openai_compat_chat_empty_messages_400);
     SC_RUN_TEST(test_openai_compat_models_returns_list);
     SC_RUN_TEST(test_openai_compat_models_null_config_503);

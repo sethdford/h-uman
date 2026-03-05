@@ -1,0 +1,42 @@
+---
+import "../styles/global.css";
+const rawBase = import.meta.env.BASE_URL;
+const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
+---
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>404 — Page Not Found | SeaClaw</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+  </head>
+  <body style="background: var(--sc-web-bg); color: var(--sc-web-text);" class="antialiased">
+    <div class="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+      <img
+        src={`${base}seaclaw.svg`}
+        alt="SeaClaw logo"
+        width="80"
+        height="80"
+        class="w-16 h-16 mb-8 opacity-40"
+      />
+      <h1 class="font-sans font-black text-[clamp(4rem,12vw,8rem)] leading-none mb-4" style="color: var(--sc-web-text); letter-spacing: -0.05em; opacity: 0.12;">
+        404
+      </h1>
+      <p class="text-xl font-medium mb-2" style="color: var(--sc-web-text)">
+        Page not found
+      </p>
+      <p class="text-base mb-10 max-w-md" style="color: var(--sc-web-text-secondary)">
+        The page you're looking for doesn't exist or has been moved.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4">
+        <a href={`${base}`} class="inline-flex items-center justify-center px-6 py-3 rounded-full text-[15px] font-semibold transition-all" style="background: var(--sc-accent); color: var(--sc-on-accent, #fff);">
+          Back to Home
+        </a>
+        <a href={`${base}getting-started/installation/`} class="inline-flex items-center justify-center px-6 py-3 rounded-full text-[15px] font-medium transition-all" style="color: var(--sc-web-text-secondary); border: 1px solid var(--sc-web-border-strong);">
+          Read the Docs
+        </a>
+      </div>
+    </div>
+  </body>
+</html>

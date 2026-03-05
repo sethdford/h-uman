@@ -87,7 +87,7 @@ cmake --build build
 
 | Option                   | Default | Description                                          |
 | ------------------------ | ------- | ---------------------------------------------------- |
-| `SC_ENABLE_ALL_CHANNELS` | OFF     | Build all 27 channels (CLI, Telegram, Discord, etc.) |
+| `SC_ENABLE_ALL_CHANNELS` | OFF     | Build all 26 channels (CLI, Telegram, Discord, etc.) |
 | `SC_ENABLE_LTO`          | OFF     | Link-time optimization for smaller binaries          |
 | `SC_ENABLE_ASAN`         | OFF     | AddressSanitizer for memory debugging                |
 | `SC_ENABLE_SQLITE`       | ON      | SQLite memory backend                                |
@@ -139,4 +139,4 @@ If config is missing, run the onboard wizard first (see [Quick Start](/getting-s
 ./build/seaclaw_tests
 ```
 
-All 2,366+ tests must pass with zero ASan errors.
+All 2,454 tests must pass with zero ASan errors.

@@ -150,12 +150,18 @@ export class ScModal extends LitElement {
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (e.shiftKey) {
-        if (document.activeElement === first || this.renderRoot.activeElement === first) {
+        if (
+          document.activeElement === first ||
+          (this.renderRoot as ShadowRoot).activeElement === first
+        ) {
           e.preventDefault();
           last.focus();
         }
       } else {
-        if (document.activeElement === last || this.renderRoot.activeElement === last) {
+        if (
+          document.activeElement === last ||
+          (this.renderRoot as ShadowRoot).activeElement === last
+        ) {
           e.preventDefault();
           first.focus();
         }

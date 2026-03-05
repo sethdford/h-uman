@@ -30,6 +30,10 @@ sc_error_t sc_email_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_lo
 
 #if SC_IS_TEST
 const char *sc_email_test_last_message(sc_channel_t *ch);
+
+/** Test hook: inject mock email for poll to return. */
+sc_error_t sc_email_test_inject_mock_email(sc_channel_t *ch, const char *from, size_t from_len,
+                                           const char *subject_or_body, size_t body_len);
 #endif
 
 #endif /* SC_CHANNELS_EMAIL_H */

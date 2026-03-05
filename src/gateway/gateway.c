@@ -372,10 +372,11 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         int status = 500;
         char *resp_body = NULL;
         size_t resp_len = 0;
+        const char *content_type = "application/json";
         sc_openai_compat_handle_chat_completions(body, body_len, gw->alloc,
                                                   gw->config.app_ctx, &status, &resp_body,
-                                                  &resp_len);
-        send_response(fd, status, "application/json", resp_body ? resp_body : "{}",
+                                                  &resp_len, &content_type);
+        send_response(fd, status, content_type, resp_body ? resp_body : "{}",
                      resp_body ? resp_len : 2, 0);
         if (resp_body && gw->alloc)
             gw->alloc->free(gw->alloc->ctx, resp_body, resp_len + 1);

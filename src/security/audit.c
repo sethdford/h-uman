@@ -103,6 +103,17 @@ void sc_audit_event_init(sc_audit_event_t *ev, sc_audit_event_type_t type) {
     ev->security.policy_violation = false;
     ev->security.rate_limit_remaining = 0;
     ev->security.sandbox_backend = NULL;
+    ev->identity.agent_id = 0;
+    ev->identity.model_version = NULL;
+    ev->identity.auth_token_hash = NULL;
+    ev->input.trigger_type = NULL;
+    ev->input.trigger_source = NULL;
+    ev->input.prompt_hash = NULL;
+    ev->input.prompt_length = 0;
+    ev->reasoning.decision = NULL;
+    ev->reasoning.rule_name = NULL;
+    ev->reasoning.confidence = -1.0f;
+    ev->reasoning.context_tokens = 0;
 }
 
 void sc_audit_event_with_actor(sc_audit_event_t *ev, const char *channel, const char *user_id,
@@ -140,6 +151,37 @@ void sc_audit_event_with_security(sc_audit_event_t *ev, const char *sandbox_back
     ev->security.sandbox_backend = sandbox_backend;
 }
 
+void sc_audit_event_with_identity(sc_audit_event_t *ev, uint64_t agent_id,
+                                  const char *model_version, const char *auth_token_hash) {
+    if (!ev)
+        return;
+    ev->identity.agent_id = agent_id;
+    ev->identity.model_version = model_version;
+    ev->identity.auth_token_hash = auth_token_hash;
+}
+
+void sc_audit_event_with_input(sc_audit_event_t *ev, const char *trigger_type,
+                               const char *trigger_source, const char *prompt_hash,
+                               size_t prompt_length) {
+    if (!ev)
+        return;
+    ev->input.trigger_type = trigger_type;
+    ev->input.trigger_source = trigger_source;
+    ev->input.prompt_hash = prompt_hash;
+    ev->input.prompt_length = prompt_length;
+}
+
+void sc_audit_event_with_reasoning(sc_audit_event_t *ev, const char *decision,
+                                   const char *rule_name, float confidence,
+                                   uint32_t context_tokens) {
+    if (!ev)
+        return;
+    ev->reasoning.decision = decision;
+    ev->reasoning.rule_name = rule_name;
+    ev->reasoning.confidence = confidence;
+    ev->reasoning.context_tokens = context_tokens;
+}
+
 size_t sc_audit_event_write_json(const sc_audit_event_t *ev, char *buf, size_t buf_size) {
     if (!ev || !buf || buf_size < 64)
         return 0;
@@ -150,6 +192,130 @@ size_t sc_audit_event_write_json(const sc_audit_event_t *ev, char *buf, size_t b
     if (n < 0 || (size_t)n >= buf_size)
         return 0;
     size_t pos = (size_t)n;
+
+    /* identity: agent_id, model_version, auth_token_hash */
+    if (ev->identity.agent_id > 0 || ev->identity.model_version || ev->identity.auth_token_hash) {
+        n = snprintf(buf + pos, buf_size - pos, ",\"identity\":{\"agent_id\":%lu",
+                     (unsigned long)ev->identity.agent_id);
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
+        if (ev->identity.model_version) {
+            char esc[128];
+            size_t elen = escape_json_string(ev->identity.model_version, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, ",\"model_version\":\"%s\"", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
+        }
+        if (ev->identity.auth_token_hash) {
+            char esc[32];
+            size_t elen = escape_json_string(ev->identity.auth_token_hash, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, ",\"auth_token_hash\":\"%s\"", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
+        }
+        n = snprintf(buf + pos, buf_size - pos, "}");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
+    }
+
+    /* input: trigger_type, trigger_source, prompt_hash, prompt_length */
+    if (ev->input.trigger_type || ev->input.trigger_source || ev->input.prompt_hash ||
+        ev->input.prompt_length > 0) {
+        n = snprintf(buf + pos, buf_size - pos, ",\"input\":{");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
+        bool need_comma = false;
+        if (ev->input.trigger_type) {
+            char esc[64];
+            size_t elen = escape_json_string(ev->input.trigger_type, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, "\"trigger_type\":\"%s\"", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
+        }
+        if (ev->input.trigger_source) {
+            char esc[64];
+            size_t elen = escape_json_string(ev->input.trigger_source, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, "%s\"trigger_source\":\"%s\"",
+                         need_comma ? "," : "", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
+        }
+        if (ev->input.prompt_hash) {
+            char esc[80];
+            size_t elen = escape_json_string(ev->input.prompt_hash, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, "%s\"prompt_hash\":\"%s\"",
+                         need_comma ? "," : "", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
+        }
+        if (ev->input.prompt_length > 0) {
+            n = snprintf(buf + pos, buf_size - pos, "%s\"prompt_length\":%zu",
+                         need_comma ? "," : "", ev->input.prompt_length);
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
+        }
+        n = snprintf(buf + pos, buf_size - pos, "}");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
+    }
+
+    /* reasoning: decision, rule_name, confidence, context_tokens */
+    if (ev->reasoning.decision || ev->reasoning.rule_name || ev->reasoning.confidence >= 0.0f ||
+        ev->reasoning.context_tokens > 0) {
+        n = snprintf(buf + pos, buf_size - pos, ",\"reasoning\":{");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
+        bool need_comma = false;
+        if (ev->reasoning.decision) {
+            char esc[64];
+            size_t elen = escape_json_string(ev->reasoning.decision, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, "\"decision\":\"%s\"", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
+        }
+        if (ev->reasoning.rule_name) {
+            char esc[64];
+            size_t elen = escape_json_string(ev->reasoning.rule_name, esc, sizeof(esc));
+            esc[elen] = '\0';
+            n = snprintf(buf + pos, buf_size - pos, "%s\"rule_name\":\"%s\"",
+                         need_comma ? "," : "", esc);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
+        }
+        if (ev->reasoning.confidence >= 0.0f) {
+            n = snprintf(buf + pos, buf_size - pos, "%s\"confidence\":%.2f",
+                         need_comma ? "," : "", (double)ev->reasoning.confidence);
+            if (n >= 0 && (size_t)n < buf_size - pos) {
+                pos += (size_t)n;
+                need_comma = true;
+            }
+        }
+        if (ev->reasoning.context_tokens > 0) {
+            n = snprintf(buf + pos, buf_size - pos, "%s\"context_tokens\":%u",
+                         need_comma ? "," : "", ev->reasoning.context_tokens);
+            if (n >= 0 && (size_t)n < buf_size - pos)
+                pos += (size_t)n;
+        }
+        n = snprintf(buf + pos, buf_size - pos, "}");
+        if (n >= 0 && (size_t)n < buf_size - pos)
+            pos += (size_t)n;
+    }
 
     if (ev->actor.channel) {
         char esc[256];

@@ -6,11 +6,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#define SC_NOSTR_MAX_MSG       65536
-#define SC_NOSTR_SESSION_MAX   127
-#define SC_NOSTR_CONTENT_MAX   4095
-#define SC_NOSTR_MAX_TARGET    128
-#define SC_NOSTR_LAST_MSG_SIZE 4096
+#define SC_NOSTR_MAX_MSG          65536
+#define SC_NOSTR_SESSION_MAX      127
+#define SC_NOSTR_CONTENT_MAX      4095
+#define SC_NOSTR_MAX_TARGET       128
+#define SC_NOSTR_LAST_MSG_SIZE    4096
+#define SC_NOSTR_MOCK_EVENTS_MAX  8
+
+typedef struct sc_nostr_mock_event {
+    char session_key[SC_NOSTR_SESSION_MAX + 1];
+    char content[SC_NOSTR_CONTENT_MAX + 1];
+} sc_nostr_mock_event_t;
 
 typedef struct sc_nostr_ctx {
     sc_allocator_t *alloc;
@@ -22,6 +28,8 @@ typedef struct sc_nostr_ctx {
 #if SC_IS_TEST
     char last_message[SC_NOSTR_LAST_MSG_SIZE];
     size_t last_message_len;
+    size_t mock_event_count;
+    sc_nostr_mock_event_t mock_events[SC_NOSTR_MOCK_EVENTS_MAX];
 #endif
 } sc_nostr_ctx_t;
 
@@ -52,16 +60,23 @@ static sc_error_t nostr_send(void *ctx, const char *target, size_t target_len, c
     (void)media;
     (void)media_count;
 #if SC_IS_TEST
-    (void)target;
-    (void)target_len;
     sc_nostr_ctx_t *c = (sc_nostr_ctx_t *)ctx;
     if (c && message && message_len > 0) {
-        size_t copy = message_len;
-        if (copy >= SC_NOSTR_LAST_MSG_SIZE)
-            copy = SC_NOSTR_LAST_MSG_SIZE - 1;
-        memcpy(c->last_message, message, copy);
-        c->last_message[copy] = '\0';
-        c->last_message_len = copy;
+        /* Format as Nostr event JSON (kind 4 for DM). Store in buffer for test verification. */
+        size_t tlen = (target && target_len > 0) ? (target_len > SC_NOSTR_MAX_TARGET ? SC_NOSTR_MAX_TARGET : target_len) : 0;
+        int n = snprintf(c->last_message, SC_NOSTR_LAST_MSG_SIZE,
+                         "{\"kind\":4,\"content\":\"%.*s\",\"tags\":[[\"p\",\"%.*s\"]]}",
+                         (int)message_len, message, (int)tlen, (target && tlen > 0) ? target : "");
+        if (n > 0 && (size_t)n < SC_NOSTR_LAST_MSG_SIZE) {
+            c->last_message_len = (size_t)n;
+        } else {
+            size_t copy = message_len;
+            if (copy >= SC_NOSTR_LAST_MSG_SIZE)
+                copy = SC_NOSTR_LAST_MSG_SIZE - 1;
+            memcpy(c->last_message, message, copy);
+            c->last_message[copy] = '\0';
+            c->last_message_len = copy;
+        }
     }
     return SC_OK;
 #else
@@ -152,7 +167,19 @@ sc_error_t sc_nostr_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_lo
     *out_count = 0;
 #if SC_IS_TEST
     (void)alloc;
-    (void)max_msgs;
+    for (size_t i = 0; i < ctx->mock_event_count && i < max_msgs; i++) {
+        size_t sk = strlen(ctx->mock_events[i].session_key);
+        if (sk > SC_NOSTR_SESSION_MAX)
+            sk = SC_NOSTR_SESSION_MAX;
+        memcpy(msgs[i].session_key, ctx->mock_events[i].session_key, sk);
+        msgs[i].session_key[sk] = '\0';
+        size_t ct = strlen(ctx->mock_events[i].content);
+        if (ct > SC_NOSTR_CONTENT_MAX)
+            ct = SC_NOSTR_CONTENT_MAX;
+        memcpy(msgs[i].content, ctx->mock_events[i].content, ct);
+        msgs[i].content[ct] = '\0';
+    }
+    *out_count = ctx->mock_event_count > max_msgs ? max_msgs : ctx->mock_event_count;
     return SC_OK;
 #else
 #ifdef SC_GATEWAY_POSIX
@@ -330,5 +357,25 @@ const char *sc_nostr_test_last_message(sc_channel_t *ch) {
         return NULL;
     sc_nostr_ctx_t *c = (sc_nostr_ctx_t *)ch->ctx;
     return c->last_message_len > 0 ? c->last_message : NULL;
+}
+
+sc_error_t sc_nostr_test_inject_mock_event(sc_channel_t *ch, const char *session_key,
+                                          size_t session_key_len, const char *content,
+                                          size_t content_len) {
+    if (!ch || !ch->ctx)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_nostr_ctx_t *c = (sc_nostr_ctx_t *)ch->ctx;
+    if (c->mock_event_count >= SC_NOSTR_MOCK_EVENTS_MAX)
+        return SC_ERR_OUT_OF_MEMORY;
+    size_t i = c->mock_event_count++;
+    size_t sk = session_key_len > SC_NOSTR_SESSION_MAX ? SC_NOSTR_SESSION_MAX : session_key_len;
+    size_t ct = content_len > SC_NOSTR_CONTENT_MAX ? SC_NOSTR_CONTENT_MAX : content_len;
+    if (session_key && sk > 0)
+        memcpy(c->mock_events[i].session_key, session_key, sk);
+    c->mock_events[i].session_key[sk] = '\0';
+    if (content && ct > 0)
+        memcpy(c->mock_events[i].content, content, ct);
+    c->mock_events[i].content[ct] = '\0';
+    return SC_OK;
 }
 #endif

@@ -115,6 +115,24 @@ export class ScApp extends LitElement {
       view-transition-name: main-content;
       content-visibility: auto;
       contain-intrinsic-size: auto 100vh;
+      position: relative;
+    }
+
+    /* Ambient glow — very faint accent at top-left, gives depth to the canvas */
+    main::before {
+      content: "";
+      position: fixed;
+      top: -20%;
+      left: -10%;
+      width: 50%;
+      height: 50%;
+      background: radial-gradient(
+        ellipse at center,
+        color-mix(in srgb, var(--sc-accent) 4%, transparent),
+        transparent 70%
+      );
+      pointer-events: none;
+      z-index: 0;
     }
 
     .view-enter {
@@ -143,7 +161,7 @@ export class ScApp extends LitElement {
       gap: var(--sc-space-sm);
       padding: var(--sc-space-xs) var(--sc-space-md);
       background: var(--sc-error);
-      color: #fff;
+      color: var(--sc-on-accent, #fff);
       font-size: var(--sc-text-sm);
       font-weight: 500;
       animation: sc-slide-down var(--sc-duration-normal) var(--sc-ease-out);
@@ -157,9 +175,9 @@ export class ScApp extends LitElement {
       }
     }
     .disconnect-banner button {
-      background: rgba(255, 255, 255, 0.2);
-      border: 1px solid rgba(255, 255, 255, 0.4);
-      color: #fff;
+      background: color-mix(in srgb, var(--sc-on-accent, #fff) 20%, transparent);
+      border: 1px solid color-mix(in srgb, var(--sc-on-accent, #fff) 40%, transparent);
+      color: var(--sc-on-accent, #fff);
       padding: var(--sc-space-2xs) var(--sc-space-sm);
       border-radius: var(--sc-radius-sm);
       font-size: var(--sc-text-xs);
@@ -168,7 +186,7 @@ export class ScApp extends LitElement {
       transition: background var(--sc-duration-fast);
     }
     .disconnect-banner button:hover {
-      background: rgba(255, 255, 255, 0.35);
+      background: color-mix(in srgb, var(--sc-on-accent, #fff) 35%, transparent);
     }
 
     .mobile-nav {

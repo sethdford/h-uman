@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-05T09:24:40.979Z",
+  "generated": "2026-03-05T11:49:11.187Z",
   "groups": {
     "color.neutral": [
       {
@@ -9,83 +9,83 @@
       },
       {
         "name": "50",
-        "value": "#071018",
-        "hex": "#071018"
+        "value": "#09090b",
+        "hex": "#09090b"
       },
       {
         "name": "100",
-        "value": "#0b1a2a",
-        "hex": "#0b1a2a"
+        "value": "#0f1012",
+        "hex": "#0f1012"
       },
       {
         "name": "150",
-        "value": "#0f2236",
-        "hex": "#0f2236"
+        "value": "#141518",
+        "hex": "#141518"
       },
       {
         "name": "200",
-        "value": "#152d45",
-        "hex": "#152d45"
+        "value": "#1a1b1f",
+        "hex": "#1a1b1f"
       },
       {
         "name": "250",
-        "value": "#1b3754",
-        "hex": "#1b3754"
+        "value": "#202125",
+        "hex": "#202125"
       },
       {
         "name": "300",
-        "value": "#1e3a5c",
-        "hex": "#1e3a5c"
+        "value": "#27282d",
+        "hex": "#27282d"
       },
       {
         "name": "400",
-        "value": "#4a6a8a",
-        "hex": "#4a6a8a"
+        "value": "#3f4046",
+        "hex": "#3f4046"
       },
       {
         "name": "500",
-        "value": "#7a9ab8",
-        "hex": "#7a9ab8"
+        "value": "#6b6d76",
+        "hex": "#6b6d76"
       },
       {
         "name": "600",
-        "value": "#94adc4",
-        "hex": "#94adc4"
+        "value": "#8e919a",
+        "hex": "#8e919a"
       },
       {
         "name": "700",
-        "value": "#d4dfe9",
-        "hex": "#d4dfe9"
+        "value": "#d1d3d9",
+        "hex": "#d1d3d9"
       },
       {
         "name": "750",
-        "value": "#e4ecf4",
-        "hex": "#e4ecf4"
+        "value": "#e4e5eb",
+        "hex": "#e4e5eb"
       },
       {
         "name": "800",
-        "value": "#eaf0f6",
-        "hex": "#eaf0f6"
+        "value": "#ececf0",
+        "hex": "#ececf0"
       },
       {
         "name": "825",
-        "value": "#eef3f8",
-        "hex": "#eef3f8"
+        "value": "#f0f0f4",
+        "hex": "#f0f0f4"
       },
       {
         "name": "850",
-        "value": "#f0f4f8",
-        "hex": "#f0f4f8"
+        "value": "#f4f4f7",
+        "hex": "#f4f4f7"
       },
       {
         "name": "900",
-        "value": "#f6f9fc",
-        "hex": "#f6f9fc"
+        "value": "#f8f8fa",
+        "hex": "#f8f8fa"
       },
       {
         "name": "925",
-        "value": "#f8fafc",
-        "hex": "#f8fafc"
+        "value": "#fafafb",
+        "hex": "#fafafb"
       },
       {
         "name": "1000",
@@ -1427,43 +1427,43 @@
     "dark": [
       {
         "name": "bg",
-        "value": "#071018",
-        "hex": "#071018"
+        "value": "#09090b",
+        "hex": "#09090b"
       },
       {
         "name": "bg-inset",
-        "value": "#0b1a2a",
-        "hex": "#0b1a2a"
+        "value": "#0f1012",
+        "hex": "#0f1012"
       },
       {
         "name": "bg-surface",
-        "value": "#0f2236",
-        "hex": "#0f2236"
+        "value": "#141518",
+        "hex": "#141518"
       },
       {
         "name": "bg-elevated",
-        "value": "#152d45",
-        "hex": "#152d45"
+        "value": "#1a1b1f",
+        "hex": "#1a1b1f"
       },
       {
         "name": "bg-overlay",
-        "value": "#1b3754",
-        "hex": "#1b3754"
+        "value": "#202125",
+        "hex": "#202125"
       },
       {
         "name": "text",
-        "value": "#e4ecf4",
-        "hex": "#e4ecf4"
+        "value": "#e4e5eb",
+        "hex": "#e4e5eb"
       },
       {
         "name": "text-muted",
-        "value": "#7a9ab8",
-        "hex": "#7a9ab8"
+        "value": "#6b6d76",
+        "hex": "#6b6d76"
       },
       {
         "name": "text-faint",
-        "value": "#4a6a8a",
-        "hex": "#4a6a8a"
+        "value": "#3f4046",
+        "hex": "#3f4046"
       },
       {
         "name": "accent",
@@ -1491,8 +1491,8 @@
       },
       {
         "name": "on-accent",
-        "value": "#071018",
-        "hex": "#071018"
+        "value": "#ffffff",
+        "hex": "#ffffff"
       },
       {
         "name": "accent-secondary",
@@ -1520,8 +1520,8 @@
       },
       {
         "name": "on-accent-secondary",
-        "value": "#071018",
-        "hex": "#071018"
+        "value": "#09090b",
+        "hex": "#09090b"
       },
       {
         "name": "accent-tertiary",
@@ -1554,13 +1554,13 @@
       },
       {
         "name": "border",
-        "value": "#1e3a5c",
-        "hex": "#1e3a5c"
+        "value": "#27282d",
+        "hex": "#27282d"
       },
       {
         "name": "border-subtle",
-        "value": "#152d45",
-        "hex": "#152d45"
+        "value": "#1a1b1f",
+        "hex": "#1a1b1f"
       },
       {
         "name": "success",
@@ -1685,27 +1685,27 @@
       },
       {
         "name": "surface-glow",
-        "value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.1) 0%, transparent 70%)"
+        "value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.04) 0%, transparent 70%)"
       },
       {
         "name": "button-gradient-primary",
-        "value": "linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(0,0,0,0.2) 100%)"
+        "value": "linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.15) 100%)"
       },
       {
         "name": "hero-gradient",
-        "value": "linear-gradient(135deg, rgba(20,184,166,0.14) 0%, rgba(16,185,129,0.08) 50%, transparent 100%)"
+        "value": "linear-gradient(135deg, rgba(20,184,166,0.06) 0%, rgba(16,185,129,0.03) 50%, transparent 100%)"
       }
     ],
     "light": [
       {
         "name": "bg",
-        "value": "#f6f9fc",
-        "hex": "#f6f9fc"
+        "value": "#f8f8fa",
+        "hex": "#f8f8fa"
       },
       {
         "name": "bg-inset",
-        "value": "#eaf0f6",
-        "hex": "#eaf0f6"
+        "value": "#ececf0",
+        "hex": "#ececf0"
       },
       {
         "name": "bg-surface",
@@ -1714,13 +1714,13 @@
       },
       {
         "name": "bg-warm",
-        "value": "#fafcfe",
-        "hex": "#fafcfe"
+        "value": "#fafafb",
+        "hex": "#fafafb"
       },
       {
         "name": "bg-elevated",
-        "value": "#f0f4f8",
-        "hex": "#f0f4f8"
+        "value": "#f4f4f7",
+        "hex": "#f4f4f7"
       },
       {
         "name": "bg-overlay",
@@ -1729,18 +1729,18 @@
       },
       {
         "name": "text",
-        "value": "#0b1a2a",
-        "hex": "#0b1a2a"
+        "value": "#0f1012",
+        "hex": "#0f1012"
       },
       {
         "name": "text-muted",
-        "value": "#4a6a8a",
-        "hex": "#4a6a8a"
+        "value": "#3f4046",
+        "hex": "#3f4046"
       },
       {
         "name": "text-faint",
-        "value": "#94adc4",
-        "hex": "#94adc4"
+        "value": "#8e919a",
+        "hex": "#8e919a"
       },
       {
         "name": "accent",
@@ -1836,13 +1836,13 @@
       },
       {
         "name": "border",
-        "value": "#d4dfe9",
-        "hex": "#d4dfe9"
+        "value": "#d1d3d9",
+        "hex": "#d1d3d9"
       },
       {
         "name": "border-subtle",
-        "value": "#f0f4f8",
-        "hex": "#f0f4f8"
+        "value": "#f4f4f7",
+        "hex": "#f4f4f7"
       },
       {
         "name": "success",
@@ -1963,11 +1963,11 @@
       },
       {
         "name": "surface-gradient",
-        "value": "linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(240,244,248,0.6) 100%)"
+        "value": "linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(244,244,247,0.6) 100%)"
       },
       {
         "name": "surface-glow",
-        "value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.08) 0%, transparent 70%)"
+        "value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.05) 0%, transparent 70%)"
       },
       {
         "name": "button-gradient-primary",
@@ -1975,7 +1975,7 @@
       },
       {
         "name": "hero-gradient",
-        "value": "linear-gradient(135deg, rgba(20,184,166,0.12) 0%, rgba(16,185,129,0.06) 50%, transparent 100%)"
+        "value": "linear-gradient(135deg, rgba(20,184,166,0.08) 0%, rgba(16,185,129,0.04) 50%, transparent 100%)"
       }
     ],
     "high-contrast": [
@@ -1991,18 +1991,18 @@
       },
       {
         "name": "bg-surface",
-        "value": "#0b1a2a",
-        "hex": "#0b1a2a"
+        "value": "#0f1012",
+        "hex": "#0f1012"
       },
       {
         "name": "bg-elevated",
-        "value": "#0f2236",
-        "hex": "#0f2236"
+        "value": "#141518",
+        "hex": "#141518"
       },
       {
         "name": "bg-overlay",
-        "value": "#152d45",
-        "hex": "#152d45"
+        "value": "#1a1b1f",
+        "hex": "#1a1b1f"
       },
       {
         "name": "text",
@@ -2011,13 +2011,13 @@
       },
       {
         "name": "text-muted",
-        "value": "#d4dfe9",
-        "hex": "#d4dfe9"
+        "value": "#d1d3d9",
+        "hex": "#d1d3d9"
       },
       {
         "name": "text-faint",
-        "value": "#94adc4",
-        "hex": "#94adc4"
+        "value": "#8e919a",
+        "hex": "#8e919a"
       },
       {
         "name": "accent",
@@ -2050,13 +2050,13 @@
       },
       {
         "name": "border",
-        "value": "#94adc4",
-        "hex": "#94adc4"
+        "value": "#8e919a",
+        "hex": "#8e919a"
       },
       {
         "name": "border-subtle",
-        "value": "#4a6a8a",
-        "hex": "#4a6a8a"
+        "value": "#3f4046",
+        "hex": "#3f4046"
       },
       {
         "name": "success",

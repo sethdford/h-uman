@@ -64,7 +64,7 @@ export class ScSidebar extends LitElement {
       background: color-mix(in srgb, var(--sc-bg-surface) 82%, transparent);
       backdrop-filter: blur(20px) saturate(180%);
       -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border-right: 1px solid rgba(255, 255, 255, 0.06);
+      border-right: 1px solid color-mix(in srgb, var(--sc-border-subtle, #27282d) 50%, transparent);
       transition: width var(--sc-duration-normal) var(--sc-ease-out);
       overflow: hidden;
     }
@@ -254,6 +254,44 @@ export class ScSidebar extends LitElement {
       background: var(--sc-text-muted);
     }
 
+    .theme-toggle {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      width: 100%;
+      padding: var(--sc-space-sm);
+      background: transparent;
+      border: none;
+      border-radius: var(--sc-radius-sm);
+      color: var(--sc-text-muted);
+      cursor: pointer;
+      font-size: var(--sc-text-xs);
+      font-family: var(--sc-font);
+      transition:
+        background var(--sc-duration-fast),
+        color var(--sc-duration-fast);
+    }
+
+    .theme-toggle:hover {
+      background: var(--sc-bg-elevated);
+      color: var(--sc-text);
+    }
+
+    .theme-toggle .icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+
+    .theme-toggle .icon svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    :host([collapsed]) .theme-toggle .label {
+      display: none;
+    }
+
     .collapse-btn {
       display: flex;
       align-items: center;
@@ -306,6 +344,13 @@ export class ScSidebar extends LitElement {
   @property({ type: String }) activeTab = "overview";
   @property({ type: Boolean, reflect: true }) collapsed = false;
   @property({ type: String }) connectionStatus: ConnectionStatus = "disconnected";
+  @property({ type: String }) theme: "system" | "dark" | "light" = (() => {
+    try {
+      return (localStorage.getItem("sc-theme") as "system" | "dark" | "light") || "system";
+    } catch {
+      return "system";
+    }
+  })();
 
   override render() {
     return html`
@@ -373,6 +418,15 @@ export class ScSidebar extends LitElement {
             <span class="status-label">${this.connectionStatus}</span>
           </div>
           <button
+            class="theme-toggle"
+            aria-label="Toggle theme"
+            title=${this.collapsed ? this._themeLabel() : undefined}
+            @click=${this._cycleTheme}
+          >
+            <span class="icon">${this._themeIcon()}</span>
+            <span class="label">${this._themeLabel()}</span>
+          </button>
+          <button
             class="collapse-btn"
             aria-label=${this.collapsed ? "Expand sidebar" : "Collapse sidebar"}
             @click=${this._dispatchToggleCollapse}
@@ -383,6 +437,54 @@ export class ScSidebar extends LitElement {
         </footer>
       </aside>
     `;
+  }
+
+  private _themeIcon() {
+    if (this.theme === "dark")
+      return html`<svg fill="currentColor" viewBox="0 0 256 256">
+        <path
+          d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.36A88,88,0,0,1,65.64,67.09,89,89,0,0,1,98,41.64a104.11,104.11,0,0,0,116.36,116.36A89,89,0,0,1,188.9,190.36Z"
+        />
+      </svg>`;
+    if (this.theme === "light")
+      return html`<svg fill="currentColor" viewBox="0 0 256 256">
+        <path
+          d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"
+        />
+      </svg>`;
+    return html`<svg fill="currentColor" viewBox="0 0 256 256">
+      <path
+        d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,0,1,0-176Z"
+      />
+    </svg>`;
+  }
+
+  private _themeLabel() {
+    if (this.theme === "dark") return "Dark";
+    if (this.theme === "light") return "Light";
+    return "System";
+  }
+
+  private _cycleTheme = () => {
+    const order: Array<"system" | "light" | "dark"> = ["system", "light", "dark"];
+    const idx = order.indexOf(this.theme);
+    this.theme = order[(idx + 1) % order.length];
+    localStorage.setItem("sc-theme", this.theme);
+    this._applyTheme();
+  };
+
+  private _applyTheme() {
+    const root = document.documentElement;
+    if (this.theme === "system") {
+      root.removeAttribute("data-theme");
+    } else {
+      root.setAttribute("data-theme", this.theme);
+    }
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this._applyTheme();
   }
 
   private _dispatchTabChange(tabId: string): void {

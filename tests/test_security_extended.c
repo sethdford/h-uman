@@ -297,6 +297,81 @@ static void test_audit_event_write_json_truncated(void) {
     SC_ASSERT(n <= 4);
 }
 
+static void test_audit_identity_fields_serialized_correctly(void) {
+    sc_audit_event_t ev;
+    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_identity(&ev, 42, "gpt-4o-2024-08-06", "a1b2c3d4");
+    char buf[1024];
+    size_t n = sc_audit_event_write_json(&ev, buf, sizeof(buf));
+    SC_ASSERT(n > 0);
+    SC_ASSERT(strstr(buf, "\"identity\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"agent_id\":42") != NULL);
+    SC_ASSERT(strstr(buf, "gpt-4o-2024-08-06") != NULL);
+    SC_ASSERT(strstr(buf, "a1b2c3d4") != NULL);
+}
+
+static void test_audit_input_fields_serialized_correctly(void) {
+    sc_audit_event_t ev;
+    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_input(&ev, "user_prompt", "telegram", "sha256abc", 150);
+    char buf[1024];
+    size_t n = sc_audit_event_write_json(&ev, buf, sizeof(buf));
+    SC_ASSERT(n > 0);
+    SC_ASSERT(strstr(buf, "\"input\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"trigger_type\":\"user_prompt\"") != NULL);
+    SC_ASSERT(strstr(buf, "\"trigger_source\":\"telegram\"") != NULL);
+    SC_ASSERT(strstr(buf, "\"prompt_hash\":\"sha256abc\"") != NULL);
+    SC_ASSERT(strstr(buf, "\"prompt_length\":150") != NULL);
+}
+
+static void test_audit_reasoning_fields_serialized_correctly(void) {
+    sc_audit_event_t ev;
+    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_reasoning(&ev, "policy_allow", "allow_shell", 0.95f, 4500);
+    char buf[1024];
+    size_t n = sc_audit_event_write_json(&ev, buf, sizeof(buf));
+    SC_ASSERT(n > 0);
+    SC_ASSERT(strstr(buf, "\"reasoning\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"decision\":\"policy_allow\"") != NULL);
+    SC_ASSERT(strstr(buf, "\"rule_name\":\"allow_shell\"") != NULL);
+    SC_ASSERT(strstr(buf, "\"context_tokens\":4500") != NULL);
+}
+
+static void test_audit_json_includes_all_five_layers(void) {
+    sc_audit_event_t ev;
+    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
+    sc_audit_event_with_identity(&ev, 1, "gpt-4o", NULL);
+    sc_audit_event_with_input(&ev, "user_prompt", NULL, NULL, 150);
+    sc_audit_event_with_reasoning(&ev, "policy_allow", NULL, -1.0f, 4500);
+    sc_audit_event_with_action(&ev, "shell", "tool", true, true);
+    sc_audit_event_with_result(&ev, true, 0, 230, NULL);
+    char buf[2048];
+    size_t n = sc_audit_event_write_json(&ev, buf, sizeof(buf));
+    SC_ASSERT(n > 0);
+    SC_ASSERT(strstr(buf, "\"identity\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"input\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"reasoning\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"action\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"result\":") != NULL);
+    SC_ASSERT(strstr(buf, "\"security\":") != NULL);
+}
+
+static void test_audit_old_events_without_new_fields_still_work(void) {
+    sc_audit_event_t ev;
+    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
+    /* No identity, input, reasoning - backwards compatible */
+    sc_audit_event_with_action(&ev, "ls", "low", true, true);
+    char buf[1024];
+    size_t n = sc_audit_event_write_json(&ev, buf, sizeof(buf));
+    SC_ASSERT(n > 0);
+    SC_ASSERT(strstr(buf, "command_execution") != NULL);
+    SC_ASSERT(strstr(buf, "\"action\":") != NULL);
+    /* Should not have identity/input/reasoning when not set */
+    SC_ASSERT(strstr(buf, "\"identity\":") == NULL);
+    SC_ASSERT(strstr(buf, "\"input\":") == NULL);
+    SC_ASSERT(strstr(buf, "\"reasoning\":") == NULL);
+}
+
 static void test_policy_can_act_full(void) {
     sc_security_policy_t p = { .autonomy = SC_AUTONOMY_FULL };
     SC_ASSERT_TRUE(sc_policy_can_act(&p));
@@ -714,6 +789,11 @@ void run_security_extended_tests(void) {
     SC_RUN_TEST(test_policy_is_rate_limited);
     SC_RUN_TEST(test_audit_event_init_unique_ids);
     SC_RUN_TEST(test_audit_event_write_json_truncated);
+    SC_RUN_TEST(test_audit_identity_fields_serialized_correctly);
+    SC_RUN_TEST(test_audit_input_fields_serialized_correctly);
+    SC_RUN_TEST(test_audit_reasoning_fields_serialized_correctly);
+    SC_RUN_TEST(test_audit_json_includes_all_five_layers);
+    SC_RUN_TEST(test_audit_old_events_without_new_fields_still_work);
     SC_RUN_TEST(test_policy_can_act_full);
     SC_RUN_TEST(test_policy_can_act_readonly);
     SC_RUN_TEST(test_security_shell_allowed);

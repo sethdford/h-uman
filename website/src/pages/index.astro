@@ -41,7 +41,6 @@ const tools = [
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="canonical" href="https://seaclaw.ai/" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preload" href="/fonts/avenir/Avenir-Book.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/avenir/Avenir-Heavy.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/avenir/Avenir-Black.woff2" as="font" type="font/woff2" crossorigin />
@@ -53,7 +52,7 @@ const tools = [
     <link rel="manifest" href={`${base}site.webmanifest`} />
     <meta name="theme-color" content="#14b8a6" />
     <meta property="og:title" content="SeaClaw — Bring AI to every device on Earth" />
-    <meta property="og:description" content="430 KB binary. 50+ AI providers. 24 channels. 53 tools. Zero dependencies. Pure C." />
+    <meta property="og:description" content="430 KB binary. 50+ AI providers. 26 channels. 53 tools. Zero dependencies. Pure C." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://seaclaw.ai/" />
     <meta property="og:image" content="https://seaclaw.ai/og-image.png" />
@@ -64,7 +63,7 @@ const tools = [
     <meta property="og:site_name" content="SeaClaw" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="SeaClaw — Bring AI to every device on Earth" />
-    <meta name="twitter:description" content="430 KB binary. 50+ AI providers. 24 channels. 53 tools. Zero dependencies. Pure C." />
+    <meta name="twitter:description" content="430 KB binary. 50+ AI providers. 26 channels. 53 tools. Zero dependencies. Pure C." />
     <meta name="twitter:image" content="https://seaclaw.ai/og-image.png" />
 
     <script type="application/ld+json" set:html={JSON.stringify({
@@ -144,7 +143,7 @@ const tools = [
             { count: 2, prefix: "<", suffix: " ms", label: "Startup" },
             { count: 2454, label: "Tests" },
             { count: 50, suffix: "+", label: "Providers" },
-            { count: 20, label: "Channels" },
+            { count: 26, label: "Channels" },
             { count: 53, label: "Tools" },
           ].map((stat, i, arr) => (
             <div class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`} style="border-color: var(--sc-web-border)">
@@ -241,7 +240,7 @@ const tools = [
 
           {[
             { cx: 300, cy: 100, label: "Providers", tip: "50+ AI model providers: OpenAI, Anthropic, Ollama, and more" },
-            { cx: 441, cy: 159, label: "Channels", tip: "20 messaging channels: Telegram, Discord, Slack, iMessage" },
+            { cx: 441, cy: 159, label: "Channels", tip: "26 messaging channels: Telegram, Discord, Slack, iMessage" },
             { cx: 500, cy: 300, label: "Memory", tip: "SQLite + FTS5 + vector embeddings for persistent context" },
             { cx: 441, cy: 441, label: "Tools", tip: "53 tools: shell, files, git, browser, web search, hardware" },
             { cx: 300, cy: 500, label: "Security", tip: "Sandbox, AEAD encryption, path traversal protection" },
@@ -264,7 +263,7 @@ const tools = [
     <section class="py-16 md:py-32 px-6">
       <div class="max-w-4xl mx-auto text-center">
         <h2 class="providers-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--sc-web-text); letter-spacing: -0.03em;">
-          50+ providers. 24 channels. 53 tools.
+          50+ providers. 26 channels. 53 tools.
         </h2>
         <p class="providers-sub text-lg mb-16 opacity-0" style="color: var(--sc-web-text-secondary)">Connect to any AI model. Reach users on any platform.</p>
         <div class="flex flex-wrap gap-3 justify-center" id="provider-grid">
@@ -422,7 +421,7 @@ const tools = [
               <tr><td class="p-3">Peak RAM</td><td class="p-3 text-center font-medium" style="color: var(--sc-accent);">&lt;6 MB</td><td class="p-3 text-center opacity-60">~300 MB</td><td class="p-3 text-center opacity-60">~100 MB</td></tr>
               <tr><td class="p-3">Dependencies</td><td class="p-3 text-center font-medium" style="color: var(--sc-accent);">0</td><td class="p-3 text-center opacity-60">900+</td><td class="p-3 text-center opacity-60">200+</td></tr>
               <tr><td class="p-3">Providers</td><td class="p-3 text-center font-medium" style="color: var(--sc-accent);">50+</td><td class="p-3 text-center opacity-60">1</td><td class="p-3 text-center opacity-60">1</td></tr>
-              <tr><td class="p-3">Channels</td><td class="p-3 text-center font-medium" style="color: var(--sc-accent);">20</td><td class="p-3 text-center opacity-60">1</td><td class="p-3 text-center opacity-60">1</td></tr>
+              <tr><td class="p-3">Channels</td><td class="p-3 text-center font-medium" style="color: var(--sc-accent);">26</td><td class="p-3 text-center opacity-60">1</td><td class="p-3 text-center opacity-60">1</td></tr>
             </tbody>
           </table>
         </div>

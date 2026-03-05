@@ -29,7 +29,9 @@ typedef struct sc_task {
 
 typedef struct sc_task_list sc_task_list_t;
 
-sc_task_list_t *sc_task_list_create(sc_allocator_t *alloc, size_t max_tasks);
+/** Create task list. dir_path: optional; when set, tasks persist to dir_path/tasks.json.
+ *  dir_path NULL = in-memory only. Under SC_IS_TEST, file I/O is skipped. */
+sc_task_list_t *sc_task_list_create(sc_allocator_t *alloc, const char *dir_path, size_t max_tasks);
 void sc_task_list_destroy(sc_task_list_t *list);
 
 /* Add a new task, returns task ID */
@@ -67,4 +69,11 @@ sc_error_t sc_task_list_query(sc_task_list_t *list, sc_task_list_status_t status
 
 void sc_task_free(sc_allocator_t *alloc, sc_task_t *task);
 void sc_task_array_free(sc_allocator_t *alloc, sc_task_t *tasks, size_t count);
+
+#if defined(SC_IS_TEST) && SC_IS_TEST
+/** Test-only: serialize tasks to JSON string. Caller frees with alloc->free. */
+sc_error_t sc_task_list_serialize(sc_task_list_t *list, char **out_json, size_t *out_len);
+/** Test-only: load tasks from JSON string (replaces current tasks). */
+sc_error_t sc_task_list_deserialize(sc_task_list_t *list, const char *json, size_t json_len);
+#endif
 #endif

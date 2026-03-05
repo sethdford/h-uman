@@ -40,6 +40,26 @@ typedef struct sc_audit_actor {
     const char *username; /* may be NULL */
 } sc_audit_actor_t;
 
+typedef struct sc_audit_identity {
+    uint64_t agent_id;           /* unique agent instance ID */
+    const char *model_version;   /* e.g. "gpt-4o-2024-08-06" */
+    const char *auth_token_hash; /* first 8 chars of SHA256 of auth token (for correlation) */
+} sc_audit_identity_t;
+
+typedef struct sc_audit_input {
+    const char *trigger_type;   /* "user_prompt", "webhook", "cron", "mailbox" */
+    const char *trigger_source; /* channel name or cron ID */
+    const char *prompt_hash;    /* SHA256 of prompt (for correlation without storing PII) */
+    size_t prompt_length;       /* length of prompt in chars */
+} sc_audit_input_t;
+
+typedef struct sc_audit_reasoning {
+    const char *decision;       /* "policy_allow", "policy_deny", "approval_required", "auto_approved" */
+    const char *rule_name;       /* which policy rule matched */
+    float confidence;            /* 0.0-1.0 (set to -1 if not applicable) */
+    uint32_t context_tokens;     /* how many tokens in context when decision was made */
+} sc_audit_reasoning_t;
+
 typedef struct sc_audit_action {
     const char *command;    /* may be NULL */
     const char *risk_level; /* may be NULL */
@@ -64,10 +84,13 @@ typedef struct sc_audit_event {
     int64_t timestamp_s;
     uint64_t event_id;
     sc_audit_event_type_t event_type;
-    sc_audit_actor_t actor;   /* channel/username set to NULL if not used */
-    sc_audit_action_t action; /* command set to NULL if not used */
-    sc_audit_result_t result; /* exit_code -1, duration_ms 0, err_msg NULL if not set */
+    sc_audit_actor_t actor;       /* channel/username set to NULL if not used */
+    sc_audit_action_t action;     /* command set to NULL if not used */
+    sc_audit_result_t result;     /* exit_code -1, duration_ms 0, err_msg NULL if not set */
     sc_audit_security_ctx_t security;
+    sc_audit_identity_t identity;
+    sc_audit_input_t input;
+    sc_audit_reasoning_t reasoning;
 } sc_audit_event_t;
 
 /* ── Audit event API ───────────────────────────────────────────────── */
@@ -89,6 +112,20 @@ void sc_audit_event_with_result(sc_audit_event_t *ev, bool success, int32_t exit
 
 /** Set security context (sandbox_backend). */
 void sc_audit_event_with_security(sc_audit_event_t *ev, const char *sandbox_backend);
+
+/** Set identity (agent_id, model_version, auth_token_hash). */
+void sc_audit_event_with_identity(sc_audit_event_t *ev, uint64_t agent_id,
+                                  const char *model_version, const char *auth_token_hash);
+
+/** Set input (trigger_type, trigger_source, prompt_hash, prompt_length). */
+void sc_audit_event_with_input(sc_audit_event_t *ev, const char *trigger_type,
+                               const char *trigger_source, const char *prompt_hash,
+                               size_t prompt_length);
+
+/** Set reasoning (decision, rule_name, confidence, context_tokens). */
+void sc_audit_event_with_reasoning(sc_audit_event_t *ev, const char *decision,
+                                   const char *rule_name, float confidence,
+                                   uint32_t context_tokens);
 
 /** Write JSON representation into buf. Returns bytes written, or 0 on failure. */
 size_t sc_audit_event_write_json(const sc_audit_event_t *ev, char *buf, size_t buf_size);

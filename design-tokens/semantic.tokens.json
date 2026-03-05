@@ -47,7 +47,7 @@
     "accent-hover": { "$value": "{color.teal.400}", "$type": "color" },
     "accent-subtle": { "$value": "{color.teal.dark-subtle}", "$type": "color" },
     "accent-strong": { "$value": "{color.teal.300}", "$type": "color" },
-    "on-accent": { "$value": "#071018", "$type": "color" },
+    "on-accent": { "$value": "#ffffff", "$type": "color" },
 
     "accent-secondary": { "$value": "{color.amber.500}", "$type": "color" },
     "accent-secondary-text": {
@@ -67,7 +67,7 @@
       "$value": "{color.amber.300}",
       "$type": "color"
     },
-    "on-accent-secondary": { "$value": "#071018", "$type": "color" },
+    "on-accent-secondary": { "$value": "#09090b", "$type": "color" },
 
     "accent-tertiary": { "$value": "{color.indigo.500}", "$type": "color" },
     "accent-tertiary-text": {
@@ -164,15 +164,15 @@
       "$type": "string"
     },
     "surface-glow": {
-      "$value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.1) 0%, transparent 70%)",
+      "$value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.04) 0%, transparent 70%)",
       "$type": "string"
     },
     "button-gradient-primary": {
-      "$value": "linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(0,0,0,0.2) 100%)",
+      "$value": "linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.15) 100%)",
       "$type": "string"
     },
     "hero-gradient": {
-      "$value": "linear-gradient(135deg, rgba(20,184,166,0.14) 0%, rgba(16,185,129,0.08) 50%, transparent 100%)",
+      "$value": "linear-gradient(135deg, rgba(20,184,166,0.06) 0%, rgba(16,185,129,0.03) 50%, transparent 100%)",
       "$type": "string"
     }
   },
@@ -181,12 +181,12 @@
     "bg": { "$value": "{color.neutral.900}", "$type": "color" },
     "bg-inset": { "$value": "{color.neutral.800}", "$type": "color" },
     "bg-surface": { "$value": "#ffffff", "$type": "color" },
-    "bg-warm": { "$value": "#fafcfe", "$type": "color" },
+    "bg-warm": { "$value": "{color.neutral.925}", "$type": "color" },
     "bg-elevated": { "$value": "{color.neutral.850}", "$type": "color" },
     "bg-overlay": { "$value": "{color.neutral.1000}", "$type": "color" },
 
-    "text": { "$value": "#0b1a2a", "$type": "color" },
-    "text-muted": { "$value": "#4a6a8a", "$type": "color" },
+    "text": { "$value": "{color.neutral.100}", "$type": "color" },
+    "text-muted": { "$value": "{color.neutral.400}", "$type": "color" },
     "text-faint": { "$value": "{color.neutral.600}", "$type": "color" },
 
     "accent": { "$value": "#14b8a6", "$type": "color" },
@@ -306,11 +306,11 @@
       "$type": "shadow"
     },
     "surface-gradient": {
-      "$value": "linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(240,244,248,0.6) 100%)",
+      "$value": "linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(244,244,247,0.6) 100%)",
       "$type": "string"
     },
     "surface-glow": {
-      "$value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.08) 0%, transparent 70%)",
+      "$value": "radial-gradient(ellipse at 50% 0%, rgba(20,184,166,0.05) 0%, transparent 70%)",
       "$type": "string"
     },
     "button-gradient-primary": {
@@ -318,7 +318,7 @@
       "$type": "string"
     },
     "hero-gradient": {
-      "$value": "linear-gradient(135deg, rgba(20,184,166,0.12) 0%, rgba(16,185,129,0.06) 50%, transparent 100%)",
+      "$value": "linear-gradient(135deg, rgba(20,184,166,0.08) 0%, rgba(16,185,129,0.04) 50%, transparent 100%)",
       "$type": "string"
     }
   },

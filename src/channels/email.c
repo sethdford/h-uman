@@ -11,6 +11,7 @@
 #endif
 
 #define SC_EMAIL_LAST_MSG_SIZE 4096
+#define SC_EMAIL_MOCK_INBOX_MAX 8
 
 #if !SC_IS_TEST
 static const char *sc_email_find_header_ci(const char *hdr, size_t hdr_len, const char *name,
@@ -53,6 +54,12 @@ typedef struct sc_email_ctx {
 #if SC_IS_TEST
     char last_message[SC_EMAIL_LAST_MSG_SIZE];
     size_t last_message_len;
+    struct {
+        char session_key[128];
+        char content[4096];
+    } mock_inbox[SC_EMAIL_MOCK_INBOX_MAX];
+    size_t mock_inbox_count;
+    size_t mock_inbox_read;
 #endif
 } sc_email_ctx_t;
 
@@ -83,16 +90,25 @@ static sc_error_t email_send(void *ctx, const char *target, size_t target_len, c
     (void)media;
     (void)media_count;
 #if SC_IS_TEST
-    (void)target;
-    (void)target_len;
     sc_email_ctx_t *c = (sc_email_ctx_t *)ctx;
     if (c && message && message_len > 0) {
-        size_t copy = message_len;
-        if (copy >= SC_EMAIL_LAST_MSG_SIZE)
-            copy = SC_EMAIL_LAST_MSG_SIZE - 1;
-        memcpy(c->last_message, message, copy);
-        c->last_message[copy] = '\0';
-        c->last_message_len = copy;
+        size_t tlen = target_len > 0 && target ? (target_len > 255 ? 255 : target_len) : 0;
+        const char *from = (c->from_address && c->from_len > 0) ? c->from_address : "seaclaw@localhost";
+        int n = snprintf(c->last_message, SC_EMAIL_LAST_MSG_SIZE,
+                        "From: %s\r\nTo: %.*s\r\nSubject: seaclaw\r\nContent-Type: text/plain; "
+                        "charset=utf-8\r\n\r\n%.*s",
+                        from, (int)tlen, (target && tlen > 0) ? target : "",
+                        (int)message_len, message);
+        if (n > 0 && (size_t)n < SC_EMAIL_LAST_MSG_SIZE) {
+            c->last_message_len = (size_t)n;
+        } else {
+            size_t copy = message_len;
+            if (copy >= SC_EMAIL_LAST_MSG_SIZE)
+                copy = SC_EMAIL_LAST_MSG_SIZE - 1;
+            memcpy(c->last_message, message, copy);
+            c->last_message[copy] = '\0';
+            c->last_message_len = copy;
+        }
     }
     return SC_OK;
 #else
@@ -298,6 +314,25 @@ const char *sc_email_test_last_message(sc_channel_t *ch) {
     sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
     return c->last_message_len > 0 ? c->last_message : NULL;
 }
+
+sc_error_t sc_email_test_inject_mock_email(sc_channel_t *ch, const char *from, size_t from_len,
+                                            const char *subject_or_body, size_t body_len) {
+    if (!ch || !ch->ctx)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)ch->ctx;
+    if (c->mock_inbox_count >= SC_EMAIL_MOCK_INBOX_MAX)
+        return SC_ERR_OUT_OF_MEMORY;
+    size_t i = c->mock_inbox_count++;
+    size_t sk = from_len > 127 ? 127 : from_len;
+    size_t ct = body_len > 4095 ? 4095 : body_len;
+    if (from && sk > 0)
+        memcpy(c->mock_inbox[i].session_key, from, sk);
+    c->mock_inbox[i].session_key[sk] = '\0';
+    if (subject_or_body && ct > 0)
+        memcpy(c->mock_inbox[i].content, subject_or_body, ct);
+    c->mock_inbox[i].content[ct] = '\0';
+    return SC_OK;
+}
 #endif
 
 /* ── Email IMAP polling via curl ──────────────────────────────────────── */
@@ -310,7 +345,21 @@ sc_error_t sc_email_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_lo
 
 #if SC_IS_TEST
     (void)alloc;
-    (void)max_msgs;
+    sc_email_ctx_t *c = (sc_email_ctx_t *)channel_ctx;
+    while (c->mock_inbox_read < c->mock_inbox_count && *out_count < max_msgs) {
+        size_t i = c->mock_inbox_read++;
+        size_t sk_len = strlen(c->mock_inbox[i].session_key);
+        size_t ct_len = strlen(c->mock_inbox[i].content);
+        if (sk_len >= sizeof(msgs[*out_count].session_key))
+            sk_len = sizeof(msgs[*out_count].session_key) - 1;
+        if (ct_len >= sizeof(msgs[*out_count].content))
+            ct_len = sizeof(msgs[*out_count].content) - 1;
+        memcpy(msgs[*out_count].session_key, c->mock_inbox[i].session_key, sk_len);
+        msgs[*out_count].session_key[sk_len] = '\0';
+        memcpy(msgs[*out_count].content, c->mock_inbox[i].content, ct_len);
+        msgs[*out_count].content[ct_len] = '\0';
+        (*out_count)++;
+    }
     return SC_OK;
 #else
     sc_email_ctx_t *c = (sc_email_ctx_t *)channel_ctx;

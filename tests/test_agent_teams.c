@@ -315,7 +315,7 @@ static void test_cancel_message_sets_cancel_requested(void) {
 /* ── Task list ────────────────────────────────────────────────────────── */
 static void test_task_list_add_claim_complete_flow(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id = 0;
@@ -338,7 +338,7 @@ static void test_task_list_add_claim_complete_flow(void) {
 
 static void test_task_blocked_by_incomplete_dependency_stays_blocked(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id1 = 0, id2 = 0;
@@ -361,7 +361,7 @@ static void test_task_blocked_by_incomplete_dependency_stays_blocked(void) {
 
 static void test_task_unblocks_when_dependency_completes(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id1 = 0, id2 = 0;
@@ -383,7 +383,7 @@ static void test_task_unblocks_when_dependency_completes(void) {
 
 static void test_next_available_skips_blocked_tasks(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id1 = 0, id2 = 0;
@@ -401,7 +401,7 @@ static void test_next_available_skips_blocked_tasks(void) {
 
 static void test_claim_fails_on_already_claimed_task(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id = 0;
@@ -510,7 +510,7 @@ static void test_send_slash_command_sends_message(void) {
 /* ── Feature 2: Task list is_ready and query ────────────────────────────── */
 static void test_task_is_ready_when_deps_complete(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id1 = 0, id2 = 0;
@@ -529,7 +529,7 @@ static void test_task_is_ready_when_deps_complete(void) {
 
 static void test_task_query_by_status_returns_correct_tasks(void) {
     sc_allocator_t a = sc_system_allocator();
-    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
     SC_ASSERT_NOT_NULL(list);
 
     uint64_t id1 = 0, id2 = 0, id3 = 0;
@@ -559,6 +559,109 @@ static void test_task_query_by_status_returns_correct_tasks(void) {
     sc_task_list_destroy(list);
 }
 
+/* ── Task list persistence (serialize/deserialize without file I/O) ───────── */
+static void test_task_list_serialize_deserialize_round_trip_preserves_all_fields(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
+    SC_ASSERT_NOT_NULL(list);
+
+    uint64_t id = 0;
+    SC_ASSERT_EQ(sc_task_list_add(list, "Build checkout API", "REST endpoints for cart + payment",
+                                 NULL, 0, &id), SC_OK);
+    SC_ASSERT_EQ(id, 1u);
+    SC_ASSERT_EQ(sc_task_list_claim(list, 1, 42), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_update_status(list, 1, SC_TASK_LIST_IN_PROGRESS), SC_OK);
+
+    char *json = NULL;
+    size_t json_len = 0;
+    SC_ASSERT_EQ(sc_task_list_serialize(list, &json, &json_len), SC_OK);
+    SC_ASSERT_NOT_NULL(json);
+    SC_ASSERT_TRUE(json_len > 0);
+    SC_ASSERT_TRUE(strstr(json, "Build checkout API") != NULL);
+    SC_ASSERT_TRUE(strstr(json, "in_progress") != NULL);
+    SC_ASSERT_TRUE(strstr(json, "\"owner\":42") != NULL);
+
+    sc_task_list_t *list2 = sc_task_list_create(&a, NULL, 16);
+    SC_ASSERT_NOT_NULL(list2);
+    SC_ASSERT_EQ(sc_task_list_deserialize(list2, json, json_len), SC_OK);
+    a.free(a.ctx, json, json_len + 1);
+
+    sc_task_t t = {0};
+    SC_ASSERT_EQ(sc_task_list_get(list2, 1, &t), SC_OK);
+    SC_ASSERT_EQ(t.id, 1u);
+    SC_ASSERT_EQ(t.status, SC_TASK_LIST_IN_PROGRESS);
+    SC_ASSERT_EQ(t.owner_agent_id, 42u);
+    SC_ASSERT_NOT_NULL(t.subject);
+    SC_ASSERT_TRUE(strcmp(t.subject, "Build checkout API") == 0);
+    SC_ASSERT_NOT_NULL(t.description);
+    SC_ASSERT_TRUE(strcmp(t.description, "REST endpoints for cart + payment") == 0);
+    sc_task_free(&a, &t);
+
+    sc_task_list_destroy(list2);
+    sc_task_list_destroy(list);
+}
+
+static void test_task_list_status_survives_save_load_cycle(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
+    SC_ASSERT_NOT_NULL(list);
+
+    uint64_t id = 0;
+    SC_ASSERT_EQ(sc_task_list_add(list, "Task", "Desc", NULL, 0, &id), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_claim(list, 1, 100), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_update_status(list, 1, SC_TASK_LIST_COMPLETED), SC_OK);
+
+    char *json = NULL;
+    size_t json_len = 0;
+    SC_ASSERT_EQ(sc_task_list_serialize(list, &json, &json_len), SC_OK);
+    SC_ASSERT_NOT_NULL(json);
+
+    sc_task_list_t *list2 = sc_task_list_create(&a, NULL, 16);
+    SC_ASSERT_EQ(sc_task_list_deserialize(list2, json, json_len), SC_OK);
+    a.free(a.ctx, json, json_len + 1);
+
+    SC_ASSERT_EQ(sc_task_list_count_by_status(list2, SC_TASK_LIST_COMPLETED), 1u);
+    sc_task_t t = {0};
+    SC_ASSERT_EQ(sc_task_list_get(list2, 1, &t), SC_OK);
+    SC_ASSERT_EQ(t.status, SC_TASK_LIST_COMPLETED);
+    sc_task_free(&a, &t);
+
+    sc_task_list_destroy(list2);
+    sc_task_list_destroy(list);
+}
+
+static void test_task_list_dependencies_preserved_through_serialization(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_task_list_t *list = sc_task_list_create(&a, NULL, 16);
+    SC_ASSERT_NOT_NULL(list);
+
+    uint64_t id1 = 0, id2 = 0;
+    SC_ASSERT_EQ(sc_task_list_add(list, "Task A", "First", NULL, 0, &id1), SC_OK);
+    uint64_t deps[] = {1};
+    SC_ASSERT_EQ(sc_task_list_add(list, "Task B", "Depends on A", deps, 1, &id2), SC_OK);
+
+    char *json = NULL;
+    size_t json_len = 0;
+    SC_ASSERT_EQ(sc_task_list_serialize(list, &json, &json_len), SC_OK);
+    SC_ASSERT_NOT_NULL(json);
+    SC_ASSERT_TRUE(strstr(json, "blocked_by") != NULL);
+    SC_ASSERT_TRUE(strstr(json, "1") != NULL);
+
+    sc_task_list_t *list2 = sc_task_list_create(&a, NULL, 16);
+    SC_ASSERT_EQ(sc_task_list_deserialize(list2, json, json_len), SC_OK);
+    a.free(a.ctx, json, json_len + 1);
+
+    SC_ASSERT_TRUE(sc_task_list_is_blocked(list2, 2));
+    sc_task_t t = {0};
+    SC_ASSERT_EQ(sc_task_list_get(list2, 2, &t), SC_OK);
+    SC_ASSERT_EQ(t.blocked_by_count, 1u);
+    SC_ASSERT_EQ(t.blocked_by[0], 1u);
+    sc_task_free(&a, &t);
+
+    sc_task_list_destroy(list2);
+    sc_task_list_destroy(list);
+}
+
 void run_agent_teams_tests(void) {
     SC_TEST_SUITE("agent teams (worktree + team config + mailbox + task list)");
     SC_RUN_TEST(test_mailbox_register_send_recv_with_agent_id);
@@ -574,6 +677,9 @@ void run_agent_teams_tests(void) {
     SC_RUN_TEST(test_task_unblocks_when_dependency_completes);
     SC_RUN_TEST(test_next_available_skips_blocked_tasks);
     SC_RUN_TEST(test_claim_fails_on_already_claimed_task);
+    SC_RUN_TEST(test_task_list_serialize_deserialize_round_trip_preserves_all_fields);
+    SC_RUN_TEST(test_task_list_status_survives_save_load_cycle);
+    SC_RUN_TEST(test_task_list_dependencies_preserved_through_serialization);
     SC_RUN_TEST(test_worktree_create_tracks_metadata);
     SC_RUN_TEST(test_worktree_remove_marks_inactive);
     SC_RUN_TEST(test_worktree_list_shows_active_worktrees);

@@ -267,10 +267,29 @@ static void test_nostr_last_message_in_test_mode(void) {
 #if SC_IS_TEST
     const char *last = sc_nostr_test_last_message(&ch);
     SC_ASSERT_NOT_NULL(last);
-    SC_ASSERT_STR_EQ(last, "test message");
+    SC_ASSERT_TRUE(strstr(last, "test message") != NULL);
+    SC_ASSERT_TRUE(strstr(last, "\"kind\":4") != NULL);
 #endif
     sc_nostr_destroy(&ch);
 }
+
+#if SC_IS_TEST
+static void test_nostr_poll_returns_mock_events(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_nostr_create(&alloc, "/tmp/nak", 8, "npub1", 5, "wss://r", 6, "sec", 3, &ch);
+    sc_error_t err = sc_nostr_test_inject_mock_event(&ch, "npub1abc", 8, "hello from mock", 15);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_nostr_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1u);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "npub1abc");
+    SC_ASSERT_STR_EQ(msgs[0].content, "hello from mock");
+    sc_nostr_destroy(&ch);
+}
+#endif
 #endif
 
 #if SC_HAS_QQ
@@ -457,6 +476,7 @@ void run_channel_tests(void) {
     SC_RUN_TEST(test_nostr_is_configured);
 #if SC_IS_TEST
     SC_RUN_TEST(test_nostr_last_message_in_test_mode);
+    SC_RUN_TEST(test_nostr_poll_returns_mock_events);
 #endif
 #endif
 #if SC_HAS_QQ
