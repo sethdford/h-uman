@@ -210,6 +210,109 @@ function writeOutput(
   console.log("Wrote", dest);
 }
 
+function generateDart(tokens: TokenMap): string {
+  const lines: string[] = [
+    "// Auto-generated from design-tokens/ — do not edit manually",
+    "import 'package:flutter/material.dart';",
+    "",
+    "abstract final class SCTokens {",
+  ];
+
+  for (const [key, val] of Object.entries(tokens).sort()) {
+    const dartName = key
+      .replace(/\./g, "_")
+      .replace(/-/g, "_")
+      .replace(/([A-Z])/g, "_$1")
+      .toLowerCase()
+      .replace(/^_/, "");
+
+    if (typeof val === "string" && val.startsWith("#") && val.length === 7) {
+      const hex = val.replace("#", "").toUpperCase();
+      lines.push(`  static const ${dartName} = Color(0xFF${hex});`);
+    } else if (typeof val === "number") {
+      lines.push(`  static const ${dartName} = ${val};`);
+    } else if (typeof val === "string" && val.endsWith("px")) {
+      const num = parseFloat(val);
+      if (!isNaN(num)) lines.push(`  static const ${dartName} = ${num};`);
+    } else if (typeof val === "string" && val.endsWith("rem")) {
+      const num = parseFloat(val) * 16;
+      if (!isNaN(num)) lines.push(`  static const ${dartName} = ${num};`);
+    } else if (typeof val === "string" && val.endsWith("ms")) {
+      const num = parseInt(val);
+      if (!isNaN(num))
+        lines.push(
+          `  static const ${dartName} = Duration(milliseconds: ${num});`,
+        );
+    }
+  }
+
+  lines.push("}");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function generateRuntimeJSON(tokens: TokenMap): string {
+  const organized: Record<string, Record<string, unknown>> = {};
+  for (const [key, val] of Object.entries(tokens)) {
+    const parts = key.split(".");
+    const group = parts.length > 1 ? parts[0] : "base";
+    const name = parts.length > 1 ? parts.slice(1).join(".") : key;
+    if (!organized[group]) organized[group] = {};
+    organized[group][name] = val;
+  }
+  return JSON.stringify(
+    {
+      $schema: "https://design-tokens.github.io/community-group/format/",
+      tokens: organized,
+    },
+    null,
+    2,
+  );
+}
+
+function generateTypeScriptTokens(tokens: TokenMap): string {
+  const lines: string[] = [
+    "// Auto-generated from design-tokens/ — do not edit manually",
+    "",
+    "export const tokens = {",
+  ];
+
+  const groups: Record<string, Array<[string, unknown]>> = {};
+  for (const [key, val] of Object.entries(tokens)) {
+    const parts = key.split(".");
+    const group = parts[0];
+    const name = parts.slice(1).join(".");
+    if (!groups[group]) groups[group] = [];
+    groups[group].push([name || key, val]);
+  }
+
+  for (const [group, entries] of Object.entries(groups).sort()) {
+    lines.push(`  ${toCamelCase(group)}: {`);
+    for (const [name, val] of entries.sort()) {
+      const camelName = toCamelCase(name);
+      if (typeof val === "string") {
+        lines.push(`    ${camelName}: ${JSON.stringify(val)},`);
+      } else if (typeof val === "number") {
+        lines.push(`    ${camelName}: ${val},`);
+      }
+    }
+    lines.push("  },");
+  }
+
+  lines.push("} as const;");
+  lines.push("");
+  lines.push("export type TokenKey = keyof typeof tokens;");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function toCamelCase(s: string): string {
+  return s
+    .split(/[-.]/)
+    .map((p, i) => (i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+    .join("");
+}
+
 function generateDocsReference(tokens: TokenMap): string {
   const groups: Record<
     string,
@@ -338,6 +441,36 @@ function main() {
   if (!fs.existsSync(refDir)) fs.mkdirSync(refDir, { recursive: true });
   writeOutput(outdir, refPath, "design-tokens-reference.json", refJson);
 
+  const dart = generateDart(tokens);
+  const dartDir = outdir || path.join(ROOT, "apps", "flutter", "lib");
+  if (!fs.existsSync(dartDir)) fs.mkdirSync(dartDir, { recursive: true });
+  writeOutput(
+    outdir,
+    path.join(dartDir, "design_tokens.dart"),
+    "design_tokens.dart",
+    dart,
+  );
+
+  const runtimeJson = generateRuntimeJSON(tokens);
+  writeOutput(
+    outdir,
+    outdir
+      ? path.join(outdir, "tokens.json")
+      : path.join(ROOT, "docs", "tokens.json"),
+    "tokens.json",
+    runtimeJson,
+  );
+
+  const tsTokens = generateTypeScriptTokens(tokens);
+  writeOutput(
+    outdir,
+    outdir
+      ? path.join(outdir, "tokens.ts")
+      : path.join(ROOT, "docs", "tokens.ts"),
+    "tokens.ts",
+    tsTokens,
+  );
+
   console.log("Done.");
 }
 
@@ -442,19 +575,19 @@ function generateCSS(
   lines.push("  /* Glass tiers (Liquid Motion) */");
   const glassTiers = ["subtle", "standard", "prominent"];
   for (const tier of glassTiers) {
-    const blur = tokens[`glass.${tier}.blur`];
-    const saturate = tokens[`glass.${tier}.saturate`];
-    const bgOp = tokens[`glass.${tier}.bg-opacity`];
-    const borderOp = tokens[`glass.${tier}.border-opacity`];
-    const insetOp = tokens[`glass.${tier}.inset-opacity`];
-    if (blur != null) lines.push(`  --sc-glass-${tier}-blur: ${blur};`);
-    if (saturate != null)
-      lines.push(`  --sc-glass-${tier}-saturate: ${saturate};`);
-    if (bgOp != null) lines.push(`  --sc-glass-${tier}-bg-opacity: ${bgOp};`);
-    if (borderOp != null)
-      lines.push(`  --sc-glass-${tier}-border-opacity: ${borderOp};`);
-    if (insetOp != null)
-      lines.push(`  --sc-glass-${tier}-inset-opacity: ${insetOp};`);
+    const glassProps = [
+      "blur",
+      "saturate",
+      "bg-opacity",
+      "border-opacity",
+      "inset-opacity",
+      "tint-opacity",
+      "refraction-scale",
+    ];
+    for (const prop of glassProps) {
+      const val = tokens[`glass.${tier}.${prop}`];
+      if (val != null) lines.push(`  --sc-glass-${tier}-${prop}: ${val};`);
+    }
   }
 
   // Micro-physics presets
@@ -606,6 +739,28 @@ function generateCSS(
       const mass = (tokens[`spring.${name}.mass`] as number) ?? 1;
       lines.push(`  --sc-spring-${name}-stiffness: ${stiff};`);
       lines.push(`  --sc-spring-${name}-damping: ${damp};`);
+    }
+  }
+
+  // Container transforms, path motion, view transitions
+  const advancedMotionGroups = [
+    "container-transform",
+    "path-motion",
+    "view-transition",
+  ];
+  for (const group of advancedMotionGroups) {
+    const groupKeys = Object.keys(tokens).filter((k) =>
+      k.startsWith(`${group}.`),
+    );
+    if (groupKeys.length > 0) {
+      lines.push(`  /* ${group.replace(/-/g, " ")} */`);
+      for (const k of groupKeys.sort()) {
+        const val = tokens[k];
+        if (val != null) {
+          const prop = k.replace(`${group}.`, "");
+          lines.push(`  --sc-${group}-${prop}: ${val};`);
+        }
+      }
     }
   }
 

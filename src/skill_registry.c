@@ -526,9 +526,11 @@ sc_error_t sc_skill_registry_publish(sc_allocator_t *alloc, const char *skill_di
 
     const char *name = sc_json_get_string(parsed, "name");
     const char *desc = sc_json_get_string(parsed, "description");
-    sc_json_free(alloc, parsed);
-    if (!name || !name[0] || !desc)
+    if (!name || !name[0] || !desc) {
+        sc_json_free(alloc, parsed);
         return SC_ERR_PARSE;
+    }
+    sc_json_free(alloc, parsed);
 
     printf("To publish, submit a PR to https://github.com/seaclaw/skill-registry with your skill "
            "manifest.\n");

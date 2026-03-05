@@ -183,13 +183,14 @@ sc_error_t sc_voice_stt_file(sc_allocator_t *alloc, const sc_voice_config_t *con
         return SC_ERR_PARSE;
     }
 
-    char *text = sc_strndup(alloc, text_val->data.string.ptr, text_val->data.string.len);
+    size_t text_len = text_val->data.string.len;
+    char *text = sc_strndup(alloc, text_val->data.string.ptr, text_len);
     sc_json_free(alloc, parsed);
     if (!text)
         return SC_ERR_OUT_OF_MEMORY;
 
     *out_text = text;
-    *out_len = text_val->data.string.len;
+    *out_len = text_len;
     return SC_OK;
 #endif
 }

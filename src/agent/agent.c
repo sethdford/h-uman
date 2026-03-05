@@ -1,7 +1,9 @@
 #include "seaclaw/agent.h"
 #include "seaclaw/agent/compaction.h"
+#include "seaclaw/agent/team.h"
 #include "seaclaw/agent/dispatcher.h"
 #include "seaclaw/agent/mailbox.h"
+#include "seaclaw/agent/task_list.h"
 #include "seaclaw/agent/tool_context.h"
 #include "seaclaw/agent/undo.h"
 #include "seaclaw/agent/memory_loader.h"
@@ -282,11 +284,18 @@ sc_error_t sc_agent_from_config(sc_agent_t *out, sc_allocator_t *alloc, sc_provi
 void sc_agent_set_mailbox(sc_agent_t *agent, sc_mailbox_t *mailbox) {
     if (!agent)
         return;
+    uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
     if (agent->mailbox)
-        sc_mailbox_unregister(agent->mailbox, (uint64_t)(uintptr_t)agent);
+        sc_mailbox_unregister(agent->mailbox, id);
     agent->mailbox = mailbox;
     if (agent->mailbox)
-        sc_mailbox_register(agent->mailbox, (uint64_t)(uintptr_t)agent);
+        sc_mailbox_register(agent->mailbox, id);
+}
+
+void sc_agent_set_task_list(sc_agent_t *agent, sc_task_list_t *task_list) {
+    if (!agent)
+        return;
+    agent->task_list = task_list;
 }
 
 void sc_agent_set_retrieval_engine(sc_agent_t *agent, sc_retrieval_engine_t *engine) {
@@ -299,7 +308,8 @@ void sc_agent_deinit(sc_agent_t *agent) {
     if (!agent)
         return;
     if (agent->mailbox) {
-        sc_mailbox_unregister(agent->mailbox, (uint64_t)(uintptr_t)agent);
+        uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
+        sc_mailbox_unregister(agent->mailbox, id);
         agent->mailbox = NULL;
     }
     sc_agent_clear_history(agent);
@@ -351,6 +361,10 @@ void sc_agent_deinit(sc_agent_t *agent) {
     if (agent->audit_logger) {
         sc_audit_logger_destroy(agent->audit_logger, agent->alloc);
         agent->audit_logger = NULL;
+    }
+    if (agent->team) {
+        sc_team_destroy(agent->team);
+        agent->team = NULL;
     }
     if (agent->undo_stack) {
         sc_undo_stack_destroy(agent->undo_stack);
@@ -525,6 +539,11 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent, const char *message, size
                            "  /spawn <task>     Spawn a sub-agent\n"
                            "  /agents           List running agents\n"
                            "  /cancel <id>      Cancel a sub-agent\n"
+                           "  /send <id> <msg>  Send message to another agent\n"
+                           "  /tasks            Show task list summary\n"
+                           "  /task add <subj>   Create task\n"
+                           "  /task claim <id>   Claim task\n"
+                           "  /task done <id>    Mark task complete\n"
                            "  /undo             Undo last reversible action\n";
         return sc_strndup(agent->alloc, help, strlen(help));
     }
@@ -643,6 +662,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent, const char *message, size
         memset(&scfg, 0, sizeof(scfg));
         scfg.mode = SC_SPAWN_ONE_SHOT;
         scfg.max_iterations = 10;
+        scfg.mailbox = agent->mailbox;
         uint64_t new_id = 0;
         sc_error_t err =
             sc_agent_pool_spawn(agent->agent_pool, &scfg, arg_buf, arg_len, "cli-spawn", &new_id);
@@ -696,6 +716,93 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent, const char *message, size
         return sc_sprintf(agent->alloc, "Cancelled agent #%llu", (unsigned long long)cid);
     }
 
+    if (sc_strncasecmp(cmd_buf, "send", 4) == 0) {
+        if (!agent->mailbox)
+            return sc_strndup(agent->alloc, "Mailbox not configured.", 22);
+        if (arg_len == 0)
+            return sc_strndup(agent->alloc, "Usage: /send <agent-id> <message>", 32);
+        const char *p = arg_buf;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (!*p)
+            return sc_strndup(agent->alloc, "Usage: /send <agent-id> <message>", 32);
+        uint64_t to_id = (uint64_t)strtoull(p, (char **)&p, 10);
+        while (*p == ' ' || *p == '\t')
+            p++;
+        uint64_t from_id =
+            agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
+        sc_error_t err = sc_mailbox_send(agent->mailbox, from_id, to_id, SC_MSG_TASK,
+                                         p, strlen(p), 0);
+        if (err != SC_OK)
+            return sc_sprintf(agent->alloc, "Send failed: %s", sc_error_string(err));
+        return sc_sprintf(agent->alloc, "Sent to agent #%llu", (unsigned long long)to_id);
+    }
+
+    if (sc_strncasecmp(cmd_buf, "tasks", 5) == 0) {
+        if (!agent->task_list)
+            return sc_strndup(agent->alloc, "Task list not configured.", 25);
+        size_t pending = sc_task_list_count_by_status(agent->task_list, SC_TASK_LIST_PENDING);
+        size_t claimed = sc_task_list_count_by_status(agent->task_list, SC_TASK_LIST_CLAIMED);
+        size_t completed =
+            sc_task_list_count_by_status(agent->task_list, SC_TASK_LIST_COMPLETED);
+        return sc_sprintf(agent->alloc,
+                          "Tasks: %zu pending, %zu claimed, %zu completed",
+                          pending, claimed, completed);
+    }
+
+    if (sc_strncasecmp(cmd_buf, "task", 4) == 0) {
+        if (!agent->task_list)
+            return sc_strndup(agent->alloc, "Task list not configured.", 25);
+        const char *p = arg_buf;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (!*p)
+            return sc_strndup(agent->alloc,
+                              "Usage: /task add <subject> | claim <id> | done <id>", 52);
+        if (sc_strncasecmp(p, "add", 3) == 0) {
+            p += 3;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (!*p)
+                return sc_strndup(agent->alloc, "Usage: /task add <subject>", 26);
+            uint64_t id = 0;
+            sc_error_t err =
+                sc_task_list_add(agent->task_list, p, NULL, NULL, 0, &id);
+            if (err != SC_OK)
+                return sc_sprintf(agent->alloc, "Add failed: %s", sc_error_string(err));
+            return sc_sprintf(agent->alloc, "Task #%llu created", (unsigned long long)id);
+        }
+        if (sc_strncasecmp(p, "claim", 5) == 0) {
+            p += 5;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (!*p)
+                return sc_strndup(agent->alloc, "Usage: /task claim <id>", 23);
+            uint64_t tid = (uint64_t)strtoull(p, NULL, 10);
+            uint64_t aid =
+                agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
+            sc_error_t err = sc_task_list_claim(agent->task_list, tid, aid);
+            if (err != SC_OK)
+                return sc_sprintf(agent->alloc, "Claim failed: %s", sc_error_string(err));
+            return sc_sprintf(agent->alloc, "Claimed task #%llu", (unsigned long long)tid);
+        }
+        if (sc_strncasecmp(p, "done", 4) == 0) {
+            p += 4;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (!*p)
+                return sc_strndup(agent->alloc, "Usage: /task done <id>", 22);
+            uint64_t tid = (uint64_t)strtoull(p, NULL, 10);
+            sc_error_t err =
+                sc_task_list_update_status(agent->task_list, tid, SC_TASK_LIST_COMPLETED);
+            if (err != SC_OK)
+                return sc_sprintf(agent->alloc, "Done failed: %s", sc_error_string(err));
+            return sc_sprintf(agent->alloc, "Task #%llu completed", (unsigned long long)tid);
+        }
+        return sc_strndup(agent->alloc,
+                          "Usage: /task add <subject> | claim <id> | done <id>", 52);
+    }
+
     if (sc_strncasecmp(cmd_buf, "undo", 4) == 0) {
         if (!agent->undo_stack)
             return sc_strndup(agent->alloc, "Undo stack not configured.", 27);
@@ -728,6 +835,11 @@ static sc_policy_action_t evaluate_tool_policy(sc_agent_t *agent, const char *to
     sc_policy_action_t base = sc_agent_check_policy(agent, tool_name, args_json);
     if (base == SC_POLICY_DENY)
         return SC_POLICY_DENY;
+    if (agent->team && agent->agent_id) {
+        const sc_team_member_t *member = sc_team_get_member(agent->team, agent->agent_id);
+        if (member && !sc_team_role_allows_tool(member->role, tool_name))
+            return SC_POLICY_DENY;
+    }
     if (agent->policy_engine) {
         sc_policy_eval_ctx_t ctx = {
             .tool_name = tool_name,
@@ -840,6 +952,23 @@ static void agent_maybe_tts(sc_agent_t *agent, const char *text, size_t text_len
 #endif
 }
 
+static void process_mailbox_messages(sc_agent_t *agent) {
+    if (!agent->mailbox)
+        return;
+    uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
+    sc_message_t msg;
+    while (sc_mailbox_recv(agent->mailbox, id, &msg) == SC_OK) {
+        char buf[512];
+        size_t payload_len = msg.payload_len < 400 ? msg.payload_len : 400;
+        int n = snprintf(buf, sizeof(buf), "[Message from agent %llu]: %.*s",
+                        (unsigned long long)msg.from_agent, (int)payload_len,
+                        msg.payload ? msg.payload : "");
+        if (n > 0)
+            (void)append_history(agent, SC_ROLE_USER, buf, (size_t)n, NULL, 0, NULL, 0);
+        sc_message_free(agent->alloc, &msg);
+    }
+}
+
 sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, char **response_out,
                          size_t *response_len_out) {
     if (!agent || !msg || !response_out)
@@ -849,6 +978,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
         *response_len_out = 0;
 
     sc_agent_set_current_for_tools(agent);
+
+    process_mailbox_messages(agent);
 
     char *slash_resp = sc_agent_handle_slash_command(agent, msg, msg_len);
     if (slash_resp) {
@@ -1429,6 +1560,8 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
         *response_len_out = 0;
 
     sc_agent_set_current_for_tools(agent);
+
+    process_mailbox_messages(agent);
 
     char *slash_resp = sc_agent_handle_slash_command(agent, msg, msg_len);
     if (slash_resp) {

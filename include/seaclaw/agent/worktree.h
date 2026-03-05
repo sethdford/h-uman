@@ -8,40 +8,36 @@
 #include <stdint.h>
 
 typedef struct sc_worktree {
-    char *path;           /* e.g., "/path/to/repo-agent-1" */
-    char *branch;        /* e.g., "agent/task-42" */
+    char *path;          /* absolute path to worktree directory */
+    char *branch;        /* branch name */
     uint64_t agent_id;   /* owning agent */
     bool active;
 } sc_worktree_t;
 
 typedef struct sc_worktree_manager sc_worktree_manager_t;
 
-/* Create manager anchored to a git repo root */
+/* Create manager. repo_root is the main git repo path. */
 sc_worktree_manager_t *sc_worktree_manager_create(sc_allocator_t *alloc,
-    const char *repo_root, size_t max_worktrees);
+    const char *repo_root);
 void sc_worktree_manager_destroy(sc_worktree_manager_t *mgr);
 
-/* Create a worktree for an agent: git worktree add <path> -b <branch>
- * path is auto-generated: <repo_root>-agent-<agent_id>
- * branch is auto-generated: agent/<agent_id>
- */
+/* Create a new worktree for an agent. Branch name auto-generated: "agent/<agent_id>/<label>"
+ * worktree_path is set on success (owned by manager, valid until destroy) */
 sc_error_t sc_worktree_create(sc_worktree_manager_t *mgr, uint64_t agent_id,
-    sc_worktree_t *out);
+    const char *label, const char **out_path);
 
-/* Remove a worktree: git worktree remove <path> */
+/* Remove a worktree when agent is done */
 sc_error_t sc_worktree_remove(sc_worktree_manager_t *mgr, uint64_t agent_id);
 
-/* Get worktree info for an agent */
-sc_error_t sc_worktree_get(sc_worktree_manager_t *mgr, uint64_t agent_id,
-    sc_worktree_t *out);
+/* List active worktrees */
+sc_error_t sc_worktree_list(sc_worktree_manager_t *mgr, sc_worktree_t **out,
+    size_t *count);
 
-/* List all active worktrees. Caller must sc_worktree_free each element and free the array. */
-sc_error_t sc_worktree_list(sc_worktree_manager_t *mgr,
-    sc_worktree_t **out, size_t *out_count);
+/* Get worktree path for an agent (NULL if none) */
+const char *sc_worktree_path_for_agent(sc_worktree_manager_t *mgr,
+    uint64_t agent_id);
 
-/* Merge agent's branch back to base: git merge <branch> */
-sc_error_t sc_worktree_merge(sc_worktree_manager_t *mgr, uint64_t agent_id);
-
-void sc_worktree_free(sc_allocator_t *alloc, sc_worktree_t *wt);
+void sc_worktree_list_free(sc_allocator_t *alloc, sc_worktree_t *list,
+    size_t count);
 
 #endif /* SC_WORKTREE_H */

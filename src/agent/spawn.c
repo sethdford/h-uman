@@ -2,6 +2,7 @@
 #include "seaclaw/agent/team.h"
 #include "seaclaw/agent/worktree.h"
 #include "seaclaw/agent.h"
+#include "seaclaw/agent/mailbox.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/providers/factory.h"
 #include "seaclaw/security.h"
@@ -32,6 +33,7 @@ typedef struct sc_pool_slot {
     double temperature;
     uint32_t max_iterations;
     sc_security_policy_t *policy;
+    sc_mailbox_t *mailbox;
     int64_t started_at;
     double cost_usd;
     volatile bool cancelled;
@@ -154,6 +156,10 @@ static void *spawn_thread(void *arg) {
             result = sc_strndup(a, "(agent create failed)", 21);
             goto done;
         }
+        ag->agent_id = s->agent_id;
+        ag->worktree_mgr = pool->worktree_mgr;
+        if (s->mailbox)
+            sc_agent_set_mailbox(ag, s->mailbox);
         char *resp = NULL;
         size_t rlen = 0;
         sc_error_t e = sc_agent_turn(ag, task, task_len, &resp, &rlen);
@@ -186,6 +192,10 @@ static void *spawn_thread(void *arg) {
             result = sc_strndup(a, "(agent create failed)", 21);
             goto done;
         }
+        ag.agent_id = s->agent_id;
+        ag.worktree_mgr = pool->worktree_mgr;
+        if (s->mailbox)
+            sc_agent_set_mailbox(&ag, s->mailbox);
         char *resp = NULL;
         size_t rlen = 0;
         sc_agent_turn(&ag, task, task_len, &resp, &rlen);
@@ -198,6 +208,8 @@ static void *spawn_thread(void *arg) {
         sc_agent_deinit(&ag);
         if (!result)
             result = sc_strndup(a, "(no response)", 13);
+        if (pool->worktree_mgr)
+            (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
     }
 
 done:
@@ -263,6 +275,8 @@ void sc_agent_pool_destroy(sc_agent_pool_t *pool) {
         if (!pool->used[i])
             continue;
         sc_pool_slot_t *s = &pool->slots[i];
+        if (pool->worktree_mgr && s->agent_id)
+            (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
         if (s->thread_valid) {
             pthread_t th = s->thread;
@@ -326,10 +340,11 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool, const sc_spawn_config_t *c
     s->base_url = dup_opt(a, cfg->base_url, cfg->base_url_len);
     s->model = dup_opt(a, cfg->model, cfg->model_len);
     if (pool->worktree_mgr) {
-        sc_worktree_t wt = {0};
-        if (sc_worktree_create(pool->worktree_mgr, s->agent_id, &wt) == SC_OK && wt.path) {
-            s->workspace_dir = sc_strdup(a, wt.path);
-            sc_worktree_free(a, &wt);
+        const char *wt_path = NULL;
+        const char *lbl = (label && label[0]) ? label : "agent";
+        if (sc_worktree_create(pool->worktree_mgr, s->agent_id, lbl, &wt_path) == SC_OK
+            && wt_path) {
+            s->workspace_dir = sc_strdup(a, wt_path);
         } else {
             s->workspace_dir = dup_opt(a, cfg->workspace_dir, cfg->workspace_dir_len);
         }
@@ -339,6 +354,7 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool, const sc_spawn_config_t *c
     s->system_prompt = dup_opt(a, cfg->system_prompt, cfg->system_prompt_len);
     s->task = task ? sc_strndup(a, task, task_len) : NULL;
     s->label = label ? sc_strndup(a, label, strlen(label)) : NULL;
+    s->mailbox = cfg->mailbox;
     pool->used[si] = true;
 
 #if defined(SC_IS_TEST) && SC_IS_TEST == 1
@@ -478,6 +494,8 @@ sc_error_t sc_agent_pool_cancel(sc_agent_pool_t *pool, uint64_t agent_id) {
     }
     s->cancelled = true;
     if (s->status == SC_AGENT_IDLE || s->status == SC_AGENT_COMPLETED) {
+        if (pool->worktree_mgr)
+            (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
         slot_deinit_agent(pool->alloc, s);
         s->status = SC_AGENT_CANCELLED;
     }

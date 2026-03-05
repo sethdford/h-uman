@@ -237,6 +237,62 @@ size_t sc_task_list_count_by_status(sc_task_list_t *list, sc_task_list_status_t 
     return n;
 }
 
+bool sc_task_list_is_ready(sc_task_list_t *list, uint64_t task_id) {
+    return list && !sc_task_list_is_blocked(list, task_id);
+}
+
+sc_error_t sc_task_list_query(sc_task_list_t *list, sc_task_list_status_t status,
+                              sc_task_t **out, size_t *out_count) {
+    if (!list || !out || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    size_t n = sc_task_list_count_by_status(list, status);
+    if (n == 0)
+        return SC_OK;
+    sc_task_t *arr =
+        (sc_task_t *)list->alloc->alloc(list->alloc->ctx, n * sizeof(sc_task_t));
+    if (!arr)
+        return SC_ERR_OUT_OF_MEMORY;
+    memset(arr, 0, n * sizeof(sc_task_t));
+    size_t j = 0;
+    for (size_t i = 0; i < list->count && j < n; i++) {
+        if (list->tasks[i].status != status)
+            continue;
+        arr[j] = list->tasks[i];
+        if (arr[j].subject)
+            arr[j].subject =
+                sc_strndup(list->alloc, arr[j].subject, strlen(arr[j].subject));
+        if (arr[j].description)
+            arr[j].description =
+                sc_strndup(list->alloc, arr[j].description, strlen(arr[j].description));
+        if (arr[j].blocked_by && arr[j].blocked_by_count > 0) {
+            uint64_t *cpy = (uint64_t *)list->alloc->alloc(
+                list->alloc->ctx, arr[j].blocked_by_count * sizeof(uint64_t));
+            if (cpy) {
+                memcpy(cpy, list->tasks[i].blocked_by,
+                       arr[j].blocked_by_count * sizeof(uint64_t));
+                arr[j].blocked_by = cpy;
+            } else {
+                arr[j].blocked_by = NULL;
+                arr[j].blocked_by_count = 0;
+            }
+        }
+        j++;
+    }
+    *out = arr;
+    *out_count = j;
+    return SC_OK;
+}
+
+void sc_task_array_free(sc_allocator_t *alloc, sc_task_t *tasks, size_t count) {
+    if (!alloc || !tasks)
+        return;
+    for (size_t i = 0; i < count; i++)
+        sc_task_free(alloc, &tasks[i]);
+    alloc->free(alloc->ctx, tasks, count * sizeof(sc_task_t));
+}
+
 void sc_task_free(sc_allocator_t *alloc, sc_task_t *task) {
     if (!alloc || !task)
         return;

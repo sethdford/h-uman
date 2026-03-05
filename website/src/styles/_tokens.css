@@ -57,16 +57,22 @@
   --sc-glass-subtle-bg-opacity: 0.04;
   --sc-glass-subtle-border-opacity: 0.05;
   --sc-glass-subtle-inset-opacity: 0;
+  --sc-glass-subtle-tint-opacity: 0.02;
+  --sc-glass-subtle-refraction-scale: 0;
   --sc-glass-standard-blur: 24px;
   --sc-glass-standard-saturate: 180%;
   --sc-glass-standard-bg-opacity: 0.06;
   --sc-glass-standard-border-opacity: 0.08;
   --sc-glass-standard-inset-opacity: 0.06;
+  --sc-glass-standard-tint-opacity: 0.04;
+  --sc-glass-standard-refraction-scale: 2;
   --sc-glass-prominent-blur: 32px;
   --sc-glass-prominent-saturate: 200%;
   --sc-glass-prominent-bg-opacity: 0.08;
   --sc-glass-prominent-border-opacity: 0.12;
   --sc-glass-prominent-inset-opacity: 0.1;
+  --sc-glass-prominent-tint-opacity: 0.06;
+  --sc-glass-prominent-refraction-scale: 3;
   /* Pixar micro-physics */
   --sc-physics-button-press-scaleX: 1.01;
   --sc-physics-button-press-scaleY: 0.97;
@@ -76,6 +82,8 @@
   --sc-physics-dropdown-anticipate-scaleY: 0.98;
   --sc-physics-modal-anticipate-pause: 50ms;
   --sc-physics-modal-anticipate-scale: 0.97;
+  --sc-physics-secondary-damping: 0.85;
+  --sc-physics-secondary-delay: 60ms;
   --sc-physics-toggle-squash-scaleX: 1.15;
   --sc-physics-toggle-squash-scaleY: 0.85;
   /* Breakpoints */
@@ -222,6 +230,22 @@
   --sc-spring-expressive-damping: 14;
   --sc-spring-dramatic-stiffness: 80;
   --sc-spring-dramatic-damping: 10;
+  /* container transform */
+  --sc-container-transform-duration: 350ms;
+  --sc-container-transform-easing: cubic-bezier(0.2, 0, 0, 1);
+  --sc-container-transform-fade-through-duration: 100ms;
+  --sc-container-transform-scale-end: 1;
+  --sc-container-transform-scale-start: 0.85;
+  /* path motion */
+  --sc-path-motion-arc-duration: 300ms;
+  --sc-path-motion-arc-easing: cubic-bezier(0.35, 0, 0.25, 1);
+  --sc-path-motion-offset-distance-end: 100%;
+  --sc-path-motion-offset-distance-start: 0%;
+  /* view transition */
+  --sc-view-transition-duration: 300ms;
+  --sc-view-transition-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --sc-view-transition-new-enter: ease-out;
+  --sc-view-transition-old-exit: ease-in;
   /* Dark theme colors (default) */
   --sc-accent: #14b8a6;
   --sc-accent-hover: #2dd4bf;
@@ -583,5 +607,33 @@
     --sc-duration-slow: 0ms;
     --sc-duration-slower: 0ms;
     --sc-duration-slowest: 0ms;
+  }
+}
+
+@media (color-gamut: p3) {
+  :root {
+    /* Wide gamut P3 color overrides — more vivid on supported displays */
+    --sc-accent: color(display-p3 0.078 0.722 0.651);
+    --sc-accent-hover: color(display-p3 0.176 0.831 0.749);
+    --sc-accent-secondary: color(display-p3 0.961 0.620 0.043);
+    --sc-accent-strong: color(display-p3 0.369 0.918 0.831);
+    --sc-accent-tertiary: color(display-p3 0.388 0.400 0.945);
+    --sc-accent-text: color(display-p3 0.176 0.831 0.749);
+    --sc-error: color(display-p3 0.976 0.439 0.400);
+    --sc-focus-ring: color(display-p3 0.078 0.722 0.651);
+    --sc-info: color(display-p3 0.231 0.510 0.965);
+    --sc-link: color(display-p3 0.176 0.831 0.749);
+    --sc-success: color(display-p3 0.063 0.725 0.506);
+    --sc-warning: color(display-p3 0.918 0.702 0.031);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --sc-accent: color(display-p3 0.078 0.722 0.651);
+      --sc-accent-text: color(display-p3 0.051 0.580 0.533);
+      --sc-error: color(display-p3 0.863 0.149 0.149);
+      --sc-info: color(display-p3 0.145 0.388 0.922);
+      --sc-success: color(display-p3 0.022 0.588 0.412);
+      --sc-warning: color(display-p3 0.792 0.541 0.016);
+    }
   }
 }

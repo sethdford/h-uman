@@ -1,6 +1,7 @@
 #ifndef SC_AGENT_SPAWN_H
 #define SC_AGENT_SPAWN_H
 
+#include "seaclaw/agent/mailbox.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/security.h"
@@ -36,6 +37,7 @@ typedef struct sc_spawn_config {
     double budget_usd;
     uint32_t max_iterations;
     sc_spawn_mode_t mode;
+    sc_mailbox_t *mailbox; /* optional; when set, child agents share this mailbox */
 } sc_spawn_config_t;
 
 typedef enum sc_agent_status {

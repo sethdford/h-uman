@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-05T08:49:01.098Z",
+  "generated": "2026-03-05T09:00:36.111Z",
   "groups": {
     "color.neutral": [
       {
@@ -1330,6 +1330,74 @@
         "value": "0.85"
       }
     ],
+    "micro-physics": [
+      {
+        "name": "secondary-delay",
+        "value": "60ms"
+      },
+      {
+        "name": "secondary-damping",
+        "value": "0.85"
+      }
+    ],
+    "container-transform": [
+      {
+        "name": "duration",
+        "value": "350ms"
+      },
+      {
+        "name": "easing",
+        "value": "cubic-bezier(0.2, 0, 0, 1)"
+      },
+      {
+        "name": "fade-through-duration",
+        "value": "100ms"
+      },
+      {
+        "name": "scale-start",
+        "value": "0.85"
+      },
+      {
+        "name": "scale-end",
+        "value": "1"
+      }
+    ],
+    "path-motion": [
+      {
+        "name": "arc-easing",
+        "value": "cubic-bezier(0.35, 0, 0.25, 1)"
+      },
+      {
+        "name": "arc-duration",
+        "value": "300ms"
+      },
+      {
+        "name": "offset-distance-start",
+        "value": "0%"
+      },
+      {
+        "name": "offset-distance-end",
+        "value": "100%"
+      }
+    ],
+    "view-transition": [
+      {
+        "name": "duration",
+        "value": "300ms"
+      },
+      {
+        "name": "easing",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)"
+      },
+      {
+        "name": "old-exit",
+        "value": "ease-in"
+      },
+      {
+        "name": "new-enter",
+        "value": "ease-out"
+      }
+    ],
     "dark": [
       {
         "name": "bg",
@@ -2014,6 +2082,48 @@
         "value": "2px"
       }
     ],
+    "composite": [
+      {
+        "name": "border-default",
+        "value": "[object Object]"
+      },
+      {
+        "name": "border-subtle",
+        "value": "[object Object]"
+      },
+      {
+        "name": "border-focus",
+        "value": "[object Object]"
+      },
+      {
+        "name": "shadow-sm",
+        "value": "[object Object]"
+      },
+      {
+        "name": "shadow-md",
+        "value": "[object Object],[object Object]"
+      },
+      {
+        "name": "shadow-lg",
+        "value": "[object Object],[object Object]"
+      },
+      {
+        "name": "typography-body",
+        "value": "[object Object]"
+      },
+      {
+        "name": "typography-heading",
+        "value": "[object Object]"
+      },
+      {
+        "name": "typography-caption",
+        "value": "[object Object]"
+      },
+      {
+        "name": "typography-code",
+        "value": "[object Object]"
+      }
+    ],
     "sidebar": [
       {
         "name": "width",
@@ -2420,6 +2530,14 @@
       {
         "name": "inset-opacity",
         "value": "0"
+      },
+      {
+        "name": "tint-opacity",
+        "value": "0.02"
+      },
+      {
+        "name": "refraction-scale",
+        "value": "0"
       }
     ],
     "glass.standard": [
@@ -2442,6 +2560,14 @@
       {
         "name": "inset-opacity",
         "value": "0.06"
+      },
+      {
+        "name": "tint-opacity",
+        "value": "0.04"
+      },
+      {
+        "name": "refraction-scale",
+        "value": "2"
       }
     ],
     "glass.prominent": [
@@ -2464,6 +2590,14 @@
       {
         "name": "inset-opacity",
         "value": "0.1"
+      },
+      {
+        "name": "tint-opacity",
+        "value": "0.06"
+      },
+      {
+        "name": "refraction-scale",
+        "value": "3"
       }
     ]
   }

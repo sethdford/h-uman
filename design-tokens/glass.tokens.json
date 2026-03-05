@@ -1,4 +1,9 @@
 {
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$extensions": {
+    "com.seaclaw.platform": "all",
+    "com.seaclaw.version": "0.3.0"
+  },
   "$description": "Liquid Glass tokens — three tiers of glass depth inspired by Apple visionOS Liquid Glass, adapted for web/native",
   "glass": {
     "subtle": {
@@ -27,7 +32,17 @@
         "$type": "number",
         "$description": "No inset highlight"
       },
-      "$description": "Backgrounds, nav chrome, ambient panels"
+      "tint-opacity": {
+        "$value": 0.02,
+        "$type": "number",
+        "$description": "Minimal environment tint"
+      },
+      "refraction-scale": {
+        "$value": 0,
+        "$type": "number",
+        "$description": "No refraction at subtle tier"
+      },
+      "$description": "Backgrounds, nav chrome, ambient panels — z.raised (100)"
     },
     "standard": {
       "blur": {
@@ -55,7 +70,17 @@
         "$type": "number",
         "$description": "Subtle top highlight"
       },
-      "$description": "Cards, panels, interactive surfaces"
+      "tint-opacity": {
+        "$value": 0.04,
+        "$type": "number",
+        "$description": "Subtle environment tint"
+      },
+      "refraction-scale": {
+        "$value": 2,
+        "$type": "number",
+        "$description": "Light refraction distortion"
+      },
+      "$description": "Cards, panels, interactive surfaces — z.dropdown (1000)"
     },
     "prominent": {
       "blur": {
@@ -83,7 +108,17 @@
         "$type": "number",
         "$description": "Strong top highlight"
       },
-      "$description": "Modals, sheets, hero elements, overlays"
+      "tint-opacity": {
+        "$value": 0.06,
+        "$type": "number",
+        "$description": "Noticeable environment tint"
+      },
+      "refraction-scale": {
+        "$value": 3,
+        "$type": "number",
+        "$description": "Visible refraction distortion"
+      },
+      "$description": "Modals, sheets, hero elements, overlays — z.modal (1300)"
     }
   }
 }

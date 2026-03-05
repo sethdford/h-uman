@@ -3,6 +3,8 @@
 
 #include "seaclaw/agent/mailbox.h"
 #include "seaclaw/agent/spawn.h"
+#include "seaclaw/agent/team.h"
+#include "seaclaw/agent/worktree.h"
 #include "seaclaw/agent/task_list.h"
 #include "seaclaw/channel.h"
 #include "seaclaw/core/allocator.h"
@@ -115,6 +117,9 @@ struct sc_agent {
 
     sc_agent_pool_t *agent_pool;
     sc_mailbox_t *mailbox;
+    uint64_t agent_id; /* used for mailbox registration; 0 = use (uintptr_t)agent */
+    sc_worktree_manager_t *worktree_mgr;
+    sc_team_t *team;
     sc_task_list_t *task_list;
     sc_policy_engine_t *policy_engine;
 
@@ -140,6 +145,9 @@ void sc_agent_deinit(sc_agent_t *agent);
 
 /* Optional: set mailbox and register agent for multi-agent messaging. Caller owns mailbox. */
 void sc_agent_set_mailbox(sc_agent_t *agent, sc_mailbox_t *mailbox);
+
+/* Optional: set shared task list for multi-agent collaboration. Caller owns task_list. */
+void sc_agent_set_task_list(sc_agent_t *agent, sc_task_list_t *task_list);
 
 /* Optional: set retrieval engine for semantic/hybrid recall. Caller owns engine lifecycle. */
 void sc_agent_set_retrieval_engine(sc_agent_t *agent, sc_retrieval_engine_t *engine);

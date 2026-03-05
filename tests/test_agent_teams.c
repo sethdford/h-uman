@@ -11,55 +11,41 @@
 #include "test_framework.h"
 #include <string.h>
 
-static void test_worktree_create_generates_correct_path_and_branch(void) {
+static void test_worktree_create_tracks_metadata(void) {
     sc_allocator_t alloc = sc_system_allocator();
-    sc_worktree_manager_t *mgr =
-        sc_worktree_manager_create(&alloc, "/tmp/repo", 8);
+    sc_worktree_manager_t *mgr = sc_worktree_manager_create(&alloc, "/tmp/repo");
     SC_ASSERT_NOT_NULL(mgr);
 
-    sc_worktree_t wt = {0};
-    sc_error_t err = sc_worktree_create(mgr, 42, &wt);
+    const char *path = NULL;
+    sc_error_t err = sc_worktree_create(mgr, 42, "task-a", &path);
     SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(wt.path);
-    SC_ASSERT_NOT_NULL(wt.branch);
-    SC_ASSERT_STR_EQ(wt.path, "/tmp/repo-agent-42");
-    SC_ASSERT_STR_EQ(wt.branch, "agent/42");
-    SC_ASSERT_EQ(wt.agent_id, 42u);
-    SC_ASSERT_TRUE(wt.active);
-
-    sc_worktree_free(&alloc, &wt);
+    SC_ASSERT_NOT_NULL(path);
+    SC_ASSERT_STR_EQ(path, "/tmp/repo/../.worktrees/task-a");
     sc_worktree_manager_destroy(mgr);
 }
 
 static void test_worktree_remove_marks_inactive(void) {
     sc_allocator_t alloc = sc_system_allocator();
-    sc_worktree_manager_t *mgr =
-        sc_worktree_manager_create(&alloc, "/tmp/repo", 8);
+    sc_worktree_manager_t *mgr = sc_worktree_manager_create(&alloc, "/tmp/repo");
     SC_ASSERT_NOT_NULL(mgr);
 
-    sc_worktree_t wt = {0};
-    SC_ASSERT_EQ(sc_worktree_create(mgr, 1, &wt), SC_OK);
-    sc_worktree_free(&alloc, &wt);
+    const char *path = NULL;
+    SC_ASSERT_EQ(sc_worktree_create(mgr, 1, "label", &path), SC_OK);
 
     SC_ASSERT_EQ(sc_worktree_remove(mgr, 1), SC_OK);
 
-    sc_worktree_t out = {0};
-    SC_ASSERT_EQ(sc_worktree_get(mgr, 1, &out), SC_ERR_NOT_FOUND);
-
+    SC_ASSERT_NULL(sc_worktree_path_for_agent(mgr, 1));
     sc_worktree_manager_destroy(mgr);
 }
 
-static void test_worktree_list_returns_active_only(void) {
+static void test_worktree_list_shows_active_worktrees(void) {
     sc_allocator_t alloc = sc_system_allocator();
-    sc_worktree_manager_t *mgr =
-        sc_worktree_manager_create(&alloc, "/tmp/repo", 8);
+    sc_worktree_manager_t *mgr = sc_worktree_manager_create(&alloc, "/tmp/repo");
     SC_ASSERT_NOT_NULL(mgr);
 
-    sc_worktree_t wt1 = {0}, wt2 = {0};
-    SC_ASSERT_EQ(sc_worktree_create(mgr, 1, &wt1), SC_OK);
-    SC_ASSERT_EQ(sc_worktree_create(mgr, 2, &wt2), SC_OK);
-    sc_worktree_free(&alloc, &wt1);
-    sc_worktree_free(&alloc, &wt2);
+    const char *p1 = NULL, *p2 = NULL;
+    SC_ASSERT_EQ(sc_worktree_create(mgr, 1, "a", &p1), SC_OK);
+    SC_ASSERT_EQ(sc_worktree_create(mgr, 2, "b", &p2), SC_OK);
 
     SC_ASSERT_EQ(sc_worktree_remove(mgr, 1), SC_OK);
 
@@ -68,32 +54,26 @@ static void test_worktree_list_returns_active_only(void) {
     SC_ASSERT_EQ(sc_worktree_list(mgr, &list, &count), SC_OK);
     SC_ASSERT_EQ(count, 1u);
     SC_ASSERT_NOT_NULL(list);
-    SC_ASSERT_STR_EQ(list[0].path, "/tmp/repo-agent-2");
+    SC_ASSERT_STR_EQ(list[0].path, "/tmp/repo/../.worktrees/b");
     SC_ASSERT_EQ(list[0].agent_id, 2u);
 
-    for (size_t i = 0; i < count; i++)
-        sc_worktree_free(&alloc, &list[i]);
-    alloc.free(alloc.ctx, list, count * sizeof(sc_worktree_t));
+    sc_worktree_list_free(&alloc, list, count);
     sc_worktree_manager_destroy(mgr);
 }
 
-static void test_worktree_get_finds_by_agent_id(void) {
+static void test_worktree_path_for_agent_returns_correct_path(void) {
     sc_allocator_t alloc = sc_system_allocator();
-    sc_worktree_manager_t *mgr =
-        sc_worktree_manager_create(&alloc, "/tmp/repo", 8);
+    sc_worktree_manager_t *mgr = sc_worktree_manager_create(&alloc, "/tmp/repo");
     SC_ASSERT_NOT_NULL(mgr);
 
-    sc_worktree_t wt = {0};
-    SC_ASSERT_EQ(sc_worktree_create(mgr, 99, &wt), SC_OK);
-    sc_worktree_free(&alloc, &wt);
+    const char *path = NULL;
+    SC_ASSERT_EQ(sc_worktree_create(mgr, 99, "task-99", &path), SC_OK);
 
-    sc_worktree_t out = {0};
-    SC_ASSERT_EQ(sc_worktree_get(mgr, 99, &out), SC_OK);
-    SC_ASSERT_STR_EQ(out.path, "/tmp/repo-agent-99");
-    SC_ASSERT_STR_EQ(out.branch, "agent/99");
-    SC_ASSERT_EQ(out.agent_id, 99u);
+    const char *got = sc_worktree_path_for_agent(mgr, 99);
+    SC_ASSERT_NOT_NULL(got);
+    SC_ASSERT_STR_EQ(got, "/tmp/repo/../.worktrees/task-99");
 
-    sc_worktree_free(&alloc, &out);
+    SC_ASSERT_NULL(sc_worktree_path_for_agent(mgr, 999));
     sc_worktree_manager_destroy(mgr);
 }
 
@@ -132,7 +112,7 @@ static void test_team_config_get_member_by_name(void) {
     sc_team_config_t cfg = {0};
     SC_ASSERT_EQ(sc_team_config_parse(&alloc, json, strlen(json), &cfg), SC_OK);
 
-    const sc_team_member_t *m = sc_team_config_get_member(&cfg, "reviewer");
+    const sc_team_config_member_t *m = sc_team_config_get_member(&cfg, "reviewer");
     SC_ASSERT_NOT_NULL(m);
     SC_ASSERT_STR_EQ(m->name, "reviewer");
     SC_ASSERT_STR_EQ(m->role, "reviewer");
@@ -152,7 +132,7 @@ static void test_team_config_get_by_role_finds_first_match(void) {
     sc_team_config_t cfg = {0};
     SC_ASSERT_EQ(sc_team_config_parse(&alloc, json, strlen(json), &cfg), SC_OK);
 
-    const sc_team_member_t *m = sc_team_config_get_by_role(&cfg, "builder");
+    const sc_team_config_member_t *m = sc_team_config_get_by_role(&cfg, "builder");
     SC_ASSERT_NOT_NULL(m);
     SC_ASSERT_STR_EQ(m->name, "backend");
 
@@ -195,6 +175,56 @@ static void test_team_config_parse_missing_fields_uses_defaults(void) {
     SC_ASSERT_NULL(cfg.members[0].model);
 
     sc_team_config_free(&alloc, &cfg);
+}
+
+/* ── Runtime team (sc_team_t) ─────────────────────────────────────────── */
+static void test_team_add_remove_members(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_team_t *team = sc_team_create(&alloc, "squad");
+    SC_ASSERT_NOT_NULL(team);
+
+    SC_ASSERT_EQ(sc_team_add_member(team, 1, "alice", SC_ROLE_LEAD, 2), SC_OK);
+    SC_ASSERT_EQ(sc_team_add_member(team, 2, "bob", SC_ROLE_BUILDER, 2), SC_OK);
+    SC_ASSERT_EQ(sc_team_member_count(team), 2u);
+
+    SC_ASSERT_EQ(sc_team_remove_member(team, 1), SC_OK);
+    SC_ASSERT_EQ(sc_team_member_count(team), 1u);
+    SC_ASSERT_NULL(sc_team_get_member(team, 1));
+    SC_ASSERT_NOT_NULL(sc_team_get_member(team, 2));
+
+    sc_team_destroy(team);
+}
+
+static void test_team_member_count_correct_after_add_remove(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_team_t *team = sc_team_create(&alloc, "t");
+    SC_ASSERT_NOT_NULL(team);
+
+    SC_ASSERT_EQ(sc_team_member_count(team), 0u);
+    SC_ASSERT_EQ(sc_team_add_member(team, 1, "a", SC_ROLE_REVIEWER, 1), SC_OK);
+    SC_ASSERT_EQ(sc_team_member_count(team), 1u);
+    SC_ASSERT_EQ(sc_team_add_member(team, 2, "b", SC_ROLE_TESTER, 2), SC_OK);
+    SC_ASSERT_EQ(sc_team_member_count(team), 2u);
+    SC_ASSERT_EQ(sc_team_remove_member(team, 1), SC_OK);
+    SC_ASSERT_EQ(sc_team_member_count(team), 1u);
+    SC_ASSERT_EQ(sc_team_remove_member(team, 2), SC_OK);
+    SC_ASSERT_EQ(sc_team_member_count(team), 0u);
+
+    sc_team_destroy(team);
+}
+
+static void test_team_role_reviewer_denies_file_write(void) {
+    SC_ASSERT_FALSE(sc_team_role_allows_tool(SC_ROLE_REVIEWER, "file_write"));
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_REVIEWER, "file_read"));
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_REVIEWER, "shell"));
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_REVIEWER, "memory_recall"));
+}
+
+static void test_team_role_lead_allows_all_tools(void) {
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_LEAD, "file_write"));
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_LEAD, "file_read"));
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_LEAD, "agent_spawn"));
+    SC_ASSERT_TRUE(sc_team_role_allows_tool(SC_ROLE_LEAD, "shell"));
 }
 
 /* ── Mailbox + agent integration ──────────────────────────────────────── */
@@ -382,23 +412,179 @@ static void test_claim_fails_on_already_claimed_task(void) {
     sc_task_list_destroy(list);
 }
 
+/* ── Feature 1: Mailbox in agent loop ───────────────────────────────────── */
+static void test_agent_turn_processes_mailbox_messages(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_mailbox_t *mb = sc_mailbox_create(&a, 8);
+    SC_ASSERT_NOT_NULL(mb);
+
+    sc_provider_t prov = {0};
+    SC_ASSERT_EQ(sc_provider_create(&a, "openai", 6, "test-key", 8, "", 0, &prov), SC_OK);
+
+    sc_agent_t agent = {0};
+    SC_ASSERT_EQ(sc_agent_from_config(&agent, &a, prov, NULL, 0, NULL, NULL, NULL, NULL,
+                                      "gpt-4o-mini", 10, "openai", 6, 0.7, ".", 1, 5, 20, false,
+                                      2, NULL, 0, NULL),
+                 SC_OK);
+    sc_agent_set_mailbox(&agent, mb);
+
+    uint64_t agent_id = (uint64_t)(uintptr_t)&agent;
+    SC_ASSERT_EQ(sc_mailbox_send(mb, 999, agent_id, SC_MSG_TASK, "Task from agent 999", 19, 0),
+                 SC_OK);
+
+    char *resp = NULL;
+    size_t rlen = 0;
+    SC_ASSERT_EQ(sc_agent_turn(&agent, "/status", 7, &resp, &rlen), SC_OK);
+    SC_ASSERT_NOT_NULL(resp);
+    a.free(a.ctx, resp, rlen + 1);
+
+    SC_ASSERT_EQ(agent.history_count, 1u);
+    SC_ASSERT_NOT_NULL(agent.history[0].content);
+    SC_ASSERT_TRUE(strstr(agent.history[0].content, "[Message from agent 999]") != NULL);
+    SC_ASSERT_TRUE(strstr(agent.history[0].content, "Task from agent 999") != NULL);
+
+    sc_agent_deinit(&agent);
+    sc_mailbox_destroy(mb);
+}
+
+static void test_agent_registers_unregisters_with_mailbox(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_mailbox_t *mb = sc_mailbox_create(&a, 8);
+    SC_ASSERT_NOT_NULL(mb);
+
+    sc_provider_t prov = {0};
+    SC_ASSERT_EQ(sc_provider_create(&a, "openai", 6, "test-key", 8, "", 0, &prov), SC_OK);
+
+    sc_agent_t agent = {0};
+    SC_ASSERT_EQ(sc_agent_from_config(&agent, &a, prov, NULL, 0, NULL, NULL, NULL, NULL,
+                                      "gpt-4o-mini", 10, "openai", 6, 0.7, ".", 1, 5, 20, false,
+                                      2, NULL, 0, NULL),
+                 SC_OK);
+    agent.agent_id = 1;
+    sc_agent_set_mailbox(&agent, mb);
+
+    SC_ASSERT_EQ(sc_mailbox_send(mb, 999, 1, SC_MSG_TASK, "hello", 5, 0), SC_OK);
+    sc_message_t msg = {0};
+    SC_ASSERT_EQ(sc_mailbox_recv(mb, 1, &msg), SC_OK);
+    sc_message_free(&a, &msg);
+
+    sc_agent_deinit(&agent);
+    SC_ASSERT_EQ(sc_mailbox_send(mb, 999, 1, SC_MSG_TASK, "after deinit", 12, 0),
+                 SC_ERR_NOT_FOUND);
+
+    sc_mailbox_destroy(mb);
+}
+
+static void test_send_slash_command_sends_message(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_mailbox_t *mb = sc_mailbox_create(&a, 8);
+    SC_ASSERT_NOT_NULL(mb);
+    SC_ASSERT_EQ(sc_mailbox_register(mb, 42), SC_OK);
+
+    sc_provider_t prov = {0};
+    SC_ASSERT_EQ(sc_provider_create(&a, "openai", 6, "test-key", 8, "", 0, &prov), SC_OK);
+
+    sc_agent_t agent = {0};
+    SC_ASSERT_EQ(sc_agent_from_config(&agent, &a, prov, NULL, 0, NULL, NULL, NULL, NULL,
+                                      "gpt-4o-mini", 10, "openai", 6, 0.7, ".", 1, 5, 20, false,
+                                      2, NULL, 0, NULL),
+                 SC_OK);
+    sc_agent_set_mailbox(&agent, mb);
+
+    char *resp = sc_agent_handle_slash_command(&agent, "/send 42 hello from slash", 25);
+    SC_ASSERT_NOT_NULL(resp);
+    SC_ASSERT_TRUE(strstr(resp, "Sent to agent") != NULL);
+    a.free(a.ctx, resp, strlen(resp) + 1);
+
+    sc_message_t msg = {0};
+    SC_ASSERT_EQ(sc_mailbox_recv(mb, 42, &msg), SC_OK);
+    SC_ASSERT_NOT_NULL(msg.payload);
+    SC_ASSERT_TRUE(strstr(msg.payload, "hello from slash") != NULL);
+    sc_message_free(&a, &msg);
+
+    sc_mailbox_unregister(mb, 42);
+    sc_agent_deinit(&agent);
+    sc_mailbox_destroy(mb);
+}
+
+/* ── Feature 2: Task list is_ready and query ────────────────────────────── */
+static void test_task_is_ready_when_deps_complete(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    SC_ASSERT_NOT_NULL(list);
+
+    uint64_t id1 = 0, id2 = 0;
+    SC_ASSERT_EQ(sc_task_list_add(list, "Task A", "First", NULL, 0, &id1), SC_OK);
+    uint64_t deps[] = {1};
+    SC_ASSERT_EQ(sc_task_list_add(list, "Task B", "Depends on A", deps, 1, &id2), SC_OK);
+
+    SC_ASSERT_TRUE(sc_task_list_is_ready(list, 1));
+    SC_ASSERT_FALSE(sc_task_list_is_ready(list, 2));
+
+    SC_ASSERT_EQ(sc_task_list_update_status(list, 1, SC_TASK_LIST_COMPLETED), SC_OK);
+    SC_ASSERT_TRUE(sc_task_list_is_ready(list, 2));
+
+    sc_task_list_destroy(list);
+}
+
+static void test_task_query_by_status_returns_correct_tasks(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_task_list_t *list = sc_task_list_create(&a, 16);
+    SC_ASSERT_NOT_NULL(list);
+
+    uint64_t id1 = 0, id2 = 0, id3 = 0;
+    SC_ASSERT_EQ(sc_task_list_add(list, "P1", NULL, NULL, 0, &id1), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_add(list, "P2", NULL, NULL, 0, &id2), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_add(list, "P3", NULL, NULL, 0, &id3), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_claim(list, 3, 100), SC_OK);
+    SC_ASSERT_EQ(sc_task_list_update_status(list, 3, SC_TASK_LIST_COMPLETED), SC_OK);
+
+    sc_task_t *pending = NULL;
+    size_t pending_count = 0;
+    SC_ASSERT_EQ(sc_task_list_query(list, SC_TASK_LIST_PENDING, &pending, &pending_count),
+                 SC_OK);
+    SC_ASSERT_EQ(pending_count, 2u);
+    SC_ASSERT_NOT_NULL(pending);
+    sc_task_array_free(&a, pending, pending_count);
+
+    sc_task_t *completed = NULL;
+    size_t completed_count = 0;
+    SC_ASSERT_EQ(sc_task_list_query(list, SC_TASK_LIST_COMPLETED, &completed, &completed_count),
+                 SC_OK);
+    SC_ASSERT_EQ(completed_count, 1u);
+    SC_ASSERT_NOT_NULL(completed);
+    SC_ASSERT_EQ(completed[0].id, 3u);
+    sc_task_array_free(&a, completed, completed_count);
+
+    sc_task_list_destroy(list);
+}
+
 void run_agent_teams_tests(void) {
     SC_TEST_SUITE("agent teams (worktree + team config + mailbox + task list)");
     SC_RUN_TEST(test_mailbox_register_send_recv_with_agent_id);
     SC_RUN_TEST(test_mailbox_recv_in_agent_context_works);
+    SC_RUN_TEST(test_agent_turn_processes_mailbox_messages);
+    SC_RUN_TEST(test_agent_registers_unregisters_with_mailbox);
+    SC_RUN_TEST(test_send_slash_command_sends_message);
     SC_RUN_TEST(test_cancel_message_sets_cancel_requested);
     SC_RUN_TEST(test_task_list_add_claim_complete_flow);
+    SC_RUN_TEST(test_task_is_ready_when_deps_complete);
+    SC_RUN_TEST(test_task_query_by_status_returns_correct_tasks);
     SC_RUN_TEST(test_task_blocked_by_incomplete_dependency_stays_blocked);
     SC_RUN_TEST(test_task_unblocks_when_dependency_completes);
     SC_RUN_TEST(test_next_available_skips_blocked_tasks);
     SC_RUN_TEST(test_claim_fails_on_already_claimed_task);
-    SC_RUN_TEST(test_worktree_create_generates_correct_path_and_branch);
+    SC_RUN_TEST(test_worktree_create_tracks_metadata);
     SC_RUN_TEST(test_worktree_remove_marks_inactive);
-    SC_RUN_TEST(test_worktree_list_returns_active_only);
-    SC_RUN_TEST(test_worktree_get_finds_by_agent_id);
+    SC_RUN_TEST(test_worktree_list_shows_active_worktrees);
+    SC_RUN_TEST(test_worktree_path_for_agent_returns_correct_path);
     SC_RUN_TEST(test_team_config_parse_with_3_members);
     SC_RUN_TEST(test_team_config_get_member_by_name);
     SC_RUN_TEST(test_team_config_get_by_role_finds_first_match);
     SC_RUN_TEST(test_team_config_parse_autonomy_levels_maps_correctly);
     SC_RUN_TEST(test_team_config_parse_missing_fields_uses_defaults);
+    SC_RUN_TEST(test_team_add_remove_members);
+    SC_RUN_TEST(test_team_member_count_correct_after_add_remove);
+    SC_RUN_TEST(test_team_role_reviewer_denies_file_write);
+    SC_RUN_TEST(test_team_role_lead_allows_all_tools);
 }

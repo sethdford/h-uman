@@ -410,12 +410,14 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
             send_json(fd, 400, "{\"error\":\"pairing not required\"}");
             return;
         }
-        const char *code = NULL;
+        char *code = NULL;
         if (body_len > 0 && body_len <= gw->config.max_body_size) {
             sc_json_value_t *root = NULL;
             if (sc_json_parse(gw->alloc, body, body_len, &root) == SC_OK && root &&
                 root->type == SC_JSON_OBJECT) {
-                code = sc_json_get_string(root, "code");
+                const char *raw = sc_json_get_string(root, "code");
+                if (raw && raw[0])
+                    code = sc_strndup(gw->alloc, raw, strlen(raw));
                 sc_json_free(gw->alloc, root);
             }
         }
@@ -455,6 +457,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         } else {
             send_json(fd, 400, "{\"error\":\"pairing_failed\"}");
         }
+        gw->alloc->free(gw->alloc->ctx, code, strlen(code) + 1);
         return;
     }
 

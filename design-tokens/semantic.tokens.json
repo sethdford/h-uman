@@ -1,6 +1,9 @@
 {
+  "$schema": "https://design-tokens.github.io/community-group/format/",
   "$description": "Semantic tokens — ocean-aligned theme",
   "$extensions": {
+    "com.seaclaw.platform": "all",
+    "com.seaclaw.version": "0.3.0",
     "seaclaw.colorSpace": "display-p3",
     "seaclaw.p3Colors": {
       "dark.accent": "color(display-p3 0.078 0.722 0.651)",
@@ -353,5 +356,121 @@
     "focus-ring": { "$value": "#ffffff", "$type": "color" },
     "focus-ring-width": { "$value": "3px", "$type": "dimension" },
     "focus-ring-offset": { "$value": "2px", "$type": "dimension" }
+  },
+  "composite": {
+    "$description": "W3C DTCG composite tokens — bundled multi-value types",
+    "border-default": {
+      "$value": {
+        "color": "{dark.border}",
+        "width": "1px",
+        "style": "solid"
+      },
+      "$type": "border"
+    },
+    "border-subtle": {
+      "$value": {
+        "color": "{dark.border-subtle}",
+        "width": "1px",
+        "style": "solid"
+      },
+      "$type": "border"
+    },
+    "border-focus": {
+      "$value": {
+        "color": "{dark.focus-ring}",
+        "width": "{dark.focus-ring-width}",
+        "style": "solid"
+      },
+      "$type": "border"
+    },
+    "shadow-sm": {
+      "$value": [
+        {
+          "color": "rgba(0,0,0,0.35)",
+          "offsetX": "0px",
+          "offsetY": "1px",
+          "blur": "3px",
+          "spread": "0px"
+        }
+      ],
+      "$type": "shadow"
+    },
+    "shadow-md": {
+      "$value": [
+        {
+          "color": "rgba(0,0,0,0.3)",
+          "offsetX": "0px",
+          "offsetY": "2px",
+          "blur": "4px",
+          "spread": "0px"
+        },
+        {
+          "color": "rgba(0,8,20,0.35)",
+          "offsetX": "0px",
+          "offsetY": "8px",
+          "blur": "24px",
+          "spread": "0px"
+        }
+      ],
+      "$type": "shadow"
+    },
+    "shadow-lg": {
+      "$value": [
+        {
+          "color": "rgba(0,0,0,0.35)",
+          "offsetX": "0px",
+          "offsetY": "4px",
+          "blur": "8px",
+          "spread": "0px"
+        },
+        {
+          "color": "rgba(0,8,20,0.4)",
+          "offsetX": "0px",
+          "offsetY": "16px",
+          "blur": "48px",
+          "spread": "0px"
+        }
+      ],
+      "$type": "shadow"
+    },
+    "typography-body": {
+      "$value": {
+        "fontFamily": "{fontFamily.sans}",
+        "fontSize": "{fontSize.base}",
+        "fontWeight": "{fontWeight.regular}",
+        "lineHeight": "{lineHeight.normal}",
+        "letterSpacing": "{letterSpacing.normal}"
+      },
+      "$type": "typography"
+    },
+    "typography-heading": {
+      "$value": {
+        "fontFamily": "{fontFamily.sans}",
+        "fontSize": "{fontSize.2xl}",
+        "fontWeight": "{fontWeight.semibold}",
+        "lineHeight": "{lineHeight.tight}",
+        "letterSpacing": "{letterSpacing.tight}"
+      },
+      "$type": "typography"
+    },
+    "typography-caption": {
+      "$value": {
+        "fontFamily": "{fontFamily.sans}",
+        "fontSize": "{fontSize.xs}",
+        "fontWeight": "{fontWeight.regular}",
+        "lineHeight": "{lineHeight.normal}",
+        "letterSpacing": "{letterSpacing.wide}"
+      },
+      "$type": "typography"
+    },
+    "typography-code": {
+      "$value": {
+        "fontFamily": "{fontFamily.mono}",
+        "fontSize": "{fontSize.sm}",
+        "fontWeight": "{fontWeight.regular}",
+        "lineHeight": "{lineHeight.relaxed}"
+      },
+      "$type": "typography"
+    }
   }
 }

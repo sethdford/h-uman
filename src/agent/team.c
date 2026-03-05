@@ -3,6 +3,10 @@
 #include "seaclaw/core/string.h"
 #include <string.h>
 
+#define SC_TEAM_INIT_CAP 8
+
+/* ── Config parsing ─────────────────────────────────────────────────────── */
+
 static sc_autonomy_level_t autonomy_from_string(const char *s) {
     if (!s)
         return SC_AUTONOMY_ASSISTED;
@@ -49,7 +53,7 @@ static sc_error_t parse_tools_array(sc_allocator_t *a, char ***out, size_t *out_
     return SC_OK;
 }
 
-static void free_member(sc_allocator_t *a, sc_team_member_t *m) {
+static void free_config_member(sc_allocator_t *a, sc_team_config_member_t *m) {
     if (!a || !m)
         return;
     if (m->name) {
@@ -109,13 +113,13 @@ sc_error_t sc_team_config_parse(sc_allocator_t *alloc, const char *json, size_t 
         return SC_OK;
     }
 
-    sc_team_member_t *members =
-        (sc_team_member_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_team_member_t));
+    sc_team_config_member_t *members =
+        (sc_team_config_member_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_team_config_member_t));
     if (!members) {
         sc_json_free(alloc, root);
         return SC_ERR_OUT_OF_MEMORY;
     }
-    memset(members, 0, n * sizeof(sc_team_member_t));
+    memset(members, 0, n * sizeof(sc_team_config_member_t));
     out->members = members;
     out->members_count = 0;
 
@@ -124,7 +128,7 @@ sc_error_t sc_team_config_parse(sc_allocator_t *alloc, const char *json, size_t 
         if (!item || item->type != SC_JSON_OBJECT)
             continue;
 
-        sc_team_member_t *m = &members[out->members_count];
+        sc_team_config_member_t *m = &members[out->members_count];
         const char *mname = sc_json_get_string(item, "name");
         if (mname)
             m->name = sc_strdup(alloc, mname);
@@ -165,14 +169,14 @@ void sc_team_config_free(sc_allocator_t *alloc, sc_team_config_t *cfg) {
     }
     if (cfg->members) {
         for (size_t i = 0; i < cfg->members_count; i++)
-            free_member(alloc, &cfg->members[i]);
-        alloc->free(alloc->ctx, cfg->members, cfg->members_count * sizeof(sc_team_member_t));
+            free_config_member(alloc, &cfg->members[i]);
+        alloc->free(alloc->ctx, cfg->members, cfg->members_count * sizeof(sc_team_config_member_t));
         cfg->members = NULL;
         cfg->members_count = 0;
     }
 }
 
-const sc_team_member_t *sc_team_config_get_member(const sc_team_config_t *cfg,
+const sc_team_config_member_t *sc_team_config_get_member(const sc_team_config_t *cfg,
     const char *name) {
     if (!cfg || !name)
         return NULL;
@@ -183,7 +187,7 @@ const sc_team_member_t *sc_team_config_get_member(const sc_team_config_t *cfg,
     return NULL;
 }
 
-const sc_team_member_t *sc_team_config_get_by_role(const sc_team_config_t *cfg,
+const sc_team_config_member_t *sc_team_config_get_by_role(const sc_team_config_t *cfg,
     const char *role) {
     if (!cfg || !role)
         return NULL;
@@ -192,4 +196,187 @@ const sc_team_member_t *sc_team_config_get_by_role(const sc_team_config_t *cfg,
             return &cfg->members[i];
     }
     return NULL;
+}
+
+/* ── Runtime team (sc_team_t) ───────────────────────────────────────────── */
+
+struct sc_team {
+    sc_allocator_t *alloc;
+    char *name;
+    sc_team_member_t *members;
+    size_t count;
+    size_t capacity;
+};
+
+sc_team_role_t sc_team_role_from_string(const char *s) {
+    if (!s)
+        return SC_ROLE_BUILDER;
+    if (strcmp(s, "lead") == 0)
+        return SC_ROLE_LEAD;
+    if (strcmp(s, "builder") == 0)
+        return SC_ROLE_BUILDER;
+    if (strcmp(s, "reviewer") == 0)
+        return SC_ROLE_REVIEWER;
+    if (strcmp(s, "tester") == 0)
+        return SC_ROLE_TESTER;
+    return SC_ROLE_BUILDER;
+}
+
+static sc_error_t grow_if_needed(sc_team_t *team) {
+    if (team->count < team->capacity)
+        return SC_OK;
+    size_t new_cap = team->capacity == 0 ? SC_TEAM_INIT_CAP : team->capacity * 2;
+    sc_team_member_t *n = (sc_team_member_t *)team->alloc->alloc(team->alloc->ctx,
+        new_cap * sizeof(sc_team_member_t));
+    if (!n)
+        return SC_ERR_OUT_OF_MEMORY;
+    memset(n, 0, new_cap * sizeof(sc_team_member_t));
+    if (team->members) {
+        memcpy(n, team->members, team->count * sizeof(sc_team_member_t));
+        team->alloc->free(team->alloc->ctx, team->members,
+            team->capacity * sizeof(sc_team_member_t));
+    }
+    team->members = n;
+    team->capacity = new_cap;
+    return SC_OK;
+}
+
+static void free_runtime_member(sc_allocator_t *a, sc_team_member_t *m) {
+    if (!a || !m)
+        return;
+    if (m->name) {
+        a->free(a->ctx, m->name, strlen(m->name) + 1);
+        m->name = NULL;
+    }
+}
+
+sc_team_t *sc_team_create(sc_allocator_t *alloc, const char *name) {
+    if (!alloc)
+        return NULL;
+    sc_team_t *team = (sc_team_t *)alloc->alloc(alloc->ctx, sizeof(*team));
+    if (!team)
+        return NULL;
+    memset(team, 0, sizeof(*team));
+    team->alloc = alloc;
+    if (name && name[0])
+        team->name = sc_strdup(alloc, name);
+    return team;
+}
+
+void sc_team_destroy(sc_team_t *team) {
+    if (!team)
+        return;
+    sc_allocator_t *a = team->alloc;
+    for (size_t i = 0; i < team->count; i++)
+        free_runtime_member(a, &team->members[i]);
+    if (team->name)
+        a->free(a->ctx, team->name, strlen(team->name) + 1);
+    if (team->members)
+        a->free(a->ctx, team->members, team->capacity * sizeof(sc_team_member_t));
+    a->free(a->ctx, team, sizeof(*team));
+}
+
+sc_error_t sc_team_add_member(sc_team_t *team, uint64_t agent_id, const char *name,
+    sc_team_role_t role, uint8_t autonomy_level) {
+    if (!team)
+        return SC_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < team->count; i++) {
+        if (team->members[i].agent_id == agent_id)
+            return SC_ERR_ALREADY_EXISTS;
+    }
+    sc_error_t err = grow_if_needed(team);
+    if (err != SC_OK)
+        return err;
+
+    sc_team_member_t *m = &team->members[team->count++];
+    m->agent_id = agent_id;
+    m->name = name && name[0] ? sc_strdup(team->alloc, name) : NULL;
+    m->role = role;
+    m->autonomy_level = autonomy_level;
+    m->active = true;
+    return SC_OK;
+}
+
+sc_error_t sc_team_remove_member(sc_team_t *team, uint64_t agent_id) {
+    if (!team)
+        return SC_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < team->count; i++) {
+        if (team->members[i].agent_id == agent_id) {
+            free_runtime_member(team->alloc, &team->members[i]);
+            memmove(&team->members[i], &team->members[i + 1],
+                (team->count - 1 - i) * sizeof(sc_team_member_t));
+            team->count--;
+            return SC_OK;
+        }
+    }
+    return SC_ERR_NOT_FOUND;
+}
+
+const sc_team_member_t *sc_team_get_member(sc_team_t *team, uint64_t agent_id) {
+    if (!team)
+        return NULL;
+    for (size_t i = 0; i < team->count; i++) {
+        if (team->members[i].agent_id == agent_id && team->members[i].active)
+            return &team->members[i];
+    }
+    return NULL;
+}
+
+sc_error_t sc_team_list_members(sc_team_t *team, sc_team_member_t **out,
+    size_t *count) {
+    if (!team || !out || !count)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *count = 0;
+    if (team->count == 0)
+        return SC_OK;
+
+    sc_team_member_t *arr = (sc_team_member_t *)team->alloc->alloc(team->alloc->ctx,
+        team->count * sizeof(sc_team_member_t));
+    if (!arr)
+        return SC_ERR_OUT_OF_MEMORY;
+    for (size_t i = 0; i < team->count; i++) {
+        arr[i].agent_id = team->members[i].agent_id;
+        arr[i].name = team->members[i].name ? sc_strdup(team->alloc, team->members[i].name) : NULL;
+        arr[i].role = team->members[i].role;
+        arr[i].autonomy_level = team->members[i].autonomy_level;
+        arr[i].active = team->members[i].active;
+    }
+    *out = arr;
+    *count = team->count;
+    return SC_OK;
+}
+
+const char *sc_team_name(const sc_team_t *team) {
+    return team ? team->name : NULL;
+}
+
+size_t sc_team_member_count(const sc_team_t *team) {
+    return team ? team->count : 0;
+}
+
+static bool tool_matches(const char *tool_name, const char *pattern) {
+    if (!tool_name || !pattern)
+        return false;
+    return strcmp(tool_name, pattern) == 0;
+}
+
+bool sc_team_role_allows_tool(sc_team_role_t role, const char *tool_name) {
+    if (!tool_name)
+        return false;
+    switch (role) {
+    case SC_ROLE_LEAD:
+        return true;
+    case SC_ROLE_BUILDER:
+        return !tool_matches(tool_name, "agent_spawn");
+    case SC_ROLE_REVIEWER:
+        return tool_matches(tool_name, "file_read") ||
+               tool_matches(tool_name, "shell") ||
+               tool_matches(tool_name, "memory_recall");
+    case SC_ROLE_TESTER:
+        return tool_matches(tool_name, "shell") ||
+               tool_matches(tool_name, "file_read") ||
+               tool_matches(tool_name, "file_write");
+    }
+    return false;
 }

@@ -1,4 +1,9 @@
 {
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$extensions": {
+    "com.seaclaw.platform": "all",
+    "com.seaclaw.version": "0.3.0"
+  },
   "$description": "Motion tokens — duration, easing, spring, choreography, and purpose-based transitions",
   "duration": {
     "instant": {
@@ -184,6 +189,150 @@
       "scaleX": { "$value": 1.15, "$type": "number" },
       "scaleY": { "$value": 0.85, "$type": "number" },
       "$description": "Toggle thumb squashes during slide"
+    },
+    "secondary-delay": {
+      "$value": "60ms",
+      "$type": "duration",
+      "$description": "Pixar secondary action — subsidiary elements react after primary, creating depth"
+    },
+    "secondary-damping": {
+      "$value": 0.85,
+      "$type": "number",
+      "$description": "Secondary action damping ratio — slightly underdamped for follow-through"
+    }
+  },
+  "container-transform": {
+    "$description": "Material 3-style container transforms — one element morphs into another",
+    "duration": {
+      "$value": "{duration.slow}",
+      "$type": "duration",
+      "$description": "Shared-element morph duration"
+    },
+    "easing": {
+      "$value": "{easing.emphasize}",
+      "$type": "cubicBezier",
+      "$description": "Dramatic deceleration for container morphs"
+    },
+    "fade-through-duration": {
+      "$value": "{duration.fast}",
+      "$type": "duration",
+      "$description": "Cross-fade portion of container transform"
+    },
+    "scale-start": {
+      "$value": 0.85,
+      "$type": "number",
+      "$description": "Origin container starts at this scale during morph"
+    },
+    "scale-end": {
+      "$value": 1.0,
+      "$type": "number",
+      "$description": "Destination container reaches full scale"
+    }
+  },
+  "path-motion": {
+    "$description": "Arc and curve motion for elements following natural paths instead of straight lines",
+    "arc-easing": {
+      "$value": "cubic-bezier(0.35, 0, 0.25, 1)",
+      "$type": "cubicBezier",
+      "$description": "Natural arc path easing — elements travel along a curve"
+    },
+    "arc-duration": {
+      "$value": "{duration.moderate}",
+      "$type": "duration",
+      "$description": "Duration for arc-based transitions"
+    },
+    "offset-distance-start": {
+      "$value": "0%",
+      "$type": "string",
+      "$description": "CSS offset-distance start for path-based motion"
+    },
+    "offset-distance-end": {
+      "$value": "100%",
+      "$type": "string",
+      "$description": "CSS offset-distance end for path-based motion"
+    }
+  },
+  "view-transition": {
+    "$description": "Native View Transitions API tokens for page/view transitions",
+    "duration": {
+      "$value": "{duration.moderate}",
+      "$type": "duration",
+      "$description": "View transition cross-fade duration"
+    },
+    "easing": {
+      "$value": "{easing.ease-out}",
+      "$type": "cubicBezier",
+      "$description": "View transition easing curve"
+    },
+    "old-exit": {
+      "$value": "ease-in",
+      "$type": "cubicBezier",
+      "$description": "Old view exits with ease-in"
+    },
+    "new-enter": {
+      "$value": "ease-out",
+      "$type": "cubicBezier",
+      "$description": "New view enters with ease-out"
+    }
+  },
+  "haptic": {
+    "$description": "Haptic feedback tokens mapped to micro-physics presets — native platforms only (iOS UIImpactFeedbackGenerator, Android HapticFeedbackType)",
+    "light": {
+      "$value": "light",
+      "$type": "string",
+      "$extensions": {
+        "com.seaclaw.ios": "UIImpactFeedbackGenerator.FeedbackStyle.light",
+        "com.seaclaw.android": "HapticFeedbackConstants.KEYBOARD_TAP",
+        "com.seaclaw.maps-to": "micro-physics.button-press"
+      },
+      "$description": "Light tap — button press, toggle, list item select"
+    },
+    "medium": {
+      "$value": "medium",
+      "$type": "string",
+      "$extensions": {
+        "com.seaclaw.ios": "UIImpactFeedbackGenerator.FeedbackStyle.medium",
+        "com.seaclaw.android": "HapticFeedbackConstants.CONTEXT_CLICK",
+        "com.seaclaw.maps-to": "micro-physics.card-hover"
+      },
+      "$description": "Medium impact — connection events, significant state changes"
+    },
+    "heavy": {
+      "$value": "heavy",
+      "$type": "string",
+      "$extensions": {
+        "com.seaclaw.ios": "UIImpactFeedbackGenerator.FeedbackStyle.heavy",
+        "com.seaclaw.android": "HapticFeedbackConstants.LONG_PRESS",
+        "com.seaclaw.maps-to": "micro-physics.modal-anticipate"
+      },
+      "$description": "Heavy impact — destructive actions, major transitions"
+    },
+    "success": {
+      "$value": "success",
+      "$type": "string",
+      "$extensions": {
+        "com.seaclaw.ios": "UINotificationFeedbackGenerator.FeedbackType.success",
+        "com.seaclaw.android": "HapticFeedbackConstants.CONFIRM"
+      },
+      "$description": "Success notification — task complete, connection established"
+    },
+    "warning": {
+      "$value": "warning",
+      "$type": "string",
+      "$extensions": {
+        "com.seaclaw.ios": "UINotificationFeedbackGenerator.FeedbackType.warning",
+        "com.seaclaw.android": "HapticFeedbackConstants.REJECT"
+      },
+      "$description": "Warning notification — failed action, connection lost"
+    },
+    "selection": {
+      "$value": "selection",
+      "$type": "string",
+      "$extensions": {
+        "com.seaclaw.ios": "UISelectionFeedbackGenerator",
+        "com.seaclaw.android": "HapticFeedbackConstants.CLOCK_TICK"
+      },
+      "$description": "Selection change — picker scroll, settings toggle, tab switch"
     }
   }
 }

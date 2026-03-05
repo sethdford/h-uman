@@ -58,5 +58,13 @@ bool sc_task_list_is_blocked(sc_task_list_t *list, uint64_t task_id);
 /* Count by status */
 size_t sc_task_list_count_by_status(sc_task_list_t *list, sc_task_list_status_t status);
 
+/* Check if a task's dependencies are all completed (ready to claim) */
+bool sc_task_list_is_ready(sc_task_list_t *list, uint64_t task_id);
+
+/* Get all tasks with a given status (out array must be freed with sc_task_array_free) */
+sc_error_t sc_task_list_query(sc_task_list_t *list, sc_task_list_status_t status,
+                              sc_task_t **out, size_t *out_count);
+
 void sc_task_free(sc_allocator_t *alloc, sc_task_t *task);
+void sc_task_array_free(sc_allocator_t *alloc, sc_task_t *tasks, size_t count);
 #endif
