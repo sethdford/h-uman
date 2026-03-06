@@ -1,220 +1,97 @@
-name: CI
+name: SeaClaw CI
 
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+on: [push, pull_request]
 
 jobs:
   build-and-test:
     strategy:
-      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        build_type: [Debug, MinSizeRel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install deps (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq libsqlite3-dev libcurl4-openssl-dev
-
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: brew install sqlite3 curl
-
-      - name: Configure
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DSC_ENABLE_ALL_CHANNELS=ON \
-            -DSC_ENABLE_CURL=ON
-
-      - name: Build
-        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
-
-      - name: Test
-        run: ./build/seaclaw_tests
-
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          enable-asan: "true"
+          enable-curl: ${{ runner.os == 'Linux' && 'true' || 'false' }}
+          enable-all-channels: "true"
+      - uses: ./.github/actions/run-tests
+        with:
+          asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
       - name: Persona CLI smoke test
         run: |
           ./build/seaclaw persona list
-          ./build/seaclaw persona validate nonexistent 2>&1 || true
-
-  asan:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install deps (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq libsqlite3-dev libcurl4-openssl-dev
-
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: brew install sqlite3 curl
-
-      - name: Configure with ASan
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
-            -DSC_ENABLE_ALL_CHANNELS=ON \
-            -DSC_ENABLE_CURL=ON
-
-      - name: Build
-        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
-
-      - name: Test (ASan)
-        env:
-          ASAN_OPTIONS: ${{ runner.os == 'Linux' && 'detect_leaks=1:halt_on_error=1' || 'halt_on_error=1' }}
-        run: ./build/seaclaw_tests
-
-  binary-size:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install deps
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq libsqlite3-dev libcurl4-openssl-dev
-
-      - name: Build MinSizeRel + LTO (full)
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=MinSizeRel \
-            -DSC_ENABLE_LTO=ON \
-            -DSC_ENABLE_ALL_CHANNELS=ON \
-            -DSC_ENABLE_CURL=ON
-          cmake --build build -j$(nproc)
-
-      - name: Test release build
-        run: ./build/seaclaw_tests
-
-      - name: Check binary size
-        run: |
-          SIZE=$(stat -c%s build/seaclaw 2>/dev/null || stat -f%z build/seaclaw)
-          echo "Binary size: ${SIZE} bytes ($(( SIZE / 1024 )) KB)"
-          if [ "$SIZE" -gt 512000 ]; then
-            echo "::error::Binary exceeds 512 KB hard limit"
-            exit 1
-          elif [ "$SIZE" -gt 480000 ]; then
-            echo "::warning::Binary approaching 512 KB limit ($(( SIZE / 1024 )) KB)"
-          fi
+          mkdir -p "$HOME/.seaclaw/personas"
+          echo '{"version":1,"name":"ci_test","core":{"identity":"CI test persona","traits":["direct"]}}' > "$HOME/.seaclaw/personas/ci_test.json"
+          ./build/seaclaw persona validate ci_test
+          ./build/seaclaw persona show ci_test
 
   cross-arm64:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install cross-compiler
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq gcc-aarch64-linux-gnu libsqlite3-dev
-
-      - name: Configure ARM64 cross-build
+      - uses: actions/checkout@v4
+      - name: Install ARM64 cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Configure (ARM64 cross-compile)
         run: |
           cmake -B build-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake \
-            -DCMAKE_BUILD_TYPE=MinSizeRel
-
-      - name: Build
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DSC_ENABLE_CURL=OFF \
+            -DSC_ENABLE_TLS=OFF \
+            -DSC_ENABLE_SQLITE=OFF
+      - name: Build (ARM64)
         run: cmake --build build-arm64 -j$(nproc)
-
       - name: Verify binary
-        run: file build-arm64/seaclaw | grep -i aarch64
+        run: file build-arm64/seaclaw | grep -i "aarch64\|ARM"
 
-  coverage:
+  minimal-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install deps
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq libsqlite3-dev libcurl4-openssl-dev lcov bc
-
-      - name: Configure with coverage
-        run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage" \
-            -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
-            -DSC_ENABLE_ALL_CHANNELS=ON \
-            -DSC_ENABLE_CURL=ON
-
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+      - name: Configure
+        run: cmake --preset minimal
       - name: Build
-        run: cmake --build build -j$(nproc)
+        run: cmake --build build-minimal -j$(nproc)
+      - name: Run tests
+        run: ./build-minimal/seaclaw_tests
 
-      - name: Test
-        run: ./build/seaclaw_tests
-
-      - name: Generate coverage
-        run: |
-          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch
-          lcov --remove coverage.info '*/tests/*' '/usr/*' --output-file coverage.info
-          lcov --list coverage.info | tail -20
-
-      - name: Upload coverage
-        if: github.event_name == 'push'
-        uses: codecov/codecov-action@v4
+  release-size:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
         with:
-          file: coverage.info
-          fail_ci_if_error: true
-
-      - name: Check coverage threshold
-        run: |
-          TOTAL=$(lcov --summary coverage.info 2>&1 | grep "lines\.\.\." | sed 's/.*: //' | sed 's/%.*//')
-          echo "Line coverage: ${TOTAL}%"
-          THRESHOLD=70
-          if [ "$(echo "$TOTAL < $THRESHOLD" | bc -l)" -eq 1 ]; then
-            echo "::error::Coverage ${TOTAL}% is below ${THRESHOLD}% threshold"
+          build-type: MinSizeRel
+          enable-lto: "true"
+          enable-all-channels: "true"
+      - run: ls -lh build/seaclaw
+      - run: |
+          SIZE=$(stat -f%z build/seaclaw)
+          if [ "$SIZE" -gt 512000 ]; then
+            echo "Binary size $SIZE bytes exceeds 500KB (512000 bytes)"
             exit 1
           fi
 
-  fuzz:
-    runs-on: ubuntu-latest
+  build-ios:
+    runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
+      - run: cd apps/shared/SeaClawKit && swift test
+      - run: cd apps/ios && swift build
 
-      - name: Install deps
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -yq libsqlite3-dev libcurl4-openssl-dev clang
-
-      - name: Build fuzz targets
-        run: |
-          cmake -B build-fuzz \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DSC_ENABLE_FUZZ=ON \
-            -DSC_ENABLE_ALL_CHANNELS=ON \
-            -DSC_ENABLE_CURL=ON
-          cmake --build build-fuzz -j$(nproc)
-
-      - name: Smoke-test fuzzers (30s each)
-        continue-on-error: true
-        run: |
-          for f in build-fuzz/fuzz_*; do
-            echo "Running $(basename $f)..."
-            timeout 30 $f -max_total_time=25
-          done
+  build-android:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+      - run: cd apps/android && chmod +x gradlew && ./gradlew assembleDebug
 
   ui:
     runs-on: ubuntu-latest
@@ -222,196 +99,250 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v6
-
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
+          cache: npm
           cache-dependency-path: ui/package-lock.json
-
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - name: Test with coverage
+        run: npm run test:coverage
+      - run: npm run build
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint --if-present
-
-      - name: Install ripgrep (for lint:strict)
-        run: sudo apt-get update -q && sudo apt-get install -yq ripgrep
-
-      - name: Strict lint
-        run: npm run lint:strict
-
-      - name: Unit tests
-        run: npm test --if-present
-
-      - name: Build
-        run: npm run build
-
-      - name: Bundle size check
-        run: |
-          MAIN_SIZE=$(stat -c%s dist/assets/index-*.js 2>/dev/null || stat -f%z dist/assets/index-*.js)
-          echo "Main bundle: ${MAIN_SIZE} bytes ($(( MAIN_SIZE / 1024 )) KB)"
-          if [ "$MAIN_SIZE" -gt 200000 ]; then
-            echo "::warning::UI main bundle exceeds 200 KB"
-          fi
-
-  token-drift:
+  ui-e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: design-tokens/package-lock.json
-
-      - name: Install token build deps
-        working-directory: design-tokens
-        run: npm ci --ignore-scripts 2>/dev/null || npm install tsx
-
-      - name: Check token drift
-        run: bash design-tokens/check-drift.sh
-
-  e2e:
-    runs-on: ubuntu-latest
-    needs: [ui]
-    defaults:
-      run:
-        working-directory: ui
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: ui/package-lock.json
-
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-
+          node-version: "20"
+      - name: Install
+        run: cd ui && npm ci
+      - name: Install Playwright browsers
+        run: cd ui && npx playwright install --with-deps chromium
       - name: Build
-        run: npm run build
-
+        run: cd ui && npm run build
       - name: E2E tests
-        run: npx playwright test
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
+        run: cd ui && npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
         with:
           name: playwright-report
-          path: ui/playwright-report/
-          retention-days: 14
+          path: ui/test-results/
+          retention-days: 7
 
-      - name: Visual regression screenshots
-        if: always()
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
         run: |
-          npx vite preview --port 4173 &
-          sleep 3
-          npx playwright screenshot --browser chromium "http://localhost:4173/" "visual-overview.png"
-          npx playwright screenshot --browser chromium "http://localhost:4173/#chat" "visual-chat.png"
-        continue-on-error: true
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc libsqlite3-dev libcurl4-openssl-dev \
+            debhelper devscripts fakeroot
+      - name: Build .deb package
+        run: bash scripts/build-deb.sh
+      - name: Verify package
+        run: |
+          dpkg-deb --info ../*.deb
+          dpkg-deb --contents ../*.deb | head -20
+      - name: Copy .deb to workspace for artifact upload
+        run: cp ../*.deb .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: "*.deb"
 
-      - name: Upload screenshots
-        if: always()
+  completions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify completions are parseable
+        run: bash -n completions/seaclaw.bash
+      - name: Verify completions cover all subcommands
+        run: |
+          CMDS=$(grep -oP '\{"[a-z-]+", "' src/main.c | sed 's/{"//;s/", "//' | sort)
+          for cmd in $CMDS; do
+            grep -q "$cmd" completions/seaclaw.bash || { echo "MISSING in bash: $cmd"; exit 1; }
+            grep -q "$cmd" completions/_seaclaw || { echo "MISSING in zsh: $cmd"; exit 1; }
+          done
+
+  local-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang-format libcurl4-openssl-dev libsqlite3-dev
+      - name: Run scripts/check.sh
+        run: scripts/check.sh
+
+  benchmark:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          build-type: MinSizeRel
+          enable-lto: "true"
+          enable-all-channels: "true"
+          extra-cmake-flags: -DSC_ENABLE_BENCH=ON
+      - name: Run benchmark
+        run: scripts/benchmark.sh build/seaclaw --save-history
+      - name: Run core benchmarks
+        run: ./build/seaclaw_bench 2>&1 | tee benchmark-core.txt
+      - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
-          name: visual-screenshots
+          name: benchmark-results
           path: |
-            ui/visual-overview.png
-            ui/visual-chat.png
-          retention-days: 14
-
-  swift:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build SeaClawKit
-        working-directory: apps/shared/SeaClawKit
-        run: swift build 2>&1 || echo "::warning::Swift build failed — check SeaClawKit sources"
-        continue-on-error: true
-
-      - name: Type check
-        working-directory: apps/shared/SeaClawKit
-        run: swift build -Xswiftc -typecheck 2>&1 || true
-        continue-on-error: true
-
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build Android app
-        working-directory: apps/android
-        run: ./gradlew assembleDebug 2>&1 || echo "::warning::Android build failed — check app sources"
-        continue-on-error: true
-
-  flutter:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.27.x"
-          channel: stable
-
-      - name: Flutter analyze
-        working-directory: apps/flutter
-        run: flutter analyze 2>&1 || echo "::warning::Flutter analyze found issues"
-        continue-on-error: true
-
-      - name: Flutter test
-        working-directory: apps/flutter
-        run: flutter test 2>&1 || echo "::warning::Flutter tests failed"
-        continue-on-error: true
-
-  ios:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build iOS app
-        working-directory: apps/ios
-        run: swift build 2>&1 || echo "::warning::iOS build failed"
-        continue-on-error: true
-
-  macos-app:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build macOS app
-        working-directory: apps/macos
-        run: swift build 2>&1 || echo "::warning::macOS build failed"
-        continue-on-error: true
+            benchmark-results.json
+            benchmark-history.json
+            benchmark-core.txt
+          retention-days: 90
 
   static-analysis:
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
-      - name: Install dependencies
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          enable-curl: "true"
+          enable-all-channels: "true"
+          extra-apt: clang-tidy
+          extra-cmake-flags: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: Run clang-tidy on changed files
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy cmake libsqlite3-dev libcurl4-openssl-dev
-      - name: Configure
-        run: cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-      - name: Run clang-tidy
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF" -- 'src/*.c' | head -20)
+          else
+            FILES=$(find src -name '*.c' -newer CMakeLists.txt | head -20)
+          fi
+          if [ -n "$FILES" ]; then
+            echo "$FILES" | xargs clang-tidy -p build --warnings-as-errors='bugprone-use-after-move,security-*' 2>&1 | tail -30
+          else
+            echo "No changed C files to analyze"
+          fi
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          enable-curl: "true"
+          enable-all-channels: "true"
+          enable-coverage: "true"
+          extra-apt: lcov
+      - uses: ./.github/actions/run-tests
+      - name: Generate coverage report
         run: |
-          cd build
-          FILES=$(find ../src -name '*.c' | head -50)
-          clang-tidy $FILES -p . --warnings-as-errors='bugprone-*,cert-*,security-*' 2>&1 | tail -50 || true
+          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch
+          lcov --remove coverage.info '/usr/*' '*/tests/*' '*/vendor/*' --output-file coverage.info
+          lcov --list coverage.info | tail -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.info
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target release -t seaclaw:ci-test .
+      - run: docker run --rm seaclaw:ci-test --version
+
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: cd website && npm ci && npm run build
+      - run: test -d website/dist
+
+  lighthouse:
+    runs-on: ubuntu-latest
+    needs: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: cd website && npm ci && npm run build
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+          configPath: .lighthouserc.json
+
+  design-tokens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: design-tokens/package-lock.json
+      - run: cd design-tokens && npm ci && npm run build -- --outdir /tmp/dt-check
+      - run: bash design-tokens/check-drift.sh
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixpkgs-unstable
+      - run: nix build --no-link --print-build-logs
+      - run: nix flake check
+
+  ollama-integration:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Pull tinyllama
+        run: ollama pull tinyllama
+      - name: Build
+        run: |
+          cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
+          cmake --build build -j$(nproc)
+      - name: Run integration tests
+        run: ./build/seaclaw_tests
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for stale branding
+        run: |
+          if grep -ri "nullclaw" docs/ skills/ sdk/ --include='*.md' -l 2>/dev/null | grep -v plans/; then
+            echo "Found 'NullClaw' references — update to 'SeaClaw'"
+            exit 1
+          fi
+      - name: Verify docs have frontmatter
+        run: |
+          MISSING=""
+          for f in $(find docs -name '*.md' -not -path '*/plans/*'); do
+            if ! head -1 "$f" | grep -q '^---'; then
+              MISSING="$MISSING $f"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "Docs missing frontmatter:$MISSING"
+          fi

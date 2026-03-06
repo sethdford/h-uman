@@ -128,6 +128,16 @@ persona-validate name: build
 persona-test: build
     cd build && ./seaclaw_tests 2>&1 | grep -E "persona|Results"
 
+# Create a test persona and validate it (for local smoke test)
+persona-create-test: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$HOME/.seaclaw/personas"
+    echo '{"version":1,"name":"just_test","core":{"identity":"Justfile test persona","traits":["direct"]}}' > "$HOME/.seaclaw/personas/just_test.json"
+    ./build/seaclaw persona validate just_test
+    ./build/seaclaw persona show just_test
+    echo "Persona smoke test passed"
+
 # ── Info ─────────────────────────────────────────────────────────────────
 
 # Show binary size and test count
