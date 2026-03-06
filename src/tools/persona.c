@@ -1,6 +1,6 @@
-#include "seaclaw/agent/tool_context.h"
 #include "seaclaw/tools/persona.h"
 #include "seaclaw/agent.h"
+#include "seaclaw/agent/tool_context.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"

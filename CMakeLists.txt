@@ -543,6 +543,7 @@ list(APPEND SC_CORE_SOURCES
     src/persona/analyzer.c
     src/persona/creator.c
     src/persona/cli.c
+    src/persona/feedback.c
 )
 
 # Browser automation tools

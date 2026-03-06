@@ -7,7 +7,6 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/persona.h"
 #include "seaclaw/providers/factory.h"
-#include "seaclaw/providers/factory.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/tools/persona.h"
 #include "test_framework.h"
