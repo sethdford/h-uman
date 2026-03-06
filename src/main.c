@@ -1284,8 +1284,9 @@ static sc_error_t cmd_persona(sc_allocator_t *alloc, int argc, char **argv) {
     sc_persona_cli_args_t args;
     sc_error_t err = sc_persona_cli_parse(argc, (const char **)argv, &args);
     if (err != SC_OK) {
-        fprintf(stderr,
-                "Usage: seaclaw persona <create|update|show|list|delete|validate> [name] [options]\n");
+        fprintf(
+            stderr,
+            "Usage: seaclaw persona <create|update|show|list|delete|validate> [name] [options]\n");
         fprintf(
             stderr,
             "  create <name> [--from-imessage] [--from-gmail] [--from-facebook] [--interactive]\n");

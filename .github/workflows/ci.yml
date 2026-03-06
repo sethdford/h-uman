@@ -45,7 +45,9 @@ jobs:
         run: ./build/seaclaw_tests
 
       - name: Persona CLI smoke test
-        run: ./build/seaclaw persona list
+        run: |
+          ./build/seaclaw persona list
+          ./build/seaclaw persona validate nonexistent 2>&1 || true
 
   asan:
     strategy:

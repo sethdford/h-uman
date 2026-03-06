@@ -117,3 +117,84 @@ sc_error_t sc_persona_sampler_facebook_parse(const char *json, size_t json_len, 
     *out_count = count;
     return SC_OK;
 }
+
+/* Gmail Takeout JSON format: {"messages": [{"from": "me", "body": "..."}, ...]}
+ * We extract messages where "from" is "me" (user's sent messages). */
+sc_error_t sc_persona_sampler_gmail_parse(const char *json, size_t json_len, char ***out,
+                                          size_t *out_count) {
+    if (!json || !out || !out_count)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_json_value_t *root = NULL;
+    sc_error_t err = sc_json_parse(&alloc, json, json_len, &root);
+    if (err != SC_OK || !root)
+        return err != SC_OK ? err : SC_ERR_INVALID_ARGUMENT;
+
+    sc_json_value_t *messages = sc_json_object_get(root, "messages");
+    if (!messages || messages->type != SC_JSON_ARRAY) {
+        sc_json_free(&alloc, root);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+
+    size_t arr_len = messages->data.array.len;
+    if (arr_len == 0) {
+        sc_json_free(&alloc, root);
+        return SC_OK;
+    }
+
+    /* Count "me" messages first */
+    size_t me_count = 0;
+    for (size_t i = 0; i < arr_len; i++) {
+        sc_json_value_t *msg = messages->data.array.items[i];
+        if (!msg || msg->type != SC_JSON_OBJECT)
+            continue;
+        const char *from = sc_json_get_string(msg, "from");
+        if (from && strcmp(from, "me") == 0) {
+            const char *body = sc_json_get_string(msg, "body");
+            if (body && body[0] != '\0')
+                me_count++;
+        }
+    }
+
+    if (me_count == 0) {
+        sc_json_free(&alloc, root);
+        return SC_OK;
+    }
+
+    size_t cap = me_count < 64 ? me_count : 64;
+    char **results = (char **)alloc.alloc(alloc.ctx, cap * sizeof(char *));
+    if (!results) {
+        sc_json_free(&alloc, root);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    size_t count = 0;
+
+    for (size_t i = 0; i < arr_len && count < cap; i++) {
+        sc_json_value_t *msg = messages->data.array.items[i];
+        if (!msg || msg->type != SC_JSON_OBJECT)
+            continue;
+        const char *from = sc_json_get_string(msg, "from");
+        if (!from || strcmp(from, "me") != 0)
+            continue;
+        const char *body = sc_json_get_string(msg, "body");
+        if (!body || body[0] == '\0')
+            continue;
+        results[count] = sc_strdup(&alloc, body);
+        if (!results[count]) {
+            for (size_t j = 0; j < count; j++)
+                alloc.free(alloc.ctx, results[j], strlen(results[j]) + 1);
+            alloc.free(alloc.ctx, results, cap * sizeof(char *));
+            sc_json_free(&alloc, root);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
+        count++;
+    }
+
+    sc_json_free(&alloc, root);
+    *out = results;
+    *out_count = count;
+    return SC_OK;
+}

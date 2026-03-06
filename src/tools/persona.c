@@ -1,4 +1,6 @@
+#include "seaclaw/agent/tool_context.h"
 #include "seaclaw/tools/persona.h"
+#include "seaclaw/agent.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
@@ -16,7 +18,7 @@
 #define PERSONA_PARAMS                                                                   \
     "{\"type\":\"object\",\"properties\":{"                                              \
     "\"action\":{\"type\":\"string\",\"enum\":[\"create\",\"update\",\"show\",\"list\"," \
-    "\"delete\"]},"                                                                      \
+    "\"delete\",\"switch\",\"feedback\"]},"                                              \
     "\"name\":{\"type\":\"string\"},"                                                    \
     "\"source\":{\"type\":\"string\",\"enum\":[\"imessage\",\"gmail\",\"facebook\"]},"   \
     "\"channel\":{\"type\":\"string\"},"                                                 \

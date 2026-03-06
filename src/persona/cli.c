@@ -315,12 +315,10 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
             return SC_ERR_NOT_SUPPORTED;
 #endif
         }
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
         if (args->from_facebook && args->facebook_export_path) {
             FILE *f = fopen(args->facebook_export_path, "rb");
             if (!f) {
-                fprintf(stderr, "Could not open Facebook export: %s\n",
-                        args->facebook_export_path);
+                fprintf(stderr, "Could not open Facebook export: %s\n", args->facebook_export_path);
                 return SC_ERR_IO;
             }
             fseek(f, 0, SEEK_END);
@@ -342,8 +340,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
 
             char **messages = NULL;
             size_t msg_count = 0;
-            sc_error_t perr =
-                sc_persona_sampler_facebook_parse(json, nr, &messages, &msg_count);
+            sc_error_t perr = sc_persona_sampler_facebook_parse(json, nr, &messages, &msg_count);
             free(json);
             if (perr != SC_OK) {
                 fprintf(stderr, "Failed to parse Facebook export\n");
@@ -381,8 +378,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
 
             char **messages = NULL;
             size_t msg_count = 0;
-            sc_error_t perr =
-                sc_persona_sampler_gmail_parse(json, nr, &messages, &msg_count);
+            sc_error_t perr = sc_persona_sampler_gmail_parse(json, nr, &messages, &msg_count);
             free(json);
             if (perr != SC_OK) {
                 fprintf(stderr, "Failed to parse Gmail export\n");

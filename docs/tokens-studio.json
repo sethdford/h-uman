@@ -118,7 +118,7 @@
           "$value": "#134e4a",
           "$type": "color"
         },
-        "$description": "Primary accent — ocean teal/aqua",
+        "$description": "Legacy ocean teal/aqua — retained for reference",
         "dark-subtle": {
           "$value": "rgba(20, 184, 166, 0.14)",
           "$type": "color"
@@ -626,24 +626,24 @@
         "$type": "color"
       },
       "accent": {
-        "$value": "{color.teal.500}",
+        "$value": "{color.fidelity.500}",
         "$type": "color"
       },
       "accent-text": {
-        "$value": "{color.teal.400}",
+        "$value": "{color.fidelity.400}",
         "$type": "color",
         "$description": "Accent color for text on dark backgrounds"
       },
       "accent-hover": {
-        "$value": "{color.teal.400}",
+        "$value": "{color.fidelity.400}",
         "$type": "color"
       },
       "accent-subtle": {
-        "$value": "{color.teal.dark-subtle}",
+        "$value": "{color.fidelity.dark-subtle}",
         "$type": "color"
       },
       "accent-strong": {
-        "$value": "{color.teal.300}",
+        "$value": "{color.fidelity.300}",
         "$type": "color"
       },
       "on-accent": {
@@ -741,7 +741,7 @@
         "$type": "color"
       },
       "focus-ring": {
-        "$value": "{color.teal.500}",
+        "$value": "{color.fidelity.500}",
         "$type": "color"
       },
       "focus-ring-width": {
@@ -753,19 +753,19 @@
         "$type": "dimension"
       },
       "link": {
-        "$value": "{color.teal.400}",
+        "$value": "{color.fidelity.400}",
         "$type": "color"
       },
       "link-hover": {
-        "$value": "{color.teal.300}",
+        "$value": "{color.fidelity.300}",
         "$type": "color"
       },
       "link-active": {
-        "$value": "{color.teal.500}",
+        "$value": "{color.fidelity.500}",
         "$type": "color"
       },
       "link-visited": {
-        "$value": "{color.teal.600}",
+        "$value": "{color.fidelity.600}",
         "$type": "color"
       },
       "hover-overlay": {
@@ -881,11 +881,11 @@
         "$description": "WCAG AA: accent color for text on light backgrounds (4.5:1 contrast)"
       },
       "accent-hover": {
-        "$value": "{color.teal.light-600}",
+        "$value": "{color.fidelity.light-600}",
         "$type": "color"
       },
       "accent-subtle": {
-        "$value": "{color.teal.light-subtle}",
+        "$value": "{color.fidelity.light-subtle}",
         "$type": "color"
       },
       "accent-light": {
@@ -893,7 +893,7 @@
         "$type": "color"
       },
       "accent-strong": {
-        "$value": "{color.teal.light-400}",
+        "$value": "{color.fidelity.light-400}",
         "$type": "color"
       },
       "on-accent": {
@@ -991,7 +991,7 @@
         "$type": "color"
       },
       "focus-ring": {
-        "$value": "{color.teal.light-500}",
+        "$value": "{color.fidelity.light-500}",
         "$type": "color"
       },
       "focus-ring-width": {
@@ -1003,19 +1003,19 @@
         "$type": "dimension"
       },
       "link": {
-        "$value": "{color.teal.light-500}",
+        "$value": "{color.fidelity.light-500}",
         "$type": "color"
       },
       "link-hover": {
-        "$value": "{color.teal.light-600}",
+        "$value": "{color.fidelity.light-600}",
         "$type": "color"
       },
       "link-active": {
-        "$value": "{color.teal.light-400}",
+        "$value": "{color.fidelity.light-400}",
         "$type": "color"
       },
       "link-visited": {
-        "$value": "{color.teal.light-600}",
+        "$value": "{color.fidelity.light-600}",
         "$type": "color"
       },
       "hover-overlay": {

@@ -110,6 +110,24 @@ tag version: test
 check:
     scripts/check.sh
 
+# ── Persona ───────────────────────────────────────────────────────────────
+
+# List personas
+persona-list: build
+    ./build/seaclaw persona list
+
+# Show persona by name
+persona-show name: build
+    ./build/seaclaw persona show {{name}}
+
+# Validate persona by name
+persona-validate name: build
+    ./build/seaclaw persona validate {{name}}
+
+# Run persona-related tests
+persona-test:
+    cd build && ./seaclaw_tests 2>&1 | grep -E "persona|Results"
+
 # ── Info ─────────────────────────────────────────────────────────────────
 
 # Show binary size and test count

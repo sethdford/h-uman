@@ -300,6 +300,57 @@ sc_error_t sc_agent_from_config(
     return SC_OK;
 }
 
+sc_error_t sc_agent_set_persona(sc_agent_t *agent, const char *name, size_t name_len) {
+    if (!agent)
+        return SC_ERR_INVALID_ARGUMENT;
+
+    /* Free existing persona */
+    if (agent->persona) {
+        sc_persona_deinit(agent->alloc, agent->persona);
+        agent->alloc->free(agent->alloc->ctx, agent->persona, sizeof(sc_persona_t));
+        agent->persona = NULL;
+    }
+    if (agent->persona_name) {
+        agent->alloc->free(agent->alloc->ctx, agent->persona_name, agent->persona_name_len + 1);
+        agent->persona_name = NULL;
+        agent->persona_name_len = 0;
+    }
+    if (agent->persona_prompt) {
+        agent->alloc->free(agent->alloc->ctx, agent->persona_prompt, agent->persona_prompt_len + 1);
+        agent->persona_prompt = NULL;
+        agent->persona_prompt_len = 0;
+    }
+
+    /* If name is NULL or empty, just clear the persona */
+    if (!name || name_len == 0)
+        return SC_OK;
+
+    /* Load new persona */
+    sc_persona_t *new_persona =
+        (sc_persona_t *)agent->alloc->alloc(agent->alloc->ctx, sizeof(sc_persona_t));
+    if (!new_persona)
+        return SC_ERR_OUT_OF_MEMORY;
+    memset(new_persona, 0, sizeof(sc_persona_t));
+
+    sc_error_t err = sc_persona_load(agent->alloc, name, name_len, new_persona);
+    if (err != SC_OK) {
+        agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(sc_persona_t));
+        return err;
+    }
+
+    agent->persona = new_persona;
+    agent->persona_name = sc_strndup(agent->alloc, name, name_len);
+    if (!agent->persona_name) {
+        sc_persona_deinit(agent->alloc, new_persona);
+        agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(sc_persona_t));
+        agent->persona = NULL;
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    agent->persona_name_len = name_len;
+
+    return SC_OK;
+}
+
 void sc_agent_set_mailbox(sc_agent_t *agent, sc_mailbox_t *mailbox) {
     if (!agent)
         return;

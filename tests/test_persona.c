@@ -298,6 +298,70 @@ static void test_persona_cli_parse_list(void) {
     SC_ASSERT_EQ((int)args.action, (int)SC_PERSONA_ACTION_LIST);
 }
 
+static void test_persona_validate_json_valid(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"test\","
+                       "\"core\":{\"identity\":\"Test person\",\"traits\":[\"direct\"]}}";
+    char *err = NULL;
+    size_t err_len = 0;
+    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_TRUE(err == NULL);
+}
+
+static void test_persona_validate_json_missing_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{\"version\":1,\"core\":{\"identity\":\"X\",\"traits\":[]}}";
+    char *err = NULL;
+    size_t err_len = 0;
+    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_TRUE(err != NULL);
+    SC_ASSERT_TRUE(strstr(err, "name") != NULL);
+    alloc.free(alloc.ctx, err, err_len + 1);
+}
+
+static void test_persona_validate_json_missing_core(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"test\"}";
+    char *err = NULL;
+    size_t err_len = 0;
+    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_TRUE(err != NULL);
+    alloc.free(alloc.ctx, err, err_len + 1);
+}
+
+static void test_persona_validate_json_malformed(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "not json at all";
+    char *err = NULL;
+    size_t err_len = 0;
+    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_TRUE(err != NULL);
+    alloc.free(alloc.ctx, err, err_len + 1);
+}
+
+static void test_persona_cli_parse_validate(void) {
+    const char *argv[] = {"seaclaw", "persona", "validate", "test_name"};
+    sc_persona_cli_args_t args;
+    memset(&args, 0, sizeof(args));
+    sc_error_t e = sc_persona_cli_parse(4, argv, &args);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_VALIDATE);
+    SC_ASSERT_TRUE(strcmp(args.name, "test_name") == 0);
+}
+
+static void test_persona_cli_run_validate(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_cli_args_t args = {0};
+    args.action = SC_PERSONA_ACTION_VALIDATE;
+    args.name = "test_name";
+    sc_error_t err = sc_persona_cli_run(&alloc, &args);
+    SC_ASSERT_EQ(err, SC_OK);
+}
+
 static void test_creator_synthesize_merges(void) {
     sc_allocator_t alloc = sc_system_allocator();
     char *traits1[] = {"direct", "casual"};
@@ -364,6 +428,54 @@ static void test_sampler_facebook_parse_empty(void) {
 static void test_sampler_facebook_parse_null(void) {
     sc_error_t err = sc_persona_sampler_facebook_parse(NULL, 0, NULL, NULL);
     SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_sampler_gmail_parse_basic(void) {
+    const char *json = "{\"messages\":["
+                       "{\"from\":\"me\",\"body\":\"Hey there\"},"
+                       "{\"from\":\"other\",\"body\":\"Hi\"},"
+                       "{\"from\":\"me\",\"body\":\"Cool thanks\"}"
+                       "]}";
+    char **msgs = NULL;
+    size_t count = 0;
+    sc_error_t e = sc_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(count, (size_t)2);
+    for (size_t i = 0; i < count; i++)
+        free(msgs[i]);
+    free(msgs);
+}
+
+static void test_sampler_gmail_parse_empty(void) {
+    const char *json = "{\"messages\":[]}";
+    char **msgs = NULL;
+    size_t count = 0;
+    sc_error_t e = sc_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(count, (size_t)0);
+}
+
+static void test_cli_parse_from_facebook_file(void) {
+    const char *argv[] = {"seaclaw", "persona", "create", "test", "--from-facebook",
+                          "/tmp/fb.json"};
+    sc_persona_cli_args_t args;
+    memset(&args, 0, sizeof(args));
+    sc_error_t e = sc_persona_cli_parse(6, argv, &args);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_TRUE(args.from_facebook);
+    SC_ASSERT_TRUE(args.facebook_export_path != NULL);
+    SC_ASSERT_TRUE(strcmp(args.facebook_export_path, "/tmp/fb.json") == 0);
+}
+
+static void test_cli_parse_from_gmail(void) {
+    const char *argv[] = {"seaclaw", "persona", "create", "test", "--from-gmail",
+                          "/tmp/gmail.json"};
+    sc_persona_cli_args_t args;
+    memset(&args, 0, sizeof(args));
+    sc_error_t e = sc_persona_cli_parse(6, argv, &args);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_TRUE(args.from_gmail);
+    SC_ASSERT_TRUE(args.gmail_export_path != NULL);
 }
 
 static void test_sampler_imessage_query(void) {
@@ -705,6 +817,271 @@ static void test_persona_build_prompt_with_overlay(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+/* sc_persona_load_json */
+static void test_persona_load_json_malformed_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    sc_error_t e = sc_persona_load_json(&alloc, "not json", 8, &p);
+    SC_ASSERT_TRUE(e != SC_OK);
+}
+
+static void test_persona_load_json_missing_core(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    const char *json = "{\"version\":1,\"name\":\"test\"}";
+    sc_error_t e = sc_persona_load_json(&alloc, json, strlen(json), &p);
+    if (e == SC_OK) {
+        SC_ASSERT_TRUE(p.traits_count == 0);
+        sc_persona_deinit(&alloc, &p);
+    }
+}
+
+/* sc_persona_load */
+static void test_persona_load_empty_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    sc_error_t e = sc_persona_load(&alloc, "", 0, &p);
+    SC_ASSERT_TRUE(e != SC_OK);
+}
+
+/* sc_persona_build_prompt - edge cases */
+static void test_persona_build_prompt_empty_persona(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "empty";
+    p.name_len = 5;
+    char *prompt = NULL;
+    size_t len = 0;
+    sc_error_t e = sc_persona_build_prompt(&alloc, &p, NULL, 0, &prompt, &len);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_TRUE(prompt != NULL);
+    SC_ASSERT_TRUE(len > 0);
+    alloc.free(alloc.ctx, prompt, len + 1);
+}
+
+/* sc_persona_examples_load_json - edge cases */
+static void test_persona_examples_load_json_empty_bank(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_example_bank_t bank;
+    memset(&bank, 0, sizeof(bank));
+    const char *json = "{\"examples\":[]}";
+    sc_error_t e =
+        sc_persona_examples_load_json(&alloc, "test", 4, json, strlen(json), &bank);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(bank.examples_count, 0);
+    if (bank.channel)
+        alloc.free(alloc.ctx, bank.channel, strlen(bank.channel) + 1);
+}
+
+static void test_persona_examples_load_json_malformed(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_example_bank_t bank;
+    memset(&bank, 0, sizeof(bank));
+    sc_error_t e = sc_persona_examples_load_json(&alloc, "test", 4, "bad", 3, &bank);
+    SC_ASSERT_TRUE(e != SC_OK);
+}
+
+/* sc_persona_select_examples - edge cases */
+static void test_persona_select_examples_null_topic_returns_some(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.example_banks = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_bank_t));
+    memset(p.example_banks, 0, sizeof(sc_persona_example_bank_t));
+    p.example_banks_count = 1;
+    p.example_banks[0].channel = sc_strdup(&alloc, "test");
+    p.example_banks[0].examples = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_t));
+    memset(p.example_banks[0].examples, 0, sizeof(sc_persona_example_t));
+    p.example_banks[0].examples_count = 1;
+    p.example_banks[0].examples[0].incoming = sc_strdup(&alloc, "hello");
+    p.example_banks[0].examples[0].response = sc_strdup(&alloc, "hi");
+
+    const sc_persona_example_t *sel[4];
+    size_t sel_count = 0;
+    sc_error_t e = sc_persona_select_examples(&p, "test", 4, NULL, 0, sel, &sel_count, 4);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(sel_count, 1);
+
+    sc_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_select_examples_max_zero(void) {
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    const sc_persona_example_t *sel[1];
+    size_t sel_count = 99;
+    sc_error_t e = sc_persona_select_examples(&p, "x", 1, NULL, 0, sel, &sel_count, 0);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(sel_count, 0);
+}
+
+/* sc_persona_find_overlay - edge cases */
+static void test_persona_find_overlay_null_channel(void) {
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    const sc_persona_overlay_t *o = sc_persona_find_overlay(&p, NULL, 0);
+    SC_ASSERT_TRUE(o == NULL);
+}
+
+/* sc_persona_analyzer_parse_response - edge cases */
+static void test_persona_analyzer_parse_response_empty_object(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    sc_error_t e = sc_persona_analyzer_parse_response(&alloc, "{}", 2, "test", 4, &p);
+    if (e == SC_OK)
+        sc_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_analyzer_parse_response_malformed(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    sc_error_t e = sc_persona_analyzer_parse_response(&alloc, "not json", 8, "test", 4, &p);
+    SC_ASSERT_TRUE(e != SC_OK);
+}
+
+/* sc_persona_creator_synthesize - edge cases */
+static void test_persona_creator_synthesize_single_partial(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t partial;
+    memset(&partial, 0, sizeof(partial));
+    char *trait = "direct";
+    partial.traits = &trait;
+    partial.traits_count = 1;
+
+    sc_persona_t out;
+    memset(&out, 0, sizeof(out));
+    sc_error_t e = sc_persona_creator_synthesize(&alloc, &partial, 1, "single", 6, &out);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_TRUE(out.traits_count >= 1);
+    sc_persona_deinit(&alloc, &out);
+}
+
+static void test_persona_creator_synthesize_zero_partials(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t dummy;
+    memset(&dummy, 0, sizeof(dummy));
+    sc_persona_t out;
+    memset(&out, 0, sizeof(out));
+    sc_error_t e = sc_persona_creator_synthesize(&alloc, &dummy, 0, "empty", 5, &out);
+    /* With count 0, succeeds with empty persona */
+    if (e == SC_OK) {
+        SC_ASSERT_TRUE(out.name != NULL);
+        sc_persona_deinit(&alloc, &out);
+    }
+}
+
+/* sc_persona_sampler - edge cases */
+static void test_sampler_imessage_query_small_cap(void) {
+    char buf[16];
+    size_t out_len = 0;
+    sc_error_t e = sc_persona_sampler_imessage_query(buf, 16, &out_len, 100);
+    SC_ASSERT_TRUE(e != SC_OK);
+}
+
+static void test_sampler_facebook_parse_malformed(void) {
+    char **out = NULL;
+    size_t count = 0;
+    sc_error_t e = sc_persona_sampler_facebook_parse("bad", 3, &out, &count);
+    SC_ASSERT_TRUE(e != SC_OK || count == 0);
+}
+
+static void test_sampler_facebook_parse_missing_messages(void) {
+    char **out = NULL;
+    size_t count = 0;
+    sc_error_t e = sc_persona_sampler_facebook_parse("{\"other\":1}", 11, &out, &count);
+    SC_ASSERT_TRUE(e != SC_OK || count == 0);
+}
+
+/* sc_persona_deinit - edge cases */
+static void test_persona_deinit_double_call(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"test\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]}}";
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    sc_error_t e = sc_persona_load_json(&alloc, json, strlen(json), &p);
+    SC_ASSERT_EQ(e, SC_OK);
+    sc_persona_deinit(&alloc, &p);
+    sc_persona_deinit(&alloc, &p);
+}
+
+/* tool execute tests */
+static void test_persona_tool_execute_list(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool = {0};
+    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(tool.vtable != NULL);
+
+    const char *args = "{\"action\":\"list\"}";
+    sc_json_value_t *val = NULL;
+    err = sc_json_parse(&alloc, args, strlen(args), &val);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_tool_result_t result;
+    memset(&result, 0, sizeof(result));
+    err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_json_free(&alloc, val);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_persona_tool_execute_invalid_action(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool = {0};
+    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    const char *args = "{\"action\":\"invalid\"}";
+    sc_json_value_t *val = NULL;
+    err = sc_json_parse(&alloc, args, strlen(args), &val);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_tool_result_t result;
+    memset(&result, 0, sizeof(result));
+    err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(!result.success);
+
+    sc_json_free(&alloc, val);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_persona_tool_execute_create_redirects_to_cli(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool = {0};
+    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    const char *args = "{\"action\":\"create\",\"name\":\"test\"}";
+    sc_json_value_t *val = NULL;
+    err = sc_json_parse(&alloc, args, strlen(args), &val);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_tool_result_t result;
+    memset(&result, 0, sizeof(result));
+    err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(result.output != NULL);
+    SC_ASSERT_TRUE(strstr(result.output, "CLI") != NULL || strstr(result.output, "cli") != NULL);
+
+    sc_json_free(&alloc, val);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
 void run_persona_tests(void) {
     SC_TEST_SUITE("Persona");
 
@@ -728,6 +1105,12 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_persona_cli_parse_create);
     SC_RUN_TEST(test_persona_cli_parse_show);
     SC_RUN_TEST(test_persona_cli_parse_list);
+    SC_RUN_TEST(test_persona_cli_parse_validate);
+    SC_RUN_TEST(test_persona_validate_json_valid);
+    SC_RUN_TEST(test_persona_validate_json_missing_name);
+    SC_RUN_TEST(test_persona_validate_json_missing_core);
+    SC_RUN_TEST(test_persona_validate_json_malformed);
+    SC_RUN_TEST(test_persona_cli_run_validate);
     SC_RUN_TEST(test_persona_cli_run_list);
     SC_RUN_TEST(test_persona_cli_run_show_not_found);
     SC_RUN_TEST(test_persona_cli_run_delete_not_found);
@@ -745,4 +1128,28 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_persona_select_examples_no_channel);
     SC_RUN_TEST(test_persona_select_examples_no_match);
     SC_RUN_TEST(test_persona_full_round_trip);
+
+    /* Error-path and edge-case tests */
+    SC_RUN_TEST(test_persona_load_json_malformed_returns_error);
+    SC_RUN_TEST(test_persona_load_json_missing_core);
+    SC_RUN_TEST(test_persona_load_empty_name);
+    SC_RUN_TEST(test_persona_build_prompt_empty_persona);
+    SC_RUN_TEST(test_persona_examples_load_json_empty_bank);
+    SC_RUN_TEST(test_persona_examples_load_json_malformed);
+    SC_RUN_TEST(test_persona_select_examples_null_topic_returns_some);
+    SC_RUN_TEST(test_persona_select_examples_max_zero);
+    SC_RUN_TEST(test_persona_find_overlay_null_channel);
+    SC_RUN_TEST(test_persona_analyzer_parse_response_empty_object);
+    SC_RUN_TEST(test_persona_analyzer_parse_response_malformed);
+    SC_RUN_TEST(test_persona_creator_synthesize_single_partial);
+    SC_RUN_TEST(test_persona_creator_synthesize_zero_partials);
+    SC_RUN_TEST(test_sampler_imessage_query_small_cap);
+    SC_RUN_TEST(test_sampler_facebook_parse_malformed);
+    SC_RUN_TEST(test_sampler_facebook_parse_missing_messages);
+    SC_RUN_TEST(test_persona_deinit_double_call);
+
+    /* Persona tool execute tests */
+    SC_RUN_TEST(test_persona_tool_execute_list);
+    SC_RUN_TEST(test_persona_tool_execute_invalid_action);
+    SC_RUN_TEST(test_persona_tool_execute_create_redirects_to_cli);
 }
