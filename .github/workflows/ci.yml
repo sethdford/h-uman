@@ -9,7 +9,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           enable-asan: "true"
@@ -22,7 +22,7 @@ jobs:
   cross-arm64:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install ARM64 cross-compiler
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Configure (ARM64 cross-compile)
@@ -41,7 +41,7 @@ jobs:
   minimal-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
       - name: Configure
@@ -54,7 +54,7 @@ jobs:
   sandbox-integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -74,7 +74,7 @@ jobs:
   release-size:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           build-type: MinSizeRel
@@ -91,15 +91,15 @@ jobs:
   build-ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: cd apps/shared/SeaClawKit && swift test
       - run: cd apps/ios && swift build
 
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: temurin
@@ -111,8 +111,8 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -134,8 +134,8 @@ jobs:
   ui-e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
       - name: Install
@@ -146,7 +146,7 @@ jobs:
         run: cd ui && npm run build
       - name: E2E tests
         run: cd ui && npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
@@ -156,7 +156,7 @@ jobs:
   build-deb:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -170,7 +170,7 @@ jobs:
           dpkg-deb --contents ../*.deb | head -20
       - name: Copy .deb to workspace for artifact upload
         run: cp ../*.deb .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: debian-package
           path: "*.deb"
@@ -178,7 +178,7 @@ jobs:
   completions:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Verify completions are parseable
         run: bash -n completions/seaclaw.bash
       - name: Verify completions cover all subcommands
@@ -192,7 +192,7 @@ jobs:
   local-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang-format libcurl4-openssl-dev libsqlite3-dev
       - name: Run scripts/check.sh
@@ -202,7 +202,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           build-type: MinSizeRel
@@ -235,7 +235,7 @@ jobs:
             exit 1
           fi
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: |
@@ -247,7 +247,7 @@ jobs:
   static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           enable-curl: "true"
@@ -272,9 +272,9 @@ jobs:
     permissions:
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: cpp
       - name: Build for analysis
@@ -283,12 +283,12 @@ jobs:
           cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
           cmake --build build -j$(nproc)
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
 
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           enable-curl: "true"
@@ -301,12 +301,12 @@ jobs:
           lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch
           lcov --remove coverage.info '/usr/*' '*/tests/*' '*/vendor/*' --output-file coverage.info
           lcov --list coverage.info | tail -20
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.info
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: coverage.info
           fail_ci_if_error: false
@@ -316,7 +316,7 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -350,7 +350,7 @@ jobs:
               timeout 35 "$h" -max_total_time=30 "$corpus" || true
             fi
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus
           path: corpus/
@@ -359,15 +359,15 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: docker build --target release -t seaclaw:ci-test .
       - run: docker run --rm seaclaw:ci-test --version
 
   website:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -381,8 +381,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: website
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -398,8 +398,8 @@ jobs:
   design-tokens:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -410,8 +410,8 @@ jobs:
   nix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v30
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixpkgs-unstable
       - run: nix build --no-link --print-build-logs
@@ -421,7 +421,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
       - name: Pull tinyllama
@@ -436,7 +436,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check for stale branding
         run: |
           if grep -ri "nullclaw" docs/ skills/ sdk/ --include='*.md' -l 2>/dev/null | grep -v plans/; then
