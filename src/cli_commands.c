@@ -20,8 +20,8 @@
 #define SC_INIT_CONFIG_FILE "config.json"
 #define SC_INIT_MAX_PATH    1024
 
-/* Starter config JSON for seaclaw init */
-static const char __attribute__((unused)) SC_INIT_DEFAULT_JSON[] =
+#ifndef SC_IS_TEST
+static const char SC_INIT_DEFAULT_JSON[] =
     "{\n"
     "  \"default_provider\": \"gemini\",\n"
     "  \"default_model\": \"gemini-3.1-flash-lite-preview\",\n"
@@ -34,6 +34,7 @@ static const char __attribute__((unused)) SC_INIT_DEFAULT_JSON[] =
     "    \"port\": 3000\n"
     "  }\n"
     "}\n";
+#endif
 
 /* ── init ────────────────────────────────────────────────────────────────── */
 sc_error_t cmd_init(sc_allocator_t *alloc, int argc, char **argv) {

@@ -56,7 +56,9 @@ sc_error_t sc_persona_cli_parse(int argc, const char **argv, sc_persona_cli_args
                     out->facebook_export_path = argv[i + 1];
                     i++;
                 }
-            } else if (strcmp(argv[i], "--interactive") == 0)
+            } else if (strcmp(argv[i], "--from-response") == 0 && i + 1 < argc)
+                out->response_file = argv[++i];
+            else if (strcmp(argv[i], "--interactive") == 0)
                 out->interactive = true;
         }
     } else if (strcmp(action, "update") == 0) {
@@ -79,7 +81,9 @@ sc_error_t sc_persona_cli_parse(int argc, const char **argv, sc_persona_cli_args
                     out->facebook_export_path = argv[i + 1];
                     i++;
                 }
-            } else if (strcmp(argv[i], "--interactive") == 0)
+            } else if (strcmp(argv[i], "--from-response") == 0 && i + 1 < argc)
+                out->response_file = argv[++i];
+            else if (strcmp(argv[i], "--interactive") == 0)
                 out->interactive = true;
         }
     } else if (strcmp(action, "show") == 0) {
@@ -99,6 +103,11 @@ sc_error_t sc_persona_cli_parse(int argc, const char **argv, sc_persona_cli_args
         if (argc < 4)
             return SC_ERR_INVALID_ARGUMENT;
         out->name = argv[3];
+    } else if (strcmp(action, "feedback") == 0) {
+        if (argc < 5 || strcmp(argv[3], "apply") != 0)
+            return SC_ERR_INVALID_ARGUMENT;
+        out->action = SC_PERSONA_ACTION_FEEDBACK_APPLY;
+        out->name = argv[4];
     } else {
         return SC_ERR_INVALID_ARGUMENT;
     }
@@ -261,15 +270,29 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
 #endif
 #endif
     }
+    case SC_PERSONA_ACTION_FEEDBACK_APPLY: {
+        if (!args->name || !args->name[0]) {
+            fprintf(stderr, "Persona name required for feedback apply\n");
+            return SC_ERR_INVALID_ARGUMENT;
+        }
+        sc_error_t err = sc_persona_feedback_apply(alloc, args->name, strlen(args->name));
+        if (err != SC_OK) {
+            fprintf(stderr, "Failed to apply feedback for persona: %s\n", args->name);
+            return err;
+        }
+        fprintf(stdout, "Feedback applied to persona: %s\n", args->name);
+        return SC_OK;
+    }
     case SC_PERSONA_ACTION_CREATE:
     case SC_PERSONA_ACTION_UPDATE: {
         if (!args->name || !args->name[0]) {
             fprintf(stderr, "Persona name required for create/update\n");
             return SC_ERR_INVALID_ARGUMENT;
         }
-        if (!args->from_imessage && !args->from_gmail && !args->from_facebook) {
-            fprintf(stderr, "No source specified. Use --from-imessage, --from-gmail, or "
-                            "--from-facebook.\n");
+        if (!args->from_imessage && !args->from_gmail && !args->from_facebook &&
+            !args->response_file) {
+            fprintf(stderr, "No source specified. Use --from-imessage, --from-gmail, "
+                            "--from-facebook, or --from-response <path>.\n");
             return SC_ERR_INVALID_ARGUMENT;
         }
         if (args->from_facebook && !args->facebook_export_path) {
@@ -286,6 +309,66 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
         (void)alloc;
         return SC_OK;
 #else
+        /* Step 2: --from-response — read AI response, parse, write persona */
+        if (args->response_file) {
+            FILE *rf = fopen(args->response_file, "rb");
+            if (!rf) {
+                fprintf(stderr, "Could not open response file: %s\n", args->response_file);
+                return SC_ERR_IO;
+            }
+            if (fseek(rf, 0, SEEK_END) != 0) {
+                fclose(rf);
+                return SC_ERR_IO;
+            }
+            long rsz = ftell(rf);
+            if (rsz < 0 || rsz > (long)(1024 * 1024)) {
+                fclose(rf);
+                fprintf(stderr, "Response file too large or invalid\n");
+                return SC_ERR_INVALID_ARGUMENT;
+            }
+            rewind(rf);
+            char *response = (char *)alloc->alloc(alloc->ctx, (size_t)rsz + 1);
+            if (!response) {
+                fclose(rf);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+            size_t rlen = fread(response, 1, (size_t)rsz, rf);
+            fclose(rf);
+            if (rlen != (size_t)rsz) {
+                alloc->free(alloc->ctx, response, (size_t)rsz + 1);
+                return SC_ERR_IO;
+            }
+            response[rlen] = '\0';
+
+            sc_persona_t partial = {0};
+            sc_error_t perr = sc_persona_analyzer_parse_response(alloc, response, rlen, "unknown", 7,
+                                                                 &partial);
+            alloc->free(alloc->ctx, response, (size_t)rsz + 1);
+            if (perr != SC_OK) {
+                fprintf(stderr, "Failed to parse AI response\n");
+                return perr;
+            }
+            partial.name = sc_strdup(alloc, args->name);
+            if (!partial.name) {
+                sc_persona_deinit(alloc, &partial);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+            partial.name_len = strlen(args->name);
+
+            sc_error_t werr = sc_persona_creator_write(alloc, &partial);
+            sc_persona_deinit(alloc, &partial);
+            if (werr != SC_OK)
+                return werr;
+            char dir_buf[SC_PERSONA_PATH_MAX];
+            const char *dir = persona_dir_path(dir_buf, sizeof(dir_buf));
+            if (dir)
+                fprintf(stdout, "Persona created at %s/%s.json\n", dir, args->name);
+            else
+                fprintf(stdout, "Persona created at ~/.seaclaw/personas/%s.json\n", args->name);
+            return SC_OK;
+        }
+
+        /* Step 1: extract messages, build prompt, write to .pending */
         if (args->from_imessage) {
 #if defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
             size_t msg_count = 0;
@@ -362,11 +445,49 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
                 fprintf(stderr, "Failed to parse Facebook export\n");
                 return perr;
             }
-            fprintf(stdout, "Found %zu messages from Facebook\n", msg_count);
-            if (messages) {
+            if (msg_count > 0 && messages) {
+                size_t prompt_cap = 1024 * 1024;
+                char *prompt_buf = (char *)alloc->alloc(alloc->ctx, prompt_cap);
+                if (!prompt_buf) {
+                    for (size_t i = 0; i < msg_count; i++)
+                        sys.free(sys.ctx, messages[i], strlen(messages[i]) + 1);
+                    sys.free(sys.ctx, messages, msg_count * sizeof(char *));
+                    return SC_ERR_OUT_OF_MEMORY;
+                }
+                size_t prompt_len = 0;
+                sc_error_t berr = sc_persona_analyzer_build_prompt(
+                    (const char **)messages, msg_count, "facebook", prompt_buf, prompt_cap,
+                    &prompt_len);
                 for (size_t i = 0; i < msg_count; i++)
-                    free(messages[i]);
-                free(messages);
+                    sys.free(sys.ctx, messages[i], strlen(messages[i]) + 1);
+                sys.free(sys.ctx, messages, msg_count * sizeof(char *));
+                if (berr != SC_OK) {
+                    alloc->free(alloc->ctx, prompt_buf, prompt_cap);
+                    return berr;
+                }
+                char prompt_path[SC_PERSONA_PATH_MAX];
+                int path_n = snprintf(prompt_path, sizeof(prompt_path),
+                                      "%s/%s_facebook_prompt.txt", pending_dir, args->name);
+                if (path_n <= 0 || (size_t)path_n >= sizeof(prompt_path)) {
+                    alloc->free(alloc->ctx, prompt_buf, prompt_cap);
+                    return SC_ERR_INVALID_ARGUMENT;
+                }
+                FILE *pf = fopen(prompt_path, "wb");
+                if (!pf) {
+                    alloc->free(alloc->ctx, prompt_buf, prompt_cap);
+                    return SC_ERR_IO;
+                }
+                size_t written = fwrite(prompt_buf, 1, prompt_len, pf);
+                fclose(pf);
+                alloc->free(alloc->ctx, prompt_buf, prompt_cap);
+                if (written != prompt_len)
+                    return SC_ERR_IO;
+                wrote_prompt = true;
+                fprintf(stdout, "Found %zu messages from Facebook\n", msg_count);
+            } else if (messages) {
+                for (size_t i = 0; i < msg_count; i++)
+                    sys.free(sys.ctx, messages[i], strlen(messages[i]) + 1);
+                sys.free(sys.ctx, messages, msg_count * sizeof(char *));
             }
         }
         if (args->from_gmail && args->gmail_export_path) {

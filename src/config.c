@@ -1724,7 +1724,25 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
     {
         const char *strict_env = getenv("SEACLAW_STRICT_CONFIG");
         bool strict = (strict_env != NULL && strict_env[0] != '\0' && strict_env[0] != '0');
-        sc_error_t verr = sc_config_validate_strict(out, NULL, strict);
+        sc_json_value_t *validation_root = NULL;
+        if (out->config_path) {
+            FILE *vf = fopen(out->config_path, "rb");
+            if (vf) {
+                fseek(vf, 0, SEEK_END);
+                long vsz = ftell(vf);
+                fseek(vf, 0, SEEK_SET);
+                if (vsz > 0 && vsz < 65536) {
+                    char *vbuf = (char *)a.alloc(a.ctx, (size_t)vsz + 1);
+                    if (vbuf) {
+                        size_t vread = fread(vbuf, 1, (size_t)vsz, vf);
+                        vbuf[vread] = '\0';
+                        sc_json_parse(&a, vbuf, vread, &validation_root);
+                    }
+                }
+                fclose(vf);
+            }
+        }
+        sc_error_t verr = sc_config_validate_strict(out, validation_root, strict);
         if (verr != SC_OK)
             return verr;
     }

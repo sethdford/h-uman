@@ -46,7 +46,8 @@ static void set_default_board_name(sc_arduino_ctx_t *s) {
     s->board_name[sizeof(s->board_name) - 1] = '\0';
 }
 
-static bool __attribute__((unused)) is_safe_path(const char *path) {
+#ifndef SC_IS_TEST
+static bool is_safe_path(const char *path) {
     if (!path)
         return false;
     if (strstr(path, "..") != NULL)
@@ -59,20 +60,7 @@ static bool __attribute__((unused)) is_safe_path(const char *path) {
     }
     return true;
 }
-
-static bool __attribute__((unused)) is_safe_path_len(const char *path, size_t len) {
-    if (!path || len == 0)
-        return false;
-    for (size_t i = 0; i < len; i++) {
-        if (i + 1 < len && path[i] == '.' && path[i + 1] == '.')
-            return false;
-        char c = path[i];
-        if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') &&
-            c != '.' && c != '_' && c != '/' && c != '-' && c != '~')
-            return false;
-    }
-    return true;
-}
+#endif
 
 static sc_peripheral_error_t impl_init(void *ctx) {
     sc_arduino_ctx_t *s = (sc_arduino_ctx_t *)ctx;

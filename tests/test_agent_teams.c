@@ -658,8 +658,24 @@ static void test_task_list_dependencies_preserved_through_serialization(void) {
     sc_task_list_destroy(list);
 }
 
+static void test_worktree_label_rejects_traversal(void) {
+    sc_allocator_t a = sc_system_allocator();
+    sc_worktree_manager_t *mgr = sc_worktree_manager_create(&a, "/tmp/repo");
+    SC_ASSERT_NOT_NULL(mgr);
+    const char *path = NULL;
+    SC_ASSERT_NEQ(sc_worktree_create(mgr, 100, "..", &path), SC_OK);
+    SC_ASSERT_NEQ(sc_worktree_create(mgr, 101, "foo/../bar", &path), SC_OK);
+    SC_ASSERT_NEQ(sc_worktree_create(mgr, 102, "foo/bar", &path), SC_OK);
+    SC_ASSERT_NEQ(sc_worktree_create(mgr, 103, "a\\b", &path), SC_OK);
+    SC_ASSERT_EQ(sc_worktree_create(mgr, 104, "", &path), SC_OK);
+    SC_ASSERT_EQ(sc_worktree_create(mgr, 105, "my-task", &path), SC_OK);
+    SC_ASSERT_NOT_NULL(path);
+    sc_worktree_manager_destroy(mgr);
+}
+
 void run_agent_teams_tests(void) {
     SC_TEST_SUITE("agent teams (worktree + team config + mailbox + task list)");
+    SC_RUN_TEST(test_worktree_label_rejects_traversal);
     SC_RUN_TEST(test_mailbox_register_send_recv_with_agent_id);
     SC_RUN_TEST(test_mailbox_recv_in_agent_context_works);
     SC_RUN_TEST(test_agent_turn_processes_mailbox_messages);

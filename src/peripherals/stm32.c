@@ -24,7 +24,8 @@ typedef struct sc_stm32_ctx {
     bool connected;
 } sc_stm32_ctx_t;
 
-static bool __attribute__((unused)) is_safe_path_len(const char *path, size_t len) {
+#if !defined(_WIN32) && !defined(SC_IS_TEST)
+static bool is_safe_path_len(const char *path, size_t len) {
     if (!path || len == 0)
         return false;
     for (size_t i = 0; i < len; i++) {
@@ -37,6 +38,7 @@ static bool __attribute__((unused)) is_safe_path_len(const char *path, size_t le
     }
     return true;
 }
+#endif
 
 static const char *impl_name(void *ctx) {
     sc_stm32_ctx_t *s = (sc_stm32_ctx_t *)ctx;

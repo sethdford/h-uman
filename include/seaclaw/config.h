@@ -70,6 +70,11 @@ typedef struct sc_router_config {
     int complexity_high; /* above this -> powerful (default 500) */
 } sc_router_config_t;
 
+typedef struct sc_persona_channel_entry {
+    char *channel;
+    char *persona;
+} sc_persona_channel_entry_t;
+
 typedef struct sc_agent_config {
     bool compact_context;
     uint32_t max_tool_iterations;
@@ -85,6 +90,8 @@ typedef struct sc_agent_config {
     uint32_t pool_max_concurrent;
     char *default_profile;
     char *persona;
+    sc_persona_channel_entry_t *persona_channels;
+    size_t persona_channels_count;
     float context_pressure_warn;    /* warn at this ratio (default 0.85) */
     float context_pressure_compact; /* auto-compact at this ratio (default 0.95) */
     float context_compact_target;   /* compact until below this ratio (default 0.70) */
@@ -410,6 +417,9 @@ bool sc_config_get_provider_native_tools(const sc_config_t *cfg, const char *nam
 const char *sc_config_get_web_search_provider(const sc_config_t *cfg);
 size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char *key);
 bool sc_config_get_provider_ws_streaming(const sc_config_t *cfg, const char *name);
+
+/** Returns channel-specific persona if configured, else NULL. Uses global persona as fallback. */
+const char *sc_config_persona_for_channel(const sc_config_t *cfg, const char *channel);
 
 /* Config hot-reload support */
 void sc_config_set_reload_requested(void);

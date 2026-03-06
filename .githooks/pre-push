@@ -11,7 +11,7 @@ if [ -f "CMakeLists.txt" ]; then
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR" || exit 1
     if [ ! -f "CMakeCache.txt" ]; then
-        cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON 2>/dev/null
+        cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON 2>/dev/null
     fi
     cmake --build . -j"$JOBS" 2>&1 | tail -3
     if [ $? -ne 0 ]; then

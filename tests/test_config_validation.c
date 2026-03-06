@@ -132,6 +132,26 @@ static void test_config_validate_strict_unknown_provider_fails_in_strict(void) {
     sc_arena_destroy(arena);
 }
 
+static void test_config_validate_strict_unknown_key_fails_with_root(void) {
+    sc_allocator_t backing = sc_system_allocator();
+    sc_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    sc_arena_t *arena = sc_arena_create(backing);
+    SC_ASSERT_NOT_NULL(arena);
+    cfg.arena = arena;
+    cfg.allocator = sc_arena_allocator(arena);
+    const char *json = "{\"default_provider\":\"openai\",\"bogus_unknown_key\":true}";
+    sc_error_t err = sc_config_parse_json(&cfg, json, strlen(json));
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_json_value_t *root = NULL;
+    err = sc_json_parse(&cfg.allocator, json, strlen(json), &root);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(root);
+    sc_error_t verr = sc_config_validate_strict(&cfg, root, true);
+    SC_ASSERT_NEQ(verr, SC_OK);
+    sc_arena_destroy(arena);
+}
+
 void run_config_validation_tests(void) {
     SC_TEST_SUITE("Config validation");
     SC_RUN_TEST(test_config_validate_strict_valid_passes);
@@ -142,4 +162,5 @@ void run_config_validation_tests(void) {
     SC_RUN_TEST(test_config_validate_strict_path_traversal_rejected);
     SC_RUN_TEST(test_config_validate_strict_non_strict_warnings_only);
     SC_RUN_TEST(test_config_validate_strict_unknown_provider_fails_in_strict);
+    SC_RUN_TEST(test_config_validate_strict_unknown_key_fails_with_root);
 }

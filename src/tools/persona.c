@@ -18,7 +18,7 @@
 #define PERSONA_PARAMS                                                                   \
     "{\"type\":\"object\",\"properties\":{"                                              \
     "\"action\":{\"type\":\"string\",\"enum\":[\"create\",\"update\",\"show\",\"list\"," \
-    "\"delete\",\"switch\",\"feedback\"]},"                                              \
+    "\"delete\",\"switch\",\"feedback\",\"apply_feedback\"]},"                           \
     "\"name\":{\"type\":\"string\"},"                                                    \
     "\"source\":{\"type\":\"string\",\"enum\":[\"imessage\",\"gmail\",\"facebook\"]},"   \
     "\"channel\":{\"type\":\"string\"},"                                                 \
@@ -283,6 +283,19 @@ static sc_error_t persona_execute(void *ctx, sc_allocator_t *alloc, const sc_jso
         const char *context = sc_json_get_string(args, "context");
         const char *channel = sc_json_get_string(args, "channel");
         return do_feedback(alloc, name, original, corrected, context, channel, out);
+    }
+    if (strcmp(action, "apply_feedback") == 0) {
+        if (!name || !name[0]) {
+            *out = sc_tool_result_fail("name required", 13);
+            return SC_OK;
+        }
+        sc_error_t err = sc_persona_feedback_apply(alloc, name, strlen(name));
+        if (err != SC_OK) {
+            *out = sc_tool_result_fail("Failed to apply feedback", 24);
+            return SC_OK;
+        }
+        *out = sc_tool_result_ok("Feedback applied", 16);
+        return SC_OK;
     }
 
     *out = sc_tool_result_fail("unknown action", 14);

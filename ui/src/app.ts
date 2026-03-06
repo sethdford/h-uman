@@ -117,6 +117,12 @@ export class ScApp extends LitElement {
       content-visibility: auto;
       contain-intrinsic-size: auto 100vh;
       position: relative;
+      outline: none;
+    }
+
+    main:focus-visible {
+      outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
+      outline-offset: calc(-1 * var(--sc-focus-ring-width, 2px));
     }
 
     @keyframes sc-ambient-drift {
@@ -518,7 +524,7 @@ export class ScApp extends LitElement {
           @toggle-collapse=${() => this._toggleSidebar()}
         ></sc-sidebar>
 
-        <main><div class="view-enter">${this._renderView()}</div></main>
+        <main tabindex="0"><div class="view-enter">${this._renderView()}</div></main>
 
         <nav class="mobile-nav" aria-label="Mobile navigation">
           ${MOBILE_TABS.map(

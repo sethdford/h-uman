@@ -15,8 +15,8 @@ test.describe("Chat View", () => {
     const chatView = page.locator("sc-app >> sc-chat-view");
     const input = chatView.locator("textarea, input[type='text'], [contenteditable]").first();
     await expect(input).toBeVisible({ timeout: 5000 });
-    const isDisabled = await input.isDisabled();
-    if (!isDisabled) {
+    const disabled = await input.getAttribute("disabled");
+    if (disabled === null) {
       await input.focus();
       await expect(input).toBeFocused();
     }
@@ -32,8 +32,8 @@ test.describe("Chat View", () => {
     const chatView = page.locator("sc-app >> sc-chat-view");
     const input = chatView.locator("textarea, input[type='text'], [contenteditable]").first();
     await expect(input).toBeVisible({ timeout: 5000 });
-    const isDisabled = await input.isDisabled();
-    if (!isDisabled) {
+    const disabled = await input.getAttribute("disabled");
+    if (disabled === null) {
       await input.fill("Hello SeaClaw");
       await expect(input).toHaveValue("Hello SeaClaw");
     }

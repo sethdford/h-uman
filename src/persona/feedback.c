@@ -13,13 +13,15 @@
 
 #define SC_FEEDBACK_PATH_MAX 512
 
-static const char *__attribute__((unused)) feedback_dir_path(char *buf, size_t cap) {
+#if !(defined(SC_IS_TEST) && SC_IS_TEST)
+static const char *feedback_dir_path(char *buf, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         home = ".";
     int n = snprintf(buf, cap, "%s/.seaclaw/personas/feedback", home);
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
+#endif
 
 sc_error_t sc_persona_feedback_record(sc_allocator_t *alloc, const char *persona_name,
                                       size_t persona_name_len,

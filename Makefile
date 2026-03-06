@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup hooks
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup hooks lint tidy coverage
 
 all: build test
 
@@ -37,8 +37,28 @@ check: build
 	@echo "Running tests (use 'make asan' for AddressSanitizer)"
 	$(BUILD)/seaclaw_tests
 
+lint:
+	cmake -B build-tidy -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON \
+		-DSC_ENABLE_CURL=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	@find src -name '*.c' | head -50 | xargs clang-tidy -p build-tidy 2>&1 | tail -30
+
+tidy: lint
+
+coverage:
+	cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON \
+		-DSC_ENABLE_CURL=ON -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+	cmake --build build-cov -j$(JOBS)
+	build-cov/seaclaw_tests
+	@echo "Generating coverage report..."
+	@lcov --capture --directory build-cov --output-file build-cov/coverage.info --ignore-errors mismatch 2>/dev/null || true
+	@lcov --remove build-cov/coverage.info '/usr/*' --output-file build-cov/coverage.info 2>/dev/null || true
+	@if command -v genhtml >/dev/null 2>&1; then \
+		genhtml build-cov/coverage.info --output-directory build-cov/html; \
+		echo "Coverage report: build-cov/html/index.html"; \
+	else echo "Install lcov for HTML report"; fi
+
 clean:
-	rm -rf $(BUILD) build-asan build-check build-fuzz
+	rm -rf $(BUILD) build-asan build-check build-fuzz build-cov build-tidy
 
 fmt:
 	@find src include tests -name '*.c' -o -name '*.h' | xargs clang-format -i

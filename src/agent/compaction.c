@@ -116,6 +116,20 @@ static char *build_summary(sc_allocator_t *alloc, const sc_owned_message_t *hist
     return buf;
 }
 
+static void free_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs, size_t count) {
+    if (!tcs || count == 0)
+        return;
+    for (size_t i = 0; i < count; i++) {
+        if (tcs[i].id)
+            alloc->free(alloc->ctx, (void *)tcs[i].id, tcs[i].id_len + 1);
+        if (tcs[i].name)
+            alloc->free(alloc->ctx, (void *)tcs[i].name, tcs[i].name_len + 1);
+        if (tcs[i].arguments)
+            alloc->free(alloc->ctx, (void *)tcs[i].arguments, tcs[i].arguments_len + 1);
+    }
+    alloc->free(alloc->ctx, tcs, count * sizeof(sc_tool_call_t));
+}
+
 /* Free messages in range [start, end) */
 static void free_messages(sc_allocator_t *alloc, sc_owned_message_t *history, size_t start,
                           size_t end) {
@@ -131,6 +145,11 @@ static void free_messages(sc_allocator_t *alloc, sc_owned_message_t *history, si
         if (history[i].tool_call_id) {
             alloc->free(alloc->ctx, history[i].tool_call_id, history[i].tool_call_id_len + 1);
             history[i].tool_call_id = NULL;
+        }
+        if (history[i].tool_calls) {
+            free_tool_calls(alloc, history[i].tool_calls, history[i].tool_calls_count);
+            history[i].tool_calls = NULL;
+            history[i].tool_calls_count = 0;
         }
     }
 }
@@ -203,6 +222,8 @@ sc_error_t sc_compact_history(sc_allocator_t *alloc, sc_owned_message_t *history
     history[start].name_len = 0;
     history[start].tool_call_id = NULL;
     history[start].tool_call_id_len = 0;
+    history[start].tool_calls = NULL;
+    history[start].tool_calls_count = 0;
 
     /* Shift remaining messages down */
     if (compact_end > start + 1) {
@@ -273,20 +294,7 @@ sc_error_t sc_context_compact_for_pressure(sc_allocator_t *alloc, sc_owned_messa
     memcpy(summary_content, buf, marker_len + 1);
 
     /* Free compacted messages */
-    for (size_t i = start; i < compact_end; i++) {
-        if (history[i].content) {
-            alloc->free(alloc->ctx, history[i].content, history[i].content_len + 1);
-            history[i].content = NULL;
-        }
-        if (history[i].name) {
-            alloc->free(alloc->ctx, history[i].name, history[i].name_len + 1);
-            history[i].name = NULL;
-        }
-        if (history[i].tool_call_id) {
-            alloc->free(alloc->ctx, history[i].tool_call_id, history[i].tool_call_id_len + 1);
-            history[i].tool_call_id = NULL;
-        }
-    }
+    free_messages(alloc, history, start, compact_end);
 
     history[start].role = SC_ROLE_ASSISTANT;
     history[start].content = summary_content;
@@ -295,6 +303,8 @@ sc_error_t sc_context_compact_for_pressure(sc_allocator_t *alloc, sc_owned_messa
     history[start].name_len = 0;
     history[start].tool_call_id = NULL;
     history[start].tool_call_id_len = 0;
+    history[start].tool_calls = NULL;
+    history[start].tool_calls_count = 0;
 
     if (compact_end > start + 1) {
         size_t remaining = count - compact_end;
@@ -391,6 +401,8 @@ sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *his
     history[start].name_len = 0;
     history[start].tool_call_id = NULL;
     history[start].tool_call_id_len = 0;
+    history[start].tool_calls = NULL;
+    history[start].tool_calls_count = 0;
 
     if (compact_end > start + 1) {
         size_t shift = compact_end - start - 1;

@@ -1,7 +1,7 @@
 #include "seaclaw/agent.h"
 #include "seaclaw/agent/prompt.h"
-#include "seaclaw/agent/tool_context.h"
 #include "seaclaw/agent/spawn.h"
+#include "seaclaw/agent/tool_context.h"
 #include "seaclaw/config.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/arena.h"
@@ -354,6 +354,16 @@ static void test_persona_cli_parse_validate(void) {
     SC_ASSERT_EQ(e, SC_OK);
     SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_VALIDATE);
     SC_ASSERT_TRUE(strcmp(args.name, "test_name") == 0);
+}
+
+static void test_persona_cli_parse_feedback_apply(void) {
+    const char *argv[] = {"seaclaw", "persona", "feedback", "apply", "mypersona"};
+    sc_persona_cli_args_t args;
+    memset(&args, 0, sizeof(args));
+    sc_error_t e = sc_persona_cli_parse(5, argv, &args);
+    SC_ASSERT_EQ(e, SC_OK);
+    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_FEEDBACK_APPLY);
+    SC_ASSERT_TRUE(strcmp(args.name, "mypersona") == 0);
 }
 
 static void test_persona_cli_run_validate(void) {
@@ -1191,9 +1201,8 @@ static void test_persona_tool_execute_feedback(void) {
     sc_error_t err = sc_persona_tool_create(&alloc, &tool);
     SC_ASSERT_EQ(err, SC_OK);
 
-    const char *args =
-        "{\"action\":\"feedback\",\"name\":\"test\",\"original\":\"Hey there!\","
-        "\"corrected\":\"Hey what's up\",\"context\":\"greeting\"}";
+    const char *args = "{\"action\":\"feedback\",\"name\":\"test\",\"original\":\"Hey there!\","
+                       "\"corrected\":\"Hey what's up\",\"context\":\"greeting\"}";
     sc_json_value_t *val = NULL;
     err = sc_json_parse(&alloc, args, strlen(args), &val);
     SC_ASSERT_EQ(err, SC_OK);
@@ -1257,6 +1266,79 @@ static void test_persona_tool_execute_create_redirects_to_cli(void) {
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+static void test_persona_tool_execute_show(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool = {0};
+    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    const char *args_str = "{\"action\":\"show\",\"name\":\"nonexistent_xyz\"}";
+    sc_json_value_t *args = NULL;
+    err = sc_json_parse(&alloc, args_str, strlen(args_str), &args);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(args != NULL);
+
+    sc_tool_result_t result;
+    memset(&result, 0, sizeof(result));
+    err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    /* In test mode, show returns a stub message */
+    SC_ASSERT_TRUE(result.output != NULL);
+
+    sc_json_free(&alloc, args);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_persona_tool_execute_apply_feedback(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool = {0};
+    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    const char *args_str = "{\"action\":\"apply_feedback\",\"name\":\"test\"}";
+    sc_json_value_t *args = NULL;
+    err = sc_json_parse(&alloc, args_str, strlen(args_str), &args);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(args != NULL);
+
+    sc_tool_result_t result;
+    memset(&result, 0, sizeof(result));
+    err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(result.success);
+
+    sc_json_free(&alloc, args);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_persona_tool_execute_apply_feedback_no_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool = {0};
+    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    const char *args_str = "{\"action\":\"apply_feedback\"}";
+    sc_json_value_t *args = NULL;
+    err = sc_json_parse(&alloc, args_str, strlen(args_str), &args);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(args != NULL);
+
+    sc_tool_result_t result;
+    memset(&result, 0, sizeof(result));
+    err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(!result.success);
+
+    sc_json_free(&alloc, args);
+    sc_tool_result_free(&alloc, &result);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
 void run_persona_tests(void) {
     SC_TEST_SUITE("Persona");
 
@@ -1284,6 +1366,7 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_persona_cli_parse_show);
     SC_RUN_TEST(test_persona_cli_parse_list);
     SC_RUN_TEST(test_persona_cli_parse_validate);
+    SC_RUN_TEST(test_persona_cli_parse_feedback_apply);
     SC_RUN_TEST(test_persona_validate_json_valid);
     SC_RUN_TEST(test_persona_validate_json_missing_name);
     SC_RUN_TEST(test_persona_validate_json_missing_core);
@@ -1338,4 +1421,7 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_persona_tool_execute_switch_with_agent);
     SC_RUN_TEST(test_persona_tool_execute_feedback);
     SC_RUN_TEST(test_persona_tool_execute_feedback_missing_corrected);
+    SC_RUN_TEST(test_persona_tool_execute_show);
+    SC_RUN_TEST(test_persona_tool_execute_apply_feedback);
+    SC_RUN_TEST(test_persona_tool_execute_apply_feedback_no_name);
 }
