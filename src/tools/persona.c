@@ -1,7 +1,6 @@
 #include "seaclaw/tools/persona.h"
 #include "seaclaw/agent.h"
 #include "seaclaw/agent/tool_context.h"
-#include "seaclaw/core/error.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
@@ -23,10 +22,10 @@
     "\"name\":{\"type\":\"string\"},"                                                    \
     "\"source\":{\"type\":\"string\",\"enum\":[\"imessage\",\"gmail\",\"facebook\"]},"   \
     "\"channel\":{\"type\":\"string\"},"                                                 \
-    "\"patch\":{\"type\":\"object\"},"                                                  \
+    "\"patch\":{\"type\":\"object\"},"                                                   \
     "\"original\":{\"type\":\"string\"},"                                                \
     "\"corrected\":{\"type\":\"string\"},"                                               \
-    "\"context\":{\"type\":\"string\"}"                                                   \
+    "\"context\":{\"type\":\"string\"}"                                                  \
     "},\"required\":[\"action\"]}"
 
 #define SC_PERSONA_PATH_MAX 512
@@ -203,9 +202,9 @@ static sc_error_t do_switch(sc_allocator_t *alloc, const char *name, sc_tool_res
     return SC_OK;
 }
 
-static sc_error_t do_feedback(sc_allocator_t *alloc, const char *persona_name,
-                              const char *original, const char *corrected, const char *context,
-                              const char *channel, sc_tool_result_t *out) {
+static sc_error_t do_feedback(sc_allocator_t *alloc, const char *persona_name, const char *original,
+                              const char *corrected, const char *context, const char *channel,
+                              sc_tool_result_t *out) {
     const char *name = persona_name;
     if (!name || !name[0]) {
         sc_agent_t *agent = sc_agent_get_current_for_tools();
@@ -232,13 +231,12 @@ static sc_error_t do_feedback(sc_allocator_t *alloc, const char *persona_name,
     fb.context = context ? context : "";
     fb.context_len = context ? strlen(context) : 0;
 
-    size_t name_len = strlen(name);
-    sc_error_t err = sc_persona_feedback_record(alloc, name, name_len, &fb);
+    sc_error_t err = sc_persona_feedback_record(alloc, persona_name, strlen(persona_name), &fb);
     if (err != SC_OK) {
         *out = sc_tool_result_fail("Failed to record feedback", 26);
         return SC_OK;
     }
-    char *msg = sc_sprintf(alloc, "Feedback recorded for persona: %s", persona_name);
+    char *msg = sc_sprintf(alloc, "Feedback recorded for persona: %s", name);
     if (msg) {
         *out = sc_tool_result_ok_owned(msg, strlen(msg));
     } else {
@@ -277,6 +275,15 @@ static sc_error_t persona_execute(void *ctx, sc_allocator_t *alloc, const sc_jso
         return do_list(alloc, out);
     if (strcmp(action, "delete") == 0)
         return do_delete(alloc, name, out);
+    if (strcmp(action, "switch") == 0)
+        return do_switch(alloc, name, out);
+    if (strcmp(action, "feedback") == 0) {
+        const char *original = sc_json_get_string(args, "original");
+        const char *corrected = sc_json_get_string(args, "corrected");
+        const char *context = sc_json_get_string(args, "context");
+        const char *channel = sc_json_get_string(args, "channel");
+        return do_feedback(alloc, name, original, corrected, context, channel, out);
+    }
 
     *out = sc_tool_result_fail("unknown action", 14);
     return SC_OK;
