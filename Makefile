@@ -1,7 +1,7 @@
 JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 BUILD ?= build
 
-.PHONY: all configure build test clean release asan check fmt format-check fuzz hooks
+.PHONY: all configure build test clean release asan check fmt format-check fuzz bench setup hooks
 
 all: build test
 
@@ -51,6 +51,19 @@ fuzz:
 		-DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
 	cmake --build build-fuzz -j$(JOBS)
 	@echo "Fuzz targets built. Run: ./build-fuzz/fuzz_<name> -max_total_time=30"
+
+bench: release
+	@if [ -x scripts/benchmark.sh ]; then scripts/benchmark.sh $(BUILD)/seaclaw; \
+	else echo "Binary: $$(stat -c%s $(BUILD)/seaclaw 2>/dev/null || stat -f%z $(BUILD)/seaclaw) bytes"; fi
+
+setup:
+	@echo "==> Installing dependencies"
+	@if [ "$$(uname)" = "Darwin" ]; then echo "  brew install cmake sqlite curl"; \
+	else echo "  sudo apt install build-essential cmake libsqlite3-dev libcurl4-openssl-dev"; fi
+	@echo ""
+	@$(MAKE) configure
+	@$(MAKE) hooks
+	@echo "==> Ready. Run: make test"
 
 hooks:
 	git config core.hooksPath .githooks

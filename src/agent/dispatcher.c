@@ -80,10 +80,12 @@ static sc_error_t dispatch_sequential(sc_allocator_t *alloc, sc_tool_t *tools, s
                 continue;
             }
             int timed_out = timed_join(tid, timeout_secs, &wctx.done);
-            if (timed_out)
+            if (timed_out) {
+                sc_tool_result_free(alloc, &wctx.result);
                 results[i] = sc_tool_result_fail("tool execution timed out", 24);
-            else
+            } else {
                 results[i] = wctx.result;
+            }
         }
     } else
 #else
@@ -175,6 +177,7 @@ static sc_error_t dispatch_parallel(sc_dispatcher_t *d, sc_allocator_t *alloc, s
     for (size_t i = 0; i < calls_count; i++) {
         int timed_out = timed_join(threads[i], d->timeout_secs, &ctxs[i].done);
         if (timed_out) {
+            sc_tool_result_free(alloc, &ctxs[i].result);
             ctxs[i].result = sc_tool_result_fail("tool execution timed out", 24);
         }
     }

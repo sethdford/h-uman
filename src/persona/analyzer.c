@@ -122,12 +122,35 @@ sc_error_t sc_persona_analyzer_parse_response(sc_allocator_t *alloc, const char 
         memset(out->overlays, 0, sizeof(sc_persona_overlay_t));
         out->overlays_count = 1;
         out->overlays[0].channel = sc_strndup(alloc, channel, channel_len);
-        if (formality)
+        if (!out->overlays[0].channel) {
+            sc_persona_deinit(alloc, out);
+            sc_json_free(alloc, root);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
+        if (formality) {
             out->overlays[0].formality = sc_strdup(alloc, formality);
-        if (avg_length)
+            if (!out->overlays[0].formality) {
+                sc_persona_deinit(alloc, out);
+                sc_json_free(alloc, root);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+        }
+        if (avg_length) {
             out->overlays[0].avg_length = sc_strdup(alloc, avg_length);
-        if (emoji_usage)
+            if (!out->overlays[0].avg_length) {
+                sc_persona_deinit(alloc, out);
+                sc_json_free(alloc, root);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+        }
+        if (emoji_usage) {
             out->overlays[0].emoji_usage = sc_strdup(alloc, emoji_usage);
+            if (!out->overlays[0].emoji_usage) {
+                sc_persona_deinit(alloc, out);
+                sc_json_free(alloc, root);
+                return SC_ERR_OUT_OF_MEMORY;
+            }
+        }
     }
 
     sc_json_free(alloc, root);
