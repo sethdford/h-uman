@@ -1,12 +1,12 @@
 # SeaClaw — Project Status
 
-Last updated: 2026-03-02
+Last updated: 2026-03-06
 
 ## Summary
 
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
-| Source files (src/ + include/) | **587**                |
+| Source files (src/ + include/) | **588**                |
 | Lines of C/H/ASM code          | **~99K**               |
 | Test files                     | 94                     |
 | Tests passing                  | **2,768/2,768 (100%)** |

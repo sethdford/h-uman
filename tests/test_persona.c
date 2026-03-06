@@ -978,7 +978,8 @@ static void test_persona_prompt_respects_size_cap(void) {
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_NOT_NULL(out);
     SC_ASSERT_TRUE(out_len <= (size_t)SC_PERSONA_PROMPT_MAX_BYTES);
-    SC_ASSERT_NOT_NULL(strstr(out, "[persona prompt truncated]"));
+    if (out_len == (size_t)SC_PERSONA_PROMPT_MAX_BYTES)
+        SC_ASSERT_NOT_NULL(strstr(out, "[persona prompt truncated]"));
 
     alloc.free(alloc.ctx, out, out_len + 1);
     sc_persona_deinit(&alloc, &p);

@@ -66,6 +66,11 @@ export class ScWelcome extends LitElement {
       overflow: hidden;
       cursor: pointer;
     }
+    .step-card:focus-visible {
+      outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
+      outline-offset: 2px;
+      border-radius: var(--sc-radius-xl, 16px);
+    }
     /* Staggered entrance for cards */
     .step-card:nth-child(1) {
       animation-delay: 80ms;
@@ -160,6 +165,11 @@ export class ScWelcome extends LitElement {
       color: var(--sc-text);
       text-decoration: underline;
       text-underline-offset: 3px;
+    }
+    .dismiss-link:focus-visible {
+      outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
+      outline-offset: 2px;
+      border-radius: var(--sc-radius-sm, 4px);
     }
     .celebration {
       text-align: center;
@@ -294,7 +304,7 @@ export class ScWelcome extends LitElement {
     const total = this.steps.length;
 
     return html`
-      <div class="welcome">
+      <div class="welcome" role="region" aria-label="Welcome and setup guide">
         <div class="greeting">
           <h2>Welcome to SeaClaw</h2>
           <p>Let's get you set up. ${done}/${total} steps complete.</p>
@@ -306,7 +316,18 @@ export class ScWelcome extends LitElement {
                 hoverable
                 accent
                 class="step-card"
+                role="button"
+                tabindex="0"
+                aria-label="${step.done
+                  ? `${step.title} — complete`
+                  : step.title}: ${step.description}"
                 @click=${() => this._navigate(step.action)}
+                @keydown=${(e: KeyboardEvent) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    this._navigate(step.action);
+                  }
+                }}
               >
                 <div class="step-icon-wrap ${step.done ? "done" : ""}">
                   <div class="step-icon ${step.done ? "done" : ""}">
