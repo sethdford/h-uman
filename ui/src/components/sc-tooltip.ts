@@ -83,3 +83,9 @@ export class ScTooltip extends LitElement {
     `;
   }
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-tooltip": ScTooltip;
+  }
+}

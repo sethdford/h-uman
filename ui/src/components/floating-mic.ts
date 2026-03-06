@@ -264,3 +264,9 @@ export class ScFloatingMic extends LitElement {
     `;
   }
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-floating-mic": ScFloatingMic;
+  }
+}

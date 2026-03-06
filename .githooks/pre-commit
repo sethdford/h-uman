@@ -25,6 +25,18 @@ if [ -d "src" ] && [ -f "CMakeLists.txt" ]; then
     fi
 fi
 
+# Check for declared-but-undefined symbols in staged headers
+if [ -d "build" ] && [ -f "build/libseaclaw_core.a" ]; then
+    staged_h=$(git diff --cached --name-only --diff-filter=ACM -- 'include/seaclaw/*.h' 'include/seaclaw/**/*.h')
+    if [ -n "$staged_h" ]; then
+        UNDEFS=$(nm -u build/libseaclaw_core.a 2>/dev/null | grep ' U _sc_' | sort -u || true)
+        if [ -n "$UNDEFS" ]; then
+            echo "Warning: possibly undefined sc_* symbols in library:"
+            echo "$UNDEFS" | head -10
+        fi
+    fi
+fi
+
 # Lint for raw hex colors in staged CSS/TS/Astro files
 if [ -x "scripts/lint-raw-colors.sh" ]; then
     staged_style=$(git diff --cached --name-only --diff-filter=ACM -- '*.css' '*.ts' '*.tsx' '*.astro')

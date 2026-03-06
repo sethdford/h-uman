@@ -49,15 +49,15 @@ static void whatsapp_stop(void *ctx) {
 static sc_error_t whatsapp_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
+    sc_whatsapp_ctx_t *c = (sc_whatsapp_ctx_t *)ctx;
+
+#if SC_IS_TEST
     (void)target;
     (void)target_len;
     (void)message;
     (void)message_len;
     (void)media;
     (void)media_count;
-    sc_whatsapp_ctx_t *c = (sc_whatsapp_ctx_t *)ctx;
-
-#if SC_IS_TEST
     (void)c;
     return SC_OK;
 #else
@@ -116,7 +116,45 @@ static sc_error_t whatsapp_send(void *ctx, const char *target, size_t target_len
         sc_http_response_free(c->alloc, &resp);
     if (resp.status_code < 200 || resp.status_code >= 300)
         return SC_ERR_CHANNEL_SEND;
+
+    sc_json_buf_t img_buf;
+    for (size_t i = 0; i < media_count && media && media[i]; i++) {
+        err = sc_json_buf_init(&img_buf, c->alloc);
+        if (err)
+            return err;
+        err = sc_json_buf_append_raw(&img_buf, "{\"messaging_product\":\"whatsapp\",", 32);
+        if (err)
+            goto img_fail;
+        err = sc_json_append_key_value(&img_buf, "to", 2, target, target_len);
+        if (err)
+            goto img_fail;
+        err = sc_json_buf_append_raw(&img_buf, ",\"type\":\"image\",\"image\":{", 26);
+        if (err)
+            goto img_fail;
+        err = sc_json_append_key_value(&img_buf, "link", 4, media[i], strlen(media[i]));
+        if (err)
+            goto img_fail;
+        err = sc_json_buf_append_raw(&img_buf, "}}", 2);
+        if (err)
+            goto img_fail;
+
+        sc_http_response_t img_resp = {0};
+        err = sc_http_post_json(c->alloc, url_buf, auth_buf, img_buf.ptr, img_buf.len, &img_resp);
+        sc_json_buf_free(&img_buf);
+        if (err != SC_OK) {
+            if (img_resp.owned && img_resp.body)
+                sc_http_response_free(c->alloc, &img_resp);
+            return SC_ERR_CHANNEL_SEND;
+        }
+        if (img_resp.owned && img_resp.body)
+            sc_http_response_free(c->alloc, &img_resp);
+        if (img_resp.status_code < 200 || img_resp.status_code >= 300)
+            return SC_ERR_CHANNEL_SEND;
+    }
     return SC_OK;
+img_fail:
+    sc_json_buf_free(&img_buf);
+    return err;
 jfail:
     sc_json_buf_free(&jbuf);
     return err;

@@ -368,8 +368,10 @@ sc_error_t sc_config_mutator_mutate(sc_allocator_t *alloc, sc_mutation_action_t 
         return SC_ERR_PERMISSION_DENIED;
     }
 
-    if (action == SC_MUTATION_SET && (!value_raw || !value_raw[0]))
+    if (action == SC_MUTATION_SET && (!value_raw || !value_raw[0])) {
+        alloc->free(alloc->ctx, trimmed, plen + 1);
         return SC_ERR_INVALID_ARGUMENT;
+    }
 
 #if defined(SC_IS_TEST)
     /* Stub: no file write in test */

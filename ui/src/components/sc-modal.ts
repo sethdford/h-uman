@@ -216,3 +216,9 @@ export class ScModal extends LitElement {
     `;
   }
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-modal": ScModal;
+  }
+}

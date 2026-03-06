@@ -20,6 +20,10 @@
 #if SC_HAS_WHATSAPP
 #include "seaclaw/channels/whatsapp.h"
 #endif
+#if SC_HAS_FACEBOOK
+#include "seaclaw/channel_loop.h"
+#include "seaclaw/channels/facebook.h"
+#endif
 #if SC_HAS_MATRIX
 #include "seaclaw/channels/matrix.h"
 #endif
@@ -306,6 +310,74 @@ static void test_whatsapp_poll_empty(void) {
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_EQ(out, 0);
     sc_whatsapp_destroy(&ch);
+}
+#endif
+
+/* ─── Facebook Messenger ───────────────────────────────────────────────────── */
+#if SC_HAS_FACEBOOK
+static void test_facebook_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_facebook_create(&alloc, "page1", 5, "token", 5, "secret", 6, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "user123", 7, "hi", 2, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_facebook_destroy(&ch);
+}
+
+static void test_facebook_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_facebook_create(&alloc, "page1", 5, "token", 5, "secret", 6, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "facebook");
+    sc_facebook_destroy(&ch);
+}
+
+static void test_facebook_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_facebook_create(&alloc, NULL, 0, NULL, 0, NULL, 0, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "facebook");
+    sc_facebook_destroy(&ch);
+}
+
+static void test_facebook_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_facebook_create(&alloc, "1", 1, "t", 1, "s", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_facebook_destroy(&ch);
+}
+
+static void test_facebook_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_facebook_create(&alloc, "123", 3, "tok", 3, "sec", 3, &ch);
+    sc_error_t err = sc_facebook_on_webhook(ch.ctx, &alloc, "hello from webhook", 18);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t out = 0;
+    err = sc_facebook_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 1);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "test-sender");
+    SC_ASSERT_STR_EQ(msgs[0].content, "hello from webhook");
+    err = sc_facebook_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 0);
+    sc_facebook_destroy(&ch);
+}
+
+static void test_facebook_poll_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_facebook_create(&alloc, "1", 1, "t", 1, "s", 1, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t out = 99;
+    sc_error_t err = sc_facebook_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 0);
+    sc_facebook_destroy(&ch);
 }
 #endif
 
@@ -610,7 +682,8 @@ static void test_email_poll_returns_mock_emails(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
     sc_email_create(&alloc, "smtp.example.com", 16, 587, "bot@example.com", 15, &ch);
-    sc_error_t err = sc_email_test_inject_mock_email(&ch, "sender@ex.com", 13, "mock subject\n\nmock body", 23);
+    sc_error_t err =
+        sc_email_test_inject_mock_email(&ch, "sender@ex.com", 13, "mock subject\n\nmock body", 23);
     SC_ASSERT_EQ(err, SC_OK);
     sc_channel_loop_msg_t msgs[4];
     size_t count = 0;
@@ -921,7 +994,7 @@ static void test_nostr_poll_test_mode(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch = {0};
     sc_error_t err = sc_nostr_create(&alloc, "/tmp/nak", 8, "npub1x", 6, "wss://relay.example.com",
-                                    21, "seckey", 6, &ch);
+                                     21, "seckey", 6, &ch);
     SC_ASSERT(err == SC_OK);
     sc_channel_loop_msg_t msgs[4];
     size_t count = 99;
@@ -1172,7 +1245,6 @@ static void test_web_send_empty_target(void) {
     sc_web_destroy(&ch);
 }
 #endif
-
 
 /* ─── Webhook + Poll tests ───────────────────────────────────────── */
 
@@ -1520,6 +1592,14 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_whatsapp_send);
     SC_RUN_TEST(test_whatsapp_webhook_and_poll);
     SC_RUN_TEST(test_whatsapp_poll_empty);
+#endif
+#if SC_HAS_FACEBOOK
+    SC_RUN_TEST(test_facebook_create);
+    SC_RUN_TEST(test_facebook_name);
+    SC_RUN_TEST(test_facebook_health_check);
+    SC_RUN_TEST(test_facebook_send);
+    SC_RUN_TEST(test_facebook_webhook_and_poll);
+    SC_RUN_TEST(test_facebook_poll_empty);
 #endif
 #if SC_HAS_MATRIX
     SC_RUN_TEST(test_matrix_create);

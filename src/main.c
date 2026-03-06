@@ -49,9 +49,9 @@
 #ifdef SC_HAS_SKILLS
 #include "seaclaw/skillforge.h"
 #endif
+#include "seaclaw/plugin_loader.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/tools/factory.h"
-#include "seaclaw/plugin_loader.h"
 #if SC_HAS_EMAIL
 #include "seaclaw/channels/email.h"
 #endif
@@ -75,6 +75,9 @@
 #endif
 #if SC_HAS_WHATSAPP
 #include "seaclaw/channels/whatsapp.h"
+#endif
+#if SC_HAS_FACEBOOK
+#include "seaclaw/channels/facebook.h"
 #endif
 #if SC_HAS_LINE
 #include "seaclaw/channels/line.h"
@@ -395,8 +398,7 @@ static sc_error_t cmd_service(sc_allocator_t *alloc, int argc, char **argv) {
         else if (err == SC_ERR_NOT_FOUND)
             fprintf(stderr, "[%s] service is not running\n", SC_CODENAME);
         else
-            fprintf(stderr, "[%s] failed to stop service: %s\n", SC_CODENAME,
-                    sc_error_string(err));
+            fprintf(stderr, "[%s] failed to stop service: %s\n", SC_CODENAME, sc_error_string(err));
         return err;
     }
 
@@ -441,7 +443,8 @@ static sc_error_t plugin_register_tool_stub(void *ctx, const char *name, void *t
     (void)tool_vtable;
     return SC_OK;
 }
-static sc_error_t plugin_register_provider_stub(void *ctx, const char *name, void *provider_vtable) {
+static sc_error_t plugin_register_provider_stub(void *ctx, const char *name,
+                                                void *provider_vtable) {
     (void)ctx;
     (void)name;
     (void)provider_vtable;
@@ -476,8 +479,8 @@ typedef struct webhook_dispatcher_ctx {
     size_t ch_count;
 } webhook_dispatcher_ctx_t;
 
-__attribute__((unused))
-static void webhook_dispatcher(const char *channel, const char *body, size_t body_len, void *ctx) {
+__attribute__((unused)) static void webhook_dispatcher(const char *channel, const char *body,
+                                                       size_t body_len, void *ctx) {
     webhook_dispatcher_ctx_t *d = (webhook_dispatcher_ctx_t *)ctx;
     if (!d || !channel || !body)
         return;
@@ -731,7 +734,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
             model[0] ? model : "(default)", tools_count);
 
     /* ── Wire channels ────────────────────────────────────────────────── */
-    sc_service_channel_t channels[10];
+    sc_service_channel_t channels[20];
     memset(channels, 0, sizeof(channels));
     size_t ch_count = 0;
 
@@ -771,8 +774,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         err = sc_imessage_create(alloc, cfg.channels.imessage.default_target,
                                  strlen(cfg.channels.imessage.default_target),
                                  (const char *const *)cfg.channels.imessage.allow_from,
-                                 cfg.channels.imessage.allow_from_count,
-                                 &imessage_ch);
+                                 cfg.channels.imessage.allow_from_count, &imessage_ch);
         if (err == SC_OK) {
             channels[ch_count].channel_ctx = imessage_ch.ctx;
             channels[ch_count].channel = &imessage_ch;
@@ -790,13 +792,11 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     sc_channel_t gmail_ch = {0};
     if (cfg.channels.gmail.client_id && cfg.channels.gmail.client_secret &&
         cfg.channels.gmail.refresh_token) {
-        err = sc_gmail_create(alloc, cfg.channels.gmail.client_id,
-                              strlen(cfg.channels.gmail.client_id),
-                              cfg.channels.gmail.client_secret,
-                              strlen(cfg.channels.gmail.client_secret),
-                              cfg.channels.gmail.refresh_token,
-                              strlen(cfg.channels.gmail.refresh_token),
-                              cfg.channels.gmail.poll_interval_sec, &gmail_ch);
+        err = sc_gmail_create(
+            alloc, cfg.channels.gmail.client_id, strlen(cfg.channels.gmail.client_id),
+            cfg.channels.gmail.client_secret, strlen(cfg.channels.gmail.client_secret),
+            cfg.channels.gmail.refresh_token, strlen(cfg.channels.gmail.refresh_token),
+            cfg.channels.gmail.poll_interval_sec, &gmail_ch);
         if (err == SC_OK) {
             channels[ch_count].channel_ctx = gmail_ch.ctx;
             channels[ch_count].channel = &gmail_ch;
@@ -825,9 +825,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
             .imap_password = cfg.channels.imap.imap_password,
             .imap_password_len = strlen(cfg.channels.imap.imap_password),
             .imap_folder = cfg.channels.imap.imap_folder ? cfg.channels.imap.imap_folder : "INBOX",
-            .imap_folder_len = cfg.channels.imap.imap_folder
-                ? strlen(cfg.channels.imap.imap_folder)
-                : 6,
+            .imap_folder_len =
+                cfg.channels.imap.imap_folder ? strlen(cfg.channels.imap.imap_folder) : 6,
             .imap_use_tls = cfg.channels.imap.imap_use_tls,
         };
         err = sc_imap_create(alloc, &imap_cfg, &imap_ch);
@@ -923,6 +922,67 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     }
 #endif
 
+#if SC_HAS_FACEBOOK
+    sc_channel_t facebook_ch = {0};
+    if (cfg.channels.facebook.page_id && cfg.channels.facebook.page_access_token) {
+        err = sc_facebook_create(
+            alloc, cfg.channels.facebook.page_id, strlen(cfg.channels.facebook.page_id),
+            cfg.channels.facebook.page_access_token,
+            strlen(cfg.channels.facebook.page_access_token),
+            cfg.channels.facebook.app_secret ? cfg.channels.facebook.app_secret : "",
+            cfg.channels.facebook.app_secret ? strlen(cfg.channels.facebook.app_secret) : 0,
+            &facebook_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = facebook_ch.ctx;
+            channels[ch_count].channel = &facebook_ch;
+            channels[ch_count].poll_fn = sc_facebook_poll;
+            channels[ch_count].webhook_fn = sc_facebook_on_webhook;
+            channels[ch_count].interval_ms = 1000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] facebook channel configured (webhook+poll)\n", SC_CODENAME);
+        }
+    }
+#endif
+
+#if SC_HAS_LINE
+    sc_channel_t line_ch = {0};
+    if (cfg.channels.line.channel_token) {
+        err = sc_line_create_ex(alloc, cfg.channels.line.channel_token,
+                                strlen(cfg.channels.line.channel_token), cfg.channels.line.user_id,
+                                cfg.channels.line.user_id ? strlen(cfg.channels.line.user_id) : 0,
+                                &line_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = line_ch.ctx;
+            channels[ch_count].channel = &line_ch;
+            channels[ch_count].poll_fn = sc_line_poll;
+            channels[ch_count].webhook_fn = sc_line_on_webhook;
+            channels[ch_count].interval_ms = 1000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] line channel configured (webhook+poll)\n", SC_CODENAME);
+        }
+    }
+#endif
+
+#if SC_HAS_GOOGLE_CHAT
+    sc_channel_t google_chat_ch = {0};
+    if (cfg.channels.google_chat.webhook_url) {
+        err = sc_google_chat_create(alloc, cfg.channels.google_chat.webhook_url,
+                                    strlen(cfg.channels.google_chat.webhook_url), &google_chat_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = google_chat_ch.ctx;
+            channels[ch_count].channel = &google_chat_ch;
+            channels[ch_count].poll_fn = sc_google_chat_poll;
+            channels[ch_count].webhook_fn = sc_google_chat_on_webhook;
+            channels[ch_count].interval_ms = 1000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] google_chat channel configured (webhook+poll)\n", SC_CODENAME);
+        }
+    }
+#endif
+
 #ifdef SC_HAS_CRON
     fprintf(stderr, "[%s] %zu channel(s) active, cron enabled\n", SC_CODENAME, ch_count);
 #else
@@ -989,6 +1049,22 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #if SC_HAS_DISCORD
     if (discord_ch.ctx)
         sc_discord_destroy(&discord_ch);
+#endif
+#if SC_HAS_WHATSAPP
+    if (whatsapp_ch.ctx)
+        sc_whatsapp_destroy(&whatsapp_ch);
+#endif
+#if SC_HAS_FACEBOOK
+    if (facebook_ch.ctx)
+        sc_facebook_destroy(&facebook_ch);
+#endif
+#if SC_HAS_LINE
+    if (line_ch.ctx)
+        sc_line_destroy(&line_ch);
+#endif
+#if SC_HAS_GOOGLE_CHAT
+    if (google_chat_ch.ctx)
+        sc_google_chat_destroy(&google_chat_ch);
 #endif
 
     sc_agent_deinit(&agent);
@@ -1244,8 +1320,7 @@ static bool gw_agent_on_message(sc_bus_event_type_t type, const sc_bus_event_t *
         sc_bus_event_t eev;
         memset(&eev, 0, sizeof(eev));
         eev.type = SC_BUS_ERROR;
-        snprintf(eev.channel, SC_BUS_CHANNEL_LEN, "%s",
-                 ev->channel[0] ? ev->channel : "gateway");
+        snprintf(eev.channel, SC_BUS_CHANNEL_LEN, "%s", ev->channel[0] ? ev->channel : "gateway");
         snprintf(eev.id, SC_BUS_ID_LEN, "%s", ev->id);
         const char *emsg = sc_error_string(err);
         size_t el = strlen(emsg);
@@ -1480,11 +1555,10 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
             .pressure_compact = cfg.agent.context_pressure_compact,
             .compact_target = cfg.agent.context_compact_target,
         };
-        err = sc_agent_from_config(&agent, alloc, provider, tools, tools_count,
-                                   memory.vtable ? &memory : NULL, NULL, NULL, &policy, model,
-                                   strlen(model), prov_name, prov_name_len, temp, ws, strlen(ws),
-                                   max_iters, max_hist, cfg.memory.auto_save, 2, NULL, 0,
-                                   &gw_ctx_cfg);
+        err = sc_agent_from_config(
+            &agent, alloc, provider, tools, tools_count, memory.vtable ? &memory : NULL, NULL, NULL,
+            &policy, model, strlen(model), prov_name, prov_name_len, temp, ws, strlen(ws),
+            max_iters, max_hist, cfg.memory.auto_save, 2, NULL, 0, &gw_ctx_cfg);
         if (err != SC_OK) {
             fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
             if (gw_retrieval_engine.vtable && gw_retrieval_engine.vtable->deinit)
@@ -1506,8 +1580,7 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         if (cfg.security.audit.enabled) {
             sc_audit_config_t acfg = SC_AUDIT_CONFIG_DEFAULT;
             acfg.enabled = true;
-            acfg.log_path =
-                cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
+            acfg.log_path = cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
             acfg.max_size_mb =
                 cfg.security.audit.max_size_mb > 0 ? cfg.security.audit.max_size_mb : 10;
             agent.audit_logger = sc_audit_logger_create(alloc, &acfg, ws);

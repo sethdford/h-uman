@@ -359,3 +359,9 @@ export class ScCommandPalette extends LitElement {
     `;
   }
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-command-palette": ScCommandPalette;
+  }
+}

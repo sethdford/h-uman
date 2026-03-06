@@ -152,7 +152,6 @@ export class ScLogsView extends GatewayAwareLitElement {
 
   @state() private logs: LogEntry[] = [];
   @state() private filter = "";
-  @state() private logAreaRef: HTMLDivElement | null = null;
 
   protected override async load(): Promise<void> {
     this.setupListener();

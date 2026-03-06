@@ -241,3 +241,9 @@ export class ScSkeleton extends LitElement {
     `;
   }
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-skeleton": ScSkeleton;
+  }
+}

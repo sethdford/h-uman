@@ -1,6 +1,6 @@
+#include "seaclaw/channels/line.h"
 #include "seaclaw/channel.h"
 #include "seaclaw/channel_loop.h"
-#include "seaclaw/channels/line.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/http.h"
@@ -64,11 +64,11 @@ static void line_queue_push(sc_line_ctx_t *c, const char *from, size_t from_len,
 
 static sc_error_t line_send(void *ctx, const char *target, size_t target_len, const char *message,
                             size_t message_len, const char *const *media, size_t media_count) {
-    (void)media;
-    (void)media_count;
     sc_line_ctx_t *c = (sc_line_ctx_t *)ctx;
 
 #if SC_IS_TEST
+    (void)media;
+    (void)media_count;
     if (!c || !message)
         return SC_ERR_INVALID_ARGUMENT;
     if (!c->channel_token || c->channel_token_len == 0)
@@ -102,7 +102,22 @@ static sc_error_t line_send(void *ctx, const char *target, size_t target_len, co
     err = sc_json_append_key_value(&jbuf, "text", 4, message, message_len);
     if (err)
         goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, "}]}", 3);
+    for (size_t i = 0; i < media_count && media && media[i]; i++) {
+        size_t url_len = strlen(media[i]);
+        err = sc_json_buf_append_raw(&jbuf, "},{\"type\":\"image\",", 17);
+        if (err)
+            goto jfail;
+        err = sc_json_append_key_value(&jbuf, "originalContentUrl", 17, media[i], url_len);
+        if (err)
+            goto jfail;
+        err = sc_json_buf_append_raw(&jbuf, ",", 1);
+        if (err)
+            goto jfail;
+        err = sc_json_append_key_value(&jbuf, "previewImageUrl", 14, media[i], url_len);
+        if (err)
+            goto jfail;
+    }
+    err = sc_json_buf_append_raw(&jbuf, media_count > 0 ? "}}]}" : "}]}", media_count > 0 ? 4 : 3);
     if (err)
         goto jfail;
 

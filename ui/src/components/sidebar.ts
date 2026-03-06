@@ -513,3 +513,9 @@ export class ScSidebar extends LitElement {
     );
   };
 }
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-sidebar": ScSidebar;
+  }
+}

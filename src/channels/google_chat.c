@@ -1,6 +1,6 @@
+#include "seaclaw/channels/google_chat.h"
 #include "seaclaw/channel.h"
 #include "seaclaw/channel_loop.h"
-#include "seaclaw/channels/google_chat.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/http.h"
@@ -49,12 +49,12 @@ static sc_error_t google_chat_send(void *ctx, const char *target, size_t target_
                                    const char *const *media, size_t media_count) {
     (void)target;
     (void)target_len;
-    (void)media;
-    (void)media_count;
     sc_google_chat_ctx_t *c = (sc_google_chat_ctx_t *)ctx;
 
 #if SC_IS_TEST
     (void)message_len;
+    (void)media;
+    (void)media_count;
     if (!c || !message)
         return SC_ERR_INVALID_ARGUMENT;
     if (!c->webhook_url || c->webhook_url_len == 0)
@@ -74,15 +74,46 @@ static sc_error_t google_chat_send(void *ctx, const char *target, size_t target_
     sc_error_t err = sc_json_buf_init(&jbuf, c->alloc);
     if (err)
         return err;
-    err = sc_json_buf_append_raw(&jbuf, "{\"text\":", 8);
-    if (err)
-        goto jfail;
-    err = sc_json_append_string(&jbuf, message, message_len);
-    if (err)
-        goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, "}", 1);
-    if (err)
-        goto jfail;
+
+    if (media_count > 0 && media) {
+        err = sc_json_buf_append_raw(&jbuf,
+                                     "{\"cards\":[{\"sections\":[{\"widgets\":[{\"textParagraph\":{"
+                                     "\"text\":",
+                                     66);
+        if (err)
+            goto jfail;
+        err = sc_json_append_string(&jbuf, message, message_len);
+        if (err)
+            goto jfail;
+        err = sc_json_buf_append_raw(&jbuf, "}}", 2);
+        if (err)
+            goto jfail;
+        for (size_t i = 0; i < media_count && media[i]; i++) {
+            size_t url_len = strlen(media[i]);
+            err = sc_json_buf_append_raw(&jbuf, ",{\"image\":{\"imageUrl\":", 22);
+            if (err)
+                goto jfail;
+            err = sc_json_append_string(&jbuf, media[i], url_len);
+            if (err)
+                goto jfail;
+            err = sc_json_buf_append_raw(&jbuf, "}}", 2);
+            if (err)
+                goto jfail;
+        }
+        err = sc_json_buf_append_raw(&jbuf, "]}]}]}", 6);
+        if (err)
+            goto jfail;
+    } else {
+        err = sc_json_buf_append_raw(&jbuf, "{\"text\":", 8);
+        if (err)
+            goto jfail;
+        err = sc_json_append_string(&jbuf, message, message_len);
+        if (err)
+            goto jfail;
+        err = sc_json_buf_append_raw(&jbuf, "}", 1);
+        if (err)
+            goto jfail;
+    }
 
     sc_http_response_t resp = {0};
     err = sc_http_post_json(c->alloc, c->webhook_url, NULL, jbuf.ptr, jbuf.len, &resp);

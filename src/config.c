@@ -446,8 +446,7 @@ static sc_error_t parse_gateway(sc_allocator_t *a, sc_config_t *cfg, const sc_js
             a->free(a->ctx, cfg->gateway.cors_origins,
                     cfg->gateway.cors_origins_len * sizeof(char *));
         }
-        parse_string_array(a, &cfg->gateway.cors_origins,
-                           &cfg->gateway.cors_origins_len, cors);
+        parse_string_array(a, &cfg->gateway.cors_origins, &cfg->gateway.cors_origins_len, cors);
     }
     return SC_OK;
 }
@@ -721,8 +720,7 @@ static void parse_imessage_channel(sc_allocator_t *a, sc_config_t *cfg,
         (int)sc_json_get_number(obj, "poll_interval_sec", 30.0);
 }
 
-static void parse_gmail_channel(sc_allocator_t *a, sc_config_t *cfg,
-                                const sc_json_value_t *obj) {
+static void parse_gmail_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT)
         return;
     const char *cid = sc_json_get_string(obj, "client_id");
@@ -746,8 +744,7 @@ static void parse_gmail_channel(sc_allocator_t *a, sc_config_t *cfg,
                     strlen(cfg->channels.gmail.refresh_token) + 1);
         cfg->channels.gmail.refresh_token = sc_strndup(a, rtok, strlen(rtok));
     }
-    cfg->channels.gmail.poll_interval_sec =
-        (int)sc_json_get_number(obj, "poll_interval_sec", 30.0);
+    cfg->channels.gmail.poll_interval_sec = (int)sc_json_get_number(obj, "poll_interval_sec", 30.0);
 }
 
 static void parse_telegram_channel(sc_allocator_t *a, sc_config_t *cfg,
@@ -892,6 +889,191 @@ static void parse_whatsapp_channel(sc_allocator_t *a, sc_config_t *cfg,
     }
 }
 
+static void parse_line_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_line_channel_config_t *ln = &cfg->channels.line;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "channel_token");
+    if (s) {
+        if (ln->channel_token)
+            a->free(a->ctx, ln->channel_token, strlen(ln->channel_token) + 1);
+        ln->channel_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "channel_secret");
+    if (s) {
+        if (ln->channel_secret)
+            a->free(a->ctx, ln->channel_secret, strlen(ln->channel_secret) + 1);
+        ln->channel_secret = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "user_id");
+    if (s) {
+        if (ln->user_id)
+            a->free(a->ctx, ln->user_id, strlen(ln->user_id) + 1);
+        ln->user_id = sc_strdup(a, s);
+    }
+}
+
+static void parse_google_chat_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                      const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_google_chat_channel_config_t *gc = &cfg->channels.google_chat;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "webhook_url");
+    if (s) {
+        if (gc->webhook_url)
+            a->free(a->ctx, gc->webhook_url, strlen(gc->webhook_url) + 1);
+        gc->webhook_url = sc_strdup(a, s);
+    }
+}
+
+static void parse_facebook_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                   const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_facebook_channel_config_t *fb = &cfg->channels.facebook;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "page_id");
+    if (s) {
+        if (fb->page_id)
+            a->free(a->ctx, fb->page_id, strlen(fb->page_id) + 1);
+        fb->page_id = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "page_access_token");
+    if (s) {
+        if (fb->page_access_token)
+            a->free(a->ctx, fb->page_access_token, strlen(fb->page_access_token) + 1);
+        fb->page_access_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "verify_token");
+    if (s) {
+        if (fb->verify_token)
+            a->free(a->ctx, fb->verify_token, strlen(fb->verify_token) + 1);
+        fb->verify_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "app_secret");
+    if (s) {
+        if (fb->app_secret)
+            a->free(a->ctx, fb->app_secret, strlen(fb->app_secret) + 1);
+        fb->app_secret = sc_strdup(a, s);
+    }
+}
+
+static void parse_instagram_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                    const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_instagram_channel_config_t *ig = &cfg->channels.instagram;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "business_account_id");
+    if (s) {
+        if (ig->business_account_id)
+            a->free(a->ctx, ig->business_account_id, strlen(ig->business_account_id) + 1);
+        ig->business_account_id = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "access_token");
+    if (s) {
+        if (ig->access_token)
+            a->free(a->ctx, ig->access_token, strlen(ig->access_token) + 1);
+        ig->access_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "verify_token");
+    if (s) {
+        if (ig->verify_token)
+            a->free(a->ctx, ig->verify_token, strlen(ig->verify_token) + 1);
+        ig->verify_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "app_secret");
+    if (s) {
+        if (ig->app_secret)
+            a->free(a->ctx, ig->app_secret, strlen(ig->app_secret) + 1);
+        ig->app_secret = sc_strdup(a, s);
+    }
+}
+
+static void parse_twitter_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_twitter_channel_config_t *tw = &cfg->channels.twitter;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "api_key");
+    if (s) {
+        if (tw->api_key)
+            a->free(a->ctx, tw->api_key, strlen(tw->api_key) + 1);
+        tw->api_key = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "api_secret");
+    if (s) {
+        if (tw->api_secret)
+            a->free(a->ctx, tw->api_secret, strlen(tw->api_secret) + 1);
+        tw->api_secret = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "access_token");
+    if (s) {
+        if (tw->access_token)
+            a->free(a->ctx, tw->access_token, strlen(tw->access_token) + 1);
+        tw->access_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "access_token_secret");
+    if (s) {
+        if (tw->access_token_secret)
+            a->free(a->ctx, tw->access_token_secret, strlen(tw->access_token_secret) + 1);
+        tw->access_token_secret = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "bearer_token");
+    if (s) {
+        if (tw->bearer_token)
+            a->free(a->ctx, tw->bearer_token, strlen(tw->bearer_token) + 1);
+        tw->bearer_token = sc_strdup(a, s);
+    }
+}
+
+static void parse_google_rcs_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                     const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_google_rcs_channel_config_t *rcs = &cfg->channels.google_rcs;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items)
+        val = obj->data.array.items[0];
+    if (val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "agent_id");
+    if (s) {
+        if (rcs->agent_id)
+            a->free(a->ctx, rcs->agent_id, strlen(rcs->agent_id) + 1);
+        rcs->agent_id = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "service_account_json_path");
+    if (s) {
+        if (rcs->service_account_json_path)
+            a->free(a->ctx, rcs->service_account_json_path,
+                    strlen(rcs->service_account_json_path) + 1);
+        rcs->service_account_json_path = sc_strdup(a, s);
+    }
+}
+
 static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT)
         return SC_OK;
@@ -937,6 +1119,30 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_j
     sc_json_value_t *whatsapp_obj = sc_json_object_get(obj, "whatsapp");
     if (whatsapp_obj)
         parse_whatsapp_channel(a, cfg, whatsapp_obj);
+
+    sc_json_value_t *line_obj = sc_json_object_get(obj, "line");
+    if (line_obj)
+        parse_line_channel(a, cfg, line_obj);
+
+    sc_json_value_t *google_chat_obj = sc_json_object_get(obj, "google_chat");
+    if (google_chat_obj)
+        parse_google_chat_channel(a, cfg, google_chat_obj);
+
+    sc_json_value_t *facebook_obj = sc_json_object_get(obj, "facebook");
+    if (facebook_obj)
+        parse_facebook_channel(a, cfg, facebook_obj);
+
+    sc_json_value_t *instagram_obj = sc_json_object_get(obj, "instagram");
+    if (instagram_obj)
+        parse_instagram_channel(a, cfg, instagram_obj);
+
+    sc_json_value_t *twitter_obj = sc_json_object_get(obj, "twitter");
+    if (twitter_obj)
+        parse_twitter_channel(a, cfg, twitter_obj);
+
+    sc_json_value_t *google_rcs_obj = sc_json_object_get(obj, "google_rcs");
+    if (google_rcs_obj)
+        parse_google_rcs_channel(a, cfg, google_rcs_obj);
 
     cfg->channels.channel_config_len = 0;
     if (obj->data.object.pairs && cfg->channels.channel_config_len < SC_CHANNEL_CONFIG_MAX) {
@@ -1090,8 +1296,7 @@ static sc_error_t parse_plugins_cfg(sc_allocator_t *a, sc_config_t *cfg,
         const char *pd = sc_json_get_string(obj, "plugin_dir");
         if (pd) {
             if (cfg->plugins.plugin_dir)
-                a->free(a->ctx, cfg->plugins.plugin_dir,
-                        strlen(cfg->plugins.plugin_dir) + 1);
+                a->free(a->ctx, cfg->plugins.plugin_dir, strlen(cfg->plugins.plugin_dir) + 1);
             cfg->plugins.plugin_dir = sc_strdup(a, pd);
         }
     } else if (obj->type == SC_JSON_ARRAY) {
@@ -1109,8 +1314,7 @@ static sc_error_t parse_plugins_cfg(sc_allocator_t *a, sc_config_t *cfg,
             if (cfg->plugins.plugin_paths[i])
                 a->free(a->ctx, cfg->plugins.plugin_paths[i],
                         strlen(cfg->plugins.plugin_paths[i]) + 1);
-        a->free(a->ctx, cfg->plugins.plugin_paths,
-                cfg->plugins.plugin_paths_len * sizeof(char *));
+        a->free(a->ctx, cfg->plugins.plugin_paths, cfg->plugins.plugin_paths_len * sizeof(char *));
         cfg->plugins.plugin_paths = NULL;
         cfg->plugins.plugin_paths_len = 0;
     }
