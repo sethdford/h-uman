@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if (defined(__unix__) || defined(__APPLE__))
+#include <dirent.h>
+#endif
 
 #define SC_PERSONA_PROMPT_INIT_CAP 4096
 #define SC_PERSONA_PATH_MAX        512
@@ -362,7 +365,86 @@ sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_
     buf[read_len] = '\0';
     sc_error_t err = sc_persona_load_json(alloc, buf, read_len, out);
     alloc->free(alloc->ctx, buf, (size_t)sz + 1);
-    return err;
+    if (err != SC_OK)
+        return err;
+
+#if !(defined(SC_IS_TEST) && SC_IS_TEST) && (defined(__unix__) || defined(__APPLE__))
+    /* Load example banks from ~/.seaclaw/personas/examples/<name>/<channel>/examples.json */
+    {
+        const char *home = getenv("HOME");
+        if (home && home[0] && out->name && out->name_len > 0) {
+            char base[SC_PERSONA_PATH_MAX];
+            int bn = snprintf(base, sizeof(base), "%s/.seaclaw/personas/examples/%.*s",
+                              home, (int)out->name_len, out->name);
+            if (bn > 0 && (size_t)bn < sizeof(base)) {
+                DIR *d = opendir(base);
+                if (d) {
+                    struct dirent *e;
+                    while ((e = readdir(d)) != NULL) {
+                        if (e->d_name[0] == '\0' || e->d_name[0] == '.')
+                            continue;
+                        char ch_path[SC_PERSONA_PATH_MAX];
+                        int pn = snprintf(ch_path, sizeof(ch_path), "%s/%s/examples.json", base,
+                                          e->d_name);
+                        if (pn <= 0 || (size_t)pn >= sizeof(ch_path))
+                            continue;
+                        FILE *ef = fopen(ch_path, "rb");
+                        if (!ef)
+                            continue;
+                        if (fseek(ef, 0, SEEK_END) != 0) {
+                            fclose(ef);
+                            continue;
+                        }
+                        long esz = ftell(ef);
+                        if (esz <= 0 || esz > (long)(64 * 1024)) {
+                            fclose(ef);
+                            continue;
+                        }
+                        rewind(ef);
+                        char *ebuf = (char *)alloc->alloc(alloc->ctx, (size_t)esz + 1);
+                        if (!ebuf) {
+                            fclose(ef);
+                            continue;
+                        }
+                        size_t erd = fread(ebuf, 1, (size_t)esz, ef);
+                        fclose(ef);
+                        if (erd != (size_t)esz) {
+                            alloc->free(alloc->ctx, ebuf, (size_t)esz + 1);
+                            continue;
+                        }
+                        ebuf[erd] = '\0';
+                        size_t ch_len = strlen(e->d_name);
+                        sc_persona_example_bank_t *banks = out->example_banks;
+                        size_t banks_count = out->example_banks_count;
+                        size_t new_cap = banks_count + 1;
+                        sc_persona_example_bank_t *new_banks =
+                            (sc_persona_example_bank_t *)alloc->realloc(
+                                alloc->ctx, banks,
+                                banks_count * sizeof(sc_persona_example_bank_t),
+                                new_cap * sizeof(sc_persona_example_bank_t));
+                        if (!new_banks) {
+                            alloc->free(alloc->ctx, ebuf, (size_t)esz + 1);
+                            continue;
+                        }
+                        out->example_banks = new_banks;
+                        memset(&new_banks[banks_count], 0, sizeof(sc_persona_example_bank_t));
+                        sc_error_t berr = sc_persona_examples_load_json(alloc, e->d_name, ch_len,
+                                                                        ebuf, erd,
+                                                                        &new_banks[banks_count]);
+                        alloc->free(alloc->ctx, ebuf, (size_t)esz + 1);
+                        if (berr == SC_OK)
+                            out->example_banks_count++;
+                        else
+                            free_example_bank(alloc, &new_banks[banks_count]);
+                    }
+                    closedir(d);
+                }
+            }
+        }
+    }
+#endif
+
+    return SC_OK;
 }
 
 /* --- Prompt builder --- */

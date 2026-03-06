@@ -1,5 +1,6 @@
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/persona.h"
 #include <stdio.h>
@@ -7,7 +8,11 @@
 #include <string.h>
 #if defined(__unix__) || defined(__APPLE__)
 #include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#endif
+#ifdef SC_ENABLE_SQLITE
+#include <sqlite3.h>
 #endif
 
 #define SC_PERSONA_PATH_MAX 512
@@ -160,6 +165,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
             fprintf(stderr, "Persona not found: %s\n", args->name);
             return SC_ERR_NOT_FOUND;
         }
+        fprintf(stdout, "Persona deleted: %s\n", args->name);
         return SC_OK;
 #else
         fprintf(stderr, "Persona delete requires POSIX (unlink)\n");
@@ -168,28 +174,89 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
     }
     case SC_PERSONA_ACTION_CREATE:
     case SC_PERSONA_ACTION_UPDATE: {
-        char sources[128];
-        int off = 0;
-        if (args->from_imessage)
-            off += snprintf(sources + off, sizeof(sources) - (size_t)off, "%simessage",
-                            off ? ", " : "");
-        if (args->from_gmail)
-            off +=
-                snprintf(sources + off, sizeof(sources) - (size_t)off, "%sgmail", off ? ", " : "");
-        if (args->from_facebook)
-            off += snprintf(sources + off, sizeof(sources) - (size_t)off, "%sfacebook",
-                            off ? ", " : "");
-        if (off == 0)
-            off = snprintf(sources, sizeof(sources), "none");
-        fprintf(stdout, "%s persona '%s' from: %s\n",
-                args->action == SC_PERSONA_ACTION_CREATE ? "Creating" : "Updating",
-                args->name ? args->name : "?", sources);
+        if (!args->name || !args->name[0]) {
+            fprintf(stderr, "Persona name required for create/update\n");
+            return SC_ERR_INVALID_ARGUMENT;
+        }
+        if (!args->from_imessage && !args->from_gmail && !args->from_facebook) {
+            fprintf(stderr, "No source specified. Use --from-imessage, --from-gmail, or "
+                            "--from-facebook.\n");
+            return SC_ERR_INVALID_ARGUMENT;
+        }
 #if defined(SC_IS_TEST) && SC_IS_TEST
+        (void)alloc;
         return SC_OK;
 #else
-        fprintf(stderr, "Persona creation requires an active provider connection. Use the persona "
-                        "tool in an agent session instead.\n");
-        return SC_ERR_NOT_SUPPORTED;
+        size_t msg_count = 0;
+        if (args->from_imessage) {
+#if defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
+            const char *home = getenv("HOME");
+            if (!home || !home[0]) {
+                fprintf(stderr, "HOME not set\n");
+                return SC_ERR_NOT_FOUND;
+            }
+            char db_path[SC_PERSONA_PATH_MAX];
+            int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+            if (n <= 0 || (size_t)n >= sizeof(db_path))
+                return SC_ERR_INVALID_ARGUMENT;
+            sqlite3 *db = NULL;
+            if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+                if (db)
+                    sqlite3_close(db);
+                fprintf(stderr, "Could not open iMessage chat.db (Full Disk Access required)\n");
+                return SC_ERR_IO;
+            }
+            char query[512];
+            size_t query_len = 0;
+            sc_error_t qerr = sc_persona_sampler_imessage_query(query, sizeof(query), &query_len,
+                                                                500);
+            if (qerr != SC_OK) {
+                sqlite3_close(db);
+                return qerr;
+            }
+            sqlite3_stmt *stmt = NULL;
+            if (sqlite3_prepare_v2(db, query, -1, &stmt, NULL) != SQLITE_OK) {
+                sqlite3_close(db);
+                return SC_ERR_IO;
+            }
+            while (sqlite3_step(stmt) == SQLITE_ROW && msg_count < 500) {
+                const char *text = (const char *)sqlite3_column_text(stmt, 0);
+                if (text && text[0])
+                    msg_count++;
+            }
+            sqlite3_finalize(stmt);
+            sqlite3_close(db);
+            fprintf(stdout, "Found %zu messages from iMessage\n", msg_count);
+#else
+            fprintf(stderr, "iMessage sampling requires macOS and SQLite\n");
+            return SC_ERR_NOT_SUPPORTED;
+#endif
+        }
+        if (args->from_gmail || args->from_facebook) {
+            fprintf(stderr, "Gmail and Facebook sources require manual export. Use --from-imessage "
+                            "for now.\n");
+            return SC_ERR_NOT_SUPPORTED;
+        }
+        sc_persona_t template = {0};
+        template.name = sc_strdup(alloc, args->name);
+        if (!template.name)
+            return SC_ERR_OUT_OF_MEMORY;
+        template.name_len = strlen(args->name);
+        sc_error_t err = sc_persona_creator_write(alloc, &template);
+        sc_persona_deinit(alloc, &template);
+        if (err != SC_OK)
+            return err;
+        char dir_buf[SC_PERSONA_PATH_MAX];
+        const char *dir = persona_dir_path(dir_buf, sizeof(dir_buf));
+        if (dir)
+            fprintf(stdout, "Persona template created at %s/%s.json\n", dir, args->name);
+        else
+            fprintf(stdout, "Persona template created at ~/.seaclaw/personas/%s.json\n",
+                    args->name);
+        if (args->interactive)
+            fprintf(stdout,
+                    "Edit the persona file and run 'seaclaw persona update' when ready.\n");
+        return SC_OK;
 #endif
     }
     }
