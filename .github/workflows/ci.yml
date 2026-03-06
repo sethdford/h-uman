@@ -19,7 +19,7 @@ jobs:
         build_type: [Debug, MinSizeRel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install deps (Ubuntu)
         if: runner.os == 'Linux'
@@ -47,7 +47,7 @@ jobs:
   asan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install deps
         run: |
@@ -74,7 +74,7 @@ jobs:
   binary-size:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install deps
         run: |

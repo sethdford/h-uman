@@ -12,7 +12,7 @@ jobs:
     name: Build + Test (ASan)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           enable-asan: "true"
@@ -31,7 +31,7 @@ jobs:
     name: Release Build Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           build-type: MinSizeRel
@@ -50,7 +50,7 @@ jobs:
     name: Fuzz Testing (30s each)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           build-dir: build-fuzz
@@ -72,9 +72,9 @@ jobs:
     name: Generate SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: chmod +x scripts/generate-sbom.sh && ./scripts/generate-sbom.sh . sbom.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.json
@@ -83,7 +83,7 @@ jobs:
     name: Verify Audit Log Integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/run-tests
 
@@ -91,7 +91,7 @@ jobs:
     name: FIPS Crypto Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-build
         with:
           extra-apt: libssl-dev
