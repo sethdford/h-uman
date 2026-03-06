@@ -34,6 +34,7 @@ static bool firebase_sanitize_command(const char *cmd) {
     return true;
 }
 
+#if !SC_IS_TEST
 static size_t firebase_split_args(char *cmd, const char **argv_out, size_t max_out) {
     size_t argc = 0;
     char *p = cmd;
@@ -45,21 +46,21 @@ static size_t firebase_split_args(char *cmd, const char **argv_out, size_t max_o
         char *start = p;
         while (*p && !isspace((unsigned char)*p))
             p++;
-        *p = '\0';
-        argv_out[argc++] = start;
-        if (*p)
+        if (*p) {
+            *p = '\0';
             p++;
+        }
+        argv_out[argc++] = start;
     }
     return argc;
 }
+#endif /* !SC_IS_TEST */
 
 static sc_error_t firebase_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                    sc_tool_result_t *out) {
     sc_firebase_ctx_t *c = (sc_firebase_ctx_t *)ctx;
-    if (!c || !args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
+    if (!c || !args || !out)
         return SC_ERR_INVALID_ARGUMENT;
-    }
     const char *cmd = sc_json_get_string(args, "command");
     if (!cmd || strlen(cmd) == 0) {
         *out = sc_tool_result_fail("Missing 'command'", 16);
@@ -159,8 +160,9 @@ static const char *firebase_parameters_json(void *ctx) {
     return SC_FIREBASE_PARAMS;
 }
 static void firebase_deinit(void *ctx, sc_allocator_t *alloc) {
-    (void)ctx;
     (void)alloc;
+    if (ctx)
+        free(ctx);
 }
 
 static const sc_tool_vtable_t firebase_vtable = {

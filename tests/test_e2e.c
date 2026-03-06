@@ -140,7 +140,7 @@ static void test_agent_from_config_basic(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
 
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_NOT_NULL(agent.model_name);
@@ -160,7 +160,7 @@ static void test_agent_turn_simple(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_OK);
 
     char *response = NULL;
@@ -186,7 +186,7 @@ static void test_agent_slash_help(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_OK);
 
     char *response = NULL;
@@ -213,7 +213,7 @@ static void test_agent_slash_clear(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_OK);
 
     /* Do a turn to add history */
@@ -247,7 +247,7 @@ static void test_agent_slash_model(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_STR_EQ(agent.model_name, "gpt-4o");
 
@@ -274,7 +274,7 @@ static void test_agent_slash_status(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_OK);
 
     char *response = NULL;
@@ -386,7 +386,7 @@ static void test_agent_with_tool(void) {
     memset(&agent, 0, sizeof(agent));
     sc_error_t err =
         sc_agent_from_config(&agent, &alloc, prov, &tool, 1, NULL, NULL, NULL, NULL, "gpt-4", 5,
-                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_EQ(agent.tools_count, 1u);
 
@@ -407,7 +407,7 @@ static void test_agent_multi_turn(void) {
     sc_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
-                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
 
     char *r1 = NULL, *r2 = NULL;
     size_t l1 = 0, l2 = 0;
@@ -465,7 +465,8 @@ static void test_agent_custom_instructions(void) {
     sc_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
-                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, "You are helpful", 15, NULL);
+                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, "You are helpful", 15, NULL, 0,
+                         NULL);
 
     SC_ASSERT_NOT_NULL(agent.custom_instructions);
     sc_agent_deinit(&agent);
@@ -479,7 +480,7 @@ static void test_agent_from_config_max_iterations(void) {
     sc_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
-                         "openai", 6, 0.7, ".", 1, 10, 20, false, 0, NULL, 0, NULL);
+                         "openai", 6, 0.7, ".", 1, 10, 20, false, 0, NULL, 0, NULL, 0, NULL);
 
     SC_ASSERT_EQ(agent.max_tool_iterations, 10u);
     SC_ASSERT_EQ(agent.max_history_messages, 20u);
@@ -494,7 +495,7 @@ static void test_agent_deinit_cleans(void) {
     sc_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
-                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
 
     sc_agent_deinit(&agent);
     SC_ASSERT_NULL(agent.model_name);
@@ -508,7 +509,7 @@ static void test_agent_turn_empty_message(void) {
     sc_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
-                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
 
     char *r = NULL;
     size_t len = 0;
@@ -531,7 +532,7 @@ static void test_agent_with_observer(void) {
     sc_agent_t agent;
     memset(&agent, 0, sizeof(agent));
     sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, &obs, NULL, "gpt-4", 5,
-                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL);
+                         "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
 
     char *r = NULL;
     size_t len = 0;

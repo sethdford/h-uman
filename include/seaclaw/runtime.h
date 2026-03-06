@@ -41,11 +41,14 @@ typedef enum sc_runtime_kind {
     SC_RUNTIME_DOCKER,
     SC_RUNTIME_WASM,
     SC_RUNTIME_CLOUDFLARE,
+    SC_RUNTIME_GCE,
 } sc_runtime_kind_t;
 
 sc_runtime_t sc_runtime_native(void);
 sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb, const char *image,
                                const char *workspace);
+sc_runtime_t sc_runtime_gce(const char *project, const char *zone, const char *instance,
+                            uint64_t memory_limit_mb);
 sc_runtime_t sc_runtime_wasm(uint64_t memory_limit_mb);
 sc_runtime_t sc_runtime_cloudflare(void);
 

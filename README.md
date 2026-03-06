@@ -18,7 +18,7 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-430 KB binary · <30 ms startup · 2,592 tests · 50+ providers · 26 channels · 53 tools · Pluggable everything
+430 KB binary · <30 ms startup · 2,642 tests · 50+ providers · 26 channels · 53 tools · Pluggable everything
 ```
 
 ### Features
@@ -57,7 +57,7 @@ SeaClaw's verified numbers (measured on macOS arm64, March 2026):
 Binary size:   430 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
-Tests:         2,592 passing, 0 ASan errors
+Tests:         2,642 passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -238,6 +238,33 @@ All custom, zero external dependencies:
   }
 }
 ```
+
+### Persona System
+
+Data-driven personality cloning — seaclaw can adopt a user's real communication style by analyzing their message history.
+
+| Component            | Description                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Profile**          | JSON persona file (`~/.seaclaw/personas/<name>.json`) with traits, vocabulary, communication rules, values |
+| **Channel Overlays** | Per-channel style overrides (formality, message length, emoji usage, style notes)                          |
+| **Example Banks**    | Curated message examples per channel for few-shot style matching                                           |
+| **Prompt Builder**   | Generates system prompt injection from persona + overlay + examples                                        |
+| **Sampler**          | Extracts messages from iMessage (`chat.db`), Gmail, or Facebook exports                                    |
+| **Analyzer**         | Sends message batches to AI provider for personality extraction                                            |
+| **Creator**          | Orchestrates the full pipeline: sample → analyze → synthesize → write                                      |
+
+```bash
+# Create a persona from your iMessage history
+seaclaw persona create myname --from-imessage
+
+# Show persona profile
+seaclaw persona show myname
+
+# Use in config
+# ~/.seaclaw/config.json: { "agent": { "persona": "myname" } }
+```
+
+The persona tool is also available in-conversation for agents to manage personas dynamically.
 
 ## Security
 
@@ -425,6 +452,10 @@ Config: `~/.seaclaw/config.json` (created by `onboard`)
     }
   },
 
+  "agent": {
+    "persona": "myname"
+  },
+
   "tunnel": { "provider": "none" },
   "secrets": { "encrypt": true },
   "identity": { "format": "openclaw" },
@@ -539,26 +570,30 @@ Use `channels.web` for browser UI events (WebChannel v1):
 
 ## Commands
 
-| Command                                           | Description                                            |
-| ------------------------------------------------- | ------------------------------------------------------ |
-| `onboard --api-key sk-... --provider openrouter`  | Quick setup with API key and provider                  |
-| `onboard --interactive`                           | Full interactive wizard                                |
-| `onboard --channels-only`                         | Reconfigure channels/allowlists only                   |
-| `agent -m "..."`                                  | Single message mode                                    |
-| `agent`                                           | Interactive chat mode (CLI)                            |
-| `agent --tui`                                     | Full-screen terminal UI with tabs, approval, streaming |
-| `gateway`                                         | Start long-running runtime (default: `127.0.0.1:3000`) |
-| `service install\|start\|stop\|status\|uninstall` | Manage background service                              |
-| `doctor`                                          | Diagnose system health                                 |
-| `status`                                          | Show full system status                                |
-| `channel status`                                  | Show channel health/status                             |
-| `cron list\|add\|remove\|pause\|resume\|run`      | Manage scheduled tasks                                 |
-| `skills list\|install\|remove\|info\|search`      | Manage skill packs                                     |
-| `skills info <name>`                              | Show skill details                                     |
-| `skills publish`                                  | Publish skill to registry                              |
-| `hardware scan\|flash\|monitor`                   | Hardware device management                             |
-| `models list\|info\|benchmark`                    | Model catalog                                          |
-| `migrate sqlite` / `migrate markdown` [path]      | Import memories from SQLite or Markdown source         |
+| Command                                                                  | Description                                            |
+| ------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `onboard --api-key sk-... --provider openrouter`                         | Quick setup with API key and provider                  |
+| `onboard --interactive`                                                  | Full interactive wizard                                |
+| `onboard --channels-only`                                                | Reconfigure channels/allowlists only                   |
+| `agent -m "..."`                                                         | Single message mode                                    |
+| `agent`                                                                  | Interactive chat mode (CLI)                            |
+| `agent --tui`                                                            | Full-screen terminal UI with tabs, approval, streaming |
+| `gateway`                                                                | Start long-running runtime (default: `127.0.0.1:3000`) |
+| `service install\|start\|stop\|status\|uninstall`                        | Manage background service                              |
+| `doctor`                                                                 | Diagnose system health                                 |
+| `status`                                                                 | Show full system status                                |
+| `channel status`                                                         | Show channel health/status                             |
+| `cron list\|add\|remove\|pause\|resume\|run`                             | Manage scheduled tasks                                 |
+| `skills list\|install\|remove\|info\|search`                             | Manage skill packs                                     |
+| `skills info <name>`                                                     | Show skill details                                     |
+| `skills publish`                                                         | Publish skill to registry                              |
+| `hardware scan\|flash\|monitor`                                          | Hardware device management                             |
+| `models list\|info\|benchmark`                                           | Model catalog                                          |
+| `persona create <name> [--from-imessage\|--from-gmail\|--from-facebook]` | Create persona from message history                    |
+| `persona show <name>`                                                    | Display persona profile                                |
+| `persona list`                                                           | List all persona profiles                              |
+| `persona delete <name>`                                                  | Remove persona profile                                 |
+| `migrate sqlite` / `migrate markdown` [path]                             | Import memories from SQLite or Markdown source         |
 
 ## Development
 
@@ -568,7 +603,7 @@ Build and tests require a C11 compiler and CMake 3.16+.
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 2,592 tests
+./seaclaw_tests                             # 2,642 tests
 cd ..
 ```
 
@@ -603,10 +638,10 @@ Channel CJM coverage (ingress parsing/filtering, session key routing, account pr
 ```
 
 Language: C11 + ASM (aarch64, x86_64)
-Source files: ~556
-Lines of code: ~83,000+
-Test files: 85
-Tests: 2,592
+Source files: ~564
+Lines of code: ~85,000+
+Test files: 90
+Tests: 2,642
 Binary: 430 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
@@ -630,11 +665,12 @@ runtime/ Runtime adapters (native, docker, wasm, cloudflare)
 core/ Allocator, arena, error, json, http, string, slice
 observability/ Log + metrics observers
 gateway/ HTTP gateway server
+persona/ Persona profiles, prompt builder, example banks
 config.c Config loading/merging (~/.seaclaw/config.json)
 ...
 
 include/seaclaw/ Public C headers
-tests/ 85 test files, 2,592 tests
+tests/ 90 test files, 2,642 tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ```

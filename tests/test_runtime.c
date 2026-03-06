@@ -336,6 +336,84 @@ static void test_native_runtime_no_wrap(void) {
     SC_ASSERT_EQ(r.vtable->wrap_command, (void *)NULL);
 }
 
+static void test_runtime_gce_create(void) {
+    sc_runtime_t r = sc_runtime_gce("my-project", "us-central1-a", "vm-1", 1024);
+    SC_ASSERT_NOT_NULL(r.ctx);
+    SC_ASSERT_NOT_NULL(r.vtable);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "gce");
+}
+
+static void test_runtime_gce_has_shell(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", "i", 0);
+    SC_ASSERT_TRUE(r.vtable->has_shell_access(r.ctx));
+}
+
+static void test_runtime_gce_has_filesystem(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", "i", 0);
+    SC_ASSERT_TRUE(r.vtable->has_filesystem_access(r.ctx));
+}
+
+static void test_runtime_gce_supports_long_running(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", "i", 0);
+    SC_ASSERT_TRUE(r.vtable->supports_long_running(r.ctx));
+}
+
+static void test_runtime_gce_memory_budget(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", "i", 512);
+    uint64_t budget = r.vtable->memory_budget(r.ctx);
+    SC_ASSERT_EQ(budget, 512u * 1024 * 1024);
+}
+
+static void test_runtime_gce_memory_zero_when_unlimited(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", "i", 0);
+    uint64_t budget = r.vtable->memory_budget(r.ctx);
+    SC_ASSERT_EQ(budget, 0u);
+}
+
+static void test_runtime_gce_wrap_command(void) {
+    sc_runtime_t r = sc_runtime_gce("my-project", "us-central1-a", "my-vm", 0);
+    SC_ASSERT_NOT_NULL(r.vtable->wrap_command);
+    const char *argv_in[] = {"echo", "hello"};
+    const char *argv_out[32];
+    size_t argc_out = 0;
+    sc_error_t err = r.vtable->wrap_command(r.ctx, argv_in, 2, argv_out, 32, &argc_out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(argv_out[0], "gcloud");
+    SC_ASSERT_STR_EQ(argv_out[1], "compute");
+    SC_ASSERT_STR_EQ(argv_out[2], "ssh");
+    SC_ASSERT_STR_EQ(argv_out[3], "my-vm");
+    SC_ASSERT_TRUE(argc_out >= 6);
+    SC_ASSERT_EQ(argv_out[argc_out], (const char *)NULL);
+}
+
+static void test_runtime_gce_wrap_no_instance_returns_error(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", NULL, 0);
+    const char *argv_in[] = {"ls"};
+    const char *argv_out[32];
+    size_t argc_out = 0;
+    sc_error_t err = r.vtable->wrap_command(r.ctx, argv_in, 1, argv_out, 32, &argc_out);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+
+static void test_runtime_from_config_gce(void) {
+    sc_config_t cfg = {0};
+    cfg.runtime.kind = "gce";
+    cfg.runtime.gce_project = "proj";
+    cfg.runtime.gce_zone = "zone";
+    cfg.runtime.gce_instance = "vm";
+    sc_runtime_t r;
+    sc_error_t err = sc_runtime_from_config(&cfg, &r);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(r.vtable->name(r.ctx), "gce");
+}
+
+static void test_runtime_gce_storage_path(void) {
+    sc_runtime_t r = sc_runtime_gce("p", "z", "i", 0);
+    const char *path = r.vtable->storage_path(r.ctx);
+    SC_ASSERT_NOT_NULL(path);
+    SC_ASSERT_TRUE(strstr(path, "seaclaw") != NULL);
+}
+
 static void test_wasm_runtime_wrap_not_supported(void) {
     sc_runtime_t r = sc_runtime_wasm(64);
     SC_ASSERT_NOT_NULL(r.vtable->wrap_command);
@@ -390,6 +468,16 @@ void run_runtime_tests(void) {
     SC_RUN_TEST(test_docker_runtime_wrap_command_no_image_returns_not_supported);
     SC_RUN_TEST(test_native_runtime_no_wrap);
     SC_RUN_TEST(test_wasm_runtime_wrap_not_supported);
+    SC_RUN_TEST(test_runtime_gce_create);
+    SC_RUN_TEST(test_runtime_gce_has_shell);
+    SC_RUN_TEST(test_runtime_gce_has_filesystem);
+    SC_RUN_TEST(test_runtime_gce_supports_long_running);
+    SC_RUN_TEST(test_runtime_gce_memory_budget);
+    SC_RUN_TEST(test_runtime_gce_memory_zero_when_unlimited);
+    SC_RUN_TEST(test_runtime_gce_wrap_command);
+    SC_RUN_TEST(test_runtime_gce_wrap_no_instance_returns_error);
+    SC_RUN_TEST(test_runtime_from_config_gce);
+    SC_RUN_TEST(test_runtime_gce_storage_path);
     SC_RUN_TEST(test_platform_is_windows_or_unix);
     SC_RUN_TEST(test_platform_get_shell);
     SC_RUN_TEST(test_platform_get_shell_flag);

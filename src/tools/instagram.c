@@ -30,10 +30,8 @@ typedef struct sc_instagram_ctx {
 static sc_error_t instagram_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                     sc_tool_result_t *out) {
     (void)ctx;
-    if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
+    if (!args || !out)
         return SC_ERR_INVALID_ARGUMENT;
-    }
     const char *op = sc_json_get_string(args, "operation");
     const char *account_id = sc_json_get_string(args, "account_id");
     if (!op || strlen(op) == 0 || !account_id || strlen(account_id) == 0) {
@@ -189,7 +187,10 @@ resp_err:
                                                      : sc_strndup(alloc, "API error", 9);
         if (resp.owned && resp.body)
             sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_fail_owned(rbody ? rbody : "API error", rbody ? strlen(rbody) : 9);
+        if (rbody)
+            *out = sc_tool_result_fail_owned(rbody, strlen(rbody));
+        else
+            *out = sc_tool_result_fail("API error", 9);
         return SC_OK;
     }
     char *rbody = sc_strndup(alloc, resp.body, resp.body_len);
@@ -218,8 +219,9 @@ static const char *instagram_parameters_json(void *ctx) {
     return SC_INSTAGRAM_PARAMS;
 }
 static void instagram_deinit(void *ctx, sc_allocator_t *alloc) {
-    (void)ctx;
     (void)alloc;
+    if (ctx)
+        free(ctx);
 }
 
 static const sc_tool_vtable_t instagram_vtable = {

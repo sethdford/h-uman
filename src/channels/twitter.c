@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define TWITTER_API_BASE "https://api.x.com/2/"
+#define TWITTER_API_BASE        "https://api.x.com/2/"
 #define TWITTER_QUEUE_MAX       32
 #define TWITTER_SESSION_KEY_MAX 127
 #define TWITTER_CONTENT_MAX     4095
@@ -43,8 +43,10 @@ static void twitter_stop(void *ctx) {
 }
 
 static sc_error_t twitter_send(void *ctx, const char *target, size_t target_len,
-                               const char *message, size_t message_len,
-                               const char *const *media, size_t media_count) {
+                               const char *message, size_t message_len, const char *const *media,
+                               size_t media_count) {
+    (void)media;
+    (void)media_count;
     sc_twitter_ctx_t *c = (sc_twitter_ctx_t *)ctx;
 
 #if SC_IS_TEST
@@ -171,7 +173,7 @@ sc_error_t sc_twitter_on_webhook(void *channel_ctx, sc_allocator_t *alloc, const
 }
 
 sc_error_t sc_twitter_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
-                          size_t max_msgs, size_t *out_count) {
+                           size_t max_msgs, size_t *out_count) {
     (void)alloc;
     sc_twitter_ctx_t *c = (sc_twitter_ctx_t *)channel_ctx;
     if (!c || !msgs || !out_count)

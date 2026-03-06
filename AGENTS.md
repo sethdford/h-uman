@@ -24,8 +24,9 @@ Key extension points:
 - `src/observability/` (`sc_observer_t`) — observability hooks
 - `src/runtime/` (`sc_runtime_t`) — execution environments
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
+- `src/persona/` — persona system (profile loading, prompt builder, example selection)
 
-Current scale: **556 source + header files, ~83K lines of C, ~34K lines of tests, 2,592 tests, 26 channels**.
+Current scale: **587 source + header files, ~98K lines of C, ~38K lines of tests, 2,610 tests, 33 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
@@ -75,7 +76,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `SC_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 2,592 tests must pass at zero ASan errors**
+5. **All 2,610+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `SC_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -150,15 +151,18 @@ src/
   sse/                  SSE client
   websocket/            WebSocket client
   peripherals/          hardware peripherals (Arduino, STM32/Nucleo, RPi)
+  persona/              persona profiles, prompt builder, example banks
   config.c              schema + config loading/merging (~/.seaclaw/config.json)
   gateway/gateway.c     webhook/HTTP gateway server
   ...
 
 include/seaclaw/       public C headers
 
-tests/                 85 test files, 2,592 tests
+tests/                 91 test files, 2,610+ tests
 
 asm/                   platform-specific assembly (aarch64, x86_64, generic C)
+
+fuzz/                  libFuzzer harnesses (JSON, base64, URL encode, config)
 
 archive/zig-reference/ archived Zig source (build.zig, src/)
 ```
@@ -266,6 +270,7 @@ Hooks:
 | Hook         | What it does                                                                                    |
 | ------------ | ----------------------------------------------------------------------------------------------- |
 | `pre-commit` | Runs format checks — blocks commit if code is not formatted                                     |
+| `commit-msg` | Enforces conventional commit format (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`, etc.)  |
 | `pre-push`   | Runs `cmake --build build-check && ./build-check/seaclaw_tests` — blocks push if any test fails |
 
 To bypass a hook in an emergency: `git commit --no-verify` / `git push --no-verify`.

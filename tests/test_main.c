@@ -95,7 +95,6 @@ void run_untested_modules_tests(void);
 void run_modules_coverage_tests(void);
 void run_context_tests(void);
 void run_qmd_tests(void);
-void run_persona_tests(void);
 
 int main(void) {
     printf("SeaClaw Test Suite\n");

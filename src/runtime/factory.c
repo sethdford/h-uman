@@ -22,6 +22,17 @@ sc_error_t sc_runtime_from_config(const struct sc_config *cfg, sc_runtime_t *out
         return SC_OK;
     }
 
+    if (strcmp(kind, "gce") == 0) {
+        uint64_t mem_mb = 0;
+        if (cfg->security.resource_limits.max_memory_mb > 0)
+            mem_mb = (uint64_t)cfg->security.resource_limits.max_memory_mb;
+        const char *project = cfg->runtime.gce_project;
+        const char *zone = cfg->runtime.gce_zone;
+        const char *instance = cfg->runtime.gce_instance;
+        *out = sc_runtime_gce(project, zone, instance, mem_mb);
+        return SC_OK;
+    }
+
 #ifdef SC_HAS_RUNTIME_EXOTIC
     if (strcmp(kind, "wasm") == 0) {
         *out = sc_runtime_wasm(0);

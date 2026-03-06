@@ -49,6 +49,8 @@ static void instagram_stop(void *ctx) {
 static sc_error_t instagram_send(void *ctx, const char *target, size_t target_len,
                                  const char *message, size_t message_len, const char *const *media,
                                  size_t media_count) {
+    (void)media;
+    (void)media_count;
     sc_instagram_ctx_t *c = (sc_instagram_ctx_t *)ctx;
 
 #if SC_IS_TEST

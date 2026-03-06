@@ -19,17 +19,21 @@
 #include "seaclaw/tools/cron_runs.h"
 #include "seaclaw/tools/cron_update.h"
 #include "seaclaw/tools/delegate.h"
+#include "seaclaw/tools/facebook.h"
 #include "seaclaw/tools/factory.h"
 #include "seaclaw/tools/file_append.h"
 #include "seaclaw/tools/file_edit.h"
 #include "seaclaw/tools/file_read.h"
 #include "seaclaw/tools/file_write.h"
+#include "seaclaw/tools/firebase.h"
+#include "seaclaw/tools/gcloud.h"
 #include "seaclaw/tools/git.h"
 #include "seaclaw/tools/hardware_info.h"
 #include "seaclaw/tools/hardware_memory.h"
 #include "seaclaw/tools/http_request.h"
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/image.h"
+#include "seaclaw/tools/instagram.h"
 #include "seaclaw/tools/invoice.h"
 #include "seaclaw/tools/jira.h"
 #include "seaclaw/tools/memory_forget.h"
@@ -48,8 +52,10 @@
 #include "seaclaw/tools/spawn.h"
 #include "seaclaw/tools/spi.h"
 #include "seaclaw/tools/spreadsheet.h"
+#include "seaclaw/tools/twitter.h"
 #include "seaclaw/tools/web_fetch.h"
 #include "seaclaw/tools/web_search.h"
+#include "seaclaw/tools/web_search_providers.h"
 #include "seaclaw/tools/workflow.h"
 #include "test_framework.h"
 #include <string.h>
@@ -948,6 +954,56 @@ static void test_web_fetch_rejects_http_url(void) {
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+/* ─── Web search providers: URL encode ─────────────────────────────────────── */
+static void test_url_encode_basic(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_web_search_url_encode(&alloc, "hello world", 11, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(out);
+    SC_ASSERT_STR_EQ(out, "hello+world");
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_url_encode_special_chars(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_web_search_url_encode(&alloc, "a&b=c", 5, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(out);
+    SC_ASSERT_TRUE(strstr(out, "%26") != NULL); /* & -> %26 */
+    SC_ASSERT_TRUE(strstr(out, "%3D") != NULL); /* = -> %3D */
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_url_encode_passthrough(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_web_search_url_encode(&alloc, "abc-123_test.txt~", 17, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(out, "abc-123_test.txt~");
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_url_encode_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_web_search_url_encode(&alloc, "", 0, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(out);
+    SC_ASSERT_EQ(out_len, 0u);
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
+static void test_url_encode_null_args(void) {
+    sc_error_t err = sc_web_search_url_encode(NULL, "x", 1, NULL, NULL);
+    SC_ASSERT_TRUE(err != SC_OK);
+}
+
 /* ─── Web search missing query ─────────────────────────────────────────────── */
 static void test_web_search_execute_missing_query(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -1676,6 +1732,141 @@ static void test_tool_diff_execute(void) {
     sc_tools_destroy_default(&alloc, tools, count);
 }
 
+/* ─── Facebook Pages tool ──────────────────────────────────────────────────── */
+static void test_facebook_tool_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_facebook_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "facebook_pages");
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_facebook_tool_execute_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_facebook_tool_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+/* ─── Instagram Posts tool ─────────────────────────────────────────────────── */
+static void test_instagram_tool_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_instagram_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "instagram_posts");
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_instagram_tool_execute_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_instagram_tool_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+/* ─── Twitter Posts tool ───────────────────────────────────────────────────── */
+static void test_twitter_tool_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_twitter_tool_create(&alloc, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "twitter");
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_twitter_tool_execute_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_twitter_tool_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+/* ─── gcloud tool ──────────────────────────────────────────────────────────── */
+static void test_gcloud_tool_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_gcloud_create(&alloc, NULL, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "gcloud");
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_gcloud_tool_execute_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_gcloud_create(&alloc, NULL, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+/* ─── firebase tool ────────────────────────────────────────────────────────── */
+static void test_firebase_tool_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_error_t err = sc_firebase_create(&alloc, NULL, &tool);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "firebase");
+    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_firebase_tool_execute_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_firebase_create(&alloc, NULL, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_tool_result_free(&alloc, &result);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
 void run_tools_all_tests(void) {
     SC_TEST_SUITE("Tools (all) - Shell/File");
     SC_RUN_TEST(test_shell_create);
@@ -1723,6 +1914,11 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_web_fetch_execute_missing_url);
     SC_RUN_TEST(test_web_fetch_rejects_http_url);
     SC_RUN_TEST(test_web_search_execute_missing_query);
+    SC_RUN_TEST(test_url_encode_basic);
+    SC_RUN_TEST(test_url_encode_special_chars);
+    SC_RUN_TEST(test_url_encode_passthrough);
+    SC_RUN_TEST(test_url_encode_empty);
+    SC_RUN_TEST(test_url_encode_null_args);
     SC_RUN_TEST(test_http_request_create);
     SC_RUN_TEST(test_http_request_rejects_http_url);
     SC_RUN_TEST(test_http_request_parameters_has_url);
@@ -1861,6 +2057,16 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_jira_list);
     SC_RUN_TEST(test_social_create);
     SC_RUN_TEST(test_social_post);
+    SC_RUN_TEST(test_facebook_tool_create);
+    SC_RUN_TEST(test_facebook_tool_execute_empty);
+    SC_RUN_TEST(test_instagram_tool_create);
+    SC_RUN_TEST(test_instagram_tool_execute_empty);
+    SC_RUN_TEST(test_twitter_tool_create);
+    SC_RUN_TEST(test_twitter_tool_execute_empty);
+    SC_RUN_TEST(test_gcloud_tool_create);
+    SC_RUN_TEST(test_gcloud_tool_execute_empty);
+    SC_RUN_TEST(test_firebase_tool_create);
+    SC_RUN_TEST(test_firebase_tool_execute_empty);
     SC_RUN_TEST(test_crm_create);
     SC_RUN_TEST(test_crm_contacts);
     SC_RUN_TEST(test_analytics_create);

@@ -2,6 +2,7 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/lifecycle.h"
+#include "seaclaw/memory/lifecycle/migrate.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -379,8 +380,100 @@ static void test_summarizer_truncation(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* ─── Migrate: brain.db read and free ───────────────────────────────────────── */
+static void test_migrate_invalid_args(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sqlite_source_entry_t *out = NULL;
+    size_t count = 0;
+    sc_error_t err = sc_migrate_read_brain_db(NULL, "/tmp/x.db", &out, &count);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    err = sc_migrate_read_brain_db(&alloc, NULL, &out, &count);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_migrate_free_entries_null(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_migrate_free_entries(&alloc, NULL, 0);
+    sc_migrate_free_entries(NULL, NULL, 0);
+}
+
+#ifdef SC_ENABLE_SQLITE
+#include <sqlite3.h>
+
+static void test_migrate_read_nonexistent_path(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sqlite_source_entry_t *out = NULL;
+    size_t count = 0;
+    sc_error_t err =
+        sc_migrate_read_brain_db(&alloc, "/tmp/seaclaw_nonexistent_migrate_12345.db", &out, &count);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_migrate_read_brain_db_with_temp(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char path_buf[] = "/tmp/seaclaw_migrate_XXXXXX";
+#if defined(_WIN32) || defined(_WIN64)
+    (void)path_buf;
+    (void)alloc;
+    return;
+#else
+    int fd = mkstemp(path_buf);
+    SC_ASSERT_TRUE(fd >= 0);
+    close(fd);
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open(path_buf, &db) != SQLITE_OK) {
+        unlink(path_buf);
+        return;
+    }
+    const char *sql = "CREATE TABLE memories (key TEXT, content TEXT, category TEXT);"
+                      "INSERT INTO memories VALUES ('k1','content one','core');";
+    char *errmsg = NULL;
+    if (sqlite3_exec(db, sql, NULL, NULL, &errmsg) != SQLITE_OK) {
+        sqlite3_free(errmsg);
+        sqlite3_close(db);
+        unlink(path_buf);
+        return;
+    }
+    sqlite3_close(db);
+
+    sc_sqlite_source_entry_t *entries = NULL;
+    size_t count = 0;
+    sc_error_t err = sc_migrate_read_brain_db(&alloc, path_buf, &entries, &count);
+    unlink(path_buf);
+
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(entries);
+    SC_ASSERT_EQ(count, 1u);
+    SC_ASSERT_NOT_NULL(entries[0].key);
+    SC_ASSERT_NOT_NULL(entries[0].content);
+    SC_ASSERT_STR_EQ(entries[0].key, "k1");
+    SC_ASSERT_STR_EQ(entries[0].content, "content one");
+    SC_ASSERT_EQ(entries[0].category ? strcmp(entries[0].category, "core") : 0, 0);
+
+    sc_migrate_free_entries(&alloc, entries, count);
+#endif
+}
+#else
+static void test_migrate_not_supported_without_sqlite(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sqlite_source_entry_t *out = NULL;
+    size_t count = 0;
+    sc_error_t err = sc_migrate_read_brain_db(&alloc, "/tmp/any.db", &out, &count);
+    SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
+}
+#endif
+
 void run_lifecycle_tests(void) {
     SC_TEST_SUITE("Lifecycle");
+    SC_RUN_TEST(test_migrate_invalid_args);
+    SC_RUN_TEST(test_migrate_free_entries_null);
+#ifdef SC_ENABLE_SQLITE
+    SC_RUN_TEST(test_migrate_read_nonexistent_path);
+    SC_RUN_TEST(test_migrate_read_brain_db_with_temp);
+#else
+    SC_RUN_TEST(test_migrate_not_supported_without_sqlite);
+#endif
     SC_RUN_TEST(test_cache_put_get);
     SC_RUN_TEST(test_cache_eviction);
     SC_RUN_TEST(test_cache_invalidate);

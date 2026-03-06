@@ -78,6 +78,18 @@ static const sc_channel_meta_t catalog[] = {
 #ifdef SC_HAS_GMAIL
     {SC_CHANNEL_GMAIL, "gmail", "Gmail", "", SC_LISTENER_POLLING},
 #endif
+#ifdef SC_HAS_FACEBOOK
+    {SC_CHANNEL_FACEBOOK, "facebook", "Facebook Messenger", "", SC_LISTENER_POLLING},
+#endif
+#ifdef SC_HAS_INSTAGRAM
+    {SC_CHANNEL_INSTAGRAM, "instagram", "Instagram DMs", "", SC_LISTENER_POLLING},
+#endif
+#ifdef SC_HAS_TWITTER
+    {SC_CHANNEL_TWITTER, "twitter", "Twitter/X DMs", "", SC_LISTENER_POLLING},
+#endif
+#ifdef SC_HAS_GOOGLE_RCS
+    {SC_CHANNEL_GOOGLE_RCS, "google_rcs", "Google RCS", "", SC_LISTENER_POLLING},
+#endif
     {SC_CHANNEL_DISPATCH, "dispatch", "Dispatch", "", SC_LISTENER_NONE},
 #ifdef SC_HAS_SONATA
     {SC_CHANNEL_VOICE, "voice", "Voice (Sonata)", "", SC_LISTENER_SEND_ONLY},
@@ -188,6 +200,22 @@ bool sc_channel_catalog_is_build_enabled(sc_channel_id_t id) {
     case SC_CHANNEL_GMAIL:
         return true;
 #endif
+#ifdef SC_HAS_FACEBOOK
+    case SC_CHANNEL_FACEBOOK:
+        return true;
+#endif
+#ifdef SC_HAS_INSTAGRAM
+    case SC_CHANNEL_INSTAGRAM:
+        return true;
+#endif
+#ifdef SC_HAS_TWITTER
+    case SC_CHANNEL_TWITTER:
+        return true;
+#endif
+#ifdef SC_HAS_GOOGLE_RCS
+    case SC_CHANNEL_GOOGLE_RCS:
+        return true;
+#endif
     case SC_CHANNEL_DISPATCH:
         return true;
 #ifdef SC_HAS_SONATA
@@ -280,6 +308,10 @@ bool sc_channel_catalog_requires_runtime(sc_channel_id_t id) {
     case SC_CHANNEL_TWILIO:
     case SC_CHANNEL_GOOGLE_CHAT:
     case SC_CHANNEL_GMAIL:
+    case SC_CHANNEL_FACEBOOK:
+    case SC_CHANNEL_INSTAGRAM:
+    case SC_CHANNEL_TWITTER:
+    case SC_CHANNEL_GOOGLE_RCS:
         return true;
     default:
         return false;

@@ -24,10 +24,8 @@ typedef struct sc_twitter_ctx {
 static sc_error_t twitter_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                   sc_tool_result_t *out) {
     (void)ctx;
-    if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
+    if (!args || !out)
         return SC_ERR_INVALID_ARGUMENT;
-    }
     const char *action = sc_json_get_string(args, "action");
     if (!action || !action[0]) {
         *out = sc_tool_result_fail("Missing 'action'", 16);
