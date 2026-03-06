@@ -29,8 +29,7 @@ for f in src/components/sc-*.ts; do
   echo "$f" | grep -q test && continue
   TOTAL=$((TOTAL + 1))
   name=$(basename "$f" .ts)
-  refs=$(grep -rl "$name" src/views/ src/app.ts 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-  if [ "$refs" -gt 0 ]; then
+  if grep -rql "$name" src/views/ src/app.ts 2>/dev/null; then
     USED=$((USED + 1))
   fi
 done

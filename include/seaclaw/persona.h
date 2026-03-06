@@ -57,6 +57,9 @@ sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_
 sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t json_len,
                                 sc_persona_t *out);
 
+sc_error_t sc_persona_validate_json(sc_allocator_t *alloc, const char *json, size_t json_len,
+                                    char **err_msg, size_t *err_msg_len);
+
 sc_error_t sc_persona_examples_load_json(sc_allocator_t *alloc, const char *channel,
                                          size_t channel_len, const char *json, size_t json_len,
                                          sc_persona_example_bank_t *out);
@@ -79,6 +82,8 @@ const sc_persona_overlay_t *sc_persona_find_overlay(const sc_persona_t *persona,
 sc_error_t sc_persona_sampler_imessage_query(char *buf, size_t cap, size_t *out_len, size_t limit);
 sc_error_t sc_persona_sampler_facebook_parse(const char *json, size_t json_len, char ***out,
                                              size_t *out_count);
+sc_error_t sc_persona_sampler_gmail_parse(const char *json, size_t json_len, char ***out,
+                                          size_t *out_count);
 
 /* Provider analyzer — builds extraction prompt, parses provider JSON into partial persona */
 sc_error_t sc_persona_analyzer_build_prompt(const char **messages, size_t msg_count,
@@ -100,7 +105,8 @@ typedef enum {
     SC_PERSONA_ACTION_UPDATE,
     SC_PERSONA_ACTION_SHOW,
     SC_PERSONA_ACTION_LIST,
-    SC_PERSONA_ACTION_DELETE
+    SC_PERSONA_ACTION_DELETE,
+    SC_PERSONA_ACTION_VALIDATE
 } sc_persona_action_t;
 
 typedef struct sc_persona_cli_args {
