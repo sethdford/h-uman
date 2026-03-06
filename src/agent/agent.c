@@ -1070,22 +1070,28 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
         (void)sc_memory_loader_load(&loader, msg, msg_len, "", 0, &memory_ctx, &memory_ctx_len);
     }
 
-    /* Build persona prompt lazily when persona is loaded */
-    if (agent->persona && !agent->persona_prompt) {
-        char *pp = NULL;
-        size_t pp_len = 0;
-        sc_error_t perr =
-            sc_persona_build_prompt(agent->alloc, agent->persona, NULL, 0, &pp, &pp_len);
-        if (perr == SC_OK) {
-            agent->persona_prompt = pp;
-            agent->persona_prompt_len = pp_len;
+    /* Build persona prompt fresh each turn (channel-dependent; no caching) */
+    char *persona_prompt = NULL;
+    size_t persona_prompt_len = 0;
+    if (agent->persona) {
+        const char *ch = agent->active_channel;
+        size_t ch_len = agent->active_channel_len;
+        sc_error_t perr = sc_persona_build_prompt(agent->alloc, agent->persona, ch, ch_len,
+                                                  &persona_prompt, &persona_prompt_len);
+        if (perr != SC_OK) {
+            if (pref_ctx)
+                agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);
+            if (memory_ctx)
+                agent->alloc->free(agent->alloc->ctx, memory_ctx, memory_ctx_len + 1);
+            sc_agent_clear_current_for_tools();
+            return perr;
         }
     }
 
     /* Build system prompt using cached static portion when available */
     char *system_prompt = NULL;
     size_t system_prompt_len = 0;
-    if (agent->cached_static_prompt && !pref_ctx && !tone_hint && !agent->persona_prompt) {
+    if (agent->cached_static_prompt && !pref_ctx && !tone_hint && !persona_prompt) {
         err = sc_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
                                          memory_ctx_len, &system_prompt, &system_prompt_len);
@@ -1112,8 +1118,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
             .autonomy_level = agent->autonomy_level,
             .custom_instructions = agent->custom_instructions,
             .custom_instructions_len = agent->custom_instructions_len,
-            .persona_prompt = agent->persona_prompt,
-            .persona_prompt_len = agent->persona_prompt_len,
+            .persona_prompt = persona_prompt,
+            .persona_prompt_len = persona_prompt_len,
             .preferences = pref_ctx,
             .preferences_len = pref_ctx_len,
             .chain_of_thought = agent->chain_of_thought,
