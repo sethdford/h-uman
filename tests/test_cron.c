@@ -516,6 +516,11 @@ static void test_crontab_add(void) {
     size_t path_len = 0;
     sc_crontab_get_path(&alloc, &path, &path_len);
     unlink(path);
+    /* Ensure no stale file from prior tests */
+    FILE *f = fopen(path, "w");
+    if (f)
+        fclose(f);
+    unlink(path);
 
     char *new_id = NULL;
     sc_error_t err = sc_crontab_add(&alloc, path, "0 9 * * *", 9, "echo morning", 12, &new_id);

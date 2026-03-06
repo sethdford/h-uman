@@ -147,6 +147,159 @@ static void test_sqlite_list(void) {
     }
     mem.vtable->deinit(mem.ctx);
 }
+
+/* Error-path tests for SQLite memory engine */
+static void test_sqlite_create_null_path_uses_memory(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, NULL);
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    SC_ASSERT_NOT_NULL(mem.vtable);
+    SC_ASSERT_STR_EQ(mem.vtable->name(mem.ctx), "sqlite");
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_create_invalid_path_fails_gracefully(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, "/nonexistent_dir/test.db");
+    SC_ASSERT_NULL(mem.ctx);
+    SC_ASSERT_NULL(mem.vtable);
+}
+
+static void test_sqlite_store_null_key_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
+    sc_error_t err = mem.vtable->store(mem.ctx, NULL, 0, "content", 7, &cat, NULL, 0);
+    SC_ASSERT_NEQ(err, SC_OK);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_store_empty_key_handled(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
+    mem.vtable->store(mem.ctx, "", 0, "content", 7, &cat, NULL, 0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_store_null_content_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
+    sc_error_t err = mem.vtable->store(mem.ctx, "key", 3, NULL, 0, &cat, NULL, 0);
+    SC_ASSERT_NEQ(err, SC_OK);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_recall_null_query_returns_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_entry_t *out = (sc_memory_entry_t *)0xdeadbeef;
+    size_t count = 99;
+    sc_error_t err = mem.vtable->recall(mem.ctx, &alloc, NULL, 0, 10, NULL, 0, &out, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_forget_null_key_succeeds(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    bool deleted = false;
+    sc_error_t err = mem.vtable->forget(mem.ctx, NULL, 0, &deleted);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_FALSE(deleted);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_get_nonexistent_key_returns_not_found(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_entry_t entry = {0};
+    bool found = true;
+    sc_error_t err = mem.vtable->get(mem.ctx, &alloc, "nonexistent_key_xyz", 19, &entry, &found);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_FALSE(found);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_recall_nonexistent_query_returns_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_entry_t *out = NULL;
+    size_t count = 0;
+    sc_error_t err = mem.vtable->recall(mem.ctx, &alloc, "xyznonexistentquery123", 21, 10, NULL, 0,
+                                        &out, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0);
+    if (out) {
+        alloc.free(alloc.ctx, out, 10 * sizeof(sc_memory_entry_t));
+    }
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_store_recall_roundtrip(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
+    const char *key = "roundtrip_key";
+    const char *content = "roundtrip content value";
+    sc_error_t err = mem.vtable->store(mem.ctx, key, 13, content, 23, &cat, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_memory_entry_t *out = NULL;
+    size_t count = 0;
+    err = mem.vtable->recall(mem.ctx, &alloc, "roundtrip", 9, 5, NULL, 0, &out, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(out);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(out[0].key, key);
+    SC_ASSERT_STR_EQ(out[0].content, content);
+    if (out) {
+        for (size_t i = 0; i < count; i++)
+            sc_memory_entry_free_fields(&alloc, &out[i]);
+        alloc.free(alloc.ctx, out, count * sizeof(sc_memory_entry_t));
+    }
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_sqlite_forget_then_recall_returns_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+    SC_ASSERT_NOT_NULL(mem.ctx);
+    sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
+    const char *key = "forget_then_recall";
+    mem.vtable->store(mem.ctx, key, 18, "content", 7, &cat, NULL, 0);
+
+    bool deleted = false;
+    sc_error_t err = mem.vtable->forget(mem.ctx, key, 18, &deleted);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(deleted);
+
+    sc_memory_entry_t entry = {0};
+    bool found = false;
+    err = mem.vtable->get(mem.ctx, &alloc, key, 18, &entry, &found);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_FALSE(found);
+
+    sc_memory_entry_t *out = NULL;
+    size_t count = 0;
+    err = mem.vtable->recall(mem.ctx, &alloc, "forget_then_recall", 17, 5, NULL, 0, &out, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0);
+    if (out) {
+        alloc.free(alloc.ctx, out, 5 * sizeof(sc_memory_entry_t));
+    }
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 #ifdef SC_HAS_MARKDOWN_ENGINE
@@ -327,6 +480,17 @@ void run_memory_full_tests(void) {
     SC_RUN_TEST(test_sqlite_get_forget_count);
     SC_RUN_TEST(test_sqlite_session_store);
     SC_RUN_TEST(test_sqlite_list);
+    SC_RUN_TEST(test_sqlite_create_null_path_uses_memory);
+    SC_RUN_TEST(test_sqlite_create_invalid_path_fails_gracefully);
+    SC_RUN_TEST(test_sqlite_store_null_key_fails);
+    SC_RUN_TEST(test_sqlite_store_empty_key_handled);
+    SC_RUN_TEST(test_sqlite_store_null_content_fails);
+    SC_RUN_TEST(test_sqlite_recall_null_query_returns_empty);
+    SC_RUN_TEST(test_sqlite_forget_null_key_succeeds);
+    SC_RUN_TEST(test_sqlite_get_nonexistent_key_returns_not_found);
+    SC_RUN_TEST(test_sqlite_recall_nonexistent_query_returns_empty);
+    SC_RUN_TEST(test_sqlite_store_recall_roundtrip);
+    SC_RUN_TEST(test_sqlite_forget_then_recall_returns_empty);
 #endif
 
 #ifdef SC_HAS_MARKDOWN_ENGINE

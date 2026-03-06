@@ -14,6 +14,70 @@
 
 /* ─── Dispatcher tests ──────────────────────────────────────────────────── */
 
+static void test_dispatcher_default_null_out(void) {
+    sc_dispatcher_default(NULL);
+}
+
+static void test_dispatcher_create_null_alloc(void) {
+    sc_dispatcher_t *d = NULL;
+    sc_error_t err = sc_dispatcher_create(NULL, 1, 0, &d);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_NULL(d);
+}
+
+static void test_dispatcher_create_null_out(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_dispatcher_create(&alloc, 1, 0, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_dispatcher_destroy_null_alloc(void) {
+    sc_dispatcher_t d;
+    sc_dispatcher_default(&d);
+    sc_dispatcher_destroy(NULL, &d);
+}
+
+static void test_dispatcher_destroy_null_d(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_dispatcher_destroy(&alloc, NULL);
+}
+
+static void test_dispatcher_dispatch_null_d(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_call_t call = {0};
+    sc_dispatch_result_t out;
+    sc_error_t err = sc_dispatcher_dispatch(NULL, &alloc, NULL, 0, &call, 1, &out);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_dispatcher_dispatch_null_alloc(void) {
+    sc_dispatcher_t disp;
+    sc_dispatcher_default(&disp);
+    sc_tool_call_t call = {0};
+    sc_dispatch_result_t out;
+    sc_error_t err = sc_dispatcher_dispatch(&disp, NULL, NULL, 0, &call, 1, &out);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_dispatcher_dispatch_null_out(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_dispatcher_t disp;
+    sc_dispatcher_default(&disp);
+    sc_tool_call_t call = {0};
+    sc_error_t err = sc_dispatcher_dispatch(&disp, &alloc, NULL, 0, &call, 1, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_dispatch_result_free_null_alloc(void) {
+    sc_dispatch_result_t r = {.results = NULL, .count = 0};
+    sc_dispatch_result_free(NULL, &r);
+}
+
+static void test_dispatch_result_free_null_r(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_dispatch_result_free(&alloc, NULL);
+}
+
 static void test_dispatcher_sequential_single_tool(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
@@ -515,6 +579,16 @@ static void test_planner_invalid_json(void) {
 
 void run_agent_subsystems_tests(void) {
     SC_TEST_SUITE("Agent subsystems");
+    SC_RUN_TEST(test_dispatcher_default_null_out);
+    SC_RUN_TEST(test_dispatcher_create_null_alloc);
+    SC_RUN_TEST(test_dispatcher_create_null_out);
+    SC_RUN_TEST(test_dispatcher_destroy_null_alloc);
+    SC_RUN_TEST(test_dispatcher_destroy_null_d);
+    SC_RUN_TEST(test_dispatcher_dispatch_null_d);
+    SC_RUN_TEST(test_dispatcher_dispatch_null_alloc);
+    SC_RUN_TEST(test_dispatcher_dispatch_null_out);
+    SC_RUN_TEST(test_dispatch_result_free_null_alloc);
+    SC_RUN_TEST(test_dispatch_result_free_null_r);
     SC_RUN_TEST(test_dispatcher_sequential_single_tool);
     SC_RUN_TEST(test_dispatcher_multiple_tools);
     SC_RUN_TEST(test_dispatcher_result_order_preserved);
