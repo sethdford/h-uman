@@ -38,4 +38,8 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                           sc_service_channel_t *channels, size_t channel_count,
                           struct sc_agent *agent);
 
+sc_error_t sc_daemon_install(sc_allocator_t *alloc);
+sc_error_t sc_daemon_uninstall(void);
+sc_error_t sc_daemon_logs(void);
+
 #endif /* SC_DAEMON_H */

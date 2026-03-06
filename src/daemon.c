@@ -496,3 +496,16 @@ bool sc_daemon_status(void) {
     return kill((pid_t)pid_val, 0) == 0;
 }
 #endif
+
+sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
+    (void)alloc;
+    return SC_ERR_NOT_SUPPORTED;
+}
+
+sc_error_t sc_daemon_uninstall(void) {
+    return SC_ERR_NOT_SUPPORTED;
+}
+
+sc_error_t sc_daemon_logs(void) {
+    return SC_ERR_NOT_SUPPORTED;
+}

@@ -691,6 +691,38 @@ static void parse_imessage_channel(sc_allocator_t *a, sc_config_t *cfg,
                     strlen(cfg->channels.imessage.default_target) + 1);
         cfg->channels.imessage.default_target = sc_strdup(a, t);
     }
+    sc_json_value_t *af = sc_json_object_get(obj, "allow_from");
+    if (af && af->type == SC_JSON_ARRAY) {
+        if (cfg->channels.imessage.allow_from) {
+            for (size_t i = 0; i < cfg->channels.imessage.allow_from_count; i++)
+                if (cfg->channels.imessage.allow_from[i])
+                    a->free(a->ctx, cfg->channels.imessage.allow_from[i],
+                            strlen(cfg->channels.imessage.allow_from[i]) + 1);
+            a->free(a->ctx, cfg->channels.imessage.allow_from,
+                    cfg->channels.imessage.allow_from_count * sizeof(char *));
+        }
+        parse_string_array(a, &cfg->channels.imessage.allow_from,
+                           &cfg->channels.imessage.allow_from_count, af);
+    }
+    cfg->channels.imessage.poll_interval_sec =
+        (int)sc_json_get_number(obj, "poll_interval_sec", 30.0);
+}
+
+static void parse_gmail_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT)
+        return;
+    const char *cid = sc_json_get_string(obj, "client_id");
+    const char *csec = sc_json_get_string(obj, "client_secret");
+    const char *rtok = sc_json_get_string(obj, "refresh_token");
+    if (cid)
+        cfg->channels.gmail.client_id = sc_strndup(a, cid, strlen(cid));
+    if (csec)
+        cfg->channels.gmail.client_secret = sc_strndup(a, csec, strlen(csec));
+    if (rtok)
+        cfg->channels.gmail.refresh_token = sc_strndup(a, rtok, strlen(rtok));
+    cfg->channels.gmail.poll_interval_sec =
+        (int)sc_json_get_number(obj, "poll_interval_sec", 30.0);
 }
 
 static void parse_telegram_channel(sc_allocator_t *a, sc_config_t *cfg,
@@ -860,6 +892,10 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_j
     sc_json_value_t *imsg_obj = sc_json_object_get(obj, "imessage");
     if (imsg_obj)
         parse_imessage_channel(a, cfg, imsg_obj);
+
+    sc_json_value_t *gmail_obj = sc_json_object_get(obj, "gmail");
+    if (gmail_obj)
+        parse_gmail_channel(a, cfg, gmail_obj);
 
     sc_json_value_t *telegram_obj = sc_json_object_get(obj, "telegram");
     if (telegram_obj)

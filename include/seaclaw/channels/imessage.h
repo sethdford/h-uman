@@ -9,7 +9,8 @@
 #include <stddef.h>
 
 sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
-                              size_t default_target_len, sc_channel_t *out);
+                              size_t default_target_len, const char *const *allow_from,
+                              size_t allow_from_count, sc_channel_t *out);
 void sc_imessage_destroy(sc_channel_t *ch);
 
 /** Returns true if default target (phone/email) is configured. */

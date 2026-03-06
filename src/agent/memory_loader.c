@@ -1,28 +1,26 @@
 #include "seaclaw/agent/memory_loader.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/memory/retrieval/adaptive.h"
 #include <string.h>
+
+static sc_retrieval_mode_t adaptive_to_retrieval_mode(sc_adaptive_strategy_t strategy) {
+    switch (strategy) {
+    case SC_ADAPTIVE_KEYWORD_ONLY:
+        return SC_RETRIEVAL_KEYWORD;
+    case SC_ADAPTIVE_VECTOR_ONLY:
+        return SC_RETRIEVAL_SEMANTIC;
+    case SC_ADAPTIVE_HYBRID:
+    default:
+        return SC_RETRIEVAL_HYBRID;
+    }
+}
 
 static void free_recall_entries(sc_allocator_t *alloc, sc_memory_entry_t *entries, size_t count) {
     if (!alloc || !entries)
         return;
-    for (size_t i = 0; i < count; i++) {
-        sc_memory_entry_t *e = &entries[i];
-        if (e->id)
-            alloc->free(alloc->ctx, (void *)e->id, e->id_len + 1);
-        if (e->key)
-            alloc->free(alloc->ctx, (void *)e->key, e->key_len + 1);
-        if (e->content)
-            alloc->free(alloc->ctx, (void *)e->content, e->content_len + 1);
-        if (e->category.tag == SC_MEMORY_CATEGORY_CUSTOM && e->category.data.custom.name) {
-            alloc->free(alloc->ctx, (void *)e->category.data.custom.name,
-                        e->category.data.custom.name_len + 1);
-        }
-        if (e->timestamp)
-            alloc->free(alloc->ctx, (void *)e->timestamp, e->timestamp_len + 1);
-        if (e->session_id)
-            alloc->free(alloc->ctx, (void *)e->session_id, e->session_id_len + 1);
-    }
+    for (size_t i = 0; i < count; i++)
+        sc_memory_entry_free_fields(alloc, &entries[i]);
     alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
 }
 
@@ -54,8 +52,11 @@ sc_error_t sc_memory_loader_load(sc_memory_loader_t *loader, const char *query, 
 
     if (loader->retrieval_engine && loader->retrieval_engine->ctx &&
         loader->retrieval_engine->vtable) {
+        sc_adaptive_config_t acfg = {.enabled = true, .keyword_max_tokens = 3, .vector_min_tokens = 5};
+        sc_query_analysis_t qa = sc_adaptive_analyze_query(query ? query : "", query_len, &acfg);
+
         sc_retrieval_options_t opts = {
-            .mode = SC_RETRIEVAL_HYBRID,
+            .mode = adaptive_to_retrieval_mode(qa.recommended_strategy),
             .limit = loader->max_entries,
             .min_score = 0.0,
             .use_reranking = false,

@@ -75,6 +75,9 @@ static const sc_channel_meta_t catalog[] = {
 #ifdef SC_HAS_GOOGLE_CHAT
     {SC_CHANNEL_GOOGLE_CHAT, "google_chat", "Google Chat", "", SC_LISTENER_POLLING},
 #endif
+#ifdef SC_HAS_GMAIL
+    {SC_CHANNEL_GMAIL, "gmail", "Gmail", "", SC_LISTENER_POLLING},
+#endif
     {SC_CHANNEL_DISPATCH, "dispatch", "Dispatch", "", SC_LISTENER_NONE},
 #ifdef SC_HAS_SONATA
     {SC_CHANNEL_VOICE, "voice", "Voice (Sonata)", "", SC_LISTENER_SEND_ONLY},
@@ -181,6 +184,10 @@ bool sc_channel_catalog_is_build_enabled(sc_channel_id_t id) {
     case SC_CHANNEL_GOOGLE_CHAT:
         return true;
 #endif
+#ifdef SC_HAS_GMAIL
+    case SC_CHANNEL_GMAIL:
+        return true;
+#endif
     case SC_CHANNEL_DISPATCH:
         return true;
 #ifdef SC_HAS_SONATA
@@ -272,6 +279,7 @@ bool sc_channel_catalog_requires_runtime(sc_channel_id_t id) {
     case SC_CHANNEL_TEAMS:
     case SC_CHANNEL_TWILIO:
     case SC_CHANNEL_GOOGLE_CHAT:
+    case SC_CHANNEL_GMAIL:
         return true;
     default:
         return false;

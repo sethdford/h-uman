@@ -669,7 +669,7 @@ static void test_email_set_imap_null_channel(void) {
 static void test_imessage_create(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_error_t err = sc_imessage_create(&alloc, NULL, 0, &ch);
+    sc_error_t err = sc_imessage_create(&alloc, NULL, 0, NULL, 0, &ch);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "imessage");
     sc_imessage_destroy(&ch);
@@ -678,7 +678,7 @@ static void test_imessage_create(void) {
 static void test_imessage_name(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_imessage_create(&alloc, NULL, 0, &ch);
+    sc_imessage_create(&alloc, NULL, 0, NULL, 0, &ch);
     SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "imessage");
     sc_imessage_destroy(&ch);
 }
@@ -686,7 +686,7 @@ static void test_imessage_name(void) {
 static void test_imessage_health_check(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_imessage_create(&alloc, NULL, 0, &ch);
+    sc_imessage_create(&alloc, NULL, 0, NULL, 0, &ch);
     SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
     sc_imessage_destroy(&ch);
 }
@@ -694,11 +694,11 @@ static void test_imessage_health_check(void) {
 static void test_imessage_is_configured(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_imessage_create(&alloc, NULL, 0, &ch);
+    sc_imessage_create(&alloc, NULL, 0, NULL, 0, &ch);
     SC_ASSERT_FALSE(sc_imessage_is_configured(&ch));
     sc_imessage_destroy(&ch);
 
-    sc_imessage_create(&alloc, "+15551234567", 11, &ch);
+    sc_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
     SC_ASSERT_TRUE(sc_imessage_is_configured(&ch));
     sc_imessage_destroy(&ch);
 }
@@ -706,7 +706,7 @@ static void test_imessage_is_configured(void) {
 static void test_imessage_poll_test_mode(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_channel_t ch;
-    sc_imessage_create(&alloc, "+15551234567", 11, &ch);
+    sc_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
     sc_channel_loop_msg_t msgs[4];
     size_t count = 99;
     sc_error_t err = sc_imessage_poll(ch.ctx, &alloc, msgs, 4, &count);

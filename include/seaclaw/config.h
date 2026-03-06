@@ -126,7 +126,17 @@ typedef struct sc_imap_channel_config {
 
 typedef struct sc_imessage_channel_config {
     char *default_target;
+    char **allow_from;
+    size_t allow_from_count;
+    int poll_interval_sec;
 } sc_imessage_channel_config_t;
+
+typedef struct sc_gmail_channel_config {
+    char *client_id;
+    char *client_secret;
+    char *refresh_token;
+    int poll_interval_sec;
+} sc_gmail_channel_config_t;
 
 #define SC_DISCORD_CHANNEL_IDS_MAX 16
 typedef struct sc_discord_channel_config {
@@ -184,6 +194,7 @@ typedef struct sc_channels_config {
     sc_email_channel_config_t email;
     sc_imap_channel_config_t imap;
     sc_imessage_channel_config_t imessage;
+    sc_gmail_channel_config_t gmail;
     sc_discord_channel_config_t discord;
     sc_telegram_channel_config_t telegram;
     sc_slack_channel_config_t slack;

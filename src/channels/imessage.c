@@ -1,10 +1,15 @@
 #include "seaclaw/channels/imessage.h"
 #include "seaclaw/channel_loop.h"
 #include "seaclaw/core/process_util.h"
+#ifndef SC_CODENAME
+#define SC_CODENAME "seaclaw"
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <unistd.h>
 
 #if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 #ifdef SC_ENABLE_SQLITE
@@ -18,6 +23,8 @@ typedef struct sc_imessage_ctx {
     size_t default_target_len;
     bool running;
     int64_t last_rowid;
+    const char *const *allow_from;
+    size_t allow_from_count;
 } sc_imessage_ctx_t;
 
 static sc_error_t imessage_start(void *ctx) {
@@ -100,17 +107,21 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
     escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
 
-    /* Script: tell application "Messages" to send "MSG" to buddy "TGT" */
-    size_t script_cap = 64 + strlen(msg_esc) + strlen(tgt_esc);
+    /* Target the iMessage service explicitly for reliability on modern macOS */
+    size_t script_cap = 256 + strlen(msg_esc) + strlen(tgt_esc);
     char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
     if (!script) {
         c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
         return SC_ERR_OUT_OF_MEMORY;
     }
-    int n =
-        snprintf(script, script_cap, "tell application \"Messages\" to send \"%s\" to buddy \"%s\"",
-                 msg_esc, tgt_esc);
+    int n = snprintf(script, script_cap,
+                     "tell application \"Messages\"\n"
+                     "  set targetService to 1st service whose service type = iMessage\n"
+                     "  set targetBuddy to buddy \"%s\" of targetService\n"
+                     "  send \"%s\" to targetBuddy\n"
+                     "end tell",
+                     tgt_esc, msg_esc);
     c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
     c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
     if (n < 0 || (size_t)n >= script_cap) {
@@ -138,7 +149,23 @@ static const char *imessage_name(void *ctx) {
 }
 static bool imessage_health_check(void *ctx) {
     (void)ctx;
+#if !defined(__APPLE__) || !defined(__MACH__)
+    return false;
+#else
+    const char *home = getenv("HOME");
+    if (!home)
+        return false;
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return false;
+    if (access(db_path, R_OK) != 0) {
+        fprintf(stderr, "[%s] imessage: ~/Library/Messages/chat.db not readable (Full Disk Access required)\n",
+                SC_CODENAME);
+        return false;
+    }
     return true;
+#endif
 }
 
 static const sc_channel_vtable_t imessage_vtable = {
@@ -153,7 +180,8 @@ static const sc_channel_vtable_t imessage_vtable = {
 };
 
 sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
-                              size_t default_target_len, sc_channel_t *out) {
+                              size_t default_target_len, const char *const *allow_from,
+                              size_t allow_from_count, sc_channel_t *out) {
     if (!alloc || !out)
         return SC_ERR_INVALID_ARGUMENT;
     sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)calloc(1, sizeof(*c));
@@ -162,6 +190,8 @@ sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
     c->alloc = alloc;
     c->default_target = NULL;
     c->default_target_len = 0;
+    c->allow_from = allow_from;
+    c->allow_from_count = allow_from_count;
     if (default_target && default_target_len > 0) {
         c->default_target = (char *)malloc(default_target_len + 1);
         if (!c->default_target) {
@@ -172,6 +202,30 @@ sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
         c->default_target[default_target_len] = '\0';
         c->default_target_len = default_target_len;
     }
+    /* Seed last_rowid to current max so we only pick up NEW messages */
+#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
+    {
+        const char *home_env = getenv("HOME");
+        if (home_env) {
+            char db_path[512];
+            int dn = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home_env);
+            if (dn > 0 && (size_t)dn < sizeof(db_path)) {
+                sqlite3 *db = NULL;
+                if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                    sqlite3_stmt *stmt = NULL;
+                    if (sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &stmt,
+                                           NULL) == SQLITE_OK) {
+                        if (sqlite3_step(stmt) == SQLITE_ROW)
+                            c->last_rowid = sqlite3_column_int64(stmt, 0);
+                        sqlite3_finalize(stmt);
+                    }
+                    sqlite3_close(db);
+                }
+            }
+        }
+    }
+#endif
+
     out->ctx = c;
     out->vtable = &imessage_vtable;
     return SC_OK;
@@ -260,6 +314,21 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
             continue;
 
         size_t handle_len = strlen(handle);
+        if (c->allow_from_count > 0) {
+            bool allowed = false;
+            for (size_t i = 0; i < c->allow_from_count; i++) {
+                const char *a = c->allow_from[i];
+                if (!a)
+                    continue;
+                size_t a_len = strlen(a);
+                if (a_len == handle_len && strncasecmp(handle, a, a_len) == 0) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed)
+                continue;
+        }
         size_t text_len = strlen(text);
         if (handle_len >= sizeof(msgs[count].session_key))
             handle_len = sizeof(msgs[count].session_key) - 1;
@@ -273,6 +342,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
 
         c->last_rowid = rowid;
         count++;
+        fprintf(stderr, "[imessage] received from %s: %.*s\n", handle, (int)(text_len > 80 ? 80 : text_len), text);
     }
 
     sqlite3_finalize(stmt);

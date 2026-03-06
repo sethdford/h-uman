@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(__unix__) || defined(__APPLE__)
+#include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
 #endif
@@ -57,6 +58,9 @@
 #endif
 #if SC_HAS_IMAP
 #include "seaclaw/channels/imap.h"
+#endif
+#if SC_HAS_GMAIL
+#include "seaclaw/channels/gmail.h"
 #endif
 #if SC_HAS_TELEGRAM
 #include "seaclaw/channels/telegram.h"
@@ -344,15 +348,63 @@ static sc_error_t cmd_onboard(sc_allocator_t *alloc, int argc, char **argv) {
 }
 
 static sc_error_t cmd_service(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    sc_error_t err = sc_daemon_start();
-    if (err == SC_ERR_NOT_SUPPORTED) {
-        fprintf(stderr, "[%s] daemon not supported on this platform\n", SC_CODENAME);
+    const char *sub = (argc >= 3 && argv[2]) ? argv[2] : "start";
+
+    if (strcmp(sub, "start") == 0) {
+        sc_error_t err = sc_daemon_start();
+        if (err == SC_ERR_NOT_SUPPORTED)
+            fprintf(stderr, "[%s] daemon not supported on this platform\n", SC_CODENAME);
+        else if (err == SC_OK)
+            printf("[%s] service started\n", SC_CODENAME);
+        else
+            fprintf(stderr, "[%s] failed to start service: %s\n", SC_CODENAME,
+                    sc_error_string(err));
         return err;
     }
-    (void)alloc;
-    return err;
+
+    if (strcmp(sub, "stop") == 0) {
+        sc_error_t err = sc_daemon_stop();
+        if (err == SC_OK)
+            printf("[%s] service stopped\n", SC_CODENAME);
+        else if (err == SC_ERR_NOT_FOUND)
+            fprintf(stderr, "[%s] service is not running\n", SC_CODENAME);
+        else
+            fprintf(stderr, "[%s] failed to stop service: %s\n", SC_CODENAME,
+                    sc_error_string(err));
+        return err;
+    }
+
+    if (strcmp(sub, "status") == 0) {
+        bool running = sc_daemon_status();
+        printf("[%s] service is %s\n", SC_CODENAME, running ? "running" : "stopped");
+        return SC_OK;
+    }
+
+    if (strcmp(sub, "install") == 0) {
+        sc_error_t err = sc_daemon_install(alloc);
+        if (err == SC_OK)
+            printf("[%s] service installed and started\n", SC_CODENAME);
+        else
+            fprintf(stderr, "[%s] install failed: %s\n", SC_CODENAME, sc_error_string(err));
+        return err;
+    }
+
+    if (strcmp(sub, "uninstall") == 0) {
+        sc_error_t err = sc_daemon_uninstall();
+        if (err == SC_OK)
+            printf("[%s] service uninstalled\n", SC_CODENAME);
+        else
+            fprintf(stderr, "[%s] uninstall failed: %s\n", SC_CODENAME, sc_error_string(err));
+        return err;
+    }
+
+    if (strcmp(sub, "logs") == 0)
+        return sc_daemon_logs();
+
+    fprintf(stderr, "[%s] unknown service subcommand: %s\n", SC_CODENAME, sub);
+    fprintf(stderr, "Usage: %s service [start|stop|status|install|uninstall|logs]\n",
+            argv[0] ? argv[0] : "seaclaw");
+    return SC_ERR_INVALID_ARGUMENT;
 }
 
 /* Memory from config — delegates to shared factory in src/memory/factory.c */
@@ -375,10 +427,30 @@ static sc_error_t plugin_register_channel_stub(void *ctx, const sc_channel_t *ch
     return SC_OK;
 }
 
+/* Gateway thread context for --with-gateway mode */
+typedef struct svc_gw_thread_ctx {
+    sc_allocator_t *alloc;
+    sc_gateway_config_t config;
+    const char *host;
+    uint16_t port;
+} svc_gw_thread_ctx_t;
+
+static void *svc_gateway_thread(void *arg) {
+    svc_gw_thread_ctx_t *ctx = (svc_gw_thread_ctx_t *)arg;
+    sc_error_t err = sc_gateway_run(ctx->alloc, ctx->host, ctx->port, &ctx->config);
+    if (err != SC_OK)
+        fprintf(stderr, "[seaclaw] gateway thread error: %s\n", sc_error_string(err));
+    return NULL;
+}
+
 static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-    fprintf(stderr, "[%s] service loop started\n", SC_CODENAME);
+    bool with_gateway = false;
+    for (int i = 2; i < argc && argv[i]; i++) {
+        if (strcmp(argv[i], "--with-gateway") == 0)
+            with_gateway = true;
+    }
+    fprintf(stderr, "[%s] service loop started%s\n", SC_CODENAME,
+            with_gateway ? " (with gateway)" : "");
 
     sc_config_t cfg;
     sc_error_t err = sc_config_load(alloc, &cfg);
@@ -647,7 +719,10 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     sc_channel_t imessage_ch = {0};
     if (cfg.channels.imessage.default_target) {
         err = sc_imessage_create(alloc, cfg.channels.imessage.default_target,
-                                 strlen(cfg.channels.imessage.default_target), &imessage_ch);
+                                 strlen(cfg.channels.imessage.default_target),
+                                 (const char *const *)cfg.channels.imessage.allow_from,
+                                 cfg.channels.imessage.allow_from_count,
+                                 &imessage_ch);
         if (err == SC_OK) {
             channels[ch_count].channel_ctx = imessage_ch.ctx;
             channels[ch_count].channel = &imessage_ch;
@@ -657,6 +732,32 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
             ch_count++;
             fprintf(stderr, "[%s] imessage channel configured (%s)\n", SC_CODENAME,
                     cfg.channels.imessage.default_target);
+        }
+    }
+#endif
+
+#if SC_HAS_GMAIL
+    sc_channel_t gmail_ch = {0};
+    if (cfg.channels.gmail.client_id && cfg.channels.gmail.client_secret &&
+        cfg.channels.gmail.refresh_token) {
+        err = sc_gmail_create(alloc, cfg.channels.gmail.client_id,
+                              strlen(cfg.channels.gmail.client_id),
+                              cfg.channels.gmail.client_secret,
+                              strlen(cfg.channels.gmail.client_secret),
+                              cfg.channels.gmail.refresh_token,
+                              strlen(cfg.channels.gmail.refresh_token),
+                              cfg.channels.gmail.poll_interval_sec, &gmail_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = gmail_ch.ctx;
+            channels[ch_count].channel = &gmail_ch;
+            channels[ch_count].poll_fn = sc_gmail_poll;
+            channels[ch_count].interval_ms =
+                (uint32_t)(cfg.channels.gmail.poll_interval_sec > 0
+                               ? cfg.channels.gmail.poll_interval_sec * 1000
+                               : 30000);
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] gmail channel configured\n", SC_CODENAME);
         }
     }
 #endif
@@ -776,6 +877,37 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #else
     fprintf(stderr, "[%s] %zu channel(s) active\n", SC_CODENAME, ch_count);
 #endif
+
+    /* ── Optional gateway on background thread ─────────────────────────── */
+    pthread_t gw_tid = 0;
+    svc_gw_thread_ctx_t gw_tctx;
+    memset(&gw_tctx, 0, sizeof(gw_tctx));
+    if (with_gateway) {
+        sc_gateway_config_t gw_config;
+        sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
+
+        sc_app_context_t svc_app_ctx = {
+            .config = &cfg,
+            .alloc = alloc,
+            .tools = tools,
+            .tools_count = tools_count,
+        };
+        gw_config.app_ctx = &svc_app_ctx;
+
+        gw_tctx.alloc = alloc;
+        gw_tctx.config = gw_config;
+        gw_tctx.host = cfg.gateway.host ? cfg.gateway.host : "127.0.0.1";
+        gw_tctx.port = cfg.gateway.port > 0 ? cfg.gateway.port : 3000;
+
+        if (pthread_create(&gw_tid, NULL, svc_gateway_thread, &gw_tctx) == 0) {
+            fprintf(stderr, "[%s] gateway listening on %s:%u\n", SC_CODENAME, gw_tctx.host,
+                    gw_tctx.port);
+        } else {
+            fprintf(stderr, "[%s] warning: failed to start gateway thread\n", SC_CODENAME);
+            gw_tid = 0;
+        }
+    }
+
     err = sc_service_run(alloc, 1000, ch_count > 0 ? channels : NULL, ch_count, &agent);
 
     /* ── Cleanup ──────────────────────────────────────────────────────── */
@@ -786,6 +918,10 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #if SC_HAS_IMESSAGE
     if (imessage_ch.ctx)
         sc_imessage_destroy(&imessage_ch);
+#endif
+#if SC_HAS_GMAIL
+    if (gmail_ch.ctx)
+        sc_gmail_destroy(&gmail_ch);
 #endif
 #if SC_HAS_TELEGRAM
     if (telegram_ch.ctx)
