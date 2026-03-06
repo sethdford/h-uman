@@ -117,14 +117,14 @@ static char *build_summary(sc_allocator_t *alloc, const sc_owned_message_t *hist
 }
 
 static void free_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs, size_t count) {
-    if (!tcs || count == 0)
+    if (!alloc || !tcs || count == 0)
         return;
     for (size_t i = 0; i < count; i++) {
-        if (tcs[i].id)
+        if (tcs[i].id && tcs[i].id_len > 0)
             alloc->free(alloc->ctx, (void *)tcs[i].id, tcs[i].id_len + 1);
-        if (tcs[i].name)
+        if (tcs[i].name && tcs[i].name_len > 0)
             alloc->free(alloc->ctx, (void *)tcs[i].name, tcs[i].name_len + 1);
-        if (tcs[i].arguments)
+        if (tcs[i].arguments && tcs[i].arguments_len > 0)
             alloc->free(alloc->ctx, (void *)tcs[i].arguments, tcs[i].arguments_len + 1);
     }
     alloc->free(alloc->ctx, tcs, count * sizeof(sc_tool_call_t));

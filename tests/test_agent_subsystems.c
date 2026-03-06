@@ -281,6 +281,7 @@ static void test_compaction_reduces_history(void) {
     sc_owned_message_t *history =
         (sc_owned_message_t *)alloc.alloc(alloc.ctx, cap * sizeof(sc_owned_message_t));
     SC_ASSERT_NOT_NULL(history);
+    memset(history, 0, cap * sizeof(sc_owned_message_t));
 
     history[0].role = SC_ROLE_SYSTEM;
     history[0].content = sc_strndup(&alloc, "system", 6);
@@ -331,6 +332,7 @@ static void test_compaction_keep_recent_preserved(void) {
     sc_owned_message_t *history =
         (sc_owned_message_t *)alloc.alloc(alloc.ctx, cap * sizeof(sc_owned_message_t));
     SC_ASSERT_NOT_NULL(history);
+    memset(history, 0, cap * sizeof(sc_owned_message_t));
 
     for (size_t i = 0; i < 10; i++) {
         char buf[32];
@@ -431,6 +433,7 @@ static void test_context_compact_preserves_system_and_recent(void) {
     sc_owned_message_t *history =
         (sc_owned_message_t *)alloc.alloc(alloc.ctx, cap * sizeof(sc_owned_message_t));
     SC_ASSERT_NOT_NULL(history);
+    memset(history, 0, cap * sizeof(sc_owned_message_t));
 
     history[0].role = SC_ROLE_SYSTEM;
     history[0].content = sc_strndup(&alloc, "You are helpful", 15);
@@ -474,6 +477,7 @@ static void test_context_compact_reduces_below_target(void) {
     sc_owned_message_t *history =
         (sc_owned_message_t *)alloc.alloc(alloc.ctx, cap * sizeof(sc_owned_message_t));
     SC_ASSERT_NOT_NULL(history);
+    memset(history, 0, cap * sizeof(sc_owned_message_t));
 
     history[0].role = SC_ROLE_SYSTEM;
     history[0].content = sc_strndup(&alloc, "system", 6);
