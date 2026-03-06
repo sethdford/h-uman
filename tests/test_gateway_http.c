@@ -1,5 +1,6 @@
-/* Gateway HTTP handling tests - config, health, rate limit. */
+/* Gateway HTTP handling tests - config, health, rate limit, path security, CORS, malformed HTTP. */
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/core/error.h"
 #include "seaclaw/crypto.h"
 #include "seaclaw/gateway.h"
 #include "seaclaw/health.h"
@@ -65,6 +66,136 @@ static void test_gateway_max_body_size_constant(void) {
     SC_ASSERT_EQ(SC_GATEWAY_MAX_BODY_SIZE, 65536);
 }
 
+/* ── Path traversal (serve_static_file) ────────────────────────────────────── */
+
+static void test_path_traversal_rejects_dotdot(void) {
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/static/../etc/passwd"));
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("../index.html"));
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/.."));
+}
+
+static void test_path_traversal_rejects_percent_encoded(void) {
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/%2e%2e/etc/passwd"));
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/%2E%2E/secret"));
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/%2e%2E/foo"));
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/%2E%2e/bar"));
+}
+
+static void test_path_traversal_rejects_null_byte(void) {
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/path%00/../../../etc/passwd"));
+}
+
+static void test_path_traversal_rejects_double_encoded(void) {
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/%252e%252e/etc/passwd"));
+    SC_ASSERT_TRUE(sc_gateway_path_has_traversal("/%252E%252E/secret"));
+}
+
+static void test_path_traversal_allows_safe_paths(void) {
+    SC_ASSERT_FALSE(sc_gateway_path_has_traversal("/index.html"));
+    SC_ASSERT_FALSE(sc_gateway_path_has_traversal("/static/app.js"));
+    SC_ASSERT_FALSE(sc_gateway_path_has_traversal("/"));
+    SC_ASSERT_FALSE(sc_gateway_path_has_traversal(NULL));
+}
+
+/* ── Webhook path matching ────────────────────────────────────────────────── */
+
+static void test_webhook_path_valid_webhook_prefix(void) {
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/webhook/telegram"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/webhook/facebook"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/webhook"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/webhook/"));
+}
+
+static void test_webhook_path_valid_direct_channels(void) {
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/telegram"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/discord"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/slack/events"));
+}
+
+static void test_webhook_path_rejects_traversal(void) {
+    SC_ASSERT_FALSE(sc_gateway_is_webhook_path("/webhook/../../../etc/passwd"));
+    SC_ASSERT_FALSE(sc_gateway_is_webhook_path("/webhook/%2e%2e/foo"));
+}
+
+static void test_webhook_path_rejects_invalid_prefix(void) {
+    SC_ASSERT_FALSE(sc_gateway_is_webhook_path("/webhookx"));
+    SC_ASSERT_FALSE(sc_gateway_is_webhook_path("/webhooks"));
+    SC_ASSERT_FALSE(sc_gateway_is_webhook_path("/health"));
+    SC_ASSERT_FALSE(sc_gateway_is_webhook_path(NULL));
+}
+
+/* ── CORS origin validation ────────────────────────────────────────────────── */
+
+static void test_cors_allows_localhost(void) {
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("http://localhost:3000", NULL, 0));
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("https://localhost", NULL, 0));
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("http://127.0.0.1:8080", NULL, 0));
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("http://[::1]:3000", NULL, 0));
+}
+
+static void test_cors_allows_explicit_origins(void) {
+    const char *allowed[] = {"https://app.example.com", "https://dashboard.example.com"};
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("https://app.example.com", allowed, 2));
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("https://dashboard.example.com", allowed, 2));
+}
+
+static void test_cors_rejects_unknown_origins(void) {
+    const char *allowed[] = {"https://app.example.com"};
+    SC_ASSERT_FALSE(sc_gateway_is_allowed_origin("https://evil.com", allowed, 1));
+    SC_ASSERT_FALSE(sc_gateway_is_allowed_origin("https://app.example.com.evil.com", allowed, 1));
+}
+
+static void test_cors_allows_empty_origin(void) {
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin("", NULL, 0));
+    SC_ASSERT_TRUE(sc_gateway_is_allowed_origin(NULL, NULL, 0));
+}
+
+/* ── Malformed HTTP (Content-Length parsing) ───────────────────────────────── */
+
+static void test_content_length_valid(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length("42", SC_GATEWAY_MAX_BODY_SIZE, &len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(len, 42u);
+}
+
+static void test_content_length_with_spaces(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length("  100  ", SC_GATEWAY_MAX_BODY_SIZE, &len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(len, 100u);
+}
+
+static void test_content_length_non_numeric_rejected(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length("abc", SC_GATEWAY_MAX_BODY_SIZE, &len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_content_length_negative_rejected(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length("-1", SC_GATEWAY_MAX_BODY_SIZE, &len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_content_length_exceeds_max_rejected(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length("70000", 65536, &len);
+    SC_ASSERT_EQ(err, SC_ERR_GATEWAY_BODY_TOO_LARGE);
+}
+
+static void test_content_length_empty_rejected(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length("", 65536, &len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_content_length_null_args_rejected(void) {
+    size_t len = 0;
+    sc_error_t err = sc_gateway_parse_content_length(NULL, 65536, &len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
 void run_gateway_http_tests(void) {
     SC_TEST_SUITE("Gateway HTTP");
     SC_RUN_TEST(test_gateway_config_defaults);
@@ -74,4 +205,32 @@ void run_gateway_http_tests(void) {
     SC_RUN_TEST(test_gateway_hmac_verify_helper);
     SC_RUN_TEST(test_gateway_run_test_mode);
     SC_RUN_TEST(test_gateway_max_body_size_constant);
+
+    SC_TEST_SUITE("Path Traversal");
+    SC_RUN_TEST(test_path_traversal_rejects_dotdot);
+    SC_RUN_TEST(test_path_traversal_rejects_percent_encoded);
+    SC_RUN_TEST(test_path_traversal_rejects_null_byte);
+    SC_RUN_TEST(test_path_traversal_rejects_double_encoded);
+    SC_RUN_TEST(test_path_traversal_allows_safe_paths);
+
+    SC_TEST_SUITE("Webhook Path");
+    SC_RUN_TEST(test_webhook_path_valid_webhook_prefix);
+    SC_RUN_TEST(test_webhook_path_valid_direct_channels);
+    SC_RUN_TEST(test_webhook_path_rejects_traversal);
+    SC_RUN_TEST(test_webhook_path_rejects_invalid_prefix);
+
+    SC_TEST_SUITE("CORS Origin");
+    SC_RUN_TEST(test_cors_allows_localhost);
+    SC_RUN_TEST(test_cors_allows_explicit_origins);
+    SC_RUN_TEST(test_cors_rejects_unknown_origins);
+    SC_RUN_TEST(test_cors_allows_empty_origin);
+
+    SC_TEST_SUITE("Content-Length Parsing");
+    SC_RUN_TEST(test_content_length_valid);
+    SC_RUN_TEST(test_content_length_with_spaces);
+    SC_RUN_TEST(test_content_length_non_numeric_rejected);
+    SC_RUN_TEST(test_content_length_negative_rejected);
+    SC_RUN_TEST(test_content_length_exceeds_max_rejected);
+    SC_RUN_TEST(test_content_length_empty_rejected);
+    SC_RUN_TEST(test_content_length_null_args_rejected);
 }

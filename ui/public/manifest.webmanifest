@@ -4,7 +4,7 @@
   "description": "AI assistant dashboard — real-time monitoring, configuration, and control.",
   "start_url": "/",
   "display": "standalone",
-  "theme_color": "#14b8a6",
+  "theme_color": "#7AB648",
   "background_color": "#0a0a0a",
   "icons": [
     {

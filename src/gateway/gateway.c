@@ -119,7 +119,7 @@ bool sc_gateway_path_has_traversal(const char *path) {
 bool sc_gateway_is_webhook_path(const char *path) {
     if (!path)
         return false;
-    if (strstr(path, "..") != NULL || strstr(path, "%2e") != NULL || strstr(path, "%2E") != NULL)
+    if (sc_gateway_path_has_traversal(path))
         return false;
     return path_is(path, "/webhook") || strncmp(path, "/webhook/", 9) == 0 ||
            path_is(path, "/telegram") || path_is(path, "/slack/events") ||

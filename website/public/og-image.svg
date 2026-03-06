@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
   <rect width="1200" height="630" fill="#FAFAF9"/>
-  <!-- Teal accent circle near logo area -->
-  <circle cx="600" cy="180" r="12" fill="#14B8A6" opacity="0.25"/>
-  <circle cx="600" cy="180" r="4" fill="#14B8A6" opacity="0.6"/>
-  <!-- Teal underline accent -->
-  <line x1="400" y1="275" x2="800" y2="275" stroke="#14B8A6" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+  <!-- Green accent circle near logo area -->
+  <circle cx="600" cy="180" r="12" fill="#7AB648" opacity="0.25"/>
+  <circle cx="600" cy="180" r="4" fill="#7AB648" opacity="0.6"/>
+  <!-- Green underline accent -->
+  <line x1="400" y1="275" x2="800" y2="275" stroke="#7AB648" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
   <!-- SeaClaw title -->
   <text x="600" y="230" text-anchor="middle" fill="#1D1D1F" font-family="Georgia, 'Times New Roman', serif" font-size="72" font-weight="600">SeaClaw</text>
   <!-- Tagline -->
