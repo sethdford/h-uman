@@ -89,24 +89,32 @@ if grep -q '#define SC_VERSION' src/main.c; then
 fi
 
 info "Generating changelog entry..."
-LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-if [ -n "$LAST_TAG" ]; then
-    COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --no-decorate)
+if command -v git-cliff >/dev/null 2>&1; then
+    git-cliff --unreleased --tag "$TAG" > /tmp/cliff_entry.md 2>/dev/null
+    if [ -s /tmp/cliff_entry.md ] && [ -f CHANGELOG.md ]; then
+        HEADER=$(head -5 CHANGELOG.md)
+        BODY=$(tail -n +6 CHANGELOG.md)
+        printf '%s\n\n%s\n%s\n' "$HEADER" "$(cat /tmp/cliff_entry.md)" "$BODY" > CHANGELOG.md
+    fi
 else
-    COMMITS=$(git log --oneline --no-decorate -20)
-fi
-
-DATE=$(date +%Y-%m-%d)
-ENTRY="## [$VERSION] - $DATE
+    warn "git-cliff not found, falling back to git log"
+    LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+    if [ -n "$LAST_TAG" ]; then
+        COMMITS=$(git log "${LAST_TAG}..HEAD" --oneline --no-decorate)
+    else
+        COMMITS=$(git log --oneline --no-decorate -20)
+    fi
+    DATE=$(date +%Y-%m-%d)
+    ENTRY="## [$VERSION] - $DATE
 
 ### Changed
 $(echo "$COMMITS" | sed 's/^[0-9a-f]* /- /')
 "
-
-if [ -f CHANGELOG.md ]; then
-    HEADER=$(head -5 CHANGELOG.md)
-    BODY=$(tail -n +6 CHANGELOG.md)
-    printf '%s\n\n%s\n%s\n' "$HEADER" "$ENTRY" "$BODY" > CHANGELOG.md
+    if [ -f CHANGELOG.md ]; then
+        HEADER=$(head -5 CHANGELOG.md)
+        BODY=$(tail -n +6 CHANGELOG.md)
+        printf '%s\n\n%s\n%s\n' "$HEADER" "$ENTRY" "$BODY" > CHANGELOG.md
+    fi
 fi
 
 info "Committing version bump..."

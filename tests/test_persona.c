@@ -521,6 +521,43 @@ static void test_config_persona_field(void) {
     sc_config_deinit(&cfg);
 }
 
+static void test_persona_cli_run_list(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_cli_args_t args = {0};
+    args.action = SC_PERSONA_ACTION_LIST;
+    sc_error_t err = sc_persona_cli_run(&alloc, &args);
+    SC_ASSERT_EQ(err, SC_OK);
+}
+
+static void test_persona_cli_run_show_not_found(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_cli_args_t args = {0};
+    args.action = SC_PERSONA_ACTION_SHOW;
+    args.name = "nonexistent_persona_xyz_test";
+    sc_error_t err = sc_persona_cli_run(&alloc, &args);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_persona_cli_run_delete_not_found(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_cli_args_t args = {0};
+    args.action = SC_PERSONA_ACTION_DELETE;
+    args.name = "nonexistent_persona_xyz_test";
+    sc_error_t err = sc_persona_cli_run(&alloc, &args);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_persona_cli_run_create_no_provider(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_cli_args_t args = {0};
+    args.action = SC_PERSONA_ACTION_CREATE;
+    args.name = "test_create";
+    args.from_imessage = true;
+    sc_error_t err = sc_persona_cli_run(&alloc, &args);
+    /* In test mode: SC_OK. In non-test mode: SC_ERR_NOT_SUPPORTED */
+    SC_ASSERT_EQ(err, SC_OK);
+}
+
 static void test_persona_build_prompt_with_overlay(void) {
     sc_allocator_t alloc = sc_system_allocator();
     char *notes[] = {"drops punctuation"};
@@ -571,6 +608,10 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_persona_cli_parse_create);
     SC_RUN_TEST(test_persona_cli_parse_show);
     SC_RUN_TEST(test_persona_cli_parse_list);
+    SC_RUN_TEST(test_persona_cli_run_list);
+    SC_RUN_TEST(test_persona_cli_run_show_not_found);
+    SC_RUN_TEST(test_persona_cli_run_delete_not_found);
+    SC_RUN_TEST(test_persona_cli_run_create_no_provider);
     SC_RUN_TEST(test_persona_tool_create);
     SC_RUN_TEST(test_creator_synthesize_merges);
     SC_RUN_TEST(test_analyzer_builds_prompt);

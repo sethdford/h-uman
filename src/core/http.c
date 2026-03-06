@@ -7,28 +7,6 @@
 
 #if SC_IS_TEST
 /* In test mode, skip real HTTP and return mock response */
-#if 0
-static sc_error_t sc_http_get_ex_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *extra_headers,
-    sc_http_response_t *out)
-{
-    (void)url;
-    (void)extra_headers;
-    const char *mock = "{\"status\":\"ok\",\"mock\":\"sc_http_get_ex\"}";
-    size_t mock_len = strlen(mock);
-    char *body = (char *)alloc->alloc(alloc->ctx, mock_len + 1);
-    if (!body) return SC_ERR_OUT_OF_MEMORY;
-    memcpy(body, mock, mock_len + 1);
-    out->body = body;
-    out->body_len = mock_len;
-    out->body_cap = mock_len + 1;
-    out->status_code = 200;
-    out->owned = true;
-    return SC_OK;
-}
-#endif
-
 static sc_error_t sc_http_get_impl(sc_allocator_t *alloc, const char *url, const char *auth_header,
                                    sc_http_response_t *out) {
     if (!alloc || !url || !out)
@@ -77,34 +55,6 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc, const char *url,
     out->owned = true;
     return SC_OK;
 }
-
-#if 0
-static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc,
-    const char *url,
-    const char *auth_header,
-    const char *extra_headers,
-    const char *json_body,
-    size_t json_body_len,
-    sc_http_stream_cb callback,
-    void *userdata)
-{
-    (void)alloc;
-    (void)url;
-    (void)auth_header;
-    (void)extra_headers;
-    (void)json_body;
-    (void)json_body_len;
-    if (!callback) return SC_ERR_INVALID_ARGUMENT;
-    const char *sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\n"
-        "data: {\"choices\":[{\"delta\":{\"content\":\"from \"}}]}\n\n"
-        "data: {\"choices\":[{\"delta\":{\"content\":\"mock\"}}]}\n\n"
-        "data: [DONE]\n\n";
-    size_t sse_len = strlen(sse);
-    size_t ret = callback(sse, sse_len, userdata);
-    if (ret != sse_len) return SC_ERR_IO;
-    return SC_OK;
-}
-#endif
 #else
 #if defined(SC_HTTP_CURL)
 #include <curl/curl.h>
@@ -491,21 +441,6 @@ static sc_error_t sc_http_post_json_impl(sc_allocator_t *alloc, const char *url,
     (void)json_body;
     (void)json_body_len;
     (void)out;
-    return SC_ERR_NOT_SUPPORTED;
-}
-
-static sc_error_t sc_http_post_json_stream_impl(sc_allocator_t *alloc, const char *url,
-                                                const char *auth_header, const char *extra_headers,
-                                                const char *json_body, size_t json_body_len,
-                                                sc_http_stream_cb callback, void *userdata) {
-    (void)alloc;
-    (void)url;
-    (void)auth_header;
-    (void)extra_headers;
-    (void)json_body;
-    (void)json_body_len;
-    (void)callback;
-    (void)userdata;
     return SC_ERR_NOT_SUPPORTED;
 }
 #endif

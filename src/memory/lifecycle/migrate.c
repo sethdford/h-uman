@@ -8,16 +8,6 @@
 #ifdef SC_ENABLE_SQLITE
 #include <sqlite3.h>
 
-#if 0
-static int map_sqlite_err(int rc) {
-    switch (rc) {
-        case SQLITE_OK: return SC_OK;
-        case SQLITE_NOMEM: return SC_ERR_OUT_OF_MEMORY;
-        default: return SC_ERR_INTERNAL;
-    }
-}
-#endif
-
 static int table_exists(sqlite3 *db, const char *table) {
     sqlite3_stmt *stmt = NULL;
     const char *sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";

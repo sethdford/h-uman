@@ -8,9 +8,6 @@
 /* Static descriptors for enabled backends. Build options control which exist.
  * Returns pointer to array of descriptor pointers. */
 static const sc_backend_descriptor_t *const *get_descriptors(size_t *out_count);
-#if 0
-static size_t descriptor_count(void);
-#endif
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Descriptor definitions (one per enabled backend)
@@ -200,14 +197,6 @@ static const sc_backend_descriptor_t *const *get_descriptors(size_t *out_count) 
     *out_count = n;
     return (n > 0) ? list : NULL;
 }
-
-#if 0
-static size_t descriptor_count(void) {
-    size_t c;
-    get_descriptors(&c);
-    return c;
-}
-#endif
 
 const sc_backend_descriptor_t *sc_registry_find_backend(const char *name, size_t name_len) {
     if (!name)

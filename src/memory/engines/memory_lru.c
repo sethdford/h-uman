@@ -152,22 +152,6 @@ static sc_error_t dup_category(sc_allocator_t *alloc, const sc_memory_category_t
     return SC_OK;
 }
 
-#if 0
-static const char *category_to_string(const sc_memory_category_t *cat) {
-    if (!cat) return "core";
-    switch (cat->tag) {
-        case SC_MEMORY_CATEGORY_CORE: return "core";
-        case SC_MEMORY_CATEGORY_DAILY: return "daily";
-        case SC_MEMORY_CATEGORY_CONVERSATION: return "conversation";
-        case SC_MEMORY_CATEGORY_CUSTOM:
-            if (cat->data.custom.name && cat->data.custom.name_len > 0)
-                return cat->data.custom.name;
-            return "custom";
-        default: return "core";
-    }
-}
-#endif
-
 static void category_to_out(const sc_memory_category_t *src, sc_memory_entry_t *out,
                             sc_allocator_t *alloc) {
     out->category.tag = src->tag;
