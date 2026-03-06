@@ -715,6 +715,53 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
         }
     }
 
+    if (persona->example_banks && persona->example_banks_count > 0) {
+        const sc_persona_example_t *sel_buf[8];
+        size_t selected_count = 0;
+        sc_error_t sel_err = sc_persona_select_examples(
+            persona, channel, channel_len, NULL, 0,
+            sel_buf, &selected_count, 5);
+        if (sel_err == SC_OK && selected_count > 0) {
+            static const char examples_header[] = "Example conversations showing your style:\n";
+            err = append_prompt(alloc, &buf, &len, &cap, examples_header,
+                               sizeof(examples_header) - 1);
+            if (err != SC_OK)
+                goto fail;
+            for (size_t i = 0; i < selected_count; i++) {
+                const sc_persona_example_t *ex = sel_buf[i];
+                if (ex->incoming) {
+                    err = append_prompt(alloc, &buf, &len, &cap, "Them: ",
+                                       sizeof("Them: ") - 1);
+                    if (err != SC_OK)
+                        goto fail;
+                    err = append_prompt(alloc, &buf, &len, &cap, ex->incoming,
+                                       strlen(ex->incoming));
+                    if (err != SC_OK)
+                        goto fail;
+                    err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
+                    if (err != SC_OK)
+                        goto fail;
+                }
+                if (ex->response) {
+                    err = append_prompt(alloc, &buf, &len, &cap, "You: ",
+                                       sizeof("You: ") - 1);
+                    if (err != SC_OK)
+                        goto fail;
+                    err = append_prompt(alloc, &buf, &len, &cap, ex->response,
+                                       strlen(ex->response));
+                    if (err != SC_OK)
+                        goto fail;
+                    err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
+                    if (err != SC_OK)
+                        goto fail;
+                }
+                err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
+                if (err != SC_OK)
+                    goto fail;
+            }
+        }
+    }
+
     *out = buf;
     *out_len = len;
     return SC_OK;

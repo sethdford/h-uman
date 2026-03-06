@@ -643,6 +643,40 @@ static void test_persona_prompt_with_channel_overlay(void) {
     sc_persona_deinit(&alloc, &p);
 }
 
+static void test_persona_build_prompt_includes_examples(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json =
+        "{\"version\":1,\"name\":\"ex_test\","
+        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]}}";
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    /* Manually add an example bank */
+    p.example_banks = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_bank_t));
+    SC_ASSERT_TRUE(p.example_banks != NULL);
+    memset(p.example_banks, 0, sizeof(sc_persona_example_bank_t));
+    p.example_banks_count = 1;
+    p.example_banks[0].channel = sc_strdup(&alloc, "cli");
+    p.example_banks[0].examples = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_t));
+    memset(p.example_banks[0].examples, 0, sizeof(sc_persona_example_t));
+    p.example_banks[0].examples_count = 1;
+    p.example_banks[0].examples[0].incoming = sc_strdup(&alloc, "Hey what's up");
+    p.example_banks[0].examples[0].response = sc_strdup(&alloc, "Not much, you?");
+
+    char *prompt = NULL;
+    size_t plen = 0;
+    err = sc_persona_build_prompt(&alloc, &p, "cli", 3, &prompt, &plen);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(strstr(prompt, "Hey what's up") != NULL);
+    SC_ASSERT_TRUE(strstr(prompt, "Not much, you?") != NULL);
+    SC_ASSERT_TRUE(strstr(prompt, "Example conversations") != NULL);
+
+    alloc.free(alloc.ctx, prompt, plen + 1);
+    sc_persona_deinit(&alloc, &p);
+}
+
 static void test_persona_build_prompt_with_overlay(void) {
     sc_allocator_t alloc = sc_system_allocator();
     char *notes[] = {"drops punctuation"};
@@ -686,6 +720,7 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_spawn_config_has_persona);
     SC_RUN_TEST(test_config_persona_field);
     SC_RUN_TEST(test_persona_build_prompt_core);
+    SC_RUN_TEST(test_persona_build_prompt_includes_examples);
     SC_RUN_TEST(test_persona_prompt_with_channel_overlay);
     SC_RUN_TEST(test_persona_build_prompt_with_overlay);
     SC_RUN_TEST(test_persona_examples_load_json);
