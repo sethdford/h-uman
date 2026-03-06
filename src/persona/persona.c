@@ -574,13 +574,15 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     if (channel && channel_len > 0) {
         const sc_persona_overlay_t *ov = sc_persona_find_overlay(persona, channel, channel_len);
         if (ov) {
-            err = append_prompt(alloc, &buf, &len, &cap, "Channel (", 10);
-            if (err != SC_OK)
-                goto fail;
-            err = append_prompt(alloc, &buf, &len, &cap, channel, channel_len);
-            if (err != SC_OK)
-                goto fail;
-            err = append_prompt(alloc, &buf, &len, &cap, ") style:\n", 9);
+            /* Build "Channel (imessage) style:\n" in one go for clarity */
+            char ch_header[128];
+            int ch_n = snprintf(ch_header, sizeof(ch_header), "Channel (%.*s) style:\n",
+                                (int)channel_len, channel);
+            if (ch_n > 0 && (size_t)ch_n < sizeof(ch_header)) {
+                err = append_prompt(alloc, &buf, &len, &cap, ch_header, (size_t)ch_n);
+            } else {
+                err = append_prompt(alloc, &buf, &len, &cap, "Channel style:\n", 16);
+            }
             if (err != SC_OK)
                 goto fail;
             if (ov->formality && ov->formality[0]) {

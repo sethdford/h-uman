@@ -46,6 +46,7 @@ void run_net_security_tests(void);
 void run_path_security_tests(void);
 void run_process_util_tests(void);
 void run_prompt_tests(void);
+void run_persona_tests(void);
 void run_lifecycle_tests(void);
 void run_observer_tests(void);
 void run_session_tests(void);
@@ -94,6 +95,7 @@ void run_untested_modules_tests(void);
 void run_modules_coverage_tests(void);
 void run_context_tests(void);
 void run_qmd_tests(void);
+void run_persona_tests(void);
 
 int main(void) {
     printf("SeaClaw Test Suite\n");
@@ -141,6 +143,7 @@ int main(void) {
     run_path_security_tests();
     run_process_util_tests();
     run_prompt_tests();
+    run_persona_tests();
     run_lifecycle_tests();
     run_observer_tests();
     run_session_tests();

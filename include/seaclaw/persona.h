@@ -57,6 +57,10 @@ sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_
 sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t json_len,
                                 sc_persona_t *out);
 
+sc_error_t sc_persona_examples_load_json(sc_allocator_t *alloc, const char *channel,
+                                         size_t channel_len, const char *json, size_t json_len,
+                                         sc_persona_example_bank_t *out);
+
 void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona);
 
 sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *persona,
