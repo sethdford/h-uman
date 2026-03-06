@@ -44,6 +44,12 @@ export class ScEmptyState extends LitElement {
     .slot {
       margin-top: var(--sc-space-md);
     }
+    @media (prefers-reduced-motion: reduce) {
+      .icon,
+      .description {
+        animation: none !important;
+      }
+    }
   `;
 
   @property({ attribute: false }) icon: TemplateResult | null = null;
@@ -57,5 +63,11 @@ export class ScEmptyState extends LitElement {
       ${this.description ? html`<p class="description">${this.description}</p>` : nothing}
       <div class="slot"><slot></slot></div>
     `;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "sc-empty-state": ScEmptyState;
   }
 }

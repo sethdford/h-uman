@@ -882,16 +882,17 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     pthread_t gw_tid = 0;
     svc_gw_thread_ctx_t gw_tctx;
     memset(&gw_tctx, 0, sizeof(gw_tctx));
+    sc_gateway_config_t gw_config;
+    memset(&gw_config, 0, sizeof(gw_config));
+    sc_app_context_t svc_app_ctx;
+    memset(&svc_app_ctx, 0, sizeof(svc_app_ctx));
     if (with_gateway) {
-        sc_gateway_config_t gw_config;
         sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
 
-        sc_app_context_t svc_app_ctx = {
-            .config = &cfg,
-            .alloc = alloc,
-            .tools = tools,
-            .tools_count = tools_count,
-        };
+        svc_app_ctx.config = &cfg;
+        svc_app_ctx.alloc = alloc;
+        svc_app_ctx.tools = tools;
+        svc_app_ctx.tools_count = tools_count;
         gw_config.app_ctx = &svc_app_ctx;
 
         gw_tctx.alloc = alloc;

@@ -2,6 +2,7 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { ScToast } from "../components/sc-toast.js";
+import { icons } from "../icons.js";
 import "../components/sc-input.js";
 
 type SaveStatus = "saved" | "error" | "unsaved" | "idle";
@@ -141,8 +142,12 @@ export class ScConfigView extends GatewayAwareLitElement {
     }
     .section-header .chevron {
       transition: transform var(--sc-duration-normal) var(--sc-ease-out);
-      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
+      display: flex;
+    }
+    .section-header .chevron svg {
+      width: 14px;
+      height: 14px;
     }
     .section-header.collapsed .chevron {
       transform: rotate(-90deg);
@@ -472,10 +477,19 @@ export class ScConfigView extends GatewayAwareLitElement {
               <div class="section ${this.sectionCollapsed ? "collapsed" : ""}">
                 <div
                   class="section-header ${this.sectionCollapsed ? "collapsed" : ""}"
+                  role="button"
+                  tabindex="0"
+                  aria-expanded=${!this.sectionCollapsed}
                   @click=${() => (this.sectionCollapsed = !this.sectionCollapsed)}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      this.sectionCollapsed = !this.sectionCollapsed;
+                    }
+                  }}
                 >
                   <span>General</span>
-                  <span class="chevron">▼</span>
+                  <span class="chevron">${icons["caret-down"]}</span>
                 </div>
                 <div class="section-content">
                   ${fieldKeys.map((key) => {

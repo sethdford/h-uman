@@ -351,6 +351,11 @@ export class ScChatView extends GatewayAwareLitElement {
     .scroll-bottom-pill:hover {
       background: var(--sc-bg-elevated);
     }
+    .pill-icon svg {
+      width: 14px;
+      height: 14px;
+      vertical-align: -2px;
+    }
     @keyframes sc-fade-up {
       from {
         opacity: 0;
@@ -412,8 +417,12 @@ export class ScChatView extends GatewayAwareLitElement {
     }
     .tool-expand {
       margin-left: auto;
-      font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
+    }
+    .tool-expand svg {
+      width: 12px;
+      height: 12px;
+      transition: transform var(--sc-duration-normal) var(--sc-ease-out);
     }
     .tool-spinner {
       width: 14px;
@@ -570,7 +579,13 @@ export class ScChatView extends GatewayAwareLitElement {
       border: none;
       color: inherit;
       cursor: pointer;
-      font-size: 1.25rem;
+      display: flex;
+      align-items: center;
+      padding: 4px;
+    }
+    .error-banner button svg {
+      width: 16px;
+      height: 16px;
       line-height: 1;
     }
     @media (max-width: 640px) {
@@ -584,6 +599,15 @@ export class ScChatView extends GatewayAwareLitElement {
       }
       .send-btn {
         min-height: 40px;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .status-dot.reconnecting,
+      .message,
+      .scroll-bottom-pill,
+      .tool-spinner,
+      .typing-dots span {
+        animation: none !important;
       }
     }
   `;
@@ -890,7 +914,13 @@ export class ScChatView extends GatewayAwareLitElement {
           ? html`
               <div class="error-banner">
                 <span>${this.errorBanner}</span>
-                <button @click=${() => (this.errorBanner = "")} aria-label="Dismiss">×</button>
+                <button
+                  class="dismiss-btn"
+                  @click=${() => (this.errorBanner = "")}
+                  aria-label="Dismiss"
+                >
+                  ${icons.x}
+                </button>
               </div>
             `
           : nothing}
@@ -941,7 +971,11 @@ export class ScChatView extends GatewayAwareLitElement {
                 >
                   ${t.status === "running" ? html`<span class="tool-spinner"></span>` : nothing}
                   <span class="tool-name">Tool: ${t.name}</span>
-                  <span class="tool-expand"> ${this.expandedTools.has(t.id) ? "▼" : "▶"} </span>
+                  <span class="tool-expand"
+                    >${this.expandedTools.has(t.id)
+                      ? icons["caret-down"]
+                      : icons["caret-right"]}</span
+                  >
                 </div>
                 ${this.expandedTools.has(t.id)
                   ? html`
@@ -975,7 +1009,7 @@ export class ScChatView extends GatewayAwareLitElement {
         </div>
         ${this.showScrollPill
           ? html`<button class="scroll-bottom-pill" @click=${() => this.scrollToBottom()}>
-              ↓ New messages
+              <span class="pill-icon">${icons["arrow-down"]}</span> New messages
             </button>`
           : nothing}
         ${this.lastFailedMessage

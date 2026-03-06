@@ -1,5 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { icons } from "../icons.js";
 
 @customElement("sc-modal")
 export class ScModal extends LitElement {
@@ -55,8 +56,8 @@ export class ScModal extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: 28px;
+      height: 28px;
       padding: 0;
       background: transparent;
       border: none;
@@ -66,12 +67,24 @@ export class ScModal extends LitElement {
       transition: color var(--sc-duration-fast);
     }
 
+    .close-btn svg {
+      width: 16px;
+      height: 16px;
+    }
     .close-btn:hover {
       color: var(--sc-text);
     }
 
     .body {
       padding: var(--sc-space-lg);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .backdrop,
+      .backdrop.closing,
+      .panel,
+      .panel.closing {
+        animation: none !important;
+      }
     }
   `;
 
@@ -193,7 +206,7 @@ export class ScModal extends LitElement {
             ${this.heading
               ? html`<h2 id="modal-heading" class="heading">${this.heading}</h2>`
               : nothing}
-            <button class="close-btn" aria-label="Close" @click=${this._close}>×</button>
+            <button class="close-btn" aria-label="Close" @click=${this._close}>${icons.x}</button>
           </header>
           <div class="body">
             <slot></slot>

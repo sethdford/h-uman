@@ -250,8 +250,16 @@ export class ScSkillsView extends GatewayAwareLitElement {
                           <div
                             class="toggle ${skill.enabled !== false ? "enabled" : ""}"
                             @click=${() => this.toggleSkill(skill)}
+                            @keydown=${(e: KeyboardEvent) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                this.toggleSkill(skill);
+                              }
+                            }}
                             role="switch"
+                            tabindex="0"
                             aria-checked=${skill.enabled !== false}
+                            aria-label="Toggle ${skill.name}"
                           ></div>
                         </div>
                       </div>

@@ -139,6 +139,37 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         return SC_ERR_CHANNEL_SEND;
     if (!ok)
         return SC_ERR_CHANNEL_SEND;
+
+    /* After sending, advance last_rowid past any echo messages that iMessage
+       creates when sending to a number on the same Apple ID. Without this,
+       the poll would pick up the outgoing message echo as new input. */
+#ifdef SC_ENABLE_SQLITE
+    {
+        const char *home_env = getenv("HOME");
+        if (home_env) {
+            char db_path_buf[512];
+            int dp = snprintf(db_path_buf, sizeof(db_path_buf), "%s/Library/Messages/chat.db", home_env);
+            if (dp > 0 && (size_t)dp < sizeof(db_path_buf)) {
+                usleep(500000); /* 500ms for Messages.app to write the echo */
+                sqlite3 *db = NULL;
+                if (sqlite3_open_v2(db_path_buf, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                    sqlite3_stmt *stmt = NULL;
+                    if (sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &stmt,
+                                           NULL) == SQLITE_OK) {
+                        if (sqlite3_step(stmt) == SQLITE_ROW) {
+                            int64_t max_rowid = sqlite3_column_int64(stmt, 0);
+                            if (max_rowid > c->last_rowid)
+                                c->last_rowid = max_rowid;
+                        }
+                        sqlite3_finalize(stmt);
+                    }
+                    sqlite3_close(db);
+                }
+            }
+        }
+    }
+#endif
+
     return SC_OK;
 #endif
 }

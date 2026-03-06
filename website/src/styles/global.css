@@ -795,6 +795,15 @@
     transform: none !important;
   }
 
+  html {
+    scroll-behavior: auto;
+  }
+
+  .terminal-cursor {
+    animation: none !important;
+    opacity: 1;
+  }
+
   .ambient-teal,
   .ambient-indigo {
     display: none;

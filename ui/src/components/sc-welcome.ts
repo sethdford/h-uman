@@ -207,6 +207,13 @@ export class ScWelcome extends LitElement {
       margin-inline: auto;
       line-height: var(--sc-leading-relaxed);
     }
+    @media (prefers-reduced-motion: reduce) {
+      .welcome,
+      .hero-icon-wrap,
+      .step-card {
+        animation: none !important;
+      }
+    }
   `;
 
   @state() private steps: OnboardStep[] = [

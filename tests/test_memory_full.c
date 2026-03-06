@@ -63,15 +63,8 @@ static void test_sqlite_store_recall(void) {
     SC_ASSERT_EQ(count, 1);
     SC_ASSERT_STR_EQ(out[0].key, "user_pref");
     if (out) {
-        for (size_t i = 0; i < count; i++) {
-            if (out[i].id) alloc.free(alloc.ctx, (void *)out[i].id, out[i].id_len + 1);
-            if (out[i].key) alloc.free(alloc.ctx, (void *)out[i].key, out[i].key_len + 1);
-            if (out[i].content) alloc.free(alloc.ctx, (void *)out[i].content, out[i].content_len + 1);
-            if (out[i].category.data.custom.name) alloc.free(alloc.ctx,
-                (void *)out[i].category.data.custom.name, out[i].category.data.custom.name_len + 1);
-            if (out[i].timestamp) alloc.free(alloc.ctx, (void *)out[i].timestamp, out[i].timestamp_len + 1);
-            if (out[i].session_id) alloc.free(alloc.ctx, (void *)out[i].session_id, out[i].session_id_len + 1);
-        }
+        for (size_t i = 0; i < count; i++)
+            sc_memory_entry_free_fields(&alloc, &out[i]);
         alloc.free(alloc.ctx, out, count * sizeof(sc_memory_entry_t));
     }
     mem.vtable->deinit(mem.ctx);
@@ -89,12 +82,14 @@ static void test_sqlite_get_forget_count(void) {
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_TRUE(found);
     SC_ASSERT_STR_EQ(entry.key, "getme");
+    sc_memory_entry_free_fields(&alloc, &entry);
 
     bool deleted = false;
     err = mem.vtable->forget(mem.ctx, "getme", 5, &deleted);
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT_TRUE(deleted);
 
+    memset(&entry, 0, sizeof(entry));
     found = false;
     mem.vtable->get(mem.ctx, &alloc, "getme", 5, &entry, &found);
     SC_ASSERT_FALSE(found);
@@ -143,15 +138,8 @@ static void test_sqlite_list(void) {
     SC_ASSERT_EQ(err, SC_OK);
     SC_ASSERT(count >= 1);
     if (out) {
-        for (size_t i = 0; i < count; i++) {
-            if (out[i].id) alloc.free(alloc.ctx, (void *)out[i].id, out[i].id_len + 1);
-            if (out[i].key) alloc.free(alloc.ctx, (void *)out[i].key, out[i].key_len + 1);
-            if (out[i].content) alloc.free(alloc.ctx, (void *)out[i].content, out[i].content_len + 1);
-            if (out[i].category.data.custom.name) alloc.free(alloc.ctx,
-                (void *)out[i].category.data.custom.name, out[i].category.data.custom.name_len + 1);
-            if (out[i].timestamp) alloc.free(alloc.ctx, (void *)out[i].timestamp, out[i].timestamp_len + 1);
-            if (out[i].session_id) alloc.free(alloc.ctx, (void *)out[i].session_id, out[i].session_id_len + 1);
-        }
+        for (size_t i = 0; i < count; i++)
+            sc_memory_entry_free_fields(&alloc, &out[i]);
         alloc.free(alloc.ctx, out, count * sizeof(sc_memory_entry_t));
     }
     mem.vtable->deinit(mem.ctx);

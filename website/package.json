@@ -19,5 +19,9 @@
     "gsap": "^3.14.2",
     "sharp": "^0.34.2",
     "tailwindcss": "^4.2.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.6",
+    "typescript": "^5.9.3"
   }
 }

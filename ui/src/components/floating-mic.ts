@@ -49,6 +49,12 @@ export class ScFloatingMic extends LitElement {
       width: 24px;
       height: 24px;
     }
+    @media (prefers-reduced-motion: reduce) {
+      .btn.listening {
+        animation: none;
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--sc-error) 30%, transparent);
+      }
+    }
     .overlay {
       position: absolute;
       bottom: calc(100% + var(--sc-space-sm));

@@ -179,6 +179,12 @@ export class ScVoiceView extends GatewayAwareLitElement {
         display: none;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .mic-btn.active {
+        animation: none;
+        box-shadow: 0 0 0 4px var(--sc-accent-subtle);
+      }
+    }
   `;
 
   @state() private transcript = "";

@@ -250,7 +250,7 @@ export class ScDropdown extends LitElement {
     let itemIndex = -1;
 
     return html`
-      <div class="trigger">
+      <div class="trigger" aria-haspopup="menu" aria-expanded=${this.open}>
         <slot></slot>
       </div>
       ${this.open

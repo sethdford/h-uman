@@ -105,37 +105,40 @@ static void error_response(sc_allocator_t *alloc, int status, const char *messag
 }
 
 /* Build one SSE chunk event: data: {"id":"...","object":"chat.completion.chunk",...}\n\n */
+/* Use sizeof(lit)-1 to avoid hardcoded length mismatches */
+#define SSE_APPEND_LIT(buf, lit) sc_json_buf_append_raw((buf), (lit), strlen(lit))
+
 static sc_error_t append_sse_chunk(sc_json_buf_t *buf, sc_allocator_t *alloc,
                                    const char *id, const char *model, size_t model_len,
                                    long created, const char *delta, size_t delta_len,
                                    bool is_final) {
     (void)alloc;
-    if (sc_json_buf_append_raw(buf, "data: ", 6) != SC_OK)
+    if (SSE_APPEND_LIT(buf, "data: ") != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
-    if (sc_json_buf_append_raw(buf, "{\"id\":\"", 6) != SC_OK)
+    if (SSE_APPEND_LIT(buf, "{\"id\":\"") != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
     if (sc_json_buf_append_raw(buf, id, strlen(id)) != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
-    if (sc_json_buf_append_raw(buf, "\",\"object\":\"chat.completion.chunk\",\"created\":", 38) != SC_OK)
+    if (SSE_APPEND_LIT(buf, "\",\"object\":\"chat.completion.chunk\",\"created\":") != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
     char num[24];
     int n = snprintf(num, sizeof(num), "%ld", created);
     if (n > 0 && sc_json_buf_append_raw(buf, num, (size_t)n) != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
-    if (sc_json_buf_append_raw(buf, ",\"model\":\"", 9) != SC_OK)
+    if (SSE_APPEND_LIT(buf, ",\"model\":\"") != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
     if (sc_json_buf_append_raw(buf, model, model_len) != SC_OK)
         return SC_ERR_OUT_OF_MEMORY;
     if (is_final) {
-        if (sc_json_buf_append_raw(buf,
-                "\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n", 60) != SC_OK)
+        if (SSE_APPEND_LIT(buf,
+                "\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n") != SC_OK)
             return SC_ERR_OUT_OF_MEMORY;
     } else {
-        if (sc_json_buf_append_raw(buf, "\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"", 44) != SC_OK)
+        if (SSE_APPEND_LIT(buf, "\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"") != SC_OK)
             return SC_ERR_OUT_OF_MEMORY;
         if (delta && delta_len > 0 && sc_json_append_string(buf, delta, delta_len) != SC_OK)
             return SC_ERR_OUT_OF_MEMORY;
-        if (sc_json_buf_append_raw(buf, "\"},\"finish_reason\":null}]}\n\n", 32) != SC_OK)
+        if (SSE_APPEND_LIT(buf, "\"},\"finish_reason\":null}]}\n\n") != SC_OK)
             return SC_ERR_OUT_OF_MEMORY;
     }
     return SC_OK;

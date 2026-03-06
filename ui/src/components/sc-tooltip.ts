@@ -1,7 +1,9 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 
 type TooltipPosition = "top" | "bottom" | "left" | "right";
+
+let tooltipIdCounter = 0;
 
 @customElement("sc-tooltip")
 export class ScTooltip extends LitElement {
@@ -70,12 +72,13 @@ export class ScTooltip extends LitElement {
 
   @property({ type: String }) text = "";
   @property({ type: String }) position: TooltipPosition = "top";
+  @state() private _tipId = `sc-tip-${tooltipIdCounter++}`;
 
   override render() {
     return html`
-      <div class="wrapper">
+      <div class="wrapper" aria-describedby=${this._tipId}>
         <slot></slot>
-        <div class="tip ${this.position}" role="tooltip">${this.text}</div>
+        <div id=${this._tipId} class="tip ${this.position}" role="tooltip">${this.text}</div>
       </div>
     `;
   }

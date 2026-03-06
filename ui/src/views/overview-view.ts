@@ -108,6 +108,14 @@ export class ScOverviewView extends GatewayAwareLitElement {
       line-height: 1.1;
       animation: sc-overshoot-in var(--sc-duration-moderate) var(--sc-spring-out) backwards;
     }
+    .update-arrow {
+      display: inline-flex;
+      vertical-align: middle;
+    }
+    .update-arrow svg {
+      width: 16px;
+      height: 16px;
+    }
     .stat-row {
       display: flex;
       align-items: flex-end;
@@ -518,7 +526,8 @@ export class ScOverviewView extends GatewayAwareLitElement {
                   class="stat-value"
                   style="font-size: var(--sc-text-base); color: var(--sc-accent-text, var(--sc-accent));"
                 >
-                  ${this.updateInfo.current_version ?? "—"} →
+                  ${this.updateInfo.current_version ?? "—"}
+                  <span class="update-arrow">${icons["arrow-right"]}</span>
                   ${this.updateInfo.latest_version ?? "—"}
                 </div>
               </sc-card>

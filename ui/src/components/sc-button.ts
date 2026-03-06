@@ -12,7 +12,7 @@ export class ScButton extends LitElement {
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean, attribute: "icon-only" }) iconOnly = false;
 
-  static styles = css`
+  static override styles = css`
     @keyframes sc-spin {
       to {
         transform: rotate(360deg);

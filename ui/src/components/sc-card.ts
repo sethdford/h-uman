@@ -9,7 +9,7 @@ export class ScCard extends LitElement {
   @property({ type: Boolean }) elevated = false;
   @property({ type: Boolean }) glass = false;
 
-  static styles = css`
+  static override styles = css`
     :host {
       display: block;
     }

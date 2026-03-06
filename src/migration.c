@@ -9,22 +9,8 @@
 static void free_entries(sc_allocator_t *alloc, sc_memory_entry_t *entries, size_t count) {
     if (!alloc || !entries)
         return;
-    for (size_t i = 0; i < count; i++) {
-        sc_memory_entry_t *e = &entries[i];
-        if (e->id)
-            alloc->free(alloc->ctx, (void *)e->id, e->id_len + 1);
-        if (e->key)
-            alloc->free(alloc->ctx, (void *)e->key, e->key_len + 1);
-        if (e->content)
-            alloc->free(alloc->ctx, (void *)e->content, e->content_len + 1);
-        if (e->category.data.custom.name)
-            alloc->free(alloc->ctx, (void *)e->category.data.custom.name,
-                        e->category.data.custom.name_len + 1);
-        if (e->timestamp)
-            alloc->free(alloc->ctx, (void *)e->timestamp, e->timestamp_len + 1);
-        if (e->session_id)
-            alloc->free(alloc->ctx, (void *)e->session_id, e->session_id_len + 1);
-    }
+    for (size_t i = 0; i < count; i++)
+        sc_memory_entry_free_fields(alloc, &entries[i]);
     alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
 }
 #endif

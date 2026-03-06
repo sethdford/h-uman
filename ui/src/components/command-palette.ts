@@ -221,6 +221,12 @@ export class ScCommandPalette extends LitElement {
       color: var(--sc-text-faint);
       font-family: var(--sc-font-mono);
     }
+    @media (prefers-reduced-motion: reduce) {
+      .panel,
+      .backdrop {
+        animation: none !important;
+      }
+    }
   `;
 
   @property({ type: Boolean }) open = false;

@@ -8,7 +8,7 @@ export class ScBadge extends LitElement {
   @property({ type: String }) variant: BadgeVariant = "neutral";
   @property({ type: Boolean }) dot = false;
 
-  static styles = css`
+  static override styles = css`
     :host {
       display: inline-flex;
     }
@@ -74,7 +74,7 @@ export class ScBadge extends LitElement {
     }
   `;
 
-  render() {
+  override render() {
     const classes = ["badge", `variant-${this.variant}`].join(" ");
 
     return html`
