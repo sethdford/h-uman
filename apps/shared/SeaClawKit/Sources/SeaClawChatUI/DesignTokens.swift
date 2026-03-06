@@ -154,6 +154,35 @@ public enum SCTokens {
     public static let opacityOverlayMedium: Double = 0.32
     public static let opacityPressed: Double = 0.12
 
+    // MARK: - Glass
+    public static let glassAmbient: Double = 0.04
+    public static let glassIntensity: Double = 0.15
+    public static let glassProminentBgOpacity: Double = 0.08
+    public static let glassProminentBorderOpacity: Double = 0.12
+    public static let glassProminentInsetOpacity: Double = 0.1
+    public static let glassProminentRefractionScale: Double = 3
+    public static let glassProminentTintOpacity: Double = 0.06
+    public static let glassStandardBgOpacity: Double = 0.06
+    public static let glassStandardBorderOpacity: Double = 0.08
+    public static let glassStandardInsetOpacity: Double = 0.06
+    public static let glassStandardRefractionScale: Double = 2
+    public static let glassStandardTintOpacity: Double = 0.04
+    public static let glassSubtleBgOpacity: Double = 0.04
+    public static let glassSubtleBorderOpacity: Double = 0.05
+    public static let glassSubtleInsetOpacity: Double = 0
+    public static let glassSubtleRefractionScale: Double = 0
+    public static let glassSubtleTintOpacity: Double = 0.02
+    public static let glassHoverSpecularBoost: Double = 1.4
+    public static let glassPressScale: Double = 0.98
+    public static let glassBackdropBrightness: Double = 1.08
+    public static let glassIconBoost: Double = 1.2
+    public static let glassTextBoost: Double = 1.15
+    public static let glassProminentBlur: CGFloat = 32
+    public static let glassStandardBlur: CGFloat = 24
+    public static let glassSubtleBlur: CGFloat = 12
+    public static let glassFocusGlowSpread: CGFloat = 8
+    public static let glassPressBlurDelta: CGFloat = -4
+
     // MARK: - Motion (Spring)
     public static let springMicro = Animation.spring(response: 0.314, dampingFraction: 0.75)
     public static let springStandard = Animation.spring(response: 0.444, dampingFraction: 0.707)

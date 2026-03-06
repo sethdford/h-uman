@@ -8,6 +8,10 @@ import { EVENT_NAMES } from "../utils.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
 import "../components/sc-empty-state.js";
+import "../components/sc-thinking.js";
+import "../components/sc-tool-result.js";
+import "../components/sc-message-stream.js";
+import "../components/sc-message-branch.js";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -616,7 +620,6 @@ export class ScChatView extends GatewayAwareLitElement {
 
   @state() private messages: ChatMessage[] = [];
   @state() private toolCalls: ToolCall[] = [];
-  @state() private expandedTools = new Set<string>();
   @state() private inputValue = "";
   @state() private isWaiting = false;
   @state() private errorBanner = "";
@@ -837,13 +840,6 @@ export class ScChatView extends GatewayAwareLitElement {
     });
   }
 
-  private toggleTool(id: string): void {
-    const next = new Set(this.expandedTools);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    this.expandedTools = next;
-  }
-
   private resizeTextarea(): void {
     const el = this.inputEl;
     if (!el) return;
@@ -955,56 +951,28 @@ export class ScChatView extends GatewayAwareLitElement {
             `,
           )}
           ${this.toolCalls.map(
-            (t) => html`
-              <div class="tool-card">
-                <div
-                  class="tool-header"
-                  @click=${() => this.toggleTool(t.id)}
-                  role="button"
-                  tabindex="0"
-                  @keydown=${(e: KeyboardEvent) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      this.toggleTool(t.id);
-                    }
-                  }}
-                >
-                  ${t.status === "running" ? html`<span class="tool-spinner"></span>` : nothing}
-                  <span class="tool-name">Tool: ${t.name}</span>
-                  <span class="tool-expand"
-                    >${this.expandedTools.has(t.id)
-                      ? icons["caret-down"]
-                      : icons["caret-right"]}</span
-                  >
-                </div>
-                ${this.expandedTools.has(t.id)
-                  ? html`
-                      <div class="tool-body">
-                        ${t.input != null
-                          ? html`
-                              <div class="label">Input</div>
-                              <div>${t.input}</div>
-                            `
-                          : nothing}
-                        ${t.result != null
-                          ? html`
-                              <div class="label" style="margin-top: var(--sc-space-sm)">Output</div>
-                              <div>${t.result}</div>
-                            `
-                          : t.status === "running"
-                            ? html`<div class="label">Executing…</div>`
-                            : nothing}
-                      </div>
-                    `
-                  : nothing}
-              </div>
+            (tc) => html`
+              <sc-tool-result
+                .tool=${tc.name}
+                .status=${tc.status === "completed"
+                  ? tc.result?.startsWith("Error")
+                    ? "error"
+                    : "success"
+                  : "running"}
+                .content=${tc.result ?? tc.input ?? ""}
+              ></sc-tool-result>
             `,
           )}
           ${this.isWaiting
-            ? html`<div class="thinking">
-                Thinking<span class="typing-dots"><span></span><span></span><span></span></span
-                ><button class="abort-btn" @click=${() => this.handleAbort()}>Abort</button>
-              </div>`
+            ? html`
+                <div
+                  class="thinking"
+                  style="display:flex;align-items:center;gap:var(--sc-space-sm);flex-wrap:wrap;"
+                >
+                  <sc-thinking .active=${true} .steps=${[]}></sc-thinking>
+                  <button class="abort-btn" @click=${() => this.handleAbort()}>Abort</button>
+                </div>
+              `
             : nothing}
         </div>
         ${this.showScrollPill

@@ -73,6 +73,25 @@
   --sc-glass-prominent-inset-opacity: 0.1;
   --sc-glass-prominent-tint-opacity: 0.06;
   --sc-glass-prominent-refraction-scale: 3;
+  /* Glass: dynamic-light, vibrancy, interactive */
+  --sc-glass-dynamic-light-ambient: 0.04;
+  --sc-glass-dynamic-light-angle: 225deg;
+  --sc-glass-dynamic-light-color-dark: rgba(255,255,255,0.12);
+  --sc-glass-dynamic-light-color-light: rgba(255,255,255,0.18);
+  --sc-glass-dynamic-light-intensity: 0.15;
+  --sc-glass-dynamic-light-spread: 60%;
+  --sc-glass-vibrancy-backdrop-brightness: 1.08;
+  --sc-glass-vibrancy-icon-boost: 1.2;
+  --sc-glass-vibrancy-text-boost: 1.15;
+  --sc-glass-vibrancy-text-shadow: 0 0 8px rgba(0,0,0,0.5);
+  --sc-glass-interactive-focus-glow-color: rgba(20,184,166,0.35);
+  --sc-glass-interactive-focus-glow-spread: 8px;
+  --sc-glass-interactive-hover-border-glow: 0 0 0 1px rgba(255,255,255,0.08);
+  --sc-glass-interactive-hover-specular-boost: 1.4;
+  --sc-glass-interactive-press-blur-delta: -4px;
+  --sc-glass-interactive-press-saturate-boost: 20%;
+  --sc-glass-interactive-press-scale: 0.98;
+  --sc-glass-interactive-transition-duration: 200ms;
   /* Pixar micro-physics */
   --sc-physics-button-press-scaleX: 1.01;
   --sc-physics-button-press-scaleY: 0.97;

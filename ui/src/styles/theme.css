@@ -525,6 +525,98 @@ body {
   );
 }
 
+/* position: relative on all glass classes (needed for ::after) */
+.sc-glass-subtle,
+.sc-glass,
+.sc-glass-standard,
+.sc-glass-prominent {
+  position: relative;
+}
+
+/* Dynamic light specular overlay */
+.sc-glass-subtle::after,
+.sc-glass::after,
+.sc-glass-standard::after,
+.sc-glass-prominent::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse var(--sc-glass-dynamic-light-spread, 60%) var(--sc-glass-dynamic-light-spread, 60%) at
+      var(--sc-light-x, 30%) var(--sc-light-y, 20%),
+    var(--sc-glass-dynamic-light-color-dark, rgba(255, 255, 255, 0.12)),
+    transparent
+  );
+  opacity: var(--sc-glass-dynamic-light-intensity, 0.15);
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  transition: opacity var(--sc-glass-interactive-transition-duration, 200ms)
+    var(--sc-ease-out, ease-out);
+  z-index: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  .sc-glass-subtle::after,
+  .sc-glass::after,
+  .sc-glass-standard::after,
+  .sc-glass-prominent::after {
+    background: radial-gradient(
+      ellipse var(--sc-glass-dynamic-light-spread, 60%) var(--sc-glass-dynamic-light-spread, 60%) at
+        var(--sc-light-x, 30%) var(--sc-light-y, 20%),
+      var(--sc-glass-dynamic-light-color-light, rgba(255, 255, 255, 0.18)),
+      transparent
+    );
+  }
+}
+
+/* Vibrancy — auto-contrast on glass */
+.sc-glass-subtle,
+.sc-glass,
+.sc-glass-standard,
+.sc-glass-prominent {
+  --sc-vibrancy-active: 1;
+}
+
+.sc-glass-subtle :is(h1, h2, h3, h4, h5, h6),
+.sc-glass :is(h1, h2, h3, h4, h5, h6),
+.sc-glass-standard :is(h1, h2, h3, h4, h5, h6),
+.sc-glass-prominent :is(h1, h2, h3, h4, h5, h6) {
+  text-shadow: var(--sc-glass-vibrancy-text-shadow, 0 0 8px rgba(0, 0, 0, 0.5));
+}
+
+/* Interactive glass — press, hover, focus */
+.sc-glass-interactive {
+  cursor: pointer;
+  transition:
+    transform var(--sc-glass-interactive-transition-duration, 200ms) var(--sc-spring-out, ease-out),
+    box-shadow var(--sc-glass-interactive-transition-duration, 200ms) var(--sc-ease-out, ease-out);
+}
+
+.sc-glass-interactive:hover {
+  box-shadow: var(--sc-glass-interactive-hover-border-glow, 0 0 0 1px rgba(255, 255, 255, 0.08));
+}
+
+.sc-glass-interactive:hover::after {
+  opacity: calc(
+    var(--sc-glass-dynamic-light-intensity, 0.15) *
+      var(--sc-glass-interactive-hover-specular-boost, 1.4)
+  );
+}
+
+.sc-glass-interactive:active {
+  transform: scale(var(--sc-glass-interactive-press-scale, 0.98));
+}
+
+.sc-glass-interactive:focus-visible {
+  box-shadow:
+    0 0 0 var(--sc-focus-ring-width, 2px)
+      var(--sc-glass-interactive-focus-glow-color, rgba(20, 184, 166, 0.35)),
+    0 0 var(--sc-glass-interactive-focus-glow-spread, 8px)
+      var(--sc-glass-interactive-focus-glow-color, rgba(20, 184, 166, 0.35));
+  outline: none;
+}
+
 /* @supports fallback for browsers without backdrop-filter */
 @supports not (backdrop-filter: blur(1px)) {
   .sc-glass-subtle {
@@ -687,6 +779,10 @@ body {
     transform: none !important;
   }
 
+  .sc-glass-interactive {
+    transition: none;
+  }
+
   ::view-transition-old(root),
   ::view-transition-new(root),
   ::view-transition-old(main-content),
@@ -730,6 +826,13 @@ body {
     -webkit-backdrop-filter: none;
     background: var(--sc-bg-surface);
     filter: none;
+  }
+
+  .sc-glass-subtle::after,
+  .sc-glass::after,
+  .sc-glass-standard::after,
+  .sc-glass-prominent::after {
+    display: none;
   }
 
   .sc-glass-tinted.sc-glass-subtle,

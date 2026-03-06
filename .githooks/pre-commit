@@ -41,6 +41,19 @@ if [ -d "build" ] && [ -f "build/libseaclaw_core.a" ]; then
     fi
 fi
 
+# Check design token drift when token sources change
+staged_tokens=$(git diff --cached --name-only --diff-filter=ACM -- 'design-tokens/*.tokens.json' 'design-tokens/build.ts')
+if [ -n "$staged_tokens" ]; then
+  if [ -x "design-tokens/check-drift.sh" ]; then
+    echo "Checking design token drift..."
+    bash design-tokens/check-drift.sh
+    if [ $? -ne 0 ]; then
+      echo "Token drift detected. Run: cd design-tokens && npm run build"
+      exit 1
+    fi
+  fi
+fi
+
 # Lint for raw hex colors in staged CSS/TS/Astro files
 # Skip token definition files (they define the colors themselves)
 if [ -x "scripts/lint-raw-colors.sh" ]; then

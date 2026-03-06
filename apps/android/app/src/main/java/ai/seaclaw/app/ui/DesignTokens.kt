@@ -194,6 +194,35 @@ object SCTokens {
     val opacityOverlayMedium = 0.32f
     val opacityPressed = 0.12f
 
+    // Glass
+    val glassAmbient = 0.04f
+    val glassIntensity = 0.15f
+    val glassProminentBgOpacity = 0.08f
+    val glassProminentBorderOpacity = 0.12f
+    val glassProminentInsetOpacity = 0.1f
+    val glassProminentRefractionScale = 3f
+    val glassProminentTintOpacity = 0.06f
+    val glassStandardBgOpacity = 0.06f
+    val glassStandardBorderOpacity = 0.08f
+    val glassStandardInsetOpacity = 0.06f
+    val glassStandardRefractionScale = 2f
+    val glassStandardTintOpacity = 0.04f
+    val glassSubtleBgOpacity = 0.04f
+    val glassSubtleBorderOpacity = 0.05f
+    val glassSubtleInsetOpacity = 0f
+    val glassSubtleRefractionScale = 0f
+    val glassSubtleTintOpacity = 0.02f
+    val glassHoverSpecularBoost = 1.4f
+    val glassPressScale = 0.98f
+    val glassBackdropBrightness = 1.08f
+    val glassIconBoost = 1.2f
+    val glassTextBoost = 1.15f
+    val glassProminentBlur = 32.dp
+    val glassStandardBlur = 24.dp
+    val glassSubtleBlur = 12.dp
+    val glassFocusGlowSpread = 8.dp
+    val glassPressBlurDelta = -4.dp
+
     // Haptic Feedback
     enum class HapticType {
         LIGHT, MEDIUM, HEAVY, SUCCESS, WARNING, SELECTION;

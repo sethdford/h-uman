@@ -183,3 +183,82 @@ jobs:
             echo "Running $(basename $f)..."
             timeout 30 $f -max_total_time=25 || true
           done
+
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Unit tests
+        run: npm test --if-present
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundle size check
+        run: |
+          MAIN_SIZE=$(stat -c%s dist/assets/index-*.js 2>/dev/null || stat -f%z dist/assets/index-*.js)
+          echo "Main bundle: ${MAIN_SIZE} bytes ($(( MAIN_SIZE / 1024 )) KB)"
+          if [ "$MAIN_SIZE" -gt 200000 ]; then
+            echo "::warning::UI main bundle exceeds 200 KB"
+          fi
+
+  token-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: design-tokens/package-lock.json
+
+      - name: Install token build deps
+        working-directory: design-tokens
+        run: npm ci --ignore-scripts 2>/dev/null || npm install tsx
+
+      - name: Check token drift
+        run: bash design-tokens/check-drift.sh
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [ui]
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      - name: E2E tests
+        run: npm run test:e2e --if-present
+        continue-on-error: true

@@ -590,6 +590,22 @@ function generateCSS(
     }
   }
 
+  // Glass: dynamic-light, vibrancy, interactive
+  lines.push("  /* Glass: dynamic-light, vibrancy, interactive */");
+  const glassExtraGroups = ["dynamic-light", "vibrancy", "interactive"];
+  for (const group of glassExtraGroups) {
+    const groupKeys = Object.keys(tokens)
+      .filter((k) => k.startsWith(`${group}.`))
+      .sort();
+    for (const k of groupKeys) {
+      const val = tokens[k];
+      if (val != null) {
+        const prop = k.replace(`${group}.`, "");
+        lines.push(`  --sc-glass-${group}-${prop}: ${val};`);
+      }
+    }
+  }
+
   // Micro-physics presets
   lines.push("  /* Pixar micro-physics */");
   const microPhysicsKeys = Object.keys(tokens).filter((k) =>
@@ -1075,6 +1091,63 @@ function generateSwift(tokens: TokenMap): string {
   }
   lines.push("");
 
+  // Glass tokens (glass.*, dynamic-light.*, vibrancy.*, interactive.*)
+  lines.push("    // MARK: - Glass");
+  const glassPrefixes = [
+    "glass.",
+    "dynamic-light.",
+    "vibrancy.",
+    "interactive.",
+  ];
+  const glassNumericKeys = Object.keys(tokens)
+    .filter(
+      (k) =>
+        glassPrefixes.some((p) => k.startsWith(p)) &&
+        typeof tokens[k] === "number",
+    )
+    .sort();
+  for (const k of glassNumericKeys) {
+    const v = tokens[k] as number;
+    const suffix = k.replace(
+      /^(glass\.|dynamic-light\.|vibrancy\.|interactive\.)/,
+      "",
+    );
+    const name =
+      "glass" +
+      suffix
+        .split(/[.\-]/)
+        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+        .join("");
+    lines.push(`    public static let ${name}: Double = ${v}`);
+  }
+  // Glass dimension tokens (blur, glow spread, etc.)
+  const glassDimKeys = Object.keys(tokens)
+    .filter(
+      (k) =>
+        glassPrefixes.some((p) => k.startsWith(p)) &&
+        typeof tokens[k] === "string" &&
+        (tokens[k] as string).endsWith("px"),
+    )
+    .sort();
+  for (const k of glassDimKeys) {
+    const v = tokens[k] as string;
+    const px = parseInt(v);
+    if (!isNaN(px)) {
+      const suffix = k.replace(
+        /^(glass\.|dynamic-light\.|vibrancy\.|interactive\.)/,
+        "",
+      );
+      const name =
+        "glass" +
+        suffix
+          .split(/[.\-]/)
+          .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+          .join("");
+      lines.push(`    public static let ${name}: CGFloat = ${px}`);
+    }
+  }
+  lines.push("");
+
   // Spring (discover from tokens)
   lines.push("    // MARK: - Motion (Spring)");
   const springNames = Object.keys(tokens)
@@ -1385,6 +1458,62 @@ function generateKotlin(tokens: TokenMap): string {
       "opacity" +
       (suffix ? suffix.charAt(0).toUpperCase() + suffix.slice(1) : "");
     lines.push(`    val ${name} = ${v}f`);
+  }
+  lines.push("");
+
+  // Glass tokens (glass.*, dynamic-light.*, vibrancy.*, interactive.*)
+  lines.push("    // Glass");
+  const kotlinGlassPrefixes = [
+    "glass.",
+    "dynamic-light.",
+    "vibrancy.",
+    "interactive.",
+  ];
+  const kotlinGlassNumericKeys = Object.keys(tokens)
+    .filter(
+      (k) =>
+        kotlinGlassPrefixes.some((p) => k.startsWith(p)) &&
+        typeof tokens[k] === "number",
+    )
+    .sort();
+  for (const k of kotlinGlassNumericKeys) {
+    const v = tokens[k] as number;
+    const suffix = k.replace(
+      /^(glass\.|dynamic-light\.|vibrancy\.|interactive\.)/,
+      "",
+    );
+    const name =
+      "glass" +
+      suffix
+        .split(/[.\-]/)
+        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+        .join("");
+    lines.push(`    val ${name} = ${v}f`);
+  }
+  const kotlinGlassDimKeys = Object.keys(tokens)
+    .filter(
+      (k) =>
+        kotlinGlassPrefixes.some((p) => k.startsWith(p)) &&
+        typeof tokens[k] === "string" &&
+        (tokens[k] as string).endsWith("px"),
+    )
+    .sort();
+  for (const k of kotlinGlassDimKeys) {
+    const v = tokens[k] as string;
+    const px = parseInt(v);
+    if (!isNaN(px)) {
+      const suffix = k.replace(
+        /^(glass\.|dynamic-light\.|vibrancy\.|interactive\.)/,
+        "",
+      );
+      const name =
+        "glass" +
+        suffix
+          .split(/[.\-]/)
+          .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+          .join("");
+      lines.push(`    val ${name} = ${px}.dp`);
+    }
   }
   lines.push("");
 
