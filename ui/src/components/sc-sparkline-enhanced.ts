@@ -44,7 +44,7 @@ export class ScSparklineEnhanced extends LitElement {
       background: color-mix(in srgb, var(--sc-bg-overlay) 85%, transparent);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--sc-glass-border-color, rgba(255, 255, 255, 0.08));
       border-radius: var(--sc-radius-md);
       padding: var(--sc-space-xs) var(--sc-space-sm);
       font-size: var(--sc-text-xs);

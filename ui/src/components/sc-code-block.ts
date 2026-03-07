@@ -43,6 +43,7 @@ export class ScCodeBlock extends LitElement {
   private _copyTimeout = 0;
   private _mediaQuery: MediaQueryList | null = null;
   private _mediaHandler: (() => void) | null = null;
+  private _themeObserver: MutationObserver | null = null;
 
   static override styles = css`
     :host {
@@ -128,14 +129,22 @@ export class ScCodeBlock extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this._darkScheme = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    this._darkScheme = this._resolveScheme();
     this._highlight();
     this._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     this._mediaHandler = () => {
-      this._darkScheme = this._mediaQuery?.matches ?? true;
+      this._darkScheme = this._resolveScheme();
       this._highlight();
     };
     this._mediaQuery?.addEventListener("change", this._mediaHandler);
+    this._themeObserver = new MutationObserver(() => {
+      this._darkScheme = this._resolveScheme();
+      this._highlight();
+    });
+    this._themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
   }
 
   override disconnectedCallback(): void {
@@ -143,9 +152,18 @@ export class ScCodeBlock extends LitElement {
     if (this._mediaQuery && this._mediaHandler) {
       this._mediaQuery.removeEventListener("change", this._mediaHandler);
     }
+    this._themeObserver?.disconnect();
     this._mediaQuery = null;
     this._mediaHandler = null;
+    this._themeObserver = null;
     super.disconnectedCallback();
+  }
+
+  private _resolveScheme(): boolean {
+    const explicit = document.documentElement.dataset.theme;
+    if (explicit === "dark") return true;
+    if (explicit === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
   }
 
   override updated(changed: Map<string, unknown>): void {

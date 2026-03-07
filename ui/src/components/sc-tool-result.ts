@@ -24,7 +24,7 @@ export class ScToolResult extends LitElement {
         border-left-color: var(--sc-info);
       }
       50% {
-        border-left-color: rgba(59, 130, 246, 0.3);
+        border-left-color: color-mix(in srgb, var(--sc-info) 30%, transparent);
       }
     }
 

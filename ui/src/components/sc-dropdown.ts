@@ -40,7 +40,7 @@ export class ScDropdown extends LitElement {
       background: color-mix(in srgb, var(--sc-bg-overlay) 88%, transparent);
       backdrop-filter: blur(20px) saturate(180%);
       -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--sc-glass-border-color, rgba(255, 255, 255, 0.08));
       border-radius: var(--sc-radius-lg);
       box-shadow: var(--sc-shadow-lg);
       padding: var(--sc-dropdown-padding);

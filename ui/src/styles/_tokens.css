@@ -339,6 +339,7 @@
   --sc-bg-surface: #101a24;
   --sc-border: #233345;
   --sc-border-subtle: #162230;
+  --sc-glass-border-color: rgba(255, 255, 255, 0.08);
   --sc-button-gradient-primary: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.12) 0%,
@@ -498,6 +499,7 @@
     --sc-bg-warm: #fafafa;
     --sc-border: #d9d9d9;
     --sc-border-subtle: #e8e8e8;
+    --sc-glass-border-color: rgba(0, 0, 0, 0.08);
     --sc-button-gradient-primary: linear-gradient(
       180deg,
       rgba(255, 255, 255, 0.25) 0%,
@@ -583,6 +585,7 @@
   --sc-bg-surface: #101a24;
   --sc-border: #233345;
   --sc-border-subtle: #162230;
+  --sc-glass-border-color: rgba(255, 255, 255, 0.08);
   --sc-button-gradient-primary: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.12) 0%,
@@ -653,6 +656,7 @@
 
 [data-theme="light"] {
   /* Light theme — explicit override for theme switcher */
+  --sc-glass-border-color: rgba(0, 0, 0, 0.08);
   --sc-accent: #7ab648;
   --sc-accent-hover: #5a9a30;
   --sc-accent-light: #e2f2c8;
