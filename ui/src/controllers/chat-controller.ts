@@ -2,7 +2,11 @@ import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { EVENT_NAMES } from "../utils.js";
 
 export type MessageStatus = "sending" | "sent" | "streaming" | "complete" | "failed";
-export interface Reaction { emoji: string; count: number; mine: boolean; }
+export interface Reaction {
+  emoji: string;
+  count: number;
+  mine: boolean;
+}
 
 export type ChatItem =
   | {
@@ -388,7 +392,6 @@ export class ChatController implements ReactiveController {
     return -1;
   }
 
-
   toggleReaction(index: number, emoji: string): void {
     if (index < 0 || index >= this.items.length) return;
     const item = this.items[index];
@@ -397,15 +400,27 @@ export class ChatController implements ReactiveController {
     const existing = reactions.findIndex((r) => r.emoji === emoji);
     if (existing >= 0) {
       if (reactions[existing].mine) {
-        reactions[existing] = { ...reactions[existing], count: reactions[existing].count - 1, mine: false };
+        reactions[existing] = {
+          ...reactions[existing],
+          count: reactions[existing].count - 1,
+          mine: false,
+        };
         if (reactions[existing].count <= 0) reactions.splice(existing, 1);
       } else {
-        reactions[existing] = { ...reactions[existing], count: reactions[existing].count + 1, mine: true };
+        reactions[existing] = {
+          ...reactions[existing],
+          count: reactions[existing].count + 1,
+          mine: true,
+        };
       }
     } else {
       reactions.push({ emoji, count: 1, mine: true });
     }
-    this.items = [...this.items.slice(0, index), { ...item, reactions }, ...this.items.slice(index + 1)];
+    this.items = [
+      ...this.items.slice(0, index),
+      { ...item, reactions },
+      ...this.items.slice(index + 1),
+    ];
     this._requestUpdate();
   }
 
@@ -426,5 +441,7 @@ export class ChatController implements ReactiveController {
     return lines.join("\n");
   }
 
-  exportAsJson(): string { return JSON.stringify(this.items, null, 2); }
+  exportAsJson(): string {
+    return JSON.stringify(this.items, null, 2);
+  }
 }
