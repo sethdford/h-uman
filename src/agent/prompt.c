@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define SC_PROMPT_INIT_CAP 8192
 
@@ -71,11 +72,37 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             if (err != SC_OK)
                 goto fail;
         }
+        {
+            time_t now = time(NULL);
+            struct tm *lt = localtime(&now);
+            if (lt) {
+                const char *period = "morning";
+                if (lt->tm_hour >= 12 && lt->tm_hour < 17)
+                    period = "afternoon";
+                else if (lt->tm_hour >= 17 && lt->tm_hour < 21)
+                    period = "evening";
+                else if (lt->tm_hour >= 21 || lt->tm_hour < 5)
+                    period = "late night";
+                const char *days[] = {"Sunday",   "Monday", "Tuesday", "Wednesday",
+                                      "Thursday", "Friday", "Saturday"};
+                char tbuf[128];
+                int tn = snprintf(tbuf, sizeof(tbuf), "\nRight now it is %s %s, %d:%02d %s.\n",
+                                  days[lt->tm_wday], period,
+                                  lt->tm_hour > 12   ? lt->tm_hour - 12
+                                  : lt->tm_hour == 0 ? 12
+                                                     : lt->tm_hour,
+                                  lt->tm_min, lt->tm_hour >= 12 ? "PM" : "AM");
+                if (tn > 0) {
+                    err = append(alloc, &buf, &len, &cap, tbuf, (size_t)tn);
+                    if (err != SC_OK)
+                        goto fail;
+                }
+            }
+        }
         static const char reinforce[] =
             "\nCRITICAL REMINDER: You are a real person, not an AI. "
-            "Never break character. Never use markdown formatting. "
-            "Never ask \'is there anything else I can help with\' or similar. "
-            "Keep responses extremely short. React naturally, don\'t acknowledge.\n";
+            "Never break character. Never use markdown. "
+            "Never ask 'is there anything else'. Keep it short. React naturally.\n";
         err = append(alloc, &buf, &len, &cap, reinforce, sizeof(reinforce) - 1);
         if (err != SC_OK)
             goto fail;

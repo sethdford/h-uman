@@ -305,8 +305,50 @@ When handing off work, include:
 ## 12) UI & Design System Contract
 
 All UI surfaces (web dashboard, website, native apps, CLI/TUI) must follow these rules.
+The design system is grounded in SOTA references from industry leaders.
 
-### 12.1 Typography
+### 12.0 SOTA Design References (Read Before Any UI Work)
+
+The SeaClaw design system synthesizes principles from these authoritative sources.
+Agents **must** consult the relevant reference docs before creating or modifying any UI:
+
+| Source                         | What We Take                                                        | SeaClaw Doc                |
+| ------------------------------ | ------------------------------------------------------------------- | -------------------------- |
+| **Apple HIG**                  | Spring-first motion, clarity/deference/depth, spatial hierarchy     | `docs/motion-design.md`    |
+| **Material Design 3**          | Canonical layouts, easing taxonomy, elevation, dynamic color        | `docs/ux-patterns.md`      |
+| **Disney/Pixar 12 Principles** | Squash & stretch, anticipation, staging, timing, follow-through     | `docs/motion-design.md`    |
+| **Edward Tufte**               | Data-ink ratio, chartjunk elimination, small multiples              | `docs/visual-standards.md` |
+| **Dieter Rams**                | Less is more, honest design, long-lasting quality                   | `docs/visual-standards.md` |
+| **Gestalt Psychology**         | Proximity, similarity, continuity, closure, figure-ground           | `docs/ux-patterns.md`      |
+| **Nielsen Norman Group**       | F-pattern scanning, progressive disclosure, recognition over recall | `docs/ux-patterns.md`      |
+
+**Mandatory document consultation before UI work:**
+
+- **Creating or restructuring a view?** → Read `docs/ux-patterns.md` first. Every view must conform to an archetype.
+- **Adding or modifying animation?** → Read `docs/motion-design.md` first. Every animation must follow Disney/Pixar + Apple + M3 principles.
+- **Making any visual change?** → Read `docs/visual-standards.md` first. Verify hierarchy, spacing, color application, and quality checklist.
+- **Token values and specifics?** → Read `docs/design-strategy.md` for the complete token reference.
+
+### 12.1 Layout Archetypes (Required — see `docs/ux-patterns.md`)
+
+Every view must conform to one of these canonical archetypes:
+
+| Archetype            | Views                            | Key Rule                                                 |
+| -------------------- | -------------------------------- | -------------------------------------------------------- |
+| **Dashboard (Feed)** | Overview, Usage, Security        | Compact hero → scrollable card grid                      |
+| **List-Detail**      | Sessions, Channels, Tools, Nodes | Dual-pane on expanded; single-pane navigation on compact |
+| **Conversational**   | Chat, Voice                      | Content first (flex: 1), controls anchored at bottom     |
+| **Settings**         | Config                           | Single-column, max-width 640px, section-grouped          |
+| **Marketplace**      | Skills                           | Sticky search → responsive card grid                     |
+| **Log/Terminal**     | Logs                             | Controls top → monospace output fills remaining space    |
+
+Critical rules:
+
+- **Conversation views**: conversation area MUST be primary (flex: 1), controls MUST anchor to bottom. Never place controls above conversation.
+- **All views**: content occupies minimum 60% of viewport. Controls defer to content (Apple HIG: Deference).
+- **Empty/loading/error states**: every view must handle all three. Never show a blank screen.
+
+### 12.2 Typography
 
 Required:
 
@@ -315,8 +357,9 @@ Required:
 - Apple native: `Font.custom("Avenir-Book", size:)` / `"Avenir-Medium"` / `"Avenir-Heavy"` / `"Avenir-Black"`.
 - Android: `AvenirFontFamily` from `Theme.kt`.
 - CLI/TUI: terminal font (no control), but use token-derived ANSI colors from `design_tokens.h`.
+- Maximum 3 type sizes visible in any single view section (see `docs/visual-standards.md` §7).
 
-### 12.2 Icons
+### 12.3 Icons
 
 Required:
 
@@ -325,8 +368,9 @@ Required:
 - Website: inline Phosphor SVGs with `viewBox="0 0 256 256" fill="currentColor"`.
 - Never use emoji characters as UI icons (no ⚠️, 💬, 🔧, ⚡, ⚙, etc.).
 - Never create one-off SVGs when a Phosphor equivalent exists.
+- Icons use `currentColor` — color is inherited from parent, never hardcoded.
 
-### 12.3 Design Tokens
+### 12.4 Design Tokens
 
 Required:
 
@@ -335,9 +379,9 @@ Required:
 - CSS: `--sc-*` namespace. Never use raw hex colors, pixel spacing, or pixel radii.
 - Token categories: color (base + semantic), spacing, radius, shadow, typography, motion, data-viz.
 - Generated outputs: CSS custom properties, Kotlin constants, Swift constants, C `#define` macros.
-- **Centralized design strategy**: see `docs/design-strategy.md` for the full design constitution.
+- **Centralized design strategy**: see `docs/design-strategy.md` for the full token reference.
 
-Color accent hierarchy:
+Color accent hierarchy (60-30-10 rule — see `docs/visual-standards.md` §2.1):
 
 - **Primary**: `--sc-accent` (Fidelity green) — brand identity, primary buttons, links, focus rings.
 - **Secondary**: `--sc-accent-secondary` (amber) — warm highlights, featured content, CTAs needing contrast.
@@ -346,28 +390,47 @@ Color accent hierarchy:
 
 Each accent provides `-hover`, `-subtle`, `-strong`, `-text`, and `on-accent-*` variants for both dark and light themes.
 
-### 12.4 Data Visualization
+### 12.5 Visual Hierarchy (Required — see `docs/visual-standards.md`)
 
 Required:
 
+- **Squint test**: primary action and content area must be identifiable at a glance.
+- **Emphasis levels**: exactly ONE high-emphasis element per screen (M3 principle).
+- **60-30-10 color ratio**: 60% background, 30% secondary, 10% accent.
+- **Depth via elevation**: shadow intensity matches elevation level (Apple: Depth, M3: Elevation).
+- **Spacing rhythm**: use token scale consistently. Never skip >2 steps in the spacing scale.
+- **Whitespace**: empty space is a deliberate design choice, not a bug (Tufte: data-ink ratio).
+
+### 12.6 Motion & Animation (Required — see `docs/motion-design.md`)
+
+Required — grounded in Disney/Pixar 12 Principles + Apple HIG + Material 3:
+
+- **Spring-first**: prefer spring easings for interactive elements (Apple HIG).
+- **Squash & stretch**: buttons compress on press, rebound on release (Disney principle 1).
+- **Anticipation**: hover states prepare users for action (Disney principle 2).
+- **Staging**: stagger reveals, dim backgrounds for focus (Disney principle 3).
+- **Timing**: use `--sc-duration-*` tokens. Small = fast, large = slow. Never exceed 700ms.
+- **Follow-through**: child elements complete animation after parent (Disney principle 5).
+- **Easing tokens**: `--sc-ease-out` (enter), `--sc-ease-in` (exit), `--sc-ease-spring` (interact). Never raw `cubic-bezier()`.
+- **Spring tokens**: `--sc-spring-micro`, `--sc-spring-standard`, `--sc-spring-expressive`, `--sc-spring-dramatic`.
+- **Choreography**: `--sc-stagger-delay` (50ms) between items, `--sc-stagger-max` (300ms) cap.
+- **Performance**: animate only compositor properties (transform, opacity, filter). No layout thrashing.
+- Every animation must respect `prefers-reduced-motion: reduce`.
+- Keyframe names use `sc-` prefix.
+
+### 12.7 Data Visualization (Required — see `docs/visual-standards.md` §9)
+
+Required — grounded in Tufte's principles of analytical design:
+
+- Maximize data-ink ratio. Remove grid lines, legends, and decoration that don't serve data.
 - Use `--sc-chart-categorical-{1..8}` for multi-series charts (never ad-hoc colors).
 - Use `--sc-chart-sequential-{100..800}` for ordered/heatmap data.
 - Use `--sc-chart-diverging-{positive,neutral,negative}` for positive/negative indicators.
 - Single-metric charts use `--sc-chart-brand`.
+- Prefer direct labels over legends. Prefer small multiples over complex overlapping series.
 - Token definitions live in `design-tokens/data-viz.tokens.json`.
 
-### 12.5 Motion & Animation
-
-Required:
-
-- Use `--sc-duration-*` and `--sc-ease-*` tokens for all transitions.
-- Use spring tokens (`--sc-ease-spring`, `--sc-ease-spring-gentle`) for interactive elements.
-- Use `--sc-spring-out` / `--sc-spring-bounce` for CSS `linear()` spring approximations.
-- Spring physics params (`--sc-spring-micro`, `--sc-spring-standard`, `--sc-spring-expressive`) for JS animation libs.
-- Every animation must respect `prefers-reduced-motion: reduce`.
-- Keyframe names use `sc-` prefix.
-
-### 12.6 Lint Enforcement
+### 12.8 Lint Enforcement
 
 Required:
 
@@ -375,22 +438,34 @@ Required:
 - Flags raw hex/rgba, hardcoded durations, and raw breakpoints in `.ts` files.
 - Wired into `npm run check` via `npm run lint:tokens`.
 
-### 12.7 Accessibility
+### 12.9 Accessibility (Required — see `docs/ux-patterns.md` §5)
 
 Required:
 
 - WCAG 2.1 AA minimum (4.5:1 text contrast, 3:1 UI contrast).
 - All interactive elements: visible focus ring, keyboard operable.
+- Touch targets: minimum 44×44px (Apple HIG).
 - Modals: focus trap, Escape to close, `aria-modal`.
 - `prefers-color-scheme` and `prefers-reduced-motion` both supported.
+- No information conveyed by color alone — always pair with icon, label, or pattern.
+- Semantic HTML: headings follow hierarchy, lists use proper elements, live regions for dynamic content.
 
-### 12.8 Change Playbook: Adding a UI Component
+### 12.10 Change Playbook: Adding a UI Component
 
 - Add `ui/src/components/sc-<name>.ts` as a LitElement web component.
 - Use `--sc-*` tokens exclusively in `static styles`.
 - Add test file for render, accessibility, and keyboard navigation.
 - Register in component catalog (`ui/src/catalog/`).
 - Update `ui/src/icons.ts` if the component needs a new icon.
+- Run the **quality checklist** from `docs/visual-standards.md` §10 before shipping.
+
+### 12.11 Change Playbook: Adding or Modifying a View
+
+- Identify which **layout archetype** (§12.1) the view conforms to.
+- Follow the archetype's structural rules from `docs/ux-patterns.md` §2.
+- Implement empty state, loading skeleton, and error state (all three required).
+- Verify responsive behavior at all four breakpoints (compact, medium, expanded, wide).
+- Apply the **quality checklist** from `docs/visual-standards.md` §10.
 
 ## 13) Vibe Coding Guardrails
 
