@@ -13,6 +13,17 @@ export class ScChatBubble extends LitElement {
   @property({ type: Boolean }) showTail = false;
   @property({ type: Boolean }) isLast = false;
   @property({ type: Boolean }) isFirst = false;
+  @property({ type: String })
+  position: "solo" | "first" | "middle" | "last" = "solo";
+
+  private get _effectivePosition(): "solo" | "first" | "middle" | "last" {
+    if (this.position !== "solo") return this.position;
+    if (this.isFirst && this.isLast) return "solo";
+    if (!this.isFirst && !this.isLast) return "solo"; /* standalone, no group context */
+    if (this.isFirst) return "first";
+    if (this.isLast) return "last";
+    return "middle";
+  }
 
   static override styles = css`
     @keyframes sc-blink {
@@ -61,20 +72,42 @@ export class ScChatBubble extends LitElement {
       box-shadow: var(--sc-shadow-sm);
     }
 
+    /* User positions */
+    .bubble.role-user.pos-solo,
+    .bubble.role-user.pos-first {
+      border-radius: var(--sc-radius-2xl) var(--sc-radius-2xl) var(--sc-radius-sm)
+        var(--sc-radius-2xl);
+    }
+    .bubble.role-user.pos-middle,
+    .bubble.role-user.pos-last {
+      border-radius: var(--sc-radius-2xl) var(--sc-radius-sm) var(--sc-radius-sm)
+        var(--sc-radius-2xl);
+    }
+
+    /* Assistant positions */
+    .bubble.role-assistant.pos-solo,
+    .bubble.role-assistant.pos-first {
+      border-radius: var(--sc-radius-2xl) var(--sc-radius-2xl) var(--sc-radius-2xl)
+        var(--sc-radius-sm);
+    }
+    .bubble.role-assistant.pos-middle,
+    .bubble.role-assistant.pos-last {
+      border-radius: var(--sc-radius-sm) var(--sc-radius-2xl) var(--sc-radius-2xl)
+        var(--sc-radius-sm);
+    }
+
     .bubble.role-user {
       margin-left: auto;
       max-width: 75%;
       background: var(--sc-accent);
       color: var(--sc-on-accent);
-      border-radius: var(--sc-radius-2xl, 20px) var(--sc-radius-2xl, 20px) var(--sc-radius-xs, 4px)
-        var(--sc-radius-2xl, 20px);
       animation: sc-bubble-send var(--sc-duration-moderate, 250ms)
         var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
 
     .bubble.role-user::after {
       content: "";
-      display: var(--tail-display, none);
+      display: none;
       position: absolute;
       bottom: -1px;
       right: calc(-1 * var(--sc-space-sm));
@@ -84,8 +117,9 @@ export class ScChatBubble extends LitElement {
       clip-path: polygon(0 0, 100% 100%, 0 100%);
     }
 
-    .bubble.role-user.show-tail::after {
-      --tail-display: block;
+    .bubble.role-user.pos-solo::after,
+    .bubble.role-user.pos-last::after {
+      display: block;
     }
 
     .bubble.role-assistant {
@@ -94,15 +128,13 @@ export class ScChatBubble extends LitElement {
       background: var(--sc-bg-elevated);
       color: var(--sc-text);
       border: 1px solid var(--sc-border-subtle);
-      border-radius: var(--sc-radius-2xl, 20px) var(--sc-radius-2xl, 20px)
-        var(--sc-radius-2xl, 20px) var(--sc-radius-xs, 4px);
       box-shadow: var(--sc-shadow-xs);
       animation: sc-bubble-receive var(--sc-duration-normal) var(--sc-ease-out) both;
     }
 
     .bubble.role-assistant::after {
       content: "";
-      display: var(--tail-display, none);
+      display: none;
       position: absolute;
       bottom: -1px;
       left: calc(-1 * var(--sc-space-sm));
@@ -112,8 +144,9 @@ export class ScChatBubble extends LitElement {
       clip-path: polygon(100% 0, 100% 100%, 0 100%);
     }
 
-    .bubble.role-assistant.show-tail::after {
-      --tail-display: block;
+    .bubble.role-assistant.pos-solo::after,
+    .bubble.role-assistant.pos-last::after {
+      display: block;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -341,7 +374,8 @@ export class ScChatBubble extends LitElement {
   }
 
   override render() {
-    const bubbleClass = `bubble role-${this.role}${this.showTail ? " show-tail" : ""}`;
+    const pos = this._effectivePosition;
+    const bubbleClass = `bubble role-${this.role} pos-${pos}`;
     const isUser = this.role === "user";
 
     return html`
