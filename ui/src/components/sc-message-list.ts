@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
 import "./sc-message-stream.js";
+import "./sc-message-actions.js";
 import "./sc-tool-result.js";
 import "./sc-reasoning-block.js";
 import "./sc-thinking.js";
@@ -8,6 +9,8 @@ import "./sc-skeleton.js";
 import type { ChatItem } from "../controllers/chat-controller.js";
 import { icons } from "../icons.js";
 import { formatTime } from "../utils.js";
+
+const TWO_MIN_MS = 2 * 60 * 1000;
 
 @customElement("sc-message-list")
 export class ScMessageList extends LitElement {
@@ -40,6 +43,7 @@ export class ScMessageList extends LitElement {
       gap: var(--sc-space-md);
     }
     .message {
+      position: relative;
       max-width: 85%;
       padding: var(--sc-space-md) var(--sc-space-md);
       border-radius: var(--sc-radius);
@@ -51,6 +55,9 @@ export class ScMessageList extends LitElement {
       animation: sc-slide-up var(--sc-duration-normal)
         var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
+    .message:hover sc-message-actions {
+      opacity: 1;
+    }
     .message.user {
       align-self: flex-end;
       background: var(--sc-accent);
@@ -61,6 +68,12 @@ export class ScMessageList extends LitElement {
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
       color: var(--sc-text);
+    }
+    .message.continuation {
+      margin-top: calc(var(--sc-space-xs) - var(--sc-space-md));
+    }
+    .message.continuation .message-meta {
+      display: none;
     }
     .message-meta {
       font-size: var(--sc-text-xs);
@@ -226,6 +239,18 @@ export class ScMessageList extends LitElement {
     );
   }
 
+  private _computeContinuation(idx: number): boolean {
+    const item = this.items[idx];
+    if (item.type !== "message") return false;
+    if (idx === 0) return false;
+    const prev = this.items[idx - 1];
+    if (prev.type !== "message") return false;
+    if (prev.role !== item.role) return false;
+    const ts = item.ts ?? 0;
+    const prevTs = prev.ts ?? 0;
+    return Math.abs(ts - prevTs) <= TWO_MIN_MS;
+  }
+
   private _onAbort(): void {
     this.dispatchEvent(
       new CustomEvent("sc-abort", {
@@ -239,13 +264,19 @@ export class ScMessageList extends LitElement {
     const lastAssistantIdx = this._findLastAssistantIdx();
     if (item.type === "message") {
       const isStreaming = this.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
+      const isContinuation = this._computeContinuation(idx);
       return html`
         <div
           id="msg-${idx}"
-          class="message ${item.role}"
+          class="message ${item.role} ${isContinuation ? "continuation" : ""}"
           style="--sc-stagger-index: ${idx}; animation-delay: min(calc(var(--sc-stagger-delay) * var(--sc-stagger-index)), var(--sc-stagger-max));"
           @contextmenu=${(ev: MouseEvent) => this._onContextMenu(ev, item)}
         >
+          <sc-message-actions
+            .role=${item.role}
+            .content=${item.content}
+            .index=${idx}
+          ></sc-message-actions>
           <sc-message-stream
             .content=${item.content}
             .streaming=${isStreaming}

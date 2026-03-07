@@ -13,9 +13,12 @@
 typedef enum sc_bus_event_type {
     SC_BUS_MESSAGE_RECEIVED,
     SC_BUS_MESSAGE_SENT,
+    SC_BUS_MESSAGE_CHUNK,
     SC_BUS_TOOL_CALL,
     SC_BUS_ERROR,
     SC_BUS_HEALTH_CHANGE,
+    SC_BUS_CRON_STARTED,
+    SC_BUS_CRON_COMPLETED,
     SC_BUS_EVENT_COUNT
 } sc_bus_event_type_t;
 

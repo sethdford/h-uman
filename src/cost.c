@@ -128,7 +128,8 @@ sc_budget_check_t sc_cost_check_budget(const sc_cost_tracker_t *t, double estima
     return SC_BUDGET_ALLOWED;
 }
 
-sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usage) {
+sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usage,
+                               uint64_t job_id) {
     if (!t || !usage)
         return SC_ERR_INVALID_ARGUMENT;
     if (!t->enabled)
@@ -162,6 +163,7 @@ sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usa
     rec->usage.model = rec->model_buf;
     strncpy(rec->session_id, "current", sizeof(rec->session_id) - 1);
     rec->session_id[sizeof(rec->session_id) - 1] = '\0';
+    rec->job_id = job_id;
     t->record_count++;
 
 #ifndef SC_IS_TEST
@@ -180,10 +182,10 @@ sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usa
         if (f) {
             fprintf(f,
                     "{\"model\":\"%s\",\"input_tokens\":%llu,\"output_tokens\":%llu,\"cost_usd\":%."
-                    "8f,\"timestamp\":%lld,\"session\":\"%s\"}\n",
+                    "8f,\"timestamp\":%lld,\"session\":\"%s\",\"job_id\":%llu}\n",
                     usage->model ? usage->model : "", (unsigned long long)usage->input_tokens,
                     (unsigned long long)usage->output_tokens, usage->cost_usd,
-                    (long long)usage->timestamp_secs, "current");
+                    (long long)usage->timestamp_secs, "current", (unsigned long long)job_id);
             fclose(f);
         }
     }
@@ -284,6 +286,7 @@ static sc_error_t parse_cost_line(sc_allocator_t *alloc, const char *line, size_
     const char *model = sc_json_get_string(root, "model");
     double cost = sc_json_get_number(root, "cost_usd", 0.0);
     double ts = sc_json_get_number(root, "timestamp", 0.0);
+    uint64_t job_id = (uint64_t)sc_json_get_number(root, "job_id", 0.0);
     uint64_t inp = (uint64_t)sc_json_get_number(root, "input_tokens", 0.0);
     uint64_t out_tok = (uint64_t)sc_json_get_number(root, "output_tokens", 0.0);
     uint64_t total = (uint64_t)sc_json_get_number(root, "tokens", 0.0);
@@ -299,6 +302,7 @@ static sc_error_t parse_cost_line(sc_allocator_t *alloc, const char *line, size_
     out->usage.timestamp_secs = (int64_t)ts;
     strncpy(out->session_id, "history", sizeof(out->session_id) - 1);
     out->session_id[sizeof(out->session_id) - 1] = '\0';
+    out->job_id = job_id;
 
     sc_json_free(alloc, root);
     return SC_OK;

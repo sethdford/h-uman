@@ -649,7 +649,7 @@ export class ScApp extends LitElement {
       case "channels":
         return html`<sc-channels-view></sc-channels-view>`;
       case "automations":
-        return html`<sc-cron-view></sc-cron-view>`;
+        return html`<sc-automations-view></sc-automations-view>`;
       case "skills":
         return html`<sc-skills-view></sc-skills-view>`;
       case "voice":

@@ -73,6 +73,7 @@ typedef struct sc_cost_record {
     sc_cost_entry_t usage;
     char model_buf[64];
     char session_id[64];
+    uint64_t job_id; /* 0 = interactive, >0 = automation/cron job ID */
 } sc_cost_record_t;
 
 typedef struct sc_cost_tracker {
@@ -101,8 +102,9 @@ void sc_cost_tracker_deinit(sc_cost_tracker_t *t);
 sc_budget_check_t sc_cost_check_budget(const sc_cost_tracker_t *t, double estimated_cost_usd,
                                        sc_budget_info_t *info_out);
 
-/* Record usage. Persists to JSONL if path set. */
-sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usage);
+/* Record usage. Persists to JSONL if path set. job_id: 0 = interactive, >0 = automation/cron. */
+sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usage,
+                               uint64_t job_id);
 
 /* Session cost (in-memory). */
 double sc_cost_session_total(const sc_cost_tracker_t *t);

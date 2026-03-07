@@ -86,11 +86,11 @@ test.describe("SeaClaw Control UI", () => {
     await expect(view).toBeAttached({ timeout: 5000 });
   });
 
-  test("hash navigation loads cron view", async ({ page }) => {
-    await page.goto("/#cron");
-    await page.waitForTimeout(500);
-    const view = page.locator("sc-app >> sc-cron-view");
-    await expect(view).toBeAttached({ timeout: 5000 });
+  test("hash navigation loads automations view", async ({ page }) => {
+    await page.goto("/#automations");
+    await page.waitForTimeout(800);
+    const view = page.locator("sc-app >> sc-automations-view");
+    await expect(view).toBeAttached({ timeout: 8000 });
   });
 
   test("hash navigation loads voice view", async ({ page }) => {

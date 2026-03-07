@@ -1,6 +1,8 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
 import { icons } from "../icons.js";
+import "./sc-file-preview.js";
+import type { FilePreviewItem } from "./sc-file-preview.js";
 
 const SUGGESTIONS = [
   "Explain how this project is architected",
@@ -180,6 +182,7 @@ export class ScComposer extends LitElement {
   @property({ type: String }) placeholder = "Type a message...";
 
   @state() private _dragOver = false;
+  @state() private _attachedFiles: FilePreviewItem[] = [];
 
   @query("#composer-textarea") private _textarea!: HTMLTextAreaElement;
   @query("#file-input") private _fileInput!: HTMLInputElement;
@@ -211,8 +214,14 @@ export class ScComposer extends LitElement {
   private _emitSend(): void {
     const msg = this.value.trim();
     if (!msg || this.waiting || this.disabled) return;
+    const files = [...this._attachedFiles];
+    this._attachedFiles = [];
     this.dispatchEvent(
-      new CustomEvent("sc-send", { bubbles: true, composed: true, detail: { message: msg } }),
+      new CustomEvent("sc-send", {
+        bubbles: true,
+        composed: true,
+        detail: { message: msg, files },
+      }),
     );
   }
 
@@ -221,15 +230,35 @@ export class ScComposer extends LitElement {
     this._fileInput?.click();
   }
 
+  private async _processFiles(files: File[]): Promise<void> {
+    for (const file of files) {
+      const item: FilePreviewItem = {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      };
+      if (file.type.startsWith("image/")) {
+        try {
+          item.dataUrl = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result as string);
+            r.onerror = reject;
+            r.readAsDataURL(file);
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+      this._attachedFiles = [...this._attachedFiles, item];
+    }
+    this.requestUpdate();
+  }
+
   private _handleFileChange(e: Event): void {
     const input = e.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     input.value = "";
-    if (files.length > 0) {
-      this.dispatchEvent(
-        new CustomEvent("sc-files", { bubbles: true, composed: true, detail: { files } }),
-      );
-    }
+    if (files.length > 0) this._processFiles(files);
   }
 
   private _handleDragOver(e: DragEvent): void {
@@ -245,10 +274,13 @@ export class ScComposer extends LitElement {
     e.preventDefault();
     this._dragOver = false;
     const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length > 0) {
-      this.dispatchEvent(
-        new CustomEvent("sc-files", { bubbles: true, composed: true, detail: { files } }),
-      );
+    if (files.length > 0) this._processFiles(files);
+  }
+
+  private _handleFileRemove(e: CustomEvent<{ index: number }>): void {
+    const idx = e.detail.index;
+    if (idx >= 0 && idx < this._attachedFiles.length) {
+      this._attachedFiles = this._attachedFiles.filter((_, i) => i !== idx);
     }
   }
 
@@ -279,6 +311,14 @@ export class ScComposer extends LitElement {
         @dragleave=${this._handleDragLeave}
         @drop=${this._handleDrop}
       >
+        ${this._attachedFiles.length > 0
+          ? html`
+              <sc-file-preview
+                .files=${this._attachedFiles}
+                @sc-file-remove=${this._handleFileRemove}
+              ></sc-file-preview>
+            `
+          : nothing}
         <div class="input-bar">
           <textarea
             id="composer-textarea"

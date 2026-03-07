@@ -57,6 +57,8 @@ sc_error_t sc_cron_remove_job(sc_cron_scheduler_t *sched, uint64_t job_id);
 sc_error_t sc_cron_update_job(sc_cron_scheduler_t *sched, sc_allocator_t *alloc, uint64_t job_id,
                               const char *expression, const char *command, const bool *enabled);
 
+sc_error_t sc_cron_set_job_one_shot(sc_cron_scheduler_t *sched, uint64_t job_id, bool one_shot);
+
 const sc_cron_job_t *sc_cron_get_job(const sc_cron_scheduler_t *sched, uint64_t job_id);
 const sc_cron_job_t *sc_cron_list_jobs(const sc_cron_scheduler_t *sched, size_t *count);
 

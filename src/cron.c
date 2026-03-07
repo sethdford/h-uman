@@ -222,6 +222,18 @@ sc_error_t sc_cron_update_job(sc_cron_scheduler_t *sched, sc_allocator_t *alloc,
     return SC_OK;
 }
 
+sc_error_t sc_cron_set_job_one_shot(sc_cron_scheduler_t *sched, uint64_t job_id, bool one_shot) {
+    if (!sched)
+        return SC_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < sched->jobs_len; i++) {
+        if (sched->jobs[i].id == job_id) {
+            sched->jobs[i].one_shot = one_shot;
+            return SC_OK;
+        }
+    }
+    return SC_ERR_NOT_FOUND;
+}
+
 const sc_cron_job_t *sc_cron_get_job(const sc_cron_scheduler_t *sched, uint64_t job_id) {
     if (!sched)
         return NULL;

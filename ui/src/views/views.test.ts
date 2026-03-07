@@ -9,7 +9,7 @@ import "./models-view.js";
 import "./config-view.js";
 import "./tools-view.js";
 import "./channels-view.js";
-import "./cron-view.js";
+import "./automations-view.js";
 import "./skills-view.js";
 import "./voice-view.js";
 import "./nodes-view.js";
@@ -26,7 +26,7 @@ const VIEW_TAGS = [
   "sc-config-view",
   "sc-tools-view",
   "sc-channels-view",
-  "sc-cron-view",
+  "sc-automations-view",
   "sc-skills-view",
   "sc-voice-view",
   "sc-nodes-view",

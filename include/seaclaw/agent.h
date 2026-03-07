@@ -144,6 +144,9 @@ struct sc_agent {
     const char *active_channel;
     size_t active_channel_len;
 
+    /* Set by cron dispatch before turn; used for per-automation cost tracking. 0 = interactive. */
+    uint64_t active_job_id;
+
     char trace_id[37]; /* UUID v4 hex string + NUL, regenerated per conversation turn */
 
 #ifdef SC_HAS_PERSONA

@@ -627,6 +627,21 @@ static void test_cron_job_one_shot_field(void) {
     sc_cron_destroy(s, &alloc);
 }
 
+static void test_cron_set_job_one_shot(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_cron_scheduler_t *s = sc_cron_create(&alloc, 100, true);
+    uint64_t id = 0;
+    sc_cron_add_job(s, &alloc, "* * * * *", "x", NULL, &id);
+    SC_ASSERT_EQ(sc_cron_set_job_one_shot(s, id, true), SC_OK);
+    const sc_cron_job_t *job = sc_cron_get_job(s, id);
+    SC_ASSERT_TRUE(job->one_shot);
+    SC_ASSERT_EQ(sc_cron_set_job_one_shot(s, id, false), SC_OK);
+    job = sc_cron_get_job(s, id);
+    SC_ASSERT_FALSE(job->one_shot);
+    SC_ASSERT_EQ(sc_cron_set_job_one_shot(s, 99999, true), SC_ERR_NOT_FOUND);
+    sc_cron_destroy(s, &alloc);
+}
+
 static void test_crontab_add_null_path(void) {
     sc_allocator_t alloc = sc_system_allocator();
     char *id = NULL;
@@ -682,6 +697,7 @@ void run_cron_tests(void) {
     SC_RUN_TEST(test_crontab_remove);
     SC_RUN_TEST(test_cron_job_paused_field);
     SC_RUN_TEST(test_cron_job_one_shot_field);
+    SC_RUN_TEST(test_cron_set_job_one_shot);
     SC_RUN_TEST(test_crontab_add_null_path);
     SC_RUN_TEST(test_crontab_load_null_args);
 }

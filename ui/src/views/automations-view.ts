@@ -22,10 +22,81 @@ interface CronJob {
   channel?: string;
   enabled: boolean;
   paused: boolean;
+  one_shot?: boolean;
   next_run: number;
   last_run: number;
   last_status?: string;
   created_at: number;
+}
+
+const TEMPLATES = [
+  {
+    name: "Daily Digest",
+    description: "Summarize yesterday's messages across all channels",
+    type: "agent" as const,
+    prompt:
+      "Summarize all messages I received yesterday across all channels. Highlight anything urgent or requiring my attention.",
+    expression: "0 8 * * *",
+    icon: "summary",
+  },
+  {
+    name: "Weekly Report",
+    description: "Generate a weekly activity summary every Friday",
+    type: "agent" as const,
+    prompt:
+      "Generate a comprehensive weekly report summarizing: conversations handled, tools used, tasks completed, and any recurring topics or issues from this week.",
+    expression: "0 17 * * 5",
+    icon: "report",
+  },
+  {
+    name: "Email Monitor",
+    description: "Check for urgent emails every hour during business hours",
+    type: "agent" as const,
+    prompt:
+      "Check my email for any urgent or time-sensitive messages. If you find any, summarize them and alert me.",
+    expression: "0 9-17 * * 1-5",
+    channel: "gmail",
+    icon: "email",
+  },
+  {
+    name: "Health Check",
+    description: "Verify all systems are healthy every 15 minutes",
+    type: "shell" as const,
+    command: "curl -sf http://localhost:3000/health || echo 'ALERT: Health check failed'",
+    expression: "*/15 * * * *",
+    icon: "health",
+  },
+  {
+    name: "Database Backup",
+    description: "Backup the database every night at midnight",
+    type: "shell" as const,
+    command: "sqlite3 ~/.seaclaw/memory.db '.backup ~/.seaclaw/backups/memory-$(date +%Y%m%d).db'",
+    expression: "0 0 * * *",
+    icon: "backup",
+  },
+];
+
+function cronToHuman(expr: string): string {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length < 5) return expr;
+  const [min, hour, dom, month, dow] = parts;
+  const every = (f: string, unit: string) =>
+    f === "*" ? `Every ${unit}` : f.startsWith("*/") ? `Every ${f.slice(2)} ${unit}s` : null;
+  if (min === "*" && hour === "*" && dom === "*" && month === "*" && dow === "*")
+    return "Every minute";
+  if (every(min, "minute")) return every(min, "minute")!;
+  if (every(hour, "hour") && min === "0") return every(hour, "hour")!;
+  if (hour !== "*" && !hour.startsWith("*/") && min === "0") {
+    const h = parseInt(hour, 10);
+    const ampm = h >= 12 ? (h === 12 ? "noon" : `${h - 12}pm`) : h === 0 ? "midnight" : `${h}am`;
+    if (dom === "*" && month === "*" && dow === "*") return `Daily at ${ampm}`;
+    if (dow !== "*" && dom === "*" && month === "*") {
+      const dayLabel = dow === "1-5" ? "Weekdays" : dow === "0,6" ? "Weekends" : `Days ${dow}`;
+      return `${dayLabel} at ${ampm}`;
+    }
+  }
+  if (dom !== "*" && month === "*" && hour === "0" && min === "0") return `Monthly on day ${dom}`;
+  return expr;
 }
 
 interface CronRun {
@@ -213,6 +284,54 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       font-family: var(--sc-font-mono) !important;
     }
 
+    .mode-toggle {
+      display: flex;
+      gap: var(--sc-space-xs);
+    }
+
+    .templates-section {
+      margin-bottom: var(--sc-space-xl);
+    }
+
+    .templates-section h3 {
+      margin: 0 0 var(--sc-space-md);
+      font-size: var(--sc-text-lg);
+      font-weight: var(--sc-weight-semibold);
+      color: var(--sc-text);
+    }
+
+    .templates-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: var(--sc-space-md);
+    }
+
+    .template-card .template-name {
+      font-size: var(--sc-text-base);
+      font-weight: var(--sc-weight-medium);
+      color: var(--sc-text);
+      margin-bottom: var(--sc-space-xs);
+    }
+
+    .template-card .template-desc {
+      font-size: var(--sc-text-sm);
+      color: var(--sc-text-muted);
+      margin-bottom: var(--sc-space-xs);
+    }
+
+    .template-card .template-schedule {
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-faint);
+    }
+
+    .run-once-message {
+      font-size: var(--sc-text-sm);
+      color: var(--sc-text-muted);
+      padding: var(--sc-space-sm);
+      background: var(--sc-bg-elevated);
+      border-radius: var(--sc-radius);
+    }
+
     @media (max-width: 640px) {
       .stats-bar {
         flex-direction: column;
@@ -248,6 +367,8 @@ export class ScAutomationsView extends GatewayAwareLitElement {
   @state() private shellSchedule = "";
   @state() private shellName = "";
   @state() private formError = "";
+  @state() private agentOneShot = false;
+  @state() private shellOneShot = false;
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -259,19 +380,21 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       this.jobs = Array.isArray(jobs) ? jobs : [];
 
       const runs = new Map<number, CronRun[]>();
-      for (const job of this.jobs) {
-        if (job.id == null) continue;
-        try {
-          const runsRes = await gw.request<{ runs?: CronRun[] }>("cron.runs", {
-            id: job.id,
-            limit: 7,
-          });
-          const jobRuns = runsRes?.runs ?? [];
-          runs.set(job.id, Array.isArray(jobRuns) ? jobRuns : []);
-        } catch {
-          runs.set(job.id, []);
-        }
-      }
+      const runPromises = this.jobs
+        .filter((job) => job.id != null)
+        .map(async (job) => {
+          try {
+            const runsRes = await gw.request<{ runs?: CronRun[] }>("cron.runs", {
+              id: job.id,
+              limit: 7,
+            });
+            const jobRuns = runsRes?.runs ?? [];
+            runs.set(job.id, Array.isArray(jobRuns) ? jobRuns : []);
+          } catch {
+            runs.set(job.id, []);
+          }
+        });
+      await Promise.all(runPromises);
       this.runsMap = runs;
 
       try {
@@ -332,9 +455,11 @@ export class ScAutomationsView extends GatewayAwareLitElement {
     this.agentChannel = "";
     this.agentSchedule = "0 8 * * *";
     this.agentName = "";
+    this.agentOneShot = false;
     this.shellCommand = "";
     this.shellSchedule = "0 8 * * *";
     this.shellName = "";
+    this.shellOneShot = false;
     this.formError = "";
   }
 
@@ -361,11 +486,32 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       this.agentPrompt = job.command ?? "";
       this.agentChannel = job.channel ?? "";
       this.agentSchedule = job.expression ?? "0 8 * * *";
+      this.agentOneShot = job.one_shot ?? false;
       this.showAgentModal = true;
     } else {
       this.shellName = job.name ?? "";
       this.shellCommand = job.command ?? "";
       this.shellSchedule = job.expression ?? "0 8 * * *";
+      this.shellOneShot = job.one_shot ?? false;
+      this.showShellModal = true;
+    }
+  }
+
+  private _useTemplate(t: (typeof TEMPLATES)[number]): void {
+    this.editingJob = null;
+    this.formError = "";
+    if (t.type === "agent") {
+      this.agentName = t.name;
+      this.agentPrompt = t.prompt;
+      this.agentChannel = (t as { channel?: string }).channel ?? "";
+      this.agentSchedule = t.expression;
+      this.agentOneShot = false;
+      this.showAgentModal = true;
+    } else {
+      this.shellName = t.name;
+      this.shellCommand = t.command;
+      this.shellSchedule = t.expression;
+      this.shellOneShot = false;
       this.showShellModal = true;
     }
   }
@@ -421,12 +567,13 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   private async _saveAgent(): Promise<void> {
     const prompt = this.agentPrompt.trim();
-    const schedule = this.agentSchedule.trim();
+    const oneShot = this.agentOneShot;
+    const schedule = oneShot ? "0 0 1 1 *" : this.agentSchedule.trim();
     if (!prompt) {
       this.formError = "Prompt is required";
       return;
     }
-    if (!schedule) {
+    if (!oneShot && !schedule) {
       this.formError = "Schedule is required";
       return;
     }
@@ -442,14 +589,18 @@ export class ScAutomationsView extends GatewayAwareLitElement {
         });
         ScToast.show({ message: "Automation updated", variant: "success" });
       } else {
-        await gw.request("cron.add", {
+        const res = await gw.request<{ id?: number }>("cron.add", {
           type: "agent",
           prompt,
           channel: this.agentChannel || undefined,
           expression: schedule,
           name: this.agentName.trim() || "Agent task",
+          one_shot: oneShot,
         });
         ScToast.show({ message: "Automation created", variant: "success" });
+        if (oneShot && res?.id != null) {
+          await gw.request("cron.run", { id: res.id });
+        }
       }
       this._closeAgentModal();
       this.load();
@@ -460,12 +611,13 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   private async _saveShell(): Promise<void> {
     const cmd = this.shellCommand.trim();
-    const schedule = this.shellSchedule.trim();
+    const oneShot = this.shellOneShot;
+    const schedule = oneShot ? "0 0 1 1 *" : this.shellSchedule.trim();
     if (!cmd) {
       this.formError = "Command is required";
       return;
     }
-    if (!schedule) {
+    if (!oneShot && !schedule) {
       this.formError = "Schedule is required";
       return;
     }
@@ -481,12 +633,16 @@ export class ScAutomationsView extends GatewayAwareLitElement {
         });
         ScToast.show({ message: "Shell job updated", variant: "success" });
       } else {
-        await gw.request("cron.add", {
+        const res = await gw.request<{ id?: number }>("cron.add", {
           expression: schedule,
           command: cmd,
           name: this.shellName.trim() || cmd,
+          one_shot: oneShot,
         });
         ScToast.show({ message: "Shell job created", variant: "success" });
+        if (oneShot && res?.id != null) {
+          await gw.request("cron.run", { id: res.id });
+        }
       }
       this._closeShellModal();
       this.load();
@@ -543,6 +699,22 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           `
         : this.filteredJobs.length === 0
           ? html`
+              <div class="templates-section">
+                <h3>Quick Start Templates</h3>
+                <div class="templates-grid">
+                  ${TEMPLATES.filter((t) => t.type === this.activeTab).map(
+                    (t) => html`
+                      <sc-card clickable @click=${() => this._useTemplate(t)}>
+                        <div class="template-card">
+                          <div class="template-name">${t.name}</div>
+                          <div class="template-desc">${t.description}</div>
+                          <div class="template-schedule">${cronToHuman(t.expression)}</div>
+                        </div>
+                      </sc-card>
+                    `,
+                  )}
+                </div>
+              </div>
               <sc-empty-state
                 .icon=${icons.timer}
                 heading=${this.activeTab === "agent" ? "No agent tasks" : "No shell jobs"}
@@ -596,6 +768,39 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           ></textarea>
         </div>
         <div class="form-group">
+          <label>Mode</label>
+          <div class="mode-toggle">
+            <sc-button
+              variant=${!this.agentOneShot ? "primary" : "secondary"}
+              @click=${() => (this.agentOneShot = false)}
+            >
+              Recurring
+            </sc-button>
+            <sc-button
+              variant=${this.agentOneShot ? "primary" : "secondary"}
+              @click=${() => (this.agentOneShot = true)}
+            >
+              Run Once
+            </sc-button>
+          </div>
+        </div>
+        ${this.agentOneShot
+          ? html`
+              <div class="form-group">
+                <div class="run-once-message">Run immediately on save</div>
+              </div>
+            `
+          : html`
+              <div class="form-group">
+                <label>Schedule</label>
+                <sc-schedule-builder
+                  .value=${this.agentSchedule}
+                  @sc-schedule-change=${(e: CustomEvent<{ value: string }>) =>
+                    (this.agentSchedule = e.detail.value)}
+                ></sc-schedule-builder>
+              </div>
+            `}
+        <div class="form-group">
           <label for="agent-channel">Channel</label>
           <select
             id="agent-channel"
@@ -605,18 +810,9 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           >
             <option value="">— Gateway (default) —</option>
             ${this.channels.map(
-              (ch) =>
-                html`<option value=${ch.name} ?disabled=${!ch.configured}>${ch.name}</option>`,
+              (ch) => html`<option value=${ch.key} ?disabled=${!ch.configured}>${ch.name}</option>`,
             )}
           </select>
-        </div>
-        <div class="form-group">
-          <label>Schedule</label>
-          <sc-schedule-builder
-            .value=${this.agentSchedule}
-            @sc-schedule-change=${(e: CustomEvent<{ value: string }>) =>
-              (this.agentSchedule = e.detail.value)}
-          ></sc-schedule-builder>
         </div>
         ${this.formError ? html`<p class="form-error">${this.formError}</p>` : nothing}
         <div class="modal-footer">
@@ -647,13 +843,38 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           ></sc-input>
         </div>
         <div class="form-group">
-          <label>Schedule</label>
-          <sc-schedule-builder
-            .value=${this.shellSchedule}
-            @sc-schedule-change=${(e: CustomEvent<{ value: string }>) =>
-              (this.shellSchedule = e.detail.value)}
-          ></sc-schedule-builder>
+          <label>Mode</label>
+          <div class="mode-toggle">
+            <sc-button
+              variant=${!this.shellOneShot ? "primary" : "secondary"}
+              @click=${() => (this.shellOneShot = false)}
+            >
+              Recurring
+            </sc-button>
+            <sc-button
+              variant=${this.shellOneShot ? "primary" : "secondary"}
+              @click=${() => (this.shellOneShot = true)}
+            >
+              Run Once
+            </sc-button>
+          </div>
         </div>
+        ${this.shellOneShot
+          ? html`
+              <div class="form-group">
+                <div class="run-once-message">Run immediately on save</div>
+              </div>
+            `
+          : html`
+              <div class="form-group">
+                <label>Schedule</label>
+                <sc-schedule-builder
+                  .value=${this.shellSchedule}
+                  @sc-schedule-change=${(e: CustomEvent<{ value: string }>) =>
+                    (this.shellSchedule = e.detail.value)}
+                ></sc-schedule-builder>
+              </div>
+            `}
         ${this.formError ? html`<p class="form-error">${this.formError}</p>` : nothing}
         <div class="modal-footer">
           <sc-button variant="secondary" @click=${this._closeShellModal}>Cancel</sc-button>

@@ -39,7 +39,10 @@ export class ScCodeBlock extends LitElement {
   @state() private _highlighted = "";
   @state() private _copied = false;
   @state() private _shikiReady = false;
+  @state() private _darkScheme = true;
   private _copyTimeout = 0;
+  private _mediaQuery: MediaQueryList | null = null;
+  private _mediaHandler: (() => void) | null = null;
 
   static override styles = css`
     :host {
@@ -125,11 +128,23 @@ export class ScCodeBlock extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this._darkScheme = window.matchMedia("(prefers-color-scheme: dark)").matches;
     this._highlight();
+    this._mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    this._mediaHandler = () => {
+      this._darkScheme = this._mediaQuery?.matches ?? true;
+      this._highlight();
+    };
+    this._mediaQuery?.addEventListener("change", this._mediaHandler);
   }
 
   override disconnectedCallback(): void {
     clearTimeout(this._copyTimeout);
+    if (this._mediaQuery && this._mediaHandler) {
+      this._mediaQuery.removeEventListener("change", this._mediaHandler);
+    }
+    this._mediaQuery = null;
+    this._mediaHandler = null;
     super.disconnectedCallback();
   }
 
@@ -149,9 +164,10 @@ export class ScCodeBlock extends LitElement {
     }
     try {
       const { codeToHtml } = await import("shiki");
+      const theme = this._darkScheme ? "github-dark-default" : "github-light-default";
       const html = await codeToHtml(this.code, {
         lang,
-        theme: "github-dark-default",
+        theme,
       });
       this._highlighted = html;
     } catch {

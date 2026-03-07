@@ -238,6 +238,7 @@ sc_error_t sc_service_run_agent_cron(sc_allocator_t *alloc, sc_agent_t *agent,
             agent->active_channel = target_channel;
             agent->active_channel_len = strlen(target_channel);
         }
+        agent->active_job_id = jobs[i].id;
 
         char *response = NULL;
         size_t response_len = 0;
@@ -250,6 +251,7 @@ sc_error_t sc_service_run_agent_cron(sc_allocator_t *alloc, sc_agent_t *agent,
         response_len = 17;
 #endif
 
+        agent->active_job_id = 0;
         if (err == SC_OK && response && response_len > 0 && target_channel && channels) {
             for (size_t c = 0; c < channel_count; c++) {
                 if (!channels[c].channel || !channels[c].channel->vtable ||

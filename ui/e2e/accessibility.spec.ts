@@ -18,7 +18,7 @@ const VIEWS = [
   { path: "/#config", name: "Config" },
   { path: "/#tools", name: "Tools" },
   { path: "/#channels", name: "Channels" },
-  { path: "/#cron", name: "Cron" },
+  { path: "/#automations", name: "Automations" },
   { path: "/#skills", name: "Skills" },
   { path: "/#voice", name: "Voice" },
   { path: "/#nodes", name: "Nodes" },

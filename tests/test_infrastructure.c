@@ -79,7 +79,7 @@ static void test_cost_tracker_record_and_summary(void) {
 
     sc_cost_entry_t u;
     sc_token_usage_init(&u, "model", 1000, 500, 1.0, 2.0);
-    err = sc_cost_record_usage(&t, &u);
+    err = sc_cost_record_usage(&t, &u, 0);
     SC_ASSERT_EQ(err, SC_OK);
 
     sc_cost_summary_t summary;
@@ -160,7 +160,7 @@ static void test_cost_session_total_single(void) {
     sc_cost_tracker_init(&t, &alloc, "/tmp", true, 10.0, 100.0, 80);
     sc_cost_entry_t u;
     sc_token_usage_init(&u, "m", 1000, 500, 1.0, 2.0);
-    sc_cost_record_usage(&t, &u);
+    sc_cost_record_usage(&t, &u, 0);
     double total = sc_cost_session_total(&t);
     SC_ASSERT(total > 0.0);
     sc_cost_tracker_deinit(&t);
@@ -173,8 +173,8 @@ static void test_cost_session_tokens_accumulation(void) {
     sc_cost_entry_t u1, u2;
     sc_token_usage_init(&u1, "m", 100, 50, 0, 0);
     sc_token_usage_init(&u2, "m", 200, 100, 0, 0);
-    sc_cost_record_usage(&t, &u1);
-    sc_cost_record_usage(&t, &u2);
+    sc_cost_record_usage(&t, &u1, 0);
+    sc_cost_record_usage(&t, &u2, 0);
     SC_ASSERT_EQ(sc_cost_session_tokens(&t), 450u);
     sc_cost_tracker_deinit(&t);
 }
@@ -186,8 +186,8 @@ static void test_cost_request_count(void) {
     SC_ASSERT_EQ(sc_cost_request_count(&t), 0u);
     sc_cost_entry_t u;
     sc_token_usage_init(&u, "m", 1, 1, 0, 0);
-    sc_cost_record_usage(&t, &u);
-    sc_cost_record_usage(&t, &u);
+    sc_cost_record_usage(&t, &u, 0);
+    sc_cost_record_usage(&t, &u, 0);
     SC_ASSERT_EQ(sc_cost_request_count(&t), 2u);
     sc_cost_tracker_deinit(&t);
 }
@@ -210,7 +210,7 @@ static void test_cost_budget_warning_threshold(void) {
     sc_cost_tracker_init(&t, &alloc, "/tmp", true, 20.0, 200.0, 80);
     sc_cost_entry_t u;
     sc_token_usage_init(&u, "m", 10000000, 10000000, 1.0, 2.0);
-    sc_cost_record_usage(&t, &u);
+    sc_cost_record_usage(&t, &u, 0);
     sc_budget_info_t info;
     sc_budget_check_t check = sc_cost_check_budget(&t, 1.0, &info);
     SC_ASSERT(check == SC_BUDGET_WARNING || check == SC_BUDGET_EXCEEDED);

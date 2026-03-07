@@ -120,7 +120,44 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: var(--sc-space-2xl) 0 var(--sc-space-xl);
+      padding: var(--sc-space-2xl) 0 calc(var(--sc-space-2xl, 2rem) * 1.5);
+      position: relative;
+    }
+
+    .mic-orb-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -60%);
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--sc-accent-subtle) 0%, transparent 70%);
+      opacity: 0.4;
+      pointer-events: none;
+      transition: opacity var(--sc-duration-normal) var(--sc-ease-out);
+    }
+
+    .mic-orb-glow.active {
+      opacity: 0.8;
+      animation: sc-glow-breathe 3s ease-in-out infinite;
+    }
+
+    @keyframes sc-glow-breathe {
+      0%,
+      100% {
+        opacity: 0.6;
+        transform: translate(-50%, -60%) scale(1);
+      }
+      50% {
+        opacity: 1;
+        transform: translate(-50%, -60%) scale(1.1);
+      }
+    }
+
+    .mic-btn-wrap {
+      position: relative;
+      z-index: 1;
     }
 
     .mic-btn {
@@ -129,27 +166,47 @@ export class ScVoiceView extends GatewayAwareLitElement {
       border-radius: 50%;
       border: 2px solid var(--sc-border);
       background: var(--sc-bg-surface);
+      background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.08) 0%,
+        rgba(0, 0, 0, 0.04) 100%
+      );
       color: var(--sc-text-muted);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
+      box-shadow:
+        var(--sc-shadow-card),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.06);
       transition:
         background var(--sc-duration-fast) var(--sc-ease-out),
         border-color var(--sc-duration-fast) var(--sc-ease-out),
-        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+        box-shadow var(--sc-duration-normal) var(--sc-ease-out),
+        transform var(--sc-duration-fast) var(--sc-ease-out);
     }
 
     .mic-btn svg {
       width: 2.5rem;
       height: 2.5rem;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
     }
 
     .mic-btn:hover:not(:disabled) {
       background: var(--sc-bg-elevated);
       border-color: var(--sc-accent);
       color: var(--sc-accent-text, var(--sc-accent));
+      box-shadow:
+        var(--sc-shadow-md),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+      transform: translateY(-2px);
+    }
+
+    .mic-btn:active:not(:disabled) {
+      transform: translateY(1px) scaleY(0.97) scaleX(1.01);
     }
 
     .mic-btn:focus-visible {
@@ -164,33 +221,68 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
     .mic-btn.active {
       background: var(--sc-accent);
+      background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.25) 0%,
+        rgba(0, 0, 0, 0.12) 100%
+      );
       border-color: var(--sc-accent);
       color: var(--sc-on-accent, #fff);
-      box-shadow: 0 0 0 0 var(--sc-accent-subtle);
-      animation: sc-pulse-ring var(--sc-duration-slow) ease-in-out infinite;
+      box-shadow:
+        0 4px 20px rgba(122, 182, 72, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+      transform: translateY(-1px);
     }
 
-    @keyframes sc-pulse-ring {
+    .mic-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      border: 2px solid var(--sc-accent);
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .mic-ring.active {
+      animation: sc-ring-expand 2s ease-out infinite;
+    }
+
+    .mic-ring.ring-2.active {
+      animation-delay: 0.6s;
+    }
+
+    .mic-ring.ring-3.active {
+      animation-delay: 1.2s;
+    }
+
+    @keyframes sc-ring-expand {
       0% {
-        box-shadow: 0 0 0 0 var(--sc-accent-subtle);
-      }
-      50% {
-        box-shadow: 0 0 0 20px transparent;
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.6;
       }
       100% {
-        box-shadow: 0 0 0 0 var(--sc-accent-subtle);
+        transform: translate(-50%, -50%) scale(2.2);
+        opacity: 0;
       }
     }
 
     .voice-status {
-      margin-top: var(--sc-space-md);
+      margin-top: var(--sc-space-lg);
       font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
+      position: relative;
+      z-index: 1;
     }
 
     .voice-status.listening,
     .voice-status.processing {
       color: var(--sc-accent-text, var(--sc-accent));
+      font-weight: var(--sc-weight-medium);
     }
 
     /* ── Input bar ────────────────────────────────────── */
@@ -201,9 +293,18 @@ export class ScVoiceView extends GatewayAwareLitElement {
       align-items: flex-end;
       padding: var(--sc-space-md);
       background: var(--sc-bg-surface);
+      background-image: var(
+        --sc-surface-gradient,
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%)
+      );
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
       margin-bottom: var(--sc-space-xl);
+      box-shadow:
+        var(--sc-shadow-card),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
+      -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
     }
 
     .input-bar textarea {
@@ -220,6 +321,9 @@ export class ScVoiceView extends GatewayAwareLitElement {
       resize: none;
       line-height: 1.5;
       box-sizing: border-box;
+      transition:
+        border-color var(--sc-duration-fast) var(--sc-ease-out),
+        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
     }
 
     .input-bar textarea:focus {
@@ -236,16 +340,46 @@ export class ScVoiceView extends GatewayAwareLitElement {
       padding: var(--sc-space-sm) var(--sc-space-lg);
       min-height: 44px;
       background: var(--sc-accent);
-      color: var(--sc-bg);
+      background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.2) 0%,
+        rgba(0, 0, 0, 0.1) 100%
+      );
+      color: var(--sc-on-accent, var(--sc-bg));
       border: none;
       border-radius: var(--sc-radius);
-      font-weight: var(--sc-weight-medium);
+      font-weight: var(--sc-weight-semibold, 600);
       cursor: pointer;
       font-size: var(--sc-text-base);
+      box-shadow:
+        0 2px 8px rgba(122, 182, 72, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+      transition:
+        background var(--sc-duration-fast) var(--sc-ease-out),
+        box-shadow var(--sc-duration-fast) var(--sc-ease-out),
+        transform var(--sc-duration-fast) var(--sc-ease-out);
     }
 
     .send-btn:hover:not(:disabled) {
       background: var(--sc-accent-hover);
+      background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.25) 0%,
+        rgba(0, 0, 0, 0.08) 100%
+      );
+      box-shadow:
+        0 4px 16px rgba(122, 182, 72, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+      transform: translateY(-1px);
+    }
+
+    .send-btn:active:not(:disabled) {
+      transform: translateY(1px) scaleY(0.97) scaleX(1.01);
+      box-shadow:
+        0 1px 4px rgba(122, 182, 72, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
     }
 
     .send-btn:disabled {
@@ -260,24 +394,43 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
     /* ── Conversation zone ────────────────────────────── */
 
+    @keyframes sc-slide-up {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
     .conversation {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-md);
-      max-height: 400px;
+      max-height: 420px;
       overflow-y: auto;
-      padding: var(--sc-space-md);
+      padding: var(--sc-space-lg);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
       background: var(--sc-bg-surface);
+      background-image: var(
+        --sc-surface-gradient,
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%)
+      );
+      box-shadow:
+        var(--sc-shadow-card),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      scroll-behavior: smooth;
     }
 
     .msg {
       max-width: 85%;
-      padding: var(--sc-space-md);
-      border-radius: var(--sc-radius);
+      padding: var(--sc-space-md) var(--sc-space-lg);
+      border-radius: var(--sc-radius-lg);
       font-size: var(--sc-text-base);
-      line-height: 1.5;
+      line-height: 1.6;
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xs);
@@ -288,14 +441,28 @@ export class ScVoiceView extends GatewayAwareLitElement {
     .msg.user {
       align-self: flex-end;
       background: var(--sc-accent);
-      color: var(--sc-bg);
+      background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.15) 0%,
+        rgba(0, 0, 0, 0.08) 100%
+      );
+      color: var(--sc-on-accent, var(--sc-bg));
+      box-shadow:
+        0 2px 8px rgba(122, 182, 72, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      border-bottom-right-radius: var(--sc-radius-sm, 4px);
     }
 
     .msg.assistant {
       align-self: flex-start;
       background: var(--sc-bg-elevated);
+      background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, transparent 100%);
       border: 1px solid var(--sc-border);
       color: var(--sc-text);
+      box-shadow:
+        var(--sc-shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.05)),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      border-bottom-left-radius: var(--sc-radius-sm, 4px);
     }
 
     .msg-meta {
@@ -316,13 +483,30 @@ export class ScVoiceView extends GatewayAwareLitElement {
       font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
       font-style: italic;
+      animation: sc-slide-up var(--sc-duration-normal) var(--sc-ease-out) both;
     }
 
     .empty-conversation {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sc-space-md);
+      padding: var(--sc-space-2xl, 2rem) var(--sc-space-lg);
       text-align: center;
-      padding: var(--sc-space-xl) 0;
+    }
+
+    .empty-icon {
+      width: 48px;
+      height: 48px;
+      color: var(--sc-text-muted);
+      opacity: 0.3;
+    }
+
+    .empty-text {
       color: var(--sc-text-muted);
       font-size: var(--sc-text-sm);
+      max-width: 280px;
+      line-height: 1.6;
     }
 
     /* ── Skeleton ─────────────────────────────────────── */
@@ -656,16 +840,23 @@ export class ScVoiceView extends GatewayAwareLitElement {
   }
 
   private _renderVoiceZone() {
+    const isActive = this.voiceStatus === "listening";
     return html`
       <div class="voice-zone">
-        <button
-          class="mic-btn ${this.voiceStatus === "listening" ? "active" : ""}"
-          ?disabled=${!this.speechSupported || this._connectionStatus === "disconnected"}
-          @click=${this.toggleMic}
-          aria-label=${this.voiceStatus === "listening" ? "Stop listening" : "Start listening"}
-        >
-          ${icons.mic}
-        </button>
+        <div class="mic-orb-glow ${isActive ? "active" : ""}"></div>
+        <div class="mic-btn-wrap">
+          <div class="mic-ring ${isActive ? "active" : ""}"></div>
+          <div class="mic-ring ring-2 ${isActive ? "active" : ""}"></div>
+          <div class="mic-ring ring-3 ${isActive ? "active" : ""}"></div>
+          <button
+            class="mic-btn ${isActive ? "active" : ""}"
+            ?disabled=${!this.speechSupported || this._connectionStatus === "disconnected"}
+            @click=${this.toggleMic}
+            aria-label=${isActive ? "Stop listening" : "Start listening"}
+          >
+            ${icons.mic}
+          </button>
+        </div>
         <div class="voice-status ${this.voiceStatus}" aria-live="polite">${this.statusText}</div>
       </div>
     `;
@@ -703,7 +894,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
       return html`
         <div class="conversation">
           <div class="empty-conversation">
-            Your voice conversation will appear here. Speak or type a message to begin.
+            <div class="empty-icon">${icons.mic}</div>
+            <div class="empty-text">
+              Your voice conversation will appear here.<br />
+              Tap the microphone or type a message to begin.
+            </div>
           </div>
         </div>
       `;

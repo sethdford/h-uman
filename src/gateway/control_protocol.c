@@ -686,6 +686,8 @@ static sc_error_t handle_cron_list(sc_allocator_t *alloc, const sc_app_context_t
             json_set_str(alloc, j, "last_status", jobs[i].last_status);
             sc_json_object_set(alloc, j, "paused",
                                sc_json_bool_new(alloc, jobs[i].paused));
+            sc_json_object_set(alloc, j, "one_shot",
+                               sc_json_bool_new(alloc, jobs[i].one_shot));
             sc_json_object_set(alloc, j, "created_at",
                                sc_json_number_new(alloc, (double)jobs[i].created_at_s));
             sc_json_array_push(alloc, arr, j);
@@ -714,15 +716,20 @@ static sc_error_t handle_cron_add(sc_allocator_t *alloc, sc_app_context_t *app,
             const char *type_str = sc_json_get_string(params, "type");
             const char *prompt = sc_json_get_string(params, "prompt");
             const char *channel = sc_json_get_string(params, "channel");
+            bool one_shot = sc_json_get_bool(params, "one_shot", false);
             if (expr && type_str && strcmp(type_str, "agent") == 0 && prompt) {
                 sc_error_t e = sc_cron_add_agent_job(app->cron, app->alloc, expr, prompt,
                                                      channel, name ? name : "Agent task", &new_id);
                 added = (e == SC_OK);
+                if (added && one_shot)
+                    sc_cron_set_job_one_shot(app->cron, new_id, true);
             } else if (expr && cmd) {
                 sc_error_t e =
                     sc_cron_add_job(app->cron, app->alloc, expr, cmd, name ? name : cmd, &new_id);
                 added = (e == SC_OK);
                 if (added) {
+                    if (one_shot)
+                        sc_cron_set_job_one_shot(app->cron, new_id, true);
                     char *cron_path = NULL;
                     size_t cron_path_len = 0;
                     if (sc_crontab_get_path(app->alloc, &cron_path, &cron_path_len) == SC_OK) {
@@ -803,6 +810,15 @@ static sc_error_t handle_cron_run(sc_allocator_t *alloc, sc_app_context_t *app,
                 if (job && job->command) {
                     sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL), "running",
                                     NULL);
+                    if (app->bus) {
+                        sc_bus_event_t bev;
+                        memset(&bev, 0, sizeof(bev));
+                        bev.type = SC_BUS_CRON_STARTED;
+                        snprintf(bev.channel, SC_BUS_CHANNEL_LEN, "cron");
+                        snprintf(bev.id, SC_BUS_ID_LEN, "%llu", (unsigned long long)job_id);
+                        snprintf(bev.message, SC_BUS_MSG_LEN, "%s", job->name ? job->name : "");
+                        sc_bus_publish(app->bus, &bev);
+                    }
 #if !SC_IS_TEST
                     if (job->type == SC_CRON_JOB_AGENT && app->agent) {
                         char *reply = NULL;
@@ -811,9 +827,11 @@ static sc_error_t handle_cron_run(sc_allocator_t *alloc, sc_app_context_t *app,
                             job->channel ? job->channel : "gateway";
                         app->agent->active_channel_len =
                             strlen(app->agent->active_channel);
+                        app->agent->active_job_id = job_id;
                         sc_error_t run_err =
                             sc_agent_turn(app->agent, job->command, strlen(job->command),
                                           &reply, &reply_len);
+                        app->agent->active_job_id = 0;
                         started = (run_err == SC_OK);
                         sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL),
                                         started ? "completed" : "failed", reply);
@@ -833,6 +851,16 @@ static sc_error_t handle_cron_run(sc_allocator_t *alloc, sc_app_context_t *app,
 #else
                     started = true;
 #endif
+                    if (app->bus) {
+                        sc_bus_event_t bev;
+                        memset(&bev, 0, sizeof(bev));
+                        bev.type = SC_BUS_CRON_COMPLETED;
+                        snprintf(bev.channel, SC_BUS_CHANNEL_LEN, "cron");
+                        snprintf(bev.id, SC_BUS_ID_LEN, "%llu", (unsigned long long)job_id);
+                        snprintf(bev.message, SC_BUS_MSG_LEN, "%s",
+                                 started ? "completed" : "failed");
+                        sc_bus_publish(app->bus, &bev);
+                    }
                     status_msg = started ? "completed" : "failed";
                 } else {
                     status_msg = "job not found";

@@ -1124,6 +1124,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         svc_app_ctx.alloc = alloc;
         svc_app_ctx.tools = tools;
         svc_app_ctx.tools_count = tools_count;
+        svc_app_ctx.bus = &svc_bus;
         gw_config.app_ctx = &svc_app_ctx;
 
         static webhook_dispatcher_ctx_t wh_ctx;
@@ -1450,6 +1451,27 @@ typedef struct gw_agent_bridge {
     sc_thread_binding_t *thread_binding;
 } gw_agent_bridge_t;
 
+typedef struct gw_stream_ctx {
+    sc_bus_t *bus;
+    char channel[SC_BUS_CHANNEL_LEN];
+    char id[SC_BUS_ID_LEN];
+} gw_stream_ctx_t;
+
+static void gw_stream_token_cb(const char *delta, size_t len, void *ctx) {
+    gw_stream_ctx_t *sc = (gw_stream_ctx_t *)ctx;
+    if (!sc || !delta || !len)
+        return;
+    sc_bus_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = SC_BUS_MESSAGE_CHUNK;
+    memcpy(ev.channel, sc->channel, SC_BUS_CHANNEL_LEN);
+    memcpy(ev.id, sc->id, SC_BUS_ID_LEN);
+    size_t copy_len = len < SC_BUS_MSG_LEN - 1 ? len : SC_BUS_MSG_LEN - 1;
+    memcpy(ev.message, delta, copy_len);
+    ev.message[copy_len] = '\0';
+    sc_bus_publish(sc->bus, &ev);
+}
+
 static bool gw_agent_on_message(sc_bus_event_type_t type, const sc_bus_event_t *ev,
                                 void *user_ctx) {
     (void)type;
@@ -1464,7 +1486,14 @@ static bool gw_agent_on_message(sc_bus_event_type_t type, const sc_bus_event_t *
     size_t reply_len = 0;
     b->agent->active_channel = "gateway";
     b->agent->active_channel_len = 8;
-    sc_error_t err = sc_agent_turn(b->agent, msg, strlen(msg), &reply, &reply_len);
+    gw_stream_ctx_t stream_ctx;
+    memset(&stream_ctx, 0, sizeof(stream_ctx));
+    stream_ctx.bus = b->bus;
+    snprintf(stream_ctx.channel, SC_BUS_CHANNEL_LEN, "%s",
+             ev->channel[0] ? ev->channel : "gateway");
+    snprintf(stream_ctx.id, SC_BUS_ID_LEN, "%s", ev->id);
+    sc_error_t err = sc_agent_turn_stream(b->agent, msg, strlen(msg), gw_stream_token_cb,
+                                          &stream_ctx, &reply, &reply_len);
     if (err == SC_OK && reply && reply_len > 0) {
         sc_bus_event_t rev;
         memset(&rev, 0, sizeof(rev));

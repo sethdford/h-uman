@@ -30,6 +30,11 @@ static bool bus_callback(sc_bus_event_type_t type, const sc_bus_event_t *ev, voi
         sc_json_object_set(bridge->proto->alloc, payload_obj, "state",
                            sc_json_string_new(bridge->proto->alloc, "sent", 4));
         break;
+    case SC_BUS_MESSAGE_CHUNK:
+        event_name = "chat";
+        sc_json_object_set(bridge->proto->alloc, payload_obj, "state",
+                           sc_json_string_new(bridge->proto->alloc, "chunk", 5));
+        break;
     case SC_BUS_TOOL_CALL:
         event_name = "agent.tool";
         break;
@@ -38,6 +43,16 @@ static bool bus_callback(sc_bus_event_type_t type, const sc_bus_event_t *ev, voi
         break;
     case SC_BUS_HEALTH_CHANGE:
         event_name = "health";
+        break;
+    case SC_BUS_CRON_STARTED:
+        event_name = "cron.job";
+        sc_json_object_set(bridge->proto->alloc, payload_obj, "state",
+                           sc_json_string_new(bridge->proto->alloc, "started", 7));
+        break;
+    case SC_BUS_CRON_COMPLETED:
+        event_name = "cron.job";
+        sc_json_object_set(bridge->proto->alloc, payload_obj, "state",
+                           sc_json_string_new(bridge->proto->alloc, "completed", 9));
         break;
     default:
         sc_json_free(bridge->proto->alloc, payload_obj);
@@ -69,8 +84,16 @@ static bool bus_callback(sc_bus_event_type_t type, const sc_bus_event_t *ev, voi
     if (err == SC_OK && payload_str && event_name) {
         sc_control_send_event(bridge->proto, event_name, payload_str);
 #ifdef SC_HAS_PUSH
-        if (bridge->push && (type == SC_BUS_MESSAGE_SENT || type == SC_BUS_ERROR)) {
-            const char *title = (type == SC_BUS_MESSAGE_SENT) ? "New Message" : "Error";
+        if (bridge->push &&
+            (type == SC_BUS_MESSAGE_SENT || type == SC_BUS_ERROR ||
+             type == SC_BUS_CRON_COMPLETED)) {
+            const char *title;
+            if (type == SC_BUS_CRON_COMPLETED) {
+                title = (msg_text && strstr(msg_text, "failed")) ? "Automation Failed"
+                                                                 : "Automation Completed";
+            } else {
+                title = (type == SC_BUS_MESSAGE_SENT) ? "New Message" : "Error";
+            }
             const char *body = msg_text ? msg_text : event_name;
             sc_push_send(bridge->push, title, body, payload_str);
         }

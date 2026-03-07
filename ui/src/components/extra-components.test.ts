@@ -20,6 +20,9 @@ import "./sc-shortcut-overlay.js";
 import "./sc-context-menu.js";
 import "./sc-error-boundary.js";
 import "./sc-welcome-card.js";
+import "./sc-message-actions.js";
+import "./sc-chat-sessions-panel.js";
+import "./sc-file-preview.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -914,6 +917,293 @@ describe("sc-welcome-card", () => {
     await el.updateComplete;
     const heading = el.shadowRoot?.querySelector(".hero h2");
     expect(heading?.textContent).toContain("Alex");
+    el.remove();
+  });
+});
+
+describe("sc-message-actions", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-message-actions")).toBeDefined();
+  });
+
+  it("renders copy button", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      role: string;
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "user";
+    el.content = "test";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const copyBtn = el.shadowRoot?.querySelector('button[aria-label="Copy"]');
+    expect(copyBtn).toBeTruthy();
+    el.remove();
+  });
+
+  it("renders retry button for user role", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      role: string;
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "user";
+    el.content = "test";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const retryBtn = el.shadowRoot?.querySelector('button[aria-label="Retry"]');
+    expect(retryBtn).toBeTruthy();
+    el.remove();
+  });
+
+  it("renders regenerate button for assistant role", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      role: string;
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "assistant";
+    el.content = "response";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const regenBtn = el.shadowRoot?.querySelector('button[aria-label="Regenerate"]');
+    expect(regenBtn).toBeTruthy();
+    el.remove();
+  });
+
+  it("fires sc-retry when retry clicked", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      role: string;
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "user";
+    el.content = "hello";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: { content: string; index: number } | null = null;
+    el.addEventListener("sc-retry", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    const retryBtn = el.shadowRoot?.querySelector('button[aria-label="Retry"]') as HTMLElement;
+    retryBtn?.click();
+    expect(detail).toEqual({ content: "hello", index: -1 });
+    el.remove();
+  });
+
+  it("fires sc-copy when copy clicked", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      role: string;
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "assistant";
+    el.content = "text to copy";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-copy", () => {
+      fired = true;
+    });
+    const copyBtn = el.shadowRoot?.querySelector('button[aria-label="Copy"]') as HTMLElement;
+    copyBtn?.click();
+    expect(fired).toBe(true);
+    el.remove();
+  });
+
+  it("fires sc-regenerate when regenerate clicked", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      role: string;
+      content: string;
+      index: number;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "assistant";
+    el.content = "response";
+    el.index = 1;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: { content: string; index: number } | null = null;
+    el.addEventListener("sc-regenerate", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    const regenBtn = el.shadowRoot?.querySelector('button[aria-label="Regenerate"]') as HTMLElement;
+    regenBtn?.click();
+    expect(detail).toEqual({ content: "response", index: 1 });
+    el.remove();
+  });
+});
+
+describe("sc-chat-sessions-panel", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-chat-sessions-panel")).toBeDefined();
+  });
+
+  it("renders new chat button", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      sessions: unknown[];
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const btn = el.shadowRoot?.querySelector(".new-chat-btn");
+    expect(btn).toBeTruthy();
+    expect(btn?.textContent).toContain("New Chat");
+    el.remove();
+  });
+
+  it("renders sessions", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      sessions: Array<{ id: string; title: string; ts: number; active: boolean }>;
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.sessions = [
+      { id: "s1", title: "Session 1", ts: Date.now(), active: true },
+      { id: "s2", title: "Session 2", ts: Date.now() - 3600000, active: false },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const items = el.shadowRoot?.querySelectorAll(".session-item");
+    expect(items?.length).toBe(2);
+    expect(items?.[0]?.textContent).toContain("Session 1");
+    el.remove();
+  });
+
+  it("fires sc-session-select when session clicked", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      sessions: Array<{ id: string; title: string; ts: number; active: boolean }>;
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.sessions = [{ id: "s1", title: "S1", ts: Date.now(), active: false }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: { id: string } | null = null;
+    el.addEventListener("sc-session-select", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    const item = el.shadowRoot?.querySelector(".session-item") as HTMLElement;
+    item?.click();
+    expect(detail).toEqual({ id: "s1" });
+    el.remove();
+  });
+
+  it("fires sc-session-delete when delete clicked", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      sessions: Array<{ id: string; title: string; ts: number; active: boolean }>;
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.sessions = [{ id: "s1", title: "S1", ts: Date.now(), active: false }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const sessionItem = el.shadowRoot?.querySelector(".session-item") as HTMLElement;
+    sessionItem?.focus();
+    const delBtn = el.shadowRoot?.querySelector(".delete-btn") as HTMLElement;
+    if (delBtn) {
+      delBtn.style.setProperty("opacity", "1");
+      let detail: { id: string } | null = null;
+      el.addEventListener("sc-session-delete", ((e: CustomEvent) => {
+        detail = e.detail;
+      }) as EventListener);
+      delBtn.click();
+      expect(detail).toEqual({ id: "s1" });
+    }
+    el.remove();
+  });
+
+  it("fires sc-session-new when new chat clicked", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-session-new", () => {
+      fired = true;
+    });
+    const btn = el.shadowRoot?.querySelector(".new-chat-btn") as HTMLElement;
+    btn?.click();
+    expect(fired).toBe(true);
+    el.remove();
+  });
+});
+
+describe("sc-file-preview", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-file-preview")).toBeDefined();
+  });
+
+  it("renders with no files", async () => {
+    const el = document.createElement("sc-file-preview") as HTMLElement & {
+      files: Array<{ name: string; size: number; type: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.files = [];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const grid = el.shadowRoot?.querySelector(".grid");
+    expect(grid).toBeNull();
+    el.remove();
+  });
+
+  it("renders files", async () => {
+    const el = document.createElement("sc-file-preview") as HTMLElement & {
+      files: Array<{ name: string; size: number; type: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.files = [
+      { name: "doc.pdf", size: 1024, type: "application/pdf" },
+      { name: "readme.txt", size: 256, type: "text/plain" },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const cards = el.shadowRoot?.querySelectorAll(".card");
+    expect(cards?.length).toBe(2);
+    expect(el.shadowRoot?.textContent).toContain("doc.pdf");
+    expect(el.shadowRoot?.textContent).toContain("1.0 KB");
+    el.remove();
+  });
+
+  it("shows image preview when dataUrl provided", async () => {
+    const el = document.createElement("sc-file-preview") as HTMLElement & {
+      files: Array<{ name: string; size: number; type: string; dataUrl?: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.files = [
+      { name: "img.png", size: 2048, type: "image/png", dataUrl: "data:image/png;base64,abc" },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const img = el.shadowRoot?.querySelector("img.card-image");
+    expect(img).toBeTruthy();
+    expect((img as HTMLImageElement)?.src).toContain("data:image/png");
+    el.remove();
+  });
+
+  it("fires sc-file-remove when remove clicked", async () => {
+    const el = document.createElement("sc-file-preview") as HTMLElement & {
+      files: Array<{ name: string; size: number; type: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.files = [{ name: "a.txt", size: 100, type: "text/plain" }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: { index: number } | null = null;
+    el.addEventListener("sc-file-remove", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    const removeBtn = el.shadowRoot?.querySelector(".remove-btn") as HTMLElement;
+    removeBtn?.click();
+    expect(detail).toEqual({ index: 0 });
     el.remove();
   });
 });

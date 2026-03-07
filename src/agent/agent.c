@@ -79,7 +79,7 @@ static void agent_record_cost(sc_agent_t *agent, const sc_token_usage_t *usage) 
     entry.total_tokens = usage->total_tokens;
     entry.cost_usd = 0.0;
     entry.timestamp_secs = (int64_t)time(NULL);
-    sc_cost_record_usage(agent->cost_tracker, &entry);
+    sc_cost_record_usage(agent->cost_tracker, &entry, agent->active_job_id);
 }
 
 #define SC_AGENT_HISTORY_INIT_CAP 16

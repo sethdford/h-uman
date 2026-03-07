@@ -76,6 +76,66 @@ function isValidCron(expr: string): boolean {
   return parts.length === 5 || parts.length === 6;
 }
 
+function parseNaturalSchedule(text: string): string | null {
+  const t = text.toLowerCase().trim();
+  if (!t) return null;
+
+  const minMatch = t.match(/every\s+(\d+)\s+min/);
+  if (minMatch) return `*/${minMatch[1]} * * * *`;
+
+  if (/every\s+hour/.test(t)) return "0 * * * *";
+
+  const dailyMatch = t.match(/every\s+day\s+at\s+(\d{1,2})\s*(am|pm)?/i);
+  if (dailyMatch) {
+    let h = parseInt(dailyMatch[1], 10);
+    if (dailyMatch[2]?.toLowerCase() === "pm" && h < 12) h += 12;
+    if (dailyMatch[2]?.toLowerCase() === "am" && h === 12) h = 0;
+    return `0 ${h} * * *`;
+  }
+
+  if (/every\s+morning/.test(t)) return "0 8 * * *";
+  if (/every\s+evening/.test(t)) return "0 18 * * *";
+  if (/every\s+night/.test(t)) return "0 22 * * *";
+
+  const wdMatch = t.match(/every\s+weekday\s+at\s+(\d{1,2})\s*(am|pm)?/i);
+  if (wdMatch) {
+    let h = parseInt(wdMatch[1], 10);
+    if (wdMatch[2]?.toLowerCase() === "pm" && h < 12) h += 12;
+    return `0 ${h} * * 1-5`;
+  }
+
+  if (/every\s+weekday/.test(t)) return "0 9 * * 1-5";
+
+  const days: Record<string, string> = {
+    sunday: "0",
+    monday: "1",
+    tuesday: "2",
+    wednesday: "3",
+    thursday: "4",
+    friday: "5",
+    saturday: "6",
+  };
+  for (const [day, num] of Object.entries(days)) {
+    const re = new RegExp(`every\\s+${day}\\s+at\\s+(\\d{1,2})\\s*(am|pm)?`, "i");
+    const m = t.match(re);
+    if (m) {
+      let h = parseInt(m[1], 10);
+      if (m[2]?.toLowerCase() === "pm" && h < 12) h += 12;
+      return `0 ${h} * * ${num}`;
+    }
+    if (new RegExp(`every\\s+${day}`, "i").test(t)) {
+      return `0 9 * * ${num}`;
+    }
+  }
+
+  if (/^hourly$/.test(t)) return "0 * * * *";
+  if (/^daily$/.test(t)) return "0 9 * * *";
+  if (/^weekly$/.test(t)) return "0 9 * * 1";
+  if (/^monthly$/.test(t)) return "0 9 1 * *";
+
+  return null;
+}
+
 function presetIdForExpr(expr: string): PresetId | null {
   const parts = expr.trim().split(/\s+/);
   if (parts.length < 5) return null;
@@ -238,6 +298,50 @@ export class ScScheduleBuilder extends LitElement {
       color: var(--sc-error);
     }
 
+    .nl-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: var(--sc-space-sm) var(--sc-space-md);
+      font-family: var(--sc-font);
+      font-size: var(--sc-text-sm);
+      background: var(--sc-bg-elevated);
+      border: 1px solid var(--sc-border);
+      border-radius: var(--sc-radius);
+      color: var(--sc-text);
+      transition:
+        border-color var(--sc-duration-fast) var(--sc-ease-out),
+        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+    }
+
+    .nl-input::placeholder {
+      color: var(--sc-text-muted);
+    }
+
+    .nl-input:focus {
+      outline: none;
+      border-color: var(--sc-accent);
+      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+    }
+
+    .nl-hint {
+      font-size: var(--sc-text-xs);
+      margin-top: var(--sc-space-xs);
+    }
+
+    .nl-hint.success {
+      color: var(--sc-accent);
+    }
+
+    .nl-hint.unknown {
+      color: var(--sc-text-muted);
+    }
+
+    .nl-row {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sc-space-xs);
+    }
+
     .mode-link {
       display: inline-flex;
       align-items: center;
@@ -308,6 +412,12 @@ export class ScScheduleBuilder extends LitElement {
 
   @state() private _customError = "";
 
+  @state() private _nlInput = "";
+
+  @state() private _nlResult: string | null = null;
+
+  private _nlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   private _emitChange(val: string): void {
     this.value = val;
     this.dispatchEvent(
@@ -357,6 +467,32 @@ export class ScScheduleBuilder extends LitElement {
     if (!isNaN(h) && h >= 0 && h <= 23) this._hour = h;
   }
 
+  private _onNlInput(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    this._nlInput = input.value;
+    if (this._nlDebounceTimer) clearTimeout(this._nlDebounceTimer);
+    this._nlDebounceTimer = setTimeout(() => {
+      this._nlDebounceTimer = null;
+      const t = this._nlInput.trim();
+      if (!t) {
+        this._nlResult = null;
+        return;
+      }
+      const parsed = parseNaturalSchedule(t);
+      if (parsed) {
+        this._nlResult = parsed;
+        this._emitChange(parsed);
+        const pid = presetIdForExpr(parsed);
+        this._selectedPreset = pid;
+        const parts = parsed.trim().split(/\s+/);
+        const h = parseInt(parts[1], 10);
+        if (!isNaN(h) && h >= 0 && h <= 23) this._hour = h;
+      } else {
+        this._nlResult = null;
+      }
+    }, 300);
+  }
+
   private _onCustomInput(e: Event): void {
     const input = e.target as HTMLInputElement;
     const val = input.value.trim();
@@ -395,6 +531,23 @@ export class ScScheduleBuilder extends LitElement {
       <div class="wrapper" role="group" aria-label="Schedule builder">
         ${this.mode === "preset"
           ? html`
+              <div class="nl-row">
+                <input
+                  type="text"
+                  class="nl-input"
+                  .value=${this._nlInput}
+                  placeholder="e.g. every weekday at 9am"
+                  aria-label="Describe your schedule"
+                  @input=${this._onNlInput}
+                />
+                ${this._nlInput.trim()
+                  ? this._nlResult
+                    ? html`<span class="nl-hint success" role="status"
+                        >${cronToHuman(this._nlResult)}</span
+                      >`
+                    : html`<span class="nl-hint unknown" role="status">Not recognized</span>`
+                  : nothing}
+              </div>
               <div class="preset-grid" role="list">
                 ${PRESETS.map(
                   (preset) => html`

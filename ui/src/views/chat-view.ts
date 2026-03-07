@@ -1,6 +1,7 @@
 import { html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
 import type { ContextMenuItem } from "../components/sc-context-menu.js";
+import type { ChatSession } from "../components/sc-chat-sessions-panel.js";
 import type { GatewayStatus } from "../gateway.js";
 import { GatewayClient as GatewayClientClass } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
@@ -10,6 +11,7 @@ import { ChatController, type ChatItem, type GatewayLike } from "../controllers/
 import "../components/sc-composer.js";
 import "../components/sc-message-list.js";
 import "../components/sc-chat-search.js";
+import "../components/sc-chat-sessions-panel.js";
 import "../components/sc-context-menu.js";
 
 @customElement("sc-chat-view")
@@ -21,9 +23,18 @@ export class ScChatView extends GatewayAwareLitElement {
       height: 100%;
       max-height: calc(100vh - 120px);
     }
+    .main-wrap {
+      display: flex;
+      flex-direction: row;
+      flex: 1;
+      min-width: 0;
+      position: relative;
+      width: 100%;
+    }
     .container {
       display: flex;
       flex-direction: column;
+      flex: 1;
       height: 100%;
       max-width: 720px;
       margin: 0 auto;
@@ -98,6 +109,28 @@ export class ScChatView extends GatewayAwareLitElement {
       height: 16px;
       line-height: 1;
     }
+    .sessions-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--sc-space-2xs) var(--sc-space-sm);
+      background: transparent;
+      border: 1px solid var(--sc-border);
+      border-radius: var(--sc-radius-sm);
+      color: var(--sc-text-muted);
+      cursor: pointer;
+      transition:
+        color var(--sc-duration-fast),
+        border-color var(--sc-duration-fast);
+    }
+    .sessions-toggle:hover {
+      color: var(--sc-text);
+      border-color: var(--sc-text-muted);
+    }
+    .sessions-toggle svg {
+      width: 18px;
+      height: 18px;
+    }
     @media (prefers-reduced-motion: reduce) {
       .status-dot.connecting {
         animation: none !important;
@@ -120,6 +153,8 @@ export class ScChatView extends GatewayAwareLitElement {
     y: number;
     items: ContextMenuItem[];
   } = { open: false, x: 0, y: 0, items: [] };
+  @state() private _sessionsPanelOpen = false;
+  @state() private _sessions: ChatSession[] = [];
   @query("sc-message-list") private _messageList!: HTMLElement & {
     scrollToBottom: () => void;
     scrollToItem: (idx: number) => void;
@@ -156,23 +191,6 @@ export class ScChatView extends GatewayAwareLitElement {
     this._messageList?.scrollToItem(itemIdx);
   }
 
-  private _handleFiles(files: File[]): void {
-    for (const file of files) {
-      this.chat.items = [
-        ...this.chat.items,
-        {
-          type: "message",
-          role: "user",
-          content: `[Attached file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)]`,
-          ts: Date.now(),
-        },
-      ];
-    }
-    this.chat.cacheMessages(this.sessionKey);
-    this.requestUpdate();
-    this._messageList?.scrollToBottom();
-  }
-
   override firstUpdated(): void {
     const gw = this.gateway;
     if (gw) {
@@ -185,6 +203,28 @@ export class ScChatView extends GatewayAwareLitElement {
 
   protected override async load(): Promise<void> {
     await this.chat.loadHistory(this.sessionKey);
+    this._loadSessions();
+  }
+
+  private async _loadSessions(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    try {
+      const res = await gw.request<{ sessions?: Array<{ id: string; title: string; ts: number }> }>(
+        "sessions.list",
+        {},
+      );
+      if (res?.sessions && Array.isArray(res.sessions)) {
+        this._sessions = res.sessions.map((s) => ({
+          id: s.id,
+          title: s.title ?? "Untitled",
+          ts: s.ts ?? Date.now(),
+          active: s.id === this.sessionKey,
+        }));
+      }
+    } catch {
+      this._sessions = [];
+    }
   }
 
   private async handleAbort(): Promise<void> {
@@ -257,9 +297,47 @@ export class ScChatView extends GatewayAwareLitElement {
     };
   }
 
-  private async _handleSend(message: string): Promise<void> {
+  private _handleRegenerate(idx: number): void {
+    const items = this.chat.items;
+    if (idx < 0 || idx >= items.length) return;
+    const target = items[idx];
+    if (target.type !== "message" || target.role !== "assistant") return;
+    let lastUserIdx = -1;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (items[i].type === "message" && (items[i] as { role: string }).role === "user") {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx < 0) return;
+    const lastUser = items[lastUserIdx];
+    if (lastUser.type !== "message") return;
+    this.chat.items = items.slice(0, idx);
+    this.chat.cacheMessages(this.sessionKey);
+    this._handleSend(lastUser.content);
+  }
+
+  private async _handleSend(
+    message: string,
+    files?: Array<{ name: string; size: number; type: string }>,
+  ): Promise<void> {
     if (!message || !this.gateway) return;
     this.inputValue = "";
+    if (files?.length) {
+      for (const f of files) {
+        this.chat.items = [
+          ...this.chat.items,
+          {
+            type: "message",
+            role: "user",
+            content: `[Attached file: ${f.name} (${(f.size / 1024).toFixed(1)} KB)]`,
+            ts: Date.now(),
+          },
+        ];
+      }
+      this.chat.cacheMessages(this.sessionKey);
+      this.requestUpdate();
+    }
     try {
       await this.chat.send(message, this.sessionKey);
     } catch (err) {
@@ -269,48 +347,104 @@ export class ScChatView extends GatewayAwareLitElement {
     this._messageList?.scrollToBottom();
   }
 
+  private _onSessionSelect(e: CustomEvent<{ id: string }>): void {
+    const id = e.detail.id;
+    this.dispatchEvent(
+      new CustomEvent("navigate", {
+        bubbles: true,
+        composed: true,
+        detail: `chat:${id}`,
+      }),
+    );
+  }
+
+  private _onSessionNew(): void {
+    this.dispatchEvent(
+      new CustomEvent("navigate", {
+        bubbles: true,
+        composed: true,
+        detail: "chat:default",
+      }),
+    );
+  }
+
+  private _onSessionDelete(e: CustomEvent<{ id: string }>): void {
+    const id = e.detail.id;
+    this._sessions = this._sessions.filter((s) => s.id !== id);
+    if (this.sessionKey === id) {
+      this.dispatchEvent(
+        new CustomEvent("navigate", {
+          bubbles: true,
+          composed: true,
+          detail: "chat:default",
+        }),
+      );
+    }
+  }
+
   override render() {
+    const sessionsWithActive = this._sessions.map((s) => ({
+      ...s,
+      active: s.id === this.sessionKey,
+    }));
     return html`
-      <div class="container">
-        ${this._renderStatusBar()} ${this._renderErrorBanner()} ${this._renderSearch()}
-        <sc-message-list
-          .items=${this.chat.items}
-          .isWaiting=${this.chat.isWaiting}
-          .streamElapsed=${this.chat.streamElapsed}
-          .historyLoading=${this.chat.historyLoading}
-          @sc-context-menu=${(e: CustomEvent<{ event: MouseEvent; item: ChatItem }>) =>
-            this._onMessageContextMenu(e.detail.event, e.detail.item)}
-          @sc-abort=${() => this.handleAbort()}
-        ></sc-message-list>
-        ${this._renderRetryButton()}
-        <sc-composer
-          .value=${this.inputValue}
-          .waiting=${this.chat.isWaiting}
-          .disabled=${this.connectionStatus === "disconnected"}
-          .showSuggestions=${this.chat.items.length === 0}
-          .streamElapsed=${this.chat.streamElapsed}
-          .placeholder=${this.connectionStatus === "disconnected"
-            ? "Disconnected — reconnect to send messages"
-            : "Type a message... (Enter to send, Shift+Enter for newline)"}
-          @sc-send=${(e: CustomEvent<{ message: string }>) => this._handleSend(e.detail.message)}
-          @sc-files=${(e: CustomEvent<{ files: File[] }>) => this._handleFiles(e.detail.files)}
-          @sc-use-suggestion=${(e: CustomEvent<{ text: string }>) =>
-            this._handleSend(e.detail.text)}
-          @sc-input-change=${(e: CustomEvent<{ value: string }>) => {
-            this.inputValue = e.detail.value;
-          }}
-        ></sc-composer>
-        ${this._contextMenu.open
-          ? html`
-              <sc-context-menu
-                .open=${this._contextMenu.open}
-                .x=${this._contextMenu.x}
-                .y=${this._contextMenu.y}
-                .items=${this._contextMenu.items}
-                @close=${() => (this._contextMenu = { ...this._contextMenu, open: false })}
-              ></sc-context-menu>
-            `
-          : nothing}
+      <div class="main-wrap">
+        <sc-chat-sessions-panel
+          .sessions=${sessionsWithActive}
+          ?open=${this._sessionsPanelOpen}
+          @sc-session-select=${this._onSessionSelect}
+          @sc-session-new=${this._onSessionNew}
+          @sc-session-delete=${this._onSessionDelete}
+        ></sc-chat-sessions-panel>
+        <div class="container">
+          ${this._renderStatusBar()} ${this._renderErrorBanner()} ${this._renderSearch()}
+          <sc-message-list
+            .items=${this.chat.items}
+            .isWaiting=${this.chat.isWaiting}
+            .streamElapsed=${this.chat.streamElapsed}
+            .historyLoading=${this.chat.historyLoading}
+            @sc-context-menu=${(e: CustomEvent<{ event: MouseEvent; item: ChatItem }>) =>
+              this._onMessageContextMenu(e.detail.event, e.detail.item)}
+            @sc-abort=${() => this.handleAbort()}
+            @sc-retry=${(e: CustomEvent<{ content: string; index: number }>) =>
+              this._handleSend(e.detail.content)}
+            @sc-regenerate=${(e: CustomEvent<{ content: string; index: number }>) =>
+              this._handleRegenerate(e.detail.index)}
+          ></sc-message-list>
+          ${this._renderRetryButton()}
+          <sc-composer
+            .value=${this.inputValue}
+            .waiting=${this.chat.isWaiting}
+            .disabled=${this.connectionStatus === "disconnected"}
+            .showSuggestions=${this.chat.items.length === 0}
+            .streamElapsed=${this.chat.streamElapsed}
+            .placeholder=${this.connectionStatus === "disconnected"
+              ? "Disconnected — reconnect to send messages"
+              : "Type a message... (Enter to send, Shift+Enter for newline)"}
+            @sc-send=${(
+              e: CustomEvent<{
+                message: string;
+                files?: Array<{ name: string; size: number; type: string }>;
+              }>,
+            ) => this._handleSend(e.detail.message, e.detail.files)}
+            @sc-use-suggestion=${(e: CustomEvent<{ text: string }>) =>
+              this._handleSend(e.detail.text)}
+            @sc-input-change=${(e: CustomEvent<{ value: string }>) => {
+              this.inputValue = e.detail.value;
+            }}
+          ></sc-composer>
+          ${this._contextMenu.open
+            ? html`
+                <sc-context-menu
+                  .open=${this._contextMenu.open}
+                  .x=${this._contextMenu.x}
+                  .y=${this._contextMenu.y}
+                  .items=${this._contextMenu.items}
+                  @close=${() => (this._contextMenu = { ...this._contextMenu, open: false })}
+                ></sc-context-menu>
+              `
+            : nothing}
+        </div>
       </div>
     `;
   }
@@ -324,6 +458,14 @@ export class ScChatView extends GatewayAwareLitElement {
           : "Disconnected";
     return html`
       <div class="status-bar">
+        <button
+          type="button"
+          class="sessions-toggle"
+          @click=${() => (this._sessionsPanelOpen = !this._sessionsPanelOpen)}
+          aria-label=${this._sessionsPanelOpen ? "Close sessions" : "Open sessions"}
+        >
+          ${icons["sidebar-toggle"]}
+        </button>
         <span class="status-dot ${this.connectionStatus}" aria-hidden="true"></span>
         <span>${label}</span>
       </div>
