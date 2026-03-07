@@ -73,6 +73,8 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->agent.persona = NULL;
     cfg->agent.persona_channels = NULL;
     cfg->agent.persona_channels_count = 0;
+    cfg->agent.persona_contacts = NULL;
+    cfg->agent.persona_contacts_count = 0;
     cfg->policy.enabled = false;
     cfg->policy.rules_json = NULL;
     cfg->plugins.enabled = false;
@@ -1213,6 +1215,72 @@ static void parse_mqtt_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_jso
     mq->qos = (int)sc_json_get_number(val, "qos", (double)mq->qos);
 }
 
+static void parse_matrix_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT)
+        return;
+    const char *hs = sc_json_get_string(obj, "homeserver");
+    const char *tok = sc_json_get_string(obj, "access_token");
+    if (hs) {
+        if (cfg->channels.matrix.homeserver)
+            a->free(a->ctx, cfg->channels.matrix.homeserver,
+                    strlen(cfg->channels.matrix.homeserver) + 1);
+        cfg->channels.matrix.homeserver = sc_strdup(a, hs);
+    }
+    if (tok) {
+        if (cfg->channels.matrix.access_token)
+            a->free(a->ctx, cfg->channels.matrix.access_token,
+                    strlen(cfg->channels.matrix.access_token) + 1);
+        cfg->channels.matrix.access_token = sc_strdup(a, tok);
+    }
+}
+
+static void parse_irc_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT)
+        return;
+    const char *srv = sc_json_get_string(obj, "server");
+    if (srv) {
+        if (cfg->channels.irc.server)
+            a->free(a->ctx, cfg->channels.irc.server, strlen(cfg->channels.irc.server) + 1);
+        cfg->channels.irc.server = sc_strdup(a, srv);
+    }
+    double port = sc_json_get_number(obj, "port", 6667);
+    if (port >= 1 && port <= 65535)
+        cfg->channels.irc.port = (uint16_t)port;
+}
+
+static void parse_nostr_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj || obj->type != SC_JSON_OBJECT)
+        return;
+    const char *nak = sc_json_get_string(obj, "nak_path");
+    const char *pk = sc_json_get_string(obj, "bot_pubkey");
+    const char *relay = sc_json_get_string(obj, "relay_url");
+    const char *sk = sc_json_get_string(obj, "seckey_hex");
+    if (nak) {
+        if (cfg->channels.nostr.nak_path)
+            a->free(a->ctx, cfg->channels.nostr.nak_path,
+                    strlen(cfg->channels.nostr.nak_path) + 1);
+        cfg->channels.nostr.nak_path = sc_strdup(a, nak);
+    }
+    if (pk) {
+        if (cfg->channels.nostr.bot_pubkey)
+            a->free(a->ctx, cfg->channels.nostr.bot_pubkey,
+                    strlen(cfg->channels.nostr.bot_pubkey) + 1);
+        cfg->channels.nostr.bot_pubkey = sc_strdup(a, pk);
+    }
+    if (relay) {
+        if (cfg->channels.nostr.relay_url)
+            a->free(a->ctx, cfg->channels.nostr.relay_url,
+                    strlen(cfg->channels.nostr.relay_url) + 1);
+        cfg->channels.nostr.relay_url = sc_strdup(a, relay);
+    }
+    if (sk) {
+        if (cfg->channels.nostr.seckey_hex)
+            a->free(a->ctx, cfg->channels.nostr.seckey_hex,
+                    strlen(cfg->channels.nostr.seckey_hex) + 1);
+        cfg->channels.nostr.seckey_hex = sc_strdup(a, sk);
+    }
+}
+
 static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT)
         return SC_OK;
@@ -1286,6 +1354,18 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_j
     sc_json_value_t *mqtt_obj = sc_json_object_get(obj, "mqtt");
     if (mqtt_obj)
         parse_mqtt_channel(a, cfg, mqtt_obj);
+
+    sc_json_value_t *matrix_obj = sc_json_object_get(obj, "matrix");
+    if (matrix_obj)
+        parse_matrix_channel(a, cfg, matrix_obj);
+
+    sc_json_value_t *irc_obj = sc_json_object_get(obj, "irc");
+    if (irc_obj)
+        parse_irc_channel(a, cfg, irc_obj);
+
+    sc_json_value_t *nostr_obj = sc_json_object_get(obj, "nostr");
+    if (nostr_obj)
+        parse_nostr_channel(a, cfg, nostr_obj);
 
     cfg->channels.channel_config_len = 0;
     if (obj->data.object.pairs && cfg->channels.channel_config_len < SC_CHANNEL_CONFIG_MAX) {
@@ -1465,6 +1545,38 @@ static sc_error_t parse_agent(sc_allocator_t *a, sc_config_t *cfg, const sc_json
             }
         }
     }
+
+    sc_json_value_t *ct_obj = sc_json_object_get(obj, "persona_contacts");
+    if (ct_obj && ct_obj->type == SC_JSON_OBJECT && ct_obj->data.object.pairs) {
+        size_t n = ct_obj->data.object.len;
+        if (n > 0) {
+            sc_persona_channel_entry_t *arr = (sc_persona_channel_entry_t *)a->alloc(
+                a->ctx, n * sizeof(sc_persona_channel_entry_t));
+            if (arr) {
+                memset(arr, 0, n * sizeof(sc_persona_channel_entry_t));
+                size_t count = 0;
+                for (size_t i = 0; i < n && count < n; i++) {
+                    sc_json_pair_t *p = &ct_obj->data.object.pairs[i];
+                    if (!p->key || !p->value || p->value->type != SC_JSON_STRING)
+                        continue;
+                    arr[count].channel = sc_strdup(a, p->key);
+                    arr[count].persona = sc_strndup(a, p->value->data.string.ptr,
+                                                    p->value->data.string.len);
+                    if (arr[count].channel && arr[count].persona)
+                        count++;
+                    else {
+                        if (arr[count].channel)
+                            a->free(a->ctx, arr[count].channel, strlen(arr[count].channel) + 1);
+                        if (arr[count].persona)
+                            a->free(a->ctx, arr[count].persona, strlen(arr[count].persona) + 1);
+                    }
+                }
+                cfg->agent.persona_contacts = arr;
+                cfg->agent.persona_contacts_count = count;
+            }
+        }
+    }
+
     return SC_OK;
 }
 static sc_error_t parse_policy_cfg(sc_allocator_t *a, sc_config_t *cfg,

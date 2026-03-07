@@ -31,6 +31,9 @@ import "./sc-sparkline-enhanced.js";
 import "./sc-page-hero.js";
 import "./sc-schedule-builder.js";
 import "./sc-automation-card.js";
+import "./sc-chat-bubble.js";
+import "./sc-typing-indicator.js";
+import "./sc-delivery-status.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -1544,6 +1547,191 @@ describe("sc-file-preview", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-chat-bubble", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-chat-bubble")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-chat-bubble");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render with default props", async () => {
+    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+      content: string;
+      role: "user" | "assistant";
+      streaming: boolean;
+      showTail: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.content).toBe("");
+    expect(el.role).toBe("assistant");
+    expect(el.streaming).toBe(false);
+    expect(el.showTail).toBe(false);
+    el.remove();
+  });
+
+  it("renders content and role=user changes output", async () => {
+    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+      content: string;
+      role: "user" | "assistant";
+      updateComplete: Promise<boolean>;
+    };
+    el.content = "Hello world";
+    el.role = "user";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const bubble = el.shadowRoot?.querySelector(".bubble");
+    expect(bubble?.classList.contains("role-user")).toBe(true);
+    expect(bubble?.textContent).toContain("Hello world");
+    el.remove();
+  });
+
+  it("shows cursor when streaming", async () => {
+    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+      content: string;
+      streaming: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.content = "Partial";
+    el.streaming = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const cursor = el.shadowRoot?.querySelector(".cursor");
+    expect(cursor).toBeTruthy();
+    el.remove();
+  });
+
+  it("has role=article for accessibility", async () => {
+    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+      content: string;
+      role: "user" | "assistant";
+      updateComplete: Promise<boolean>;
+    };
+    el.content = "Test";
+    el.role = "assistant";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const bubble = el.shadowRoot?.querySelector(".bubble");
+    expect(bubble?.getAttribute("role")).toBe("article");
+    el.remove();
+  });
+});
+
+describe("sc-typing-indicator", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-typing-indicator")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-typing-indicator");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render with default props", async () => {
+    const el = document.createElement("sc-typing-indicator") as HTMLElement & {
+      elapsed: string;
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.elapsed).toBe("");
+    el.remove();
+  });
+
+  it("renders elapsed time when provided", async () => {
+    const el = document.createElement("sc-typing-indicator") as HTMLElement & {
+      elapsed: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.elapsed = "12s";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const elapsedSpan = el.shadowRoot?.querySelector(".elapsed");
+    expect(elapsedSpan?.textContent).toBe("12s");
+    el.remove();
+  });
+
+  it("has role=status for accessibility", async () => {
+    const el = document.createElement("sc-typing-indicator") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const indicator = el.shadowRoot?.querySelector(".indicator");
+    expect(indicator?.getAttribute("role")).toBe("status");
+    el.remove();
+  });
+});
+
+describe("sc-delivery-status", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-delivery-status")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-delivery-status");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render with default status", async () => {
+    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+      status: string;
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.status).toBe("sent");
+    el.remove();
+  });
+
+  it("status=failed shows retry button", async () => {
+    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+      status: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.status = "failed";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const retryBtn = el.shadowRoot?.querySelector(".retry");
+    expect(retryBtn).toBeTruthy();
+    expect(retryBtn?.textContent).toContain("Retry");
+    el.remove();
+  });
+
+  it("fires sc-retry when retry clicked", async () => {
+    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+      status: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.status = "failed";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-retry", () => (fired = true));
+    const retryBtn = el.shadowRoot?.querySelector(".retry") as HTMLElement | null;
+    retryBtn?.click();
+    expect(fired).toBe(true);
+    el.remove();
+  });
+
+  it("has role=status for accessibility", async () => {
+    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+      status: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.status = "sending";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const statusEl = el.shadowRoot?.querySelector("[role='status']");
+    expect(statusEl).toBeTruthy();
     el.remove();
   });
 });

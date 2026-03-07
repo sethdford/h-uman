@@ -65,6 +65,7 @@
       <a href="#sc-search">sc-search</a>
       <a href="#sc-chat-search">sc-chat-search</a>
       <a href="#sc-composer">sc-composer</a>
+      <a href="#sc-chat-composer">sc-chat-composer</a>
       <a href="#sc-message-list">sc-message-list</a>
       <a href="#sc-segmented-control">sc-segmented-control</a>
       <a href="#sc-data-table">sc-data-table</a>
@@ -93,9 +94,14 @@
       <a href="#sc-page-hero">sc-page-hero</a>
       <a href="#sc-schedule-builder">sc-schedule-builder</a>
       <a href="#sc-message-actions">sc-message-actions</a>
+      <a href="#sc-tapback-menu">sc-tapback-menu</a>
       <a href="#sc-automation-card">sc-automation-card</a>
       <a href="#sc-chat-sessions-panel">sc-chat-sessions-panel</a>
       <a href="#sc-file-preview">sc-file-preview</a>
+      <a href="#sc-chat-bubble">sc-chat-bubble</a>
+      <a href="#sc-typing-indicator">sc-typing-indicator</a>
+      <a href="#sc-delivery-status">sc-delivery-status</a>
+      <a href="#sc-link-preview">sc-link-preview</a>
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
@@ -645,6 +651,22 @@
         <div class="code-snippet"><pre><code>&lt;sc-composer .value=${""} .waiting=${false} .showSuggestions=${true} placeholder="Type a message..."&gt;&lt;/sc-composer&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-chat-composer">
+        <h2>sc-chat-composer</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Rich iMessage-style chat composer with pill-shaped input, model selector, slash commands, image paste, and send/stop morphing button.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 320px;">
+            <sc-chat-composer id="chat-composer-preview" placeholder="Type a message..." model="Gemini 2.5 Pro" show-suggestions></sc-chat-composer>
+          </div>
+          <div class="controls">
+            <label><input type="checkbox" data-target="chat-composer-preview" data-prop="showSuggestions" checked /> Show suggestions</label>
+            <label><input type="checkbox" data-target="chat-composer-preview" data-prop="waiting" /> Waiting (streaming)</label>
+            <label><input type="checkbox" data-target="chat-composer-preview" data-prop="disabled" /> Disabled</label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-chat-composer .value=${""} .waiting=${false} .model=${"Gemini 2.5 Pro"} .showSuggestions=${true} placeholder="Type a message..."&gt;&lt;/sc-chat-composer&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="sc-message-list">
         <h2>sc-message-list</h2>
         <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Scrollable chat message list with role=log, thinking indicator, scroll-to-bottom pill, and support for messages, tool calls, and reasoning blocks.</p>
@@ -1046,6 +1068,18 @@
         <div class="code-snippet"><code>&lt;sc-message-actions role="assistant" content="Hello"&gt;&lt;/sc-message-actions&gt;</code></div>
       </section>
 
+      <section class="component-section" id="sc-tapback-menu">
+        <h2>sc-tapback-menu</h2>
+        <p>Floating reaction picker overlay (iMessage-style tapback) — thumbs up/down, heart, copy, bookmark.</p>
+        <div class="playground">
+          <div class="preview" style="position:relative;min-height:120px;display:flex;align-items:center;justify-content:center">
+            <button type="button" id="catalog-tapback-trigger">Show tapback menu</button>
+            <sc-tapback-menu id="catalog-tapback-menu" messageContent="Sample message to copy" messageIndex="0"></sc-tapback-menu>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-tapback-menu open .x=${100} .y=${80} messageIndex="0" messageContent="..."&gt;&lt;/sc-tapback-menu&gt;</code></div>
+      </section>
+
       <section class="component-section" id="sc-automation-card">
         <h2>sc-automation-card</h2>
         <p>Card for displaying a cron/automation job with status, schedule, cost, and run history sparkline.</p>
@@ -1079,6 +1113,68 @@
         <div class="code-snippet"><code>&lt;sc-file-preview .files=${"[{ name: 'doc.pdf', size: 1024, type: 'application/pdf' }]"}&gt;&lt;/sc-file-preview&gt;</code></div>
       </section>
 
+      <section class="component-section" id="sc-chat-bubble">
+        <h2>sc-chat-bubble</h2>
+        <p>Chat message bubble with markdown support, user/assistant roles, streaming cursor, and optional tail.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 480px; flex-direction: column; gap: var(--sc-space-md); align-items: flex-start;">
+            <sc-chat-bubble content="Hello! How can I help you today?" role="assistant" show-tail></sc-chat-bubble>
+            <sc-chat-bubble content="Can you explain **markdown** and `code` in messages?" role="user" show-tail></sc-chat-bubble>
+            <sc-chat-bubble content="Sure! Here's a list:\n\n- **Bold** text\n- *Italic* text\n- `inline code`" role="assistant"></sc-chat-bubble>
+            <sc-chat-bubble content="Streaming response..." role="assistant" streaming></sc-chat-bubble>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-chat-bubble content="Hello" role="assistant" .streaming=${false} .showTail=${true}&gt;&lt;/sc-chat-bubble&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-typing-indicator">
+        <h2>sc-typing-indicator</h2>
+        <p>Animated typing indicator with optional elapsed time display.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 320px; justify-content: flex-start;">
+            <sc-typing-indicator elapsed="12s"></sc-typing-indicator>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-typing-indicator elapsed="12s"&gt;&lt;/sc-typing-indicator&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-delivery-status">
+        <h2>sc-delivery-status</h2>
+        <p>Message delivery status indicator: sending, sent, streaming, complete, or failed (with retry).</p>
+        <div class="playground">
+          <div class="preview" style="gap: var(--sc-space-lg); flex-wrap: wrap;">
+            <sc-delivery-status status="sending"></sc-delivery-status>
+            <sc-delivery-status status="sent"></sc-delivery-status>
+            <sc-delivery-status status="streaming"></sc-delivery-status>
+            <sc-delivery-status status="complete"></sc-delivery-status>
+            <sc-delivery-status status="failed"></sc-delivery-status>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-delivery-status status="sent"&gt;&lt;/sc-delivery-status&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-link-preview">
+        <h2>sc-link-preview</h2>
+        <p>Rich link preview card for URLs detected in messages.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 360px; flex-direction: column; gap: var(--sc-space-md); align-items: flex-start;">
+            <sc-link-preview
+              url="https://github.com/seaclaw/seaclaw"
+              title="seaclaw/seaclaw"
+              description="C11 autonomous AI assistant runtime. Minimal binary, zero dependencies."
+              favicon="https://github.com/favicon.ico"
+              image="https://opengraph.githubassets.com/1/seaclaw/seaclaw"
+            ></sc-link-preview>
+            <sc-link-preview
+              url="https://example.com/article"
+              title="Example Article Title"
+              description="A short description of the linked page content."
+            ></sc-link-preview>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-link-preview url="https://example.com" title="Title" description="Description"&gt;&lt;/sc-link-preview&gt;</code></div>
+      </section>
+
     <sc-toast></sc-toast>
 
     <script type="module">
@@ -1108,6 +1204,7 @@
       import "/src/components/sc-search.js";
       import "/src/components/sc-chat-search.js";
       import "/src/components/sc-composer.js";
+      import "/src/components/sc-chat-composer.js";
       import "/src/components/sc-message-list.js";
       import "/src/components/sc-segmented-control.js";
       import "/src/components/sc-data-table.js";
@@ -1136,9 +1233,14 @@
       import "/src/components/sc-page-hero.js";
       import "/src/components/sc-schedule-builder.js";
       import "/src/components/sc-message-actions.js";
+      import "/src/components/sc-tapback-menu.js";
       import "/src/components/sc-automation-card.js";
       import "/src/components/sc-chat-sessions-panel.js";
       import "/src/components/sc-file-preview.js";
+      import "/src/components/sc-chat-bubble.js";
+      import "/src/components/sc-typing-indicator.js";
+      import "/src/components/sc-delivery-status.js";
+      import "/src/components/sc-link-preview.js";
 
       // Theme toggle
       function setTheme(theme) {
@@ -1164,6 +1266,22 @@
       setTheme(initialTheme);
       document.getElementById("theme-dark")?.addEventListener("click", () => setTheme("dark"));
       document.getElementById("theme-light")?.addEventListener("click", () => setTheme("light"));
+
+      // sc-tapback-menu demo
+      const tapbackTrigger = document.getElementById("catalog-tapback-trigger");
+      const tapbackMenu = document.getElementById("catalog-tapback-menu");
+      if (tapbackTrigger && tapbackMenu) {
+        tapbackTrigger.addEventListener("click", (e) => {
+          const rect = tapbackTrigger.getBoundingClientRect();
+          tapbackMenu.x = rect.left + rect.width / 2;
+          tapbackMenu.y = rect.top;
+          tapbackMenu.open = true;
+        });
+        tapbackMenu.addEventListener("sc-tapback-close", () => { tapbackMenu.open = false; });
+        tapbackMenu.addEventListener("sc-react", (e) => {
+          console.log("sc-react", e.detail);
+        });
+      }
 
       // Prop controls
       document.querySelectorAll("[data-target]").forEach((control) => {

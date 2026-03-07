@@ -119,6 +119,15 @@
 #if SC_HAS_MQTT
 #include "seaclaw/channels/mqtt.h"
 #endif
+#if SC_HAS_MATRIX
+#include "seaclaw/channels/matrix.h"
+#endif
+#if SC_HAS_IRC
+#include "seaclaw/channels/irc.h"
+#endif
+#if SC_HAS_NOSTR
+#include "seaclaw/channels/nostr.h"
+#endif
 
 #define SC_VERSION  "0.3.0"
 #define SC_CODENAME "seaclaw"
@@ -1129,6 +1138,71 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     }
 #endif
 
+#if SC_HAS_MATRIX
+    sc_channel_t matrix_ch = {0};
+    if (cfg.channels.matrix.homeserver && cfg.channels.matrix.access_token) {
+        err = sc_matrix_create(alloc, cfg.channels.matrix.homeserver,
+                               strlen(cfg.channels.matrix.homeserver),
+                               cfg.channels.matrix.access_token,
+                               strlen(cfg.channels.matrix.access_token), &matrix_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = matrix_ch.ctx;
+            channels[ch_count].channel = &matrix_ch;
+            channels[ch_count].poll_fn = sc_matrix_poll;
+            channels[ch_count].interval_ms = 3000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] matrix channel configured\n", SC_CODENAME);
+        }
+    }
+#endif
+
+#if SC_HAS_IRC
+    sc_channel_t irc_ch = {0};
+    if (cfg.channels.irc.server) {
+        err = sc_irc_create(alloc, cfg.channels.irc.server, strlen(cfg.channels.irc.server),
+                            cfg.channels.irc.port ? cfg.channels.irc.port : 6667, &irc_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = irc_ch.ctx;
+            channels[ch_count].channel = &irc_ch;
+            channels[ch_count].poll_fn = sc_irc_poll;
+            channels[ch_count].interval_ms = 1000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] irc channel configured (%s:%u)\n", SC_CODENAME,
+                    cfg.channels.irc.server,
+                    cfg.channels.irc.port ? cfg.channels.irc.port : 6667);
+        }
+    }
+#endif
+
+#if SC_HAS_NOSTR
+    sc_channel_t nostr_ch = {0};
+    if (cfg.channels.nostr.relay_url) {
+        err = sc_nostr_create(alloc,
+                              cfg.channels.nostr.nak_path ? cfg.channels.nostr.nak_path : "",
+                              cfg.channels.nostr.nak_path ? strlen(cfg.channels.nostr.nak_path) : 0,
+                              cfg.channels.nostr.bot_pubkey ? cfg.channels.nostr.bot_pubkey : "",
+                              cfg.channels.nostr.bot_pubkey ? strlen(cfg.channels.nostr.bot_pubkey)
+                                                           : 0,
+                              cfg.channels.nostr.relay_url, strlen(cfg.channels.nostr.relay_url),
+                              cfg.channels.nostr.seckey_hex ? cfg.channels.nostr.seckey_hex : "",
+                              cfg.channels.nostr.seckey_hex ? strlen(cfg.channels.nostr.seckey_hex)
+                                                            : 0,
+                              &nostr_ch);
+        if (err == SC_OK) {
+            channels[ch_count].channel_ctx = nostr_ch.ctx;
+            channels[ch_count].channel = &nostr_ch;
+            channels[ch_count].poll_fn = sc_nostr_poll;
+            channels[ch_count].interval_ms = 2000;
+            channels[ch_count].last_poll_ms = 0;
+            ch_count++;
+            fprintf(stderr, "[%s] nostr channel configured (%s)\n", SC_CODENAME,
+                    cfg.channels.nostr.relay_url);
+        }
+    }
+#endif
+
 #ifdef SC_HAS_CRON
     fprintf(stderr, "[%s] %zu channel(s) active, cron enabled\n", SC_CODENAME, ch_count);
 #else
@@ -1228,6 +1302,18 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #if SC_HAS_MQTT
     if (mqtt_ch.ctx)
         sc_mqtt_destroy(&mqtt_ch, alloc);
+#endif
+#if SC_HAS_MATRIX
+    if (matrix_ch.ctx)
+        sc_matrix_destroy(&matrix_ch);
+#endif
+#if SC_HAS_IRC
+    if (irc_ch.ctx)
+        sc_irc_destroy(&irc_ch);
+#endif
+#if SC_HAS_NOSTR
+    if (nostr_ch.ctx)
+        sc_nostr_destroy(&nostr_ch);
 #endif
 
     sc_agent_deinit(&agent);

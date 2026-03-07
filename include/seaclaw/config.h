@@ -92,6 +92,8 @@ typedef struct sc_agent_config {
     char *persona;
     sc_persona_channel_entry_t *persona_channels;
     size_t persona_channels_count;
+    sc_persona_channel_entry_t *persona_contacts;
+    size_t persona_contacts_count;
     float context_pressure_warn;    /* warn at this ratio (default 0.85) */
     float context_pressure_compact; /* auto-compact at this ratio (default 0.95) */
     float context_compact_target;   /* compact until below this ratio (default 0.70) */
@@ -242,6 +244,23 @@ typedef struct sc_mqtt_channel_config {
     int qos;
 } sc_mqtt_channel_config_t;
 
+typedef struct sc_matrix_channel_config {
+    char *homeserver;
+    char *access_token;
+} sc_matrix_channel_config_t;
+
+typedef struct sc_irc_channel_config {
+    char *server;
+    uint16_t port;
+} sc_irc_channel_config_t;
+
+typedef struct sc_nostr_channel_config {
+    char *nak_path;
+    char *bot_pubkey;
+    char *relay_url;
+    char *seckey_hex;
+} sc_nostr_channel_config_t;
+
 typedef struct sc_channels_config {
     bool cli;
     char *default_channel;
@@ -264,6 +283,9 @@ typedef struct sc_channels_config {
     sc_twitter_channel_config_t twitter;
     sc_google_rcs_channel_config_t google_rcs;
     sc_mqtt_channel_config_t mqtt;
+    sc_matrix_channel_config_t matrix;
+    sc_irc_channel_config_t irc;
+    sc_nostr_channel_config_t nostr;
 } sc_channels_config_t;
 
 typedef struct sc_memory_config {
@@ -442,6 +464,7 @@ bool sc_config_get_tool_model_override(const sc_config_t *cfg, const char *tool_
 
 /** Returns channel-specific persona if configured, else NULL. Uses global persona as fallback. */
 const char *sc_config_persona_for_channel(const sc_config_t *cfg, const char *channel);
+const char *sc_config_persona_for_contact(const sc_config_t *cfg, const char *contact_id);
 
 /* Config hot-reload support */
 void sc_config_set_reload_requested(void);

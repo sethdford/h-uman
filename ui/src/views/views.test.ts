@@ -263,3 +263,33 @@ describe("sc-logs-view", () => {
     el.remove();
   });
 });
+
+describe("view accessibility", () => {
+  const ALL_VIEWS = [
+    "sc-overview-view",
+    "sc-agents-view",
+    "sc-sessions-view",
+    "sc-models-view",
+    "sc-config-view",
+    "sc-tools-view",
+    "sc-channels-view",
+    "sc-automations-view",
+    "sc-skills-view",
+    "sc-voice-view",
+    "sc-nodes-view",
+    "sc-usage-view",
+    "sc-security-view",
+    "sc-logs-view",
+  ];
+
+  for (const tag of ALL_VIEWS) {
+    it(`${tag} has scoped styles`, async () => {
+      const el = createView(tag);
+      await el.updateComplete;
+      const hasAdopted = (el.shadowRoot?.adoptedStyleSheets?.length ?? 0) > 0;
+      const hasStyle = (el.shadowRoot?.querySelectorAll("style")?.length ?? 0) > 0;
+      expect(hasAdopted || hasStyle).toBe(true);
+      el.remove();
+    });
+  }
+});
