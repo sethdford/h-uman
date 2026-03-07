@@ -10,6 +10,9 @@ import "../components/sc-badge.js";
 import "../components/sc-input.js";
 import "../components/sc-button.js";
 import "../components/sc-skeleton.js";
+import "../components/sc-form-group.js";
+import "../components/sc-combobox.js";
+import "../components/sc-code-block.js";
 
 type SaveStatus = "saved" | "error" | "unsaved" | "idle";
 
@@ -31,6 +34,29 @@ interface ConfigData {
   max_tokens?: number;
   temperature?: number;
 }
+
+interface ProviderItem {
+  name?: string;
+}
+
+const DEFAULT_PROVIDERS: { value: string; label: string }[] = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "gemini", label: "Gemini" },
+  { value: "ollama", label: "Ollama" },
+  { value: "openrouter", label: "OpenRouter" },
+  { value: "compatible", label: "Compatible" },
+];
+
+const COMMON_MODELS: { value: string; label: string }[] = [
+  { value: "gpt-4o", label: "GPT-4o" },
+  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+  { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
+  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+  { value: "llama-3.1-70b", label: "Llama 3.1 70B" },
+];
 
 function toRawConfig(edited: ConfigData): Record<string, unknown> {
   return {
@@ -131,34 +157,12 @@ export class ScConfigView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
       margin-top: var(--sc-space-2xs);
     }
-    .field input {
-      padding: var(--sc-space-sm) var(--sc-space-md);
-      background: var(--sc-bg);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      color: var(--sc-text);
-      font-size: var(--sc-text-base);
-      transition:
-        border-color var(--sc-duration-fast),
-        box-shadow var(--sc-duration-fast);
-    }
-    .field input:hover:not(:focus) {
-      border-color: var(--sc-text-muted);
-    }
-    .field input:focus {
-      outline: none;
-      border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
-    }
-    .field input[type="number"] {
-      width: 8rem;
-    }
     .raw-area {
       min-height: 280px;
       padding: var(--sc-space-md) var(--sc-space-md);
-      background: var(--sc-bg);
+      background: var(--sc-bg-inset);
       border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
+      border-radius: var(--sc-radius-md);
       color: var(--sc-text);
       font-family: var(--sc-font-mono);
       font-size: var(--sc-text-sm);
@@ -175,12 +179,27 @@ export class ScConfigView extends GatewayAwareLitElement {
       border-color: var(--sc-accent);
       box-shadow: 0 0 0 3px var(--sc-accent-subtle);
     }
+    .unsaved-banner {
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sc-space-md) var(--sc-space-lg);
+      background: var(--sc-bg-surface);
+      border-top: 1px solid var(--sc-border);
+      box-shadow: 0 -4px 12px var(--sc-shadow-lg);
+      z-index: 10;
+    }
+    .unsaved-banner-actions {
+      display: flex;
+      gap: var(--sc-space-sm);
+    }
     @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       :host {
         max-width: 100%;
-      }
-      .field input[type="number"] {
-        width: 100%;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -199,10 +218,14 @@ export class ScConfigView extends GatewayAwareLitElement {
   @state() private schema: ConfigSchema = {};
   @state() private rawMode = false;
   @state() private rawText = "";
+  @state() private rawEditing = false;
   @state() private sectionCollapsed = false;
   @state() private saveStatus: SaveStatus = "idle";
   @state() private errorMessage = "";
   @state() private saving = false;
+  @state() private providerOptions: { value: string; label: string }[] = DEFAULT_PROVIDERS;
+  @state() private modelOptions: { value: string; label: string }[] = COMMON_MODELS;
+  @state() private temperatureError = "";
   private _beforeUnloadHandler?: (e: BeforeUnloadEvent) => void;
 
   override connectedCallback(): void {
@@ -224,7 +247,7 @@ export class ScConfigView extends GatewayAwareLitElement {
 
   protected override async load(): Promise<void> {
     this.loading = true;
-    await Promise.all([this.loadConfig(), this.loadSchema()]);
+    await Promise.all([this.loadConfig(), this.loadSchema(), this.loadProviderOptions()]);
     this.loading = false;
   }
 
@@ -280,6 +303,24 @@ export class ScConfigView extends GatewayAwareLitElement {
     }
   }
 
+  private async loadProviderOptions(): Promise<void> {
+    if (!this.gateway) return;
+    try {
+      const res = await this.gateway.request<{ providers?: ProviderItem[] }>("models.list", {});
+      const providers = res?.providers ?? [];
+      if (providers.length > 0) {
+        this.providerOptions = providers
+          .map((p) => ({
+            value: p.name ?? "",
+            label: (p.name ?? "").charAt(0).toUpperCase() + (p.name ?? "").slice(1),
+          }))
+          .filter((o) => o.value);
+      }
+    } catch {
+      /* keep defaults */
+    }
+  }
+
   private hasChanges(): boolean {
     if (this.rawMode) {
       try {
@@ -299,8 +340,24 @@ export class ScConfigView extends GatewayAwareLitElement {
     );
   }
 
+  private validateTemperature(): void {
+    const t = this.edited.temperature ?? 0.7;
+    if (t < 0 || t > 2) {
+      this.temperatureError = "Temperature must be between 0 and 2";
+    } else {
+      this.temperatureError = "";
+    }
+  }
+
   private async save(): Promise<void> {
     if (!this.gateway) return;
+    if (!this.rawMode) {
+      this.validateTemperature();
+      if (this.temperatureError) {
+        ScToast.show({ message: this.temperatureError, variant: "error" });
+        return;
+      }
+    }
     this.saving = true;
     this.saveStatus = "idle";
     this.errorMessage = "";
@@ -340,6 +397,7 @@ export class ScConfigView extends GatewayAwareLitElement {
           this.config = { ...this.edited };
         }
         this.rawText = JSON.stringify(toRawConfig(this.config), null, 2);
+        this.rawEditing = false;
         this.saveStatus = "saved";
         ScToast.show({ message: "Config saved", variant: "success" });
         setTimeout(() => {
@@ -357,6 +415,15 @@ export class ScConfigView extends GatewayAwareLitElement {
     } finally {
       this.saving = false;
     }
+  }
+
+  private revert(): void {
+    this.edited = { ...this.config };
+    this.rawText = JSON.stringify(toRawConfig(this.config), null, 2);
+    this.rawEditing = false;
+    this.temperatureError = "";
+    this.saveStatus = "idle";
+    ScToast.show({ message: "Changes reverted", variant: "success" });
   }
 
   private toggleRawMode(): void {
@@ -378,6 +445,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       this.rawText = JSON.stringify(toRawConfig(this.edited), null, 2);
     }
     this.rawMode = !this.rawMode;
+    this.rawEditing = false;
   }
 
   override render() {
@@ -438,32 +506,60 @@ export class ScConfigView extends GatewayAwareLitElement {
       </sc-page-hero>
       <sc-card glass>
         <div class="form">
-          <textarea
-            class="raw-area"
-            .value=${this.rawText}
-            @input=${(e: Event) => {
-              this.rawText = (e.target as HTMLTextAreaElement).value;
-              if (this.saveStatus === "saved") this.saveStatus = "idle";
-            }}
-            spellcheck="false"
-          ></textarea>
+          ${this.rawEditing
+            ? html`
+                <textarea
+                  class="raw-area"
+                  .value=${this.rawText}
+                  @input=${(e: Event) => {
+                    this.rawText = (e.target as HTMLTextAreaElement).value;
+                    if (this.saveStatus === "saved") this.saveStatus = "idle";
+                  }}
+                  spellcheck="false"
+                ></textarea>
+                <sc-button variant="secondary" size="sm" @click=${() => (this.rawEditing = false)}>
+                  Done editing
+                </sc-button>
+              `
+            : html`
+                <sc-code-block .code=${this.rawText} language="json"></sc-code-block>
+                <sc-button variant="secondary" size="sm" @click=${() => (this.rawEditing = true)}>
+                  Edit
+                </sc-button>
+              `}
         </div>
       </sc-card>
+      ${this.hasChanges()
+        ? html`
+            <div class="unsaved-banner">
+              <span>You have unsaved changes</span>
+              <div class="unsaved-banner-actions">
+                <sc-button variant="secondary" @click=${this.revert}>Revert</sc-button>
+                <sc-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
+                  Save
+                </sc-button>
+              </div>
+            </div>
+          `
+        : nothing}
     `;
+  }
+
+  private _onFormChange(): void {
+    if (this.saveStatus === "saved") this.saveStatus = "idle";
+    this.validateTemperature();
   }
 
   private _renderForm(): TemplateResult {
     const props = this.schema?.properties ?? {};
-    const order = [
+    const orderedKeys = [
       "workspace_dir",
       "default_provider",
       "default_model",
       "max_tokens",
       "temperature",
     ];
-    const orderedKeys = order.filter((k) => k in props);
-    const extraKeys = Object.keys(props).filter((k) => !order.includes(k));
-    const fieldKeys = [...orderedKeys, ...extraKeys];
+    const fieldKeys = orderedKeys.filter((k) => k in props);
 
     return html`
       <sc-page-hero>
@@ -494,83 +590,101 @@ export class ScConfigView extends GatewayAwareLitElement {
       </sc-page-hero>
       <sc-card glass>
         <div class="form">
-          <div class="section ${this.sectionCollapsed ? "collapsed" : ""}">
-            <div
-              class="section-header ${this.sectionCollapsed ? "collapsed" : ""}"
-              role="button"
-              tabindex="0"
-              aria-expanded=${!this.sectionCollapsed}
-              aria-label="General configuration"
-              @click=${() => (this.sectionCollapsed = !this.sectionCollapsed)}
-              @keydown=${(e: KeyboardEvent) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  this.sectionCollapsed = !this.sectionCollapsed;
-                }
+          <sc-form-group title="Provider Settings" description="Default AI provider and model">
+            <sc-combobox
+              label="Provider"
+              .options=${this.providerOptions}
+              .value=${this.edited.default_provider ?? ""}
+              placeholder="Select provider"
+              freeText
+              @sc-combobox-change=${(e: CustomEvent<{ value: string }>) => {
+                this.edited = { ...this.edited, default_provider: e.detail.value };
+                this._onFormChange();
               }}
-            >
-              <span>General</span>
-              <span class="chevron">${icons["caret-down"]}</span>
-            </div>
-            <div class="section-content">
-              ${fieldKeys.map((key) => {
-                const prop = props[key] as SchemaProperty | undefined;
-                const desc = prop?.description ?? "";
-                const val = this.edited[key as keyof ConfigData];
-                const inputType =
-                  prop?.type === "integer" || prop?.type === "number" ? "number" : "text";
+            ></sc-combobox>
+            <sc-combobox
+              label="Model"
+              .options=${this.modelOptions}
+              .value=${this.edited.default_model ?? ""}
+              placeholder="Select or type model"
+              freeText
+              @sc-combobox-change=${(e: CustomEvent<{ value: string }>) => {
+                this.edited = { ...this.edited, default_model: e.detail.value };
+                this._onFormChange();
+              }}
+            ></sc-combobox>
+          </sc-form-group>
 
-                const ariaLabels: Record<string, string> = {
-                  workspace_dir: "Workspace directory",
-                  default_provider: "Provider",
-                  default_model: "Model",
-                  max_tokens: "Max tokens",
-                  temperature: "Temperature",
-                };
-                const ariaLabel = ariaLabels[key] ?? key.replace(/_/g, " ");
-                return html`
-                  <div class="field">
-                    <label for="${key}">${key.replace(/_/g, " ")}</label>
-                    ${desc ? html`<div class="description">${desc}</div>` : nothing}
-                    <sc-input
-                      aria-label=${ariaLabel}
-                      type="${inputType}"
-                      .min=${inputType === "number" ? 0 : undefined}
-                      .max=${key === "temperature" ? 2 : undefined}
-                      .step=${key === "temperature" ? 0.1 : inputType === "number" ? 1 : undefined}
-                      .value=${String(val ?? "")}
-                      @sc-input=${(e: CustomEvent<{ value: string }>) => {
-                        const raw = e.detail.value;
-                        const v =
-                          inputType === "number"
-                            ? key === "temperature"
-                              ? parseFloat(raw)
-                              : parseInt(raw, 10)
-                            : raw;
-                        const parsed =
-                          inputType === "number"
-                            ? isNaN(v as number)
-                              ? key === "temperature"
-                                ? 0.7
-                                : 0
-                              : key === "temperature"
-                                ? Math.max(0, Math.min(2, v as number))
-                                : v
-                            : v;
-                        this.edited = {
-                          ...this.edited,
-                          [key]: parsed,
-                        };
-                        if (this.saveStatus === "saved") this.saveStatus = "idle";
-                      }}
-                    ></sc-input>
-                  </div>
-                `;
-              })}
+          <sc-form-group title="Model Settings" description="Token and temperature limits">
+            <div class="field">
+              <label for="max_tokens">Max tokens</label>
+              <sc-input
+                id="max_tokens"
+                type="number"
+                .min=${0}
+                .value=${String(this.edited.max_tokens ?? 0)}
+                @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                  const v = parseInt(e.detail.value, 10);
+                  this.edited = { ...this.edited, max_tokens: isNaN(v) ? 0 : v };
+                  this._onFormChange();
+                }}
+              ></sc-input>
             </div>
-          </div>
+            <div class="field">
+              <label for="temperature">Temperature (0–2)</label>
+              <sc-input
+                id="temperature"
+                type="number"
+                .min=${0}
+                .max=${2}
+                .step=${0.1}
+                .value=${String(this.edited.temperature ?? 0.7)}
+                .error=${this.temperatureError}
+                @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                  const v = parseFloat(e.detail.value);
+                  const clamped = isNaN(v) ? 0.7 : Math.max(0, Math.min(2, v));
+                  this.edited = { ...this.edited, temperature: clamped };
+                  this._onFormChange();
+                }}
+              ></sc-input>
+              ${this.temperatureError
+                ? html`<span class="description" style="color: var(--sc-error)"
+                    >${this.temperatureError}</span
+                  >`
+                : nothing}
+            </div>
+          </sc-form-group>
+
+          <sc-form-group title="Agent Settings" description="Workspace and paths">
+            <div class="field">
+              <label for="workspace_dir">Workspace directory</label>
+              <sc-input
+                id="workspace_dir"
+                type="text"
+                .value=${this.edited.workspace_dir ?? ""}
+                placeholder="."
+                @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                  this.edited = { ...this.edited, workspace_dir: e.detail.value };
+                  this._onFormChange();
+                }}
+              ></sc-input>
+            </div>
+          </sc-form-group>
         </div>
       </sc-card>
+      ${this.hasChanges()
+        ? html`
+            <div class="unsaved-banner">
+              <span>You have unsaved changes</span>
+              <div class="unsaved-banner-actions">
+                <sc-button variant="secondary" @click=${this.revert}>Revert</sc-button>
+                <sc-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
+                  Save
+                </sc-button>
+              </div>
+            </div>
+          `
+        : nothing}
     `;
   }
 }
