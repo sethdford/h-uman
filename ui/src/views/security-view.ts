@@ -10,6 +10,9 @@ import "../components/sc-card.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-badge.js";
+import "../components/sc-select.js";
+import "../components/sc-switch.js";
+import "../components/sc-button.js";
 
 interface SecurityConfig {
   autonomy_level?: number;
@@ -26,6 +29,17 @@ interface SecurityConfig {
   };
 }
 
+interface PairingInfo {
+  device_name?: string;
+  paired_at?: number;
+}
+
+const AUTONOMY_OPTIONS = [
+  { value: "0", label: "0 — Read-Only (Supervised)" },
+  { value: "1", label: "1 — Supervised" },
+  { value: "2", label: "2 — Full Autonomy" },
+];
+
 const AUTONOMY_LABELS: Record<number, { label: string; color: string; description: string }> = {
   0: {
     label: "Read-Only",
@@ -34,7 +48,7 @@ const AUTONOMY_LABELS: Record<number, { label: string; color: string; descriptio
   },
   1: {
     label: "Supervised",
-    color: "var(--sc-warning)",
+    color: "var(--sc-success)",
     description: "Agent proposes actions. User must approve before execution.",
   },
   2: {
@@ -53,13 +67,13 @@ export class ScSecurityView extends GatewayAwareLitElement {
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-xl);
     }
     @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .stats-row {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 1fr;
       }
     }
     .grid {
@@ -82,6 +96,28 @@ export class ScSecurityView extends GatewayAwareLitElement {
     }
     .autonomy-badge-wrap {
       margin-bottom: var(--sc-space-sm);
+    }
+    .risk-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sc-space-xs);
+      padding: var(--sc-space-xs) var(--sc-space-sm);
+      border-radius: var(--sc-radius);
+      font-size: var(--sc-text-sm);
+      font-weight: var(--sc-weight-medium);
+      margin-bottom: var(--sc-space-sm);
+    }
+    .risk-indicator.success {
+      background: color-mix(in srgb, var(--sc-success) 20%, transparent);
+      color: var(--sc-success);
+    }
+    .risk-indicator.warning {
+      background: color-mix(in srgb, var(--sc-warning) 20%, transparent);
+      color: var(--sc-warning);
+    }
+    .risk-indicator.error {
+      background: color-mix(in srgb, var(--sc-error) 20%, transparent);
+      color: var(--sc-error);
     }
     .description {
       font-size: var(--sc-text-sm);
@@ -121,6 +157,12 @@ export class ScSecurityView extends GatewayAwareLitElement {
       align-items: center;
       gap: var(--sc-space-sm);
       margin-top: var(--sc-space-md);
+    }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sc-space-sm) 0;
     }
     .domain-list {
       display: flex;
@@ -172,6 +214,11 @@ export class ScSecurityView extends GatewayAwareLitElement {
     .check-icon.warn {
       color: var(--sc-warning);
     }
+    .pairing-info {
+      font-size: var(--sc-text-sm);
+      color: var(--sc-text-muted);
+      margin-top: var(--sc-space-xs);
+    }
     @media (max-width: 768px) /* --sc-breakpoint-lg */ {
       .grid {
         grid-template-columns: 1fr 1fr;
@@ -220,6 +267,12 @@ export class ScSecurityView extends GatewayAwareLitElement {
     return gw?.require_pairing === true;
   }
 
+  private get pairingInfo(): PairingInfo | null {
+    const gw = this.rawConfig?.gateway as { device_name?: string; paired_at?: number } | undefined;
+    if (!gw?.device_name && !gw?.paired_at) return null;
+    return { device_name: gw.device_name, paired_at: gw.paired_at };
+  }
+
   private get httpsOnly(): boolean {
     return true;
   }
@@ -240,53 +293,58 @@ export class ScSecurityView extends GatewayAwareLitElement {
     return this.config?.sandbox_config?.backend ?? this.config?.sandbox ?? "auto";
   }
 
+  private get netProxyEnabled(): boolean {
+    return this.config?.sandbox_config?.net_proxy?.enabled === true;
+  }
+
+  private get securityScore(): number {
+    let score = 0;
+    if (this.sandboxEnabled) score += 25;
+    if (this.netProxyEnabled) score += 25;
+    if (this.autonomyLevel === 0) score += 50;
+    else if (this.autonomyLevel === 1) score += 50;
+    else if (this.autonomyLevel === 2) score += 0;
+    if (this.pairingEnabled) score += 25;
+    if (this.httpsOnly) score += 25;
+    return Math.min(100, score);
+  }
+
+  private get riskVariant(): "success" | "warning" | "error" {
+    if (this.autonomyLevel === 0) return "success";
+    if (this.autonomyLevel === 1) return "success";
+    return "error";
+  }
+
   private _renderSkeleton() {
     return html`<sc-skeleton variant="card" height="200px"></sc-skeleton>`;
   }
 
   private _renderAutonomy() {
     const info = this.autonomyInfo;
-    const variant =
-      this.autonomyLevel === 0 ? "success" : this.autonomyLevel === 1 ? "warning" : "error";
+    const variant = this.riskVariant;
     return html`
       <sc-card>
         <div class="card-inner">
           <div class="card-title">Autonomy Level</div>
-          <div class="autonomy-badge-wrap">
-            <sc-badge variant=${variant}
-              >Level ${this.autonomyLevel} &mdash; ${info.label}</sc-badge
-            >
+          <div class="risk-indicator ${variant}">
+            <span>Level ${this.autonomyLevel} &mdash; ${info.label}</span>
           </div>
           <div class="description">${info.description}</div>
           <div class="control-row">
-            <label class="policy-label" for="autonomy-select">Change level</label>
-            <select
-              id="autonomy-select"
+            <sc-select
+              label="Change level"
+              .options=${AUTONOMY_OPTIONS}
               .value=${String(this.autonomyLevel)}
-              @change=${this._onAutonomyChange}
-              style="
-                font-family: var(--sc-font);
-                font-size: var(--sc-text-sm);
-                padding: var(--sc-space-xs) var(--sc-space-sm);
-                border-radius: var(--sc-radius-sm);
-                border: 1px solid var(--sc-border-subtle);
-                background: var(--sc-bg-elevated);
-                color: var(--sc-text);
-              "
-            >
-              <option value="0">0 — Read-Only</option>
-              <option value="1">1 — Supervised</option>
-              <option value="2">2 — Full Autonomy</option>
-            </select>
+              @sc-change=${this._onAutonomyChange}
+            ></sc-select>
           </div>
         </div>
       </sc-card>
     `;
   }
 
-  private async _onAutonomyChange(e: Event): Promise<void> {
-    const select = e.target as HTMLSelectElement;
-    const level = parseInt(select.value, 10);
+  private async _onAutonomyChange(e: CustomEvent<{ value: string }>): Promise<void> {
+    const level = parseInt(e.detail.value, 10);
     const gw = this.gateway;
     if (!gw) return;
     try {
@@ -306,6 +364,66 @@ export class ScSecurityView extends GatewayAwareLitElement {
     }
   }
 
+  private async _onSandboxToggle(e: CustomEvent<{ checked: boolean }>): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    const enabled = e.detail.checked;
+    try {
+      await gw.request("config.set", {
+        key: "security.sandbox_config.enabled",
+        value: enabled,
+      });
+      if (this.config?.sandbox_config) {
+        this.config = {
+          ...this.config,
+          sandbox_config: { ...this.config.sandbox_config, enabled },
+        };
+      } else if (this.config) {
+        this.config = {
+          ...this.config,
+          sandbox_config: { enabled, net_proxy: this.config.sandbox_config?.net_proxy },
+        };
+      }
+      ScToast.show({ message: `Sandbox ${enabled ? "enabled" : "disabled"}`, variant: "success" });
+    } catch (err) {
+      ScToast.show({
+        message: err instanceof Error ? err.message : "Failed to update",
+        variant: "error",
+      });
+    }
+  }
+
+  private async _onNetProxyToggle(e: CustomEvent<{ checked: boolean }>): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    const enabled = e.detail.checked;
+    const netProxy = this.config?.sandbox_config?.net_proxy ?? {};
+    try {
+      await gw.request("config.set", {
+        key: "security.sandbox_config.net_proxy.enabled",
+        value: enabled,
+      });
+      if (this.config?.sandbox_config) {
+        this.config = {
+          ...this.config,
+          sandbox_config: {
+            ...this.config.sandbox_config,
+            net_proxy: { ...netProxy, enabled },
+          },
+        };
+      }
+      ScToast.show({
+        message: `Network proxy ${enabled ? "enabled" : "disabled"}`,
+        variant: "success",
+      });
+    } catch (err) {
+      ScToast.show({
+        message: err instanceof Error ? err.message : "Failed to update",
+        variant: "error",
+      });
+    }
+  }
+
   private _renderSandbox() {
     if (!this.config) return nothing;
     return html`
@@ -316,13 +434,13 @@ export class ScSecurityView extends GatewayAwareLitElement {
             <span class="policy-label">Backend</span>
             <span class="policy-value">${this.sandboxBackend}</span>
           </div>
-          <div class="policy-row">
+          <div class="switch-row">
             <span class="policy-label">Enabled</span>
-            <span
-              class="policy-value ${this.config.sandbox_config?.enabled ? "enabled" : "disabled"}"
-            >
-              ${this.config.sandbox_config?.enabled ? "yes" : "auto-detect"}
-            </span>
+            <sc-switch
+              checked=${this.sandboxEnabled}
+              label=""
+              @sc-change=${this._onSandboxToggle}
+            ></sc-switch>
           </div>
         </div>
       </sc-card>
@@ -335,6 +453,14 @@ export class ScSecurityView extends GatewayAwareLitElement {
       <sc-card>
         <div class="card-inner">
           <div class="card-title">Network Proxy</div>
+          <div class="switch-row">
+            <span class="policy-label">Enabled</span>
+            <sc-switch
+              checked=${this.netProxyEnabled}
+              label=""
+              @sc-change=${this._onNetProxyToggle}
+            ></sc-switch>
+          </div>
           ${proxy?.enabled
             ? html`
                 <div class="policy-row">
@@ -375,6 +501,64 @@ export class ScSecurityView extends GatewayAwareLitElement {
         </div>
       </sc-card>
     `;
+  }
+
+  private _renderPairing() {
+    if (!this.pairingEnabled) return nothing;
+    const info = this.pairingInfo;
+    const pairedDate = info?.paired_at
+      ? new Date(info.paired_at * 1000).toLocaleDateString(undefined, {
+          dateStyle: "medium",
+        })
+      : null;
+    return html`
+      <sc-card>
+        <div class="card-inner">
+          <div class="card-title">Pairing</div>
+          <div class="policy-row">
+            <span class="policy-label">Status</span>
+            <span class="policy-value enabled">Paired</span>
+          </div>
+          ${info?.device_name || pairedDate
+            ? html`
+                <div class="pairing-info">
+                  ${info?.device_name ? html`<div>Device: ${info.device_name}</div>` : nothing}
+                  ${pairedDate ? html`<div>Paired: ${pairedDate}</div>` : nothing}
+                </div>
+              `
+            : nothing}
+          <div class="control-row">
+            <sc-button variant="secondary" size="sm" @click=${this._onUnpair}> Unpair </sc-button>
+          </div>
+        </div>
+      </sc-card>
+    `;
+  }
+
+  private async _onUnpair(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) return;
+    try {
+      await gw.request("config.set", {
+        key: "gateway.require_pairing",
+        value: false,
+      });
+      if (this.rawConfig?.gateway && typeof this.rawConfig.gateway === "object") {
+        this.rawConfig = {
+          ...this.rawConfig,
+          gateway: {
+            ...(this.rawConfig.gateway as Record<string, unknown>),
+            require_pairing: false,
+          },
+        };
+      }
+      ScToast.show({ message: "Pairing disabled", variant: "success" });
+    } catch (err) {
+      ScToast.show({
+        message: err instanceof Error ? err.message : "Failed to unpair",
+        variant: "error",
+      });
+    }
   }
 
   private _renderDefaults() {
@@ -444,26 +628,37 @@ export class ScSecurityView extends GatewayAwareLitElement {
       ${hero}
       <div class="stats-row">
         <sc-stat-card
+          .value=${this.securityScore}
+          label="Security Score"
+          accent=${this.securityScore >= 75
+            ? "primary"
+            : this.securityScore >= 50
+              ? "secondary"
+              : "error"}
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
           .value=${this.pairingEnabled ? 1 : 0}
           label="Pairing"
           accent=${this.pairingEnabled ? "primary" : "error"}
-          style="--sc-stagger-delay: 0ms"
+          style="--sc-stagger-delay: 80ms"
         ></sc-stat-card>
         <sc-stat-card
           .value=${this.httpsOnly ? 1 : 0}
           label="HTTPS Only"
           accent=${this.httpsOnly ? "primary" : "error"}
-          style="--sc-stagger-delay: 80ms"
+          style="--sc-stagger-delay: 160ms"
         ></sc-stat-card>
         <sc-stat-card
           .value=${this.sandboxEnabled ? 1 : 0}
           label="Sandbox"
           accent=${this.sandboxEnabled ? "primary" : "error"}
-          style="--sc-stagger-delay: 160ms"
+          style="--sc-stagger-delay: 240ms"
         ></sc-stat-card>
       </div>
       <div class="grid">
         ${this._renderAutonomy()} ${this._renderSandbox()} ${this._renderNetwork()}
+        ${this._renderPairing()}
       </div>
       ${this._renderDefaults()}
     `;

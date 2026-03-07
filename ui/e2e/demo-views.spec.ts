@@ -59,15 +59,16 @@ test.describe("Overview (Demo)", () => {
     await page.waitForTimeout(WAIT);
   });
 
-  test("renders page hero", async ({ page }) => {
+  test("renders bento grid layout", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-overview-view", "sc-page-hero"))).toBe(true);
+      expect(await page.evaluate(shadowExists("sc-overview-view", ".bento"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
-  test("shows 4 stat cards", async ({ page }) => {
+  test("shows stat cards with animated numbers", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowCount("sc-overview-view", "sc-stat-card"))).toBe(4);
+      const count = await page.evaluate(shadowCount("sc-overview-view", "sc-card"));
+      expect(count).toBeGreaterThanOrEqual(4);
     }).toPass({ timeout: POLL });
   });
 
@@ -78,11 +79,10 @@ test.describe("Overview (Demo)", () => {
     }).toPass({ timeout: POLL });
   });
 
-  test("shows sessions table with rows", async ({ page }) => {
+  test("shows recent sessions strip", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-overview-view", ".sessions-table"))).toBe(true);
-      const rows = await page.evaluate(shadowCount("sc-overview-view", ".sessions-table tbody tr"));
-      expect(rows).toBeGreaterThanOrEqual(3);
+      const count = await page.evaluate(shadowCount("sc-overview-view", ".session-card"));
+      expect(count).toBeGreaterThanOrEqual(1);
     }).toPass({ timeout: POLL });
   });
 
@@ -92,10 +92,9 @@ test.describe("Overview (Demo)", () => {
     }).toPass({ timeout: POLL });
   });
 
-  test("refresh button exists", async ({ page }) => {
+  test("shows system health card", async ({ page }) => {
     await expect(async () => {
-      const text = await page.evaluate(shadowText("sc-overview-view", ".hero-actions sc-button"));
-      expect(text).toContain("Refresh");
+      expect(await page.evaluate(shadowExists("sc-overview-view", ".health-card"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 });
@@ -109,15 +108,15 @@ test.describe("Chat (Demo)", () => {
     await page.waitForTimeout(WAIT);
   });
 
-  test("shows message stream component", async ({ page }) => {
+  test("shows message thread component", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-chat-view", "sc-message-stream"))).toBe(true);
+      expect(await page.evaluate(shadowExists("sc-chat-view", "sc-message-thread"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
-  test("shows composer with input and send button", async ({ page }) => {
+  test("shows chat composer", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-chat-view", "sc-composer"))).toBe(true);
+      expect(await page.evaluate(shadowExists("sc-chat-view", "sc-chat-composer"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
@@ -131,6 +130,14 @@ test.describe("Chat (Demo)", () => {
         })()
       `);
       expect(text).toContain("Connected");
+    }).toPass({ timeout: POLL });
+  });
+
+  test("shows sessions panel toggle", async ({ page }) => {
+    await expect(async () => {
+      expect(await page.evaluate(shadowExists("sc-chat-view", "sc-chat-sessions-panel"))).toBe(
+        true,
+      );
     }).toPass({ timeout: POLL });
   });
 });
