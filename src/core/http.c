@@ -102,21 +102,30 @@ static void add_header(struct curl_slist **list, const char *header) {
 static CURL *curl_pool[SC_CURL_POOL_SIZE];
 static int curl_pool_count = 0;
 
+#include <pthread.h>
+static pthread_mutex_t curl_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static CURL *curl_pool_acquire(void) {
+    pthread_mutex_lock(&curl_pool_mutex);
     if (curl_pool_count > 0) {
         CURL *h = curl_pool[--curl_pool_count];
+        pthread_mutex_unlock(&curl_pool_mutex);
         curl_easy_reset(h);
         return h;
     }
+    pthread_mutex_unlock(&curl_pool_mutex);
     return curl_easy_init();
 }
 
 static void curl_pool_release(CURL *h) {
     if (!h)
         return;
+    pthread_mutex_lock(&curl_pool_mutex);
     if (curl_pool_count < SC_CURL_POOL_SIZE) {
         curl_pool[curl_pool_count++] = h;
+        pthread_mutex_unlock(&curl_pool_mutex);
     } else {
+        pthread_mutex_unlock(&curl_pool_mutex);
         curl_easy_cleanup(h);
     }
 }

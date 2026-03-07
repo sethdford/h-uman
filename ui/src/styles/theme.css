@@ -2,7 +2,11 @@
 
 :root {
   --sc-surface: var(--sc-bg-surface);
-  --sc-overlay: rgba(0, 0, 0, 0.6);
+  --sc-overlay: var(--sc-color-overlay, rgb(0 0 0 / 0.6));
+  --sc-focus-glow: rgb(59 130 246 / 0.15);
+  --sc-glass-text-shadow-color: rgb(0 0 0 / 0.5);
+  --sc-glass-hover-border: rgb(255 255 255 / 0.08);
+  --sc-accent-glow: rgb(122 182 72 / 0.35);
   /* Spring easing — cubic-bezier approximations for physics motion */
   --sc-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --sc-ease-spring-gentle: cubic-bezier(0.22, 1.2, 0.36, 1);
@@ -85,7 +89,7 @@ body {
 :focus-visible {
   outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
   outline-offset: var(--sc-focus-ring-offset, 2px);
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 0 12px var(--sc-focus-glow);
 }
 
 /* ─── Selection ───────────────────────────────────────────────────── */
@@ -751,7 +755,7 @@ body {
 .sc-glass-surface :is(h1, h2, h3, h4, h5, h6),
 .sc-glass-elevated :is(h1, h2, h3, h4, h5, h6),
 .sc-glass-floating :is(h1, h2, h3, h4, h5, h6) {
-  text-shadow: var(--sc-glass-vibrancy-text-shadow, 0 0 8px rgba(0, 0, 0, 0.5));
+  text-shadow: var(--sc-glass-vibrancy-text-shadow, 0 0 8px var(--sc-glass-text-shadow-color));
 }
 
 /* Interactive glass — press, hover, focus */
@@ -763,7 +767,7 @@ body {
 }
 
 .sc-glass-interactive:hover {
-  box-shadow: var(--sc-glass-interactive-hover-border-glow, 0 0 0 1px rgba(255, 255, 255, 0.08));
+  box-shadow: var(--sc-glass-interactive-hover-border-glow, 0 0 0 1px var(--sc-glass-hover-border));
 }
 
 .sc-glass-interactive:hover::after {
@@ -780,9 +784,9 @@ body {
 .sc-glass-interactive:focus-visible {
   box-shadow:
     0 0 0 var(--sc-focus-ring-width, 2px)
-      var(--sc-glass-interactive-focus-glow-color, rgba(122, 182, 72, 0.35)),
+      var(--sc-glass-interactive-focus-glow-color, var(--sc-accent-glow)),
     0 0 var(--sc-glass-interactive-focus-glow-spread, 8px)
-      var(--sc-glass-interactive-focus-glow-color, rgba(122, 182, 72, 0.35));
+      var(--sc-glass-interactive-focus-glow-color, var(--sc-accent-glow));
   outline: none;
 }
 
