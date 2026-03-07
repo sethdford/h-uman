@@ -25,7 +25,7 @@ export class ScFilePreview extends LitElement {
       padding: var(--sc-space-sm) 0;
     }
 
-    @media (max-width: 480px) {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       .grid {
         grid-template-columns: repeat(2, 1fr);
       }

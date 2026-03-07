@@ -220,7 +220,7 @@ export class ScMessageThread extends LitElement {
     .reaction-count {
       color: var(--sc-text-muted);
     }
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .messages {
         padding: var(--sc-space-sm);
       }

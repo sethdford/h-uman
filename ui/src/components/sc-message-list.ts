@@ -280,7 +280,7 @@ export class ScMessageList extends LitElement {
     .skeleton-left {
       justify-content: flex-start;
     }
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .message.user {
         max-width: 95%;
       }

@@ -369,7 +369,7 @@ export class ScAutomationCard extends LitElement {
       font-variant-numeric: tabular-nums;
     }
 
-    @media (max-width: 480px) {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       .footer-row {
         flex-direction: column;
         align-items: flex-start;

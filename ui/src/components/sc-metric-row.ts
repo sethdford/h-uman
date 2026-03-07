@@ -47,7 +47,7 @@ export class ScMetricRow extends LitElement {
       color: var(--sc-error);
     }
 
-    @media (max-width: 480px) {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       .divider {
         display: none;
       }

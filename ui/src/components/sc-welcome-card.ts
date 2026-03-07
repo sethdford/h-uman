@@ -107,7 +107,7 @@ export class ScWelcomeCard extends LitElement {
       justify-content: center;
     }
 
-    @media (max-width: 480px) {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       .features {
         grid-template-columns: 1fr;
       }

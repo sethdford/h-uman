@@ -28,6 +28,7 @@ import "./sc-section-header.js";
 import "./sc-metric-row.js";
 import "./sc-timeline.js";
 import "./sc-sparkline-enhanced.js";
+import "./sc-forecast-chart.js";
 import "./sc-page-hero.js";
 import "./sc-schedule-builder.js";
 import "./sc-automation-card.js";
@@ -40,6 +41,7 @@ import "./sc-model-selector.js";
 import "./sc-tapback-menu.js";
 import "./sc-chat-composer.js";
 import "./sc-message-thread.js";
+import "./sc-chart.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -1423,6 +1425,51 @@ describe("sc-sparkline-enhanced", () => {
   });
 });
 
+describe("sc-forecast-chart", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-forecast-chart")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-forecast-chart");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render SVG with history data", async () => {
+    const el = document.createElement("sc-forecast-chart") as HTMLElement & {
+      history: Array<{ date: string; cost: number }>;
+      projectedTotal: number;
+      daysInMonth: number;
+      updateComplete: Promise<boolean>;
+    };
+    el.history = [
+      { date: "2026-03-01", cost: 1.83 },
+      { date: "2026-03-02", cost: 2.14 },
+      { date: "2026-03-03", cost: 3.07 },
+    ];
+    el.projectedTotal = 30;
+    el.daysInMonth = 31;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const svg = el.shadowRoot?.querySelector("svg");
+    expect(svg).toBeTruthy();
+    el.remove();
+  });
+
+  it("should not render with insufficient data", async () => {
+    const el = document.createElement("sc-forecast-chart") as HTMLElement & {
+      history: Array<{ date: string; cost: number }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.history = [{ date: "2026-03-01", cost: 1.0 }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const svg = el.shadowRoot?.querySelector("svg");
+    expect(svg).toBeFalsy();
+    el.remove();
+  });
+});
+
 describe("sc-page-hero", () => {
   it("should be defined as a custom element", () => {
     expect(customElements.get("sc-page-hero")).toBeDefined();
@@ -2165,5 +2212,61 @@ describe("sc-message-thread", () => {
       scrollToBottom: () => void;
     };
     expect(typeof el.scrollToBottom).toBe("function");
+  });
+});
+
+describe("sc-chart", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-chart")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-chart");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should accept type property", () => {
+    const el = document.createElement("sc-chart") as any;
+    el.type = "bar";
+    expect(el.type).toBe("bar");
+  });
+
+  it("should accept data property", () => {
+    const el = document.createElement("sc-chart") as any;
+    const data = { labels: ["A", "B"], datasets: [{ data: [1, 2] }] };
+    el.data = data;
+    expect(el.data).toEqual(data);
+  });
+
+  it("should default height to 200", () => {
+    const el = document.createElement("sc-chart") as any;
+    expect(el.height).toBe(200);
+  });
+
+  it("should default horizontal to false", () => {
+    const el = document.createElement("sc-chart") as any;
+    expect(el.horizontal).toBe(false);
+  });
+
+  it("should render a canvas when data has entries", async () => {
+    const el = document.createElement("sc-chart") as any;
+    el.type = "bar";
+    el.data = { labels: ["A"], datasets: [{ data: [1] }] };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const canvas = el.shadowRoot?.querySelector("canvas");
+    expect(canvas).toBeTruthy();
+    el.remove();
+  });
+
+  it("should show empty message when no data", async () => {
+    const el = document.createElement("sc-chart") as any;
+    el.data = { labels: [], datasets: [] };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const empty = el.shadowRoot?.querySelector(".empty");
+    expect(empty).toBeTruthy();
+    expect(empty?.textContent).toContain("No data");
+    el.remove();
   });
 });

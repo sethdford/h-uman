@@ -229,7 +229,7 @@ export class ScComposer extends LitElement {
         transform: translateY(0);
       }
     }
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .input-bar {
         flex-direction: column;
         align-items: stretch;

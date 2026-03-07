@@ -28,7 +28,7 @@ export class ScToast extends LitElement {
       pointer-events: none;
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       :host {
         left: 50%;
         right: auto;

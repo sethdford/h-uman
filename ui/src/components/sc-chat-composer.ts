@@ -256,7 +256,7 @@ export class ScChatComposer extends LitElement {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .input-row {
         flex-wrap: wrap;
       }

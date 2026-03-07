@@ -35,7 +35,7 @@ export class ScSectionHeader extends LitElement {
       flex-shrink: 0;
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .header {
         flex-wrap: wrap;
       }
