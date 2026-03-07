@@ -12,7 +12,7 @@ Read `AGENTS.md` for the full engineering protocol. This file is the quick refer
 cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON
 cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
-# Run tests (3127+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (3129+ tests, must be 0 failures, 0 ASan errors)
 ./build/seaclaw_tests
 
 # Release build
@@ -66,9 +66,9 @@ Types: `feat fix refactor test docs chore perf ci build style`
 
 | Path               | What                                           |
 | ------------------ | ---------------------------------------------- |
-| `src/`             | All C source (~597 files, ~103K lines)         |
+| `src/`             | All C source (~597 files, ~104K lines)         |
 | `include/seaclaw/` | Public headers                                 |
-| `tests/`           | 98 test files, 3127+ tests                    |
+| `tests/`           | 98 test files, 3129+ tests                    |
 | `fuzz/`            | libFuzzer harnesses                            |
 | `ui/`              | LitElement web dashboard                       |
 | `website/`         | Astro marketing site                           |
