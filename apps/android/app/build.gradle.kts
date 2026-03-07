@@ -29,13 +29,13 @@ android {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation(platform("androidx.compose:compose-bom:2026.02.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation("androidx.navigation:navigation-compose:2.7.7")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.activity:activity-compose:1.12.4")
+    implementation("androidx.navigation:navigation-compose:2.9.7")
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
 }
