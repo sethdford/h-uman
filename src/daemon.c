@@ -259,17 +259,39 @@ sc_error_t sc_service_run_agent_cron(sc_allocator_t *alloc, sc_agent_t *agent,
 
         agent->active_job_id = 0;
         if (err == SC_OK && response && response_len > 0 && target_channel && channels) {
-            for (size_t c = 0; c < channel_count; c++) {
-                if (!channels[c].channel || !channels[c].channel->vtable ||
-                    !channels[c].channel->vtable->name)
-                    continue;
-                const char *ch_name = channels[c].channel->vtable->name(channels[c].channel->ctx);
-                if (ch_name && strcmp(ch_name, target_channel) == 0) {
-                    if (channels[c].channel->vtable->send) {
-                        (void)channels[c].channel->vtable->send(channels[c].channel->ctx, NULL, 0,
-                                                                response, response_len, NULL, 0);
+            /* If response is exactly "SKIP", the agent decided not to engage */
+            bool skip = (response_len == 4 && memcmp(response, "SKIP", 4) == 0);
+            if (!skip) {
+                /* Parse "channel:target" format for directed messages */
+                const char *ch_part = target_channel;
+                const char *target_part = NULL;
+                size_t target_part_len = 0;
+                const char *colon = strchr(target_channel, ':');
+                char ch_buf[64] = {0};
+                if (colon) {
+                    size_t ch_len = (size_t)(colon - target_channel);
+                    if (ch_len < sizeof(ch_buf)) {
+                        memcpy(ch_buf, target_channel, ch_len);
+                        ch_buf[ch_len] = '\0';
+                        ch_part = ch_buf;
+                        target_part = colon + 1;
+                        target_part_len = strlen(target_part);
                     }
-                    break;
+                }
+                for (size_t c = 0; c < channel_count; c++) {
+                    if (!channels[c].channel || !channels[c].channel->vtable ||
+                        !channels[c].channel->vtable->name)
+                        continue;
+                    const char *ch_name =
+                        channels[c].channel->vtable->name(channels[c].channel->ctx);
+                    if (ch_name && strcmp(ch_name, ch_part) == 0) {
+                        if (channels[c].channel->vtable->send) {
+                            (void)channels[c].channel->vtable->send(
+                                channels[c].channel->ctx, target_part, target_part_len, response,
+                                response_len, NULL, 0);
+                        }
+                        break;
+                    }
                 }
             }
         }
