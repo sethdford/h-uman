@@ -279,6 +279,8 @@ set(SC_CORE_SOURCES
     src/websocket/websocket.c
     src/net_security.c
     src/config.c
+    src/config_schema.c
+    src/config_merge.c
     src/config_migrate.c
     src/config_serialize.c
     src/config_getters.c
@@ -325,6 +327,9 @@ set(SC_CORE_SOURCES
     src/gateway/rate_limit.c
     src/gateway/ws_server.c
     src/gateway/control_protocol.c
+    src/gateway/cp_chat.c
+    src/gateway/cp_config.c
+    src/gateway/cp_admin.c
     src/gateway/event_bridge.c
     src/gateway/tenant.c
     src/runtime/native.c
@@ -648,7 +653,7 @@ endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(seaclaw_core PUBLIC m dl)
 endif()
-target_include_directories(seaclaw_core PRIVATE ${SC_ROOT}/asm/generic ${SC_ROOT}/src/agent)
+target_include_directories(seaclaw_core PRIVATE ${SC_ROOT}/asm/generic ${SC_ROOT}/src/agent ${SC_ROOT}/src/gateway)
 ## SC_IS_TEST is intentionally NOT set here — seaclaw_core is the production library.
 ## Tests link against seaclaw_core_test (below) which defines SC_IS_TEST=1.
 
