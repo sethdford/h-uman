@@ -50,6 +50,7 @@
 #include "seaclaw/tools/facebook.h"
 #include "seaclaw/tools/firebase.h"
 #include "seaclaw/tools/gcloud.h"
+#include "seaclaw/tools/homeassistant.h"
 #include "seaclaw/tools/http_request.h"
 #include "seaclaw/tools/image.h"
 #include "seaclaw/tools/instagram.h"
@@ -76,6 +77,7 @@
 #include "seaclaw/tools/schema.h"
 #include "seaclaw/tools/send_message.h"
 #include "seaclaw/tools/shell.h"
+#include "seaclaw/tools/skill_write.h"
 #include "seaclaw/tools/spawn.h"
 #include "seaclaw/tools/web_fetch.h"
 #include "seaclaw/tools/web_search.h"
@@ -92,8 +94,9 @@
 #else
 #define SC_TOOLS_PERSONA_COUNT 0
 #endif
-#define SC_TOOLS_COUNT_BASE \
-    (41 + SC_TOOLS_CRON_COUNT - 1 + SC_TOOLS_PERSONA_COUNT) /* 40 base + persona(0|1) + cron */
+#define SC_TOOLS_COUNT_BASE         \
+    (43 + SC_TOOLS_CRON_COUNT - 1 + \
+     SC_TOOLS_PERSONA_COUNT) /* 42 base + homeassistant + persona(0|1) + cron */
 #ifdef SC_HAS_TOOLS_BROWSER
 #define SC_TOOLS_BROWSER_COUNT 3
 #else
@@ -405,6 +408,16 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc, const char *workspace_
     idx++;
 
     err = sc_calendar_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_homeassistant_create(alloc, &tools[idx]);
+    if (err != SC_OK)
+        goto fail;
+    idx++;
+
+    err = sc_skill_write_create(alloc, &tools[idx]);
     if (err != SC_OK)
         goto fail;
     idx++;

@@ -48,6 +48,7 @@
 #include "seaclaw/tools/schema_clean.h"
 #include "seaclaw/tools/screenshot.h"
 #include "seaclaw/tools/shell.h"
+#include "seaclaw/tools/skill_write.h"
 #include "seaclaw/tools/social.h"
 #include "seaclaw/tools/spawn.h"
 #include "seaclaw/tools/spi.h"
@@ -1410,6 +1411,122 @@ static void test_calendar_list(void) {
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
+static void test_skill_write_missing_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "description", "A test skill");
+    biz_set_str(&alloc, args, "command", "echo hello");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "missing name") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
+static void test_skill_write_missing_description(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "name", "my_skill");
+    biz_set_str(&alloc, args, "command", "echo hello");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "missing description") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
+static void test_skill_write_missing_command(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "name", "my_skill");
+    biz_set_str(&alloc, args, "description", "A test skill");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "missing command") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
+static void test_skill_write_invalid_name_chars(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "name", "my skill");
+    biz_set_str(&alloc, args, "description", "A test skill");
+    biz_set_str(&alloc, args, "command", "echo hello");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "invalid name") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
+static void test_skill_write_valid(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "name", "my_skill");
+    biz_set_str(&alloc, args, "description", "A test skill");
+    biz_set_str(&alloc, args, "command", "echo hello");
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(result.success);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "Skill 'my_skill' created") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
+static void test_skill_write_name_too_long(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    char long_name[70];
+    for (int i = 0; i < 65; i++)
+        long_name[i] = 'a';
+    long_name[65] = '\0';
+    biz_set_str(&alloc, args, "name", long_name);
+    biz_set_str(&alloc, args, "description", "A test skill");
+    biz_set_str(&alloc, args, "command", "echo hello");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "too long") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
 static void test_jira_create(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
@@ -2472,6 +2589,12 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_broadcast_create);
     SC_RUN_TEST(test_calendar_create);
     SC_RUN_TEST(test_calendar_list);
+    SC_RUN_TEST(test_skill_write_missing_name);
+    SC_RUN_TEST(test_skill_write_missing_description);
+    SC_RUN_TEST(test_skill_write_missing_command);
+    SC_RUN_TEST(test_skill_write_invalid_name_chars);
+    SC_RUN_TEST(test_skill_write_valid);
+    SC_RUN_TEST(test_skill_write_name_too_long);
     SC_RUN_TEST(test_jira_create);
     SC_RUN_TEST(test_jira_list);
     SC_RUN_TEST(test_social_create);

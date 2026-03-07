@@ -1,4 +1,5 @@
 #include "seaclaw/channels/mqtt.h"
+#include "seaclaw/channel_loop.h"
 #include "seaclaw/core/string.h"
 #include <stdbool.h>
 #include <stdlib.h>

@@ -62,6 +62,7 @@ option(SC_ENABLE_FACEBOOK "Build Facebook Messenger channel" OFF)
 option(SC_ENABLE_INSTAGRAM "Build Instagram DMs channel" OFF)
 option(SC_ENABLE_TWITTER "Build Twitter/X DMs channel" OFF)
 option(SC_ENABLE_VOICE "Build Voice channel (Sonata)" OFF)
+option(SC_ENABLE_MQTT "Build MQTT channel" OFF)
 option(SC_ENABLE_ALL_CHANNELS "Build all channels" OFF)
 
 # --- Per-engine build options ---
@@ -126,6 +127,7 @@ if(SC_ENABLE_ALL_CHANNELS)
     set(SC_ENABLE_INSTAGRAM ON)
     set(SC_ENABLE_TWITTER ON)
     set(SC_ENABLE_VOICE ON)
+    set(SC_ENABLE_MQTT ON)
 endif()
 
 # --- Channel sources (conditionally added) ---
@@ -207,6 +209,9 @@ if(SC_ENABLE_GMAIL)
 endif()
 if(SC_ENABLE_VOICE)
     list(APPEND CHANNEL_SOURCES src/channels/voice_channel.c)
+endif()
+if(SC_ENABLE_MQTT)
+    list(APPEND CHANNEL_SOURCES src/channels/mqtt.c)
 endif()
 # signal, nostr, qq, maixcam, dispatch: only when all-channels build (saves ~60KB in default)
 if(SC_ENABLE_ALL_CHANNELS)
@@ -432,6 +437,7 @@ set(SC_CORE_SOURCES
     src/tools/broadcast.c
     src/tools/send_message.c
     src/tools/calendar.c
+    src/tools/skill_write.c
     src/tools/jira.c
     src/tools/social.c
     src/tools/facebook.c
@@ -443,6 +449,7 @@ set(SC_CORE_SOURCES
     src/tools/analytics.c
     src/tools/invoice.c
     src/tools/workflow.c
+    src/tools/homeassistant.c
     src/tools/diff.c
     src/tools/factory.c
     src/mcp_server.c
@@ -764,6 +771,9 @@ endif()
 if(SC_ENABLE_VOICE)
     target_compile_definitions(seaclaw_core PRIVATE SC_HAS_SONATA=1)
 endif()
+if(SC_ENABLE_MQTT)
+    target_compile_definitions(seaclaw_core PRIVATE SC_HAS_MQTT=1)
+endif()
 
 # --- Compile definitions for memory engines ---
 # none + markdown are always compiled (migration depends on them), so always define.
@@ -1016,6 +1026,9 @@ if(NOT SC_ENABLE_ALL_CHANNELS)
         src/channels/signal.c src/channels/nostr.c src/channels/qq.c
         src/channels/maixcam.c src/channels/dispatch.c src/channels/gmail.c)
 endif()
+if(NOT SC_ENABLE_MQTT)
+    list(APPEND SC_TEST_EXTRA_CHANNELS src/channels/mqtt.c)
+endif()
 if(NOT SC_ENABLE_FACEBOOK)
     list(APPEND SC_TEST_EXTRA_CHANNELS src/channels/facebook.c)
 endif()
@@ -1176,7 +1189,7 @@ endif()
 if(SC_ENABLE_SONATA)
     target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_SONATA=1)
 endif()
-target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_SIGNAL=1 SC_HAS_NOSTR=1 SC_HAS_QQ=1 SC_HAS_MAIXCAM=1 SC_HAS_DISPATCH=1 SC_HAS_GMAIL=1 SC_HAS_THREAD_BINDING=1 SC_HAS_FACEBOOK=1 SC_HAS_INSTAGRAM=1 SC_HAS_TWITTER=1 SC_HAS_GOOGLE_RCS=1)
+target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_SIGNAL=1 SC_HAS_NOSTR=1 SC_HAS_QQ=1 SC_HAS_MAIXCAM=1 SC_HAS_DISPATCH=1 SC_HAS_GMAIL=1 SC_HAS_MQTT=1 SC_HAS_THREAD_BINDING=1 SC_HAS_FACEBOOK=1 SC_HAS_INSTAGRAM=1 SC_HAS_TWITTER=1 SC_HAS_GOOGLE_RCS=1)
 target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_NONE_ENGINE=1 SC_HAS_MARKDOWN_ENGINE=1)
 if(SC_ENABLE_MEMORY_LRU_ENGINE)
     target_compile_definitions(seaclaw_core_test PRIVATE SC_HAS_MEMORY_LRU_ENGINE=1)
