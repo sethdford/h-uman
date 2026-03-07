@@ -15,6 +15,8 @@ import "./sc-latex.js";
 import "./sc-message-stream.js";
 import "./sc-message-branch.js";
 import "./sc-reasoning-block.js";
+import "./sc-shortcut-overlay.js";
+import "./sc-context-menu.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -656,6 +658,149 @@ describe("sc-reasoning-block", () => {
     expect(preview).toBeTruthy();
     expect(preview?.textContent?.endsWith("...")).toBe(true);
     expect(preview?.textContent?.length).toBeLessThanOrEqual(103);
+    el.remove();
+  });
+});
+
+describe("sc-shortcut-overlay", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-shortcut-overlay")).toBeDefined();
+  });
+
+  it("should default to closed", async () => {
+    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+      open: boolean;
+    };
+    expect(el.open).toBe(false);
+  });
+
+  it("renders when open", async () => {
+    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const title = el.shadowRoot?.querySelector(".title");
+    expect(title?.textContent).toBe("Keyboard Shortcuts");
+    const kbd = el.shadowRoot?.querySelectorAll("kbd");
+    expect(kbd?.length).toBeGreaterThan(0);
+    el.remove();
+  });
+
+  it("lists keyboard shortcuts by category", async () => {
+    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const categories = el.shadowRoot?.querySelectorAll(".category-title");
+    expect(categories?.length).toBeGreaterThanOrEqual(2);
+    expect(Array.from(categories ?? []).some((c) => c.textContent?.includes("Navigation"))).toBe(
+      true,
+    );
+    expect(Array.from(categories ?? []).some((c) => c.textContent?.includes("Chat"))).toBe(true);
+    el.remove();
+  });
+
+  it("has role dialog and aria-modal", async () => {
+    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const backdrop = el.shadowRoot?.querySelector(".backdrop");
+    expect(backdrop?.getAttribute("role")).toBe("dialog");
+    expect(backdrop?.getAttribute("aria-modal")).toBe("true");
+    expect(backdrop?.getAttribute("aria-label")).toBe("Keyboard shortcuts");
+    el.remove();
+  });
+
+  it("fires close on Escape", async () => {
+    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let closed = false;
+    el.addEventListener("close", () => (closed = true));
+    el.shadowRoot
+      ?.querySelector(".backdrop")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(closed).toBe(true);
+    el.remove();
+  });
+});
+
+describe("sc-context-menu", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-context-menu")).toBeDefined();
+  });
+
+  it("should default to closed", async () => {
+    const el = document.createElement("sc-context-menu") as HTMLElement & {
+      open: boolean;
+    };
+    expect(el.open).toBe(false);
+  });
+
+  it("positions at x,y when open", async () => {
+    const el = document.createElement("sc-context-menu") as HTMLElement & {
+      open: boolean;
+      x: number;
+      y: number;
+      items: { label: string; action: () => void }[];
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.x = 100;
+    el.y = 200;
+    el.items = [{ label: "Test", action: () => {} }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const menu = el.shadowRoot?.querySelector(".menu");
+    expect(menu).toBeTruthy();
+    expect((menu as HTMLElement)?.style.left).toBe("100px");
+    expect((menu as HTMLElement)?.style.top).toBe("200px");
+    el.remove();
+  });
+
+  it("items are clickable", async () => {
+    let actionFired = false;
+    const el = document.createElement("sc-context-menu") as HTMLElement & {
+      open: boolean;
+      items: { label: string; action: () => void }[];
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.items = [{ label: "Do thing", action: () => (actionFired = true) }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const btn = el.shadowRoot?.querySelector(".item");
+    (btn as HTMLElement)?.click();
+    expect(actionFired).toBe(true);
+    el.remove();
+  });
+
+  it("has role menu", async () => {
+    const el = document.createElement("sc-context-menu") as HTMLElement & {
+      open: boolean;
+      items: { label: string; action: () => void }[];
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.items = [{ label: "A", action: () => {} }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const menu = el.shadowRoot?.querySelector(".menu");
+    expect(menu?.getAttribute("role")).toBe("menu");
     el.remove();
   });
 });

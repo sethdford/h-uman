@@ -24,6 +24,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -218,12 +219,26 @@ static bool verify_hmac(const char *body, size_t body_len, const char *sig_heade
 
 static const char *const *s_cors_origins = NULL;
 static size_t s_cors_origins_len = 0;
-
-static bool is_allowed_origin(const char *origin) {
-    return sc_gateway_is_allowed_origin(origin, s_cors_origins, s_cors_origins_len);
-}
-
 static const char *s_request_origin = NULL;
+#ifdef SC_GATEWAY_POSIX
+static pthread_mutex_t s_cors_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+/* Returns origin to echo in CORS header, or "" if not allowed. Caller must use result
+ * immediately; holds s_cors_mutex during read. */
+static const char *get_cors_origin_for_response(void) {
+#ifdef SC_GATEWAY_POSIX
+    pthread_mutex_lock(&s_cors_mutex);
+#endif
+    const char *cors = "";
+    if (s_request_origin &&
+        sc_gateway_is_allowed_origin(s_request_origin, s_cors_origins, s_cors_origins_len))
+        cors = s_request_origin;
+#ifdef SC_GATEWAY_POSIX
+    pthread_mutex_unlock(&s_cors_mutex);
+#endif
+    return cors;
+}
 
 static void send_all(int fd, const char *buf, size_t len) {
     size_t sent = 0;
@@ -256,11 +271,10 @@ static void send_response(int fd, int status, const char *content_type, const ch
         status_str = "304 Not Modified";
 
     char hdr[640];
-    const char *cors_origin = "";
+    const char *cors_origin = get_cors_origin_for_response();
     char cors_line[256] = "";
     char retry_line[64] = "";
-    if (s_request_origin && is_allowed_origin(s_request_origin)) {
-        cors_origin = s_request_origin;
+    if (cors_origin[0] != '\0') {
         snprintf(cors_line, sizeof(cors_line), "Access-Control-Allow-Origin: %s\r\n", cors_origin);
     }
     if (status == 429 && retry_after_secs > 0)
@@ -654,8 +668,14 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
         return SC_OK;
     }
 
+#ifdef SC_GATEWAY_POSIX
+    pthread_mutex_lock(&s_cors_mutex);
+#endif
     s_cors_origins = cfg.cors_origins;
     s_cors_origins_len = cfg.cors_origins_len;
+#ifdef SC_GATEWAY_POSIX
+    pthread_mutex_unlock(&s_cors_mutex);
+#endif
 
 #ifdef SC_GATEWAY_POSIX
     sc_gateway_state_t *gw = NULL;
@@ -888,12 +908,24 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                     char *v = line + 7;
                     while (*v == ' ')
                         v++;
+#ifdef SC_GATEWAY_POSIX
+                    pthread_mutex_lock(&s_cors_mutex);
+#endif
                     s_request_origin = v;
+#ifdef SC_GATEWAY_POSIX
+                    pthread_mutex_unlock(&s_cors_mutex);
+#endif
                 }
             }
 
             if (rejected) {
+#ifdef SC_GATEWAY_POSIX
+                pthread_mutex_lock(&s_cors_mutex);
+#endif
                 s_request_origin = NULL;
+#ifdef SC_GATEWAY_POSIX
+                pthread_mutex_unlock(&s_cors_mutex);
+#endif
             }
 
             if (!rejected) {
@@ -910,7 +942,13 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
 
                 handle_http_request(gw, client, method, path, body_buf, body_len, client_ip,
                                     sig_header);
+#ifdef SC_GATEWAY_POSIX
+                pthread_mutex_lock(&s_cors_mutex);
+#endif
                 s_request_origin = NULL;
+#ifdef SC_GATEWAY_POSIX
+                pthread_mutex_unlock(&s_cors_mutex);
+#endif
                 {
                     struct linger sl = {1, 5};
                     setsockopt(client, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));

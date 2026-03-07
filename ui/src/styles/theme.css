@@ -3,6 +3,9 @@
 :root {
   --sc-surface: var(--sc-bg-surface);
   --sc-overlay: rgba(0, 0, 0, 0.6);
+  /* Spring easing — cubic-bezier approximations for physics motion */
+  --sc-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --sc-ease-spring-gentle: cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 @font-face {
@@ -214,6 +217,32 @@ body {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes sc-modal-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(var(--sc-space-md));
+  }
+  50% {
+    transform: scale(1.02) translateY(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes sc-sheet-enter {
+  from {
+    transform: translateY(100%);
+  }
+  70% {
+    transform: translateY(-2%);
+  }
+  to {
+    transform: translateY(0);
   }
 }
 
@@ -504,6 +533,53 @@ body {
   filter: url(#sc-refract);
 }
 
+/* Depth layers — surface, elevated, floating */
+.sc-glass-surface {
+  background: color-mix(
+    in srgb,
+    var(--sc-bg-surface) var(--sc-glass-subtle-bg-opacity, 4%),
+    transparent
+  );
+  backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
+    saturate(var(--sc-glass-subtle-saturate, 150%));
+  -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
+    saturate(var(--sc-glass-subtle-saturate, 150%));
+  border: 1px solid
+    color-mix(in srgb, var(--sc-border) var(--sc-glass-subtle-border-opacity, 6%), transparent);
+  border-radius: var(--sc-radius-lg);
+}
+
+.sc-glass-elevated {
+  background: color-mix(
+    in srgb,
+    var(--sc-bg-surface) var(--sc-glass-standard-bg-opacity, 8%),
+    transparent
+  );
+  backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
+    saturate(var(--sc-glass-standard-saturate, 180%));
+  -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
+    saturate(var(--sc-glass-standard-saturate, 180%));
+  border: 1px solid
+    color-mix(in srgb, var(--sc-border) var(--sc-glass-standard-border-opacity, 10%), transparent);
+  box-shadow: var(--sc-shadow-sm);
+  border-radius: var(--sc-radius-lg);
+}
+
+.sc-glass-floating {
+  background: color-mix(
+    in srgb,
+    var(--sc-bg-surface) var(--sc-glass-prominent-bg-opacity, 12%),
+    transparent
+  );
+  backdrop-filter: blur(var(--sc-blur-xl, 40px)) saturate(var(--sc-glass-prominent-saturate, 200%));
+  -webkit-backdrop-filter: blur(var(--sc-blur-xl, 40px))
+    saturate(var(--sc-glass-prominent-saturate, 200%));
+  border: 1px solid
+    color-mix(in srgb, var(--sc-border) var(--sc-glass-prominent-border-opacity, 15%), transparent);
+  box-shadow: var(--sc-shadow-md);
+  border-radius: var(--sc-radius-lg);
+}
+
 /* Environment-aware tinting — glass absorbs a hint of accent color */
 .sc-glass-tinted.sc-glass-subtle {
   background: color-mix(
@@ -534,30 +610,31 @@ body {
 .sc-glass-subtle,
 .sc-glass,
 .sc-glass-standard,
-.sc-glass-prominent {
+.sc-glass-prominent,
+.sc-glass-surface,
+.sc-glass-elevated,
+.sc-glass-floating {
   position: relative;
 }
 
-/* Dynamic light specular overlay */
+/* Dynamic light specular overlay — pointer-responsive highlight */
 .sc-glass-subtle::after,
 .sc-glass::after,
 .sc-glass-standard::after,
-.sc-glass-prominent::after {
+.sc-glass-prominent::after,
+.sc-glass-elevated::after,
+.sc-glass-floating::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background: radial-gradient(
-    ellipse var(--sc-glass-dynamic-light-spread, 60%) var(--sc-glass-dynamic-light-spread, 60%) at
-      var(--sc-light-x, 30%) var(--sc-light-y, 20%),
-    var(--sc-glass-dynamic-light-color-dark, rgba(255, 255, 255, 0.12)),
-    transparent
+    circle at var(--sc-light-x, 50%) var(--sc-light-y, 50%),
+    color-mix(in srgb, white 4%, transparent),
+    transparent 60%
   );
-  opacity: var(--sc-glass-dynamic-light-intensity, 0.15);
   pointer-events: none;
   mix-blend-mode: overlay;
-  transition: opacity var(--sc-glass-interactive-transition-duration, 200ms)
-    var(--sc-ease-out, ease-out);
   z-index: 0;
 }
 
@@ -565,12 +642,13 @@ body {
   .sc-glass-subtle::after,
   .sc-glass::after,
   .sc-glass-standard::after,
-  .sc-glass-prominent::after {
+  .sc-glass-prominent::after,
+  .sc-glass-elevated::after,
+  .sc-glass-floating::after {
     background: radial-gradient(
-      ellipse var(--sc-glass-dynamic-light-spread, 60%) var(--sc-glass-dynamic-light-spread, 60%) at
-        var(--sc-light-x, 30%) var(--sc-light-y, 20%),
-      var(--sc-glass-dynamic-light-color-light, rgba(255, 255, 255, 0.18)),
-      transparent
+      circle at var(--sc-light-x, 50%) var(--sc-light-y, 50%),
+      color-mix(in srgb, white 6%, transparent),
+      transparent 60%
     );
   }
 }
@@ -579,14 +657,20 @@ body {
 .sc-glass-subtle,
 .sc-glass,
 .sc-glass-standard,
-.sc-glass-prominent {
+.sc-glass-prominent,
+.sc-glass-surface,
+.sc-glass-elevated,
+.sc-glass-floating {
   --sc-vibrancy-active: 1;
 }
 
 .sc-glass-subtle :is(h1, h2, h3, h4, h5, h6),
 .sc-glass :is(h1, h2, h3, h4, h5, h6),
 .sc-glass-standard :is(h1, h2, h3, h4, h5, h6),
-.sc-glass-prominent :is(h1, h2, h3, h4, h5, h6) {
+.sc-glass-prominent :is(h1, h2, h3, h4, h5, h6),
+.sc-glass-surface :is(h1, h2, h3, h4, h5, h6),
+.sc-glass-elevated :is(h1, h2, h3, h4, h5, h6),
+.sc-glass-floating :is(h1, h2, h3, h4, h5, h6) {
   text-shadow: var(--sc-glass-vibrancy-text-shadow, 0 0 8px rgba(0, 0, 0, 0.5));
 }
 
@@ -624,16 +708,19 @@ body {
 
 /* @supports fallback for browsers without backdrop-filter */
 @supports not (backdrop-filter: blur(1px)) {
-  .sc-glass-subtle {
+  .sc-glass-subtle,
+  .sc-glass-surface {
     background: var(--sc-bg-surface);
     border: 1px solid var(--sc-border-subtle);
   }
   .sc-glass,
-  .sc-glass-standard {
+  .sc-glass-standard,
+  .sc-glass-elevated {
     background: var(--sc-bg-surface);
     border: 1px solid var(--sc-border-subtle);
   }
-  .sc-glass-prominent {
+  .sc-glass-prominent,
+  .sc-glass-floating {
     background: var(--sc-bg-elevated);
     border: 1px solid var(--sc-border);
     filter: none;
@@ -801,7 +888,10 @@ body {
   .sc-glass-subtle,
   .sc-glass,
   .sc-glass-standard,
-  .sc-glass-prominent {
+  .sc-glass-prominent,
+  .sc-glass-surface,
+  .sc-glass-elevated,
+  .sc-glass-floating {
     background: Canvas;
     border: 1px solid CanvasText;
     backdrop-filter: none;
@@ -823,6 +913,9 @@ body {
 
 /* ── Reduced Transparency ── */
 @media (prefers-reduced-transparency: reduce) {
+  .sc-glass-surface,
+  .sc-glass-elevated,
+  .sc-glass-floating,
   .sc-glass-subtle,
   .sc-glass,
   .sc-glass-standard,
@@ -831,12 +924,15 @@ body {
     -webkit-backdrop-filter: none;
     background: var(--sc-bg-surface);
     filter: none;
+    border: 1px solid var(--sc-border);
   }
 
   .sc-glass-subtle::after,
   .sc-glass::after,
   .sc-glass-standard::after,
-  .sc-glass-prominent::after {
+  .sc-glass-prominent::after,
+  .sc-glass-elevated::after,
+  .sc-glass-floating::after {
     display: none;
   }
 

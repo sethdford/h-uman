@@ -76,6 +76,8 @@
       <a href="#sc-message-stream">sc-message-stream</a>
       <a href="#sc-message-branch">sc-message-branch</a>
       <a href="#sc-reasoning-block">sc-reasoning-block</a>
+      <a href="#sc-shortcut-overlay">sc-shortcut-overlay</a>
+      <a href="#sc-context-menu">sc-context-menu</a>
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
@@ -820,6 +822,29 @@
         <div class="code-snippet"><pre><code>&lt;sc-reasoning-block content=&quot;...&quot; duration=&quot;Thought for 12s&quot;&gt;&lt;/sc-reasoning-block&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-shortcut-overlay">
+        <h2>sc-shortcut-overlay</h2>
+        <div class="playground">
+          <div class="preview">
+            <button type="button" id="shortcut-overlay-trigger">Press ? or click to open</button>
+            <sc-shortcut-overlay id="shortcut-overlay-preview"></sc-shortcut-overlay>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-shortcut-overlay .open=${open} @close=${...}&gt;&lt;/sc-shortcut-overlay&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-context-menu">
+        <h2>sc-context-menu</h2>
+        <div class="playground">
+          <div class="preview" id="context-menu-target" style="min-height: 120px;">
+            Right-click here or use the button to open context menu
+            <button type="button" id="context-menu-trigger">Open menu</button>
+            <sc-context-menu id="context-menu-preview"></sc-context-menu>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-context-menu .open=${open} .x=${x} .y=${y} .items=${items} @close=${...}&gt;&lt;/sc-context-menu&gt;</code></pre></div>
+      </section>
+
     <sc-toast></sc-toast>
 
     <script type="module">
@@ -860,6 +885,8 @@
       import "/src/components/sc-message-branch.js";
       import "/src/components/sc-message-stream.js";
       import "/src/components/sc-reasoning-block.js";
+      import "/src/components/sc-shortcut-overlay.js";
+      import "/src/components/sc-context-menu.js";
 
       // Theme toggle
       function setTheme(theme) {
@@ -1152,6 +1179,49 @@
         if (el) el.value = anumVal;
         const btn = document.getElementById("anum-trigger");
         if (btn) btn.textContent = anumVal === 50 ? "Animate to 100" : anumVal === 100 ? "Reset to 0" : "Animate to 50";
+      });
+
+      // Shortcut overlay
+      document.getElementById("shortcut-overlay-trigger")?.addEventListener("click", () => {
+        const el = document.getElementById("shortcut-overlay-preview");
+        if (el) el.open = !el.open;
+      });
+      document.getElementById("shortcut-overlay-preview")?.addEventListener("close", () => {
+        const el = document.getElementById("shortcut-overlay-preview");
+        if (el) el.open = false;
+      });
+
+      // Context menu
+      const ctxMenu = document.getElementById("context-menu-preview");
+      const ctxTarget = document.getElementById("context-menu-target");
+      const ctxTrigger = document.getElementById("context-menu-trigger");
+      if (ctxMenu && ctxTarget) {
+        ctxTarget.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          ctxMenu.open = true;
+          ctxMenu.x = e.clientX;
+          ctxMenu.y = e.clientY;
+          ctxMenu.items = [
+            { label: "Copy", action: () => console.log("Copy") },
+            { label: "Paste", action: () => console.log("Paste") },
+            { divider: true },
+            { label: "Delete", action: () => console.log("Delete") },
+          ];
+        });
+      }
+      if (ctxTrigger && ctxMenu) {
+        ctxTrigger.addEventListener("click", (e) => {
+          ctxMenu.open = true;
+          ctxMenu.x = e.clientX;
+          ctxMenu.y = e.clientY;
+          ctxMenu.items = [
+            { label: "Option A", action: () => console.log("A") },
+            { label: "Option B", action: () => console.log("B") },
+          ];
+        });
+      }
+      ctxMenu?.addEventListener("close", () => {
+        if (ctxMenu) ctxMenu.open = false;
       });
 
       // Activity feed

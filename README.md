@@ -603,7 +603,7 @@ Build and tests require a C11 compiler and CMake 3.16+.
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 3119+ tests
+./seaclaw_tests                             # 3,127+ tests
 cd ..
 ```
 
@@ -615,7 +615,7 @@ cmake --build build
 ./build/seaclaw_tests
 ```
 
-Release build (~511 KB):
+Release build (~528 KB):
 
 ```bash
 mkdir -p build-release && cd build-release
@@ -641,8 +641,8 @@ Language: C11 + ASM (aarch64, x86_64)
 Source files: 597
 Lines of code: ~103K
 Test files: 98
-Tests: 3119
-Binary: ~511 KB (MinSizeRel + LTO, all channels)
+Tests: 3,127
+Binary: ~528 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
 Dependencies: libc + optional SQLite, libcurl
@@ -670,7 +670,7 @@ config.c Config loading/merging (~/.seaclaw/config.json)
 ...
 
 include/seaclaw/ Public C headers
-tests/ 98 test files, 3119 tests
+tests/ 98 test files, 3,127 tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ```

@@ -30,7 +30,7 @@ export class ScModal extends LitElement {
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-xl);
       box-shadow: var(--sc-shadow-lg);
-      animation: sc-scale-in var(--sc-duration-normal) var(--sc-spring-out);
+      animation: sc-modal-enter var(--sc-duration-normal) var(--sc-ease-out) both;
     }
 
     .panel.closing {

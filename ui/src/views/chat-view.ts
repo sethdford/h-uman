@@ -1,5 +1,6 @@
 import { html, css, nothing } from "lit";
 import { customElement, property, state, query } from "lit/decorators.js";
+import type { ContextMenuItem } from "../components/sc-context-menu.js";
 import type { GatewayStatus } from "../gateway.js";
 import { GatewayClient as GatewayClientClass } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
@@ -11,6 +12,8 @@ import "../components/sc-thinking.js";
 import "../components/sc-tool-result.js";
 import "../components/sc-message-stream.js";
 import "../components/sc-reasoning-block.js";
+import "../components/sc-chat-search.js";
+import "../components/sc-context-menu.js";
 
 type ChatItem =
   | {
@@ -96,6 +99,11 @@ export class ScChatView extends GatewayAwareLitElement {
       flex-direction: column;
       gap: var(--sc-space-md);
     }
+    .messages.drag-over {
+      outline: 2px dashed var(--sc-accent);
+      outline-offset: -4px;
+      background: color-mix(in srgb, var(--sc-accent) 4%, transparent);
+    }
     .message {
       max-width: 85%;
       padding: var(--sc-space-md) var(--sc-space-md);
@@ -105,7 +113,8 @@ export class ScChatView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xs);
-      animation: sc-slide-up var(--sc-duration-normal) var(--sc-ease-out) both;
+      animation: sc-slide-up var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
     .message.user {
       align-self: flex-end;
@@ -480,13 +489,76 @@ export class ScChatView extends GatewayAwareLitElement {
     if (this.showScrollPill === atBottom) this.showScrollPill = !atBottom;
   };
 
+  private _handleKeyDown = (e: KeyboardEvent): void => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+      e.preventDefault();
+      this._searchOpen = !this._searchOpen;
+    }
+  };
+
+  private _getSearchMatchIndices(): number[] {
+    const q = this._searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const indices: number[] = [];
+    this.items.forEach((item, idx) => {
+      if (item.type === "message" && item.content.toLowerCase().includes(q)) {
+        indices.push(idx);
+      }
+    });
+    return indices;
+  }
+
+  private _scrollToMatch(matchIndex: number): void {
+    const indices = this._getSearchMatchIndices();
+    if (matchIndex < 0 || matchIndex >= indices.length) return;
+    const itemIdx = indices[matchIndex];
+    this.updateComplete.then(() => {
+      const msgEl = this.messageList?.querySelector(`#msg-${itemIdx}`) as HTMLElement;
+      msgEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+
+  private _handleDragOver(e: DragEvent): void {
+    e.preventDefault();
+    this._dragOver = true;
+  }
+
+  private _handleDragLeave(): void {
+    this._dragOver = false;
+  }
+
+  private _handleDrop(e: DragEvent): void {
+    e.preventDefault();
+    this._dragOver = false;
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length > 0) {
+      this._handleFiles(files);
+    }
+  }
+
+  private _handleFiles(files: File[]): void {
+    for (const file of files) {
+      const item: ChatItem = {
+        type: "message",
+        role: "user",
+        content: `[Attached file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)]`,
+        ts: Date.now(),
+      };
+      this.items = [...this.items, item];
+    }
+    this._cacheMessages();
+    this.scrollToBottom();
+  }
+
   override firstUpdated(): void {
     const gw = this.gateway;
-    if (!gw) return;
-    this.connectionStatus = gw.status;
-    gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
-    gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
+    if (gw) {
+      this.connectionStatus = gw.status;
+      gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
+      gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
+    }
     this.messageList?.addEventListener("scroll", this._scrollHandler, { passive: true });
+    document.addEventListener("keydown", this._handleKeyDown);
   }
 
   private get _cacheKey(): string {
@@ -591,6 +663,7 @@ export class ScChatView extends GatewayAwareLitElement {
 
   override disconnectedCallback(): void {
     this._stopStreamTimer();
+    document.removeEventListener("keydown", this._handleKeyDown);
     const gw = this.gateway;
     gw?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
     gw?.removeEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
@@ -795,6 +868,40 @@ export class ScChatView extends GatewayAwareLitElement {
     this.send();
   }
 
+  private _copyMessage(item: Extract<ChatItem, { type: "message" }>): void {
+    navigator.clipboard?.writeText(item.content).catch(() => {});
+    ScToast.show({ message: "Copied to clipboard", variant: "success" });
+  }
+
+  private _retryMessage(item: Extract<ChatItem, { type: "message" }>): void {
+    if (item.role !== "user") return;
+    this.inputValue = item.content;
+    this.send();
+  }
+
+  private _onMessageContextMenu(e: MouseEvent, item: ChatItem): void {
+    e.preventDefault();
+    if (item.type !== "message") return;
+    this._contextMenu = {
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: "Copy message",
+          icon: icons.copy,
+          action: () => this._copyMessage(item),
+        },
+        {
+          label: "Retry",
+          icon: icons["arrow-clockwise"],
+          action: () => this._retryMessage(item),
+          disabled: item.role === "assistant",
+        },
+      ],
+    };
+  }
+
   private async send(): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || !this.gateway) return;
@@ -862,11 +969,46 @@ export class ScChatView extends GatewayAwareLitElement {
           : nothing}
         <div
           id="message-list"
-          class="messages"
+          class="messages ${this._dragOver ? "drag-over" : ""}"
           role="log"
           aria-live="polite"
           aria-label="Chat messages"
+          @dragover=${this._handleDragOver}
+          @dragleave=${this._handleDragLeave}
+          @drop=${this._handleDrop}
         >
+          ${this._searchOpen
+            ? html`
+                <sc-chat-search
+                  .open=${this._searchOpen}
+                  .query=${this._searchQuery}
+                  .matchCount=${this._getSearchMatchIndices().length}
+                  .currentMatch=${this._searchCurrentMatch}
+                  @sc-search-change=${(e: CustomEvent<{ query: string }>) => {
+                    this._searchQuery = e.detail.query;
+                    this._searchCurrentMatch = 0;
+                  }}
+                  @sc-search-next=${() => {
+                    const indices = this._getSearchMatchIndices();
+                    if (indices.length === 0) return;
+                    this._searchCurrentMatch = (this._searchCurrentMatch % indices.length) + 1;
+                    this._scrollToMatch(this._searchCurrentMatch - 1);
+                  }}
+                  @sc-search-prev=${() => {
+                    const indices = this._getSearchMatchIndices();
+                    if (indices.length === 0) return;
+                    this._searchCurrentMatch =
+                      this._searchCurrentMatch <= 1 ? indices.length : this._searchCurrentMatch - 1;
+                    this._scrollToMatch(this._searchCurrentMatch - 1);
+                  }}
+                  @sc-search-close=${() => {
+                    this._searchOpen = false;
+                    this._searchQuery = "";
+                    this._searchCurrentMatch = 0;
+                  }}
+                ></sc-chat-search>
+              `
+            : nothing}
           ${this.items.length === 0
             ? html`
                 <sc-empty-state
@@ -917,7 +1059,12 @@ export class ScChatView extends GatewayAwareLitElement {
                 const isStreaming =
                   this.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
                 return html`
-                  <div class="message ${item.role}">
+                  <div
+                    id="msg-${idx}"
+                    class="message ${item.role}"
+                    style="--sc-stagger-index: ${idx}; animation-delay: min(calc(var(--sc-stagger-delay) * var(--sc-stagger-index)), var(--sc-stagger-max));"
+                    @contextmenu=${(ev: MouseEvent) => this._onMessageContextMenu(ev, item)}
+                  >
                     <sc-message-stream
                       .content=${item.content}
                       .streaming=${isStreaming}

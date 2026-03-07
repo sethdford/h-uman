@@ -149,7 +149,7 @@ function rgbaToKotlin(rgba: string): string {
   const g = parseInt(m[2], 10);
   const b = parseInt(m[3], 10);
   const a = m[4] ? Math.round(parseFloat(m[4]) * 255) : 255;
-  const hex = ((a << 24) | (r << 16) | (g << 8) | b)
+  const hex = (((a << 24) | (r << 16) | (g << 8) | b) >>> 0)
     .toString(16)
     .padStart(8, "0")
     .toUpperCase();

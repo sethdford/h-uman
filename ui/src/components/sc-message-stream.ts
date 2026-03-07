@@ -46,9 +46,10 @@ export class ScMessageStream extends LitElement {
 
     .bubble.role-assistant {
       margin-right: auto;
+      position: relative;
       background: color-mix(
         in srgb,
-        var(--sc-surface, var(--sc-bg-surface)) var(--sc-glass-standard-bg-opacity, 6%),
+        var(--sc-bg-surface) var(--sc-glass-standard-bg-opacity, 6%),
         transparent
       );
       backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
@@ -61,6 +62,33 @@ export class ScMessageStream extends LitElement {
           var(--sc-border) var(--sc-glass-standard-border-opacity, 8%),
           transparent
         );
+    }
+
+    .bubble.role-assistant::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(
+        circle at var(--sc-light-x, 50%) var(--sc-light-y, 50%),
+        color-mix(in srgb, white 4%, transparent),
+        transparent 60%
+      );
+      pointer-events: none;
+      mix-blend-mode: overlay;
+      z-index: 0;
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .bubble.role-assistant {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--sc-bg-surface);
+        border: 1px solid var(--sc-border);
+      }
+      .bubble.role-assistant::after {
+        display: none;
+      }
     }
 
     .content {

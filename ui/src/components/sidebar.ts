@@ -61,17 +61,21 @@ export class ScSidebar extends LitElement {
       flex-direction: column;
       width: var(--sc-sidebar-width);
       min-width: var(--sc-sidebar-width);
-      background: color-mix(in srgb, var(--sc-bg-surface) 82%, transparent);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border-right: 1px solid transparent;
-      border-image: linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--sc-border-subtle) 60%, transparent) 0%,
-          color-mix(in srgb, var(--sc-border-subtle) 30%, transparent) 50%,
-          transparent 100%
-        )
-        1;
+      background: color-mix(
+        in srgb,
+        var(--sc-bg-surface) var(--sc-glass-standard-bg-opacity, 8%),
+        transparent
+      );
+      backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
+        saturate(var(--sc-glass-standard-saturate, 180%));
+      -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
+        saturate(var(--sc-glass-standard-saturate, 180%));
+      border-right: 1px solid
+        color-mix(
+          in srgb,
+          var(--sc-border) var(--sc-glass-standard-border-opacity, 10%),
+          transparent
+        );
       transition: width var(--sc-duration-normal) var(--sc-ease-out);
       overflow: hidden;
     }
@@ -79,6 +83,15 @@ export class ScSidebar extends LitElement {
     :host([collapsed]) {
       width: var(--sc-sidebar-collapsed);
       min-width: var(--sc-sidebar-collapsed);
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      :host {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--sc-bg-surface);
+        border-right: 1px solid var(--sc-border);
+      }
     }
 
     .header {

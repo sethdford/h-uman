@@ -34,12 +34,10 @@ export class ScButton extends LitElement {
       font-weight: var(--sc-weight-medium);
       cursor: pointer;
       transition:
-        background-color var(--sc-duration-fast, 100ms) var(--sc-ease-out),
-        color var(--sc-duration-fast, 100ms) var(--sc-ease-out),
-        box-shadow var(--sc-duration-moderate, 300ms)
-          var(--sc-emphasize, cubic-bezier(0.2, 0, 0, 1)),
-        transform var(--sc-duration-moderate, 300ms)
-          var(--sc-emphasize-overshoot, cubic-bezier(0.2, 0, 0, 1.2));
+        background-color var(--sc-duration-fast) var(--sc-ease-out),
+        color var(--sc-duration-fast) var(--sc-ease-out),
+        box-shadow var(--sc-duration-moderate) var(--sc-emphasize),
+        transform var(--sc-duration-fast) var(--sc-ease-spring, var(--sc-ease-out));
       border-radius: var(--sc-radius);
     }
 
@@ -62,7 +60,7 @@ export class ScButton extends LitElement {
     button.variant-primary:hover:not(:disabled) {
       background: var(--sc-accent-hover);
       background-image: var(--sc-button-gradient-primary);
-      transform: translateY(-2px);
+      transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
       box-shadow:
         0 4px 16px rgba(90, 154, 48, 0.25),
         0 2px 6px rgba(6, 18, 36, 0.1),
@@ -70,7 +68,7 @@ export class ScButton extends LitElement {
         inset 0 -1px 0 rgba(0, 0, 0, 0.15);
     }
     button.variant-primary:active:not(:disabled) {
-      transform: translateY(1px) scaleY(0.97) scaleX(1.01);
+      transform: translateY(0) scale(0.96);
       box-shadow:
         var(--sc-shadow-xs),
         inset 0 1px 0 rgba(255, 255, 255, 0.2),
@@ -92,14 +90,14 @@ export class ScButton extends LitElement {
     button.variant-secondary:hover:not(:disabled) {
       background: var(--sc-bg-overlay);
       background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(0, 0, 0, 0.02));
-      transform: translateY(-2px);
+      transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
       box-shadow:
         var(--sc-shadow-sm),
         inset 0 1px 0 rgba(255, 255, 255, 0.9),
         inset 0 -1px 0 rgba(6, 18, 36, 0.04);
     }
     button.variant-secondary:active:not(:disabled) {
-      transform: translateY(1px) scaleY(0.97) scaleX(1.01);
+      transform: translateY(0) scale(0.96);
       box-shadow:
         inset 0 1px 2px rgba(6, 18, 36, 0.06),
         inset 0 -1px 0 rgba(6, 18, 36, 0.04);
@@ -115,7 +113,7 @@ export class ScButton extends LitElement {
         inset 0 -1px 0 rgba(0, 0, 0, 0.08);
     }
     button.variant-destructive:hover:not(:disabled) {
-      transform: translateY(-2px);
+      transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
       box-shadow:
         0 4px 16px rgba(249, 112, 102, 0.2),
         0 2px 6px rgba(6, 18, 36, 0.08),
@@ -123,7 +121,7 @@ export class ScButton extends LitElement {
         inset 0 -1px 0 rgba(0, 0, 0, 0.08);
     }
     button.variant-destructive:active:not(:disabled) {
-      transform: translateY(1px) scaleY(0.97) scaleX(1.01);
+      transform: translateY(0) scale(0.96);
       transition-duration: 80ms;
     }
 
@@ -134,10 +132,10 @@ export class ScButton extends LitElement {
     button.variant-ghost:hover:not(:disabled) {
       background: var(--sc-hover-overlay);
       color: var(--sc-text);
-      transform: translateY(-1px);
+      transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
     }
     button.variant-ghost:active:not(:disabled) {
-      transform: translateY(0px) scaleY(0.97) scaleX(1.01);
+      transform: translateY(0) scale(0.96);
       background: var(--sc-accent-subtle);
       transition-duration: 80ms;
     }
@@ -186,6 +184,12 @@ export class ScButton extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      button {
+        transition: none !important;
+      }
     }
   `;
 

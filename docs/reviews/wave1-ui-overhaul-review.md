@@ -1,3 +1,7 @@
+---
+title: Wave 1 UI Overhaul Code Review
+---
+
 # Wave 1 UI Overhaul — Critical Code Review
 
 **Scope**: `ui/src/lib/markdown.ts`, `ui/src/components/sc-code-block.ts`, `ui/src/components/sc-message-stream.ts`, `ui/src/components/sc-latex.ts`, `ui/src/views/chat-view.ts`

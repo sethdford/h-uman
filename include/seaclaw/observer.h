@@ -23,6 +23,7 @@ typedef enum sc_observer_event_tag {
 
 typedef struct sc_observer_event {
     sc_observer_event_tag_t tag;
+    const char *trace_id; /* NULL if no trace context; points to agent->trace_id */
     union {
         struct {
             const char *provider;

@@ -3,8 +3,8 @@ import { customElement, property } from "lit/decorators.js";
 
 @customElement("sc-card")
 export class ScCard extends LitElement {
-  @property({ type: Boolean }) hoverable = false;
-  @property({ type: Boolean }) clickable = false;
+  @property({ type: Boolean, reflect: true }) hoverable = false;
+  @property({ type: Boolean, reflect: true }) clickable = false;
   @property({ type: Boolean }) accent = false;
   @property({ type: Boolean }) elevated = false;
   @property({ type: Boolean }) glass = true;
@@ -136,31 +136,22 @@ export class ScCard extends LitElement {
     .card.hoverable,
     .card.clickable {
       cursor: pointer;
-      transition:
-        transform var(--sc-duration-moderate, 300ms)
-          var(--sc-emphasize-overshoot, cubic-bezier(0.2, 0, 0, 1.2)),
-        box-shadow var(--sc-duration-moderate, 300ms)
-          var(--sc-emphasize, cubic-bezier(0.2, 0, 0, 1)),
-        border-color var(--sc-duration-normal, 200ms) ease;
       will-change: transform, box-shadow;
     }
-    .card.hoverable:hover,
-    .card.clickable:hover {
-      transform: translateY(-4px) scale(1.005);
-      box-shadow:
-        var(--sc-shadow-lg),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9),
-        inset 0 -1px 0 rgba(6, 18, 36, 0.04);
-      border-color: color-mix(in srgb, var(--sc-accent) 20%, var(--sc-border-subtle));
+    :host([hoverable]),
+    :host([clickable]) {
+      transition:
+        transform var(--sc-duration-normal) var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
+        box-shadow var(--sc-duration-normal) var(--sc-ease-out);
     }
-    .card.hoverable:active,
-    .card.clickable:active {
-      transform: translateY(0px) scaleX(1.003) scaleY(0.995);
-      box-shadow:
-        var(--sc-shadow-sm),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9),
-        inset 0 -1px 0 rgba(6, 18, 36, 0.06);
-      transition-duration: 80ms;
+    :host([hoverable]:hover),
+    :host([clickable]:hover) {
+      transform: translateY(var(--sc-physics-card-hover-translateY, -2px));
+      box-shadow: var(--sc-shadow-lg);
+    }
+    :host([hoverable]:active),
+    :host([clickable]:active) {
+      transform: translateY(0) scale(0.99);
     }
     .card.clickable:focus-visible {
       outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);
@@ -168,9 +159,10 @@ export class ScCard extends LitElement {
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .card.hoverable,
-      .card.clickable {
-        transition: none;
+      :host([hoverable]),
+      :host([clickable]) {
+        transition: none !important;
+        animation: none !important;
       }
     }
   `;

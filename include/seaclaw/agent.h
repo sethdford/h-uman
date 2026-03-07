@@ -144,6 +144,8 @@ struct sc_agent {
     const char *active_channel;
     size_t active_channel_len;
 
+    char trace_id[37]; /* UUID v4 hex string + NUL, regenerated per conversation turn */
+
 #ifdef SC_HAS_PERSONA
     sc_persona_t *persona; /* loaded from config; owned */
 #endif

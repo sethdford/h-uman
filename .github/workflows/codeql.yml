@@ -1,0 +1,34 @@
+name: CodeQL
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "include/**"]
+  pull_request:
+    branches: [main]
+    paths: ["src/**", "include/**"]
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          queries: +security-extended
+      - name: Build
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_SQLITE=ON
+          cmake --build . -j$(nproc)
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:c-cpp

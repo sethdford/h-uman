@@ -9,6 +9,7 @@ import { icons } from "./icons.js";
 import "./components/floating-mic.js";
 import "./components/sidebar.js";
 import "./components/command-palette.js";
+import "./components/sc-shortcut-overlay.js";
 import "./views/overview-view.js";
 
 type TabId =
@@ -366,6 +367,7 @@ export class ScApp extends LitElement {
   @state() private connectionStatus: GatewayStatus = "disconnected";
   @state() private sidebarCollapsed = false;
   @state() private commandPaletteOpen = false;
+  @state() private shortcutOverlayOpen = false;
   @state() private moreSheetOpen = false;
 
   gateway: GatewayClient | null = null;
@@ -456,6 +458,10 @@ export class ScApp extends LitElement {
     if (mod && e.key === "b") {
       e.preventDefault();
       this._toggleSidebar();
+    }
+    if (e.key === "?") {
+      e.preventDefault();
+      this.shortcutOverlayOpen = !this.shortcutOverlayOpen;
     }
   }
 
@@ -581,6 +587,13 @@ export class ScApp extends LitElement {
           this.commandPaletteOpen = false;
         }}
       ></sc-command-palette>
+
+      <sc-shortcut-overlay
+        .open=${this.shortcutOverlayOpen}
+        @close=${() => {
+          this.shortcutOverlayOpen = false;
+        }}
+      ></sc-shortcut-overlay>
 
       <sc-floating-mic></sc-floating-mic>
     `;

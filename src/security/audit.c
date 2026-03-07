@@ -2,6 +2,7 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/crypto.h"
 #include "seaclaw/security.h"
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,7 +15,7 @@
 
 static void build_key_path(char *out, size_t cap, const char *base, size_t blen);
 
-static uint64_t g_audit_next_id = 0;
+static _Atomic uint64_t g_audit_next_id = 0;
 
 static void audit_secure_zero(void *p, size_t n) {
 #if defined(__STDC_LIB_EXT1__)
@@ -89,7 +90,7 @@ void sc_audit_event_init(sc_audit_event_t *ev, sc_audit_event_type_t type) {
     if (!ev)
         return;
     ev->timestamp_s = (int64_t)time(NULL);
-    ev->event_id = __sync_add_and_fetch(&g_audit_next_id, 1);
+    ev->event_id = atomic_fetch_add_explicit(&g_audit_next_id, 1, memory_order_relaxed) + 1;
     ev->event_type = type;
     ev->actor.channel = NULL;
     ev->actor.user_id = NULL;

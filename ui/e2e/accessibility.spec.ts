@@ -7,62 +7,54 @@ const SHADOW_DOM_EXCLUDED_RULES = [
   "scrollable-region-focusable",
 ];
 
-test.describe("Accessibility", () => {
-  test("no critical accessibility violations on main page", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForTimeout(1000);
-    const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-      .disableRules(SHADOW_DOM_EXCLUDED_RULES)
-      .analyze();
-    const critical = results.violations.filter(
-      (v) => v.impact === "critical" || v.impact === "serious",
-    );
-    if (critical.length > 0) {
-      console.log(
-        "A11y violations:",
-        JSON.stringify(
-          critical.map((v) => ({
-            id: v.id,
-            impact: v.impact,
-            description: v.description,
-            nodes: v.nodes.length,
-          })),
-          null,
-          2,
-        ),
-      );
-    }
-    expect(critical).toEqual([]);
-  });
+const VIEWS = [
+  { path: "/", name: "Overview" },
+  { path: "/#chat", name: "Chat" },
+  { path: "/#agents", name: "Agents" },
+  { path: "/#sessions", name: "Sessions" },
+  { path: "/#models", name: "Models" },
+  { path: "/#config", name: "Config" },
+  { path: "/#tools", name: "Tools" },
+  { path: "/#channels", name: "Channels" },
+  { path: "/#cron", name: "Cron" },
+  { path: "/#skills", name: "Skills" },
+  { path: "/#voice", name: "Voice" },
+  { path: "/#nodes", name: "Nodes" },
+  { path: "/#usage", name: "Usage" },
+  { path: "/#security", name: "Security" },
+  { path: "/#logs", name: "Logs" },
+];
 
-  test("chat page has no critical a11y violations", async ({ page }) => {
-    await page.goto("/#chat");
-    await page.waitForTimeout(1000);
-    const results = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-      .disableRules(SHADOW_DOM_EXCLUDED_RULES)
-      .analyze();
-    const critical = results.violations.filter(
-      (v) => v.impact === "critical" || v.impact === "serious",
-    );
-    if (critical.length > 0) {
-      console.log(
-        "A11y violations:",
-        JSON.stringify(
-          critical.map((v) => ({
-            id: v.id,
-            impact: v.impact,
-            description: v.description,
-            nodes: v.nodes.length,
-          })),
-          null,
-          2,
-        ),
+test.describe("Accessibility", () => {
+  for (const view of VIEWS) {
+    test(`${view.name} view passes axe accessibility`, async ({ page }) => {
+      await page.goto(view.path);
+      await page.waitForLoadState("networkidle");
+      const results = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .disableRules(SHADOW_DOM_EXCLUDED_RULES)
+        .analyze();
+      const critical = results.violations.filter(
+        (v) => v.impact === "critical" || v.impact === "serious",
       );
-    }
-    expect(critical).toEqual([]);
-  });
+      if (critical.length > 0) {
+        console.log(
+          `A11y violations on ${view.name}:`,
+          JSON.stringify(
+            critical.map((v) => ({
+              id: v.id,
+              impact: v.impact,
+              description: v.description,
+              nodes: v.nodes.length,
+            })),
+            null,
+            2,
+          ),
+        );
+      }
+      expect(critical).toEqual([]);
+    });
+  }
 
   test("all navigation views are keyboard accessible", async ({ page }) => {
     await page.goto("/");

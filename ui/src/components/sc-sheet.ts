@@ -14,17 +14,6 @@ const SIZE_MAP: Record<SheetSize, string> = {
 @customElement("sc-sheet")
 export class ScSheet extends LitElement {
   static override styles = css`
-    @keyframes sc-sheet-slide-up {
-      from {
-        opacity: 0;
-        transform: translateY(100%);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
     :host {
       display: contents;
     }
@@ -49,12 +38,6 @@ export class ScSheet extends LitElement {
       animation: sc-fade-in var(--sc-duration-normal) var(--sc-ease-out);
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .backdrop {
-        transition: none;
-      }
-    }
-
     .panel {
       position: fixed;
       bottom: 0;
@@ -71,13 +54,16 @@ export class ScSheet extends LitElement {
     }
 
     .panel.open {
-      animation: sc-sheet-slide-up var(--sc-duration-slow) var(--sc-spring-out);
+      animation: sc-sheet-enter var(--sc-duration-slow)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
       transform: translateY(0);
     }
 
     @media (prefers-reduced-motion: reduce) {
+      .backdrop,
       .panel {
-        transition: none;
+        transition: none !important;
+        animation: none !important;
       }
     }
 

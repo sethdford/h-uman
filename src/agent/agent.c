@@ -31,11 +31,23 @@
 #include <string.h>
 #include <time.h>
 
-#define SC_OBS_SAFE_RECORD_EVENT(agent, ev)                     \
-    do {                                                        \
-        if ((agent)->observer)                                  \
-            sc_observer_record_event(*(agent)->observer, (ev)); \
+#define SC_OBS_SAFE_RECORD_EVENT(agent, ev)                              \
+    do {                                                                 \
+        if ((agent)->observer) {                                         \
+            (ev)->trace_id = (agent)->trace_id[0] ? (agent)->trace_id : NULL; \
+            sc_observer_record_event(*(agent)->observer, (ev));          \
+        }                                                                \
     } while (0)
+
+static void generate_trace_id(char *buf) {
+    static uint32_t counter = 0;
+    uint64_t t = (uint64_t)clock();
+    counter++;
+    snprintf(buf, 37, "%08x-%04x-%04x-%04x-%08x%04x", (uint32_t)(t & 0xFFFFFFFF),
+             (uint16_t)((t >> 32) & 0xFFFF), (uint16_t)(0x4000 | (counter & 0x0FFF)),
+             (uint16_t)(0x8000 | ((t >> 16) & 0x3FFF)), (uint32_t)(t * 2654435761u),
+             (uint16_t)(counter & 0xFFFF));
+}
 
 static uint64_t clock_diff_ms(clock_t start, clock_t end) {
     return (uint64_t)((end - start) * 1000 / CLOCKS_PER_SEC);
