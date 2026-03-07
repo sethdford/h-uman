@@ -72,6 +72,29 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             if (err != SC_OK)
                 goto fail;
         }
+        if (config->contact_context && config->contact_context_len > 0) {
+            err = append(alloc, &buf, &len, &cap, config->contact_context,
+                         config->contact_context_len);
+            if (err != SC_OK)
+                goto fail;
+        }
+        if (config->conversation_context && config->conversation_context_len > 0) {
+            err = append(alloc, &buf, &len, &cap, config->conversation_context,
+                         config->conversation_context_len);
+            if (err != SC_OK)
+                goto fail;
+        }
+        if (config->max_response_chars > 0) {
+            char lbuf[128];
+            int ln = snprintf(lbuf, sizeof(lbuf),
+                              "\nRESPONSE LIMIT: Maximum %u characters. Truncate gracefully.\n",
+                              config->max_response_chars);
+            if (ln > 0) {
+                err = append(alloc, &buf, &len, &cap, lbuf, (size_t)ln);
+                if (err != SC_OK)
+                    goto fail;
+            }
+        }
         {
             time_t now = time(NULL);
             struct tm *lt = localtime(&now);
@@ -300,6 +323,39 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             goto fail;
         if (config->custom_instructions[config->custom_instructions_len - 1] != '\n') {
             err = append(alloc, &buf, &len, &cap, "\n", 1);
+            if (err != SC_OK)
+                goto fail;
+        }
+    }
+
+    /* Per-contact context */
+    if (config->contact_context && config->contact_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap, config->contact_context, config->contact_context_len);
+        if (err != SC_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n", 1);
+        if (err != SC_OK)
+            goto fail;
+    }
+
+    /* Conversation history + awareness */
+    if (config->conversation_context && config->conversation_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap, config->conversation_context,
+                     config->conversation_context_len);
+        if (err != SC_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n", 1);
+        if (err != SC_OK)
+            goto fail;
+    }
+
+    /* Response length constraint */
+    if (config->max_response_chars > 0) {
+        char lbuf[128];
+        int ln = snprintf(lbuf, sizeof(lbuf), "\nRESPONSE LIMIT: Maximum %u characters.\n",
+                          config->max_response_chars);
+        if (ln > 0) {
+            err = append(alloc, &buf, &len, &cap, lbuf, (size_t)ln);
             if (err != SC_OK)
                 goto fail;
         }

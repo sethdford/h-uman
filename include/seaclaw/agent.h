@@ -92,6 +92,13 @@ struct sc_agent {
     char *custom_instructions; /* optional user system instructions */
     size_t custom_instructions_len;
 
+    /* Per-turn context (set by daemon before sc_agent_turn, not owned) */
+    const char *contact_context;
+    size_t contact_context_len;
+    const char *conversation_context;
+    size_t conversation_context_len;
+    uint32_t max_response_chars;
+
     sc_owned_message_t *history; /* owned array; grows */
     size_t history_count;
     size_t history_cap;

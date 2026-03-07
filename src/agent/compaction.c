@@ -31,12 +31,54 @@ void sc_compaction_config_default(sc_compaction_config_t *cfg) {
     cfg->max_history_messages = SC_COMPACTION_DEFAULT_MAX_HISTORY;
 }
 
+/*
+ * Approximate token costs for non-text content parts.
+ * OpenAI: images ~85 tokens (low) to ~765 tokens (high detail, per tile).
+ * Audio/video: ~25 tokens per second (~1500 bytes of base64 per second).
+ * We use conservative middle-ground estimates.
+ */
+#define SC_IMAGE_TOKEN_ESTIMATE 170
+#define SC_AUDIO_TOKENS_PER_KB  17
+#define SC_VIDEO_TOKEN_ESTIMATE 256
+
+static uint64_t estimate_content_parts_tokens(const sc_content_part_t *parts, size_t count) {
+    uint64_t tokens = 0;
+    for (size_t p = 0; p < count; p++) {
+        switch (parts[p].tag) {
+        case SC_CONTENT_PART_TEXT:
+            tokens += (uint64_t)parts[p].data.text.len / 4;
+            break;
+        case SC_CONTENT_PART_IMAGE_URL:
+        case SC_CONTENT_PART_IMAGE_BASE64:
+            tokens += SC_IMAGE_TOKEN_ESTIMATE;
+            break;
+        case SC_CONTENT_PART_AUDIO_BASE64:
+            tokens +=
+                ((uint64_t)parts[p].data.audio_base64.data_len / 1024) * SC_AUDIO_TOKENS_PER_KB;
+            break;
+        case SC_CONTENT_PART_VIDEO_URL:
+            tokens += SC_VIDEO_TOKEN_ESTIMATE;
+            break;
+        default:
+            break;
+        }
+    }
+    return tokens;
+}
+
 uint64_t sc_estimate_tokens(const sc_owned_message_t *history, size_t history_count) {
     uint64_t total_chars = 0;
+    uint64_t multimodal_tokens = 0;
     for (size_t i = 0; i < history_count; i++) {
-        total_chars += (uint64_t)history[i].content_len;
+        const sc_owned_message_t *m = &history[i];
+        if (m->content_parts_count > 0 && m->content_parts) {
+            multimodal_tokens +=
+                estimate_content_parts_tokens(m->content_parts, m->content_parts_count);
+        } else {
+            total_chars += (uint64_t)m->content_len;
+        }
     }
-    return (total_chars + 3 * (uint64_t)history_count) / 4;
+    return (total_chars + 3 * (uint64_t)history_count) / 4 + multimodal_tokens;
 }
 
 bool sc_should_compact(const sc_owned_message_t *history, size_t history_count,

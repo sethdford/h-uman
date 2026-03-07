@@ -1,6 +1,6 @@
-#include "seaclaw/agent/awareness.h"
 #include "seaclaw/agent/cli.h"
 #include "seaclaw/agent.h"
+#include "seaclaw/agent/awareness.h"
 #include "seaclaw/agent/outcomes.h"
 #include "seaclaw/agent/profile.h"
 #include "seaclaw/agent/tui.h"
@@ -413,6 +413,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         if (sb_storage)
             sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
         sc_awareness_deinit(&cli_awareness);
+        sc_bus_deinit(&cli_bus);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -660,6 +661,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     if (sb_storage)
         sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
     sc_awareness_deinit(&cli_awareness);
+    sc_bus_deinit(&cli_bus);
     sc_config_deinit(&cfg);
     return SC_OK;
 }
