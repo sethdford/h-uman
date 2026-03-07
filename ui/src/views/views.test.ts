@@ -80,9 +80,10 @@ describe("sc-chat-view", () => {
     };
     document.body.appendChild(el);
     await el.updateComplete;
-    const messageList = el.shadowRoot?.querySelector("#message-list");
-    expect(messageList?.getAttribute("role")).toBe("log");
-    expect(messageList?.getAttribute("aria-live")).toBe("polite");
+    const messageList = el.shadowRoot?.querySelector("sc-message-list");
+    const scrollContainer = messageList?.shadowRoot?.querySelector("#scroll-container");
+    expect(scrollContainer?.getAttribute("role")).toBe("log");
+    expect(scrollContainer?.getAttribute("aria-live")).toBe("polite");
     el.remove();
   });
 

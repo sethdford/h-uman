@@ -279,7 +279,7 @@ export class ScMessageList extends LitElement {
         ></sc-reasoning-block>
       `;
     }
-    return nothing;
+    return html``;
   }
 
   override render() {

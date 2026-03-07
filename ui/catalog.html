@@ -65,6 +65,7 @@
       <a href="#sc-search">sc-search</a>
       <a href="#sc-chat-search">sc-chat-search</a>
       <a href="#sc-composer">sc-composer</a>
+      <a href="#sc-message-list">sc-message-list</a>
       <a href="#sc-segmented-control">sc-segmented-control</a>
       <a href="#sc-data-table">sc-data-table</a>
       <a href="#sc-date-picker">sc-date-picker</a>
@@ -633,6 +634,20 @@
         <div class="code-snippet"><pre><code>&lt;sc-composer .value=${""} .waiting=${false} .showSuggestions=${true} placeholder="Type a message..."&gt;&lt;/sc-composer&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-message-list">
+        <h2>sc-message-list</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Scrollable chat message list with role=log, thinking indicator, scroll-to-bottom pill, and support for messages, tool calls, and reasoning blocks.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 320px; height: 240px;">
+            <sc-message-list id="message-list-preview"></sc-message-list>
+          </div>
+          <div class="controls">
+            <label><input type="checkbox" data-target="message-list-preview" data-prop="isWaiting" /> isWaiting</label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-message-list .items=${items} .isWaiting=${false} .streamElapsed=${""}&gt;&lt;/sc-message-list&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="sc-segmented-control">
         <h2>sc-segmented-control</h2>
         <div class="playground">
@@ -962,6 +977,7 @@
       import "/src/components/sc-search.js";
       import "/src/components/sc-chat-search.js";
       import "/src/components/sc-composer.js";
+      import "/src/components/sc-message-list.js";
       import "/src/components/sc-segmented-control.js";
       import "/src/components/sc-data-table.js";
       import "/src/components/sc-date-picker.js";
@@ -992,6 +1008,15 @@
           localStorage.setItem("catalog-theme", theme);
         } catch (_) {}
       }
+      // Populate sc-message-list demo
+      const msgList = document.getElementById("message-list-preview");
+      if (msgList) {
+        msgList.items = [
+          { type: "message", role: "user", content: "Hello", ts: Date.now() },
+          { type: "message", role: "assistant", content: "Hi there!", ts: Date.now() },
+        ];
+      }
+
       const savedTheme = localStorage.getItem("catalog-theme");
       const initialTheme = (savedTheme === "light" || savedTheme === "dark") ? savedTheme : (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
       setTheme(initialTheme);
