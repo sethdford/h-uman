@@ -592,6 +592,23 @@ function generateCSS(
     }
   }
 
+  // Glass: standalone tokens (border-color, chat, etc.)
+  lines.push("  /* Glass: standalone tokens */");
+  const glassStandaloneKeys = Object.keys(tokens)
+    .filter(
+      (k) =>
+        k.startsWith("glass.") &&
+        !glassTiers.some((t) => k.startsWith(`glass.${t}.`)),
+    )
+    .sort();
+  for (const k of glassStandaloneKeys) {
+    const val = tokens[k];
+    if (val != null) {
+      const suffix = k.replace("glass.", "").replace(/\./g, "-");
+      lines.push(`  --sc-glass-${suffix}: ${val};`);
+    }
+  }
+
   // Glass: dynamic-light, vibrancy, interactive
   lines.push("  /* Glass: dynamic-light, vibrancy, interactive */");
   const glassExtraGroups = ["dynamic-light", "vibrancy", "interactive"];
@@ -804,6 +821,19 @@ function generateCSS(
         const suffix = k.replace(`${prefix}.`, "").replace(/-/g, "-");
         lines.push(`  --sc-${prefix}-${suffix}: ${v};`);
       }
+    }
+  }
+
+  // Data-viz chart tokens
+  lines.push("  /* Data visualization */");
+  const chartKeys = Object.keys(tokens)
+    .filter((k) => k.startsWith("chart."))
+    .sort();
+  for (const k of chartKeys) {
+    const val = tokens[k];
+    if (val != null) {
+      const suffix = k.replace("chart.", "").replace(/\./g, "-");
+      lines.push(`  --sc-chart-${suffix}: ${val};`);
     }
   }
 

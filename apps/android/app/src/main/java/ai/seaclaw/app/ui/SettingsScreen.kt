@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import ai.seaclaw.app.GatewayManager
 
 @Composable
@@ -46,7 +45,7 @@ fun SettingsScreen(gatewayManager: GatewayManager) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(12.dp)
+                    .size(SCTokens.spaceMd)
                     .clip(CircleShape)
                     .background(
                         color = if (isConnected) MaterialTheme.colorScheme.primary

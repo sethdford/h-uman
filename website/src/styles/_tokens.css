@@ -78,6 +78,14 @@
   --sc-glass-prominent-inset-opacity: 0.1;
   --sc-glass-prominent-tint-opacity: 0.06;
   --sc-glass-prominent-refraction-scale: 3;
+  /* Glass: standalone tokens */
+  --sc-glass-border-color: rgba(255, 255, 255, 0.08);
+  --sc-glass-chat-actions-bg-opacity: 0.9;
+  --sc-glass-chat-actions-blur: 16px;
+  --sc-glass-chat-bg-opacity: 0.85;
+  --sc-glass-chat-blur: 24px;
+  --sc-glass-chat-border-opacity: 0.08;
+  --sc-glass-chat-saturate: 180%;
   /* Glass: dynamic-light, vibrancy, interactive */
   --sc-glass-dynamic-light-ambient: 0.04;
   --sc-glass-dynamic-light-angle: 225deg;
@@ -485,6 +493,32 @@
   --sc-floating-action-button-icon-size: 24px;
   --sc-floating-action-button-radius: 16px;
   --sc-floating-action-button-size: 56px;
+  /* Data visualization */
+  --sc-chart-brand: #7ab648;
+  --sc-chart-categorical-1: #7ab648;
+  --sc-chart-categorical-2: #6366f1;
+  --sc-chart-categorical-3: #f59e0b;
+  --sc-chart-categorical-4: #f97066;
+  --sc-chart-categorical-5: #14b8a6;
+  --sc-chart-categorical-6: #a5b4fc;
+  --sc-chart-categorical-7: #fcd34d;
+  --sc-chart-categorical-8: #a3d46a;
+  --sc-chart-diverging-negative: #f97066;
+  --sc-chart-diverging-neutral: #5e7a94;
+  --sc-chart-diverging-positive: #7ab648;
+  --sc-chart-sequential-100: #e2f2c8;
+  --sc-chart-sequential-200: #c5e59a;
+  --sc-chart-sequential-300: #a3d46a;
+  --sc-chart-sequential-400: #8dc63f;
+  --sc-chart-sequential-500: #7ab648;
+  --sc-chart-sequential-600: #5a9a30;
+  --sc-chart-sequential-700: #47802a;
+  --sc-chart-sequential-800: #366320;
+  --sc-chart-status-error: #f97066;
+  --sc-chart-status-info: #6366f1;
+  --sc-chart-status-muted: #5e7a94;
+  --sc-chart-status-success: #7ab648;
+  --sc-chart-status-warning: #f59e0b;
 }
 
 @media (prefers-color-scheme: light) {

@@ -146,7 +146,7 @@ fun ChatScreen(gatewayManager: GatewayManager) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(8.dp)
+                    .size(SCTokens.spaceSm)
                     .clip(RoundedCornerShape(4.dp))
                     .background(
                         color = if (isConnected) MaterialTheme.colorScheme.primary

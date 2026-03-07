@@ -51,12 +51,13 @@ class GatewayClient: ObservableObject {
         queue.async { [weak self] in
             guard let self = self else { return }
             self.pendingRequests[reqId] = completion
-            guard let data = try? JSONSerialization.data(withJSONObject: msg) else {
+            guard let data = try? JSONSerialization.data(withJSONObject: msg),
+                  let text = String(data: data, encoding: .utf8) else {
                 self.pendingRequests.removeValue(forKey: reqId)
                 completion(.failure(NSError(domain: "GatewayClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "JSON serialization failed"])))
                 return
             }
-            self.task?.send(.data(data)) { error in
+            self.task?.send(.string(text)) { error in
                 if let error = error {
                     self.queue.async {
                         self.pendingRequests.removeValue(forKey: reqId)
@@ -137,8 +138,9 @@ class GatewayClient: ObservableObject {
             "method": "connect",
             "params": [:]
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: connect) else { return }
-        task?.send(.data(data)) { _ in }
+        guard let data = try? JSONSerialization.data(withJSONObject: connect),
+              let text = String(data: data, encoding: .utf8) else { return }
+        task?.send(.string(text)) { _ in }
     }
 
     private func scheduleReconnect() {
