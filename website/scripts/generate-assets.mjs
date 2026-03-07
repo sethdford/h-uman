@@ -1,5 +1,4 @@
 import sharp from "sharp";
-import { mkdirSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 

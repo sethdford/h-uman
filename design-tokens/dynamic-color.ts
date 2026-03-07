@@ -6,9 +6,9 @@
  * hue rotation and lightness shifting. Outputs JSON, CSS, or both.
  *
  * Usage:
- *   npx tsx design-tokens/dynamic-color.ts --hex "#14b8a6"
+ *   npx tsx design-tokens/dynamic-color.ts --hex "#7AB648"
  *   npx tsx design-tokens/dynamic-color.ts --hex "#ff6b35" --format css
- *   npx tsx design-tokens/dynamic-color.ts --hex "#14b8a6" --format json
+ *   npx tsx design-tokens/dynamic-color.ts --hex "#7AB648" --format json
  */
 
 interface OklchColor {

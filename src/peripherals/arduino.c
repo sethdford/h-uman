@@ -239,7 +239,7 @@ static sc_peripheral_error_t impl_read(void *ctx, uint32_t addr, uint8_t *out_va
     if (!val)
         return SC_PERIPHERAL_ERR_IO;
     val += 9;
-    *out_value = (uint8_t)atoi(val);
+    *out_value = (uint8_t)strtol(val, NULL, 10);
     return SC_PERIPHERAL_ERR_NONE;
 #else
     (void)addr;

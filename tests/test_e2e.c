@@ -582,6 +582,125 @@ static void test_config_validate_after_load(void) {
         unsetenv("HOME");
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Tool-call round-trip: mock provider returns a tool call on first chat(),
+ * agent executes it, feeds the result back, provider returns final text.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+typedef struct tc_mock_provider {
+    const char *name;
+    int call_count;
+} tc_mock_provider_t;
+
+static sc_error_t tc_mock_chat(void *ctx, sc_allocator_t *alloc, const sc_chat_request_t *request,
+                               const char *model, size_t model_len, double temperature,
+                               sc_chat_response_t *out) {
+    (void)request;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    tc_mock_provider_t *m = (tc_mock_provider_t *)ctx;
+    memset(out, 0, sizeof(*out));
+
+    if (m->call_count == 0) {
+        /* First call: return a tool call instead of text */
+        m->call_count++;
+        sc_tool_call_t *tc = (sc_tool_call_t *)alloc->alloc(alloc->ctx, sizeof(sc_tool_call_t));
+        if (!tc)
+            return SC_ERR_OUT_OF_MEMORY;
+        memset(tc, 0, sizeof(*tc));
+        tc->id = sc_strndup(alloc, "call_1", 6);
+        tc->id_len = 6;
+        tc->name = sc_strndup(alloc, "mock_tool", 9);
+        tc->name_len = 9;
+        tc->arguments = sc_strndup(alloc, "{}", 2);
+        tc->arguments_len = 2;
+        out->tool_calls = tc;
+        out->tool_calls_count = 1;
+        out->content = NULL;
+        out->content_len = 0;
+        return SC_OK;
+    }
+    /* Subsequent calls: return final text */
+    m->call_count++;
+    const char *resp = "tool call done";
+    out->content = sc_strndup(alloc, resp, strlen(resp));
+    out->content_len = out->content ? strlen(resp) : 0;
+    out->tool_calls = NULL;
+    out->tool_calls_count = 0;
+    return out->content ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+}
+
+static sc_error_t tc_mock_chat_with_system(void *ctx, sc_allocator_t *alloc,
+                                           const char *system_prompt, size_t system_prompt_len,
+                                           const char *message, size_t message_len,
+                                           const char *model, size_t model_len, double temperature,
+                                           char **out, size_t *out_len) {
+    (void)ctx;
+    (void)system_prompt;
+    (void)system_prompt_len;
+    (void)message;
+    (void)message_len;
+    (void)model;
+    (void)model_len;
+    (void)temperature;
+    const char *resp = "tool call done";
+    *out = sc_strndup(alloc, resp, strlen(resp));
+    *out_len = *out ? strlen(resp) : 0;
+    return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+}
+
+static bool tc_mock_supports_native_tools(void *ctx) {
+    (void)ctx;
+    return true;
+}
+static const char *tc_mock_get_name(void *ctx) {
+    return ((tc_mock_provider_t *)ctx)->name;
+}
+static void tc_mock_deinit(void *ctx, sc_allocator_t *alloc) {
+    (void)ctx;
+    (void)alloc;
+}
+
+static const sc_provider_vtable_t tc_mock_vtable = {
+    .chat_with_system = tc_mock_chat_with_system,
+    .chat = tc_mock_chat,
+    .supports_native_tools = tc_mock_supports_native_tools,
+    .get_name = tc_mock_get_name,
+    .deinit = tc_mock_deinit,
+};
+
+static void test_agent_tool_call_round_trip(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    tc_mock_provider_t mock_ctx = {.name = "tc_mock", .call_count = 0};
+    sc_provider_t prov = {.ctx = &mock_ctx, .vtable = &tc_mock_vtable};
+
+    mock_tool_t tool_ctx = {.name = "mock_tool"};
+    sc_tool_t tool = {.ctx = &tool_ctx, .vtable = &mock_tool_vtable};
+
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    sc_error_t err =
+        sc_agent_from_config(&agent, &alloc, prov, &tool, 1, NULL, NULL, NULL, NULL, "gpt-4", 5,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(agent.tools_count, 1u);
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = sc_agent_turn(&agent, "call the tool", 13, &response, &response_len);
+
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(response);
+    SC_ASSERT_STR_EQ(response, "tool call done");
+    SC_ASSERT_EQ(mock_ctx.call_count, 2);
+    SC_ASSERT_TRUE(agent.history_count >= 4);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    sc_agent_deinit(&agent);
+}
+
 void run_e2e_tests(void) {
     SC_TEST_SUITE("E2E");
     SC_RUN_TEST(test_agent_from_config_basic);
@@ -608,4 +727,5 @@ void run_e2e_tests(void) {
     SC_RUN_TEST(test_agent_with_observer);
     SC_RUN_TEST(test_provider_create_from_config);
     SC_RUN_TEST(test_config_validate_after_load);
+    SC_RUN_TEST(test_agent_tool_call_round_trip);
 }

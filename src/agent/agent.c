@@ -471,6 +471,8 @@ static sc_error_t ensure_history_cap(sc_agent_t *agent, size_t need) {
     return SC_OK;
 }
 
+static void free_owned_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs, size_t count);
+
 static sc_error_t append_history(sc_agent_t *agent, sc_role_t role, const char *content,
                                  size_t content_len, const char *name, size_t name_len,
                                  const char *tool_call_id, size_t tool_call_id_len) {
@@ -486,9 +488,20 @@ static sc_error_t append_history(sc_agent_t *agent, sc_role_t role, const char *
     agent->history[agent->history_count].name =
         name_len ? sc_strndup(agent->alloc, name, name_len) : NULL;
     agent->history[agent->history_count].name_len = name_len;
+    if (name_len && !agent->history[agent->history_count].name) {
+        agent->alloc->free(agent->alloc->ctx, dup, content_len + 1);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     agent->history[agent->history_count].tool_call_id =
         tool_call_id_len ? sc_strndup(agent->alloc, tool_call_id, tool_call_id_len) : NULL;
     agent->history[agent->history_count].tool_call_id_len = tool_call_id_len;
+    if (tool_call_id_len && !agent->history[agent->history_count].tool_call_id) {
+        agent->alloc->free(agent->alloc->ctx, dup, content_len + 1);
+        if (agent->history[agent->history_count].name)
+            agent->alloc->free(agent->alloc->ctx, agent->history[agent->history_count].name,
+                               agent->history[agent->history_count].name_len + 1);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
     agent->history[agent->history_count].tool_calls = NULL;
     agent->history[agent->history_count].tool_calls_count = 0;
     agent->history_count++;
@@ -528,14 +541,30 @@ static sc_error_t append_history_with_tool_calls(sc_agent_t *agent, const char *
             const sc_tool_call_t *src = &tool_calls[i];
             if (src->id && src->id_len > 0) {
                 owned[i].id = sc_strndup(agent->alloc, src->id, src->id_len);
+                if (!owned[i].id) {
+                    free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
+                    agent->alloc->free(agent->alloc->ctx, dup, content_len ? content_len + 1 : 1);
+                    return SC_ERR_OUT_OF_MEMORY;
+                }
                 owned[i].id_len = src->id_len;
             }
             if (src->name && src->name_len > 0) {
                 owned[i].name = sc_strndup(agent->alloc, src->name, src->name_len);
+                if (!owned[i].name) {
+                    free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
+                    agent->alloc->free(agent->alloc->ctx, dup, content_len ? content_len + 1 : 1);
+                    return SC_ERR_OUT_OF_MEMORY;
+                }
                 owned[i].name_len = src->name_len;
             }
             if (src->arguments && src->arguments_len > 0) {
-                owned[i].arguments = sc_strndup(agent->alloc, src->arguments, src->arguments_len);
+                owned[i].arguments =
+                    sc_strndup(agent->alloc, src->arguments, src->arguments_len);
+                if (!owned[i].arguments) {
+                    free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
+                    agent->alloc->free(agent->alloc->ctx, dup, content_len ? content_len + 1 : 1);
+                    return SC_ERR_OUT_OF_MEMORY;
+                }
                 owned[i].arguments_len = src->arguments_len;
             }
         }
@@ -561,7 +590,7 @@ static void free_owned_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs, si
 }
 
 void sc_agent_clear_history(sc_agent_t *agent) {
-    if (!agent)
+    if (!agent || !agent->history)
         return;
     for (size_t i = 0; i < agent->history_count; i++) {
         if (agent->history[i].content) {

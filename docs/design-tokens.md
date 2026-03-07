@@ -8,31 +8,31 @@ Auto-generated from W3C token files in `design-tokens/`.
 
 | Token                          | Dark                      | Light                    |
 | ------------------------------ | ------------------------- | ------------------------ |
-| `--sc-accent`                  | #14b8a6                   | #14b8a6                  |
-| `--sc-accent-hover`            | #2dd4bf                   | #0f766e                  |
+| `--sc-accent`                  | #7AB648                   | #7AB648                  |
+| `--sc-accent-hover`            | #8DC63F                   | #5A9A30                  |
 | `--sc-accent-light`            | —                         | #99f6e4                  |
 | `--sc-accent-secondary`        | #f59e0b                   | #d97706                  |
 | `--sc-accent-secondary-hover`  | #fbbf24                   | #b45309                  |
 | `--sc-accent-secondary-strong` | #fcd34d                   | #f59e0b                  |
 | `--sc-accent-secondary-subtle` | rgba(245, 158, 11, 0.14)  | rgba(217, 119, 6, 0.10)  |
 | `--sc-accent-secondary-text`   | #fbbf24                   | #b45309                  |
-| `--sc-accent-strong`           | #5eead4                   | #14b8a6                  |
-| `--sc-accent-subtle`           | rgba(20, 184, 166, 0.14)  | rgba(13, 148, 136, 0.10) |
+| `--sc-accent-strong`           | #a3d46a                   | #7AB648                  |
+| `--sc-accent-subtle`           | rgba(122, 182, 72, 0.14)  | rgba(122, 182, 72, 0.08) |
 | `--sc-accent-tertiary`         | #6366f1                   | #4f46e5                  |
 | `--sc-accent-tertiary-hover`   | #818cf8                   | #4338ca                  |
 | `--sc-accent-tertiary-strong`  | #a5b4fc                   | #6366f1                  |
 | `--sc-accent-tertiary-subtle`  | rgba(99, 102, 241, 0.14)  | rgba(79, 70, 229, 0.10)  |
 | `--sc-accent-tertiary-text`    | #818cf8                   | #4338ca                  |
-| `--sc-accent-text`             | #2dd4bf                   | #0d9488                  |
+| `--sc-accent-text`             | #8DC63F                   | #47802A                  |
 | `--sc-backdrop-overlay`        | rgba(0, 0, 0, 0.6)        | rgba(0, 0, 0, 0.3)       |
-| `--sc-bg`                      | #060b12                   | #f7f9fc                  |
-| `--sc-bg-elevated`             | #162230                   | #f0f5fa                  |
-| `--sc-bg-inset`                | #0b1219                   | #e6edf4                  |
+| `--sc-bg`                      | #060b12                   | #F5F5F5                  |
+| `--sc-bg-elevated`             | #162230                   | #F8F8F8                  |
+| `--sc-bg-inset`                | #0b1219                   | #EFEFEF                  |
 | `--sc-bg-overlay`              | #1c2a3a                   | #ffffff                  |
 | `--sc-bg-surface`              | #101a24                   | #ffffff                  |
-| `--sc-bg-warm`                 | —                         | #fafcfe                  |
-| `--sc-border`                  | #233345                   | #c0d0e0                  |
-| `--sc-border-subtle`           | #162230                   | #f0f5fa                  |
+| `--sc-bg-warm`                 | —                         | #FAFAFA                  |
+| `--sc-border`                  | #233345                   | #D9D9D9                  |
+| `--sc-border-subtle`           | #162230                   | #E8E8E8                  |
 | `--sc-disabled-overlay`        | rgba(255, 255, 255, 0.04) | rgba(0, 0, 0, 0.04)      |
 | `--sc-error`                   | #f97066                   | #CC0000                  |
 | `--sc-error-dim`               | rgba(249, 112, 102, 0.12) | rgba(204, 0, 0, 0.08)    |

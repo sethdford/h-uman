@@ -86,8 +86,8 @@
 #define SC_TOOLS_CRON_COUNT 0
 #endif
 #define SC_TOOLS_COUNT_BASE \
-    (42 +                   \
-     SC_TOOLS_CRON_COUNT) /* 36 base + facebook,instagram,twitter,gcloud,firebase,cron,persona */
+    (41 +                   \
+     SC_TOOLS_CRON_COUNT) /* 41 base tools + cron tools */
 #ifdef SC_HAS_TOOLS_BROWSER
 #define SC_TOOLS_BROWSER_COUNT 3
 #else

@@ -668,7 +668,7 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
             PQclear(res);
         return SC_ERR_MEMORY_STORE;
     }
-    *deleted = (PQcmdTuples(res) && atoi(PQcmdTuples(res)) > 0);
+    *deleted = (PQcmdTuples(res) && strtol(PQcmdTuples(res), NULL, 10) > 0);
     PQclear(res);
     return SC_OK;
 #else

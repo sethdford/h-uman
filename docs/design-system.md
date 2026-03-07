@@ -19,14 +19,14 @@ SeaClaw's design system prioritizes:
 
 ### Primary Accent — Ocean Teal
 
-The primary accent is teal (`--sc-accent`), an ocean-inspired color that anchors the SeaClaw brand identity.
+The primary accent is Fidelity green (`--sc-accent`), a nature-inspired color that anchors the SeaClaw brand identity.
 
-| Token                | Dark                  | Light                 |
-| -------------------- | --------------------- | --------------------- |
-| `--sc-accent`        | #14b8a6               | #14b8a6               |
-| `--sc-accent-hover`  | #2dd4bf               | #0f766e               |
-| `--sc-accent-strong` | #5eead4               | #14b8a6               |
-| `--sc-accent-subtle` | rgba(20,184,166,0.14) | rgba(13,148,136,0.10) |
+| Token                | Dark                  | Light                |
+| -------------------- | --------------------- | -------------------- |
+| `--sc-accent`        | #7AB648               | #5A9A30              |
+| `--sc-accent-hover`  | #8DC63F               | #47802A              |
+| `--sc-accent-strong` | #a3d46a               | #7AB648              |
+| `--sc-accent-subtle` | rgba(122,182,72,0.14) | rgba(90,154,48,0.10) |
 
 ### Secondary Accent — Amber
 
@@ -198,7 +198,7 @@ Four spring presets for different contexts:
 
 ### Don't
 
-- Use raw hex colors (e.g., `#14b8a6`) — use `var(--sc-accent)`
+- Use raw hex colors (e.g., `#7AB648`) — use `var(--sc-accent)`
 - Use raw pixel values for spacing — use `var(--sc-space-sm)` etc.
 - Use raw `font-family` — use `var(--sc-font)`
 - Use emoji as UI icons — use Phosphor Regular from `ui/src/icons.ts`

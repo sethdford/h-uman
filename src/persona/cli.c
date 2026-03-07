@@ -586,19 +586,25 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
             alloc->free(alloc->ctx, json, json_len + 1);
             return SC_ERR_NOT_FOUND;
         }
-        const char *home = getenv("HOME");
-        if (!home || !home[0]) {
-            fprintf(stderr, "HOME not set\n");
-            alloc->free(alloc->ctx, json, json_len + 1);
-            return SC_ERR_NOT_FOUND;
+#if defined(__unix__) || defined(__APPLE__)
+        {
+            const char *override = getenv("SC_PERSONA_DIR");
+            if (!override || !override[0]) {
+                const char *home = getenv("HOME");
+                if (home && home[0]) {
+                    char parent[SC_PERSONA_PATH_MAX];
+                    int pn = snprintf(parent, sizeof(parent), "%s/.seaclaw", home);
+                    if (pn > 0 && (size_t)pn < sizeof(parent))
+                        (void)mkdir(parent, 0755);
+                }
+            }
+            if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
+                fprintf(stderr, "Could not create persona directory\n");
+                alloc->free(alloc->ctx, json, json_len + 1);
+                return SC_ERR_IO;
+            }
         }
-        char parent[SC_PERSONA_PATH_MAX];
-        int pn = snprintf(parent, sizeof(parent), "%s/.seaclaw", home);
-        if (pn > 0 && (size_t)pn < sizeof(parent))
-            (void)mkdir(parent, 0755);
-        pn = snprintf(parent, sizeof(parent), "%s/.seaclaw/personas", home);
-        if (pn > 0 && (size_t)pn < sizeof(parent))
-            (void)mkdir(parent, 0755);
+#endif
         char out_path[SC_PERSONA_PATH_MAX];
         int on = snprintf(out_path, sizeof(out_path), "%s/%s.json", dir, args->name);
         if (on <= 0 || (size_t)on >= sizeof(out_path)) {

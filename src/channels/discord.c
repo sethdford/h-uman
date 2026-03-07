@@ -414,8 +414,11 @@ sc_error_t sc_discord_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_
         err = sc_json_parse(alloc, resp.body, resp.body_len, &parsed);
         if (resp.owned && resp.body)
             sc_http_response_free(alloc, &resp);
-        if (err != SC_OK || !parsed || parsed->type != SC_JSON_ARRAY)
+        if (err != SC_OK || !parsed || parsed->type != SC_JSON_ARRAY) {
+            if (parsed)
+                sc_json_free(alloc, parsed);
             continue;
+        }
 
         /* Discord returns newest first; process oldest first for correct last_message_id */
         size_t arr_len = parsed->data.array.len;

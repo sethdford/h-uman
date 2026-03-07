@@ -502,6 +502,10 @@ static void test_cli_parse_merge(void) {
     SC_ASSERT_EQ(sc_persona_cli_parse(6, argv, &args), SC_OK);
     SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_MERGE);
     SC_ASSERT_TRUE(strcmp(args.name, "combined") == 0);
+    SC_ASSERT_TRUE(args.merge_sources != NULL);
+    SC_ASSERT_EQ(args.merge_sources_count, (size_t)2);
+    SC_ASSERT_TRUE(strcmp(args.merge_sources[0], "a") == 0);
+    SC_ASSERT_TRUE(strcmp(args.merge_sources[1], "b") == 0);
 }
 
 static void test_cli_parse_import(void) {
@@ -511,6 +515,8 @@ static void test_cli_parse_import(void) {
     SC_ASSERT_EQ(sc_persona_cli_parse(6, argv, &args), SC_OK);
     SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_IMPORT);
     SC_ASSERT_TRUE(strcmp(args.name, "newpersona") == 0);
+    SC_ASSERT_TRUE(args.import_file != NULL);
+    SC_ASSERT_TRUE(strcmp(args.import_file, "/tmp/p.json") == 0);
 }
 
 static void test_cli_parse_from_facebook_file(void) {
@@ -822,10 +828,17 @@ static void test_persona_load_save_roundtrip_with_temp_dir(void) {
 
     sc_allocator_t alloc = sc_system_allocator();
     sc_persona_t p = {0};
-    p.name = "roundtrip_test";
+    p.name = sc_strdup(&alloc, "roundtrip_test");
     p.name_len = strlen(p.name);
-    p.identity = "Test identity";
+    p.identity = sc_strdup(&alloc, "Test identity");
+    if (!p.name || !p.identity) {
+        sc_persona_deinit(&alloc, &p);
+        unsetenv("SC_PERSONA_DIR");
+        rmdir(tmpdir);
+        return;
+    }
     sc_error_t err = sc_persona_creator_write(&alloc, &p);
+    sc_persona_deinit(&alloc, &p);
     if (err != SC_OK) {
         unsetenv("SC_PERSONA_DIR");
         rmdir(tmpdir);
@@ -1499,6 +1512,171 @@ static void test_persona_tool_execute_apply_feedback_no_name(void) {
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+/* Sampler - additional tests */
+static void test_sampler_imessage_query_basic(void) {
+    char buf[512];
+    size_t len = 0;
+    sc_error_t err = sc_persona_sampler_imessage_query(buf, 512, &len, 100);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(len > 0);
+    SC_ASSERT_NOT_NULL(strstr(buf, "SELECT"));
+    SC_ASSERT_NOT_NULL(strstr(buf, "LIMIT 100"));
+}
+
+static void test_sampler_imessage_query_null_buf(void) {
+    size_t len = 0;
+    sc_error_t err = sc_persona_sampler_imessage_query(NULL, 512, &len, 100);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_sampler_facebook_parse_empty_object(void) {
+    const char *json = "{\"messages\":[]}";
+    char **msgs = NULL;
+    size_t count = 99;
+    sc_error_t err = sc_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, (size_t)0);
+}
+
+static void test_sampler_gmail_parse_null(void) {
+    char **out = NULL;
+    size_t count = 0;
+    sc_error_t err = sc_persona_sampler_gmail_parse(NULL, 0, &out, &count);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_sampler_gmail_parse_empty_object(void) {
+    const char *json = "{\"messages\":[]}";
+    char **msgs = NULL;
+    size_t count = 99;
+    sc_error_t err = sc_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, (size_t)0);
+}
+
+/* Feedback - null/error tests */
+static void test_feedback_record_null_alloc(void) {
+    sc_persona_feedback_t fb;
+    memset(&fb, 0, sizeof(fb));
+    fb.channel = "cli";
+    fb.channel_len = 3;
+    fb.original_response = "a";
+    fb.original_response_len = 1;
+    fb.corrected_response = "b";
+    fb.corrected_response_len = 1;
+    sc_error_t err = sc_persona_feedback_record(NULL, "test", 4, &fb);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_feedback_record_null_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_feedback_t fb;
+    memset(&fb, 0, sizeof(fb));
+    fb.channel = "cli";
+    fb.channel_len = 3;
+    fb.original_response = "a";
+    fb.original_response_len = 1;
+    fb.corrected_response = "b";
+    fb.corrected_response_len = 1;
+    sc_error_t err = sc_persona_feedback_record(&alloc, NULL, 0, &fb);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_feedback_record_null_feedback(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_persona_feedback_record(&alloc, "test", 4, NULL);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_feedback_apply_null_alloc(void) {
+    sc_error_t err = sc_persona_feedback_apply(NULL, "test", 4);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_feedback_apply_null_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_persona_feedback_apply(&alloc, NULL, 0);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+/* Analyzer - additional tests */
+static void test_analyzer_build_prompt_basic(void) {
+    const char *messages[] = {"hello", "world"};
+    char buf[4096];
+    size_t len = 0;
+    sc_error_t err =
+        sc_persona_analyzer_build_prompt(messages, 2, "discord", buf, sizeof(buf), &len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(len > 0);
+}
+
+static void test_analyzer_build_prompt_null_messages(void) {
+    char buf[4096];
+    size_t len = 0;
+    sc_error_t err = sc_persona_analyzer_build_prompt(NULL, 2, "discord", buf, sizeof(buf), &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_analyzer_build_prompt_zero_count(void) {
+    const char *messages[] = {"hello"};
+    char buf[4096];
+    size_t len = 0;
+    sc_error_t err =
+        sc_persona_analyzer_build_prompt(messages, 0, "discord", buf, sizeof(buf), &len);
+    /* Current implementation accepts 0 count and returns SC_OK */
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(len > 0);
+}
+
+static void test_analyzer_parse_response_null_alloc(void) {
+    sc_persona_t out;
+    memset(&out, 0, sizeof(out));
+    const char *response = "{\"traits\":[]}";
+    sc_error_t err =
+        sc_persona_analyzer_parse_response(NULL, response, strlen(response), "test", 4, &out);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+/* Creator - null/error tests */
+static void test_creator_synthesize_null_alloc(void) {
+    sc_persona_t partial;
+    memset(&partial, 0, sizeof(partial));
+    sc_persona_t out;
+    memset(&out, 0, sizeof(out));
+    sc_error_t err = sc_persona_creator_synthesize(NULL, &partial, 1, "test", 4, &out);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_creator_synthesize_null_partials(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t out;
+    memset(&out, 0, sizeof(out));
+    sc_error_t err = sc_persona_creator_synthesize(&alloc, NULL, 1, "test", 4, &out);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_creator_synthesize_zero_count(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t dummy;
+    memset(&dummy, 0, sizeof(dummy));
+    sc_persona_t out;
+    memset(&out, 0, sizeof(out));
+    sc_error_t err = sc_persona_creator_synthesize(&alloc, &dummy, 0, "test", 4, &out);
+    /* Current implementation accepts 0 count and returns SC_OK with empty persona */
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(out.name, "test");
+    sc_persona_deinit(&alloc, &out);
+}
+
+static void test_creator_write_null_alloc(void) {
+    sc_persona_t p;
+    memset(&p, 0, sizeof(p));
+    p.name = "test";
+    p.name_len = 4;
+    sc_error_t err = sc_persona_creator_write(NULL, &p);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
 void run_persona_tests(void) {
     SC_TEST_SUITE("Persona");
 
@@ -1595,4 +1773,30 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_persona_tool_execute_show);
     SC_RUN_TEST(test_persona_tool_execute_apply_feedback);
     SC_RUN_TEST(test_persona_tool_execute_apply_feedback_no_name);
+
+    /* Sampler - additional tests */
+    SC_RUN_TEST(test_sampler_imessage_query_basic);
+    SC_RUN_TEST(test_sampler_imessage_query_null_buf);
+    SC_RUN_TEST(test_sampler_facebook_parse_empty_object);
+    SC_RUN_TEST(test_sampler_gmail_parse_null);
+    SC_RUN_TEST(test_sampler_gmail_parse_empty_object);
+
+    /* Feedback - null/error tests */
+    SC_RUN_TEST(test_feedback_record_null_alloc);
+    SC_RUN_TEST(test_feedback_record_null_name);
+    SC_RUN_TEST(test_feedback_record_null_feedback);
+    SC_RUN_TEST(test_feedback_apply_null_alloc);
+    SC_RUN_TEST(test_feedback_apply_null_name);
+
+    /* Analyzer - additional tests */
+    SC_RUN_TEST(test_analyzer_build_prompt_basic);
+    SC_RUN_TEST(test_analyzer_build_prompt_null_messages);
+    SC_RUN_TEST(test_analyzer_build_prompt_zero_count);
+    SC_RUN_TEST(test_analyzer_parse_response_null_alloc);
+
+    /* Creator - null/error tests */
+    SC_RUN_TEST(test_creator_synthesize_null_alloc);
+    SC_RUN_TEST(test_creator_synthesize_null_partials);
+    SC_RUN_TEST(test_creator_synthesize_zero_count);
+    SC_RUN_TEST(test_creator_write_null_alloc);
 }

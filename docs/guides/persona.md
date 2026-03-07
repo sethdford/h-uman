@@ -302,7 +302,7 @@ When the agent responds in a way that does not match your style, record a correc
 }
 ```
 
-Feedback is stored in `~/.seaclaw/personas/feedback/<name>.ndjson`.
+Feedback is stored in `~/.seaclaw/personas/feedback/<name>.jsonl`.
 
 ### Applying Feedback
 

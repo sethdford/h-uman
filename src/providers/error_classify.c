@@ -41,7 +41,7 @@ bool sc_error_is_non_retryable(const char *msg, size_t msg_len) {
             buf[1] = msg[i + 1];
             buf[2] = msg[i + 2];
             buf[3] = '\0';
-            int code = atoi(buf);
+            int code = (int)strtol(buf, NULL, 10);
             if (code >= 400 && code < 500 && code != 429 && code != 408)
                 return true;
         }

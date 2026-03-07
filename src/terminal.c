@@ -73,7 +73,7 @@ sc_theme_t sc_terminal_theme(void) {
     if (colorfgbg) {
         const char *semi = strrchr(colorfgbg, ';');
         if (semi) {
-            int bg = atoi(semi + 1);
+            int bg = (int)strtol(semi + 1, NULL, 10);
             cached_theme = (bg >= 8) ? SC_THEME_LIGHT : SC_THEME_DARK;
             return cached_theme;
         }

@@ -2,10 +2,14 @@
 import "../styles/global.css";
 import Nav from "../components/Nav.astro";
 
-const iconMonitor = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H108v16H80a8,8,0,0,0,0,16h96a8,8,0,0,0,0-16H148V200h60a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40ZM48,56H208a8,8,0,0,1,8,8V160H40V64A8,8,0,0,1,48,56ZM208,184H48a8,8,0,0,1-8-8v-0H216v0A8,8,0,0,1,208,184Z"/></svg>';
-const iconCircuitBoard = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M208,36H48A12,12,0,0,0,36,48V208a12,12,0,0,0,12,12H208a12,12,0,0,0,12-12V48A12,12,0,0,0,208,36Zm-4,168H52V52H204ZM116,96a12,12,0,1,1-12-12A12,12,0,0,1,116,96Zm64,64a12,12,0,1,1-12-12A12,12,0,0,1,180,160Z"/></svg>';
-const iconCloud = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M160,40A88.09,88.09,0,0,0,81.29,88.68,64,64,0,1,0,72,216h88a88,88,0,0,0,0-176Zm0,160H72a48,48,0,0,1,0-96c1.1,0,2.2,0,3.29.11A88,88,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,72,72Z"/></svg>';
-const iconCpu = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M152,96H104a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V104A8,8,0,0,0,152,96Zm-8,48H112V112h32ZM224,120H208V96a24,24,0,0,0-24-24H160V48a8,8,0,0,0-16,0V72H112V48a8,8,0,0,0-16,0V72H72A24,24,0,0,0,48,96v24H32a8,8,0,0,0,0,16H48v16H32a8,8,0,0,0,0,16H48v16a24,24,0,0,0,24,24H96v24a8,8,0,0,0,16,0V208h32v24a8,8,0,0,0,16,0V208h24a24,24,0,0,0,24-24V160h16a8,8,0,0,0,0-16H208V128h16a8,8,0,0,0,0-16Zm-32,64a8,8,0,0,1-8,8H72a8,8,0,0,1-8-8V96a8,8,0,0,1,8-8H184a8,8,0,0,1,8,8Z"/></svg>';
+const iconMonitor =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H108v16H80a8,8,0,0,0,0,16h96a8,8,0,0,0,0-16H148V200h60a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40ZM48,56H208a8,8,0,0,1,8,8V160H40V64A8,8,0,0,1,48,56ZM208,184H48a8,8,0,0,1-8-8v-0H216v0A8,8,0,0,1,208,184Z"/></svg>';
+const iconCircuitBoard =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M208,36H48A12,12,0,0,0,36,48V208a12,12,0,0,0,12,12H208a12,12,0,0,0,12-12V48A12,12,0,0,0,208,36Zm-4,168H52V52H204ZM116,96a12,12,0,1,1-12-12A12,12,0,0,1,116,96Zm64,64a12,12,0,1,1-12-12A12,12,0,0,1,180,160Z"/></svg>';
+const iconCloud =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M160,40A88.09,88.09,0,0,0,81.29,88.68,64,64,0,1,0,72,216h88a88,88,0,0,0,0-176Zm0,160H72a48,48,0,0,1,0-96c1.1,0,2.2,0,3.29.11A88,88,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,72,72Z"/></svg>';
+const iconCpu =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256" fill="currentColor"><path d="M152,96H104a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V104A8,8,0,0,0,152,96Zm-8,48H112V112h32ZM224,120H208V96a24,24,0,0,0-24-24H160V48a8,8,0,0,0-16,0V72H112V48a8,8,0,0,0-16,0V72H72A24,24,0,0,0,48,96v24H32a8,8,0,0,0,0,16H48v16H32a8,8,0,0,0,0,16H48v16a24,24,0,0,0,24,24H96v24a8,8,0,0,0,16,0V208h32v24a8,8,0,0,0,16,0V208h24a24,24,0,0,0,24-24V160h16a8,8,0,0,0,0-16H208V128h16a8,8,0,0,0,0-16Zm-32,64a8,8,0,0,1-8,8H72a8,8,0,0,1-8-8V96a8,8,0,0,1,8-8H184a8,8,0,0,1,8,8Z"/></svg>';
 
 const rawBase = import.meta.env.BASE_URL;
 const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
@@ -20,409 +24,968 @@ const bloatItems = [
 ];
 
 const providers = [
-  "OpenAI", "Anthropic", "Gemini", "OpenRouter", "Ollama", "llama.cpp",
-  "Groq", "Mistral", "xAI", "DeepSeek", "Together", "Fireworks",
-  "Perplexity", "Cohere", "LM Studio", "vLLM", "sglang", "Cerebras",
-  "SambaNova", "Hyperbolic",
+  "OpenAI",
+  "Anthropic",
+  "Gemini",
+  "OpenRouter",
+  "Ollama",
+  "llama.cpp",
+  "Groq",
+  "Mistral",
+  "xAI",
+  "DeepSeek",
+  "Together",
+  "Fireworks",
+  "Perplexity",
+  "Cohere",
+  "LM Studio",
+  "vLLM",
+  "sglang",
+  "Cerebras",
+  "SambaNova",
+  "Hyperbolic",
 ];
 
 const channels = [
-  "Telegram", "Discord", "Slack", "Signal", "iMessage", "Matrix",
-  "WhatsApp", "IRC", "Nostr", "Email", "Line", "Mattermost",
+  "Telegram",
+  "Discord",
+  "Slack",
+  "Signal",
+  "iMessage",
+  "Matrix",
+  "WhatsApp",
+  "IRC",
+  "Nostr",
+  "Email",
+  "Line",
+  "Mattermost",
 ];
 
 const tools = [
-  "Shell", "File Ops", "Git", "Browser", "Memory", "Web Search",
-  "Cron", "HTTP", "Hardware", "Delegate",
+  "Shell",
+  "File Ops",
+  "Git",
+  "Browser",
+  "Memory",
+  "Web Search",
+  "Cron",
+  "HTTP",
+  "Hardware",
+  "Delegate",
 ];
 ---
+
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="canonical" href="https://seaclaw.ai/" />
-    <link rel="preload" href="/fonts/avenir/Avenir-Book.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/avenir/Avenir-Heavy.woff2" as="font" type="font/woff2" crossorigin />
+    <link
+      rel="preload"
+      href="/fonts/avenir/Avenir-Book.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/avenir/Avenir-Heavy.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <title>SeaClaw — Bring AI to every device on Earth</title>
-    <meta name="description" content="A complete autonomous AI agent runtime in 430 kilobytes of pure C. One static binary. Zero dependencies. 50+ providers. Runs on anything with a CPU." />
+    <meta
+      name="description"
+      content="A complete autonomous AI agent runtime in 430 kilobytes of pure C. One static binary. Zero dependencies. 50+ providers. Runs on anything with a CPU."
+    />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
-    <link rel="icon" type="image/png" sizes="32x32" href={`${base}favicon-32.png`} />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href={`${base}favicon-32.png`}
+    />
     <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
     <link rel="manifest" href={`${base}site.webmanifest`} />
     <meta name="theme-color" content="#f97066" />
-    <meta property="og:title" content="SeaClaw — Bring AI to every device on Earth" />
-    <meta property="og:description" content="430 KB binary. 50+ AI providers. 20 channels. 53 tools. Zero dependencies. Pure C." />
+    <meta
+      property="og:title"
+      content="SeaClaw — Bring AI to every device on Earth"
+    />
+    <meta
+      property="og:description"
+      content="430 KB binary. 50+ AI providers. 20 channels. 53 tools. Zero dependencies. Pure C."
+    />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://seaclaw.ai/" />
     <meta property="og:image" content="https://seaclaw.ai/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="SeaClaw - Autonomous AI agent runtime" />
+    <meta
+      property="og:image:alt"
+      content="SeaClaw - Autonomous AI agent runtime"
+    />
     <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="SeaClaw" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="SeaClaw — Bring AI to every device on Earth" />
-    <meta name="twitter:description" content="430 KB binary. 50+ AI providers. 20 channels. 53 tools. Zero dependencies. Pure C." />
+    <meta
+      name="twitter:title"
+      content="SeaClaw — Bring AI to every device on Earth"
+    />
+    <meta
+      name="twitter:description"
+      content="430 KB binary. 50+ AI providers. 20 channels. 53 tools. Zero dependencies. Pure C."
+    />
     <meta name="twitter:image" content="https://seaclaw.ai/og-image.png" />
 
-    <script type="application/ld+json" set:html={JSON.stringify({
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "SeaClaw",
-      "description": "A complete autonomous AI agent runtime in 430 kilobytes of pure C.",
-      "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Cross-platform",
-      "url": "https://seaclaw.ai/",
-      "license": "https://opensource.org/licenses/MIT",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "author": { "@type": "Organization", "name": "SeaClaw", "url": "https://github.com/sethdford/seaclaw" }
-    })} />
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "SeaClaw",
+        description:
+          "A complete autonomous AI agent runtime in 430 kilobytes of pure C.",
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "Cross-platform",
+        url: "https://seaclaw.ai/",
+        license: "https://opensource.org/licenses/MIT",
+        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        author: {
+          "@type": "Organization",
+          name: "SeaClaw",
+          url: "https://github.com/sethdford/seaclaw",
+        },
+      })}
+    />
   </head>
-  <body style="background: var(--color-bg); color: var(--color-text);" class="antialiased overflow-x-hidden">
+  <body
+    style="background: var(--color-bg); color: var(--color-text);"
+    class="antialiased overflow-x-hidden"
+  >
     <div class="scroll-progress" id="scroll-progress"></div>
     <a href="#main-content" class="skip-link">Skip to content</a>
     <Nav />
 
     <main id="main-content">
+      {/* ═══ HERO ═══ */}
 
-    {/* ═══ HERO ═══ */}
-
-    <section class="relative min-h-screen flex flex-col items-center justify-center px-6 pt-24 overflow-hidden">
-      <div class="hero-gradient noise-overlay"></div>
-      <div class="ambient-coral" style="top: 15%; left: 50%; transform: translateX(-50%);"></div>
-      <div class="ambient-blue" style="top: 30%; right: 10%;"></div>
-      <div class="hero-content text-center max-w-3xl mx-auto relative z-10">
-        <img
-          src={`${base}seaclaw.svg`}
-          alt="SeaClaw logo"
-          width="512"
-          height="512"
-          class="hero-logo w-20 h-20 md:w-24 md:h-24 mx-auto mb-10 opacity-0"
-          style={`filter: drop-shadow(0 0 40px var(--color-accent-glow)); animation: float 6s ease-in-out infinite;`}
-        />
-        <h1 class="hero-headline font-sans font-black text-[clamp(2.5rem,7vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em; font-weight: 900;">
-          Bring AI to <span class="text-gradient">every</span> device on&nbsp;Earth.
-        </h1>
-        <p class="hero-desc text-[clamp(1.05rem,2.2vw,1.3rem)] leading-relaxed mb-10 opacity-0 max-w-2xl mx-auto" style="color: var(--color-text-secondary)">
-          A complete autonomous AI agent runtime in <strong style="color: var(--color-text)">430&nbsp;kilobytes</strong> of pure&nbsp;C.<br />
-          One static binary. Zero dependencies. Boots in under 2&nbsp;milliseconds.
-        </p>
-        <div class="hero-buttons flex flex-col sm:flex-row gap-4 justify-center opacity-0">
-          <a href={`${base}getting-started/installation/`} class="btn-primary">Get Started</a>
-          <a href="https://github.com/sethdford/seaclaw" target="_blank" rel="noopener noreferrer" class="btn-outline">View on GitHub</a>
+      <section
+        class="relative min-h-screen flex flex-col items-center justify-center px-6 pt-24 overflow-hidden"
+      >
+        <div class="hero-gradient noise-overlay"></div>
+        <div
+          class="ambient-coral"
+          style="top: 15%; left: 50%; transform: translateX(-50%);"
+        >
         </div>
-      </div>
-    </section>
-
-    {/* ═══ THE NUMBERS ═══ */}
-
-    <section class="py-16 md:py-24 px-6">
-      <div class="max-w-5xl mx-auto">
-        <div class="numbers-grid glass px-4 md:px-8 py-8 md:py-10 grid grid-cols-3 md:grid-cols-6 gap-0">
-          {[
-            { count: 430, suffix: " KB", label: "Binary" },
-            { count: 2, prefix: "<", suffix: " ms", label: "Startup" },
-            { count: 2266, label: "Tests" },
-            { count: 50, suffix: "+", label: "Providers" },
-            { count: 20, label: "Channels" },
-            { count: 53, label: "Tools" },
-          ].map((stat, i, arr) => (
-            <div class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`} style="border-color: var(--color-border)">
-              <div class="font-sans font-black text-[clamp(2rem,4vw,3rem)] leading-none" style="color: var(--color-text)" data-count={stat.count} data-prefix={stat.prefix || ""} data-suffix={stat.suffix || ""}>
-                {stat.prefix && <span class="count-prefix">{stat.prefix}</span>}
-                <span class="count-value">0</span>
-                {stat.suffix && <span class="count-suffix">{stat.suffix}</span>}
-              </div>
-              <div class="text-[11px] font-medium mt-2 uppercase tracking-[0.1em]" style="color: var(--color-text-tertiary)">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-
-    {/* ═══ THE PROBLEM ═══ */}
-
-    <section class="relative min-h-[85vh] flex flex-col items-center justify-center px-6">
-      <div class="max-w-2xl mx-auto text-center">
-        <h2 class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          To run an AI assistant today, you need...
-        </h2>
-        <div class="bloat-stack flex flex-col items-center gap-3 mb-12">
-          {bloatItems.map((item, i) => (
-            <div
-              class={`bloat-card opacity-0 glass px-8 py-4 text-[clamp(1rem,2vw,1.25rem)] w-full max-w-md text-center ${i === bloatItems.length - 1 ? "italic" : ""}`}
-              style={`color: ${i === bloatItems.length - 1 ? "var(--color-text-tertiary)" : "var(--color-text-secondary)"}`}
+        <div class="ambient-blue" style="top: 30%; right: 10%;"></div>
+        <div class="hero-content text-center max-w-3xl mx-auto relative z-10">
+          <img
+            src={`${base}seaclaw.svg`}
+            alt="SeaClaw logo"
+            width="512"
+            height="512"
+            class="hero-logo w-20 h-20 md:w-24 md:h-24 mx-auto mb-10 opacity-0"
+            style={`filter: drop-shadow(0 0 40px var(--color-accent-glow)); animation: float 6s ease-in-out infinite;`}
+          />
+          <h1
+            class="hero-headline font-sans font-black text-[clamp(2.5rem,7vw,4.5rem)] leading-[1.05] mb-6 opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.04em; font-weight: 900;"
+          >
+            Bring AI to <span class="text-gradient">every</span> device on&nbsp;Earth.
+          </h1>
+          <p
+            class="hero-desc text-[clamp(1.05rem,2.2vw,1.3rem)] leading-relaxed mb-10 opacity-0 max-w-2xl mx-auto"
+            style="color: var(--color-text-secondary)"
+          >
+            A complete autonomous AI agent runtime in <strong
+              style="color: var(--color-text)">430&nbsp;kilobytes</strong
+            > of pure&nbsp;C.<br />
+            One static binary. Zero dependencies. Boots in under 2&nbsp;milliseconds.
+          </p>
+          <div
+            class="hero-buttons flex flex-col sm:flex-row gap-4 justify-center opacity-0"
+          >
+            <a href={`${base}getting-started/installation/`} class="btn-primary"
+              >Get Started</a
             >
-              {item}
-            </div>
-          ))}
+            <a
+              href="https://github.com/sethdford/seaclaw"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-outline">View on GitHub</a
+            >
+          </div>
         </div>
-        <p class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)] opacity-0" style="color: var(--color-text)">
-          SeaClaw needs one thing: <span style="color: var(--color-accent)" class="font-semibold">a CPU.</span>
-        </p>
-      </div>
-    </section>
+      </section>
 
-    {/* ═══ DEVICE SPECTRUM ═══ */}
+      {/* ═══ THE NUMBERS ═══ */}
 
-    <section id="use-cases" class="py-16 md:py-32 px-6">
-      <div class="max-w-5xl mx-auto">
-        <h2 class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          From data centers to five-dollar boards.
-        </h2>
-        <p class="spectrum-sub text-lg mb-16 text-center opacity-0" style="color: var(--color-text-secondary)">The same static binary. The same config. Every device.</p>
-        <div class="grid md:grid-cols-4 gap-5">
-          {[
-            { icon: iconCloud, title: "Cloud", desc: "Docker, WASM, Cloudflare Workers. Full gateway with webhooks, tunnels, and multi-channel routing." },
-            { icon: iconMonitor, title: "Workstation", desc: "macOS, Linux, Windows. Interactive TUI, local Ollama/llama.cpp. No cloud dependency." },
-            { icon: iconCircuitBoard, title: "Edge", desc: "Raspberry Pi, ARM SBCs. Under 5 MB RAM. Under 2 ms startup. Runs headless on boot." },
-            { icon: iconCpu, title: "Embedded", desc: "Arduino, STM32, Nucleo. Serial JSON protocol. Hardware peripherals via vtable interface." },
-          ].map(({ icon, title, desc }) => (
-            <div class="spectrum-card card-glow card-spotlight opacity-0 glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1" style={`--tw-shadow: var(--shadow-md);`}>
-              <span class="w-8 h-8 mx-auto mb-4 flex items-center justify-center [&>svg]:flex-shrink-0" style="color: var(--color-text-tertiary)" set:html={icon} />
-              <h3 class="text-lg font-semibold mb-3" style="color: var(--color-text)">{title}</h3>
-              <p class="text-[14px] leading-relaxed" style="color: var(--color-text-secondary)">{desc}</p>
-            </div>
-          ))}
+      <section class="py-16 md:py-24 px-6">
+        <div class="max-w-5xl mx-auto">
+          <div
+            class="numbers-grid glass px-4 md:px-8 py-8 md:py-10 grid grid-cols-3 md:grid-cols-6 gap-0"
+          >
+            {
+              [
+                { count: 430, suffix: " KB", label: "Binary" },
+                { count: 2, prefix: "<", suffix: " ms", label: "Startup" },
+                { count: 2266, label: "Tests" },
+                { count: 50, suffix: "+", label: "Providers" },
+                { count: 20, label: "Channels" },
+                { count: 53, label: "Tools" },
+              ].map((stat, i, arr) => (
+                <div
+                  class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`}
+                  style="border-color: var(--color-border)"
+                >
+                  <div
+                    class="font-sans font-black text-[clamp(2rem,4vw,3rem)] leading-none"
+                    style="color: var(--color-text)"
+                    data-count={stat.count}
+                    data-prefix={stat.prefix || ""}
+                    data-suffix={stat.suffix || ""}
+                  >
+                    {stat.prefix && (
+                      <span class="count-prefix">{stat.prefix}</span>
+                    )}
+                    <span class="count-value">0</span>
+                    {stat.suffix && (
+                      <span class="count-suffix">{stat.suffix}</span>
+                    )}
+                  </div>
+                  <div
+                    class="text-[11px] font-medium mt-2 uppercase tracking-[0.1em]"
+                    style="color: var(--color-text-tertiary)"
+                  >
+                    {stat.label}
+                  </div>
+                </div>
+              ))
+            }
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    {/* ═══ ARCHITECTURE ═══ */}
+      {/* ═══ THE PROBLEM ═══ */}
 
-    <section id="architecture" class="relative py-16 md:py-32 px-6">
-      <div class="ambient-coral" style="top: 20%; left: 10%;"></div>
-      <div class="ambient-blue" style="bottom: 10%; right: 15%;"></div>
-      <div class="max-w-4xl mx-auto text-center">
-        <h2 class="arch-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          Swap anything. Lock in nothing.
-        </h2>
-        <p class="arch-sub text-lg mb-20 opacity-0" style="color: var(--color-text-secondary)">Every subsystem is a vtable interface. Change any layer with a config edit.</p>
+      <section
+        class="relative min-h-[85vh] flex flex-col items-center justify-center px-6"
+      >
+        <div class="max-w-2xl mx-auto text-center">
+          <h2
+            class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16 opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.03em;"
+          >
+            To run an AI assistant today, you need...
+          </h2>
+          <div class="bloat-stack flex flex-col items-center gap-3 mb-12">
+            {
+              bloatItems.map((item, i) => (
+                <div
+                  class={`bloat-card opacity-0 glass px-8 py-4 text-[clamp(1rem,2vw,1.25rem)] w-full max-w-md text-center ${i === bloatItems.length - 1 ? "italic" : ""}`}
+                  style={`color: ${i === bloatItems.length - 1 ? "var(--color-text-tertiary)" : "var(--color-text-secondary)"}`}
+                >
+                  {item}
+                </div>
+              ))
+            }
+          </div>
+          <p
+            class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)] opacity-0"
+            style="color: var(--color-text)"
+          >
+            SeaClaw needs one thing: <span
+              style="color: var(--color-accent)"
+              class="font-semibold">a CPU.</span
+            >
+          </p>
+        </div>
+      </section>
 
-        <svg id="arch-diagram" viewBox="0 0 600 600" class="w-full max-w-lg mx-auto" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SeaClaw architecture diagram showing 8 swappable subsystems">
-          <defs>
-            <filter id="node-shadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.06)" />
-            </filter>
-          </defs>
+      {/* ═══ DEVICE SPECTRUM ═══ */}
 
-          {[
-            [300, 100], [441, 159], [500, 300], [441, 441],
-            [300, 500], [159, 441], [100, 300], [159, 159]
-          ].map(([x, y]) => (
-            <line class="arch-line" x1="300" y1="300" x2={x} y2={y} stroke="var(--color-line-stroke)" stroke-width="1" />
-          ))}
+      <section id="use-cases" class="py-16 md:py-32 px-6">
+        <div class="max-w-5xl mx-auto">
+          <h2
+            class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.03em;"
+          >
+            From data centers to five-dollar boards.
+          </h2>
+          <p
+            class="spectrum-sub text-lg mb-16 text-center opacity-0"
+            style="color: var(--color-text-secondary)"
+          >
+            The same static binary. The same config. Every device.
+          </p>
+          <div class="grid md:grid-cols-4 gap-5">
+            {
+              [
+                {
+                  icon: iconCloud,
+                  title: "Cloud",
+                  desc: "Docker, WASM, Cloudflare Workers. Full gateway with webhooks, tunnels, and multi-channel routing.",
+                },
+                {
+                  icon: iconMonitor,
+                  title: "Workstation",
+                  desc: "macOS, Linux, Windows. Interactive TUI, local Ollama/llama.cpp. No cloud dependency.",
+                },
+                {
+                  icon: iconCircuitBoard,
+                  title: "Edge",
+                  desc: "Raspberry Pi, ARM SBCs. Under 5 MB RAM. Under 2 ms startup. Runs headless on boot.",
+                },
+                {
+                  icon: iconCpu,
+                  title: "Embedded",
+                  desc: "Arduino, STM32, Nucleo. Serial JSON protocol. Hardware peripherals via vtable interface.",
+                },
+              ].map(({ icon, title, desc }) => (
+                <div
+                  class="spectrum-card card-glow card-spotlight opacity-0 glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1"
+                  style={`--tw-shadow: var(--shadow-md);`}
+                >
+                  <span
+                    class="w-8 h-8 mx-auto mb-4 flex items-center justify-center [&>svg]:flex-shrink-0"
+                    style="color: var(--color-text-tertiary)"
+                    set:html={icon}
+                  />
+                  <h3
+                    class="text-lg font-semibold mb-3"
+                    style="color: var(--color-text)"
+                  >
+                    {title}
+                  </h3>
+                  <p
+                    class="text-[14px] leading-relaxed"
+                    style="color: var(--color-text-secondary)"
+                  >
+                    {desc}
+                  </p>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </section>
 
-          <g id="arch-core" class="opacity-0">
-            <circle cx="300" cy="300" r="44" fill="var(--color-node-fill)" stroke="var(--color-accent)" stroke-width="1.5" filter="url(#node-shadow)" />
-            <text x="300" y="296" text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="600" font-family="var(--font-sans)">SeaClaw</text>
-            <text x="300" y="312" text-anchor="middle" fill="var(--color-text-secondary)" font-size="9" font-family="var(--font-sans)">Core</text>
-          </g>
+      {/* ═══ ARCHITECTURE ═══ */}
 
-          {[
-            { cx: 300, cy: 100, label: "Providers", tip: "50+ AI model providers: OpenAI, Anthropic, Ollama, and more" },
-            { cx: 441, cy: 159, label: "Channels", tip: "20 messaging channels: Telegram, Discord, Slack, iMessage" },
-            { cx: 500, cy: 300, label: "Memory", tip: "SQLite + FTS5 + vector embeddings for persistent context" },
-            { cx: 441, cy: 441, label: "Tools", tip: "53 tools: shell, files, git, browser, web search, hardware" },
-            { cx: 300, cy: 500, label: "Security", tip: "Sandbox, AEAD encryption, path traversal protection" },
-            { cx: 159, cy: 441, label: "Runtime", tip: "Native, Docker, WASM, Cloudflare Workers" },
-            { cx: 100, cy: 300, label: "Tunnels", tip: "Cloudflare, ngrok, Tailscale for webhook exposure" },
-            { cx: 159, cy: 159, label: "Hardware", tip: "Arduino, STM32, Raspberry Pi peripherals" },
-          ].map(({ cx, cy, label, tip }) => (
-            <g class="arch-node opacity-0" style="cursor: pointer;">
-              <title>{tip}</title>
-              <circle cx={cx} cy={cy} r="30" fill="var(--color-node-fill)" stroke="var(--color-node-stroke)" stroke-width="1" filter="url(#node-shadow)" />
-              <text x={cx} y={cy + 4} text-anchor="middle" fill="var(--color-text-secondary)" font-size="10" font-family="var(--font-sans)">{label}</text>
+      <section id="architecture" class="relative py-16 md:py-32 px-6">
+        <div class="ambient-coral" style="top: 20%; left: 10%;"></div>
+        <div class="ambient-blue" style="bottom: 10%; right: 15%;"></div>
+        <div class="max-w-4xl mx-auto text-center">
+          <h2
+            class="arch-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.03em;"
+          >
+            Swap anything. Lock in nothing.
+          </h2>
+          <p
+            class="arch-sub text-lg mb-20 opacity-0"
+            style="color: var(--color-text-secondary)"
+          >
+            Every subsystem is a vtable interface. Change any layer with a
+            config edit.
+          </p>
+
+          <svg
+            id="arch-diagram"
+            viewBox="0 0 600 600"
+            class="w-full max-w-lg mx-auto"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-label="SeaClaw architecture diagram showing 8 swappable subsystems"
+          >
+            <defs>
+              <filter
+                id="node-shadow"
+                x="-20%"
+                y="-20%"
+                width="140%"
+                height="140%"
+              >
+                <feDropShadow
+                  dx="0"
+                  dy="2"
+                  stdDeviation="4"
+                  flood-color="rgba(0,0,0,0.06)"></feDropShadow>
+              </filter>
+            </defs>
+
+            {
+              [
+                [300, 100],
+                [441, 159],
+                [500, 300],
+                [441, 441],
+                [300, 500],
+                [159, 441],
+                [100, 300],
+                [159, 159],
+              ].map(([x, y]) => (
+                <line
+                  class="arch-line"
+                  x1="300"
+                  y1="300"
+                  x2={x}
+                  y2={y}
+                  stroke="var(--color-line-stroke)"
+                  stroke-width="1"
+                />
+              ))
+            }
+
+            <g id="arch-core" class="opacity-0">
+              <circle
+                cx="300"
+                cy="300"
+                r="44"
+                fill="var(--color-node-fill)"
+                stroke="var(--color-accent)"
+                stroke-width="1.5"
+                filter="url(#node-shadow)"></circle>
+              <text
+                x="300"
+                y="296"
+                text-anchor="middle"
+                fill="var(--color-text)"
+                font-size="11"
+                font-weight="600"
+                font-family="var(--font-sans)">SeaClaw</text
+              >
+              <text
+                x="300"
+                y="312"
+                text-anchor="middle"
+                fill="var(--color-text-secondary)"
+                font-size="9"
+                font-family="var(--font-sans)">Core</text
+              >
             </g>
-          ))}
-        </svg>
-      </div>
-    </section>
 
-    {/* ═══ ECOSYSTEM ═══ */}
-
-    <section class="py-16 md:py-32 px-6">
-      <div class="max-w-4xl mx-auto text-center">
-        <h2 class="providers-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          50+ providers. 20 channels. 53 tools.
-        </h2>
-        <p class="providers-sub text-lg mb-16 opacity-0" style="color: var(--color-text-secondary)">Connect to any AI model. Reach users on any platform.</p>
-        <div class="flex flex-wrap gap-3 justify-center" id="provider-grid">
-          {providers.map((name) => (
-            <span class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm" style="color: var(--color-pill-provider); background: var(--color-pill-provider-bg); border: 1px solid var(--color-pill-provider-border)">
-              {name}
-            </span>
-          ))}
-          {channels.map((name) => (
-            <span class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm" style="color: var(--color-pill-channel); background: var(--color-pill-channel-bg); border: 1px solid var(--color-pill-channel-border)">
-              {name}
-            </span>
-          ))}
-          {tools.map((name) => (
-            <span class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm" style="color: var(--color-pill-tool); background: var(--color-pill-tool-bg); border: 1px solid var(--color-pill-tool-border)">
-              {name}
-            </span>
-          ))}
-          <span class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] italic backdrop-blur-sm" style="color: var(--color-text-tertiary); background: var(--color-accent-light); border: 1px solid var(--color-border)">
-            and more...
-          </span>
+            {
+              [
+                {
+                  cx: 300,
+                  cy: 100,
+                  label: "Providers",
+                  tip: "50+ AI model providers: OpenAI, Anthropic, Ollama, and more",
+                },
+                {
+                  cx: 441,
+                  cy: 159,
+                  label: "Channels",
+                  tip: "20 messaging channels: Telegram, Discord, Slack, iMessage",
+                },
+                {
+                  cx: 500,
+                  cy: 300,
+                  label: "Memory",
+                  tip: "SQLite + FTS5 + vector embeddings for persistent context",
+                },
+                {
+                  cx: 441,
+                  cy: 441,
+                  label: "Tools",
+                  tip: "53 tools: shell, files, git, browser, web search, hardware",
+                },
+                {
+                  cx: 300,
+                  cy: 500,
+                  label: "Security",
+                  tip: "Sandbox, AEAD encryption, path traversal protection",
+                },
+                {
+                  cx: 159,
+                  cy: 441,
+                  label: "Runtime",
+                  tip: "Native, Docker, WASM, Cloudflare Workers",
+                },
+                {
+                  cx: 100,
+                  cy: 300,
+                  label: "Tunnels",
+                  tip: "Cloudflare, ngrok, Tailscale for webhook exposure",
+                },
+                {
+                  cx: 159,
+                  cy: 159,
+                  label: "Hardware",
+                  tip: "Arduino, STM32, Raspberry Pi peripherals",
+                },
+              ].map(({ cx, cy, label, tip }) => (
+                <g class="arch-node opacity-0" style="cursor: pointer;">
+                  <title>{tip}</title>
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r="30"
+                    fill="var(--color-node-fill)"
+                    stroke="var(--color-node-stroke)"
+                    stroke-width="1"
+                    filter="url(#node-shadow)"
+                  />
+                  <text
+                    x={cx}
+                    y={cy + 4}
+                    text-anchor="middle"
+                    fill="var(--color-text-secondary)"
+                    font-size="10"
+                    font-family="var(--font-sans)"
+                  >
+                    {label}
+                  </text>
+                </g>
+              ))
+            }
+          </svg>
         </div>
-      </div>
-    </section>
+      </section>
 
-    {/* ═══ TERMINAL ═══ */}
+      {/* ═══ ECOSYSTEM ═══ */}
 
-    <section class="py-16 md:py-32 px-6">
-      <div class="max-w-3xl mx-auto">
-        <h2 class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          Three commands. Zero dependencies.
-        </h2>
-        <p class="terminal-sub text-lg mb-12 text-center opacity-0" style="color: var(--color-text-secondary)">Clone, build, run. No containers. No interpreters. No package managers.</p>
-        <div id="terminal" class="rounded-2xl overflow-hidden opacity-0" style={`background: var(--color-terminal-bg); box-shadow: var(--shadow-lg);`}>
-          <div class="flex items-center gap-2 px-5 py-3.5 border-b" style={`background: var(--color-terminal-chrome); border-color: rgba(255,255,255,0.06);`}>
-            <span class="w-3 h-3 rounded-full bg-[#FF5F57]"></span>
-            <span class="w-3 h-3 rounded-full bg-[#FEBC2E]"></span>
-            <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
-            <span class="text-[11px] text-[rgba(255,255,255,0.3)] ml-2 font-mono">terminal</span>
-          </div>
-          <div id="terminal-output" class="p-4 md:p-6 font-mono text-[12px] md:text-sm leading-[1.8] min-h-[240px] md:min-h-[280px] overflow-x-auto">
+      <section class="py-16 md:py-32 px-6">
+        <div class="max-w-4xl mx-auto text-center">
+          <h2
+            class="providers-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.03em;"
+          >
+            50+ providers. 20 channels. 53 tools.
+          </h2>
+          <p
+            class="providers-sub text-lg mb-16 opacity-0"
+            style="color: var(--color-text-secondary)"
+          >
+            Connect to any AI model. Reach users on any platform.
+          </p>
+          <div class="flex flex-wrap gap-3 justify-center" id="provider-grid">
+            {
+              providers.map((name) => (
+                <span
+                  class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
+                  style="color: var(--color-pill-provider); background: var(--color-pill-provider-bg); border: 1px solid var(--color-pill-provider-border)"
+                >
+                  {name}
+                </span>
+              ))
+            }
+            {
+              channels.map((name) => (
+                <span
+                  class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
+                  style="color: var(--color-pill-channel); background: var(--color-pill-channel-bg); border: 1px solid var(--color-pill-channel-border)"
+                >
+                  {name}
+                </span>
+              ))
+            }
+            {
+              tools.map((name) => (
+                <span
+                  class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
+                  style="color: var(--color-pill-tool); background: var(--color-pill-tool-bg); border: 1px solid var(--color-pill-tool-border)"
+                >
+                  {name}
+                </span>
+              ))
+            }
+            <span
+              class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] italic backdrop-blur-sm"
+              style="color: var(--color-text-tertiary); background: var(--color-accent-light); border: 1px solid var(--color-border)"
+            >
+              and more...
+            </span>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    {/* ═══ DASHBOARD PREVIEW ═══ */}
+      {/* ═══ TERMINAL ═══ */}
 
-    <section class="py-16 md:py-32 px-6">
-      <div class="max-w-4xl mx-auto text-center">
-        <h2 class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0" style="color: var(--color-text); letter-spacing: -0.03em;">
-          A command center, not a status page.
-        </h2>
-        <p class="dash-sub text-lg mb-12 opacity-0" style="color: var(--color-text-secondary)">
-          Real-time stats. Live activity feed. Sparkline trends. All in 430 KB.
-        </p>
-        <div class="dash-preview opacity-0 glass rounded-2xl overflow-hidden" style="box-shadow: var(--shadow-xl);">
-          <div class="flex items-center gap-2 px-5 py-3 border-b" style="background: var(--color-terminal-chrome); border-color: rgba(255,255,255,0.06);">
-            <span class="w-3 h-3 rounded-full bg-[#FF5F57]"></span>
-            <span class="w-3 h-3 rounded-full bg-[#FEBC2E]"></span>
-            <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
-            <span class="text-[11px] text-[rgba(255,255,255,0.3)] ml-2 font-mono">SeaClaw Dashboard</span>
-            <span class="ml-auto text-[11px] px-2 py-0.5 rounded-full" style="background: rgba(40,200,64,0.15); color: #28C840;">Live</span>
+      <section class="py-16 md:py-32 px-6">
+        <div class="max-w-3xl mx-auto">
+          <h2
+            class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.03em;"
+          >
+            Three commands. Zero dependencies.
+          </h2>
+          <p
+            class="terminal-sub text-lg mb-12 text-center opacity-0"
+            style="color: var(--color-text-secondary)"
+          >
+            Clone, build, run. No containers. No interpreters. No package
+            managers.
+          </p>
+          <div
+            id="terminal"
+            class="rounded-2xl overflow-hidden opacity-0"
+            style={`background: var(--color-terminal-bg); box-shadow: var(--shadow-lg);`}
+          >
+            <div
+              class="flex items-center gap-2 px-5 py-3.5 border-b"
+              style={`background: var(--color-terminal-chrome); border-color: rgba(255,255,255,0.06);`}
+            >
+              <span class="w-3 h-3 rounded-full bg-[#FF5F57]"></span>
+              <span class="w-3 h-3 rounded-full bg-[#FEBC2E]"></span>
+              <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
+              <span
+                class="text-[11px] text-[rgba(255,255,255,0.3)] ml-2 font-mono"
+                >terminal</span
+              >
+            </div>
+            <div
+              id="terminal-output"
+              class="p-4 md:p-6 font-mono text-[12px] md:text-sm leading-[1.8] min-h-[240px] md:min-h-[280px] overflow-x-auto"
+            >
+            </div>
           </div>
-          <div class="p-6 md:p-8" style="background: var(--color-terminal-bg);">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
-                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Providers</div>
-                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
-                  <span class="dash-count" data-target="50">0</span>
+        </div>
+      </section>
+
+      {/* ═══ DASHBOARD PREVIEW ═══ */}
+
+      <section class="py-16 md:py-32 px-6">
+        <div class="max-w-4xl mx-auto text-center">
+          <h2
+            class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.03em;"
+          >
+            A command center, not a status page.
+          </h2>
+          <p
+            class="dash-sub text-lg mb-12 opacity-0"
+            style="color: var(--color-text-secondary)"
+          >
+            Real-time stats. Live activity feed. Sparkline trends. All in 430
+            KB.
+          </p>
+          <div
+            class="dash-preview opacity-0 glass rounded-2xl overflow-hidden"
+            style="box-shadow: var(--shadow-xl);"
+          >
+            <div
+              class="flex items-center gap-2 px-5 py-3 border-b"
+              style="background: var(--color-terminal-chrome); border-color: rgba(255,255,255,0.06);"
+            >
+              <span class="w-3 h-3 rounded-full bg-[#FF5F57]"></span>
+              <span class="w-3 h-3 rounded-full bg-[#FEBC2E]"></span>
+              <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
+              <span
+                class="text-[11px] text-[rgba(255,255,255,0.3)] ml-2 font-mono"
+                >SeaClaw Dashboard</span
+              >
+              <span
+                class="ml-auto text-[11px] px-2 py-0.5 rounded-full"
+                style="background: rgba(40,200,64,0.15); color: #28C840;"
+                >Live</span
+              >
+            </div>
+            <div
+              class="p-6 md:p-8"
+              style="background: var(--color-terminal-bg);"
+            >
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div
+                  class="text-left p-4 rounded-xl"
+                  style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);"
+                >
+                  <div
+                    class="text-[10px] uppercase tracking-wider mb-2"
+                    style="color: rgba(255,255,255,0.4);"
+                  >
+                    Providers
+                  </div>
+                  <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                    <span class="dash-count" data-target="50">0</span>
+                  </div>
+                  <div
+                    class="flex items-center gap-1 text-[11px]"
+                    style="color: #6ee7b7;"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 256 256"
+                      fill="currentColor"
+                      ><path
+                        d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"
+                      ></path></svg
+                    >
+                    Active
+                  </div>
                 </div>
-                <div class="flex items-center gap-1 text-[11px]" style="color: #6ee7b7;">
-                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"/></svg>
-                  Active
+                <div
+                  class="text-left p-4 rounded-xl"
+                  style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);"
+                >
+                  <div
+                    class="text-[10px] uppercase tracking-wider mb-2"
+                    style="color: rgba(255,255,255,0.4);"
+                  >
+                    Channels
+                  </div>
+                  <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                    <span class="dash-count" data-target="20">0</span>
+                  </div>
+                  <div
+                    class="flex items-center gap-1 text-[11px]"
+                    style="color: #6ee7b7;"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 256 256"
+                      fill="currentColor"
+                      ><path
+                        d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"
+                      ></path></svg
+                    >
+                    Connected
+                  </div>
+                </div>
+                <div
+                  class="text-left p-4 rounded-xl"
+                  style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);"
+                >
+                  <div
+                    class="text-[10px] uppercase tracking-wider mb-2"
+                    style="color: rgba(255,255,255,0.4);"
+                  >
+                    Tools
+                  </div>
+                  <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                    <span class="dash-count" data-target="53">0</span>
+                  </div>
+                  <div
+                    class="flex items-center gap-1 text-[11px]"
+                    style="color: rgba(255,255,255,0.4);"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 256 256"
+                      fill="currentColor"
+                      ><path
+                        d="M221.66,133.66l-48,48a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,221.66,133.66Z"
+                      ></path></svg
+                    >
+                    Stable
+                  </div>
+                </div>
+                <div
+                  class="text-left p-4 rounded-xl"
+                  style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);"
+                >
+                  <div
+                    class="text-[10px] uppercase tracking-wider mb-2"
+                    style="color: rgba(255,255,255,0.4);"
+                  >
+                    Sessions
+                  </div>
+                  <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
+                    <span class="dash-count" data-target="5">0</span>
+                  </div>
+                  <div
+                    class="flex items-center gap-1 text-[11px]"
+                    style="color: #6ee7b7;"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 256 256"
+                      fill="currentColor"
+                      ><path
+                        d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"
+                      ></path></svg
+                    >
+                    Active
+                  </div>
                 </div>
               </div>
-              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
-                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Channels</div>
-                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
-                  <span class="dash-count" data-target="20">0</span>
-                </div>
-                <div class="flex items-center gap-1 text-[11px]" style="color: #6ee7b7;">
-                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"/></svg>
-                  Connected
-                </div>
-              </div>
-              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
-                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Tools</div>
-                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
-                  <span class="dash-count" data-target="53">0</span>
-                </div>
-                <div class="flex items-center gap-1 text-[11px]" style="color: rgba(255,255,255,0.4);">
-                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M221.66,133.66l-48,48a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,221.66,133.66Z"/></svg>
-                  Stable
-                </div>
-              </div>
-              <div class="text-left p-4 rounded-xl" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);">
-                <div class="text-[10px] uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.4);">Sessions</div>
-                <div class="text-2xl font-bold mb-1" style="color: #e2e8f0;">
-                  <span class="dash-count" data-target="5">0</span>
-                </div>
-                <div class="flex items-center gap-1 text-[11px]" style="color: #6ee7b7;">
-                  <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor"><path d="M232,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,131.31,29.66,197.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L128,140.69,204.69,64H160a8,8,0,0,1,0-16h64A8,8,0,0,1,232,56Z"/></svg>
-                  Active
-                </div>
+              <div
+                id="dash-activity"
+                class="text-left text-[13px] space-y-2"
+                style="color: rgba(255,255,255,0.5);"
+              >
               </div>
             </div>
-            <div id="dash-activity" class="text-left text-[13px] space-y-2" style="color: rgba(255,255,255,0.5);">
-            </div>
+          </div>
+          <p
+            class="mt-6 text-sm opacity-0 dash-cta"
+            style="color: var(--color-text-tertiary)"
+          >
+            <a
+              href="/?demo=true"
+              class="underline hover:opacity-80 transition-opacity"
+              style="color: var(--color-accent)">Try the live demo</a
+            > — no installation required.
+          </p>
+        </div>
+      </section>
+
+      {/* ═══ CTA ═══ */}
+
+      <section class="relative py-20 md:py-40 px-6">
+        <div class="ambient-coral" style="top: 30%; left: 30%;"></div>
+        <div class="ambient-blue" style="top: 40%; right: 20%;"></div>
+        <div class="max-w-3xl mx-auto text-center">
+          <h2
+            class="cta-title font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6 opacity-0"
+            style="color: var(--color-text); letter-spacing: -0.04em;"
+          >
+            Bring AI to every device on&nbsp;Earth.
+          </h2>
+          <p
+            class="cta-sub text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 opacity-0 max-w-xl mx-auto leading-relaxed"
+            style="color: var(--color-text-secondary)"
+          >
+            Open source. MIT licensed. 430 KB. Runs anywhere.
+          </p>
+          <div
+            class="cta-buttons flex flex-col sm:flex-row gap-4 justify-center opacity-0"
+          >
+            <a href={`${base}getting-started/installation/`} class="btn-primary"
+              >Get Started</a
+            >
+            <a
+              href="https://github.com/sethdford/seaclaw"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-outline">View on GitHub</a
+            >
           </div>
         </div>
-        <p class="mt-6 text-sm opacity-0 dash-cta" style="color: var(--color-text-tertiary)">
-          <a href="/?demo=true" class="underline hover:opacity-80 transition-opacity" style="color: var(--color-accent)">Try the live demo</a> — no installation required.
-        </p>
-      </div>
-    </section>
+      </section>
 
-    {/* ═══ CTA ═══ */}
+      {/* ═══ COMPARISON ═══ */}
 
-    <section class="relative py-20 md:py-40 px-6">
-      <div class="ambient-coral" style="top: 30%; left: 30%;"></div>
-      <div class="ambient-blue" style="top: 40%; right: 20%;"></div>
-      <div class="max-w-3xl mx-auto text-center">
-        <h2 class="cta-title font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6 opacity-0" style="color: var(--color-text); letter-spacing: -0.04em;">
-          Bring AI to every device on&nbsp;Earth.
-        </h2>
-        <p class="cta-sub text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 opacity-0 max-w-xl mx-auto leading-relaxed" style="color: var(--color-text-secondary)">
-          Open source. MIT licensed. 430 KB. Runs anywhere.
-        </p>
-        <div class="cta-buttons flex flex-col sm:flex-row gap-4 justify-center opacity-0">
-          <a href={`${base}getting-started/installation/`} class="btn-primary">Get Started</a>
-          <a href="https://github.com/sethdford/seaclaw" target="_blank" rel="noopener noreferrer" class="btn-outline">View on GitHub</a>
+      <section class="py-16 md:py-24 relative">
+        <div class="max-w-5xl mx-auto px-4">
+          <h2
+            class="text-2xl md:text-3xl font-bold text-center mb-12"
+            style="font-weight: 900;"
+          >
+            How SeaClaw Compares
+          </h2>
+          <div class="overflow-x-auto">
+            <table
+              class="w-full text-sm comparison-table"
+              style="border-collapse: separate; border-spacing: 0;"
+            >
+              <thead>
+                <tr>
+                  <th class="text-left p-3">Feature</th>
+                  <th
+                    class="p-3"
+                    style="color: var(--color-accent); font-weight: 900;"
+                    >SeaClaw</th
+                  >
+                  <th class="p-3 opacity-60">Claude Code</th>
+                  <th class="p-3 opacity-60">OpenAI Codex</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  ><td class="p-3">Language</td><td
+                    class="p-3 text-center font-medium"
+                    style="color: var(--color-accent, #f97066);">C</td
+                  ><td class="p-3 text-center opacity-60">TypeScript</td><td
+                    class="p-3 text-center opacity-60">Rust</td
+                  ></tr
+                >
+                <tr
+                  ><td class="p-3">Binary Size</td><td
+                    class="p-3 text-center font-medium"
+                    style="color: var(--color-accent, #f97066);">430 KB</td
+                  ><td class="p-3 text-center opacity-60">~200 MB</td><td
+                    class="p-3 text-center opacity-60">~50 MB</td
+                  ></tr
+                >
+                <tr
+                  ><td class="p-3">Peak RAM</td><td
+                    class="p-3 text-center font-medium"
+                    style="color: var(--color-accent, #f97066);">&lt;6 MB</td
+                  ><td class="p-3 text-center opacity-60">~300 MB</td><td
+                    class="p-3 text-center opacity-60">~100 MB</td
+                  ></tr
+                >
+                <tr
+                  ><td class="p-3">Dependencies</td><td
+                    class="p-3 text-center font-medium"
+                    style="color: var(--color-accent, #f97066);">0</td
+                  ><td class="p-3 text-center opacity-60">900+</td><td
+                    class="p-3 text-center opacity-60">200+</td
+                  ></tr
+                >
+                <tr
+                  ><td class="p-3">Providers</td><td
+                    class="p-3 text-center font-medium"
+                    style="color: var(--color-accent, #f97066);">50+</td
+                  ><td class="p-3 text-center opacity-60">1</td><td
+                    class="p-3 text-center opacity-60">1</td
+                  ></tr
+                >
+                <tr
+                  ><td class="p-3">Channels</td><td
+                    class="p-3 text-center font-medium"
+                    style="color: var(--color-accent, #f97066);">20</td
+                  ><td class="p-3 text-center opacity-60">1</td><td
+                    class="p-3 text-center opacity-60">1</td
+                  ></tr
+                >
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    </section>
-
-    {/* ═══ COMPARISON ═══ */}
-
-    <section class="py-16 md:py-24 relative">
-      <div class="max-w-5xl mx-auto px-4">
-        <h2 class="text-2xl md:text-3xl font-bold text-center mb-12" style="font-weight: 900;">How SeaClaw Compares</h2>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm comparison-table" style="border-collapse: separate; border-spacing: 0;">
-            <thead>
-              <tr>
-                <th class="text-left p-3">Feature</th>
-                <th class="p-3" style="color: var(--color-accent); font-weight: 900;">SeaClaw</th>
-                <th class="p-3 opacity-60">Claude Code</th>
-                <th class="p-3 opacity-60">OpenAI Codex</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td class="p-3">Language</td><td class="p-3 text-center font-medium" style="color: var(--color-accent, #f97066);">C</td><td class="p-3 text-center opacity-60">TypeScript</td><td class="p-3 text-center opacity-60">Rust</td></tr>
-              <tr><td class="p-3">Binary Size</td><td class="p-3 text-center font-medium" style="color: var(--color-accent, #f97066);">430 KB</td><td class="p-3 text-center opacity-60">~200 MB</td><td class="p-3 text-center opacity-60">~50 MB</td></tr>
-              <tr><td class="p-3">Peak RAM</td><td class="p-3 text-center font-medium" style="color: var(--color-accent, #f97066);">&lt;6 MB</td><td class="p-3 text-center opacity-60">~300 MB</td><td class="p-3 text-center opacity-60">~100 MB</td></tr>
-              <tr><td class="p-3">Dependencies</td><td class="p-3 text-center font-medium" style="color: var(--color-accent, #f97066);">0</td><td class="p-3 text-center opacity-60">900+</td><td class="p-3 text-center opacity-60">200+</td></tr>
-              <tr><td class="p-3">Providers</td><td class="p-3 text-center font-medium" style="color: var(--color-accent, #f97066);">50+</td><td class="p-3 text-center opacity-60">1</td><td class="p-3 text-center opacity-60">1</td></tr>
-              <tr><td class="p-3">Channels</td><td class="p-3 text-center font-medium" style="color: var(--color-accent, #f97066);">20</td><td class="p-3 text-center opacity-60">1</td><td class="p-3 text-center opacity-60">1</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
+      </section>
     </main>
 
     {/* ── Footer ── */}
-    <footer class="py-12 px-6" style="border-top: 1px solid var(--color-border)">
-      <div class="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <footer
+      class="py-12 px-6"
+      style="border-top: 1px solid var(--color-border)"
+    >
+      <div
+        class="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4"
+      >
         <div class="flex items-center gap-3">
-          <img src={`${base}seaclaw.svg`} alt="SeaClaw logo" width="512" height="512" class="w-5 h-5" loading="lazy" decoding="async" />
-          <span class="text-[13px]" style="color: var(--color-text-tertiary)">SeaClaw</span>
+          <img
+            src={`${base}seaclaw.svg`}
+            alt="SeaClaw logo"
+            width="512"
+            height="512"
+            class="w-5 h-5"
+            loading="lazy"
+            decoding="async"
+          />
+          <span class="text-[13px]" style="color: var(--color-text-tertiary)"
+            >SeaClaw</span
+          >
         </div>
-        <p class="text-[13px] hidden md:block" style="color: var(--color-text-tertiary)">Bring AI to every device on Earth.</p>
-        <div class="flex items-center gap-6 text-[13px]" style="color: var(--color-text-tertiary)">
+        <p
+          class="text-[13px] hidden md:block"
+          style="color: var(--color-text-tertiary)"
+        >
+          Bring AI to every device on Earth.
+        </p>
+        <div
+          class="flex items-center gap-6 text-[13px]"
+          style="color: var(--color-text-tertiary)"
+        >
           <span>MIT License</span>
           <span>Made with C11</span>
-          <a href="https://github.com/sethdford/seaclaw" target="_blank" rel="noopener noreferrer" class="hover:opacity-80 transition-opacity">GitHub</a>
+          <a
+            href="https://github.com/sethdford/seaclaw"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hover:opacity-80 transition-opacity">GitHub</a
+          >
         </div>
       </div>
     </footer>
@@ -434,7 +997,9 @@ const tools = [
       gsap.registerPlugin(ScrollTrigger);
       gsap.config({ nullTargetWarn: false });
 
-      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const prefersReducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
 
       if (prefersReducedMotion) {
         document.querySelectorAll(".opacity-0").forEach((el) => {
@@ -456,27 +1021,47 @@ const tools = [
         document.querySelectorAll("[data-count]").forEach((el) => {
           const target = parseInt((el as HTMLElement).dataset.count || "0");
           const valSpan = el.querySelector(".count-value");
-          if (valSpan) valSpan.textContent = target > 100 ? target.toLocaleString() : target.toString();
+          if (valSpan)
+            valSpan.textContent =
+              target > 100 ? target.toLocaleString() : target.toString();
         });
         document.querySelectorAll(".dash-count").forEach((el) => {
           el.textContent = (el as HTMLElement).dataset.target || "0";
         });
       } else {
-        const ctx = gsap.context(() => {
-
+        gsap.context(() => {
           ScrollTrigger.create({
             start: "top -80",
-            onEnter: () => document.getElementById("site-nav")?.classList.add("glass-nav"),
-            onLeaveBack: () => document.getElementById("site-nav")?.classList.remove("glass-nav"),
+            onEnter: () =>
+              document.getElementById("site-nav")?.classList.add("glass-nav"),
+            onLeaveBack: () =>
+              document
+                .getElementById("site-nav")
+                ?.classList.remove("glass-nav"),
           });
 
           // ═══ HERO ═══
           const heroTl = gsap.timeline({ defaults: { ease: "power3.out" } });
           heroTl
             .to(".hero-logo", { opacity: 1, duration: 0.9 }, 0.2)
-            .fromTo(".hero-headline", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 1 }, 0.4)
-            .fromTo(".hero-desc", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9 }, 0.7)
-            .fromTo(".hero-buttons", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9 }, 0.9);
+            .fromTo(
+              ".hero-headline",
+              { opacity: 0, y: 30 },
+              { opacity: 1, y: 0, duration: 1 },
+              0.4,
+            )
+            .fromTo(
+              ".hero-desc",
+              { opacity: 0, y: 20 },
+              { opacity: 1, y: 0, duration: 0.9 },
+              0.7,
+            )
+            .fromTo(
+              ".hero-buttons",
+              { opacity: 0, y: 20 },
+              { opacity: 1, y: 0, duration: 0.9 },
+              0.9,
+            );
 
           // ═══ NUMBERS ═══
           document.querySelectorAll(".number-item").forEach((item, i) => {
@@ -486,79 +1071,259 @@ const tools = [
             const valSpan = el.querySelector(".count-value");
             if (!valSpan) return;
             const obj = { val: 0 };
-            gsap.fromTo(item, { opacity: 0, y: 30, scale: 0.98 }, {
-              opacity: 1, y: 0, scale: 1, duration: 0.7, delay: i * 0.08, ease: "power3.out",
-              scrollTrigger: { trigger: ".numbers-grid", start: "top 85%" },
-            });
+            gsap.fromTo(
+              item,
+              { opacity: 0, y: 30, scale: 0.98 },
+              {
+                opacity: 1,
+                y: 0,
+                scale: 1,
+                duration: 0.7,
+                delay: i * 0.08,
+                ease: "power3.out",
+                scrollTrigger: { trigger: ".numbers-grid", start: "top 85%" },
+              },
+            );
             gsap.to(obj, {
-              val: target, duration: 1.5, ease: "power3.out", delay: i * 0.08,
+              val: target,
+              duration: 1.5,
+              ease: "power3.out",
+              delay: i * 0.08,
               scrollTrigger: { trigger: ".numbers-grid", start: "top 85%" },
               onUpdate: () => {
-                valSpan.textContent = target > 100 ? Math.round(obj.val).toLocaleString() : Math.round(obj.val).toString();
+                valSpan.textContent =
+                  target > 100
+                    ? Math.round(obj.val).toLocaleString()
+                    : Math.round(obj.val).toString();
               },
               onComplete: () => {
-                gsap.fromTo(item, { scale: 1 }, { scale: 1.04, duration: 0.15, yoyo: true, repeat: 1, ease: "power2.out" });
+                gsap.fromTo(
+                  item,
+                  { scale: 1 },
+                  {
+                    scale: 1.04,
+                    duration: 0.15,
+                    yoyo: true,
+                    repeat: 1,
+                    ease: "power2.out",
+                  },
+                );
               },
             });
           });
 
           // ═══ THE PROBLEM ═══
-          gsap.fromTo(".bloat-title", { opacity: 0, y: 20 }, {
-            opacity: 1, y: 0, duration: 0.9, ease: "power3.out",
-            scrollTrigger: { trigger: ".bloat-title", start: "top 85%" },
-          });
-          gsap.fromTo(".bloat-card", { opacity: 0, y: 30, scale: 0.97 }, {
-            opacity: 1, y: 0, scale: 1, duration: 0.5, stagger: 0.15, ease: "power3.out",
-            scrollTrigger: { trigger: ".bloat-stack", start: "top 80%" },
-          });
-          gsap.fromTo(".bloat-answer", { opacity: 0, y: 20 }, {
-            opacity: 1, y: 0, duration: 0.8, delay: 1.0, ease: "power3.out",
-            scrollTrigger: { trigger: ".bloat-stack", start: "top 80%" },
-          });
+          gsap.fromTo(
+            ".bloat-title",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".bloat-title", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".bloat-card",
+            { opacity: 0, y: 30, scale: 0.97 },
+            {
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              duration: 0.5,
+              stagger: 0.15,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".bloat-stack", start: "top 80%" },
+            },
+          );
+          gsap.fromTo(
+            ".bloat-answer",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.8,
+              delay: 1.0,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".bloat-stack", start: "top 80%" },
+            },
+          );
 
           // ═══ DEVICE SPECTRUM ═══
-          gsap.fromTo(".spectrum-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".spectrum-title", start: "top 85%" } });
-          gsap.fromTo(".spectrum-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".spectrum-sub", start: "top 85%" } });
-          gsap.fromTo(".spectrum-card", { opacity: 0, y: 40, scale: 0.98 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, stagger: 0.12, ease: "power3.out", scrollTrigger: { trigger: ".spectrum-card", start: "top 85%" } });
+          gsap.fromTo(
+            ".spectrum-title",
+            { opacity: 0, y: 30 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".spectrum-title", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".spectrum-sub",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".spectrum-sub", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".spectrum-card",
+            { opacity: 0, y: 40, scale: 0.98 },
+            {
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              duration: 0.7,
+              stagger: 0.12,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".spectrum-card", start: "top 85%" },
+            },
+          );
 
           // ═══ ARCHITECTURE ═══
-          gsap.fromTo(".arch-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".arch-title", start: "top 85%" } });
-          gsap.fromTo(".arch-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".arch-sub", start: "top 85%" } });
+          gsap.fromTo(
+            ".arch-title",
+            { opacity: 0, y: 30 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".arch-title", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".arch-sub",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".arch-sub", start: "top 85%" },
+            },
+          );
 
-          const archTl = gsap.timeline({ scrollTrigger: { trigger: "#arch-diagram", start: "top 75%" }, defaults: { ease: "power3.out" } });
+          const archTl = gsap.timeline({
+            scrollTrigger: { trigger: "#arch-diagram", start: "top 75%" },
+            defaults: { ease: "power3.out" },
+          });
           archTl
             .to("#arch-core", { opacity: 1, duration: 0.6 })
-            .fromTo(".arch-line",
-              { attr: { "stroke-dasharray": "200", "stroke-dashoffset": "200" } },
-              { attr: { "stroke-dashoffset": "0", stroke: "var(--color-accent)" }, duration: 0.7, stagger: 0.06 }, 0.3)
-            .to(".arch-node", { opacity: 1, duration: 0.5, stagger: 0.08 }, 0.6);
+            .fromTo(
+              ".arch-line",
+              {
+                attr: { "stroke-dasharray": "200", "stroke-dashoffset": "200" },
+              },
+              {
+                attr: {
+                  "stroke-dashoffset": "0",
+                  stroke: "var(--color-accent)",
+                },
+                duration: 0.7,
+                stagger: 0.06,
+              },
+              0.3,
+            )
+            .to(
+              ".arch-node",
+              { opacity: 1, duration: 0.5, stagger: 0.08 },
+              0.6,
+            );
 
           document.querySelectorAll(".arch-node").forEach((node) => {
             node.addEventListener("mouseenter", () => {
               const c = node.querySelector("circle");
-              if (c) gsap.to(c, { attr: { stroke: "var(--color-accent)" }, duration: 0.2 });
+              if (c)
+                gsap.to(c, {
+                  attr: { stroke: "var(--color-accent)" },
+                  duration: 0.2,
+                });
             });
             node.addEventListener("mouseleave", () => {
               const c = node.querySelector("circle");
-              if (c) gsap.to(c, { attr: { stroke: "var(--color-node-stroke)" }, duration: 0.2 });
+              if (c)
+                gsap.to(c, {
+                  attr: { stroke: "var(--color-node-stroke)" },
+                  duration: 0.2,
+                });
             });
           });
 
           // ═══ ECOSYSTEM ═══
-          gsap.fromTo(".providers-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".providers-title", start: "top 85%" } });
-          gsap.fromTo(".providers-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".providers-sub", start: "top 85%" } });
-          gsap.fromTo(".provider-pill", { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out", stagger: { each: 0.02, from: "random" }, scrollTrigger: { trigger: "#provider-grid", start: "top 80%" } });
+          gsap.fromTo(
+            ".providers-title",
+            { opacity: 0, y: 30 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".providers-title", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".providers-sub",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".providers-sub", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".provider-pill",
+            { opacity: 0, scale: 0.8 },
+            {
+              opacity: 1,
+              scale: 1,
+              duration: 0.5,
+              ease: "power3.out",
+              stagger: { each: 0.02, from: "random" },
+              scrollTrigger: { trigger: "#provider-grid", start: "top 80%" },
+            },
+          );
 
           // ═══ TERMINAL ═══
-          gsap.fromTo(".terminal-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".terminal-title", start: "top 85%" } });
-          gsap.fromTo(".terminal-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".terminal-sub", start: "top 85%" } });
+          gsap.fromTo(
+            ".terminal-title",
+            { opacity: 0, y: 30 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".terminal-title", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".terminal-sub",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".terminal-sub", start: "top 85%" },
+            },
+          );
 
           const terminalEl = document.getElementById("terminal");
           const outputEl = document.getElementById("terminal-output");
           if (terminalEl && outputEl) {
             let played = false;
             ScrollTrigger.create({
-              trigger: terminalEl, start: "top 80%",
+              trigger: terminalEl,
+              start: "top 80%",
               onEnter: () => {
                 if (played) return;
                 played = true;
@@ -568,21 +1333,48 @@ const tools = [
             });
           }
 
-          interface TermLine { prompt: boolean; text: string; highlights?: Array<{ text: string; cls: string }>; }
+          interface TermLine {
+            prompt: boolean;
+            text: string;
+            highlights?: Array<{ text: string; cls: string }>;
+          }
 
           function typeTerminal(container: HTMLElement) {
             const accentColor = "var(--color-accent)";
             const lines: TermLine[] = [
-              { prompt: true, text: "git clone https://github.com/sethdford/seaclaw.git" },
-              { prompt: true, text: "cd seaclaw && mkdir -p build && cd build" },
-              { prompt: true, text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON" },
+              {
+                prompt: true,
+                text: "git clone https://github.com/sethdford/seaclaw.git",
+              },
+              {
+                prompt: true,
+                text: "cd seaclaw && mkdir -p build && cd build",
+              },
+              {
+                prompt: true,
+                text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON",
+              },
               { prompt: true, text: "cmake --build ." },
               { prompt: false, text: "[100%] Built target seaclaw" },
               { prompt: true, text: "ls -lh seaclaw" },
-              { prompt: false, text: "-rwxr-xr-x  1 user  staff  430K  seaclaw", highlights: [{ text: "430K", cls: accentColor }] },
-              { prompt: true, text: "./seaclaw agent -m \"Hello from a 430 KB binary.\"" },
-              { prompt: false, text: "Hello! I'm SeaClaw — a fully autonomous AI assistant", highlights: [{ text: "SeaClaw", cls: accentColor }] },
-              { prompt: false, text: "running in 430 kilobytes. How can I help?" },
+              {
+                prompt: false,
+                text: "-rwxr-xr-x  1 user  staff  430K  seaclaw",
+                highlights: [{ text: "430K", cls: accentColor }],
+              },
+              {
+                prompt: true,
+                text: './seaclaw agent -m "Hello from a 430 KB binary."',
+              },
+              {
+                prompt: false,
+                text: "Hello! I'm SeaClaw — a fully autonomous AI assistant",
+                highlights: [{ text: "SeaClaw", cls: accentColor }],
+              },
+              {
+                prompt: false,
+                text: "running in 430 kilobytes. How can I help?",
+              },
             ];
 
             let lineIdx = 0;
@@ -608,8 +1400,14 @@ const tools = [
                 container.appendChild(div);
                 let ci = 0;
                 const tc = () => {
-                  if (ci < line.text.length) { t.textContent += line.text[ci]; ci++; setTimeout(tc, 18); }
-                  else { lineIdx++; setTimeout(nextLine, 300); }
+                  if (ci < line.text.length) {
+                    t.textContent += line.text[ci];
+                    ci++;
+                    setTimeout(tc, 18);
+                  } else {
+                    lineIdx++;
+                    setTimeout(nextLine, 300);
+                  }
                 };
                 tc();
               } else {
@@ -620,7 +1418,10 @@ const tools = [
                   for (const hl of line.highlights) {
                     const idx = rem.indexOf(hl.text);
                     if (idx >= 0) {
-                      if (idx > 0) w.appendChild(document.createTextNode(rem.slice(0, idx)));
+                      if (idx > 0)
+                        w.appendChild(
+                          document.createTextNode(rem.slice(0, idx)),
+                        );
                       const s = document.createElement("span");
                       s.style.color = hl.cls;
                       s.textContent = hl.text;
@@ -644,44 +1445,101 @@ const tools = [
           }
 
           // ═══ DASHBOARD PREVIEW ═══
-          gsap.fromTo(".dash-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".dash-title", start: "top 85%" } });
-          gsap.fromTo(".dash-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".dash-sub", start: "top 85%" } });
-          gsap.fromTo(".dash-cta", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out", scrollTrigger: { trigger: ".dash-cta", start: "top 90%" } });
+          gsap.fromTo(
+            ".dash-title",
+            { opacity: 0, y: 30 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".dash-title", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".dash-sub",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".dash-sub", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".dash-cta",
+            { opacity: 0, y: 10 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.7,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".dash-cta", start: "top 90%" },
+            },
+          );
 
           const dashPreview = document.querySelector(".dash-preview");
           if (dashPreview) {
             let dashPlayed = false;
             ScrollTrigger.create({
-              trigger: dashPreview, start: "top 80%",
+              trigger: dashPreview,
+              start: "top 80%",
               onEnter: () => {
                 if (dashPlayed) return;
                 dashPlayed = true;
                 gsap.to(dashPreview, { opacity: 1, duration: 0.6 });
                 document.querySelectorAll(".dash-count").forEach((el, i) => {
-                  const target = parseInt((el as HTMLElement).dataset.target || "0");
+                  const target = parseInt(
+                    (el as HTMLElement).dataset.target || "0",
+                  );
                   const obj = { val: 0 };
                   gsap.to(obj, {
-                    val: target, duration: 1.2, ease: "power3.out", delay: 0.3 + i * 0.1,
-                    onUpdate: () => { el.textContent = Math.round(obj.val).toString(); },
+                    val: target,
+                    duration: 1.2,
+                    ease: "power3.out",
+                    delay: 0.3 + i * 0.1,
+                    onUpdate: () => {
+                      el.textContent = Math.round(obj.val).toString();
+                    },
                   });
                 });
                 const actContainer = document.getElementById("dash-activity");
                 if (actContainer) {
                   const activities = [
-                    { icon: "💬", text: "Alice via Telegram: Can you review the PR?", time: "just now" },
-                    { icon: "⚡", text: "Tool shell: git status", time: "1m ago" },
-                    { icon: "💬", text: "Bob via Discord: Deploy looks good", time: "2m ago" },
-                    { icon: "🟢", text: "Session \"Code Review\" started", time: "3m ago" },
+                    {
+                      icon: "💬",
+                      text: "Alice via Telegram: Can you review the PR?",
+                      time: "just now",
+                    },
+                    {
+                      icon: "⚡",
+                      text: "Tool shell: git status",
+                      time: "1m ago",
+                    },
+                    {
+                      icon: "💬",
+                      text: "Bob via Discord: Deploy looks good",
+                      time: "2m ago",
+                    },
+                    {
+                      icon: "🟢",
+                      text: 'Session "Code Review" started',
+                      time: "3m ago",
+                    },
                   ];
                   activities.forEach((act, i) => {
-                    setTimeout(() => {
-                      const div = document.createElement("div");
-                      div.className = "flex items-center gap-2";
-                      div.style.opacity = "0";
-                      div.innerHTML = `<span>${act.icon}</span><span style="color: rgba(255,255,255,0.7); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: rgba(255,255,255,0.3)">${act.time}</span>`;
-                      actContainer.appendChild(div);
-                      gsap.to(div, { opacity: 1, duration: 0.4 });
-                    }, 800 + i * 400);
+                    setTimeout(
+                      () => {
+                        const div = document.createElement("div");
+                        div.className = "flex items-center gap-2";
+                        div.style.opacity = "0";
+                        div.innerHTML = `<span>${act.icon}</span><span style="color: rgba(255,255,255,0.7); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: rgba(255,255,255,0.3)">${act.time}</span>`;
+                        actContainer.appendChild(div);
+                        gsap.to(div, { opacity: 1, duration: 0.4 });
+                      },
+                      800 + i * 400,
+                    );
                   });
                 }
               },
@@ -689,16 +1547,53 @@ const tools = [
           }
 
           // ═══ CTA ═══
-          gsap.fromTo(".cta-title", { opacity: 0, y: 40, scale: 0.98 }, { opacity: 1, y: 0, scale: 1, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".cta-title", start: "top 80%" } });
-          gsap.fromTo(".cta-sub", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".cta-sub", start: "top 85%" } });
-          gsap.fromTo(".cta-buttons", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: ".cta-buttons", start: "top 85%" } });
+          gsap.fromTo(
+            ".cta-title",
+            { opacity: 0, y: 40, scale: 0.98 },
+            {
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".cta-title", start: "top 80%" },
+            },
+          );
+          gsap.fromTo(
+            ".cta-sub",
+            { opacity: 0, y: 30 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".cta-sub", start: "top 85%" },
+            },
+          );
+          gsap.fromTo(
+            ".cta-buttons",
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.9,
+              ease: "power3.out",
+              scrollTrigger: { trigger: ".cta-buttons", start: "top 85%" },
+            },
+          );
 
           // ═══ SPOTLIGHT CARDS ═══
           document.querySelectorAll(".card-spotlight").forEach((card) => {
             card.addEventListener("mousemove", (e) => {
               const rect = (card as HTMLElement).getBoundingClientRect();
-              (card as HTMLElement).style.setProperty("--mouse-x", (e as MouseEvent).clientX - rect.left + "px");
-              (card as HTMLElement).style.setProperty("--mouse-y", (e as MouseEvent).clientY - rect.top + "px");
+              (card as HTMLElement).style.setProperty(
+                "--mouse-x",
+                (e as MouseEvent).clientX - rect.left + "px",
+              );
+              (card as HTMLElement).style.setProperty(
+                "--mouse-y",
+                (e as MouseEvent).clientY - rect.top + "px",
+              );
             });
           });
         });

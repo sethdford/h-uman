@@ -199,6 +199,7 @@ export class ScSkeleton extends LitElement {
         <div
           class="skeleton stat-card animation-${this.animation}"
           style="width: ${this.width};"
+          role="status"
           aria-busy="true"
           aria-label="Loading"
         >
@@ -215,6 +216,7 @@ export class ScSkeleton extends LitElement {
         <div
           class="skeleton channel-card animation-${this.animation}"
           style="width: ${this.width};"
+          role="status"
           aria-busy="true"
           aria-label="Loading"
         >
@@ -230,6 +232,7 @@ export class ScSkeleton extends LitElement {
         <div
           class="skeleton session-card animation-${this.animation}"
           style="width: ${this.width};"
+          role="status"
           aria-busy="true"
           aria-label="Loading"
         >
@@ -249,6 +252,7 @@ export class ScSkeleton extends LitElement {
       <div
         class="skeleton ${this.variant} animation-${this.animation}"
         style="${style}"
+        role="status"
         aria-busy="true"
         aria-label="Loading"
       ></div>

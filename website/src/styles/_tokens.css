@@ -46,11 +46,16 @@
   --sc-opacity-pressed: 0.12;
   /* Elevation */
   --sc-elevation-0: none;
-  --sc-elevation-1: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15);
-  --sc-elevation-2: 0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15);
-  --sc-elevation-3: 0 4px 8px 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.3);
-  --sc-elevation-4: 0 6px 10px 4px rgba(0,0,0,0.15), 0 2px 3px rgba(0,0,0,0.3);
-  --sc-elevation-5: 0 8px 12px 6px rgba(0,0,0,0.15), 0 4px 4px rgba(0,0,0,0.3);
+  --sc-elevation-1:
+    0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --sc-elevation-2:
+    0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  --sc-elevation-3:
+    0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --sc-elevation-4:
+    0 6px 10px 4px rgba(0, 0, 0, 0.15), 0 2px 3px rgba(0, 0, 0, 0.3);
+  --sc-elevation-5:
+    0 8px 12px 6px rgba(0, 0, 0, 0.15), 0 4px 4px rgba(0, 0, 0, 0.3);
   /* Glass tiers (Liquid Motion) */
   --sc-glass-subtle-blur: 12px;
   --sc-glass-subtle-saturate: 120%;
@@ -76,17 +81,17 @@
   /* Glass: dynamic-light, vibrancy, interactive */
   --sc-glass-dynamic-light-ambient: 0.04;
   --sc-glass-dynamic-light-angle: 225deg;
-  --sc-glass-dynamic-light-color-dark: rgba(255,255,255,0.12);
-  --sc-glass-dynamic-light-color-light: rgba(255,255,255,0.18);
+  --sc-glass-dynamic-light-color-dark: rgba(255, 255, 255, 0.12);
+  --sc-glass-dynamic-light-color-light: rgba(255, 255, 255, 0.18);
   --sc-glass-dynamic-light-intensity: 0.15;
   --sc-glass-dynamic-light-spread: 60%;
   --sc-glass-vibrancy-backdrop-brightness: 1.08;
   --sc-glass-vibrancy-icon-boost: 1.2;
   --sc-glass-vibrancy-text-boost: 1.15;
-  --sc-glass-vibrancy-text-shadow: 0 0 8px rgba(0,0,0,0.5);
-  --sc-glass-interactive-focus-glow-color: rgba(122,182,72,0.35);
+  --sc-glass-vibrancy-text-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+  --sc-glass-interactive-focus-glow-color: rgba(122, 182, 72, 0.35);
   --sc-glass-interactive-focus-glow-spread: 8px;
-  --sc-glass-interactive-hover-border-glow: 0 0 0 1px rgba(255,255,255,0.08);
+  --sc-glass-interactive-hover-border-glow: 0 0 0 1px rgba(255, 255, 255, 0.08);
   --sc-glass-interactive-hover-specular-boost: 1.4;
   --sc-glass-interactive-press-blur-delta: -4px;
   --sc-glass-interactive-press-saturate-boost: 20%;
@@ -112,8 +117,10 @@
   --sc-breakpoint-sm: 640px;
   --sc-breakpoint-xl: 1280px;
   /* Typography */
-  --sc-font: 'Avenir', 'Avenir Next', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --sc-font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  --sc-font:
+    "Avenir", "Avenir Next", -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  --sc-font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
   --sc-text-xs: 0.6875rem;
   --sc-text-sm: 0.8125rem;
   --sc-text-base: 0.875rem;
@@ -202,7 +209,7 @@
   --sc-type-title-sm-letter-spacing: 0.01em;
   --sc-type-title-sm-line-height: 1.5;
   /* Focus ring */
-  --sc-focus-ring: #7AB648;
+  --sc-focus-ring: #7ab648;
   --sc-focus-ring-width: 2px;
   --sc-focus-ring-offset: 2px;
   /* Choreography */
@@ -224,7 +231,23 @@
   --sc-page-exit-duration: 100ms;
   --sc-page-exit-easing: cubic-bezier(0.55, 0, 1, 0.45);
   --sc-shared-element-duration: 350ms;
-  --sc-shared-element-easing: linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1);
+  --sc-shared-element-easing: linear(
+    0,
+    0.006,
+    0.025 2.8%,
+    0.101 6.1%,
+    0.539 18.9%,
+    0.721 25.3%,
+    0.849 31.5%,
+    0.937 38.1%,
+    0.968 41.8%,
+    0.991 45.7%,
+    1.006 50.1%,
+    1.015 55%,
+    1.017 63.9%,
+    1.001 85.9%,
+    1
+  );
   /* Motion */
   --sc-duration-instant: 50ms;
   --sc-duration-fast: 100ms;
@@ -237,8 +260,41 @@
   --sc-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --sc-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --sc-ease-in: cubic-bezier(0.55, 0, 1, 0.45);
-  --sc-spring-out: linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1);
-  --sc-spring-bounce: linear(0, 0.004, 0.016, 0.035 4%, 0.147 8%, 0.51 17.2%, 0.726 23.1%, 0.884 28.9%, 0.976 34%, 1.019 38.3%, 1.045 42.5%, 1.054 47.7%, 1.04 56.7%, 1.017 64.3%, 1.003 76%, 1);
+  --sc-spring-out: linear(
+    0,
+    0.006,
+    0.025 2.8%,
+    0.101 6.1%,
+    0.539 18.9%,
+    0.721 25.3%,
+    0.849 31.5%,
+    0.937 38.1%,
+    0.968 41.8%,
+    0.991 45.7%,
+    1.006 50.1%,
+    1.015 55%,
+    1.017 63.9%,
+    1.001 85.9%,
+    1
+  );
+  --sc-spring-bounce: linear(
+    0,
+    0.004,
+    0.016,
+    0.035 4%,
+    0.147 8%,
+    0.51 17.2%,
+    0.726 23.1%,
+    0.884 28.9%,
+    0.976 34%,
+    1.019 38.3%,
+    1.045 42.5%,
+    1.054 47.7%,
+    1.04 56.7%,
+    1.017 64.3%,
+    1.003 76%,
+    1
+  );
   --sc-emphasize: cubic-bezier(0.2, 0, 0, 1);
   --sc-emphasize-overshoot: cubic-bezier(0.2, 0, 0, 1.2);
   --sc-transition: 150ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -267,8 +323,8 @@
   --sc-view-transition-new-enter: ease-out;
   --sc-view-transition-old-exit: ease-in;
   /* Dark theme colors (default) */
-  --sc-accent: #7AB648;
-  --sc-accent-hover: #8DC63F;
+  --sc-accent: #7ab648;
+  --sc-accent-hover: #8dc63f;
   --sc-accent-secondary: #f59e0b;
   --sc-accent-secondary-hover: #fbbf24;
   --sc-accent-secondary-strong: #fcd34d;
@@ -281,7 +337,7 @@
   --sc-accent-tertiary-strong: #a5b4fc;
   --sc-accent-tertiary-subtle: rgba(99, 102, 241, 0.14);
   --sc-accent-tertiary-text: #818cf8;
-  --sc-accent-text: #8DC63F;
+  --sc-accent-text: #8dc63f;
   --sc-backdrop-overlay: rgba(0, 0, 0, 0.6);
   --sc-bg: #060b12;
   --sc-bg-elevated: #162230;
@@ -290,37 +346,67 @@
   --sc-bg-surface: #101a24;
   --sc-border: #233345;
   --sc-border-subtle: #162230;
-  --sc-button-gradient-primary: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(0,0,0,0.18) 100%);
+  --sc-button-gradient-primary: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.12) 0%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
   --sc-disabled-overlay: rgba(255, 255, 255, 0.04);
   --sc-error: #f97066;
   --sc-error-dim: rgba(249, 112, 102, 0.12);
-  --sc-focus-ring: #7AB648;
+  --sc-focus-ring: #7ab648;
   --sc-focus-ring-offset: 2px;
   --sc-focus-ring-width: 2px;
-  --sc-hero-gradient: linear-gradient(135deg, rgba(122,182,72,0.10) 0%, rgba(90,154,48,0.05) 40%, rgba(99,102,241,0.03) 80%, transparent 100%);
+  --sc-hero-gradient: linear-gradient(
+    135deg,
+    rgba(122, 182, 72, 0.1) 0%,
+    rgba(90, 154, 48, 0.05) 40%,
+    rgba(99, 102, 241, 0.03) 80%,
+    transparent 100%
+  );
   --sc-hover-overlay: rgba(255, 255, 255, 0.06);
   --sc-info: #3b82f6;
   --sc-info-dim: rgba(59, 130, 246, 0.15);
-  --sc-link: #8DC63F;
-  --sc-link-active: #7AB648;
+  --sc-link: #8dc63f;
+  --sc-link-active: #7ab648;
   --sc-link-hover: #a3d46a;
-  --sc-link-visited: #5A9A30;
+  --sc-link-visited: #5a9a30;
   --sc-on-accent: #ffffff;
   --sc-on-accent-secondary: #060b12;
   --sc-on-accent-tertiary: #ffffff;
-  --sc-pressed-overlay: rgba(255, 255, 255, 0.10);
-  --sc-shadow-card: 0 1px 3px rgba(3,8,16,0.3), 0 8px 24px rgba(3,8,16,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
-  --sc-shadow-glow-accent: 0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122,182,72,0.15);
-  --sc-shadow-inset: inset 0 1px 2px rgba(0,0,0,0.06);
-  --sc-shadow-lg: 0 4px 8px rgba(3,8,16,0.4), 0 16px 48px rgba(3,8,16,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
-  --sc-shadow-md: 0 2px 4px rgba(3,8,16,0.35), 0 8px 24px rgba(3,8,16,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
-  --sc-shadow-sm: 0 1px 3px rgba(3,8,16,0.4), 0 2px 8px rgba(3,8,16,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-  --sc-shadow-xl: 0 8px 16px rgba(3,8,16,0.45), 0 32px 72px rgba(3,8,16,0.5), inset 0 1px 0 rgba(255,255,255,0.03);
-  --sc-shadow-xs: 0 1px 2px rgba(3,8,16,0.45), inset 0 1px 0 rgba(255,255,255,0.05);
+  --sc-pressed-overlay: rgba(255, 255, 255, 0.1);
+  --sc-shadow-card:
+    0 1px 3px rgba(3, 8, 16, 0.3), 0 8px 24px rgba(3, 8, 16, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sc-shadow-glow-accent:
+    0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122, 182, 72, 0.15);
+  --sc-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  --sc-shadow-lg:
+    0 4px 8px rgba(3, 8, 16, 0.4), 0 16px 48px rgba(3, 8, 16, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --sc-shadow-md:
+    0 2px 4px rgba(3, 8, 16, 0.35), 0 8px 24px rgba(3, 8, 16, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --sc-shadow-sm:
+    0 1px 3px rgba(3, 8, 16, 0.4), 0 2px 8px rgba(3, 8, 16, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sc-shadow-xl:
+    0 8px 16px rgba(3, 8, 16, 0.45), 0 32px 72px rgba(3, 8, 16, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --sc-shadow-xs:
+    0 1px 2px rgba(3, 8, 16, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --sc-success: #10b981;
   --sc-success-dim: rgba(16, 185, 129, 0.15);
-  --sc-surface-glow: radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.08) 0%, transparent 70%);
-  --sc-surface-gradient: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.12) 100%);
+  --sc-surface-glow: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(122, 182, 72, 0.08) 0%,
+    transparent 70%
+  );
+  --sc-surface-gradient: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
   --sc-text: #d8e4f0;
   --sc-text-faint: #3d5468;
   --sc-text-muted: #5e7a94;
@@ -394,61 +480,83 @@
 @media (prefers-color-scheme: light) {
   :root {
     /* Light theme — state/interactive tokens */
-    --sc-accent: #7AB648;
-    --sc-accent-hover: #5A9A30;
+    --sc-accent: #7ab648;
+    --sc-accent-hover: #5a9a30;
     --sc-accent-light: #e2f2c8;
     --sc-accent-secondary: #d97706;
     --sc-accent-secondary-hover: #b45309;
     --sc-accent-secondary-strong: #f59e0b;
-    --sc-accent-secondary-subtle: rgba(217, 119, 6, 0.10);
+    --sc-accent-secondary-subtle: rgba(217, 119, 6, 0.1);
     --sc-accent-secondary-text: #b45309;
-    --sc-accent-strong: #7AB648;
+    --sc-accent-strong: #7ab648;
     --sc-accent-subtle: rgba(122, 182, 72, 0.08);
     --sc-accent-tertiary: #4f46e5;
     --sc-accent-tertiary-hover: #4338ca;
     --sc-accent-tertiary-strong: #6366f1;
-    --sc-accent-tertiary-subtle: rgba(79, 70, 229, 0.10);
+    --sc-accent-tertiary-subtle: rgba(79, 70, 229, 0.1);
     --sc-accent-tertiary-text: #4338ca;
-    --sc-accent-text: #47802A;
+    --sc-accent-text: #47802a;
     --sc-backdrop-overlay: rgba(0, 0, 0, 0.3);
-    --sc-bg: #F5F5F5;
-    --sc-bg-elevated: #F8F8F8;
-    --sc-bg-inset: #EFEFEF;
+    --sc-bg: #f5f5f5;
+    --sc-bg-elevated: #f8f8f8;
+    --sc-bg-inset: #efefef;
     --sc-bg-overlay: #ffffff;
     --sc-bg-surface: #ffffff;
-    --sc-bg-warm: #FAFAFA;
-    --sc-border: #D9D9D9;
-    --sc-border-subtle: #E8E8E8;
-    --sc-button-gradient-primary: linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(0,0,0,0.15) 100%);
+    --sc-bg-warm: #fafafa;
+    --sc-border: #d9d9d9;
+    --sc-border-subtle: #e8e8e8;
+    --sc-button-gradient-primary: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.25) 0%,
+      rgba(0, 0, 0, 0.15) 100%
+    );
     --sc-disabled-overlay: rgba(0, 0, 0, 0.04);
-    --sc-error: #CC0000;
+    --sc-error: #cc0000;
     --sc-error-dim: rgba(204, 0, 0, 0.08);
-    --sc-focus-ring: #5A9A30;
+    --sc-focus-ring: #5a9a30;
     --sc-focus-ring-offset: 2px;
     --sc-focus-ring-width: 2px;
-    --sc-hero-gradient: linear-gradient(135deg, rgba(122,182,72,0.07) 0%, rgba(122,182,72,0.03) 50%, transparent 100%);
+    --sc-hero-gradient: linear-gradient(
+      135deg,
+      rgba(122, 182, 72, 0.07) 0%,
+      rgba(122, 182, 72, 0.03) 50%,
+      transparent 100%
+    );
     --sc-hover-overlay: rgba(0, 0, 0, 0.04);
     --sc-info: #2563eb;
     --sc-info-dim: rgba(37, 99, 235, 0.1);
-    --sc-link: #5A9A30;
-    --sc-link-active: #7AB648;
-    --sc-link-hover: #47802A;
-    --sc-link-visited: #47802A;
+    --sc-link: #5a9a30;
+    --sc-link-active: #7ab648;
+    --sc-link-hover: #47802a;
+    --sc-link-visited: #47802a;
     --sc-on-accent: #ffffff;
     --sc-on-accent-secondary: #ffffff;
     --sc-on-accent-tertiary: #ffffff;
     --sc-pressed-overlay: rgba(0, 0, 0, 0.08);
-    --sc-shadow-card: 0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03);
-    --sc-shadow-glow-accent: 0 0 0 1px rgba(90,154,48,0.12), 0 4px 16px rgba(90,154,48,0.15);
-    --sc-shadow-inset: inset 0 1px 2px rgba(0,0,0,0.04);
-    --sc-shadow-lg: 0 4px 12px rgba(6,18,36,0.1), 0 16px 44px rgba(6,18,36,0.12), 0 32px 80px rgba(6,18,36,0.08);
-    --sc-shadow-md: 0 2px 6px rgba(6,18,36,0.08), 0 8px 24px rgba(6,18,36,0.1), 0 16px 48px rgba(6,18,36,0.06);
-    --sc-shadow-sm: 0 1px 3px rgba(6,18,36,0.1), 0 2px 8px rgba(6,18,36,0.06);
-    --sc-shadow-xl: 0 8px 20px rgba(6,18,36,0.12), 0 32px 64px rgba(6,18,36,0.16), 0 48px 96px rgba(6,18,36,0.08);
-    --sc-shadow-xs: 0 1px 2px rgba(6,18,36,0.08);
+    --sc-shadow-card:
+      0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.03);
+    --sc-shadow-glow-accent:
+      0 0 0 1px rgba(90, 154, 48, 0.12), 0 4px 16px rgba(90, 154, 48, 0.15);
+    --sc-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+    --sc-shadow-lg:
+      0 4px 12px rgba(6, 18, 36, 0.1), 0 16px 44px rgba(6, 18, 36, 0.12),
+      0 32px 80px rgba(6, 18, 36, 0.08);
+    --sc-shadow-md:
+      0 2px 6px rgba(6, 18, 36, 0.08), 0 8px 24px rgba(6, 18, 36, 0.1),
+      0 16px 48px rgba(6, 18, 36, 0.06);
+    --sc-shadow-sm:
+      0 1px 3px rgba(6, 18, 36, 0.1), 0 2px 8px rgba(6, 18, 36, 0.06);
+    --sc-shadow-xl:
+      0 8px 20px rgba(6, 18, 36, 0.12), 0 32px 64px rgba(6, 18, 36, 0.16),
+      0 48px 96px rgba(6, 18, 36, 0.08);
+    --sc-shadow-xs: 0 1px 2px rgba(6, 18, 36, 0.08);
     --sc-success: #008000;
     --sc-success-dim: rgba(0, 128, 0, 0.08);
-    --sc-surface-glow: radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.06) 0%, transparent 70%);
+    --sc-surface-glow: radial-gradient(
+      ellipse at 50% 0%,
+      rgba(122, 182, 72, 0.06) 0%,
+      transparent 70%
+    );
     --sc-surface-gradient: linear-gradient(180deg, #ffffff 0%, #f9f9f9 100%);
     --sc-text: #333333;
     --sc-text-faint: #999999;
@@ -460,8 +568,8 @@
 
 [data-theme="dark"] {
   /* Dark theme — explicit override for theme switcher */
-  --sc-accent: #7AB648;
-  --sc-accent-hover: #8DC63F;
+  --sc-accent: #7ab648;
+  --sc-accent-hover: #8dc63f;
   --sc-accent-secondary: #f59e0b;
   --sc-accent-secondary-hover: #fbbf24;
   --sc-accent-secondary-strong: #fcd34d;
@@ -474,7 +582,7 @@
   --sc-accent-tertiary-strong: #a5b4fc;
   --sc-accent-tertiary-subtle: rgba(99, 102, 241, 0.14);
   --sc-accent-tertiary-text: #818cf8;
-  --sc-accent-text: #8DC63F;
+  --sc-accent-text: #8dc63f;
   --sc-backdrop-overlay: rgba(0, 0, 0, 0.6);
   --sc-bg: #060b12;
   --sc-bg-elevated: #162230;
@@ -483,37 +591,67 @@
   --sc-bg-surface: #101a24;
   --sc-border: #233345;
   --sc-border-subtle: #162230;
-  --sc-button-gradient-primary: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(0,0,0,0.18) 100%);
+  --sc-button-gradient-primary: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.12) 0%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
   --sc-disabled-overlay: rgba(255, 255, 255, 0.04);
   --sc-error: #f97066;
   --sc-error-dim: rgba(249, 112, 102, 0.12);
-  --sc-focus-ring: #7AB648;
+  --sc-focus-ring: #7ab648;
   --sc-focus-ring-offset: 2px;
   --sc-focus-ring-width: 2px;
-  --sc-hero-gradient: linear-gradient(135deg, rgba(122,182,72,0.10) 0%, rgba(90,154,48,0.05) 40%, rgba(99,102,241,0.03) 80%, transparent 100%);
+  --sc-hero-gradient: linear-gradient(
+    135deg,
+    rgba(122, 182, 72, 0.1) 0%,
+    rgba(90, 154, 48, 0.05) 40%,
+    rgba(99, 102, 241, 0.03) 80%,
+    transparent 100%
+  );
   --sc-hover-overlay: rgba(255, 255, 255, 0.06);
   --sc-info: #3b82f6;
   --sc-info-dim: rgba(59, 130, 246, 0.15);
-  --sc-link: #8DC63F;
-  --sc-link-active: #7AB648;
+  --sc-link: #8dc63f;
+  --sc-link-active: #7ab648;
   --sc-link-hover: #a3d46a;
-  --sc-link-visited: #5A9A30;
+  --sc-link-visited: #5a9a30;
   --sc-on-accent: #ffffff;
   --sc-on-accent-secondary: #060b12;
   --sc-on-accent-tertiary: #ffffff;
-  --sc-pressed-overlay: rgba(255, 255, 255, 0.10);
-  --sc-shadow-card: 0 1px 3px rgba(3,8,16,0.3), 0 8px 24px rgba(3,8,16,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
-  --sc-shadow-glow-accent: 0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122,182,72,0.15);
-  --sc-shadow-inset: inset 0 1px 2px rgba(0,0,0,0.06);
-  --sc-shadow-lg: 0 4px 8px rgba(3,8,16,0.4), 0 16px 48px rgba(3,8,16,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
-  --sc-shadow-md: 0 2px 4px rgba(3,8,16,0.35), 0 8px 24px rgba(3,8,16,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
-  --sc-shadow-sm: 0 1px 3px rgba(3,8,16,0.4), 0 2px 8px rgba(3,8,16,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-  --sc-shadow-xl: 0 8px 16px rgba(3,8,16,0.45), 0 32px 72px rgba(3,8,16,0.5), inset 0 1px 0 rgba(255,255,255,0.03);
-  --sc-shadow-xs: 0 1px 2px rgba(3,8,16,0.45), inset 0 1px 0 rgba(255,255,255,0.05);
+  --sc-pressed-overlay: rgba(255, 255, 255, 0.1);
+  --sc-shadow-card:
+    0 1px 3px rgba(3, 8, 16, 0.3), 0 8px 24px rgba(3, 8, 16, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sc-shadow-glow-accent:
+    0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122, 182, 72, 0.15);
+  --sc-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  --sc-shadow-lg:
+    0 4px 8px rgba(3, 8, 16, 0.4), 0 16px 48px rgba(3, 8, 16, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --sc-shadow-md:
+    0 2px 4px rgba(3, 8, 16, 0.35), 0 8px 24px rgba(3, 8, 16, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --sc-shadow-sm:
+    0 1px 3px rgba(3, 8, 16, 0.4), 0 2px 8px rgba(3, 8, 16, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sc-shadow-xl:
+    0 8px 16px rgba(3, 8, 16, 0.45), 0 32px 72px rgba(3, 8, 16, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --sc-shadow-xs:
+    0 1px 2px rgba(3, 8, 16, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --sc-success: #10b981;
   --sc-success-dim: rgba(16, 185, 129, 0.15);
-  --sc-surface-glow: radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.08) 0%, transparent 70%);
-  --sc-surface-gradient: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.12) 100%);
+  --sc-surface-glow: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(122, 182, 72, 0.08) 0%,
+    transparent 70%
+  );
+  --sc-surface-gradient: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
   --sc-text: #d8e4f0;
   --sc-text-faint: #3d5468;
   --sc-text-muted: #5e7a94;
@@ -523,61 +661,83 @@
 
 [data-theme="light"] {
   /* Light theme — explicit override for theme switcher */
-  --sc-accent: #7AB648;
-  --sc-accent-hover: #5A9A30;
+  --sc-accent: #7ab648;
+  --sc-accent-hover: #5a9a30;
   --sc-accent-light: #e2f2c8;
   --sc-accent-secondary: #d97706;
   --sc-accent-secondary-hover: #b45309;
   --sc-accent-secondary-strong: #f59e0b;
-  --sc-accent-secondary-subtle: rgba(217, 119, 6, 0.10);
+  --sc-accent-secondary-subtle: rgba(217, 119, 6, 0.1);
   --sc-accent-secondary-text: #b45309;
-  --sc-accent-strong: #7AB648;
+  --sc-accent-strong: #7ab648;
   --sc-accent-subtle: rgba(122, 182, 72, 0.08);
   --sc-accent-tertiary: #4f46e5;
   --sc-accent-tertiary-hover: #4338ca;
   --sc-accent-tertiary-strong: #6366f1;
-  --sc-accent-tertiary-subtle: rgba(79, 70, 229, 0.10);
+  --sc-accent-tertiary-subtle: rgba(79, 70, 229, 0.1);
   --sc-accent-tertiary-text: #4338ca;
-  --sc-accent-text: #47802A;
+  --sc-accent-text: #47802a;
   --sc-backdrop-overlay: rgba(0, 0, 0, 0.3);
-  --sc-bg: #F5F5F5;
-  --sc-bg-elevated: #F8F8F8;
-  --sc-bg-inset: #EFEFEF;
+  --sc-bg: #f5f5f5;
+  --sc-bg-elevated: #f8f8f8;
+  --sc-bg-inset: #efefef;
   --sc-bg-overlay: #ffffff;
   --sc-bg-surface: #ffffff;
-  --sc-bg-warm: #FAFAFA;
-  --sc-border: #D9D9D9;
-  --sc-border-subtle: #E8E8E8;
-  --sc-button-gradient-primary: linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(0,0,0,0.15) 100%);
+  --sc-bg-warm: #fafafa;
+  --sc-border: #d9d9d9;
+  --sc-border-subtle: #e8e8e8;
+  --sc-button-gradient-primary: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.25) 0%,
+    rgba(0, 0, 0, 0.15) 100%
+  );
   --sc-disabled-overlay: rgba(0, 0, 0, 0.04);
-  --sc-error: #CC0000;
+  --sc-error: #cc0000;
   --sc-error-dim: rgba(204, 0, 0, 0.08);
-  --sc-focus-ring: #5A9A30;
+  --sc-focus-ring: #5a9a30;
   --sc-focus-ring-offset: 2px;
   --sc-focus-ring-width: 2px;
-  --sc-hero-gradient: linear-gradient(135deg, rgba(122,182,72,0.07) 0%, rgba(122,182,72,0.03) 50%, transparent 100%);
+  --sc-hero-gradient: linear-gradient(
+    135deg,
+    rgba(122, 182, 72, 0.07) 0%,
+    rgba(122, 182, 72, 0.03) 50%,
+    transparent 100%
+  );
   --sc-hover-overlay: rgba(0, 0, 0, 0.04);
   --sc-info: #2563eb;
   --sc-info-dim: rgba(37, 99, 235, 0.1);
-  --sc-link: #5A9A30;
-  --sc-link-active: #7AB648;
-  --sc-link-hover: #47802A;
-  --sc-link-visited: #47802A;
+  --sc-link: #5a9a30;
+  --sc-link-active: #7ab648;
+  --sc-link-hover: #47802a;
+  --sc-link-visited: #47802a;
   --sc-on-accent: #ffffff;
   --sc-on-accent-secondary: #ffffff;
   --sc-on-accent-tertiary: #ffffff;
   --sc-pressed-overlay: rgba(0, 0, 0, 0.08);
-  --sc-shadow-card: 0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03);
-  --sc-shadow-glow-accent: 0 0 0 1px rgba(90,154,48,0.12), 0 4px 16px rgba(90,154,48,0.15);
-  --sc-shadow-inset: inset 0 1px 2px rgba(0,0,0,0.04);
-  --sc-shadow-lg: 0 4px 12px rgba(6,18,36,0.1), 0 16px 44px rgba(6,18,36,0.12), 0 32px 80px rgba(6,18,36,0.08);
-  --sc-shadow-md: 0 2px 6px rgba(6,18,36,0.08), 0 8px 24px rgba(6,18,36,0.1), 0 16px 48px rgba(6,18,36,0.06);
-  --sc-shadow-sm: 0 1px 3px rgba(6,18,36,0.1), 0 2px 8px rgba(6,18,36,0.06);
-  --sc-shadow-xl: 0 8px 20px rgba(6,18,36,0.12), 0 32px 64px rgba(6,18,36,0.16), 0 48px 96px rgba(6,18,36,0.08);
-  --sc-shadow-xs: 0 1px 2px rgba(6,18,36,0.08);
+  --sc-shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.03);
+  --sc-shadow-glow-accent:
+    0 0 0 1px rgba(90, 154, 48, 0.12), 0 4px 16px rgba(90, 154, 48, 0.15);
+  --sc-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+  --sc-shadow-lg:
+    0 4px 12px rgba(6, 18, 36, 0.1), 0 16px 44px rgba(6, 18, 36, 0.12),
+    0 32px 80px rgba(6, 18, 36, 0.08);
+  --sc-shadow-md:
+    0 2px 6px rgba(6, 18, 36, 0.08), 0 8px 24px rgba(6, 18, 36, 0.1),
+    0 16px 48px rgba(6, 18, 36, 0.06);
+  --sc-shadow-sm:
+    0 1px 3px rgba(6, 18, 36, 0.1), 0 2px 8px rgba(6, 18, 36, 0.06);
+  --sc-shadow-xl:
+    0 8px 20px rgba(6, 18, 36, 0.12), 0 32px 64px rgba(6, 18, 36, 0.16),
+    0 48px 96px rgba(6, 18, 36, 0.08);
+  --sc-shadow-xs: 0 1px 2px rgba(6, 18, 36, 0.08);
   --sc-success: #008000;
   --sc-success-dim: rgba(0, 128, 0, 0.08);
-  --sc-surface-glow: radial-gradient(ellipse at 50% 0%, rgba(122,182,72,0.06) 0%, transparent 70%);
+  --sc-surface-glow: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(122, 182, 72, 0.06) 0%,
+    transparent 70%
+  );
   --sc-surface-gradient: linear-gradient(180deg, #ffffff 0%, #f9f9f9 100%);
   --sc-text: #333333;
   --sc-text-faint: #999999;
@@ -588,11 +748,11 @@
 
 @media (prefers-contrast: more) {
   :root {
-    --sc-accent: #8DC63F;
+    --sc-accent: #8dc63f;
     --sc-accent-hover: #a3d46a;
-    --sc-accent-strong: #7AB648;
+    --sc-accent-strong: #7ab648;
     --sc-accent-subtle: rgba(122, 182, 72, 0.2);
-    --sc-accent-text: #47802A;
+    --sc-accent-text: #47802a;
     --sc-bg: #000000;
     --sc-bg-elevated: #101a24;
     --sc-bg-inset: #000000;
@@ -633,26 +793,26 @@
 @media (color-gamut: p3) {
   :root {
     /* Wide gamut P3 color overrides — more vivid on supported displays */
-    --sc-accent: color(display-p3 0.420 0.680 0.220);
-    --sc-accent-hover: color(display-p3 0.490 0.740 0.180);
-    --sc-accent-secondary: color(display-p3 0.961 0.620 0.043);
-    --sc-accent-strong: color(display-p3 0.570 0.800 0.330);
-    --sc-accent-tertiary: color(display-p3 0.388 0.400 0.945);
-    --sc-accent-text: color(display-p3 0.490 0.740 0.180);
-    --sc-error: color(display-p3 0.976 0.439 0.400);
-    --sc-focus-ring: color(display-p3 0.420 0.680 0.220);
-    --sc-info: color(display-p3 0.231 0.510 0.965);
-    --sc-link: color(display-p3 0.490 0.740 0.180);
+    --sc-accent: color(display-p3 0.42 0.68 0.22);
+    --sc-accent-hover: color(display-p3 0.49 0.74 0.18);
+    --sc-accent-secondary: color(display-p3 0.961 0.62 0.043);
+    --sc-accent-strong: color(display-p3 0.57 0.8 0.33);
+    --sc-accent-tertiary: color(display-p3 0.388 0.4 0.945);
+    --sc-accent-text: color(display-p3 0.49 0.74 0.18);
+    --sc-error: color(display-p3 0.976 0.439 0.4);
+    --sc-focus-ring: color(display-p3 0.42 0.68 0.22);
+    --sc-info: color(display-p3 0.231 0.51 0.965);
+    --sc-link: color(display-p3 0.49 0.74 0.18);
     --sc-success: color(display-p3 0.063 0.725 0.506);
     --sc-warning: color(display-p3 0.918 0.702 0.031);
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --sc-accent: color(display-p3 0.420 0.680 0.220);
-      --sc-accent-text: color(display-p3 0.240 0.480 0.130);
-      --sc-error: color(display-p3 0.760 0.000 0.000);
+      --sc-accent: color(display-p3 0.42 0.68 0.22);
+      --sc-accent-text: color(display-p3 0.24 0.48 0.13);
+      --sc-error: color(display-p3 0.76 0 0);
       --sc-info: color(display-p3 0.145 0.388 0.922);
-      --sc-success: color(display-p3 0.000 0.480 0.000);
+      --sc-success: color(display-p3 0 0.48 0);
       --sc-warning: color(display-p3 0.792 0.541 0.016);
     }
   }

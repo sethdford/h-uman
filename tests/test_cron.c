@@ -9,9 +9,13 @@
 #include <time.h>
 #include <unistd.h>
 
-/* Unique crontab path per test to avoid shared-state flakiness. */
+/* Unique crontab path per test to avoid shared-state flakiness (parallel-safe via pid). */
 static sc_error_t get_unique_crontab_path(sc_allocator_t *alloc, char **path, size_t *path_len) {
     static unsigned counter;
+    long pid = 0;
+#if defined(__unix__) || defined(__APPLE__)
+    pid = (long)getpid();
+#endif
     char *tmp = sc_platform_get_temp_dir(alloc);
     if (!tmp) {
         const char *t = getenv("TMPDIR");
@@ -20,11 +24,11 @@ static sc_error_t get_unique_crontab_path(sc_allocator_t *alloc, char **path, si
         if (!t)
             t = "/tmp";
         size_t tlen = strlen(t);
-        size_t cap = tlen + 64;
+        size_t cap = tlen + 80;
         *path = (char *)alloc->alloc(alloc->ctx, cap);
         if (!*path)
             return SC_ERR_OUT_OF_MEMORY;
-        int n = snprintf(*path, cap, "%s/seaclaw_crontab_test_%u.json", t, counter++);
+        int n = snprintf(*path, cap, "%s/seaclaw_crontab_test_%ld_%u.json", t, pid, counter++);
         if (n < 0 || (size_t)n >= cap) {
             alloc->free(alloc->ctx, *path, cap);
             *path = NULL;
@@ -34,13 +38,13 @@ static sc_error_t get_unique_crontab_path(sc_allocator_t *alloc, char **path, si
         return SC_OK;
     }
     size_t tlen = strlen(tmp);
-    size_t cap = tlen + 64;
+    size_t cap = tlen + 80;
     *path = (char *)alloc->alloc(alloc->ctx, cap);
     if (!*path) {
         alloc->free(alloc->ctx, tmp, tlen + 1);
         return SC_ERR_OUT_OF_MEMORY;
     }
-    int n = snprintf(*path, cap, "%s/seaclaw_crontab_test_%u.json", tmp, counter++);
+    int n = snprintf(*path, cap, "%s/seaclaw_crontab_test_%ld_%u.json", tmp, pid, counter++);
     alloc->free(alloc->ctx, tmp, tlen + 1);
     if (n < 0 || (size_t)n >= cap) {
         alloc->free(alloc->ctx, *path, cap);

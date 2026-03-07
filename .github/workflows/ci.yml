@@ -359,3 +359,37 @@ jobs:
             echo "Docs missing frontmatter:$MISSING"
             exit 1
           fi
+
+  fuzz:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Clang and build deps
+        run: sudo apt-get update && sudo apt-get install -y clang libsqlite3-dev
+      - name: Configure (fuzz)
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -B build-fuzz \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DSC_ENABLE_FUZZ=ON \
+            -DSC_ENABLE_ALL_CHANNELS=ON
+      - name: Build (fuzz)
+        run: cmake --build build-fuzz -j$(nproc)
+      - name: Run fuzz harnesses
+        continue-on-error: true
+        run: |
+          mkdir -p fuzz/corpus/url
+          ./build-fuzz/fuzz_json_parse fuzz/corpus/json -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_config_load fuzz/corpus/config -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_tool_params -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_base64 -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_json fuzz/corpus/json -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_config fuzz/corpus/config -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_url_encode fuzz/corpus/url -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_persona_json -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_sse -max_total_time=30 -print_final_stats=1 || true
+          ./build-fuzz/fuzz_http_parse -max_total_time=30 -print_final_stats=1 || true
