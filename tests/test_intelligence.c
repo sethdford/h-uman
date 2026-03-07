@@ -6,6 +6,7 @@
 #include "seaclaw/agent/reflection.h"
 #include "seaclaw/bus.h"
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/memory.h"
 #include "test_framework.h"
@@ -173,6 +174,53 @@ static void test_episodic_summarize_basic(void) {
 
 static void test_episodic_summarize_null(void) {
     char *summary = sc_episodic_summarize_session(NULL, NULL, NULL, 0, NULL);
+    SC_ASSERT_NULL(summary);
+}
+
+static void test_episodic_load_null_out(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+    size_t out_len = 0;
+    sc_error_t err = sc_episodic_load(&mem, &alloc, NULL, &out_len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_episodic_load_null_alloc(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_episodic_load(&mem, NULL, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_episodic_store_null_memory(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_episodic_store(NULL, &alloc, "s", 1, "summary", 7);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_episodic_store_null_summary(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+    sc_error_t err = sc_episodic_store(&mem, &alloc, "s", 1, NULL, 0);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_episodic_summarize_null_messages(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    size_t lens[] = {5};
+    size_t out_len = 0;
+    char *summary = sc_episodic_summarize_session(&alloc, NULL, lens, 1, &out_len);
+    SC_ASSERT_NULL(summary);
+}
+
+static void test_episodic_summarize_zero_count(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *msgs[] = {"hello"};
+    size_t lens[] = {5};
+    size_t out_len = 0;
+    char *summary = sc_episodic_summarize_session(&alloc, msgs, lens, 0, &out_len);
     SC_ASSERT_NULL(summary);
 }
 
@@ -422,6 +470,12 @@ void run_intelligence_tests(void) {
 
     SC_RUN_TEST(test_episodic_summarize_basic);
     SC_RUN_TEST(test_episodic_summarize_null);
+    SC_RUN_TEST(test_episodic_load_null_out);
+    SC_RUN_TEST(test_episodic_load_null_alloc);
+    SC_RUN_TEST(test_episodic_store_null_memory);
+    SC_RUN_TEST(test_episodic_store_null_summary);
+    SC_RUN_TEST(test_episodic_summarize_null_messages);
+    SC_RUN_TEST(test_episodic_summarize_zero_count);
 #ifdef SC_ENABLE_SQLITE
     SC_RUN_TEST(test_episodic_store_load_sqlite);
 #endif

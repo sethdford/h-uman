@@ -835,6 +835,70 @@ static void test_git_parameters_json_has_command(void) {
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+static void test_git_add_path_traversal_rejected(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_git_create(&alloc, ".", 1, NULL, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_json_object_set(&alloc, args, "operation", sc_json_string_new(&alloc, "add", 3));
+    sc_json_object_set(&alloc, args, "paths", sc_json_string_new(&alloc, "../etc/passwd", 13));
+    sc_tool_result_t result;
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(!result.success);
+    SC_ASSERT_NOT_NULL(result.error_msg);
+    SC_ASSERT_NOT_NULL(strstr(result.error_msg, "path traversal"));
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+    if (tool.vtable && tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_git_add_dot_succeeds(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_git_create(&alloc, ".", 1, NULL, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_json_object_set(&alloc, args, "operation", sc_json_string_new(&alloc, "add", 3));
+    sc_json_object_set(&alloc, args, "paths", sc_json_string_new(&alloc, ".", 1));
+    sc_tool_result_t result;
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(result.success);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+    if (tool.vtable && tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
+static void test_git_add_empty_path_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_git_create(&alloc, ".", 1, NULL, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_json_object_set(&alloc, args, "operation", sc_json_string_new(&alloc, "add", 3));
+    sc_json_object_set(&alloc, args, "paths", sc_json_string_new(&alloc, "", 0));
+    sc_tool_result_t result;
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT(!result.success);
+    SC_ASSERT_NOT_NULL(result.error_msg);
+    SC_ASSERT_NOT_NULL(strstr(result.error_msg, "Missing"));
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+    if (tool.vtable && tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+
 /* ─── Memory tools with valid args ─────────────────────────────────────────── */
 static void test_memory_store_execute_with_content(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -2252,6 +2316,9 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_git_execute_empty);
     SC_RUN_TEST(test_git_execute_missing_command);
     SC_RUN_TEST(test_git_parameters_json_has_command);
+    SC_RUN_TEST(test_git_add_path_traversal_rejected);
+    SC_RUN_TEST(test_git_add_dot_succeeds);
+    SC_RUN_TEST(test_git_add_empty_path_returns_error);
     SC_RUN_TEST(test_spawn_create);
     SC_RUN_TEST(test_spawn_name);
     SC_RUN_TEST(test_spawn_execute_empty);

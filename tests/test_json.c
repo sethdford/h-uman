@@ -1,4 +1,5 @@
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/core/error.h"
 #include "seaclaw/core/json.h"
 #include "test_framework.h"
 #include <string.h>
@@ -116,8 +117,27 @@ static void test_json_stringify(void) {
     SC_ASSERT_EQ(sc_json_stringify(&alloc, obj, &out, &out_len), SC_OK);
     SC_ASSERT_NOT_NULL(out);
     SC_ASSERT_STR_EQ(out, "{\"name\":\"seaclaw\",\"version\":1}");
+    SC_ASSERT_EQ(out_len, strlen(out));
 
     alloc.free(alloc.ctx, out, out_len + 1);
+    sc_json_free(&alloc, obj);
+}
+
+static void test_json_stringify_null_val_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_json_stringify(&alloc, NULL, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_json_stringify_null_out_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_json_value_t *obj = sc_json_object_new(&alloc);
+    sc_json_object_set(&alloc, obj, "a", sc_json_number_new(&alloc, 1));
+    size_t out_len = 0;
+    sc_error_t err = sc_json_stringify(&alloc, obj, NULL, &out_len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
     sc_json_free(&alloc, obj);
 }
 
@@ -242,6 +262,8 @@ void run_json_tests(void) {
     SC_RUN_TEST(test_json_parse_object);
     SC_RUN_TEST(test_json_parse_nested);
     SC_RUN_TEST(test_json_stringify);
+    SC_RUN_TEST(test_json_stringify_null_val_returns_error);
+    SC_RUN_TEST(test_json_stringify_null_out_returns_error);
     SC_RUN_TEST(test_json_empty_object);
     SC_RUN_TEST(test_json_empty_array);
     SC_RUN_TEST(test_json_trailing_comma);
