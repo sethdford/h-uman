@@ -10,21 +10,32 @@ import "../components/sc-empty-state.js";
 import "../components/sc-thinking.js";
 import "../components/sc-tool-result.js";
 import "../components/sc-message-stream.js";
+import "../components/sc-reasoning-block.js";
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  id?: string;
-  ts?: number;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  input?: string;
-  status: "running" | "completed";
-  result?: string;
-}
+type ChatItem =
+  | {
+      type: "message";
+      role: "user" | "assistant";
+      content: string;
+      id?: string;
+      ts?: number;
+    }
+  | {
+      type: "tool_call";
+      id: string;
+      name: string;
+      input?: string;
+      status: "running" | "completed";
+      result?: string;
+      ts?: number;
+    }
+  | {
+      type: "thinking";
+      content: string;
+      streaming: boolean;
+      duration?: string;
+      ts?: number;
+    };
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -343,6 +354,11 @@ export class ScChatView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
       font-style: italic;
     }
+    .stream-elapsed {
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
     .abort-btn {
       margin-left: var(--sc-space-md);
       padding: var(--sc-space-xs) var(--sc-space-md);
@@ -438,16 +454,19 @@ export class ScChatView extends GatewayAwareLitElement {
 
   @property() sessionKey = "default";
 
-  @state() private messages: ChatMessage[] = [];
-  @state() private toolCalls: ToolCall[] = [];
+  @state() private items: ChatItem[] = [];
   @state() private inputValue = "";
   @state() private isWaiting = false;
   @state() private errorBanner = "";
   @state() private connectionStatus: GatewayStatus = "disconnected";
   @state() private showScrollPill = false;
   @state() private lastFailedMessage = "";
+  @state() private _streamElapsed = "";
   @query("#message-list") private messageList!: HTMLElement;
   @query("#chat-input") private inputEl!: HTMLTextAreaElement;
+
+  private _streamStartTime = 0;
+  private _streamTimer = 0;
 
   private messageHandler = (e: Event) => this.onGatewayMessage(e);
   private statusHandler = (e: Event) => {
@@ -474,9 +493,28 @@ export class ScChatView extends GatewayAwareLitElement {
     return `sc-chat-${this.sessionKey}`;
   }
 
+  private _startStreamTimer(): void {
+    this._streamStartTime = Date.now();
+    this._streamElapsed = "0s";
+    this._streamTimer = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - this._streamStartTime) / 1000);
+      this._streamElapsed =
+        elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+      this.requestUpdate();
+    }, 1000);
+  }
+
+  private _stopStreamTimer(): void {
+    if (this._streamTimer) {
+      window.clearInterval(this._streamTimer);
+      this._streamTimer = 0;
+    }
+    this._streamElapsed = "";
+  }
+
   private _cacheMessages(): void {
     try {
-      sessionStorage.setItem(this._cacheKey, JSON.stringify(this.messages));
+      sessionStorage.setItem(this._cacheKey, JSON.stringify(this.items));
     } catch {
       /* quota exceeded — ignore */
     }
@@ -486,9 +524,9 @@ export class ScChatView extends GatewayAwareLitElement {
     try {
       const raw = sessionStorage.getItem(this._cacheKey);
       if (!raw) return false;
-      const cached = JSON.parse(raw) as ChatMessage[];
+      const cached = JSON.parse(raw) as ChatItem[];
       if (Array.isArray(cached) && cached.length > 0) {
-        this.messages = cached;
+        this.items = cached;
         this.scrollToBottom();
         return true;
       }
@@ -509,7 +547,8 @@ export class ScChatView extends GatewayAwareLitElement {
         messages?: { role: string; content: string }[];
       }>("chat.history", { sessionKey: this.sessionKey });
       if (res?.messages && Array.isArray(res.messages) && res.messages.length > 0) {
-        this.messages = res.messages.map((m) => ({
+        this.items = res.messages.map((m) => ({
+          type: "message",
           role: m.role as "user" | "assistant",
           content: m.content ?? "",
         }));
@@ -531,9 +570,11 @@ export class ScChatView extends GatewayAwareLitElement {
       /* abort is best-effort */
     }
     this.isWaiting = false;
+    this._stopStreamTimer();
   }
 
   override disconnectedCallback(): void {
+    this._stopStreamTimer();
     const gw = this.gateway;
     gw?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
     gw?.removeEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
@@ -557,18 +598,42 @@ export class ScChatView extends GatewayAwareLitElement {
     if (detail.event === EVENT_NAMES.HEALTH) {
       this.requestUpdate();
     }
+    if (
+      detail.event === "thinking" ||
+      (detail.event === EVENT_NAMES.CHAT && (payload.state as string) === "thinking")
+    ) {
+      const content = (payload.message as string) ?? "";
+      const streaming = this.items.filter(
+        (i): i is Extract<ChatItem, { type: "thinking" }> => i.type === "thinking" && i.streaming,
+      );
+      const existingThinking = streaming.length > 0 ? streaming[streaming.length - 1] : null;
+      if (existingThinking) {
+        this.items = this.items.map((i) =>
+          i === existingThinking ? { ...i, content: i.content + content } : i,
+        );
+      } else {
+        this.items = [
+          ...this.items,
+          { type: "thinking", content, streaming: true, ts: Date.now() },
+        ];
+      }
+      this.requestUpdate();
+      this.scrollToBottom();
+      this._cacheMessages();
+    }
     if (detail.event === EVENT_NAMES.CHAT) {
       const state = payload.state as string;
       const content = (payload.message as string) ?? "";
       if (state === "received" && content) {
-        const recentUser = this.messages
+        const recentUser = this.items
           .slice(-6)
-          .some((m) => m.role === "user" && m.content === content);
+          .some((i) => i.type === "message" && i.role === "user" && i.content === content);
         if (!recentUser) {
-          this.messages = [
-            ...this.messages,
+          this.items = [
+            ...this.items,
             {
-              role: "user",
+              type: "message",
+              role: "user" as const,
               content,
               id: payload.id as string,
               ts: Date.now(),
@@ -577,29 +642,49 @@ export class ScChatView extends GatewayAwareLitElement {
         }
       }
       if (state === "sent" && content) {
-        this.messages = [
-          ...this.messages,
+        this.items = this.items.map((i) =>
+          i.type === "thinking" && i.streaming ? { ...i, streaming: false } : i,
+        );
+        this.items = [
+          ...this.items,
           {
-            role: "assistant",
+            type: "message",
+            role: "assistant" as const,
             content,
             id: payload.id as string,
             ts: Date.now(),
           },
         ];
         this.isWaiting = false;
+        this._stopStreamTimer();
       }
       if (state === "chunk" && content) {
-        const last = this.messages[this.messages.length - 1];
-        if (last && last.role === "assistant") {
-          this.messages = [
-            ...this.messages.slice(0, -1),
-            { ...last, content: last.content + content },
-          ];
+        this.items = this.items.map((i) =>
+          i.type === "thinking" && i.streaming ? { ...i, streaming: false } : i,
+        );
+        let lastMsgIdx = -1;
+        for (let i = this.items.length - 1; i >= 0; i--) {
+          const item = this.items[i];
+          if (item.type === "message" && item.role === "assistant") {
+            lastMsgIdx = i;
+            break;
+          }
+        }
+        if (lastMsgIdx >= 0) {
+          const last = this.items[lastMsgIdx];
+          if (last.type === "message") {
+            this.items = [
+              ...this.items.slice(0, lastMsgIdx),
+              { ...last, content: last.content + content },
+              ...this.items.slice(lastMsgIdx + 1),
+            ];
+          }
         } else {
-          this.messages = [
-            ...this.messages,
+          this.items = [
+            ...this.items,
             {
-              role: "assistant",
+              type: "message",
+              role: "assistant" as const,
               content,
               id: payload.id as string,
               ts: Date.now(),
@@ -609,6 +694,7 @@ export class ScChatView extends GatewayAwareLitElement {
       }
       if (state === "sent" && !content) {
         this.isWaiting = true;
+        this._startStreamTimer();
       }
       this.requestUpdate();
       this.scrollToBottom();
@@ -624,32 +710,40 @@ export class ScChatView extends GatewayAwareLitElement {
             ? JSON.stringify(payload.args)
             : undefined;
       const result = payload.result != null ? String(payload.result) : undefined;
-      const existing = this.toolCalls.find((t) => t.id === id);
-      if (!existing) {
-        this.toolCalls = [
-          ...this.toolCalls,
+      const existingIdx = this.items.findIndex(
+        (i): i is Extract<ChatItem, { type: "tool_call" }> => i.type === "tool_call" && i.id === id,
+      );
+      if (existingIdx < 0) {
+        this.items = [
+          ...this.items,
           {
+            type: "tool_call",
             id,
             name,
             input,
             status: result != null ? "completed" : "running",
             result,
+            ts: Date.now(),
           },
         ];
       } else {
-        this.toolCalls = this.toolCalls.map((t) =>
-          t.id === id
-            ? {
-                ...t,
-                input: t.input ?? input,
-                status: "completed" as const,
-                result: result ?? t.result,
-              }
-            : t,
-        );
+        const existing = this.items[existingIdx];
+        if (existing.type === "tool_call") {
+          this.items = [
+            ...this.items.slice(0, existingIdx),
+            {
+              ...existing,
+              input: existing.input ?? input,
+              status: "completed" as const,
+              result: result ?? existing.result,
+            },
+            ...this.items.slice(existingIdx + 1),
+          ];
+        }
       }
       this.requestUpdate();
       this.scrollToBottom();
+      this._cacheMessages();
     }
   }
 
@@ -688,10 +782,11 @@ export class ScChatView extends GatewayAwareLitElement {
   private async send(): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || !this.gateway) return;
-    this.messages = [...this.messages, { role: "user", content: text, ts: Date.now() }];
+    this.items = [...this.items, { type: "message", role: "user", content: text, ts: Date.now() }];
     this.inputValue = "";
     this.lastFailedMessage = "";
     this.isWaiting = true;
+    this._startStreamTimer();
     this._cacheMessages();
     this.resizeTextarea();
     this.scrollToBottom();
@@ -702,6 +797,7 @@ export class ScChatView extends GatewayAwareLitElement {
       });
     } catch (err) {
       this.isWaiting = false;
+      this._stopStreamTimer();
       this.lastFailedMessage = text;
       const msg = err instanceof Error ? err.message : "Failed to send message";
       ScToast.show({ message: msg, variant: "error" });
@@ -755,7 +851,7 @@ export class ScChatView extends GatewayAwareLitElement {
           aria-live="polite"
           aria-label="Chat messages"
         >
-          ${this.messages.length === 0 && this.toolCalls.length === 0
+          ${this.items.length === 0
             ? html`
                 <sc-empty-state
                   .icon=${icons["chat-circle"]}
@@ -791,42 +887,65 @@ export class ScChatView extends GatewayAwareLitElement {
                 </sc-empty-state>
               `
             : nothing}
-          ${this.messages.map(
-            (m, i) => html`
-              <div class="message ${m.role}">
-                <sc-message-stream
-                  .content=${m.content}
-                  .streaming=${this.isWaiting &&
-                  m.role === "assistant" &&
-                  i === this.messages.length - 1}
-                  .role=${m.role}
-                ></sc-message-stream>
-                ${m.ts != null
-                  ? html`<span class="message-meta">${formatTime(m.ts)}</span>`
-                  : nothing}
-              </div>
-            `,
-          )}
-          ${this.toolCalls.map(
-            (tc) => html`
-              <sc-tool-result
-                .tool=${tc.name}
-                .status=${tc.status === "completed"
-                  ? tc.result?.startsWith("Error")
-                    ? "error"
-                    : "success"
-                  : "running"}
-                .content=${tc.result ?? tc.input ?? ""}
-              ></sc-tool-result>
-            `,
-          )}
+          ${(() => {
+            let lastAssistantIdx = -1;
+            for (let i = this.items.length - 1; i >= 0; i--) {
+              const it = this.items[i];
+              if (it.type === "message" && it.role === "assistant") {
+                lastAssistantIdx = i;
+                break;
+              }
+            }
+            return this.items.map((item, idx) => {
+              if (item.type === "message") {
+                const isStreaming =
+                  this.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
+                return html`
+                  <div class="message ${item.role}">
+                    <sc-message-stream
+                      .content=${item.content}
+                      .streaming=${isStreaming}
+                      .role=${item.role}
+                    ></sc-message-stream>
+                    ${item.ts != null
+                      ? html`<span class="message-meta">${formatTime(item.ts)}</span>`
+                      : nothing}
+                  </div>
+                `;
+              }
+              if (item.type === "tool_call") {
+                return html`
+                  <sc-tool-result
+                    .tool=${item.name}
+                    .status=${item.status === "completed"
+                      ? item.result?.startsWith("Error")
+                        ? "error"
+                        : "success"
+                      : "running"}
+                    .content=${item.result ?? item.input ?? ""}
+                  ></sc-tool-result>
+                `;
+              }
+              if (item.type === "thinking") {
+                return html`
+                  <sc-reasoning-block
+                    .content=${item.content}
+                    .streaming=${item.streaming}
+                    .duration=${item.duration ?? ""}
+                  ></sc-reasoning-block>
+                `;
+              }
+              return nothing;
+            });
+          })()}
           ${this.isWaiting
             ? html`
                 <div
                   class="thinking"
-                  style="display:flex;align-items:center;gap:var(--sc-space-sm);flex-wrap:wrap;"
+                  style="display:flex;align-items:center;gap:var(--sc-space-sm)"
                 >
                   <sc-thinking .active=${true} .steps=${[]}></sc-thinking>
+                  <span class="stream-elapsed">${this._streamElapsed}</span>
                   <button class="abort-btn" @click=${() => this.handleAbort()}>Abort</button>
                 </div>
               `

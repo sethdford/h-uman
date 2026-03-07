@@ -75,6 +75,7 @@
       <a href="#sc-tool-result">sc-tool-result</a>
       <a href="#sc-message-stream">sc-message-stream</a>
       <a href="#sc-message-branch">sc-message-branch</a>
+      <a href="#sc-reasoning-block">sc-reasoning-block</a>
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
@@ -806,6 +807,19 @@
         <div class="code-snippet"><pre><code>&lt;sc-message-branch branches=&quot;3&quot; current=&quot;1&quot;&gt;&lt;/sc-message-branch&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-reasoning-block">
+        <h2>sc-reasoning-block</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 480px;">
+            <sc-reasoning-block
+              content="The user asked about deployment. I will consider: 1) CI/CD pipeline status, 2) environment variables, 3) rollback strategy."
+              duration="Thought for 12s"
+            ></sc-reasoning-block>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-reasoning-block content=&quot;...&quot; duration=&quot;Thought for 12s&quot;&gt;&lt;/sc-reasoning-block&gt;</code></pre></div>
+      </section>
+
     <sc-toast></sc-toast>
 
     <script type="module">
@@ -845,7 +859,7 @@
       import "/src/components/sc-tool-result.js";
       import "/src/components/sc-message-branch.js";
       import "/src/components/sc-message-stream.js";
-      import "/src/components/sc-message-branch.js";
+      import "/src/components/sc-reasoning-block.js";
 
       // Theme toggle
       function setTheme(theme) {

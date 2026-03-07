@@ -14,6 +14,7 @@ import "./sc-code-block.js";
 import "./sc-latex.js";
 import "./sc-message-stream.js";
 import "./sc-message-branch.js";
+import "./sc-reasoning-block.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -567,6 +568,94 @@ describe("sc-message-branch", () => {
     pill?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     await el.updateComplete;
     expect(newBranch).toBe(1);
+    el.remove();
+  });
+});
+
+describe("sc-reasoning-block", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-reasoning-block")).toBeDefined();
+  });
+
+  it("renders with content", async () => {
+    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.content = "The user asked about X. I will consider Y and Z.";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const block = el.shadowRoot?.querySelector(".reasoning-block");
+    expect(block).toBeTruthy();
+    const preview = el.shadowRoot?.querySelector(".preview");
+    expect(preview?.textContent).toContain("The user asked about X");
+    el.remove();
+  });
+
+  it("starts collapsed by default", async () => {
+    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+      content: string;
+      collapsed: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.content = "Some reasoning content here.";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.collapsed).toBe(true);
+    const content = el.shadowRoot?.querySelector(".content");
+    expect(content?.classList.contains("collapsed")).toBe(true);
+    el.remove();
+  });
+
+  it("header has aria-expanded=false when collapsed", async () => {
+    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+      collapsed: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.collapsed = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const header = el.shadowRoot?.querySelector(".header");
+    expect(header?.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
+
+  it("clicking header toggles expanded", async () => {
+    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+      content: string;
+      collapsed: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.content = "Reasoning text.";
+    el.collapsed = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const header = el.shadowRoot?.querySelector(".header") as HTMLElement | null;
+    header?.click();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(false);
+    expect(header?.getAttribute("aria-expanded")).toBe("true");
+    header?.click();
+    await el.updateComplete;
+    expect(el.collapsed).toBe(true);
+    el.remove();
+  });
+
+  it("shows preview when collapsed", async () => {
+    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+      content: string;
+      collapsed: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.content =
+      "This is a very long reasoning block that exceeds one hundred characters and should be truncated with an ellipsis when displayed as a preview in the collapsed state.";
+    el.collapsed = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const preview = el.shadowRoot?.querySelector(".preview");
+    expect(preview).toBeTruthy();
+    expect(preview?.textContent?.endsWith("...")).toBe(true);
+    expect(preview?.textContent?.length).toBeLessThanOrEqual(103);
     el.remove();
   });
 });
