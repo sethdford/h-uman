@@ -1,8 +1,8 @@
 # SeaClaw (Swift/SeaClawKit) — Project Status
 
-This file documents the **Swift/SeaClawKit** module — a Swift wrapper around the C core. Metrics below are for the Swift codebase; the main C codebase has different scale (~588 source files, ~100K lines of C, 2,797 tests, 529 KB binary).
+This file documents the **Swift/SeaClawKit** module — a Swift wrapper around the C core. Metrics below are for the Swift codebase; the main C codebase has different scale (~588 source files, ~101K lines of C, 3,021 tests, ~511 KB binary).
 
-Last updated: 2026-03-06
+Last updated: 2026-03-07
 
 ## Summary
 
@@ -10,9 +10,9 @@ Last updated: 2026-03-06
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **~588**               |
 | Lines of C/H code              | **~101,017**           |
-| Test files                     | 95                     |
-| Tests passing                  | **2,895/2,895 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **529 KB (full)**      |
+| Test files                     | 96                     |
+| Tests passing                  | **3,021/3,021 (100%)** |
+| Binary size (MinSizeRel+LTO)   | **~511 KB (full)**     |
 | Core binary (no curl/channels) | **463 KB**             |
 | seaclaw module parity          | **100%**               |
 
@@ -89,10 +89,13 @@ Last updated: 2026-03-06
 
 - **postgres.c, redis.c, lancedb.c, lucid.c**: Memory engines — stubs present, need external libs for real backend (api.c is real — HTTP API with in-memory mock for tests)
 - **store_pgvector.c**: Vector store stub (needs libpq + pgvector)
-- **MCP client**: Protocol defined, transport not implemented
-- **Sub-agent spawning**: Interface defined, not wired to process management
-- **Voice I/O, multimodal**: Interfaces defined, no TTS/STT integration yet
 - **Self-update**: Interface defined, no download/replace mechanism
+
+Previously stubbed, now **real**:
+
+- **MCP client**: Real — JSON-RPC 2.0 over stdio, tools/list + tools/call, MCP Host server mode
+- **Sub-agent spawning**: Real — pthread pool, spawn/query/cancel/list, 64-slot pool
+- **Voice I/O**: Real — Groq Whisper STT, OpenAI TTS, play via afplay/paplay
 
 ## External Dependencies
 

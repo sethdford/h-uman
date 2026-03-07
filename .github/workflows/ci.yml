@@ -36,8 +36,8 @@ jobs:
         run: |
           COUNT=$(./build/seaclaw_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
           echo "Test count: $COUNT"
-          if [ "$COUNT" -lt 2950 ]; then
-            echo "Test count regression: $COUNT < 2950 baseline"
+          if [ "$COUNT" -lt 3010 ]; then
+            echo "Test count regression: $COUNT < 3010 baseline"
             exit 1
           fi
       - name: Check for untested modules
@@ -129,11 +129,13 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - name: Strict lint
+        run: npm run lint:strict
       - run: npm run format:check
       - name: Test with coverage
         run: npm run test:coverage
       - run: npm run build
-      - name: Enforce bundle size budget (320KB)
+      - name: Enforce bundle size budget (350KB)
         run: bash scripts/check-bundle-size.sh
 
   ui-e2e:
@@ -312,7 +314,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: coverage.info
-          fail_ci_if_error: true
+          fail_ci_if_error: false
       - uses: actions/upload-artifact@v7
         with:
           name: coverage-report

@@ -25,6 +25,22 @@
 #define SC_DAEMON_PID_FILE "seaclaw.pid"
 #define SC_MAX_PATH        1024
 
+static sc_error_t validate_home(const char *home) {
+    if (!home || !home[0]) {
+        fprintf(stderr, "HOME not set\n");
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+    for (const char *p = home; *p; p++) {
+        char c = *p;
+        if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') &&
+            c != '/' && c != '.' && c != '_' && c != '-' && c != ' ') {
+            fprintf(stderr, "HOME contains unsafe characters\n");
+            return SC_ERR_INVALID_ARGUMENT;
+        }
+    }
+    return SC_OK;
+}
+
 static int get_pid_path(char *buf, size_t buf_size) {
     const char *home = getenv("HOME");
     if (!home)
@@ -566,7 +582,7 @@ static int get_binary_path(char *buf, size_t buf_size) {
 sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
     (void)alloc;
     const char *home = getenv("HOME");
-    if (!home)
+    if (validate_home(home) != SC_OK)
         return SC_ERR_INVALID_ARGUMENT;
 
     char bin[SC_MAX_PATH];
@@ -636,7 +652,7 @@ sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
 
 sc_error_t sc_daemon_uninstall(void) {
     const char *home = getenv("HOME");
-    if (!home)
+    if (validate_home(home) != SC_OK)
         return SC_ERR_INVALID_ARGUMENT;
 
     char plist[SC_MAX_PATH];
@@ -648,7 +664,7 @@ sc_error_t sc_daemon_uninstall(void) {
     char cmd[SC_MAX_PATH * 2];
     n = snprintf(cmd, sizeof(cmd), "launchctl unload \"%s\"", plist);
     if (n > 0 && (size_t)n < sizeof(cmd))
-        system(cmd);
+        (void)system(cmd);
 
     remove(plist);
     return SC_OK;
@@ -656,7 +672,7 @@ sc_error_t sc_daemon_uninstall(void) {
 
 sc_error_t sc_daemon_logs(void) {
     const char *home = getenv("HOME");
-    if (!home)
+    if (validate_home(home) != SC_OK)
         return SC_ERR_INVALID_ARGUMENT;
 
     char log_path[SC_MAX_PATH];
@@ -679,7 +695,7 @@ sc_error_t sc_daemon_logs(void) {
 sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
     (void)alloc;
     const char *home = getenv("HOME");
-    if (!home)
+    if (validate_home(home) != SC_OK)
         return SC_ERR_INVALID_ARGUMENT;
 
     char dir[SC_MAX_PATH];
@@ -691,7 +707,7 @@ sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
     n = snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p \"%s\"", dir);
     if (n <= 0 || (size_t)n >= sizeof(mkdir_cmd))
         return SC_ERR_IO;
-    system(mkdir_cmd);
+    (void)system(mkdir_cmd);
 
     char bin[SC_MAX_PATH];
     int found = 0;
@@ -736,7 +752,7 @@ sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
             bin, home);
     fclose(f);
 
-    system("systemctl --user daemon-reload");
+    (void)system("systemctl --user daemon-reload");
     if (system("systemctl --user enable --now " SC_SYSTEMD_UNIT) != 0)
         return SC_ERR_IO;
 
@@ -744,7 +760,7 @@ sc_error_t sc_daemon_install(sc_allocator_t *alloc) {
 }
 
 sc_error_t sc_daemon_uninstall(void) {
-    system("systemctl --user disable --now " SC_SYSTEMD_UNIT);
+    (void)system("systemctl --user disable --now " SC_SYSTEMD_UNIT);
 
     const char *home = getenv("HOME");
     if (!home)
@@ -756,7 +772,7 @@ sc_error_t sc_daemon_uninstall(void) {
     if (n > 0 && (size_t)n < sizeof(unit_path))
         remove(unit_path);
 
-    system("systemctl --user daemon-reload");
+    (void)system("systemctl --user daemon-reload");
     return SC_OK;
 }
 

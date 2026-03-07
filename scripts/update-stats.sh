@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# update-stats.sh — Sync AGENTS.md and README.md with actual repo metrics.
+# update-stats.sh — Sync all docs with actual repo metrics.
+# Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, seaclaw/STUBS.md, CLAUDE.md
 # Usage: ./scripts/update-stats.sh [--apply]
 #   Without --apply: prints stats only (dry run).
-#   With --apply: patches AGENTS.md and README.md in place.
+#   With --apply: patches all files in place.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -32,7 +33,7 @@ TOOL_COUNT=$(find src/tools -maxdepth 1 -name '*.c' ! -name 'factory.c' | wc -l 
 
 # Get test count from binary (try multiple build dirs)
 TEST_COUNT="unknown"
-for test_bin in build/seaclaw_tests build2/seaclaw_tests build-check/seaclaw_tests; do
+for test_bin in build/seaclaw_tests build2/seaclaw_tests build-check/seaclaw_tests build-release/seaclaw_tests; do
     if [ -f "$test_bin" ]; then
         TEST_COUNT=$("$test_bin" 2>/dev/null | grep 'Results:' | sed 's|.*: \([0-9]*\)/.*|\1|' || echo "unknown")
         break

@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake *)",
+      "Bash(make *)",
+      "Bash(./build/seaclaw_tests)",
+      "Bash(./build/seaclaw *)",
+      "Bash(./build-*/seaclaw*)",
+      "Bash(scripts/*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git branch*)",
+      "Bash(git checkout*)",
+      "Bash(git switch*)",
+      "Bash(git stash*)",
+      "Bash(git rev-parse*)",
+      "Bash(git config core.hooksPath*)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(cat *)",
+      "Bash(stat *)",
+      "Bash(nm *)",
+      "Bash(size *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)*",
+      "Bash(git push --force)*",
+      "Bash(git push -f)*",
+      "Bash(git reset --hard)*"
+    ]
+  }
+}

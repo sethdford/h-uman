@@ -26,7 +26,7 @@ Key extension points:
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 
-Current scale: **588 source + header files, ~101K lines of C, ~43K lines of tests, 3021 tests, 32 channels**.
+Current scale: **588 source + header files, ~101K lines of C, ~43K lines of tests, 3,021 tests, 33 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
@@ -138,7 +138,7 @@ Required:
 src/
   main.c                CLI entrypoint and command routing
   agent/                agent loop, context, planner, compaction, dispatcher
-  channels/             32 channel implementations (cli, telegram, discord, slack, ...)
+  channels/             33 channel implementations (cli, telegram, discord, slack, ...)
   providers/            50+ AI provider implementations (9 core + 41 compatible services)
   tools/                63 tool implementations
   memory/               SQLite + markdown + LRU backends, embeddings, vector search

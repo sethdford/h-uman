@@ -45,6 +45,9 @@ reference/
 # MCP config (local build paths)
 .mcp.json
 
+# Claude Code local settings (not shared)
+.claude/settings.local.json
+
 # Worktrees
 .worktrees
 

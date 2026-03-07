@@ -1,0 +1,8 @@
+{
+  "env": {
+    "SC_IS_TEST": "1"
+  },
+  "permissions": {
+    "allow": []
+  }
+}
