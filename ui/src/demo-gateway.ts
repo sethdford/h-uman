@@ -88,7 +88,7 @@ const DEMO_EVENTS = [
   },
 ];
 
-function handleRequest(method: string, _params?: Record<string, unknown>): unknown {
+function handleRequest(method: string, params?: Record<string, unknown>): unknown {
   switch (method) {
     case "connect":
       return {
@@ -222,7 +222,88 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
         agent: { persona: "default", max_turns: 50 },
       };
     case "config.schema":
-      return { schema: { type: "object", properties: {} } };
+      return {
+        schema: {
+          type: "object",
+          description: "SeaClaw runtime configuration",
+          properties: {
+            default_provider: {
+              type: "string",
+              description: "Default AI model provider",
+              enum: ["openai", "anthropic", "gemini", "ollama", "openrouter"],
+              default: "openrouter",
+            },
+            default_model: {
+              type: "string",
+              description: "Default model identifier for chat completions",
+              default: "claude-sonnet-4-20250514",
+            },
+            max_tokens: {
+              type: "integer",
+              description: "Maximum tokens per response",
+              minimum: 100,
+              maximum: 128000,
+              default: 8192,
+            },
+            temperature: {
+              type: "number",
+              description: "Sampling temperature (0.0 = deterministic, 2.0 = creative)",
+              minimum: 0,
+              maximum: 2,
+              default: 0.7,
+            },
+            system_prompt: {
+              type: "string",
+              description: "System prompt prepended to all conversations",
+            },
+            autonomy_level: {
+              type: "string",
+              description: "How much the agent can act without confirmation",
+              enum: ["supervised", "semi", "full"],
+              default: "semi",
+            },
+            sandbox_backend: {
+              type: "string",
+              description: "Sandbox for tool execution isolation",
+              enum: ["none", "bubblewrap", "firejail", "landlock", "docker", "seatbelt"],
+              default: "landlock",
+            },
+            log_level: {
+              type: "string",
+              description: "Logging verbosity",
+              enum: ["debug", "info", "warn", "error"],
+              default: "info",
+            },
+            memory_engine: {
+              type: "string",
+              description: "Memory storage backend",
+              enum: ["sqlite", "markdown", "lru", "none"],
+              default: "sqlite",
+            },
+            gateway_port: {
+              type: "integer",
+              description: "HTTP/WebSocket gateway port",
+              default: 3000,
+            },
+            security: {
+              type: "object",
+              description: "Security and sandbox settings",
+              properties: {
+                allowed_domains: {
+                  type: "array",
+                  description: "Domains allowed for outbound requests",
+                  items: { type: "string" },
+                },
+                blocked_commands: {
+                  type: "array",
+                  description: "Shell commands that are never allowed",
+                  items: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      };
     case "config.set":
       return { ok: true };
     case "tools.catalog":
@@ -240,27 +321,46 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
       return {
         jobs: [
           {
-            id: "j1",
+            id: 1,
+            name: "Daily Summary",
             type: "agent",
+            expression: "0 9 * * *",
             schedule: "0 9 * * *",
             prompt: "Summarize overnight emails",
+            command: "",
             enabled: true,
-            last_run: Date.now() - 3600000,
+            paused: false,
+            next_run: Math.floor(Date.now() / 1000) + 86400,
+            last_run: Math.floor((Date.now() - 3600000) / 1000),
+            created_at: Math.floor((Date.now() - 604800000) / 1000),
           },
           {
-            id: "j2",
+            id: 2,
+            name: "Health Check",
             type: "shell",
+            expression: "*/30 * * * *",
             schedule: "*/30 * * * *",
+            prompt: "",
             command: "git pull && npm test",
             enabled: true,
-            last_run: Date.now() - 1800000,
+            paused: false,
+            next_run: Math.floor(Date.now() / 1000) + 1800,
+            last_run: Math.floor((Date.now() - 1800000) / 1000),
+            created_at: Math.floor((Date.now() - 259200000) / 1000),
           },
           {
-            id: "j3",
+            id: 3,
+            name: "Daily Standup",
             type: "agent",
+            expression: "0 18 * * 1-5",
             schedule: "0 18 * * 1-5",
             prompt: "Generate daily standup report",
+            command: "",
             enabled: false,
+            paused: true,
+            next_run: 0,
+            last_run: 0,
+            created_at: Math.floor((Date.now() - 1209600000) / 1000),
           },
         ],
       };
@@ -463,8 +563,94 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
       };
     case "nodes.action":
       return { ok: true };
-    case "cron.runs":
-      return { runs: [] };
+    case "cron.runs": {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const runs = [
+        {
+          id: 1001,
+          automation_id: "1",
+          name: "Daily Summary",
+          started_at: nowSec - 3600,
+          finished_at: nowSec - 3540,
+          status: "completed",
+          duration_ms: 60000,
+          output: "Summarized 12 emails. 2 urgent items flagged.",
+        },
+        {
+          id: 1002,
+          automation_id: "1",
+          name: "Daily Summary",
+          started_at: nowSec - 90000,
+          finished_at: nowSec - 89400,
+          status: "completed",
+          duration_ms: 60000,
+          output: "No new emails overnight.",
+        },
+        {
+          id: 1003,
+          automation_id: "2",
+          name: "Health Check",
+          started_at: nowSec - 1800,
+          finished_at: nowSec - 1795,
+          status: "completed",
+          duration_ms: 5000,
+          output: "git pull: up to date. npm test: 3207 passed.",
+        },
+        {
+          id: 1004,
+          automation_id: "2",
+          name: "Health Check",
+          started_at: nowSec - 3600,
+          finished_at: nowSec - 3592,
+          status: "failed",
+          duration_ms: 8000,
+          output: "git pull failed: connection refused.",
+        },
+        {
+          id: 1005,
+          automation_id: "1",
+          name: "Daily Summary",
+          started_at: nowSec - 172800,
+          finished_at: nowSec - 172740,
+          status: "completed",
+          duration_ms: 60000,
+          output: "Summarized 8 emails. 1 calendar reminder.",
+        },
+        {
+          id: 1006,
+          automation_id: "2",
+          name: "Health Check",
+          started_at: nowSec - 5400,
+          finished_at: nowSec - 5396,
+          status: "completed",
+          duration_ms: 4000,
+          output: "All systems operational.",
+        },
+        {
+          id: 1007,
+          automation_id: "2",
+          name: "Health Check",
+          started_at: nowSec - 7200,
+          finished_at: nowSec - 7190,
+          status: "running",
+          duration_ms: 10000,
+          output: "",
+        },
+      ];
+      const jobId = params?.id as number | undefined;
+      const limit = (params?.limit as number) ?? 10;
+      const filtered =
+        jobId != null ? runs.filter((r) => String(r.automation_id) === String(jobId)) : runs;
+      const limited = filtered.slice(0, limit);
+      return {
+        runs: limited.map((r) => ({
+          id: r.id,
+          started_at: r.started_at,
+          finished_at: r.finished_at,
+          status: r.status,
+        })),
+      };
+    }
     case "cron.add":
     case "cron.update":
     case "cron.remove":

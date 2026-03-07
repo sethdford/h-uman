@@ -57,7 +57,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
@@ -74,8 +74,8 @@ export class ScSkillsView extends GatewayAwareLitElement {
       align-items: center;
       gap: var(--sc-space-sm);
       flex: 1;
-      min-width: 200px;
-      max-width: 360px;
+      min-width: 12.5rem;
+      max-width: 22.5rem;
     }
     .toolbar-right {
       display: flex;
@@ -114,7 +114,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     .tag-chip {
       display: inline-flex;
       align-items: center;
-      padding: 2px var(--sc-space-sm);
+      padding: var(--sc-space-2xs) var(--sc-space-sm);
       border-radius: var(--sc-radius-full);
       font-size: var(--sc-text-xs);
       font-weight: var(--sc-weight-medium);
@@ -140,7 +140,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     }
     .skills-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
       gap: var(--sc-space-lg);
     }
     .grid-full {
@@ -161,7 +161,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-sm);
-      min-height: 120px;
+      min-height: 7.5rem;
     }
     .skill-header {
       display: flex;
@@ -191,7 +191,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     }
     .skill-tags {
       display: flex;
-      gap: 4px;
+      gap: var(--sc-space-xs);
       flex-wrap: wrap;
       flex: 1;
       min-width: 0;
@@ -221,8 +221,8 @@ export class ScSkillsView extends GatewayAwareLitElement {
       flex-shrink: 0;
     }
     .detail-icon svg {
-      width: 20px;
-      height: 20px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
     }
     .detail-name {
       font-size: var(--sc-text-xl);
@@ -277,14 +277,14 @@ export class ScSkillsView extends GatewayAwareLitElement {
     }
     .registry-search-row {
       margin-bottom: var(--sc-space-lg);
-      max-width: 400px;
+      max-width: 25rem;
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -292,13 +292,15 @@ export class ScSkillsView extends GatewayAwareLitElement {
         grid-template-columns: 1fr;
       }
     }
-    @media (max-width: 768px) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
       .skills-grid {
         grid-template-columns: 1fr 1fr;
       }
     }
     @media (prefers-reduced-motion: reduce) {
-      * {
+      .tag-chip,
+      .skill-card,
+      :host {
         animation-duration: 0s !important;
         transition-duration: 0s !important;
       }
@@ -318,6 +320,14 @@ export class ScSkillsView extends GatewayAwareLitElement {
   @state() private installUrl = "";
   @state() private installUrlError = "";
   private _searchTimer = 0;
+
+  override disconnectedCallback(): void {
+    if (this._searchTimer) {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = 0;
+    }
+    super.disconnectedCallback();
+  }
 
   private _validateInstallUrl(url: string): string {
     const trimmed = url.trim();
@@ -416,7 +426,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
 
   private _onRegistrySearch(e: CustomEvent<{ value: string }>) {
     this.registryQuery = e.detail.value;
-    window.clearTimeout(this._searchTimer);
+    if (this._searchTimer) clearTimeout(this._searchTimer);
     this._searchTimer = window.setTimeout(() => {
       this._fetchRegistry(this.registryQuery);
     }, 300);
@@ -529,6 +539,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
             variant="primary"
             ?disabled=${!this.installUrl.trim() || !!this.installUrlError || this.actionLoading}
             @click=${this._installFromUrl}
+            aria-label="Install skill from URL"
             >Install</sc-button
           >
         </div>
@@ -651,7 +662,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
         </div>
         <div class="toolbar-right">
           <span class="staleness">${this.stalenessLabel}</span>
-          <sc-button variant="ghost" @click=${() => this.load()}
+          <sc-button variant="ghost" @click=${() => this.load()} aria-label="Refresh skills list"
             >${icons.refresh} Refresh</sc-button
           >
         </div>
@@ -870,11 +881,11 @@ export class ScSkillsView extends GatewayAwareLitElement {
   override render() {
     return html` ${this._renderHero()}
     ${this.error
-      ? html`<sc-empty-state
-          .icon=${icons.warning}
-          heading="Error"
-          description=${this.error}
-        ></sc-empty-state>`
+      ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+          <sc-button variant="primary" @click=${() => this.load()} aria-label="Retry loading skills"
+            >Retry</sc-button
+          >
+        </sc-empty-state>`
       : nothing}
     ${this.loading
       ? this._renderSkeleton()

@@ -36,6 +36,33 @@ export function formatTime(ts: number): string {
   });
 }
 
+export function formatTimestampForDivider(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (isToday) return `Today ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday =
+    d.getDate() === yesterday.getDate() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getFullYear() === yesterday.getFullYear();
+  if (isYesterday) return `Yesterday ${time}`;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export const EVENT_NAMES = {
   CHAT: "chat",
   TOOL_CALL: "agent.tool",

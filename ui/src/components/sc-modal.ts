@@ -56,8 +56,8 @@ export class ScModal extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
+      width: var(--sc-icon-xl);
+      height: var(--sc-icon-xl);
       padding: 0;
       background: transparent;
       border: none;
@@ -68,8 +68,8 @@ export class ScModal extends LitElement {
     }
 
     .close-btn svg {
-      width: 16px;
-      height: 16px;
+      width: var(--sc-icon-sm);
+      height: var(--sc-icon-sm);
     }
     .close-btn:hover {
       color: var(--sc-text);

@@ -291,15 +291,19 @@ export class ScModelsView extends GatewayAwareLitElement {
     }
   }
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
-      <sc-page-hero>
+      <sc-page-hero role="region" aria-label="Models and providers">
         <sc-section-header
           heading="Models & Providers"
           description="AI model providers and their configurations"
         >
-          <div class="search-wrap">
+          <div class="search-wrap" role="group" aria-label="Search providers">
             <sc-search
               placeholder="Search providers..."
               @sc-search=${(e: CustomEvent<{ value: string }>) => (this.filter = e.detail.value)}
@@ -345,7 +349,7 @@ export class ScModelsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-page-hero>
+      <sc-page-hero role="region" aria-label="Models and providers">
         <sc-section-header
           heading="Models"
           description="AI model providers and their configurations"

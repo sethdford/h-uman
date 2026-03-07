@@ -223,7 +223,7 @@ export class ScApp extends LitElement {
       gap: var(--sc-space-sm);
       padding: var(--sc-space-xs) var(--sc-space-md);
       background: var(--sc-error);
-      color: var(--sc-on-accent, #fff);
+      color: var(--sc-on-accent);
       font-size: var(--sc-text-sm);
       font-weight: var(--sc-weight-medium);
       animation: sc-slide-down var(--sc-duration-normal) var(--sc-ease-out);
@@ -237,9 +237,9 @@ export class ScApp extends LitElement {
       }
     }
     .disconnect-banner button {
-      background: color-mix(in srgb, var(--sc-on-accent, #fff) 20%, transparent);
-      border: 1px solid color-mix(in srgb, var(--sc-on-accent, #fff) 40%, transparent);
-      color: var(--sc-on-accent, #fff);
+      background: color-mix(in srgb, var(--sc-on-accent) 20%, transparent);
+      border: 1px solid color-mix(in srgb, var(--sc-on-accent) 40%, transparent);
+      color: var(--sc-on-accent);
       padding: var(--sc-space-2xs) var(--sc-space-sm);
       border-radius: var(--sc-radius-sm);
       font-size: var(--sc-text-xs);
@@ -248,7 +248,7 @@ export class ScApp extends LitElement {
       transition: background var(--sc-duration-fast);
     }
     .disconnect-banner button:hover {
-      background: color-mix(in srgb, var(--sc-on-accent, #fff) 35%, transparent);
+      background: color-mix(in srgb, var(--sc-on-accent) 35%, transparent);
     }
 
     .mobile-nav {
@@ -374,8 +374,8 @@ export class ScApp extends LitElement {
       background: var(--sc-bg-elevated);
     }
     .more-item .more-icon {
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
     }
     .more-item .more-icon svg {
       width: 100%;

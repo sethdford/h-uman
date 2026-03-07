@@ -54,8 +54,8 @@ export class ScButton extends LitElement {
       text-shadow: 0 1px 1px color-mix(in srgb, var(--sc-text) 20%, transparent);
       box-shadow:
         var(--sc-shadow-sm),
-        inset 0 1px 0 color-mix(in srgb, white 30%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, black 15%, transparent);
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 30%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--sc-color-black) 15%, transparent);
     }
     button.variant-primary:hover:not(:disabled) {
       background: var(--sc-accent-hover);
@@ -63,15 +63,15 @@ export class ScButton extends LitElement {
       transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
       box-shadow:
         var(--sc-shadow-glow-accent),
-        inset 0 1px 0 color-mix(in srgb, white 35%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, black 15%, transparent);
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 35%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--sc-color-black) 15%, transparent);
     }
     button.variant-primary:active:not(:disabled) {
       transform: translateY(0) scale(0.96);
       box-shadow:
         var(--sc-shadow-xs),
-        inset 0 1px 0 color-mix(in srgb, white 20%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, black 10%, transparent);
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 20%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--sc-color-black) 10%, transparent);
       transition-duration: var(--sc-duration-fast);
     }
 
@@ -92,7 +92,7 @@ export class ScButton extends LitElement {
       transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
       box-shadow:
         var(--sc-shadow-sm),
-        inset 0 1px 0 color-mix(in srgb, white 90%, transparent),
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 90%, transparent),
         inset 0 -1px 0 color-mix(in srgb, var(--sc-text) 4%, transparent);
     }
     button.variant-secondary:active:not(:disabled) {
@@ -108,16 +108,16 @@ export class ScButton extends LitElement {
       color: var(--sc-error);
       box-shadow:
         var(--sc-shadow-xs),
-        inset 0 1px 0 color-mix(in srgb, white 30%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, black 8%, transparent);
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 30%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--sc-color-black) 8%, transparent);
     }
     button.variant-destructive:hover:not(:disabled) {
       transform: translateY(var(--sc-physics-card-hover-translateY, -2px)) scale(1.02);
       box-shadow:
         0 4px 16px color-mix(in srgb, var(--sc-error) 20%, transparent),
         0 2px 6px color-mix(in srgb, var(--sc-text) 8%, transparent),
-        inset 0 1px 0 color-mix(in srgb, white 30%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, black 8%, transparent);
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 30%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--sc-color-black) 8%, transparent);
     }
     button.variant-destructive:active:not(:disabled) {
       transform: translateY(0) scale(0.96);
@@ -170,8 +170,8 @@ export class ScButton extends LitElement {
     }
 
     .spinner {
-      width: 14px;
-      height: 14px;
+      width: var(--sc-text-base);
+      height: var(--sc-text-base);
       border: 2px solid currentColor;
       border-right-color: transparent;
       border-radius: 50%;

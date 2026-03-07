@@ -849,7 +849,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
           @keydown=${this.handleKeyDown}
           resize="none"
           rows="2"
-          aria-label="Speech transcript"
+          .accessibleLabel=${"Speech transcript"}
         ></sc-textarea>
         <sc-button
           variant="primary"

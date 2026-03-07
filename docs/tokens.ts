@@ -425,6 +425,14 @@ export const tokens = {
     warning: "#fde047",
     warningDim: "rgba(253, 224, 71, 0.2)",
   },
+  icon: {
+    2xl: "36px",
+    lg: "24px",
+    md: "20px",
+    sm: "16px",
+    xl: "28px",
+    xs: "14px",
+  },
   input: {
     fontSize: "0.875rem",
     minHeight: "40px",

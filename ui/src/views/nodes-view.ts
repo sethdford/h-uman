@@ -43,20 +43,20 @@ export class ScNodesView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-nodes;
       display: block;
-      max-width: 1200px;
+      max-width: 75rem;
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -178,10 +178,17 @@ export class ScNodesView extends GatewayAwareLitElement {
     this._sheetNode = null;
   }
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   private _renderSkeleton(): TemplateResult {
     return html`
-      <sc-page-hero>
-        <sc-section-header heading="Nodes" description="Loading..."></sc-section-header>
+      <sc-page-hero role="region" aria-label="Nodes overview">
+        <sc-section-header
+          heading="Nodes"
+          description="Connected node instances and their status"
+        ></sc-section-header>
       </sc-page-hero>
       <div class="stats-row">
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
@@ -195,7 +202,7 @@ export class ScNodesView extends GatewayAwareLitElement {
 
   private _renderContent(): TemplateResult {
     return html`
-      <sc-page-hero>
+      <sc-page-hero role="region" aria-label="Nodes overview">
         <sc-section-header
           heading="Nodes"
           description="Connected node instances and their status"

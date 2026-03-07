@@ -121,7 +121,7 @@ export class ScCommandPalette extends LitElement {
       backdrop-filter: blur(24px) saturate(180%);
       -webkit-backdrop-filter: blur(24px) saturate(180%);
       box-shadow: var(--sc-shadow-xl);
-      border: 1px solid var(--sc-glass-border-color, rgba(255, 255, 255, 0.08));
+      border: 1px solid var(--sc-glass-border-color);
       border-radius: var(--sc-radius-xl);
       max-width: 560px;
       width: 100%;

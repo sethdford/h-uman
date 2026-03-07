@@ -56,7 +56,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
       view-transition-name: view-agents;
       display: block;
       color: var(--sc-text);
-      max-width: 1200px;
+      max-width: 75rem;
       padding: var(--sc-space-lg) var(--sc-space-xl);
     }
 
@@ -67,7 +67,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
 
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
@@ -108,7 +108,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
 
     .profile-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
       gap: var(--sc-space-sm);
       font-size: var(--sc-text-sm);
     }
@@ -125,7 +125,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
       margin-bottom: var(--sc-space-2xl);
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
       .metrics,
       .skeleton-metrics {
         grid-template-columns: repeat(2, 1fr);
@@ -135,7 +135,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
       }
     }
 
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .metrics,
       .skeleton-metrics {
         grid-template-columns: 1fr;
@@ -262,6 +262,10 @@ export class ScAgentsView extends GatewayAwareLitElement {
     this.dispatchNavigate("chat:" + key);
   }
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
@@ -281,8 +285,8 @@ export class ScAgentsView extends GatewayAwareLitElement {
     const provider = this.config.default_provider || "\u2014";
     const model = this.config.default_model || "\u2014";
     return html`
-      <sc-page-hero>
-        <sc-section-header heading="SeaClaw Agent" description="${provider} · ${model}">
+      <sc-page-hero role="region" aria-label="SeaClaw Agent overview">
+        <sc-section-header heading="SeaClaw Agent" description="Monitor autonomous agent instances">
           <span class="staleness">${this.stalenessLabel}</span>
           <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data"
             >Refresh</sc-button

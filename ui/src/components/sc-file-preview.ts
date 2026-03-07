@@ -72,8 +72,8 @@ export class ScFilePreview extends LitElement {
     }
 
     .card-icon svg {
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
     }
 
     .card-name {
@@ -101,8 +101,8 @@ export class ScFilePreview extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
       padding: 0;
       background: color-mix(in srgb, var(--sc-bg-surface) 90%, transparent);
       backdrop-filter: blur(8px);

@@ -20,7 +20,7 @@ export class ScMessageActions extends LitElement {
       align-items: center;
       gap: var(--sc-space-2xs);
       position: absolute;
-      top: -28px;
+      top: calc(var(--sc-space-xl) * -1); /* sc-lint-ok: action bar offset */
       right: var(--sc-space-sm);
       padding: var(--sc-space-2xs) var(--sc-space-sm);
       background: color-mix(in srgb, var(--sc-bg-overlay, var(--sc-bg-surface)) 65%, transparent);
@@ -46,8 +46,8 @@ export class ScMessageActions extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
       padding: 0;
       background: transparent;
       border: none;
@@ -74,8 +74,8 @@ export class ScMessageActions extends LitElement {
     }
 
     .action-btn svg {
-      width: 16px;
-      height: 16px;
+      width: var(--sc-icon-sm);
+      height: var(--sc-icon-sm);
     }
 
     @media (prefers-reduced-motion: reduce) {

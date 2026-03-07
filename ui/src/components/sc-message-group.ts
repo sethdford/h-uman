@@ -24,10 +24,48 @@ export class ScMessageGroup extends LitElement {
       align-items: flex-start;
     }
 
+    .group-inner {
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+      gap: var(--sc-space-sm);
+      max-width: 100%;
+    }
+
+    .group.user .group-inner {
+      flex-direction: row-reverse;
+    }
+
+    .avatar {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .avatar.assistant {
+      background: var(--sc-accent);
+      color: var(--sc-on-accent);
+    }
+
+    .avatar.user {
+      background: var(--sc-accent-subtle);
+      color: var(--sc-accent);
+    }
+
+    .avatar svg {
+      width: 14px;
+      height: 14px;
+    }
+
     .messages {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xs);
+      min-width: 0;
     }
 
     .group-footer {
@@ -53,15 +91,6 @@ export class ScMessageGroup extends LitElement {
       justify-content: flex-start;
     }
 
-    .group.user .group-footer slot[name="avatar"] {
-      display: none;
-    }
-
-    ::slotted([slot="avatar"]) {
-      width: var(--sc-space-md);
-      height: var(--sc-space-md);
-    }
-
     @media (prefers-reduced-motion: reduce) {
       .group-footer {
         transition: none;
@@ -76,11 +105,15 @@ export class ScMessageGroup extends LitElement {
         role="group"
         aria-label="${this.role === "user" ? "Your messages" : "Assistant messages"}"
       >
-        <div class="messages">
-          <slot></slot>
+        <div class="group-inner">
+          <div class="avatar ${this.role}" aria-hidden="true">
+            <slot name="avatar"></slot>
+          </div>
+          <div class="messages">
+            <slot></slot>
+          </div>
         </div>
         <div class="group-footer">
-          <slot name="avatar"></slot>
           <slot name="timestamp"></slot>
         </div>
       </div>

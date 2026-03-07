@@ -24,20 +24,20 @@ export class ScToolsView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-tools;
       display: block;
-      max-width: 1200px;
+      max-width: 75rem;
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -124,6 +124,10 @@ export class ScToolsView extends GatewayAwareLitElement {
     this._expandedTool = this._expandedTool === name ? null : name;
   }
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   private get _expandedToolData(): unknown {
     if (!this._expandedTool) return undefined;
     const t = this.tools.find((x) => (x.name ?? "unnamed") === this._expandedTool);
@@ -132,8 +136,11 @@ export class ScToolsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-page-hero>
-        <sc-section-header heading="Tools" description="Loading..."></sc-section-header>
+      <sc-page-hero role="region" aria-label="Tools overview">
+        <sc-section-header
+          heading="Tools"
+          description="Available tool integrations and their configurations"
+        ></sc-section-header>
       </sc-page-hero>
       <div class="stats-row">
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
@@ -152,10 +159,10 @@ export class ScToolsView extends GatewayAwareLitElement {
     const expandedParams = this._expandedToolData;
 
     return html`
-      <sc-page-hero>
+      <sc-page-hero role="region" aria-label="Tools overview">
         <sc-section-header
           heading="Tools"
-          description=${`${count} tool${count === 1 ? "" : "s"} available`}
+          description="Available tool integrations and their configurations"
         ></sc-section-header>
       </sc-page-hero>
       <div class="stats-row">

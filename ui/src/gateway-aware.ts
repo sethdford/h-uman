@@ -60,9 +60,12 @@ export class GatewayAwareLitElement extends LitElement {
     this._stopAutoRefresh();
   }
 
-  private _doLoad(): void {
-    this.load();
-    this.lastLoadedAt = Date.now();
+  private async _doLoad(): Promise<void> {
+    try {
+      await this.load();
+    } finally {
+      this.lastLoadedAt = Date.now();
+    }
   }
 
   private _startAutoRefresh(): void {
@@ -84,5 +87,5 @@ export class GatewayAwareLitElement extends LitElement {
     }
   }
 
-  protected load(): void {}
+  protected load(): void | Promise<void> {}
 }

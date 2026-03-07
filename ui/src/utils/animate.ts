@@ -19,7 +19,13 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-const DEFAULT_DURATION = 200;
+/** Matches --sc-duration-normal (200ms). */
+const DURATION_NORMAL = 200;
+/** Matches --sc-duration-slow (350ms). */
+const DURATION_SLOW = 350;
+/** Matches --sc-duration-moderate (300ms). */
+const DURATION_MODERATE = 300;
+const DEFAULT_DURATION = DURATION_NORMAL;
 
 function withReducedMotion<T>(fn: () => T, fallback: () => T): T {
   return prefersReducedMotion() ? fallback() : fn();
@@ -47,7 +53,7 @@ export function springTransition(
   return withReducedMotion(
     () =>
       element.animate(kf, {
-        duration: 400,
+        duration: DURATION_SLOW,
         easing,
         fill: "forwards",
       }),
@@ -92,7 +98,7 @@ export function flipAnimate(
               { transform: "translate(0, 0)" },
             ],
             {
-              duration: 300,
+              duration: DURATION_MODERATE,
               easing,
               fill: "forwards",
             },
@@ -137,7 +143,7 @@ export function staggerEntrance(
       {
         duration: prefersReducedMotion() ? 0 : 200,
         delay: prefersReducedMotion() ? 0 : delay,
-        easing: "ease-out",
+        easing: "cubic-bezier(0.16, 1, 0.3, 1)" /* --sc-ease-out */,
         fill: "forwards",
       },
     );

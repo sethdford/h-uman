@@ -478,6 +478,7 @@ function main() {
 const COMPONENT_PREFIXES = [
   "sidebar",
   "button",
+  "icon",
   "card",
   "modal",
   "badge",

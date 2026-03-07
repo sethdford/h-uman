@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-07T22:04:08.378Z",
+  "generated": "2026-03-07T22:25:35.396Z",
   "groups": {
     "color.neutral": [
       {
@@ -2557,6 +2557,32 @@
       {
         "name": "icon-size",
         "value": "24px"
+      }
+    ],
+    "icon": [
+      {
+        "name": "xs",
+        "value": "14px"
+      },
+      {
+        "name": "sm",
+        "value": "16px"
+      },
+      {
+        "name": "md",
+        "value": "20px"
+      },
+      {
+        "name": "lg",
+        "value": "24px"
+      },
+      {
+        "name": "xl",
+        "value": "28px"
+      },
+      {
+        "name": "2xl",
+        "value": "36px"
       }
     ],
     "opacity": [

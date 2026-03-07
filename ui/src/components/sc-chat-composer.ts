@@ -144,8 +144,8 @@ export class ScChatComposer extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 36px;
-      height: 36px;
+      width: var(--sc-icon-2xl);
+      height: var(--sc-icon-2xl);
       padding: 0;
       background: transparent;
       border: none;
@@ -193,8 +193,8 @@ export class ScChatComposer extends LitElement {
       color: var(--sc-bg);
     }
     .send-btn svg {
-      width: 18px;
-      height: 18px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
     }
     .send-btn:hover:not(:disabled) {
       filter: brightness(1.1);
@@ -275,6 +275,10 @@ export class ScChatComposer extends LitElement {
       }
     }
   `;
+
+  focus(): void {
+    this._textarea?.focus();
+  }
 
   private _resizeTextarea(): void {
     const el = this._textarea;

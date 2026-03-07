@@ -8,11 +8,11 @@ const MENU_OFFSET_Y = 50;
 const MENU_MIN_Y = 10;
 
 const REACTIONS = [
-  { key: "👍", icon: "thumbs-up", label: "Thumbs up" },
-  { key: "👎", icon: "thumbs-down", label: "Thumbs down" },
-  { key: "❤️", icon: "heart", label: "Heart" },
-  { key: "📋", icon: "copy", label: "Copy" },
-  { key: "🔖", icon: "bookmark-simple", label: "Bookmark" },
+  { key: "👍", icon: "thumbs-up", label: "Thumbs up" }, // sc-lint-ok
+  { key: "👎", icon: "thumbs-down", label: "Thumbs down" }, // sc-lint-ok
+  { key: "❤️", icon: "heart", label: "Heart" }, // sc-lint-ok
+  { key: "📋", icon: "copy", label: "Copy" }, // sc-lint-ok
+  { key: "🔖", icon: "bookmark-simple", label: "Bookmark" }, // sc-lint-ok
 ] as const;
 
 @customElement("sc-tapback-menu")
@@ -80,8 +80,8 @@ export class ScTapbackMenu extends LitElement {
       outline-offset: 2px;
     }
     .reaction-btn svg {
-      width: var(--sc-space-lg);
-      height: var(--sc-space-lg);
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
     }
     @media (prefers-reduced-motion: reduce) {
       .bar {

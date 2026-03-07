@@ -133,8 +133,8 @@ export class ScToast extends LitElement {
     }
 
     .dismiss-btn svg {
-      width: 16px;
-      height: 16px;
+      width: var(--sc-icon-sm);
+      height: var(--sc-icon-sm);
     }
   `;
 

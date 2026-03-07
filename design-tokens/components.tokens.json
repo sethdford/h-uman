@@ -100,5 +100,37 @@
     "size": { "$value": "56px", "$type": "dimension" },
     "radius": { "$value": "{radius.xl}", "$type": "dimension" },
     "icon-size": { "$value": "24px", "$type": "dimension" }
+  },
+  "icon": {
+    "xs": {
+      "$value": "14px",
+      "$type": "dimension",
+      "$description": "Extra-small icon — inline text"
+    },
+    "sm": {
+      "$value": "16px",
+      "$type": "dimension",
+      "$description": "Small icon — buttons, list items"
+    },
+    "md": {
+      "$value": "20px",
+      "$type": "dimension",
+      "$description": "Medium icon — default"
+    },
+    "lg": {
+      "$value": "24px",
+      "$type": "dimension",
+      "$description": "Large icon — headers, emphasis"
+    },
+    "xl": {
+      "$value": "28px",
+      "$type": "dimension",
+      "$description": "Extra-large icon — feature cards"
+    },
+    "2xl": {
+      "$value": "36px",
+      "$type": "dimension",
+      "$description": "2x extra-large icon — heroes, empty states"
+    }
   }
 }

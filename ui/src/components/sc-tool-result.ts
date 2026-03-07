@@ -42,7 +42,7 @@ export class ScToolResult extends LitElement {
     }
 
     .container.status-running {
-      animation: sc-pulse-border 1.5s ease-in-out infinite;
+      animation: sc-pulse-border 1.5s ease-in-out infinite; /* sc-lint-ok: ambient pulse */
     }
 
     .container.status-success {
@@ -78,8 +78,8 @@ export class ScToolResult extends LitElement {
     }
 
     .icon {
-      width: 16px;
-      height: 16px;
+      width: var(--sc-icon-sm);
+      height: var(--sc-icon-sm);
       flex-shrink: 0;
       color: inherit;
     }

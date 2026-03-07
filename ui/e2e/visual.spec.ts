@@ -33,7 +33,8 @@ test.describe("Visual Regression — Dark Theme", () => {
       const url = view.hash ? `/?demo${view.hash}` : "/?demo";
       await page.goto(url);
       await page.waitForTimeout(1500);
-      if (!snapshotExists(testInfo, snapName)) {
+      const updating = testInfo.config.updateSnapshots !== "none";
+      if (!updating && !snapshotExists(testInfo, snapName)) {
         test.skip(true, `No baseline for ${process.platform}, run --update-snapshots locally`);
       }
       await expect(page).toHaveScreenshot(`${view.name}-dark.png`, {
@@ -54,7 +55,8 @@ test.describe("Visual Regression — Light Theme", () => {
         document.documentElement.setAttribute("data-theme", "light");
       });
       await page.waitForTimeout(500);
-      if (!snapshotExists(testInfo, snapName)) {
+      const updating = testInfo.config.updateSnapshots !== "none";
+      if (!updating && !snapshotExists(testInfo, snapName)) {
         test.skip(true, `No baseline for ${process.platform}, run --update-snapshots locally`);
       }
       await expect(page).toHaveScreenshot(`${view.name}-light.png`, {
@@ -69,7 +71,8 @@ test.describe("Visual Regression — Catalog", () => {
     const snapName = `catalog-${testInfo.project.name}-${process.platform}.png`;
     await page.goto("/catalog.html");
     await page.waitForTimeout(1000);
-    if (!snapshotExists(testInfo, snapName)) {
+    const updating = testInfo.config.updateSnapshots !== "none";
+    if (!updating && !snapshotExists(testInfo, snapName)) {
       test.skip(true, `No baseline for ${process.platform}, run --update-snapshots locally`);
     }
     await expect(page).toHaveScreenshot("catalog.png", {

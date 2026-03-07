@@ -8,6 +8,9 @@ export interface DataTableColumn {
   width?: string;
 }
 
+/**
+ * @deprecated Use sc-data-table-v2 instead. Still used in: components.test.ts, catalog.html
+ */
 @customElement("sc-data-table")
 export class ScDataTable extends LitElement {
   @property({ type: Array }) columns: DataTableColumn[] = [];

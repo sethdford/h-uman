@@ -249,6 +249,10 @@ export class ScSecurityView extends GatewayAwareLitElement {
   @state() private loading = false;
   @state() private error = "";
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   protected override async load(): Promise<void> {
     const gw = this.gateway;
     if (!gw) return;
@@ -445,7 +449,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
             <span class="policy-label">Enabled</span>
             <sc-switch
               checked=${this.sandboxEnabled}
-              label=""
+              label="Enable sandbox"
               @sc-change=${this._onSandboxToggle}
             ></sc-switch>
           </div>
@@ -464,7 +468,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
             <span class="policy-label">Enabled</span>
             <sc-switch
               checked=${this.netProxyEnabled}
-              label=""
+              label="Enable network proxy"
               @sc-change=${this._onNetProxyToggle}
             ></sc-switch>
           </div>
@@ -535,7 +539,13 @@ export class ScSecurityView extends GatewayAwareLitElement {
               `
             : nothing}
           <div class="control-row">
-            <sc-button variant="secondary" size="sm" @click=${this._onUnpair}> Unpair </sc-button>
+            <sc-button
+              variant="secondary"
+              size="sm"
+              @click=${this._onUnpair}
+              aria-label="Unpair device"
+              >Unpair</sc-button
+            >
           </div>
         </div>
       </sc-card>
@@ -620,7 +630,11 @@ export class ScSecurityView extends GatewayAwareLitElement {
 
     if (this.error) {
       return html`${hero}
-        <sc-empty-state heading="Error" description=${this.error}></sc-empty-state>`;
+        <sc-empty-state
+          .icon=${icons.warning}
+          heading="Error"
+          description=${this.error}
+        ></sc-empty-state>`;
     }
 
     if (!this.config) {

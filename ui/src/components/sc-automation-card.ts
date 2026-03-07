@@ -156,8 +156,8 @@ export class ScAutomationCard extends LitElement {
       position: absolute;
       height: 16px;
       width: 16px;
-      left: 2px;
-      bottom: 2px;
+      left: 2px; /* sc-lint-ok: sub-token toggle position */
+      bottom: 2px; /* sc-lint-ok: sub-token toggle position */
       background: var(--sc-bg);
       border-radius: var(--sc-radius-full);
       box-shadow: var(--sc-shadow-sm);
@@ -373,8 +373,8 @@ export class ScAutomationCard extends LitElement {
     }
 
     .footer-actions .icon-btn svg {
-      width: 16px;
-      height: 16px;
+      width: var(--sc-icon-sm);
+      height: var(--sc-icon-sm);
     }
 
     .created-at {

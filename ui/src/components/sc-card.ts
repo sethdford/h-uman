@@ -24,7 +24,7 @@ export class ScCard extends LitElement {
       padding: var(--sc-space-xl);
       box-shadow:
         var(--sc-shadow-card),
-        inset 0 1px 0 color-mix(in srgb, white 90%, transparent),
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 90%, transparent),
         inset 0 -1px 0 color-mix(in srgb, var(--sc-text) 4%, transparent);
       overflow: hidden;
     }
@@ -37,17 +37,17 @@ export class ScCard extends LitElement {
       border-radius: inherit;
       background: linear-gradient(
         180deg,
-        color-mix(in srgb, white 70%, transparent),
-        color-mix(in srgb, white 10%, transparent) 30%,
+        color-mix(in srgb, var(--sc-color-white) 70%, transparent),
+        color-mix(in srgb, var(--sc-color-white) 10%, transparent) 30%,
         transparent 60%
       );
       mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
+        linear-gradient(white 0 0) content-box,
+        linear-gradient(white 0 0);
       mask-composite: exclude;
       -webkit-mask:
-        linear-gradient(#fff 0 0) content-box,
-        linear-gradient(#fff 0 0);
+        linear-gradient(white 0 0) content-box,
+        linear-gradient(white 0 0);
       -webkit-mask-composite: xor;
       padding: 1px;
       pointer-events: none;
@@ -81,14 +81,14 @@ export class ScCard extends LitElement {
     .card.elevated {
       box-shadow:
         var(--sc-shadow-md),
-        inset 0 1px 0 color-mix(in srgb, white 90%, transparent),
+        inset 0 1px 0 color-mix(in srgb, var(--sc-color-white) 90%, transparent),
         inset 0 -1px 0 color-mix(in srgb, var(--sc-text) 4%, transparent);
     }
 
     /* Accent top-band — teal gradient bar + tinted wash below */
     .card.accent {
       border-top: none;
-      padding-top: calc(var(--sc-space-xl) + 4px);
+      padding-top: calc(var(--sc-space-xl) + 4px); /* sc-lint-ok: token + micro-adjust */
     }
     .card.accent::after {
       height: 4px;
@@ -114,8 +114,8 @@ export class ScCard extends LitElement {
     /* Glass variant — Apple Liquid Glass with specular highlight */
     .card.glass {
       background: color-mix(in srgb, var(--sc-bg-surface) 65%, transparent);
-      backdrop-filter: blur(24px) saturate(180%);
-      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      backdrop-filter: blur(var(--sc-blur-lg)) saturate(var(--sc-glass-standard-saturate));
+      -webkit-backdrop-filter: blur(var(--sc-blur-lg)) saturate(var(--sc-glass-standard-saturate));
       border: 1px solid color-mix(in srgb, var(--sc-border-subtle) 40%, transparent);
       box-shadow:
         var(--sc-shadow-card),
@@ -125,7 +125,7 @@ export class ScCard extends LitElement {
     .card.glass::before {
       background: radial-gradient(
         ellipse 60% 40% at 25% 0%,
-        color-mix(in srgb, white 15%, transparent),
+        color-mix(in srgb, var(--sc-color-white) 15%, transparent),
         transparent 70%
       );
       mask: none;
@@ -141,7 +141,7 @@ export class ScCard extends LitElement {
     :host([hoverable]),
     :host([clickable]) {
       transition:
-        transform var(--sc-duration-normal) var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
+        transform var(--sc-duration-normal) var(--sc-ease-spring),
         box-shadow var(--sc-duration-normal) var(--sc-ease-out);
     }
     :host([hoverable]:hover),

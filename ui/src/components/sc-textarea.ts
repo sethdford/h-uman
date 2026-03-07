@@ -13,6 +13,7 @@ export class ScTextarea extends LitElement {
   @property({ type: String }) error = "";
   @property({ type: Number }) maxlength = 0;
   @property({ type: String }) resize: ResizeMode = "vertical";
+  @property({ type: String }) accessibleLabel = "";
 
   @state() private _textareaId = `sc-textarea-${Math.random().toString(36).slice(2, 11)}`;
 
@@ -154,6 +155,7 @@ export class ScTextarea extends LitElement {
             placeholder=${this.placeholder}
             ?disabled=${this.disabled}
             maxlength=${this.maxlength || undefined}
+            aria-label=${this.accessibleLabel || undefined}
             aria-invalid=${this.error ? "true" : "false"}
             aria-describedby=${errorId ?? undefined}
             @input=${this._onInput}

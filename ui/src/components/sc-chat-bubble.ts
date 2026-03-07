@@ -94,11 +94,11 @@ export class ScChatBubble extends LitElement {
       margin-right: auto;
       max-width: 85%;
       background: color-mix(in srgb, var(--sc-bg-surface) 65%, transparent);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(var(--sc-blur-md));
+      -webkit-backdrop-filter: blur(var(--sc-blur-md));
       color: var(--sc-text);
-      border: 1px solid color-mix(in srgb, white 8%, transparent);
-      border-radius: 20px 20px 20px 6px;
+      border: 1px solid color-mix(in srgb, var(--sc-color-white) 8%, transparent);
+      border-radius: var(--sc-radius-xl) var(--sc-radius-xl) var(--sc-radius-xl) var(--sc-radius-sm);
       box-shadow: var(--sc-shadow-xs);
       animation: sc-bubble-receive var(--sc-duration-fast) var(--sc-ease-out) both;
     }
@@ -282,7 +282,7 @@ export class ScChatBubble extends LitElement {
 
     .cursor {
       display: inline-block;
-      width: 2px;
+      width: var(--sc-focus-ring-width);
       height: 1em;
       background: var(--sc-accent);
       margin-left: var(--sc-space-2xs);
@@ -339,8 +339,8 @@ export class ScChatBubble extends LitElement {
     }
 
     .bubble:focus-visible {
-      outline: 2px solid var(--sc-accent);
-      outline-offset: 2px;
+      outline: var(--sc-focus-ring-width) solid var(--sc-accent);
+      outline-offset: var(--sc-focus-ring-offset);
     }
   `;
 

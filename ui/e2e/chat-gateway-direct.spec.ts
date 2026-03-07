@@ -3,20 +3,21 @@ import { test } from "@playwright/test";
 /**
  * Test sending a message via gateway client directly (bypasses Shadow DOM input).
  * Uses baseURL from playwright.config (preview server on 4173).
- * Requires: gateway on 3000 for full flow (or use ?demo for demo mode).
+ * Requires: live gateway on ws:// — skips automatically if disconnected.
  */
 test.describe("Chat via Gateway Direct", () => {
   test("send message via gw.request and capture response", async ({ page }) => {
-    // 1. Navigate to chat (uses baseURL from config)
     await page.goto("/#chat");
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(2000); // WebSocket connect
+    await page.waitForTimeout(2000);
 
-    // 2. Snapshot / check connection
     const statusBefore = await page.evaluate(() => {
       const app = document.querySelector("sc-app") as { gateway?: { status: string } } | null;
       return app?.gateway?.status ?? "no-gateway";
     });
+    if (statusBefore !== "connected") {
+      test.skip(true, `Gateway not connected (${statusBefore}), skipping live gateway test`);
+    }
     console.log("Gateway status before:", statusBefore);
 
     // 3. Send message via gateway client

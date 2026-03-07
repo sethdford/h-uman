@@ -74,9 +74,9 @@ export class ScMessageList extends LitElement {
     }
     .avatar {
       flex-shrink: 0;
-      width: 28px;
-      height: 28px;
-      min-width: 28px;
+      width: var(--sc-icon-xl);
+      height: var(--sc-icon-xl);
+      min-width: var(--sc-icon-xl);
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -86,7 +86,7 @@ export class ScMessageList extends LitElement {
     }
     .avatar.assistant {
       background: var(--sc-accent);
-      color: var(--sc-on-accent, #fff);
+      color: var(--sc-on-accent);
     }
     .avatar.user {
       background: var(--sc-bg-elevated);
@@ -94,8 +94,8 @@ export class ScMessageList extends LitElement {
     }
     .avatar-spacer {
       flex-shrink: 0;
-      width: 28px;
-      min-width: 28px;
+      width: var(--sc-icon-xl);
+      min-width: var(--sc-icon-xl);
     }
     .time-divider {
       display: flex;
@@ -128,11 +128,17 @@ export class ScMessageList extends LitElement {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xs);
-      animation: sc-slide-up 150ms var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
+      animation: sc-slide-up var(--sc-duration-fast) var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
     .message:hover sc-message-actions {
       opacity: 1;
       transform: translateY(0);
+    }
+    @media (hover: none) {
+      .message sc-message-actions {
+        opacity: var(--sc-opacity-overlay-heavy);
+        transform: translateY(0);
+      }
     }
     .message.user {
       align-self: flex-end;
@@ -193,7 +199,7 @@ export class ScMessageList extends LitElement {
     }
     .scroll-bottom-pill {
       position: absolute;
-      bottom: 90px;
+      bottom: 90px; /* sc-lint-ok: scroll-to-bottom offset above composer */
       left: 50%;
       transform: translateX(-50%);
       background: var(--sc-bg-surface);

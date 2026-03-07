@@ -137,6 +137,10 @@ export class ScChannelsView extends GatewayAwareLitElement {
     return "Error";
   }
 
+  private get messagesToday(): number {
+    return 0;
+  }
+
   private get filteredChannels(): ChannelStatus[] {
     if (this.filter === "all") return this.channels;
     if (this.filter === "configured") return this.channels.filter((ch) => ch.configured === true);
@@ -178,15 +182,20 @@ export class ScChannelsView extends GatewayAwareLitElement {
     this._sheetChannel = null;
   }
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   private _renderSkeleton(): TemplateResult {
     return html`
-      <sc-page-hero>
+      <sc-page-hero role="region" aria-label="Channels overview">
         <sc-section-header
           heading="Channels"
           description="Messaging integrations and their connection status"
         ></sc-section-header>
       </sc-page-hero>
       <div class="stats-row">
+        <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
@@ -199,7 +208,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
 
   private _renderContent(): TemplateResult {
     return html`
-      <sc-page-hero>
+      <sc-page-hero role="region" aria-label="Channels overview">
         <sc-section-header
           heading="Channels"
           description="Messaging integrations and their connection status"
@@ -221,6 +230,11 @@ export class ScChannelsView extends GatewayAwareLitElement {
           label="Healthy"
           style="--sc-stagger-delay: 100ms"
         ></sc-stat-card>
+        <sc-stat-card
+          .value=${this.messagesToday}
+          label="Messages Today"
+          style="--sc-stagger-delay: 150ms"
+        ></sc-stat-card>
       </div>
       ${this.error
         ? html`<sc-empty-state
@@ -229,7 +243,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
             description=${this.error}
           ></sc-empty-state>`
         : nothing}
-      <div class="filters">
+      <div class="filters" role="group" aria-label="Filter channels by status">
         <sc-segmented-control
           .options=${this.filterOptions}
           .value=${this.filter}

@@ -53,7 +53,7 @@ export class ScSkeleton extends LitElement {
     }
 
     .skeleton.animation-shimmer {
-      animation: sc-skel-shimmer var(--sc-duration-slow) ease-in-out infinite;
+      animation: sc-skel-shimmer var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
     }
     @keyframes sc-skel-shimmer {
       0% {

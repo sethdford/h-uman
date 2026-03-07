@@ -314,7 +314,9 @@ test.describe("Wave 3: Loading & Empty States", () => {
     await page.goto("/?demo#voice");
     await page.waitForTimeout(WAIT);
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-voice-view", ".empty-conversation"))).toBe(true);
+      const hasEmpty = await page.evaluate(shadowExists("sc-voice-view", ".conversation-empty"));
+      const hasEmptyState = await page.evaluate(shadowExists("sc-voice-view", "sc-empty-state"));
+      expect(hasEmpty || hasEmptyState).toBe(true);
     }).toPass({ timeout: POLL });
   });
 });

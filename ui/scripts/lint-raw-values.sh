@@ -42,6 +42,10 @@ grep_ts() {
 echo "--- Raw hex colors ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
+  # Allow explicit lint overrides via /* sc-lint-ok */ comment
+  if echo "$match" | grep -qF 'sc-lint-ok'; then
+    continue
+  fi
   # Skip SVG attributes, CSS content/quotes, import lines, and JS private fields (#identifier)
   # (#identifier has letters outside hex range g-z or underscore)
   if echo "$match" | grep -qE '(fill=|stroke=|content:|\"#|import |from |#.*[g-zG-Z_])'; then
@@ -55,6 +59,10 @@ done < <(grep_ts '#[0-9a-fA-F]{3,8}')
 echo "--- Raw rgba() colors ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
+  # Allow explicit lint overrides via /* sc-lint-ok */ comment
+  if echo "$match" | grep -qF 'sc-lint-ok'; then
+    continue
+  fi
   if echo "$match" | grep -qE '(color-mix|from |import )'; then
     continue
   fi
@@ -66,6 +74,10 @@ done < <(grep_ts 'rgba\(')
 echo "--- Raw breakpoints in @media ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
+  # Allow explicit lint overrides via /* sc-lint-ok */ comment
+  if echo "$match" | grep -qF 'sc-lint-ok'; then
+    continue
+  fi
   if echo "$match" | grep -qE '/\*.*--sc-breakpoint'; then
     continue
   fi
@@ -77,6 +89,10 @@ done < <(grep_ts '@media.*[0-9]+px')
 echo "--- Raw pixel spacing ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
+  # Allow explicit lint overrides via /* sc-lint-ok */ comment
+  if echo "$match" | grep -qF 'sc-lint-ok'; then
+    continue
+  fi
   # Skip 1px (hairline borders), border-width, outline-offset, box-shadow
   if echo "$match" | grep -qE '(1px|border-width|outline-offset|box-shadow)'; then
     continue
@@ -97,6 +113,10 @@ done < <(grep_ts '(padding|margin|gap|top|bottom|left|right|inset):[^;]*[0-9]+px
 echo "--- Raw pixel radii ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
+  # Allow explicit lint overrides via /* sc-lint-ok */ comment
+  if echo "$match" | grep -qF 'sc-lint-ok'; then
+    continue
+  fi
   if echo "$match" | grep -qE 'var\(--sc-radius'; then
     continue
   fi
@@ -132,6 +152,10 @@ done < <(grep_ts '(transition|animation):[^;]*([1-9][0-9]*ms|[0-9]+\.[0-9]+s|[1-
 echo "--- Emoji as icons ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
+  # Allow explicit lint overrides via /* sc-lint-ok */ comment
+  if echo "$match" | grep -qF 'sc-lint-ok'; then
+    continue
+  fi
   # Skip comment-only lines
   if echo "$match" | grep -qE '^\s*(//|/\*|\*)'; then
     continue

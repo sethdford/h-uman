@@ -423,6 +423,12 @@
   --sc-button-padding-x: 1rem;
   --sc-button-padding-y: 0.5rem;
   --sc-button-radius: 8px;
+  --sc-icon-2xl: 36px;
+  --sc-icon-lg: 24px;
+  --sc-icon-md: 20px;
+  --sc-icon-sm: 16px;
+  --sc-icon-xl: 28px;
+  --sc-icon-xs: 14px;
   --sc-card-padding: 1.5rem;
   --sc-card-radius: 12px;
   --sc-modal-max-width: 480px;

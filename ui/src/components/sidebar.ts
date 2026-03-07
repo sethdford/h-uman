@@ -103,8 +103,8 @@ export class ScSidebar extends LitElement {
 
     .logo {
       flex-shrink: 0;
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
       color: var(--sc-accent-text, var(--sc-accent));
     }
 
@@ -217,8 +217,8 @@ export class ScSidebar extends LitElement {
 
     .nav-item .icon {
       flex-shrink: 0;
-      width: 20px;
-      height: 20px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
     }
 
     .nav-item .icon svg,
@@ -342,8 +342,8 @@ export class ScSidebar extends LitElement {
     }
 
     .collapse-btn .icon {
-      width: 20px;
-      height: 20px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
     }
 
     .collapse-btn .icon svg {

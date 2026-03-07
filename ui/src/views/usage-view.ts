@@ -169,6 +169,10 @@ export class ScUsageView extends GatewayAwareLitElement {
   @state() private error = "";
   @state() private _timeRange: "24h" | "7d" | "30d" = "24h";
 
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+  }
+
   protected override async load(): Promise<void> {
     await this.loadSummary();
   }
@@ -285,7 +289,7 @@ export class ScUsageView extends GatewayAwareLitElement {
 
     const chartData = this._tokenChartData();
     return html`
-      <div class="section">
+      <div class="section" role="region" aria-label="Token usage over time">
         <div class="chart-header">
           <div class="section-label">Token Usage</div>
           <sc-segmented-control
@@ -413,11 +417,14 @@ export class ScUsageView extends GatewayAwareLitElement {
       </div>
 
       ${this.error
-        ? html`<sc-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          ></sc-empty-state>`
+        ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <sc-button
+              variant="primary"
+              @click=${() => this.load()}
+              aria-label="Retry loading usage"
+              >Retry</sc-button
+            >
+          </sc-empty-state>`
         : nothing}
       ${this.loading
         ? this._renderSkeleton()

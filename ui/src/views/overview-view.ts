@@ -3,7 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 import { formatDate, formatRelative } from "../utils.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import { observeAllCards } from "../utils/scroll-entrance.js";
+import { observeAllCards, unobserveAllCards } from "../utils/scroll-entrance.js";
 import type { ActivityEvent } from "../components/sc-activity-feed.js";
 import "../components/sc-card.js";
 import "../components/sc-badge.js";
@@ -76,7 +76,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-overview;
       display: block;
-      max-width: 1200px;
+      max-width: 75rem;
       padding: var(--sc-space-lg) var(--sc-space-xl);
     }
 
@@ -134,15 +134,15 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
 
     .status-dot {
-      width: 10px;
-      height: 10px;
+      width: 0.625rem;
+      height: 0.625rem;
       border-radius: 50%;
       flex-shrink: 0;
     }
 
     .status-dot.operational {
       background: var(--sc-success);
-      box-shadow: 0 0 6px var(--sc-success);
+      box-shadow: 0 0 var(--sc-space-sm) var(--sc-success);
       animation: sc-status-pulse var(--sc-duration-slow) ease-in-out infinite;
     }
 
@@ -153,11 +153,11 @@ export class ScOverviewView extends GatewayAwareLitElement {
     @keyframes sc-status-pulse {
       0%,
       100% {
-        box-shadow: 0 0 4px var(--sc-success);
+        box-shadow: 0 0 var(--sc-space-xs) var(--sc-success);
         opacity: 1;
       }
       50% {
-        box-shadow: 0 0 12px var(--sc-success);
+        box-shadow: 0 0 var(--sc-space-md) var(--sc-success);
         opacity: 0.8;
       }
     }
@@ -176,12 +176,12 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
 
-    /* ── Detail zone ──────────────────────────────────── */
+    /* ── Detail zone (asymmetric bento) ────────────────── */
 
     .details {
       display: flex;
@@ -189,10 +189,25 @@ export class ScOverviewView extends GatewayAwareLitElement {
       gap: var(--sc-space-xl, 1.5rem);
     }
 
-    .details-row {
+    .bento {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-areas:
+        "activity activity channels channels"
+        "activity activity sessions sessions";
       gap: var(--sc-space-xl);
+    }
+
+    .bento .activity {
+      grid-area: activity;
+    }
+
+    .bento .channels {
+      grid-area: channels;
+    }
+
+    .bento .sessions {
+      grid-area: sessions;
     }
 
     .activity-sparkline {
@@ -220,7 +235,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
     .channels-inner {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
       gap: var(--sc-space-sm);
       flex: 1;
       min-width: 0;
@@ -276,14 +291,6 @@ export class ScOverviewView extends GatewayAwareLitElement {
       outline-offset: -2px;
     }
 
-    /* ── Error ────────────────────────────────────────── */
-
-    .error {
-      color: var(--sc-error);
-      font-size: var(--sc-text-sm);
-      margin-bottom: var(--sc-space-md);
-    }
-
     /* ── Skeleton ─────────────────────────────────────── */
 
     .skeleton-hero {
@@ -297,41 +304,101 @@ export class ScOverviewView extends GatewayAwareLitElement {
       margin-bottom: var(--sc-space-2xl, 2rem);
     }
 
-    .skeleton-details {
+    .skeleton-bento {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-areas:
+        "activity activity channels channels"
+        "activity activity sessions sessions";
       gap: var(--sc-space-xl);
     }
 
-    .skeleton-full {
-      grid-column: 1 / -1;
+    .skeleton-bento .activity {
+      grid-area: activity;
+    }
+
+    .skeleton-bento .channels {
+      grid-area: channels;
+    }
+
+    .skeleton-bento .sessions {
+      grid-area: sessions;
     }
 
     /* ── Responsive ───────────────────────────────────── */
 
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
-      .details-row {
+      .bento {
         grid-template-columns: 1fr;
+        grid-template-areas:
+          "activity"
+          "channels"
+          "sessions";
       }
       .skeleton-metrics {
         grid-template-columns: 1fr 1fr;
       }
-      .skeleton-details {
+      .skeleton-bento {
         grid-template-columns: 1fr;
+        grid-template-areas:
+          "activity"
+          "channels"
+          "sessions";
       }
       .channels-with-chart {
         flex-direction: column;
       }
     }
 
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+      :host {
+        padding: var(--sc-space-md) var(--sc-space-lg);
+      }
       .stats-row {
         grid-template-columns: 1fr;
       }
       .skeleton-metrics {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ── Quick actions row ───────────────────────────────── */
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--sc-space-lg);
+      margin-bottom: var(--sc-space-2xl);
+    }
+    .quick-action-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      padding: var(--sc-space-lg);
+    }
+    .quick-action-card .icon-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      color: var(--sc-accent);
+    }
+    .quick-action-card .icon-wrap svg {
+      width: 1.5rem;
+      height: 1.5rem;
+    }
+    .quick-action-card .label {
+      font-size: var(--sc-text-sm);
+      font-weight: var(--sc-weight-medium);
+      color: var(--sc-text);
+    }
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
+      .quick-actions {
         grid-template-columns: 1fr;
       }
     }
@@ -352,9 +419,13 @@ export class ScOverviewView extends GatewayAwareLitElement {
   @state() private updateInfo: UpdateInfo = {};
   @state() private activityEvents: ActivityEvent[] = [];
   private _gwEventHandler = ((e: CustomEvent) => {
-    const detail = e.detail as { event: string; payload: ActivityEvent };
-    if (detail.event === "activity" && detail.payload) {
-      this.activityEvents = [detail.payload, ...this.activityEvents].slice(0, 20);
+    const detail = e.detail as { event: string; payload?: unknown };
+    if (
+      detail.event === "activity" &&
+      typeof detail.payload === "object" &&
+      detail.payload != null
+    ) {
+      this.activityEvents = [detail.payload as ActivityEvent, ...this.activityEvents].slice(0, 20);
     }
   }) as EventListener;
 
@@ -366,6 +437,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.gateway?.removeEventListener("gateway", this._gwEventHandler);
+    if (this.shadowRoot) unobserveAllCards(this.shadowRoot);
   }
 
   protected override async load(): Promise<void> {
@@ -395,12 +467,16 @@ export class ScOverviewView extends GatewayAwareLitElement {
       this.health = healthRes as HealthRes;
       this.capabilities = capRes as CapabilitiesRes;
       const chPayload = chRes as { channels?: ChannelItem[] };
-      this.channels = chPayload?.channels ?? [];
+      this.channels = Array.isArray(chPayload?.channels) ? chPayload.channels : [];
       const sessPayload = sessRes as { sessions?: SessionItem[] };
-      this.sessions = sessPayload?.sessions ?? [];
+      this.sessions = Array.isArray(sessPayload?.sessions) ? sessPayload.sessions : [];
       this.updateInfo = (updateRes as UpdateInfo) ?? {};
       const actPayload = actRes as { events?: ActivityEvent[] };
-      if (actPayload?.events?.length && this.activityEvents.length === 0) {
+      if (
+        Array.isArray(actPayload?.events) &&
+        actPayload.events.length > 0 &&
+        this.activityEvents.length === 0
+      ) {
         this.activityEvents = actPayload.events;
       }
       this._updateWelcome();
@@ -509,8 +585,13 @@ export class ScOverviewView extends GatewayAwareLitElement {
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
-      ${this.error ? html`<p class="error">${this.error}</p>` : nothing} ${this._renderHero()}
-      ${this._renderMetrics()} ${this._renderDetails()}
+      ${this.error
+        ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <sc-button variant="primary" @click=${() => this.load()}> Retry </sc-button>
+          </sc-empty-state>`
+        : nothing}
+      ${this._renderHero()} ${this._renderMetrics()} ${this._renderQuickActions()}
+      ${this._renderDetails()}
     `;
   }
 
@@ -531,7 +612,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
     return html`
       <sc-page-hero>
-        <sc-section-header heading="Overview" description="System health and activity at a glance">
+        <sc-section-header heading="Overview" description="Your AI assistant at a glance">
           <div class="hero-actions">
             ${this.lastLoadedAt
               ? html`<span class="staleness">Updated ${this.stalenessLabel}</span>`
@@ -621,13 +702,50 @@ export class ScOverviewView extends GatewayAwareLitElement {
     `;
   }
 
+  /* ── Quick actions row ───────────────────────────────── */
+
+  private _renderQuickActions() {
+    if (!this._onboarded) return nothing;
+    const actions = [
+      { label: "Chat", icon: icons["message-square"], target: "chat" },
+      { label: "New Automation", icon: icons.clock, target: "automations" },
+      { label: "Voice", icon: icons.mic, target: "voice" },
+    ];
+    return html`
+      <div class="quick-actions">
+        ${actions.map(
+          (a) => html`
+            <sc-card
+              glass
+              clickable
+              class="quick-action-card"
+              role="button"
+              tabindex="0"
+              aria-label=${`Go to ${a.label}`}
+              @click=${() => this._navigate(a.target)}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  this._navigate(a.target);
+                }
+              }}
+            >
+              <div class="icon-wrap" aria-hidden="true">${a.icon}</div>
+              <span class="label">${a.label}</span>
+            </sc-card>
+          `,
+        )}
+      </div>
+    `;
+  }
+
   /* ── Detail zone ────────────────────────────────────── */
 
   private _renderDetails() {
     return html`
       <div class="details">
-        <div class="details-row">
-          <sc-card hoverable accent>
+        <div class="bento">
+          <sc-card hoverable accent class="activity">
             <div class="section-label">Live Activity</div>
             ${this.activityEvents.length > 0
               ? html`
@@ -643,7 +761,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             <sc-timeline .items=${this._timelineItems}></sc-timeline>
           </sc-card>
 
-          <sc-card hoverable accent>
+          <sc-card hoverable accent class="channels">
             <div class="section-label">Channels</div>
             ${this.channels.length === 0
               ? html`
@@ -679,70 +797,70 @@ export class ScOverviewView extends GatewayAwareLitElement {
                   </div>
                 `}
           </sc-card>
-        </div>
 
-        <sc-card hoverable accent>
-          <div class="section-label">Recent Sessions</div>
-          ${this.recentSessions.length === 0
-            ? html`
-                <sc-empty-state
-                  .icon=${icons["chat-circle"]}
-                  heading="No conversations yet"
-                  description="Start your first chat to see SeaClaw in action."
-                >
-                  <sc-button variant="primary" @click=${() => this._navigate("chat")}>
-                    Start a Conversation
-                  </sc-button>
-                </sc-empty-state>
-              `
-            : html`
-                <table class="sessions-table">
-                  <thead>
-                    <tr>
-                      <th>Session</th>
-                      <th>Turns</th>
-                      <th>Last active</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${this.recentSessions.map(
-                      (s) => html`
-                        <tr
-                          class="session-row"
-                          role="link"
-                          tabindex="0"
-                          aria-label=${`Open session ${s.label ?? s.key ?? "unnamed"}`}
-                          @click=${() =>
-                            this.dispatchEvent(
-                              new CustomEvent("navigate", {
-                                detail: "chat:" + (s.key ?? ""),
-                                bubbles: true,
-                                composed: true,
-                              }),
-                            )}
-                          @keydown=${(e: KeyboardEvent) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
+          <sc-card hoverable accent class="sessions">
+            <div class="section-label">Recent Sessions</div>
+            ${this.recentSessions.length === 0
+              ? html`
+                  <sc-empty-state
+                    .icon=${icons["chat-circle"]}
+                    heading="No conversations yet"
+                    description="Start your first chat to see SeaClaw in action."
+                  >
+                    <sc-button variant="primary" @click=${() => this._navigate("chat")}>
+                      Start a Conversation
+                    </sc-button>
+                  </sc-empty-state>
+                `
+              : html`
+                  <table class="sessions-table">
+                    <thead>
+                      <tr>
+                        <th>Session</th>
+                        <th>Turns</th>
+                        <th>Last active</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${this.recentSessions.map(
+                        (s) => html`
+                          <tr
+                            class="session-row"
+                            role="button"
+                            tabindex="0"
+                            aria-label=${`Open session ${s.label ?? s.key ?? "unnamed"}`}
+                            @click=${() =>
                               this.dispatchEvent(
                                 new CustomEvent("navigate", {
                                   detail: "chat:" + (s.key ?? ""),
                                   bubbles: true,
                                   composed: true,
                                 }),
-                              );
-                            }
-                          }}
-                        >
-                          <td>${s.label ?? s.key ?? "unnamed"}</td>
-                          <td>${s.turn_count ?? 0}</td>
-                          <td>${formatDate(s.last_active)}</td>
-                        </tr>
-                      `,
-                    )}
-                  </tbody>
-                </table>
-              `}
-        </sc-card>
+                              )}
+                            @keydown=${(e: KeyboardEvent) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                this.dispatchEvent(
+                                  new CustomEvent("navigate", {
+                                    detail: "chat:" + (s.key ?? ""),
+                                    bubbles: true,
+                                    composed: true,
+                                  }),
+                                );
+                              }
+                            }}
+                          >
+                            <td>${s.label ?? s.key ?? "unnamed"}</td>
+                            <td>${s.turn_count ?? 0}</td>
+                            <td>${formatDate(s.last_active)}</td>
+                          </tr>
+                        `,
+                      )}
+                    </tbody>
+                  </table>
+                `}
+          </sc-card>
+        </div>
       </div>
     `;
   }
@@ -760,12 +878,10 @@ export class ScOverviewView extends GatewayAwareLitElement {
         <sc-skeleton variant="stat-card"></sc-skeleton>
         <sc-skeleton variant="stat-card"></sc-skeleton>
       </div>
-      <div class="skeleton-details">
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
-        <div class="skeleton-full">
-          <sc-skeleton variant="card" height="160px"></sc-skeleton>
-        </div>
+      <div class="skeleton-bento">
+        <sc-skeleton variant="card" height="280px" class="activity"></sc-skeleton>
+        <sc-skeleton variant="card" height="140px" class="channels"></sc-skeleton>
+        <sc-skeleton variant="card" height="140px" class="sessions"></sc-skeleton>
       </div>
     `;
   }

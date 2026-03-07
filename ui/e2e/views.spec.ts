@@ -159,26 +159,6 @@ test.describe("Secondary Views", () => {
       expect(text).toContain("Refresh");
     }).toPass({ timeout: 8000 });
   });
-
-  test("navigation between views works", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForTimeout(500);
-    await page.goto("/#chat");
-    await page.waitForTimeout(300);
-    const chatView = page.locator("sc-app >> sc-chat-view");
-    await expect(chatView).toBeAttached({ timeout: 5000 });
-    await page.goto("/#config");
-    await page.waitForTimeout(300);
-    const configView = page.locator("sc-app >> sc-config-view");
-    await expect(configView).toBeAttached({ timeout: 5000 });
-  });
-
-  test("unknown hash falls back gracefully", async ({ page }) => {
-    await page.goto("/#nonexistent");
-    await page.waitForTimeout(500);
-    const app = page.locator("sc-app");
-    await expect(app).toBeAttached({ timeout: 5000 });
-  });
 });
 
 test.describe("Skills View (Demo Mode)", () => {

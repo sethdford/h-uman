@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactiveControllerHost } from "lit";
 import { ChatController, type ChatItem, type GatewayLike } from "./chat-controller.js";
+import { ChatCache } from "./chat-cache.js";
+import { exportAsJson, exportAsMarkdown } from "./chat-export.js";
 
 function createMockHost(): {
   requestUpdate: ReturnType<typeof vi.fn>;
@@ -524,6 +526,53 @@ describe("ChatController", () => {
       ctrl.items = [{ type: "message", role: "user", content: "Hi", id: "m1", ts: 1 }];
 
       expect(ctrl.getBranchMessages("nonexistent")).toEqual([]);
+    });
+  });
+
+  describe("ChatCache (standalone)", () => {
+    beforeEach(() => sessionStorage.clear());
+    afterEach(() => sessionStorage.clear());
+
+    it("save/restore round-trips items", () => {
+      const items: ChatItem[] = [
+        { type: "message", role: "user", content: "Hi", ts: 1000 },
+        { type: "message", role: "assistant", content: "Hello!", ts: 2000 },
+      ];
+      ChatCache.save("cache-key", items);
+      const restored = ChatCache.restore("cache-key");
+      expect(restored).toHaveLength(2);
+      expect(restored[0]).toMatchObject({ type: "message", role: "user", content: "Hi" });
+      expect(restored[1]).toMatchObject({ type: "message", role: "assistant", content: "Hello!" });
+    });
+
+    it("restore returns empty array for missing key", () => {
+      expect(ChatCache.restore("nonexistent")).toEqual([]);
+    });
+
+    it("clear removes cached data", () => {
+      ChatCache.save("clear-key", [{ type: "message", role: "user", content: "x", ts: 1 }]);
+      ChatCache.clear("clear-key");
+      expect(ChatCache.restore("clear-key")).toEqual([]);
+    });
+  });
+
+  describe("chat-export (standalone)", () => {
+    it("exportAsMarkdown formats messages", () => {
+      const items: ChatItem[] = [
+        { type: "message", role: "user", content: "Q?", ts: 1 },
+        { type: "message", role: "assistant", content: "A", ts: 2 },
+      ];
+      const md = exportAsMarkdown(items);
+      expect(md).toContain("**You**: Q?");
+      expect(md).toContain("**Assistant**: A");
+    });
+
+    it("exportAsJson returns valid JSON", () => {
+      const items: ChatItem[] = [{ type: "message", role: "user", content: "Hi", ts: 1 }];
+      const json = exportAsJson(items);
+      const parsed = JSON.parse(json);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].content).toBe("Hi");
     });
   });
 

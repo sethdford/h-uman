@@ -62,7 +62,7 @@ export class ScActivityFeed extends LitElement {
       color: var(--sc-accent);
     }
     .event-icon.tool {
-      color: var(--sc-warning, #f59e0b);
+      color: var(--sc-warning);
     }
     .event-icon.session {
       color: var(--sc-success);

@@ -53,7 +53,7 @@ export class ScDialog extends LitElement {
       background: color-mix(in srgb, var(--sc-bg-overlay) 85%, transparent);
       backdrop-filter: blur(24px) saturate(180%);
       -webkit-backdrop-filter: blur(24px) saturate(180%);
-      border: 1px solid var(--sc-glass-border-color, rgba(255, 255, 255, 0.08));
+      border: 1px solid var(--sc-glass-border-color);
       border-radius: var(--sc-radius-xl);
       box-shadow: var(--sc-shadow-xl);
       padding: var(--sc-space-lg);

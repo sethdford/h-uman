@@ -11,7 +11,7 @@ import "./sc-skeleton.js";
 import "./sc-message-actions.js";
 import type { ChatItem } from "../controllers/chat-controller.js";
 import { icons } from "../icons.js";
-import { formatTime } from "../utils.js";
+import { formatTime, formatTimestampForDivider } from "../utils.js";
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 
@@ -67,6 +67,12 @@ export class ScMessageThread extends LitElement {
       opacity: 1;
       transform: translateY(0);
     }
+    @media (hover: none) {
+      .bubble-wrapper sc-message-actions {
+        opacity: var(--sc-opacity-overlay-heavy);
+        transform: translateY(0);
+      }
+    }
     .time-divider {
       display: flex;
       align-items: center;
@@ -85,25 +91,13 @@ export class ScMessageThread extends LitElement {
       background: linear-gradient(to left, transparent, var(--sc-border-subtle));
     }
     .time-divider span {
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-xs);
       color: var(--sc-text-faint);
       white-space: nowrap;
     }
-    .avatar-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: var(--sc-space-md);
-      height: var(--sc-space-md);
-      color: var(--sc-accent);
-    }
-    .avatar-icon svg {
-      width: 100%;
-      height: 100%;
-    }
     .scroll-bottom-pill {
       position: absolute;
-      bottom: 90px;
+      bottom: 90px; /* sc-lint-ok: scroll-to-bottom offset above composer */
       left: 50%;
       transform: translateX(-50%);
       background: var(--sc-bg-surface);
@@ -167,8 +161,8 @@ export class ScMessageThread extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 20px;
-      height: 20px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
       padding: 0;
       background: var(--sc-bg-elevated);
       border: 1px solid var(--sc-border-subtle);
@@ -431,10 +425,8 @@ export class ScMessageThread extends LitElement {
           `;
         })}
         ${role === "assistant"
-          ? html`<div slot="avatar" class="avatar-icon" aria-hidden="true">
-              ${icons["chat-circle"]}
-            </div>`
-          : nothing}
+          ? html`<span slot="avatar">${icons["chat-circle"]}</span>`
+          : html`<span slot="avatar">${icons.user}</span>`}
         <span slot="timestamp">${formatTime(lastTs)}</span>
       </sc-message-group>
     `;
@@ -453,15 +445,17 @@ export class ScMessageThread extends LitElement {
         ${this.historyLoading
           ? html`
               <div class="history-skeleton">
-                <sc-skeleton variant="line" width="60%"></sc-skeleton>
-                <sc-skeleton variant="line" width="80%"></sc-skeleton>
-                <sc-skeleton variant="line" width="45%"></sc-skeleton>
+                <sc-skeleton variant="card" height="60px"></sc-skeleton>
+                <sc-skeleton variant="card" height="60px"></sc-skeleton>
+                <sc-skeleton variant="card" height="60px"></sc-skeleton>
               </div>
             `
           : html`
               ${blocks.map((block) => {
                 if (block.type === "time-divider")
-                  return html`<div class="time-divider"><span>${formatTime(block.ts)}</span></div>`;
+                  return html`<div class="time-divider">
+                    <span>${formatTimestampForDivider(block.ts)}</span>
+                  </div>`;
                 if (block.type === "message-group") return this._renderMessageGroup(block);
                 if (block.type === "tool_call")
                   return html`<sc-tool-result

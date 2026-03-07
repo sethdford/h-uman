@@ -13,6 +13,7 @@ import "../components/sc-card.js";
 import "../components/sc-segmented-control.js";
 import "../components/sc-badge.js";
 import "../components/sc-timeline.js";
+import "../components/sc-skeleton.js";
 import type { TimelineItem } from "../components/sc-timeline.js";
 
 interface LogEntry {
@@ -53,7 +54,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       flex: 1;
       min-height: 0;
       color: var(--sc-text);
-      max-width: 960px;
+      max-width: 60rem;
     }
     .layout {
       display: flex;
@@ -92,7 +93,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       color: var(--sc-text);
       font-size: var(--sc-text-sm);
       font-family: var(--sc-font-mono);
-      width: 220px;
+      width: 13.75rem;
       transition:
         border-color var(--sc-duration-fast) var(--sc-ease-out),
         box-shadow var(--sc-duration-fast) var(--sc-ease-out);
@@ -100,7 +101,7 @@ export class ScLogsView extends GatewayAwareLitElement {
     .filter-input:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+      box-shadow: 0 0 0 var(--sc-space-xs) var(--sc-accent-subtle);
     }
     .filter-input::placeholder {
       color: var(--sc-text-muted);
@@ -140,7 +141,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       color: var(--sc-text);
     }
     .log-area::-webkit-scrollbar {
-      width: 8px;
+      width: var(--sc-space-sm);
     }
     .log-area::-webkit-scrollbar-track {
       background: var(--sc-bg-elevated);
@@ -153,7 +154,7 @@ export class ScLogsView extends GatewayAwareLitElement {
     .log-area::-webkit-scrollbar-thumb:hover {
       background: var(--sc-text-muted);
     }
-    @media (max-width: 768px) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
       .header {
         flex-wrap: wrap;
       }
@@ -161,7 +162,7 @@ export class ScLogsView extends GatewayAwareLitElement {
         flex-wrap: wrap;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .filter-input {
         width: 100%;
       }
@@ -180,15 +181,48 @@ export class ScLogsView extends GatewayAwareLitElement {
   @state() private _level: string = "all";
   @state() private _paused = false;
   @state() private _relativeTimeKey = 0;
+  @state() private loading = true;
+  @state() private error = "";
 
   private _tsInterval: ReturnType<typeof setInterval> | null = null;
+  private _logsStatusHandler = ((e: CustomEvent<string>) => {
+    const status = e.detail;
+    if (status === "connected") {
+      this.loading = false;
+      this.error = "";
+    } else if (status === "disconnected") {
+      this.loading = false;
+      this.error = "Not connected";
+    } else if (status === "connecting") {
+      this.loading = true;
+      this.error = "";
+    }
+  }) as EventListener;
 
   protected override async load(): Promise<void> {
     this.setupListener();
+    if (this.gateway?.status === "connected") {
+      this.loading = false;
+      this.error = "";
+    }
   }
 
   override connectedCallback(): void {
     super.connectedCallback();
+    const gw = this.gateway;
+    if (gw) {
+      gw.addEventListener(GatewayClient.EVENT_STATUS, this._logsStatusHandler);
+      const status = gw.status;
+      if (status === "connected") {
+        this.loading = false;
+        this.error = "";
+      } else if (status === "disconnected") {
+        this.loading = false;
+        this.error = "Not connected";
+      } else {
+        this.loading = true;
+      }
+    }
     this._tsInterval = setInterval(() => {
       this._relativeTimeKey++;
       this.requestUpdate();
@@ -196,6 +230,7 @@ export class ScLogsView extends GatewayAwareLitElement {
   }
 
   override disconnectedCallback(): void {
+    this.gateway?.removeEventListener(GatewayClient.EVENT_STATUS, this._logsStatusHandler);
     if (this._tsInterval) {
       clearInterval(this._tsInterval);
       this._tsInterval = null;
@@ -308,9 +343,44 @@ export class ScLogsView extends GatewayAwareLitElement {
     `;
   }
 
-  private _renderControls(): ReturnType<typeof html> {
+  private _renderSkeleton(): ReturnType<typeof html> {
     return html`
       <div class="controls-sticky">
+        <div class="controls">
+          <sc-skeleton variant="card" height="2.5rem" style="width: 12rem"></sc-skeleton>
+          <sc-skeleton variant="card" height="2.5rem" style="width: 13.75rem"></sc-skeleton>
+          <sc-skeleton variant="card" height="2.5rem" style="width: 4rem"></sc-skeleton>
+        </div>
+      </div>
+      <sc-card class="log-card" glass>
+        <div class="log-area-wrapper" style="min-height: 12rem">
+          <div class="log-area">
+            <sc-skeleton
+              variant="line"
+              style="width: 100%; margin-bottom: var(--sc-space-sm)"
+            ></sc-skeleton>
+            <sc-skeleton
+              variant="line"
+              style="width: 90%; margin-bottom: var(--sc-space-sm)"
+            ></sc-skeleton>
+            <sc-skeleton
+              variant="line"
+              style="width: 95%; margin-bottom: var(--sc-space-sm)"
+            ></sc-skeleton>
+            <sc-skeleton
+              variant="line"
+              style="width: 85%; margin-bottom: var(--sc-space-sm)"
+            ></sc-skeleton>
+            <sc-skeleton variant="line" style="width: 70%"></sc-skeleton>
+          </div>
+        </div>
+      </sc-card>
+    `;
+  }
+
+  private _renderControls(): ReturnType<typeof html> {
+    return html`
+      <div class="controls-sticky" role="toolbar" aria-label="Log filters and actions">
         <div class="controls">
           <sc-segmented-control
             .value=${this._level}
@@ -372,6 +442,24 @@ export class ScLogsView extends GatewayAwareLitElement {
   }
 
   override render() {
+    if (this.error) {
+      return html`
+        <div class="layout">
+          ${this._renderHeader()}
+          <sc-empty-state .icon=${icons.warning} heading="Not connected" description=${this.error}>
+            <sc-button
+              variant="primary"
+              @click=${() => this.load()}
+              aria-label="Retry logs connection"
+              >Retry</sc-button
+            >
+          </sc-empty-state>
+        </div>
+      `;
+    }
+    if (this.loading) {
+      return html` <div class="layout">${this._renderHeader()} ${this._renderSkeleton()}</div> `;
+    }
     return html`
       <div class="layout">
         ${this._renderHeader()} ${this._renderControls()} ${this._renderLogArea()}

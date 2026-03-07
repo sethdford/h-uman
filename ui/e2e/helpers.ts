@@ -29,6 +29,26 @@ export function shadowText(viewTag: string): string {
   })()`;
 }
 
+/** Returns text content of a specific element within a view's shadow DOM. */
+export function shadowElementText(viewTag: string, selector: string): string {
+  return `(() => {
+    const app = document.querySelector("sc-app");
+    const view = app?.shadowRoot?.querySelector("${viewTag}");
+    const el = view?.shadowRoot?.querySelector("${selector}");
+    return el?.textContent?.trim() ?? "";
+  })()`;
+}
+
+/** Clicks an element within a view's shadow DOM. Returns a JS expression for page.evaluate. */
+export function shadowClick(viewTag: string, selector: string): string {
+  return `(() => {
+    const app = document.querySelector("sc-app");
+    const view = app?.shadowRoot?.querySelector("${viewTag}");
+    const el = view?.shadowRoot?.querySelector("${selector}");
+    el?.click();
+  })()`;
+}
+
 export function shadowComputedStyle(viewTag: string, selector: string, prop: string): string {
   return `(() => {
     const app = document.querySelector("sc-app");

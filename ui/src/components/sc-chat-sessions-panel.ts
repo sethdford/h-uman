@@ -93,8 +93,8 @@ export class ScChatSessionsPanel extends LitElement {
     }
 
     .new-chat-btn svg {
-      width: 18px;
-      height: 18px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
       flex-shrink: 0;
     }
 
@@ -222,8 +222,8 @@ export class ScChatSessionsPanel extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
       padding: 0;
       background: transparent;
       border: none;

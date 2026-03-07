@@ -26,3 +26,9 @@ export function observeAllCards(root: ShadowRoot | Document): void {
   const cards = root.querySelectorAll("sc-card, .sc-observe");
   cards.forEach(observeEntrance);
 }
+
+export function unobserveAllCards(root: ShadowRoot | Document): void {
+  if (!observer) return;
+  const cards = root.querySelectorAll("sc-card, .sc-observe");
+  cards.forEach((el) => observer!.unobserve(el));
+}

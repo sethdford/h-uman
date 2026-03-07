@@ -46,8 +46,8 @@ export class ScFloatingMic extends LitElement {
       }
     }
     .btn svg {
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
     }
     @media (prefers-reduced-motion: reduce) {
       .btn.listening {

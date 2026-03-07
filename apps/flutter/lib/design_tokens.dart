@@ -287,6 +287,12 @@ abstract final class SCTokens {
   static const high_contrast_text_faint = Color(0xFF8AA0B8);
   static const high_contrast_text_muted = Color(0xFFC0D0E0);
   static const high_contrast_warning = Color(0xFFFDE047);
+  static const icon_2xl = 36;
+  static const icon_lg = 24;
+  static const icon_md = 20;
+  static const icon_sm = 16;
+  static const icon_xl = 28;
+  static const icon_xs = 14;
   static const input_font_size = 14;
   static const input_min_height = 40;
   static const input_padding_x = 8;

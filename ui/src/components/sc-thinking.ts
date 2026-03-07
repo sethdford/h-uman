@@ -77,7 +77,7 @@ export class ScThinking extends LitElement {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: var(--sc-info, #3b82f6);
+      background: var(--sc-info);
       animation: sc-dot-bounce var(--sc-duration-slow) ease-in-out infinite;
     }
 

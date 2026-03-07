@@ -14,6 +14,9 @@ const SUGGESTIONS = [
 const LINE_HEIGHT = 24;
 const MAX_LINES = 5;
 
+/**
+ * @deprecated Consolidate with sc-chat-composer. Only used in catalog/demo and sc-composer.test.ts
+ */
 @customElement("sc-composer")
 export class ScComposer extends LitElement {
   static override styles = css`
@@ -76,10 +79,10 @@ export class ScComposer extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
-      min-height: 36px;
+      width: var(--sc-icon-2xl);
+      height: var(--sc-icon-2xl);
+      min-width: var(--sc-icon-2xl);
+      min-height: var(--sc-icon-2xl);
       padding: 0;
       background: transparent;
       border: none;
@@ -121,8 +124,8 @@ export class ScComposer extends LitElement {
         transform var(--sc-duration-fast) var(--sc-spring-micro, cubic-bezier(0.34, 1.56, 0.64, 1));
     }
     .send-btn svg {
-      width: 18px;
-      height: 18px;
+      width: var(--sc-icon-md);
+      height: var(--sc-icon-md);
     }
     .send-btn:hover:not(:disabled) {
       background: var(--sc-accent-hover);
@@ -206,8 +209,8 @@ export class ScComposer extends LitElement {
       color: var(--sc-accent);
     }
     .bento-icon svg {
-      width: 24px;
-      height: 24px;
+      width: var(--sc-icon-lg);
+      height: var(--sc-icon-lg);
     }
     .bento-title {
       font-size: var(--sc-text-sm);

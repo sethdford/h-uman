@@ -18,6 +18,14 @@ export class ScForecastChart extends LitElement {
   @state() private _hoverValue = 0;
   @state() private _hoverIsProjected = false;
 
+  private _cached: { actual: number[]; projected: number[]; niceMax: number } = {
+    actual: [],
+    projected: [],
+    niceMax: 1,
+  };
+
+  private _uid = Math.random().toString(36).slice(2, 8);
+
   private readonly PL = 56;
   private readonly PR = 48;
   private readonly PT = 28;
@@ -222,10 +230,9 @@ export class ScForecastChart extends LitElement {
     const day = Math.round(1 + ((svgX - this.PL) / this.cw) * (this.daysInMonth - 1));
     const clamped = Math.max(1, Math.min(day, this.daysInMonth));
 
-    const { actual, projected } = this._getCumulative();
+    const { actual, projected } = this._cached;
     const n = this.history.length;
-    const allValues = [...actual, ...projected];
-    const niceMax = this._niceMax(Math.max(...allValues, 1));
+    const niceMax = this._cached.niceMax;
 
     const isProjected = clamped > n;
     const value = isProjected
@@ -264,6 +271,7 @@ export class ScForecastChart extends LitElement {
     const { actual, projected } = this._getCumulative();
     const allValues = [...actual, ...projected];
     const niceMax = this._niceMax(Math.max(...allValues, 1));
+    this._cached = { actual, projected, niceMax };
     const actualDays = this.history.length;
     const bottom = this.PT + this.ch;
 
@@ -303,11 +311,11 @@ export class ScForecastChart extends LitElement {
         @touchend=${this._handleMouseLeave}
       >
         <defs>
-          <linearGradient id="fc-actual-grad" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="fc-actual-${this._uid}" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stop-color="var(--sc-accent)" stop-opacity="0.25" />
             <stop offset="1" stop-color="var(--sc-accent)" stop-opacity="0.02" />
           </linearGradient>
-          <linearGradient id="fc-proj-grad" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="fc-proj-${this._uid}" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stop-color="var(--sc-accent)" stop-opacity="0.08" />
             <stop offset="1" stop-color="var(--sc-accent)" stop-opacity="0" />
           </linearGradient>
@@ -340,10 +348,10 @@ export class ScForecastChart extends LitElement {
           `,
         )}
 
-        <path d=${projArea} fill="url(#fc-proj-grad)" />
+        <path d=${projArea} fill="url(#fc-proj-${this._uid})" />
         <path class="projected-line" d=${projLine} />
 
-        <path d=${actualArea} fill="url(#fc-actual-grad)" />
+        <path d=${actualArea} fill="url(#fc-actual-${this._uid})" />
         <path class="actual-line" d=${actualLine} />
 
         <line class="today-line" x1=${todayX} y1=${this.PT} x2=${todayX} y2=${bottom} />

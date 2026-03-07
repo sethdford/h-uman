@@ -1,5 +1,10 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { EVENT_NAMES } from "../utils.js";
+import { ChatCache } from "./chat-cache.js";
+import {
+  exportAsJson as exportItemsAsJson,
+  exportAsMarkdown as exportItemsAsMarkdown,
+} from "./chat-export.js";
 
 export type MessageStatus = "sending" | "sent" | "streaming" | "complete" | "failed";
 export interface Reaction {
@@ -51,6 +56,7 @@ export class ChatController implements ReactiveController {
   errorBanner = "";
   streamElapsed = "";
   historyLoading = false;
+  historyError = "";
 
   private _getGateway: () => GatewayLike | null;
   private _streamStartTime = 0;
@@ -146,6 +152,7 @@ export class ChatController implements ReactiveController {
     if (!gw) return;
 
     this.historyLoading = true;
+    this.historyError = "";
     this._requestUpdate();
     try {
       const res = await gw.request<{
@@ -161,8 +168,9 @@ export class ChatController implements ReactiveController {
         this._requestUpdate();
         return;
       }
-    } catch {
-      /* history load is best-effort */
+    } catch (err) {
+      this.historyError =
+        err instanceof Error ? err.message : "Failed to load conversation history";
     } finally {
       this.historyLoading = false;
       this._requestUpdate();
@@ -199,42 +207,14 @@ export class ChatController implements ReactiveController {
   }
 
   cacheMessages(sessionKey: string): void {
-    try {
-      const key = `sc-chat-${sessionKey}`;
-      sessionStorage.setItem(key, JSON.stringify(this.items));
-    } catch {
-      /* quota exceeded — ignore */
-    }
+    ChatCache.save(sessionKey, this.items);
   }
 
   restoreFromCache(sessionKey: string): boolean {
-    try {
-      const key = `sc-chat-${sessionKey}`;
-      const raw = sessionStorage.getItem(key);
-      if (!raw) return false;
-      const cached = JSON.parse(raw) as unknown;
-      if (!Array.isArray(cached) || cached.length === 0) return false;
-      this.items = cached
-        .map((item: unknown) => {
-          const obj = item as Record<string, unknown>;
-          if (obj?.type === "message" || obj?.type === "tool_call" || obj?.type === "thinking") {
-            return item as ChatItem;
-          }
-          if (obj?.role && obj?.content) {
-            return {
-              type: "message",
-              role: obj.role as "user" | "assistant",
-              content: String(obj.content ?? ""),
-            } as ChatItem;
-          }
-          return null;
-        })
-        .filter((i): i is ChatItem => i != null);
-      return this.items.length > 0;
-    } catch {
-      /* corrupt cache — ignore */
-    }
-    return false;
+    const items = ChatCache.restore(sessionKey);
+    if (items.length === 0) return false;
+    this.items = items;
+    return true;
   }
 
   private _startStreamTimer(): void {
@@ -458,19 +438,10 @@ export class ChatController implements ReactiveController {
   }
 
   exportAsMarkdown(): string {
-    const lines: string[] = [];
-    for (const item of this.items) {
-      if (item.type === "message") {
-        const role = item.role === "user" ? "**You**" : "**Assistant**";
-        lines.push(`${role}: ${item.content}\n`);
-      } else if (item.type === "tool_call") {
-        lines.push(`> Tool: ${item.name} \u2192 ${item.result ?? "running"}\n`);
-      }
-    }
-    return lines.join("\n");
+    return exportItemsAsMarkdown(this.items);
   }
 
   exportAsJson(): string {
-    return JSON.stringify(this.items, null, 2);
+    return exportItemsAsJson(this.items);
   }
 }
