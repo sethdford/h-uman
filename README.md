@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>~511 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
+  <strong>~561 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -18,12 +18,12 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~511 KB binary · <30 ms startup · 3185+ tests · 50+ providers · 33 channels · 66+ tools · Pluggable everything
+~561 KB binary · <30 ms startup · 3199+ tests · 50+ providers · 33 channels · 66+ tools · Pluggable everything
 ```
 
 ### Features
 
-- **Impossibly Small:** ~511 KB static binary — no runtime, no VM, no framework overhead.
+- **Impossibly Small:** ~561 KB static binary — no runtime, no VM, no framework overhead.
 - **Near-Zero Memory:** < 6 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
 - **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
@@ -46,7 +46,7 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
 | **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 6 MB**        |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~511 KB**       |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~561 KB**       |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
 > ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. SeaClaw's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
@@ -54,7 +54,7 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 SeaClaw's verified numbers (measured on macOS arm64, March 2026):
 
 ```
-Binary size:   ~511 KB (MinSizeRel + LTO, all channels)
+Binary size:   ~561 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
 Tests:         3185 passing, 0 ASan errors
@@ -607,7 +607,7 @@ Build and tests require a C11 compiler and CMake 3.16+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 3185+ tests
+./seaclaw_tests                             # 3199+ tests
 cd ..
 ```
 
@@ -619,7 +619,7 @@ cmake --build build
 ./build/seaclaw_tests
 ```
 
-Release build (~511 KB):
+Release build (~561 KB):
 
 ```bash
 mkdir -p build-release && cd build-release
@@ -645,8 +645,8 @@ Language: C11 + ASM (aarch64, x86_64)
 Source files: 597
 Lines of code: ~104K
 Test files: 101
-Tests: 3185
-Binary: ~511 KB (MinSizeRel + LTO, all channels)
+Tests: 3199
+Binary: ~561 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
 Dependencies: libc + optional SQLite, libcurl
