@@ -1288,7 +1288,11 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
     /* Prompt injection defense-in-depth */
     {
         sc_injection_risk_t risk = SC_INJECTION_SAFE;
-        sc_input_guard_check(msg, msg_len, &risk);
+        sc_error_t guard_err = sc_input_guard_check(msg, msg_len, &risk);
+        if (guard_err != SC_OK) {
+            sc_agent_clear_current_for_tools();
+            return guard_err;
+        }
         if (risk == SC_INJECTION_HIGH_RISK && agent->observer) {
             sc_observer_event_t ev = {.tag = SC_OBSERVER_EVENT_ERR};
             ev.data.err.component = "input_guard";

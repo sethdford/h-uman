@@ -87,6 +87,27 @@ static sc_error_t database_execute(void *ctx, sc_allocator_t *alloc, const sc_js
             *out = sc_tool_result_fail("query failed", 12);
         }
     } else if (sql) {
+        /* Reject dangerous SQL statements — only allow SELECT for query, and
+           SELECT/INSERT/UPDATE/DELETE for execute.  Block ATTACH, PRAGMA, LOAD,
+           and other meta-commands that could escape the database boundary. */
+        const char *s = sql;
+        while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
+            s++;
+        int is_select = (strncasecmp(s, "SELECT", 6) == 0 && (s[6] == ' ' || s[6] == '\t'));
+        int is_write = (strncasecmp(s, "INSERT", 6) == 0 || strncasecmp(s, "UPDATE", 6) == 0 ||
+                        strncasecmp(s, "DELETE", 6) == 0) &&
+                       (s[6] == ' ' || s[6] == '\t');
+        if (strcmp(action, "query") == 0 && !is_select) {
+            sqlite3_close(db);
+            *out = sc_tool_result_fail("query action only allows SELECT", 31);
+            return SC_OK;
+        }
+        if (strcmp(action, "execute") == 0 && !is_select && !is_write) {
+            sqlite3_close(db);
+            *out = sc_tool_result_fail("execute only allows SELECT/INSERT/UPDATE/DELETE", 47);
+            return SC_OK;
+        }
+
         sqlite3_stmt *stmt = NULL;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
             int rows = 0;

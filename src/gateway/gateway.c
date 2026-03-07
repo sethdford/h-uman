@@ -389,6 +389,11 @@ static bool serve_static_file(int fd, const char *base_dir, const char *url_path
     size_t rd = fread(buf, 1, fsize, f);
     fclose(f);
 
+    if (rd != fsize) {
+        free(buf);
+        return false;
+    }
+
     const char *mime = mime_for_ext(filepath);
     send_response(fd, 200, mime, buf, rd, 0);
     free(buf);
@@ -733,7 +738,11 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     }
 
     int opt = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        sc_health_mark_error("gateway", "setsockopt SO_REUSEADDR failed");
+        err = SC_ERR_IO;
+        goto cleanup;
+    }
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -755,8 +764,11 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     /* Set listen socket non-blocking for poll */
     {
         int flags = fcntl(fd, F_GETFL, 0);
-        if (flags >= 0)
-            fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+            sc_health_mark_error("gateway", "fcntl non-blocking failed");
+            err = SC_ERR_IO;
+            goto cleanup;
+        }
     }
 
     gw->listen_fd = fd;
@@ -830,15 +842,19 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
             /* Ensure client socket is blocking (macOS accept inherits O_NONBLOCK) */
             {
                 int flags = fcntl(client, F_GETFL, 0);
-                if (flags >= 0 && (flags & O_NONBLOCK))
-                    fcntl(client, F_SETFL, flags & ~O_NONBLOCK);
+                if (flags >= 0 && (flags & O_NONBLOCK)) {
+                    if (fcntl(client, F_SETFL, flags & ~O_NONBLOCK) < 0) {
+                        close(client);
+                        continue;
+                    }
+                }
             }
 
             char req[4096];
             size_t total = 0;
             {
                 struct timeval tv = {5, 0};
-                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
             }
             while (total < sizeof(req) - 1) {
                 ssize_t r = recv(client, req + total, sizeof(req) - 1 - total, 0);
@@ -955,11 +971,11 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
 #endif
                 {
                     struct linger sl = {1, 5};
-                    setsockopt(client, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+                    (void)setsockopt(client, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
                     shutdown(client, SHUT_WR);
                     char drain[256];
                     struct timeval tv = {1, 0};
-                    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                    (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
                     while (recv(client, drain, sizeof(drain), 0) > 0) {}
                 }
                 close(client);

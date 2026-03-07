@@ -21,6 +21,8 @@ static int has(const char *msg, size_t len, const char *pat) {
     return ci_strstr(msg, len, pat, strlen(pat)) != NULL;
 }
 
+#define SC_INPUT_GUARD_MAX_LEN (256u * 1024u)
+
 sc_error_t sc_input_guard_check(const char *message, size_t message_len,
                                 sc_injection_risk_t *out_risk) {
     if (!out_risk)
@@ -29,6 +31,8 @@ sc_error_t sc_input_guard_check(const char *message, size_t message_len,
         *out_risk = SC_INJECTION_SAFE;
         return SC_OK;
     }
+    if (message_len > SC_INPUT_GUARD_MAX_LEN)
+        message_len = SC_INPUT_GUARD_MAX_LEN;
 
     int score = 0;
 

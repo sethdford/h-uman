@@ -589,10 +589,9 @@ if(SC_ENABLE_SKILLS)
     list(APPEND SC_CORE_SOURCES src/skillforge.c src/skills.c)
 endif()
 
-# Cron scheduler
+# Cron scheduler (cron.c and crontab.c are in SC_CORE_SOURCES unconditionally)
 if(SC_ENABLE_CRON)
     list(APPEND SC_CORE_SOURCES
-        src/cron.c src/crontab.c
         src/tools/cron_add.c src/tools/cron_list.c src/tools/cron_remove.c
         src/tools/cron_run.c src/tools/cron_runs.c src/tools/cron_update.c
         src/tools/schedule.c)
@@ -1102,7 +1101,6 @@ if(NOT SC_ENABLE_UPDATE)
 endif()
 if(NOT SC_ENABLE_CRON)
     list(APPEND SC_TEST_EXTRA_MODULES
-        src/cron.c src/crontab.c
         src/tools/cron_add.c src/tools/cron_list.c src/tools/cron_remove.c
         src/tools/cron_run.c src/tools/cron_runs.c src/tools/cron_update.c
         src/tools/schedule.c)
