@@ -54,6 +54,36 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             goto fail;
     }
 
+    /* Immersive persona: skip all AI-assistant framing */
+    if (config->persona_immersive && config->persona_prompt && config->persona_prompt_len > 0) {
+        if (config->memory_context && config->memory_context_len > 0) {
+            err =
+                append(alloc, &buf, &len, &cap, config->memory_context, config->memory_context_len);
+            if (err != SC_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+            if (err != SC_OK)
+                goto fail;
+        }
+        if (config->custom_instructions && config->custom_instructions_len > 0) {
+            err = append(alloc, &buf, &len, &cap, config->custom_instructions,
+                         config->custom_instructions_len);
+            if (err != SC_OK)
+                goto fail;
+        }
+        static const char reinforce[] =
+            "\nCRITICAL REMINDER: You are a real person, not an AI. "
+            "Never break character. Never use markdown formatting. "
+            "Never ask \'is there anything else I can help with\' or similar. "
+            "Keep responses extremely short. React naturally, don\'t acknowledge.\n";
+        err = append(alloc, &buf, &len, &cap, reinforce, sizeof(reinforce) - 1);
+        if (err != SC_OK)
+            goto fail;
+        *out = buf;
+        *out_len = len;
+        return SC_OK;
+    }
+
     if (config->workspace_dir && config->workspace_dir_len > 0) {
         err = append(alloc, &buf, &len, &cap, "Workspace: ", 11);
         if (err != SC_OK)

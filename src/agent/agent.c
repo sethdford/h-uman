@@ -1475,6 +1475,7 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
             .awareness_context_len = awareness_ctx_len,
             .outcome_context = outcome_ctx,
             .outcome_context_len = outcome_ctx_len,
+            .persona_immersive = (persona_prompt && persona_prompt_len > 0),
         };
         err = sc_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (persona_prompt)
@@ -2212,6 +2213,7 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
             .awareness_context_len = awareness_ctx_len,
             .outcome_context = outcome_ctx,
             .outcome_context_len = outcome_ctx_len,
+            .persona_immersive = (persona_prompt && persona_prompt_len > 0),
         };
         err = sc_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (persona_prompt)

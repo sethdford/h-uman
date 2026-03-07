@@ -36,6 +36,7 @@ typedef struct sc_prompt_config {
     size_t awareness_context_len;
     const char *outcome_context; /* outcome tracker summary (tool success rates, corrections) */
     size_t outcome_context_len;
+    bool persona_immersive; /* suppress AI-assistant framing for deep persona mode */
 } sc_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc. */
