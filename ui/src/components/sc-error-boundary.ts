@@ -65,9 +65,6 @@ export class ScErrorBoundary extends LitElement {
 
   override render() {
     if (this.error) {
-      if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
-        console.error("[sc-error-boundary]", this.error);
-      }
       return html`
         <div class="fallback" role="alert" aria-live="assertive">
           <div class="icon" aria-hidden="true">${icons.warning}</div>

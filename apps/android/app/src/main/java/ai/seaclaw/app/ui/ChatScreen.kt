@@ -107,7 +107,7 @@ fun ChatScreen(gatewayManager: GatewayManager) {
                             if (hasSuccess && toolCalls.isNotEmpty()) {
                                 val idx = toolCalls.lastIndex
                                 val last = toolCalls[idx]
-                                val ok = e.payload?.optBoolean("success", false)
+                                val ok = e.payload?.optBoolean("success", false) ?: false
                                 val result = e.payload?.opt("detail")?.toString() ?: e.payload?.opt("message")?.toString()
                                 toolCalls[idx] = last.copy(
                                     status = if (ok) ToolStatus.COMPLETED else ToolStatus.FAILED,
