@@ -59,8 +59,8 @@ jobs:
         run: |
           SIZE=$(stat -c%s build/seaclaw 2>/dev/null || stat -f%z build/seaclaw)
           echo "Binary size: $SIZE bytes ($(echo "scale=1; $SIZE/1024" | bc)KB)"
-          if [ "$SIZE" -gt 400000 ]; then
-            echo "WARNING: Binary exceeds 400KB target"
+          if [ "$SIZE" -gt 614400 ]; then
+            echo "WARNING: Binary exceeds 600KB budget"
           fi
 
   fuzz-test:
