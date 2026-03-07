@@ -383,7 +383,48 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
     case "nodes.list":
       return {
         nodes: [
-          { id: "local", name: "Local", status: "healthy", uptime: 172800, version: "0.42.0" },
+          {
+            id: "local",
+            type: "gateway",
+            status: "online",
+            hostname: "studio.local",
+            version: "0.3.1",
+            uptime_secs: 172800,
+            ws_connections: 3,
+            cpu_percent: 12,
+            memory_mb: 5.7,
+          },
+          {
+            id: "remote-prod",
+            type: "gateway",
+            status: "online",
+            hostname: "prod-us-east.example.com",
+            version: "0.3.1",
+            uptime_secs: 604800,
+            ws_connections: 18,
+            cpu_percent: 34,
+            memory_mb: 14.2,
+          },
+          {
+            id: "rpi-sensor",
+            type: "peripheral",
+            status: "degraded",
+            hostname: "raspberrypi.local",
+            version: "0.3.0",
+            uptime_secs: 3600,
+            ws_connections: 1,
+            cpu_percent: 68,
+            memory_mb: 42,
+          },
+          {
+            id: "staging",
+            type: "gateway",
+            status: "offline",
+            hostname: "staging.internal",
+            version: "0.2.9",
+            uptime_secs: 0,
+            ws_connections: 0,
+          },
         ],
       };
     case "nodes.action":

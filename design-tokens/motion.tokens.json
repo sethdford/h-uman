@@ -75,6 +75,16 @@
       "$value": "cubic-bezier(0.2, 0, 0, 1.2)",
       "$type": "cubicBezier",
       "$description": "Material 3 expressive — deceleration with spring overshoot for hero moments"
+    },
+    "spring": {
+      "$value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+      "$type": "cubicBezier",
+      "$description": "CSS cubic-bezier spring approximation — overshoot with quick settle for buttons, toggles, cards"
+    },
+    "spring-gentle": {
+      "$value": "cubic-bezier(0.22, 1.2, 0.36, 1)",
+      "$type": "cubicBezier",
+      "$description": "Gentle spring — subtle overshoot for modals, panels, hover states"
     }
   },
   "spring": {

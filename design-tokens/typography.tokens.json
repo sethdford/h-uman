@@ -16,6 +16,11 @@
     }
   },
   "fontSize": {
+    "2xs": {
+      "$value": "0.625rem",
+      "$type": "dimension",
+      "$description": "10px — smallest readable size, used for badges and secondary metadata"
+    },
     "xs": {
       "$value": "0.6875rem",
       "$type": "dimension",
@@ -90,6 +95,7 @@
   },
   "letterSpacing": {
     "$description": "Optical size compensation — tighter tracking at larger sizes",
+    "2xs": { "$value": "0.03em", "$type": "dimension" },
     "xs": { "$value": "0.02em", "$type": "dimension" },
     "sm": { "$value": "0.01em", "$type": "dimension" },
     "base": { "$value": "0em", "$type": "dimension" },

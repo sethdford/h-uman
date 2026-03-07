@@ -121,6 +121,7 @@ public enum SCTokens {
     public static let fontMono = "Geist Mono"
 
     // MARK: - Font sizes
+    public static let text2Xs: CGFloat = 10
     public static let textBase: CGFloat = 14
     public static let textLg: CGFloat = 16
     public static let textSm: CGFloat = 13

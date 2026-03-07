@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-07T17:08:17.279Z",
+  "generated": "2026-03-07T18:36:52.066Z",
   "groups": {
     "color.neutral": [
       {
@@ -657,6 +657,26 @@
       {
         "name": "6xl",
         "value": "8rem"
+      },
+      {
+        "name": "bar-gap",
+        "value": "4px"
+      },
+      {
+        "name": "bar-radius",
+        "value": "3px"
+      },
+      {
+        "name": "axis-padding",
+        "value": "8px"
+      },
+      {
+        "name": "legend-gap",
+        "value": "12px"
+      },
+      {
+        "name": "tooltip-padding",
+        "value": "8px 12px"
       }
     ],
     "radius": [
@@ -753,6 +773,10 @@
     ],
     "fontSize": [
       {
+        "name": "2xs",
+        "value": "0.625rem"
+      },
+      {
         "name": "xs",
         "value": "0.6875rem"
       },
@@ -834,6 +858,10 @@
       }
     ],
     "letterSpacing": [
+      {
+        "name": "2xs",
+        "value": "0.03em"
+      },
       {
         "name": "xs",
         "value": "0.02em"
@@ -1195,6 +1223,14 @@
       {
         "name": "emphasize-overshoot",
         "value": "cubic-bezier(0.2, 0, 0, 1.2)"
+      },
+      {
+        "name": "spring",
+        "value": "cubic-bezier(0.34, 1.56, 0.64, 1)"
+      },
+      {
+        "name": "spring-gentle",
+        "value": "cubic-bezier(0.22, 1.2, 0.36, 1)"
       }
     ],
     "spring.micro": [
@@ -2823,6 +2859,141 @@
       {
         "name": "transition-duration",
         "value": "200ms"
+      }
+    ],
+    "chart.categorical": [
+      {
+        "name": "1",
+        "value": "#7AB648",
+        "hex": "#7AB648"
+      },
+      {
+        "name": "2",
+        "value": "#6366f1",
+        "hex": "#6366f1"
+      },
+      {
+        "name": "3",
+        "value": "#f59e0b",
+        "hex": "#f59e0b"
+      },
+      {
+        "name": "4",
+        "value": "#f97066",
+        "hex": "#f97066"
+      },
+      {
+        "name": "5",
+        "value": "#14b8a6",
+        "hex": "#14b8a6"
+      },
+      {
+        "name": "6",
+        "value": "#a5b4fc",
+        "hex": "#a5b4fc"
+      },
+      {
+        "name": "7",
+        "value": "#fcd34d",
+        "hex": "#fcd34d"
+      },
+      {
+        "name": "8",
+        "value": "#a3d46a",
+        "hex": "#a3d46a"
+      }
+    ],
+    "chart.sequential": [
+      {
+        "name": "100",
+        "value": "#e2f2c8",
+        "hex": "#e2f2c8"
+      },
+      {
+        "name": "200",
+        "value": "#c5e59a",
+        "hex": "#c5e59a"
+      },
+      {
+        "name": "300",
+        "value": "#a3d46a",
+        "hex": "#a3d46a"
+      },
+      {
+        "name": "400",
+        "value": "#8DC63F",
+        "hex": "#8DC63F"
+      },
+      {
+        "name": "500",
+        "value": "#7AB648",
+        "hex": "#7AB648"
+      },
+      {
+        "name": "600",
+        "value": "#5A9A30",
+        "hex": "#5A9A30"
+      },
+      {
+        "name": "700",
+        "value": "#47802A",
+        "hex": "#47802A"
+      },
+      {
+        "name": "800",
+        "value": "#366320",
+        "hex": "#366320"
+      }
+    ],
+    "chart.diverging": [
+      {
+        "name": "positive",
+        "value": "#7AB648",
+        "hex": "#7AB648"
+      },
+      {
+        "name": "neutral",
+        "value": "#5e7a94",
+        "hex": "#5e7a94"
+      },
+      {
+        "name": "negative",
+        "value": "#f97066",
+        "hex": "#f97066"
+      }
+    ],
+    "chart.status": [
+      {
+        "name": "success",
+        "value": "#7AB648",
+        "hex": "#7AB648"
+      },
+      {
+        "name": "warning",
+        "value": "#f59e0b",
+        "hex": "#f59e0b"
+      },
+      {
+        "name": "error",
+        "value": "#f97066",
+        "hex": "#f97066"
+      },
+      {
+        "name": "info",
+        "value": "#6366f1",
+        "hex": "#6366f1"
+      },
+      {
+        "name": "muted",
+        "value": "#5e7a94",
+        "hex": "#5e7a94"
+      }
+    ],
+    "chart": [
+      {
+        "name": "brand",
+        "value": "#7AB648",
+        "hex": "#7AB648"
       }
     ]
   }

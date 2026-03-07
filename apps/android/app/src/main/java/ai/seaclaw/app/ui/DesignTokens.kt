@@ -144,6 +144,7 @@ object SCTokens {
 
     // Letter spacing (em multiplier for LetterSpacing.Em())
     val tracking2xl = -0.02f
+    val tracking2xs = 0.03f
     val trackingBase = 0f
     val trackingHero = -0.04f
     val trackingLg = 0f
@@ -167,7 +168,9 @@ object SCTokens {
     val easingEmphasize = "cubic-bezier(0.2, 0, 0, 1)"
     val easingEmphasizeOvershoot = "cubic-bezier(0.2, 0, 0, 1.2)"
     val easingLinear = "linear"
+    val easingSpring = "cubic-bezier(0.34, 1.56, 0.64, 1)"
     val easingSpringBounce = "linear(0, 0.004, 0.016, 0.035 4%, 0.147 8%, 0.51 17.2%, 0.726 23.1%, 0.884 28.9%, 0.976 34%, 1.019 38.3%, 1.045 42.5%, 1.054 47.7%, 1.04 56.7%, 1.017 64.3%, 1.003 76%, 1)"
+    val easingSpringGentle = "cubic-bezier(0.22, 1.2, 0.36, 1)"
     val easingSpringOut = "linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1)"
 
     // Spring (stiffness, damping, mass)

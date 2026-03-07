@@ -159,6 +159,16 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         return SC_ERR_INTERNAL;
     }
 
+    /* Human-like typing delay before sending */
+    {
+        unsigned int delay_ms = (unsigned int)(message_len * 25);
+        if (delay_ms < 800)
+            delay_ms = 800;
+        if (delay_ms > 4000)
+            delay_ms = 4000;
+        usleep(delay_ms * 1000);
+    }
+
     const char *argv[] = {"osascript", "-e", script, NULL};
     sc_run_result_t result = {0};
     sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
