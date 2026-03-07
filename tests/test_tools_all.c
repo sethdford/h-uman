@@ -30,6 +30,7 @@
 #include "seaclaw/tools/git.h"
 #include "seaclaw/tools/hardware_info.h"
 #include "seaclaw/tools/hardware_memory.h"
+#include "seaclaw/tools/homeassistant.h"
 #include "seaclaw/tools/http_request.h"
 #include "seaclaw/tools/i2c.h"
 #include "seaclaw/tools/image.h"
@@ -1411,6 +1412,80 @@ static void test_calendar_list(void) {
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
+static void test_homeassistant_null_args_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_homeassistant_create(&alloc, &tool);
+    sc_tool_result_t result = {0};
+    sc_error_t err = tool.vtable->execute(tool.ctx, &alloc, NULL, &result);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_FALSE(result.success);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_homeassistant_get_states_returns_mock_data(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_homeassistant_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "operation", "get_states");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.success);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "states") != NULL);
+    SC_ASSERT(strstr(result.output, "light.living_room") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_homeassistant_get_entity_with_entity_id_returns_mock_data(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_homeassistant_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "operation", "get_entity");
+    biz_set_str(&alloc, args, "entity_id", "switch.plug");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.success);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "switch.plug") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_homeassistant_call_service_returns_success(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_homeassistant_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "operation", "call_service");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT(result.success);
+    SC_ASSERT(result.output != NULL);
+    SC_ASSERT(strstr(result.output, "success") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
+static void test_homeassistant_missing_operation_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_homeassistant_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "missing operation") != NULL);
+    sc_json_free(&alloc, args);
+    if (tool.vtable->deinit)
+        tool.vtable->deinit(tool.ctx, &alloc);
+}
 static void test_skill_write_missing_name(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
@@ -2589,6 +2664,11 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_broadcast_create);
     SC_RUN_TEST(test_calendar_create);
     SC_RUN_TEST(test_calendar_list);
+    SC_RUN_TEST(test_homeassistant_null_args_returns_error);
+    SC_RUN_TEST(test_homeassistant_get_states_returns_mock_data);
+    SC_RUN_TEST(test_homeassistant_get_entity_with_entity_id_returns_mock_data);
+    SC_RUN_TEST(test_homeassistant_call_service_returns_success);
+    SC_RUN_TEST(test_homeassistant_missing_operation_returns_error);
     SC_RUN_TEST(test_skill_write_missing_name);
     SC_RUN_TEST(test_skill_write_missing_description);
     SC_RUN_TEST(test_skill_write_missing_command);

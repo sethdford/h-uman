@@ -1284,6 +1284,49 @@ static void test_nostr_poll_test_mode(void) {
 }
 #endif
 
+#if SC_HAS_MQTT
+#include "seaclaw/channel_loop.h"
+#include "seaclaw/channels/mqtt.h"
+static void test_mqtt_create_null_alloc_returns_error(void) {
+    sc_channel_t ch = {0};
+    sc_error_t err =
+        sc_mqtt_create(NULL, "mqtt://broker", 14, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+static void test_mqtt_create_null_broker_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_mqtt_create(&alloc, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+static void test_mqtt_create_valid_lifecycle(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_mqtt_create(&alloc, "mqtt://broker.example.com", 26, "in", 2, "out", 3,
+                                    NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(ch.ctx);
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, NULL, 0, "hello", 5, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    ch.vtable->stop(ch.ctx);
+    sc_mqtt_destroy(&ch, &alloc);
+}
+static void test_mqtt_create_valid_health_check_when_running(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err =
+        sc_mqtt_create(&alloc, "mqtt://broker", 13, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    ch.vtable->stop(ch.ctx);
+    sc_mqtt_destroy(&ch, &alloc);
+}
+#endif
+
 #if SC_HAS_QQ
 #include "seaclaw/channels/qq.h"
 static void test_qq_create(void) {
@@ -1843,6 +1886,12 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_nostr_send);
     SC_RUN_TEST(test_nostr_health_check);
     SC_RUN_TEST(test_nostr_poll_test_mode);
+#endif
+#if SC_HAS_MQTT
+    SC_RUN_TEST(test_mqtt_create_null_alloc_returns_error);
+    SC_RUN_TEST(test_mqtt_create_null_broker_returns_error);
+    SC_RUN_TEST(test_mqtt_create_valid_lifecycle);
+    SC_RUN_TEST(test_mqtt_create_valid_health_check_when_running);
 #endif
 #if SC_HAS_QQ
     SC_RUN_TEST(test_qq_create);
