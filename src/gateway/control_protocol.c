@@ -1760,6 +1760,30 @@ static sc_error_t rpc_auth_token(sc_allocator_t *alloc, sc_app_context_t *app, s
     return handle_auth_token(alloc, conn, proto, root, out, out_len);
 }
 
+static sc_error_t rpc_oauth_start(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
+                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+                                  char **out, size_t *out_len) {
+    (void)app;
+    (void)conn;
+    return handle_oauth_start(alloc, proto, root, out, out_len);
+}
+
+static sc_error_t rpc_oauth_callback(sc_allocator_t *alloc, sc_app_context_t *app,
+                                     sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
+                                     const sc_json_value_t *root, char **out, size_t *out_len) {
+    (void)app;
+    (void)conn;
+    return handle_oauth_callback(alloc, proto, root, out, out_len);
+}
+
+static sc_error_t rpc_oauth_refresh(sc_allocator_t *alloc, sc_app_context_t *app,
+                                    sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
+                                    const sc_json_value_t *root, char **out, size_t *out_len) {
+    (void)app;
+    (void)conn;
+    return handle_oauth_refresh(alloc, proto, root, out, out_len);
+}
+
 static sc_error_t rpc_connect(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
                               const sc_control_protocol_t *proto, const sc_json_value_t *root,
                               char **out, size_t *out_len) {
@@ -2099,6 +2123,9 @@ static sc_error_t rpc_push_unregister(sc_allocator_t *alloc, sc_app_context_t *a
 
 static const sc_rpc_entry_t s_rpc_table[] = {
     {"auth.token", rpc_auth_token},
+    {"auth.oauth.start", rpc_oauth_start},
+    {"auth.oauth.callback", rpc_oauth_callback},
+    {"auth.oauth.refresh", rpc_oauth_refresh},
     {"connect", rpc_connect},
     {"health", rpc_health},
     {"config.get", rpc_config_get},
@@ -2153,7 +2180,8 @@ static const sc_rpc_entry_t s_rpc_table[] = {
 static bool is_public_method(const char *method) {
     return strcmp(method, "health") == 0 || strcmp(method, "status") == 0 ||
            strcmp(method, "version") == 0 || strcmp(method, "connect") == 0 ||
-           strcmp(method, "capabilities") == 0;
+           strcmp(method, "capabilities") == 0 || strcmp(method, "auth.oauth.start") == 0 ||
+           strcmp(method, "auth.oauth.callback") == 0 || strcmp(method, "auth.oauth.refresh") == 0;
 }
 
 /* ── auth.token ──────────────────────────────────────────────────────── */
@@ -2231,6 +2259,11 @@ void sc_control_protocol_init(sc_control_protocol_t *proto, sc_allocator_t *allo
     proto->require_pairing = false;
     proto->pairing_guard = NULL;
     proto->auth_token = NULL;
+    proto->oauth_ctx = NULL;
+    proto->oauth_pending_ctx = NULL;
+    proto->oauth_pending_store = NULL;
+    proto->oauth_pending_lookup = NULL;
+    proto->oauth_pending_remove = NULL;
 }
 
 void sc_control_protocol_deinit(sc_control_protocol_t *proto) {

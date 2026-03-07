@@ -1,4 +1,4 @@
-/* Internal agent module API. Not installed; used only by agent/*.c */
+/* Internal agent module API. Not installed; used only by agent/ sources. */
 #ifndef SC_AGENT_INTERNAL_H
 #define SC_AGENT_INTERNAL_H
 
@@ -33,6 +33,8 @@ sc_error_t sc_agent_internal_append_history_with_tool_calls(sc_agent_t *agent, c
                                                             const sc_tool_call_t *tool_calls,
                                                             size_t tool_calls_count);
 
+void sc_agent_set_current_for_tools(sc_agent_t *agent);
+void sc_agent_clear_current_for_tools(void);
 void sc_agent_internal_process_mailbox_messages(sc_agent_t *agent);
 void sc_agent_internal_maybe_tts(sc_agent_t *agent, const char *text, size_t text_len);
 

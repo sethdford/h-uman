@@ -24,6 +24,9 @@ set(SC_WASM_CORE_SOURCES
     src/tunnel/none.c
     src/runtime/wasm_rt.c
     src/agent/agent.c
+    src/agent/agent_slash.c
+    src/agent/agent_stream.c
+    src/agent/agent_turn.c
     src/agent/context.c
     src/agent/dispatcher.c
     src/agent/compaction.c

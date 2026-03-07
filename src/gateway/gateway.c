@@ -103,6 +103,114 @@ typedef struct sc_gateway_state {
     sc_thread_pool_t *http_pool;
 } sc_gateway_state_t;
 
+/* ── OAuth pending state (PKCE verifier storage) ───────────────────────── */
+
+static void oauth_pending_store(void *ctx, const char *state, const char *verifier) {
+    sc_gateway_state_t *gw = (sc_gateway_state_t *)ctx;
+    if (!gw || gw->oauth_pending_count >= SC_OAUTH_PENDING_MAX)
+        return;
+    sc_oauth_pending_entry_t *e = &gw->oauth_pending[gw->oauth_pending_count++];
+    size_t sl = strlen(state);
+    size_t vl = strlen(verifier);
+    if (sl >= SC_OAUTH_STATE_LEN)
+        sl = SC_OAUTH_STATE_LEN - 1;
+    if (vl >= SC_OAUTH_VERIFIER_LEN)
+        vl = SC_OAUTH_VERIFIER_LEN - 1;
+    memcpy(e->state, state, sl);
+    e->state[sl] = '\0';
+    memcpy(e->verifier, verifier, vl);
+    e->verifier[vl] = '\0';
+    e->created_at = time(NULL);
+}
+
+static const char *oauth_pending_lookup(void *ctx, const char *state) {
+    sc_gateway_state_t *gw = (sc_gateway_state_t *)ctx;
+    if (!gw || !state)
+        return NULL;
+    time_t now = time(NULL);
+    for (size_t i = 0; i < gw->oauth_pending_count; i++) {
+        sc_oauth_pending_entry_t *e = &gw->oauth_pending[i];
+        if (strcmp(e->state, state) == 0) {
+            if (now - e->created_at > 600)
+                return NULL;
+            return e->verifier;
+        }
+    }
+    return NULL;
+}
+
+static void oauth_pending_remove(void *ctx, const char *state) {
+    sc_gateway_state_t *gw = (sc_gateway_state_t *)ctx;
+    if (!gw || !state)
+        return;
+    for (size_t i = 0; i < gw->oauth_pending_count; i++) {
+        if (strcmp(gw->oauth_pending[i].state, state) == 0) {
+            memmove(&gw->oauth_pending[i], &gw->oauth_pending[i + 1],
+                    (gw->oauth_pending_count - 1 - i) * sizeof(sc_oauth_pending_entry_t));
+            gw->oauth_pending_count--;
+            memset(&gw->oauth_pending[gw->oauth_pending_count], 0,
+                   sizeof(sc_oauth_pending_entry_t));
+            return;
+        }
+    }
+}
+
+/* Extract cookie value from Cookie header. cookie_header is "name1=val1; name2=val2".
+ * Returns pointer into header or NULL. out_len set to value length. */
+static const char *cookie_value(const char *cookie_header, const char *name, size_t *out_len) {
+    if (!cookie_header || !name || !out_len)
+        return NULL;
+    size_t nlen = strlen(name);
+    const char *p = cookie_header;
+    while (*p) {
+        while (*p == ' ')
+            p++;
+        if (strncasecmp(p, name, nlen) == 0 && p[nlen] == '=') {
+            p += nlen + 1;
+            const char *end = strchr(p, ';');
+            if (end) {
+                *out_len = (size_t)(end - p);
+                return p;
+            }
+            *out_len = strlen(p);
+            return p;
+        }
+        p = strchr(p, ';');
+        if (!p)
+            break;
+        p++;
+    }
+    return NULL;
+}
+
+/* Extract query param value. path may be "/foo?code=xxx&state=yyy". Returns pointer into path or
+ * NULL.
+ */
+static const char *query_param_value(const char *path, const char *key, size_t *out_len) {
+    const char *q = strchr(path, '?');
+    if (!q)
+        return NULL;
+    const char *p = q + 1;
+    size_t klen = strlen(key);
+    while (*p) {
+        if (strncasecmp(p, key, klen) == 0 && p[klen] == '=') {
+            p += klen + 1;
+            const char *end = strchr(p, '&');
+            if (end) {
+                *out_len = (size_t)(end - p);
+                return p;
+            }
+            *out_len = strlen(p);
+            return p;
+        }
+        p = strchr(p, '&');
+        if (!p)
+            break;
+        p++;
+    }
+    return NULL;
+}
+
 static void trim_crlf(char *s) {
     size_t len = strlen(s);
     while (len > 0 && (s[len - 1] == '\r' || s[len - 1] == '\n'))
@@ -118,6 +226,15 @@ static bool path_is(const char *path, const char *base) {
     if (strncmp(path, base, n) != 0)
         return false;
     return path[n] == '\0' || (path[n] == '/' && path[n + 1] == '\0');
+}
+
+static bool path_starts_with(const char *path, const char *base) {
+    if (!path || !base)
+        return false;
+    size_t n = strlen(base);
+    if (strncmp(path, base, n) != 0)
+        return false;
+    return path[n] == '\0' || path[n] == '?';
 }
 
 bool sc_gateway_path_is(const char *path, const char *base) {
@@ -311,6 +428,44 @@ static void send_json(int fd, int status, const char *body) {
     send_response(fd, status, "application/json", body, body ? strlen(body) : 0, 0);
 }
 
+static void send_json_with_cookie(int fd, int status, const char *body, const char *cookie_name,
+                                  const char *cookie_value) {
+    if (!cookie_name || !cookie_value) {
+        send_json(fd, status, body);
+        return;
+    }
+    const char *status_str = (status == 200)   ? "200 OK"
+                             : (status == 400) ? "400 Bad Request"
+                             : (status == 401) ? "401 Unauthorized"
+                                               : "500 Internal Server Error";
+    char hdr[768];
+    const char *cors_origin = get_cors_origin_for_response();
+    char cors_line[256] = "";
+    char cookie_line[384];
+    snprintf(cookie_line, sizeof(cookie_line),
+             "Set-Cookie: %s=%s; HttpOnly; Path=/api/auth/oauth; SameSite=Lax\r\n", cookie_name,
+             cookie_value);
+    if (cors_origin[0] != '\0')
+        snprintf(cors_line, sizeof(cors_line), "Access-Control-Allow-Origin: %s\r\n", cors_origin);
+    size_t body_len = body ? strlen(body) : 0;
+    int n = snprintf(hdr, sizeof(hdr),
+                     "HTTP/1.1 %s\r\n"
+                     "Content-Type: application/json\r\n"
+                     "Connection: close\r\n"
+                     "Content-Length: %zu\r\n"
+                     "X-Frame-Options: DENY\r\n"
+                     "X-Content-Type-Options: nosniff\r\n"
+                     "%s"
+                     "%s"
+                     "\r\n",
+                     status_str, body_len, cors_line, cookie_line);
+    if (n > 0 && (size_t)n < sizeof(hdr)) {
+        send_all(fd, hdr, (size_t)n);
+        if (body && body_len > 0)
+            send_all(fd, body, body_len);
+    }
+}
+
 static void send_json_rate_limited(int fd, const char *body, int retry_after_secs) {
     send_response(fd, 429, "application/json", body, body ? strlen(body) : 0, retry_after_secs);
 }
@@ -412,8 +567,14 @@ static bool serve_static_file(int fd, const char *base_dir, const char *url_path
 /* ── HTTP request handling (thread pool worker) ───────────────────────────── */
 
 #ifdef SC_GATEWAY_POSIX
+static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *method,
+                                const char *path, const char *body, size_t body_len,
+                                const char *client_ip, const char *sig_header,
+                                const char *cookie_header);
+
 #define SC_HTTP_WORK_ORIGIN_MAX 256
 #define SC_HTTP_WORK_SIG_MAX    128
+#define SC_HTTP_WORK_COOKIE_MAX 512
 
 typedef struct {
     sc_gateway_state_t *gw;
@@ -425,6 +586,7 @@ typedef struct {
     char client_ip[64];
     char sig_header[SC_HTTP_WORK_SIG_MAX];
     char origin[SC_HTTP_WORK_ORIGIN_MAX];
+    char cookie[SC_HTTP_WORK_COOKIE_MAX];
 } sc_http_work_t;
 
 static void http_worker_fn(void *arg) {
@@ -434,7 +596,8 @@ static void http_worker_fn(void *arg) {
 
     s_request_origin = work->origin[0] != '\0' ? work->origin : NULL;
     handle_http_request(gw, work->fd, work->method, work->path, work->body, work->body_len,
-                        work->client_ip, work->sig_header[0] != '\0' ? work->sig_header : NULL);
+                        work->client_ip, work->sig_header[0] != '\0' ? work->sig_header : NULL,
+                        work->cookie[0] != '\0' ? work->cookie : NULL);
     s_request_origin = NULL;
 
     {
@@ -455,7 +618,8 @@ static void http_worker_fn(void *arg) {
 
 static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *method,
                                 const char *path, const char *body, size_t body_len,
-                                const char *client_ip, const char *sig_header) {
+                                const char *client_ip, const char *sig_header,
+                                const char *cookie_header) {
 
     if (gw->config.test_mode) {
         fprintf(stderr, "[gateway] %s %s %s body=%zu\n", method ? method : "?", path ? path : "/",
@@ -578,6 +742,123 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
             send_json(fd, 400, "{\"error\":\"pairing_failed\"}");
         }
         gw->alloc->free(gw->alloc->ctx, code, strlen(code) + 1);
+        return;
+    }
+
+    /* OAuth routes (require oauth_ctx and SC_HTTP_CURL unless SC_IS_TEST) */
+    sc_oauth_ctx_t *oauth_ctx = (sc_oauth_ctx_t *)gw->config.oauth_ctx;
+    if (oauth_ctx && path_starts_with(path, "/api/auth/oauth/start") && method &&
+        strcmp(method, "GET") == 0) {
+        char verifier[64];
+        char challenge[64];
+        char state[48];
+        if (sc_oauth_generate_pkce(oauth_ctx, verifier, sizeof(verifier), challenge,
+                                   sizeof(challenge)) != SC_OK) {
+            send_json(fd, 500, "{\"error\":\"internal\"}");
+            return;
+        }
+        {
+            static const char b64[] =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)(uintptr_t)oauth_ctx;
+            for (int i = 0; i < 43; i++) {
+                seed = seed * 1103515245u + 12345u;
+                state[i] = b64[(seed >> 16) & 63];
+            }
+            state[43] = '\0';
+        }
+        oauth_pending_store(gw, state, verifier);
+        char url[1024];
+        if (sc_oauth_build_auth_url(oauth_ctx, challenge, strlen(challenge), state, strlen(state),
+                                    url, sizeof(url)) != SC_OK) {
+            oauth_pending_remove(gw, state);
+            send_json(fd, 500, "{\"error\":\"internal\"}");
+            return;
+        }
+        sc_json_value_t *obj = sc_json_object_new(gw->alloc);
+        if (obj) {
+            sc_json_object_set(gw->alloc, obj, "url",
+                               sc_json_string_new(gw->alloc, url, strlen(url)));
+            sc_json_object_set(gw->alloc, obj, "state",
+                               sc_json_string_new(gw->alloc, state, strlen(state)));
+            char *json = NULL;
+            size_t json_len = 0;
+            if (sc_json_stringify(gw->alloc, obj, &json, &json_len) == SC_OK && json) {
+                send_json_with_cookie(fd, 200, json, "oauth_state", state);
+                gw->alloc->free(gw->alloc->ctx, json, json_len + 1);
+            } else {
+                send_json(fd, 500, "{\"error\":\"internal\"}");
+            }
+            sc_json_free(gw->alloc, obj);
+        } else {
+            send_json(fd, 500, "{\"error\":\"internal\"}");
+        }
+        return;
+    }
+    if (oauth_ctx && path_starts_with(path, "/api/auth/oauth/callback") && method &&
+        strcmp(method, "GET") == 0) {
+        size_t code_len = 0, state_len = 0;
+        const char *code = query_param_value(path, "code", &code_len);
+        const char *state = query_param_value(path, "state", &state_len);
+        if (!code || code_len == 0 || !state || state_len == 0) {
+            send_json(fd, 400, "{\"error\":\"missing code or state\"}");
+            return;
+        }
+        size_t cookie_state_len = 0;
+        const char *cookie_state =
+            cookie_header ? cookie_value(cookie_header, "oauth_state", &cookie_state_len) : NULL;
+        if (!cookie_state || cookie_state_len != state_len ||
+            memcmp(cookie_state, state, state_len) != 0) {
+            send_json(fd, 401, "{\"error\":\"invalid state\"}");
+            return;
+        }
+        char state_buf[SC_OAUTH_STATE_LEN];
+        if (state_len >= sizeof(state_buf))
+            state_len = sizeof(state_buf) - 1;
+        memcpy(state_buf, state, state_len);
+        state_buf[state_len] = '\0';
+        const char *verifier = oauth_pending_lookup(gw, state_buf);
+        oauth_pending_remove(gw, state_buf);
+        if (!verifier) {
+            send_json(fd, 401, "{\"error\":\"invalid or expired state\"}");
+            return;
+        }
+        char code_buf[512];
+        if (code_len >= sizeof(code_buf))
+            code_len = sizeof(code_buf) - 1;
+        memcpy(code_buf, code, code_len);
+        code_buf[code_len] = '\0';
+        sc_oauth_session_t session = {0};
+        sc_error_t err = sc_oauth_exchange_code(oauth_ctx, code_buf, code_len, verifier,
+                                                strlen(verifier), &session);
+        if (err != SC_OK) {
+            send_json(fd, 401, "{\"error\":\"token exchange failed\"}");
+            return;
+        }
+        sc_json_value_t *obj = sc_json_object_new(gw->alloc);
+        if (obj) {
+            sc_json_object_set(
+                gw->alloc, obj, "token",
+                sc_json_string_new(gw->alloc, session.access_token, strlen(session.access_token)));
+            sc_json_value_t *user = sc_json_object_new(gw->alloc);
+            if (user) {
+                sc_json_object_set(
+                    gw->alloc, user, "id",
+                    sc_json_string_new(gw->alloc, session.user_id, strlen(session.user_id)));
+                sc_json_object_set(gw->alloc, obj, "user", user);
+            }
+            char *json = NULL;
+            size_t json_len = 0;
+            if (sc_json_stringify(gw->alloc, obj, &json, &json_len) == SC_OK && json) {
+                send_json(fd, 200, json);
+                gw->alloc->free(gw->alloc->ctx, json, json_len + 1);
+            } else {
+                send_json(fd, 500, "{\"error\":\"internal\"}");
+            }
+            sc_json_free(gw->alloc, obj);
+        } else {
+            send_json(fd, 500, "{\"error\":\"internal\"}");
+        }
         return;
     }
 
@@ -772,6 +1053,11 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
         }
     }
     sc_control_set_auth(ctrl, cfg.require_pairing, gw->pairing_guard, cfg.auth_token);
+    if (cfg.oauth_ctx) {
+        sc_control_set_oauth(ctrl, cfg.oauth_ctx);
+        sc_control_set_oauth_pending(ctrl, gw, oauth_pending_store, oauth_pending_lookup,
+                                     oauth_pending_remove);
+    }
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -965,6 +1251,7 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
 
             size_t body_len = 0;
             char *sig_header = NULL;
+            char cookie_header[SC_HTTP_WORK_COOKIE_MAX] = {0};
             bool rejected = false;
             while ((line = strtok(NULL, "\n")) != NULL) {
                 trim_crlf(line);
@@ -1000,6 +1287,16 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                         v++;
                     s_request_origin = v;
                 }
+                if (strncasecmp(line, "Cookie:", 7) == 0) {
+                    char *v = line + 7;
+                    while (*v == ' ')
+                        v++;
+                    size_t len = strlen(v);
+                    if (len >= SC_HTTP_WORK_COOKIE_MAX)
+                        len = SC_HTTP_WORK_COOKIE_MAX - 1;
+                    memcpy(cookie_header, v, len);
+                    cookie_header[len] = '\0';
+                }
             }
 
             if (rejected)
@@ -1017,25 +1314,53 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                     body_buf[got < body_len ? got : body_len] = '\0';
                 }
 
-                handle_http_request(gw, client, method, path, body_buf, body_len, client_ip,
-                                    sig_header);
-#ifdef SC_GATEWAY_POSIX
-                pthread_mutex_lock(&s_cors_mutex);
-#endif
-                s_request_origin = NULL;
-#ifdef SC_GATEWAY_POSIX
-                pthread_mutex_unlock(&s_cors_mutex);
-#endif
-                {
-                    struct linger sl = {1, 5};
-                    (void)setsockopt(client, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
-                    shutdown(client, SHUT_WR);
-                    char drain[256];
-                    struct timeval tv = {1, 0};
-                    (void)setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-                    while (recv(client, drain, sizeof(drain), 0) > 0) {}
+                sc_http_work_t *work =
+                    (sc_http_work_t *)alloc->alloc(alloc->ctx, sizeof(sc_http_work_t));
+                if (!work) {
+                    send_json(client, 503, "{\"error\":\"service unavailable\"}");
+                    close(client);
+                    s_request_origin = NULL;
+                } else {
+                    memset(work, 0, sizeof(*work));
+                    work->gw = gw;
+                    work->fd = client;
+                    snprintf(work->method, sizeof(work->method), "%s", method);
+                    snprintf(work->path, sizeof(work->path), "%s", path);
+                    snprintf(work->client_ip, sizeof(work->client_ip), "%s", client_ip);
+                    if (s_request_origin)
+                        snprintf(work->origin, sizeof(work->origin), "%.255s", s_request_origin);
+                    if (sig_header)
+                        snprintf(work->sig_header, sizeof(work->sig_header), "%.127s", sig_header);
+                    if (cookie_header[0])
+                        snprintf(work->cookie, sizeof(work->cookie), "%.511s", cookie_header);
+                    work->body_len = body_len;
+                    if (body_len > 0) {
+                        work->body = (char *)alloc->alloc(alloc->ctx, body_len + 1);
+                        if (!work->body) {
+                            alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+                            send_json(client, 503, "{\"error\":\"service unavailable\"}");
+                            close(client);
+                            s_request_origin = NULL;
+                        } else {
+                            memcpy(work->body, body_buf, body_len);
+                            work->body[body_len] = '\0';
+                            if (!sc_thread_pool_submit(gw->http_pool, http_worker_fn, work)) {
+                                alloc->free(alloc->ctx, work->body, body_len + 1);
+                                alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+                                send_json(client, 503, "{\"error\":\"service unavailable\"}");
+                                close(client);
+                            }
+                            s_request_origin = NULL;
+                        }
+                    } else {
+                        if (!sc_thread_pool_submit(gw->http_pool, http_worker_fn, work)) {
+                            alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+                            send_json(client, 503, "{\"error\":\"service unavailable\"}");
+                            close(client);
+                        }
+                        s_request_origin = NULL;
+                    }
                 }
-                close(client);
             }
         }
     }
@@ -1050,6 +1375,10 @@ cleanup:
     if (gw && gw->rate_limiter) {
         sc_rate_limiter_destroy(gw->rate_limiter);
         gw->rate_limiter = NULL;
+    }
+    if (gw && gw->http_pool) {
+        sc_thread_pool_destroy(gw->http_pool);
+        gw->http_pool = NULL;
     }
     sc_ws_server_deinit(&gw->ws);
     if (ctrl == &proto_local)

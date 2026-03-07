@@ -319,6 +319,7 @@ set(SC_CORE_SOURCES
     src/tunnel/none.c
     src/tunnel/root.c
     src/gateway/gateway.c
+    src/gateway/thread_pool.c
     src/gateway/openai_compat.c
     src/gateway/oauth.c
     src/gateway/rate_limit.c
@@ -332,6 +333,9 @@ set(SC_CORE_SOURCES
     src/runtime/factory.c
     src/agent/action_preview.c
     src/agent/agent.c
+    src/agent/agent_slash.c
+    src/agent/agent_stream.c
+    src/agent/agent_turn.c
     src/agent/context.c
     src/agent/prompt.c
     src/agent/memory_loader.c
@@ -644,7 +648,7 @@ endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(seaclaw_core PUBLIC m dl)
 endif()
-target_include_directories(seaclaw_core PRIVATE ${SC_ROOT}/asm/generic)
+target_include_directories(seaclaw_core PRIVATE ${SC_ROOT}/asm/generic ${SC_ROOT}/src/agent)
 ## SC_IS_TEST is intentionally NOT set here — seaclaw_core is the production library.
 ## Tests link against seaclaw_core_test (below) which defines SC_IS_TEST=1.
 
@@ -1505,7 +1509,7 @@ if(SC_BUILD_WASM)
         ${SC_WASM_CORE_SOURCES}
         ${SC_WASM_CRYPTO_SOURCES}
     )
-    target_include_directories(seaclaw.wasm PRIVATE ${SC_ROOT}/include ${SC_ROOT}/asm/generic)
+    target_include_directories(seaclaw.wasm PRIVATE ${SC_ROOT}/include ${SC_ROOT}/asm/generic ${SC_ROOT}/src/agent)
     target_compile_definitions(seaclaw.wasm PRIVATE __wasi__=1 SC_IS_TEST=0)
     if(SC_ENABLE_SQLITE)
         target_compile_definitions(seaclaw.wasm PRIVATE SC_ENABLE_SQLITE=0)
