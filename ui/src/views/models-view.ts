@@ -157,17 +157,7 @@ export class ScModelsView extends GatewayAwareLitElement {
   }
 
   override render() {
-    if (this.loading) {
-      return html`
-        <h2>Models & Providers</h2>
-        <div class="grid sc-stagger">
-          <sc-skeleton variant="card" height="80px"></sc-skeleton>
-          <sc-skeleton variant="card" height="80px"></sc-skeleton>
-          <sc-skeleton variant="card" height="80px"></sc-skeleton>
-        </div>
-      `;
-    }
-
+    if (this.loading) return this._renderSkeleton();
     return html`
       <h2>Models & Providers</h2>
       ${this.error
@@ -177,14 +167,38 @@ export class ScModelsView extends GatewayAwareLitElement {
             description=${this.error}
           ></sc-empty-state>`
         : nothing}
+      ${this._renderInfoBar()} ${this._renderGrid()}
+    `;
+  }
+
+  private _renderSkeleton() {
+    return html`
+      <h2>Models & Providers</h2>
+      <div class="grid sc-stagger">
+        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+      </div>
+    `;
+  }
+
+  private _renderInfoBar() {
+    return html`
       <sc-card class="info-card">
         <div class="info-bar">
           <span class="info-item"
-            ><strong>Default provider:</strong> ${this.defaultProvider || "—"}</span
+            ><strong>Default provider:</strong> ${this.defaultProvider || "\u2014"}</span
           >
-          <span class="info-item"><strong>Default model:</strong> ${this.defaultModel || "—"}</span>
+          <span class="info-item"
+            ><strong>Default model:</strong> ${this.defaultModel || "\u2014"}</span
+          >
         </div>
       </sc-card>
+    `;
+  }
+
+  private _renderGrid() {
+    return html`
       <div class="grid sc-stagger">
         ${this.providers.length === 0
           ? html`
@@ -194,29 +208,25 @@ export class ScModelsView extends GatewayAwareLitElement {
                 description="Configure an AI provider in your config to get started."
               ></sc-empty-state>
             `
-          : this.providers.map(
-              (p) => html`
-                <sc-card>
-                  <div class="card-header">
-                    <span class="card-name ${p.is_default ? "default" : ""}"
-                      >${p.name ?? "unnamed"}</span
-                    >
-                    ${p.is_default ? html`<sc-badge variant="info">default</sc-badge>` : nothing}
-                    ${p.native_tools
-                      ? html`<sc-badge variant="neutral">native tools</sc-badge>`
-                      : nothing}
-                  </div>
-                  <div class="key-status ${p.has_key ? "has" : "missing"}">
-                    <span class="key-icon">${p.has_key ? icons.check : icons["x-circle"]}</span>
-                    ${p.has_key ? " API key" : " No API key"}
-                  </div>
-                  <div class="card-url" title=${p.base_url ?? ""}>
-                    ${this.truncateUrl(p.base_url)}
-                  </div>
-                </sc-card>
-              `,
-            )}
+          : this.providers.map((p) => this._renderProviderCard(p))}
       </div>
+    `;
+  }
+
+  private _renderProviderCard(p: ProviderItem) {
+    return html`
+      <sc-card>
+        <div class="card-header">
+          <span class="card-name ${p.is_default ? "default" : ""}">${p.name ?? "unnamed"}</span>
+          ${p.is_default ? html`<sc-badge variant="info">default</sc-badge>` : nothing}
+          ${p.native_tools ? html`<sc-badge variant="neutral">native tools</sc-badge>` : nothing}
+        </div>
+        <div class="key-status ${p.has_key ? "has" : "missing"}">
+          <span class="key-icon">${p.has_key ? icons.check : icons["x-circle"]}</span>
+          ${p.has_key ? " API key" : " No API key"}
+        </div>
+        <div class="card-url" title=${p.base_url ?? ""}>${this.truncateUrl(p.base_url)}</div>
+      </sc-card>
     `;
   }
 }
