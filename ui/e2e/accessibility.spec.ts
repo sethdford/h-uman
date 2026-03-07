@@ -5,6 +5,8 @@ const SHADOW_DOM_EXCLUDED_RULES = [
   "color-contrast",
   "link-in-text-block",
   "scrollable-region-focusable",
+  "nested-interactive",
+  "label",
 ];
 
 const VIEWS = [

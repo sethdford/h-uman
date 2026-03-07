@@ -10,7 +10,6 @@ import "../components/sc-badge.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-button.js";
-import "../components/sc-sparkline.js";
 import "../components/sc-animated-number.js";
 import "../components/sc-welcome.js";
 import "../components/sc-welcome-card.js";
@@ -59,39 +58,119 @@ export class ScOverviewView extends GatewayAwareLitElement {
     :host {
       display: block;
       max-width: 1200px;
-      background-image: var(--sc-hero-gradient);
-      border-radius: var(--sc-radius-xl, 16px);
       padding: var(--sc-space-lg) var(--sc-space-xl);
     }
-    .header {
+
+    /* ── Hero zone ────────────────────────────────────── */
+
+    .hero {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: var(--sc-space-2xl, 2rem);
       flex-wrap: wrap;
       gap: var(--sc-space-md);
+      padding: var(--sc-space-xl) var(--sc-space-2xl);
+      margin-bottom: var(--sc-space-2xl, 2rem);
+      background-image: var(--sc-hero-gradient);
+      border-radius: var(--sc-radius-xl, 16px);
+      border: 1px solid var(--sc-border-subtle, var(--sc-border));
     }
-    .header h2 {
+
+    .hero-left {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-lg);
+      min-width: 0;
+    }
+
+    .hero-status {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sc-space-2xs);
+    }
+
+    .hero-title {
       margin: 0;
       font-size: clamp(1.5rem, 2.5vw, 2rem);
       font-weight: var(--sc-weight-bold, 700);
       letter-spacing: -0.03em;
       color: var(--sc-text);
+      line-height: 1.1;
     }
-    .bento {
+
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+    }
+
+    .hero-meta .update-link {
+      color: var(--sc-accent-text, var(--sc-accent));
+      text-decoration: none;
+      font-weight: var(--sc-weight-medium);
+    }
+
+    .hero-meta .update-link:hover {
+      text-decoration: underline;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+    }
+
+    .staleness {
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.operational {
+      background: var(--sc-success);
+      box-shadow: 0 0 6px var(--sc-success);
+      animation: sc-status-pulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.offline {
+      background: var(--sc-error);
+    }
+
+    @keyframes sc-status-pulse {
+      0%,
+      100% {
+        box-shadow: 0 0 4px var(--sc-success);
+        opacity: 1;
+      }
+      50% {
+        box-shadow: 0 0 12px var(--sc-success);
+        opacity: 0.8;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .status-dot.operational {
+        animation: none;
+      }
+    }
+
+    /* ── Metrics zone ─────────────────────────────────── */
+
+    .metrics {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: var(--sc-space-lg, 1.5rem);
+      margin-bottom: var(--sc-space-2xl, 2rem);
     }
-    .gateway-card {
-      grid-column: span 2;
-    }
-    .channels-overview {
-      grid-column: 1 / -1;
-    }
-    .recent-sessions {
-      grid-column: 1 / -1;
-    }
+
     .stat-label {
       font-size: 0.6875rem;
       font-weight: var(--sc-weight-semibold, 600);
@@ -100,6 +179,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       color: var(--sc-accent-text, var(--sc-accent));
       margin-bottom: var(--sc-space-xs);
     }
+
     .stat-value {
       font-size: clamp(1.5rem, 2.5vw, 2rem);
       font-weight: var(--sc-weight-bold, 700);
@@ -109,118 +189,60 @@ export class ScOverviewView extends GatewayAwareLitElement {
       line-height: 1.1;
       animation: sc-overshoot-in var(--sc-duration-moderate) var(--sc-spring-out) backwards;
     }
-    .update-arrow {
-      display: inline-flex;
-      vertical-align: middle;
-    }
-    .update-arrow svg {
-      width: 16px;
-      height: 16px;
-    }
-    .stat-row {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: var(--sc-space-md);
-    }
-    .stat-main {
-      flex: 1;
-      min-width: 0;
-    }
-    .trend {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--sc-space-2xs);
+
+    .stat-desc {
       font-size: var(--sc-text-xs);
-      font-weight: var(--sc-weight-medium);
+      color: var(--sc-text-muted);
       margin-top: var(--sc-space-2xs);
     }
-    .trend svg {
-      width: 14px;
-      height: 14px;
-    }
-    .trend.up {
-      color: var(--sc-success);
-    }
-    .trend.down {
-      color: var(--sc-error);
-    }
-    .trend.flat {
-      color: var(--sc-text-muted);
-    }
-    .gateway-content {
+
+    /* ── Detail zone ──────────────────────────────────── */
+
+    .details {
       display: flex;
-      align-items: center;
-      gap: var(--sc-space-sm);
-      margin-bottom: var(--sc-space-xs);
+      flex-direction: column;
+      gap: var(--sc-space-xl, 1.5rem);
     }
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .status-dot.operational {
-      background: var(--sc-success);
-      box-shadow: 0 0 6px var(--sc-success);
-      animation: sc-status-pulse 2s ease-in-out infinite;
-    }
-    .status-dot.offline {
-      background: var(--sc-error);
-    }
-    @keyframes sc-status-pulse {
-      0%,
-      100% {
-        box-shadow: 0 0 4px var(--sc-success);
-        opacity: 1;
-      }
-      50% {
-        box-shadow: 0 0 10px var(--sc-success);
-        opacity: 0.8;
-      }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .status-dot.operational {
-        animation: none;
-      }
-    }
-    .activity-section {
-      grid-column: 1 / -1;
-    }
-    .two-col {
+
+    .details-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: var(--sc-space-xl);
     }
-    @media (max-width: 768px) {
-      .two-col {
-        grid-template-columns: 1fr;
-      }
+
+    .section-label {
+      font-size: 0.6875rem;
+      font-weight: var(--sc-weight-semibold, 600);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sc-accent-text, var(--sc-accent));
+      margin-bottom: var(--sc-space-sm);
     }
-    .gateway-version {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
-    }
+
     .channels-inner {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
       gap: var(--sc-space-sm);
     }
+
     .channel-item {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: var(--sc-space-sm);
     }
+
     .channel-name {
       font-size: var(--sc-text-sm);
       font-weight: var(--sc-weight-medium);
       color: var(--sc-text);
     }
+
     .sessions-table {
       width: 100%;
       border-collapse: collapse;
     }
+
     .sessions-table th,
     .sessions-table td {
       padding: var(--sc-space-sm) var(--sc-space-md);
@@ -228,49 +250,75 @@ export class ScOverviewView extends GatewayAwareLitElement {
       border-bottom: 1px solid var(--sc-border);
       font-size: var(--sc-text-sm);
     }
+
     .sessions-table th {
       font-size: var(--sc-text-xs);
       font-weight: var(--sc-weight-medium);
       color: var(--sc-text-muted);
     }
+
     .sessions-table tr:last-child td {
       border-bottom: none;
     }
+
+    /* ── Error ────────────────────────────────────────── */
+
     .error {
       color: var(--sc-error);
       font-size: var(--sc-text-sm);
       margin-bottom: var(--sc-space-md);
     }
-    .skeleton-grid {
+
+    /* ── Skeleton ─────────────────────────────────────── */
+
+    .skeleton-hero {
+      margin-bottom: var(--sc-space-2xl, 2rem);
+    }
+
+    .skeleton-metrics {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
+      gap: var(--sc-space-lg);
+      margin-bottom: var(--sc-space-2xl, 2rem);
+    }
+
+    .skeleton-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: var(--sc-space-xl);
     }
-    .skeleton-gateway {
-      grid-column: span 2;
-    }
+
     .skeleton-full {
       grid-column: 1 / -1;
     }
+
+    /* ── Responsive ───────────────────────────────────── */
+
     @media (max-width: 768px) {
-      .bento {
+      .metrics {
         grid-template-columns: 1fr 1fr;
       }
-      .gateway-card {
-        grid-column: span 2;
-      }
-      .skeleton-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 480px) {
-      .bento {
+      .details-row {
         grid-template-columns: 1fr;
       }
-      .gateway-card {
-        grid-column: span 1;
+      .skeleton-metrics {
+        grid-template-columns: 1fr 1fr;
       }
-      .skeleton-grid {
+      .skeleton-details {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+      .hero {
+        padding: var(--sc-space-lg);
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .skeleton-metrics {
         grid-template-columns: 1fr;
       }
     }
@@ -290,7 +338,6 @@ export class ScOverviewView extends GatewayAwareLitElement {
   @state() private error = "";
   @state() private updateInfo: UpdateInfo = {};
   @state() private activityEvents: ActivityEvent[] = [];
-  private _pollTimer: ReturnType<typeof setInterval> | null = null;
   private _gwEventHandler = ((e: CustomEvent) => {
     const detail = e.detail as { event: string; payload: ActivityEvent };
     if (detail.event === "activity" && detail.payload) {
@@ -301,15 +348,11 @@ export class ScOverviewView extends GatewayAwareLitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.gateway?.addEventListener("gateway", this._gwEventHandler);
-    this._pollTimer = setInterval(() => {
-      if (!this.loading && this.gateway?.status === "connected") this.load();
-    }, 30000);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.gateway?.removeEventListener("gateway", this._gwEventHandler);
-    if (this._pollTimer) clearInterval(this._pollTimer);
   }
 
   protected override async load(): Promise<void> {
@@ -388,171 +431,116 @@ export class ScOverviewView extends GatewayAwareLitElement {
     return sorted.slice(0, 5);
   }
 
-  override render() {
-    const cap = this.capabilities;
-    const gwOk = this.gatewayOperational;
+  private get _onboarded(): boolean {
+    return localStorage.getItem("sc-onboarded") === "true";
+  }
 
-    if (this.loading) {
+  /* ── Render: top-level ──────────────────────────────── */
+
+  override render() {
+    if (this.loading) return this._renderSkeleton();
+    return html`
+      ${this.error ? html`<p class="error">${this.error}</p>` : nothing} ${this._renderHero()}
+      ${this._renderMetrics()} ${this._renderDetails()}
+    `;
+  }
+
+  /* ── Hero zone ──────────────────────────────────────── */
+
+  private _renderHero() {
+    if (!this._onboarded) {
       return html`
-        <div class="header">
-          <h2>Overview</h2>
-        </div>
-        <div class="skeleton-grid bento">
-          <div class="skeleton-gateway">
-            <sc-skeleton variant="card" height="120px"></sc-skeleton>
-          </div>
-          <sc-skeleton variant="stat-card"></sc-skeleton>
-          <sc-skeleton variant="stat-card"></sc-skeleton>
-          <sc-skeleton variant="stat-card"></sc-skeleton>
-          <sc-skeleton variant="stat-card"></sc-skeleton>
-          <div class="skeleton-full">
-            <sc-skeleton variant="card" height="140px"></sc-skeleton>
-          </div>
-          <div class="skeleton-full">
-            <sc-skeleton variant="card" height="180px"></sc-skeleton>
-          </div>
-        </div>
+        <sc-welcome-card></sc-welcome-card>
+        <sc-welcome></sc-welcome>
       `;
     }
 
-    return html`
-      <sc-welcome-card></sc-welcome-card>
-      <sc-welcome></sc-welcome>
+    const gwOk = this.gatewayOperational;
+    const cap = this.capabilities;
 
-      <div class="header">
-        <h2>Overview</h2>
-        <div style="display:flex;align-items:center;gap:var(--sc-space-sm)">
+    return html`
+      <div class="hero">
+        <div class="hero-left">
+          <sc-tooltip text=${gwOk ? "All subsystems responding" : "Gateway is unreachable"}>
+            <span class="status-dot ${gwOk ? "operational" : "offline"}" aria-hidden="true"></span>
+          </sc-tooltip>
+          <div class="hero-status">
+            <h2 class="hero-title">${gwOk ? "Operational" : "Offline"}</h2>
+            <div class="hero-meta">
+              <span>${cap.version ?? "SeaClaw"}</span>
+              ${this.updateInfo.available
+                ? html`<span>&middot;</span>
+                    <a
+                      class="update-link"
+                      href=${this.updateInfo.url ?? "#"}
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      Update to ${this.updateInfo.latest_version}
+                    </a>`
+                : nothing}
+            </div>
+          </div>
+        </div>
+        <div class="hero-actions">
           ${this.lastLoadedAt
-            ? html`<span style="font-size:var(--sc-text-xs);color:var(--sc-text-muted)">
-                Updated ${this.stalenessLabel}
-              </span>`
+            ? html`<span class="staleness">Updated ${this.stalenessLabel}</span>`
             : nothing}
           <sc-tooltip text="Reload all dashboard data" position="bottom">
             <sc-button variant="secondary" @click=${() => this.load()}>Refresh</sc-button>
           </sc-tooltip>
         </div>
       </div>
-      ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
-      <div class="bento sc-stagger">
-        <!-- 1. Gateway Status (2 cols) -->
-        <sc-card hoverable accent elevated class="gateway-card">
-          <div class="stat-label">Gateway Status</div>
-          <div class="gateway-content">
-            <sc-tooltip text=${gwOk ? "All subsystems responding" : "Gateway is unreachable"}>
-              <span
-                class="status-dot ${gwOk ? "operational" : "offline"}"
-                aria-hidden="true"
-              ></span>
-            </sc-tooltip>
-            <span class="stat-value">${gwOk ? "Operational" : "Offline"}</span>
-          </div>
-          <div class="gateway-version">${cap.version ?? "—"}</div>
-        </sc-card>
+    `;
+  }
 
-        <!-- 2. Providers -->
-        <sc-card hoverable accent>
-          <div class="stat-row">
-            <div class="stat-main">
-              <div class="stat-label">Providers</div>
+  /* ── Metrics zone ───────────────────────────────────── */
+
+  private _renderMetrics() {
+    const cap = this.capabilities;
+    const metrics = [
+      { label: "Providers", value: cap.providers ?? 0, desc: "AI model backends" },
+      { label: "Channels", value: cap.channels ?? 0, desc: "Messaging integrations" },
+      { label: "Tools", value: cap.tools ?? 0, desc: "Available capabilities" },
+      { label: "Sessions", value: this.sessions.length, desc: "Active conversations" },
+    ];
+
+    return html`
+      <div class="metrics sc-stagger">
+        ${metrics.map(
+          (m) => html`
+            <sc-card hoverable accent>
+              <div class="stat-label">${m.label}</div>
               <div class="stat-value">
-                <sc-animated-number .value=${cap.providers ?? 0}></sc-animated-number>
+                <sc-animated-number .value=${m.value}></sc-animated-number>
               </div>
-              <div class="trend up">${icons["trend-up"]} Active</div>
-            </div>
-            <sc-sparkline
-              .data=${[3, 5, 4, 7, 6, 8, cap.providers ?? 0]}
-              color="var(--sc-accent)"
-            ></sc-sparkline>
-          </div>
-        </sc-card>
+              <div class="stat-desc">${m.desc}</div>
+            </sc-card>
+          `,
+        )}
+      </div>
+    `;
+  }
 
-        <!-- 3. Channels -->
-        <sc-card hoverable accent>
-          <div class="stat-row">
-            <div class="stat-main">
-              <div class="stat-label">Channels</div>
-              <div class="stat-value">
-                <sc-animated-number .value=${cap.channels ?? 0}></sc-animated-number>
-              </div>
-              <div class="trend up">${icons["trend-up"]} Configured</div>
-            </div>
-            <sc-sparkline
-              .data=${[2, 3, 5, 4, 6, 7, cap.channels ?? 0]}
-              color="var(--sc-accent)"
-            ></sc-sparkline>
-          </div>
-        </sc-card>
+  /* ── Detail zone ────────────────────────────────────── */
 
-        <!-- 4. Tools -->
-        <sc-card hoverable accent>
-          <div class="stat-row">
-            <div class="stat-main">
-              <div class="stat-label">Tools</div>
-              <div class="stat-value">
-                <sc-animated-number .value=${cap.tools ?? 0}></sc-animated-number>
-              </div>
-              <div class="trend flat">${icons["trend-flat"]} Stable</div>
-            </div>
-            <sc-sparkline
-              .data=${[8, 8, 9, 8, 9, 9, cap.tools ?? 0]}
-              color="var(--sc-accent)"
-            ></sc-sparkline>
-          </div>
-        </sc-card>
-
-        <!-- 5. Active Sessions -->
-        <sc-card hoverable accent>
-          <div class="stat-row">
-            <div class="stat-main">
-              <div class="stat-label">Active Sessions</div>
-              <div class="stat-value">
-                <sc-animated-number .value=${this.sessions.length}></sc-animated-number>
-              </div>
-              <div class="trend ${this.sessions.length > 0 ? "up" : "flat"}">
-                ${this.sessions.length > 0 ? icons["trend-up"] : icons["trend-flat"]}
-                ${this.sessions.length > 0 ? "Active" : "Idle"}
-              </div>
-            </div>
-            <sc-sparkline
-              .data=${[0, 1, 2, 1, 3, 2, this.sessions.length]}
-              color=${this.sessions.length > 0 ? "var(--sc-accent)" : "var(--sc-text-muted)"}
-            ></sc-sparkline>
-          </div>
-        </sc-card>
-
-        ${this.updateInfo.available
-          ? html`
-              <sc-card hoverable accent>
-                <div class="stat-label">Update Available</div>
-                <div
-                  class="stat-value"
-                  style="font-size: var(--sc-text-base); color: var(--sc-accent-text, var(--sc-accent));"
-                >
-                  ${this.updateInfo.current_version ?? "—"}
-                  <span class="update-arrow">${icons["arrow-right"]}</span>
-                  ${this.updateInfo.latest_version ?? "—"}
-                </div>
-              </sc-card>
-            `
-          : nothing}
-
-        <!-- 6. Activity + Channels (two columns, full width) -->
-        <div class="two-col activity-section">
+  private _renderDetails() {
+    return html`
+      <div class="details">
+        <div class="details-row">
           <sc-card hoverable accent>
-            <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">Live Activity</div>
+            <div class="section-label">Live Activity</div>
             <sc-activity-feed .events=${this.activityEvents}></sc-activity-feed>
           </sc-card>
 
           <sc-card hoverable accent>
-            <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">
-              Channels Overview
-            </div>
+            <div class="section-label">Channels</div>
             ${this.channels.length === 0
               ? html`
                   <sc-empty-state
                     .icon=${icons.radio}
                     heading="No channels yet"
-                    description="Connect Telegram, Discord, Slack, or any messaging platform in under a minute."
+                    description="Connect Telegram, Discord, Slack, or any messaging platform."
                   >
                     <sc-button variant="primary" @click=${() => this._navigate("channels")}>
                       Configure a Channel
@@ -565,9 +553,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
                       (ch) => html`
                         <div class="channel-item">
                           <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
-                          <sc-badge variant=${ch.configured ? "success" : "neutral"} dot
-                            >${ch.status ?? (ch.configured ? "Configured" : "—")}</sc-badge
-                          >
+                          <sc-badge variant=${ch.configured ? "success" : "neutral"} dot>
+                            ${ch.status ?? (ch.configured ? "Configured" : "\u2014")}
+                          </sc-badge>
                         </div>
                       `,
                     )}
@@ -576,15 +564,14 @@ export class ScOverviewView extends GatewayAwareLitElement {
           </sc-card>
         </div>
 
-        <!-- 7. Recent Sessions (full width) -->
-        <sc-card hoverable accent class="recent-sessions">
-          <div class="stat-label" style="margin-bottom: var(--sc-space-sm);">Recent Sessions</div>
+        <sc-card hoverable accent>
+          <div class="section-label">Recent Sessions</div>
           ${this.recentSessions.length === 0
             ? html`
                 <sc-empty-state
                   .icon=${icons["chat-circle"]}
                   heading="No conversations yet"
-                  description="Start your first chat to see SeaClaw in action. It only takes a moment."
+                  description="Start your first chat to see SeaClaw in action."
                 >
                   <sc-button variant="primary" @click=${() => this._navigate("chat")}>
                     Start a Conversation
@@ -614,6 +601,29 @@ export class ScOverviewView extends GatewayAwareLitElement {
                 </table>
               `}
         </sc-card>
+      </div>
+    `;
+  }
+
+  /* ── Skeleton (loading state) ───────────────────────── */
+
+  private _renderSkeleton() {
+    return html`
+      <div class="skeleton-hero">
+        <sc-skeleton variant="card" height="100px"></sc-skeleton>
+      </div>
+      <div class="skeleton-metrics">
+        <sc-skeleton variant="stat-card"></sc-skeleton>
+        <sc-skeleton variant="stat-card"></sc-skeleton>
+        <sc-skeleton variant="stat-card"></sc-skeleton>
+        <sc-skeleton variant="stat-card"></sc-skeleton>
+      </div>
+      <div class="skeleton-details">
+        <sc-skeleton variant="card" height="200px"></sc-skeleton>
+        <sc-skeleton variant="card" height="200px"></sc-skeleton>
+        <div class="skeleton-full">
+          <sc-skeleton variant="card" height="160px"></sc-skeleton>
+        </div>
       </div>
     `;
   }
