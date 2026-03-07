@@ -47,6 +47,7 @@ import "./sc-pagination.js";
 import "./sc-data-table-v2.js";
 import "./sc-checkbox.js";
 import "./sc-combobox.js";
+import "./sc-form-group.js";
 
 describe("sc-checkbox", () => {
   it("should be defined as a custom element", () => {
@@ -128,6 +129,37 @@ describe("sc-combobox", () => {
     const input = el.shadowRoot?.querySelector('[role="combobox"]');
     expect(input).toBeTruthy();
     el.remove();
+  });
+});
+
+describe("sc-form-group", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-form-group")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-form-group");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should default dirty to false", () => {
+    const el = document.createElement("sc-form-group") as any;
+    expect(el.dirty).toBe(false);
+  });
+
+  it("should default valid to true", () => {
+    const el = document.createElement("sc-form-group") as any;
+    expect(el.valid).toBe(true);
+  });
+
+  it("should have validate method", () => {
+    const el = document.createElement("sc-form-group") as any;
+    expect(typeof el.validate).toBe("function");
+  });
+
+  it("should have reset method", () => {
+    const el = document.createElement("sc-form-group") as any;
+    expect(typeof el.reset).toBe("function");
   });
 });
 
