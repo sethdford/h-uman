@@ -1899,7 +1899,9 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
                     if (vbuf) {
                         size_t vread = fread(vbuf, 1, (size_t)vsz, vf);
                         vbuf[vread] = '\0';
-                        sc_json_parse(&a, vbuf, vread, &validation_root);
+                        sc_error_t verr = sc_json_parse(&a, vbuf, vread, &validation_root);
+                        if (verr != SC_OK)
+                            validation_root = NULL;
                     }
                 }
                 fclose(vf);

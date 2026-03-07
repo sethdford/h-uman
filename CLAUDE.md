@@ -1,6 +1,6 @@
 # seaclaw
 
-C11 autonomous AI assistant runtime. ~511 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~561 KB binary, <6 MB RAM, <30 ms startup.
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
