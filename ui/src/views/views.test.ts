@@ -51,25 +51,25 @@ describe("views", () => {
 });
 
 describe("sc-chat-view", () => {
-  it("renders sc-composer when no messages", async () => {
+  it("renders sc-chat-composer when no messages", async () => {
     const el = document.createElement("sc-chat-view") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
-    const composer = el.shadowRoot?.querySelector("sc-composer");
+    const composer = el.shadowRoot?.querySelector("sc-chat-composer");
     expect(composer).toBeTruthy();
     el.remove();
   });
 
-  it("renders message list component", async () => {
+  it("renders message thread component", async () => {
     const el = document.createElement("sc-chat-view") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
-    const messageList = el.shadowRoot?.querySelector("sc-message-list");
-    expect(messageList).toBeTruthy();
+    const thread = el.shadowRoot?.querySelector("sc-message-thread");
+    expect(thread).toBeTruthy();
     el.remove();
   });
 });
