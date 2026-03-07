@@ -11,7 +11,9 @@ const SLASH_COMMANDS = [
   { command: "/export", desc: "Export conversation" },
   { command: "/clear", desc: "Clear conversation" },
 ];
+/** Matches --sc-space-2xl (24px). JS needs pixel values; CSS vars not usable in getComputedStyle-free calculations. */
 const LINE_HEIGHT = 24;
+/** Max visible lines before textarea scrolls. */
 const MAX_LINES = 5;
 
 @customElement("sc-chat-composer")
@@ -229,7 +231,7 @@ export class ScChatComposer extends LitElement {
     .slash-item {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: var(--sc-space-2xs);
       padding: var(--sc-space-sm) var(--sc-space-md);
       cursor: pointer;
       font-family: var(--sc-font);

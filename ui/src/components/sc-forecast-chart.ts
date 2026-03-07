@@ -48,7 +48,7 @@ export class ScForecastChart extends LitElement {
     }
     .axis-label {
       fill: var(--sc-text-muted);
-      font-size: 11px;
+      font-size: var(--sc-text-xs);
       font-family: var(--sc-font);
     }
     .actual-line {
@@ -105,7 +105,8 @@ export class ScForecastChart extends LitElement {
       background: color-mix(in srgb, var(--sc-bg-overlay) 90%, transparent);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--sc-glass-border-color, rgba(255, 255, 255, 0.08));
+      border: 1px solid
+        var(--sc-glass-border-color, color-mix(in srgb, var(--sc-text) 8%, transparent));
       border-radius: var(--sc-radius-md);
       padding: var(--sc-space-xs) var(--sc-space-sm);
       font-size: var(--sc-text-xs);
@@ -117,7 +118,7 @@ export class ScForecastChart extends LitElement {
     }
     .tooltip-date {
       color: var(--sc-text-muted);
-      margin-bottom: 2px;
+      margin-bottom: var(--sc-space-2xs);
     }
     .tooltip-value {
       font-weight: var(--sc-weight-semibold);

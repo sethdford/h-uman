@@ -74,8 +74,8 @@ export class ScDeliveryStatus extends LitElement {
 
     /* Sending: pulsing dot */
     .dot {
-      width: 4px;
-      height: 4px;
+      width: var(--sc-space-2xs);
+      height: var(--sc-space-2xs);
       border-radius: 50%;
       background: currentColor;
       animation: sc-delivery-pulse var(--sc-duration-slowest) var(--sc-ease-in-out) infinite;
@@ -89,8 +89,8 @@ export class ScDeliveryStatus extends LitElement {
     }
 
     .stream-dots .dot {
-      width: 3px;
-      height: 3px;
+      width: var(--sc-space-2xs);
+      height: var(--sc-space-2xs);
       border-radius: 50%;
       background: currentColor;
       animation: sc-delivery-dots var(--sc-duration-slowest) var(--sc-ease-in-out) infinite;

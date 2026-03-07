@@ -24,7 +24,7 @@ export class ScTypingIndicator extends LitElement {
         transform: translateY(0);
       }
       40% {
-        transform: translateY(-4px);
+        transform: translateY(calc(-1 * var(--sc-space-xs)));
       }
     }
 
@@ -66,8 +66,8 @@ export class ScTypingIndicator extends LitElement {
     }
 
     .dot {
-      width: 0.375rem;
-      height: 0.375rem;
+      width: var(--sc-space-xs);
+      height: var(--sc-space-xs);
       border-radius: var(--sc-radius-full);
       background: var(--sc-text-muted);
       animation: sc-dot-bounce var(--sc-duration-slowest)

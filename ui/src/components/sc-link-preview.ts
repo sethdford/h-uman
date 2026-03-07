@@ -13,7 +13,7 @@ export class ScLinkPreview extends LitElement {
     @keyframes sc-preview-enter {
       from {
         opacity: 0;
-        transform: translateY(4px);
+        transform: translateY(var(--sc-space-xs));
       }
       to {
         opacity: 1;
@@ -36,7 +36,7 @@ export class ScLinkPreview extends LitElement {
       border-radius: var(--sc-radius-lg);
       text-decoration: none;
       color: inherit;
-      animation: sc-preview-enter 200ms var(--sc-ease-out);
+      animation: sc-preview-enter var(--sc-duration-fast) var(--sc-ease-out);
       transition:
         border-color var(--sc-duration-fast),
         box-shadow var(--sc-duration-fast);
@@ -53,9 +53,9 @@ export class ScLinkPreview extends LitElement {
     }
 
     .thumb {
-      width: 48px;
-      min-width: 48px;
-      height: 48px;
+      width: var(--sc-space-4xl);
+      min-width: var(--sc-space-4xl);
+      height: var(--sc-space-4xl);
       border-radius: var(--sc-radius-md);
       object-fit: cover;
       flex-shrink: 0;
@@ -96,9 +96,9 @@ export class ScLinkPreview extends LitElement {
     }
 
     .fav {
-      width: 14px;
-      height: 14px;
-      border-radius: 2px;
+      width: var(--sc-text-sm);
+      height: var(--sc-text-sm);
+      border-radius: var(--sc-space-2xs);
     }
 
     .domain {

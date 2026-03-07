@@ -2,6 +2,11 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { icons } from "../icons.js";
 
+/** Viewport-safety offsets for popover placement (px required for JS coordinates). */
+const MENU_WIDTH = 220;
+const MENU_OFFSET_Y = 50;
+const MENU_MIN_Y = 10;
+
 const REACTIONS = [
   { key: "👍", icon: "thumbs-up", label: "Thumbs up" },
   { key: "👎", icon: "thumbs-down", label: "Thumbs down" },
@@ -116,8 +121,8 @@ export class ScTapbackMenu extends LitElement {
 
   override render() {
     if (!this.open) return nothing;
-    const barX = Math.min(this.x, window.innerWidth - 220);
-    const barY = Math.max(this.y - 50, 10);
+    const barX = Math.min(this.x, window.innerWidth - MENU_WIDTH);
+    const barY = Math.max(this.y - MENU_OFFSET_Y, MENU_MIN_Y);
     return html`
       <div class="overlay" @click=${this._onOverlayClick}></div>
       <div
