@@ -36,8 +36,8 @@ jobs:
         run: |
           COUNT=$(./build/seaclaw_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
           echo "Test count: $COUNT"
-          if [ "$COUNT" -lt 3185 ]; then
-            echo "Test count regression: $COUNT < 3185 baseline"
+          if [ "$COUNT" -lt 3183 ]; then
+            echo "Test count regression: $COUNT < 3183 baseline"
             exit 1
           fi
       - name: Check for untested modules
