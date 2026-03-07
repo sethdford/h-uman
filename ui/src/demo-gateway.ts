@@ -141,26 +141,42 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
       };
     case "models.list":
       return {
+        default_model: "claude-sonnet-4-20250514",
         providers: [
           {
             name: "openrouter",
-            label: "OpenRouter",
-            configured: true,
-            models: ["claude-sonnet-4-20250514", "gpt-4o", "gemini-2.5-pro"],
+            has_key: true,
+            base_url: "https://openrouter.ai/api/v1",
+            native_tools: true,
+            is_default: true,
           },
           {
             name: "anthropic",
-            label: "Anthropic",
-            configured: true,
-            models: ["claude-sonnet-4-20250514", "claude-3-haiku"],
+            has_key: true,
+            base_url: "https://api.anthropic.com",
+            native_tools: true,
+            is_default: false,
           },
-          { name: "openai", label: "OpenAI", configured: false, models: ["gpt-4o", "gpt-4o-mini"] },
-          { name: "ollama", label: "Ollama", configured: true, models: ["llama3.1", "mistral"] },
+          {
+            name: "openai",
+            has_key: false,
+            base_url: "https://api.openai.com/v1",
+            native_tools: true,
+            is_default: false,
+          },
+          {
+            name: "ollama",
+            has_key: true,
+            base_url: "http://localhost:11434",
+            native_tools: false,
+            is_default: false,
+          },
           {
             name: "gemini",
-            label: "Google Gemini",
-            configured: true,
-            models: ["gemini-2.5-pro", "gemini-2.0-flash"],
+            has_key: true,
+            base_url: "https://generativelanguage.googleapis.com",
+            native_tools: true,
+            is_default: false,
           },
         ],
       };
@@ -184,7 +200,9 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
     case "config.get":
       return {
         provider: "openrouter",
+        default_provider: "openrouter",
         model: "claude-sonnet-4-20250514",
+        default_model: "claude-sonnet-4-20250514",
         channels: { telegram: { enabled: true }, discord: { enabled: true } },
         security: {
           autonomy_level: 1,
@@ -477,6 +495,7 @@ export class DemoGatewayClient extends EventTarget {
         cost_tracking: true,
       };
       this.dispatchEvent(new CustomEvent("features", { detail: this.#features }));
+      this.#seedInitialEvents();
       this.#startActivityStream();
     }, 400);
   }
@@ -485,6 +504,23 @@ export class DemoGatewayClient extends EventTarget {
     if (this.#status === s) return;
     this.#status = s;
     this.dispatchEvent(new CustomEvent(DemoGatewayClient.EVENT_STATUS, { detail: s }));
+  }
+
+  #seedInitialEvents(): void {
+    const seed = [
+      {
+        event: "chat",
+        payload: { channel: "Telegram", user: "Alice", preview: "PR review ready" },
+      },
+      { event: "tool_call", payload: { tool: "shell", command: "git status" } },
+      { event: "health", payload: { status: "operational", uptime_secs: 172800 } },
+      { event: "chat", payload: { channel: "Discord", user: "Bob", preview: "Deploy looks good" } },
+      { event: "tool_call", payload: { tool: "web_search", command: "Rust async patterns" } },
+      { event: "error", payload: { source: "email", message: "SMTP timeout" } },
+    ];
+    for (const s of seed) {
+      this.dispatchEvent(new CustomEvent(DemoGatewayClient.EVENT_GATEWAY, { detail: s }));
+    }
   }
 
   #startActivityStream(): void {

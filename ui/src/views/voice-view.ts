@@ -28,11 +28,15 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
   static override styles = css`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
       color: var(--sc-text);
       max-width: 720px;
       margin: 0 auto;
       padding: var(--sc-space-lg) var(--sc-space-xl);
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     /* ── Hero zone ────────────────────────────────────── */
@@ -43,11 +47,12 @@ export class ScVoiceView extends GatewayAwareLitElement {
       justify-content: space-between;
       flex-wrap: wrap;
       gap: var(--sc-space-md);
-      padding: var(--sc-space-xl) var(--sc-space-2xl);
-      margin-bottom: var(--sc-space-2xl, 2rem);
+      padding: var(--sc-space-md) var(--sc-space-lg);
+      margin-bottom: var(--sc-space-md);
       background-image: var(--sc-hero-gradient);
-      border-radius: var(--sc-radius-xl, 16px);
+      border-radius: var(--sc-radius-lg);
       border: 1px solid var(--sc-border-subtle, var(--sc-border));
+      flex-shrink: 0;
     }
 
     .hero-left {
@@ -59,11 +64,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
     .hero-title {
       margin: 0;
-      font-size: clamp(1.5rem, 2.5vw, 2rem);
+      font-size: var(--sc-text-lg);
       font-weight: var(--sc-weight-bold, 700);
-      letter-spacing: -0.03em;
+      letter-spacing: -0.02em;
       color: var(--sc-text);
-      line-height: 1.1;
+      line-height: 1.2;
     }
 
     .hero-meta {

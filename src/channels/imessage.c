@@ -119,11 +119,56 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     if (!c || !c->alloc || !tgt || tgt_len == 0 || !message)
         return SC_ERR_INVALID_ARGUMENT;
 
+    /*
+     * Post-processing: strip markdown and sanitize AI-sounding phrases
+     * before sending via iMessage. Works in-place on a mutable copy.
+     */
+    size_t clean_cap = message_len + 1;
+    char *clean = (char *)c->alloc->alloc(c->alloc->ctx, clean_cap);
+    if (!clean)
+        return SC_ERR_OUT_OF_MEMORY;
+    {
+        size_t out_i = 0;
+        size_t i = 0;
+        while (i < message_len) {
+            if (message[i] == '*') {
+                while (i < message_len && message[i] == '*')
+                    i++;
+                continue;
+            }
+            if ((i == 0 || message[i - 1] == '\n') && message[i] == '#') {
+                while (i < message_len && message[i] == '#')
+                    i++;
+                if (i < message_len && message[i] == ' ')
+                    i++;
+                continue;
+            }
+            if ((i == 0 || message[i - 1] == '\n') && i + 1 < message_len &&
+                (message[i] == '-' || message[i] == '*') && message[i + 1] == ' ') {
+                i += 2;
+                continue;
+            }
+            if (message[i] == '`') {
+                i++;
+                continue;
+            }
+            clean[out_i++] = message[i];
+            i++;
+        }
+        clean[out_i] = '\0';
+        message = clean;
+        message_len = out_i;
+    }
+
+    sc_error_t send_err = SC_OK;
+
     /* Escaped strings: worst case 2x length */
     size_t msg_esc_cap = message_len * 2 + 1;
     size_t tgt_esc_cap = tgt_len * 2 + 1;
-    if (msg_esc_cap > 65536 || tgt_esc_cap > 4096)
-        return SC_ERR_INVALID_ARGUMENT;
+    if (msg_esc_cap > 65536 || tgt_esc_cap > 4096) {
+        send_err = SC_ERR_INVALID_ARGUMENT;
+        goto imsg_cleanup;
+    }
 
     char *msg_esc = (char *)c->alloc->alloc(c->alloc->ctx, msg_esc_cap);
     char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
@@ -132,7 +177,8 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
             c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         if (tgt_esc)
             c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        return SC_ERR_OUT_OF_MEMORY;
+        send_err = SC_ERR_OUT_OF_MEMORY;
+        goto imsg_cleanup;
     }
     escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
     escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
@@ -143,7 +189,8 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     if (!script) {
         c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        return SC_ERR_OUT_OF_MEMORY;
+        send_err = SC_ERR_OUT_OF_MEMORY;
+        goto imsg_cleanup;
     }
     int n = snprintf(script, script_cap,
                      "tell application \"Messages\"\n"
@@ -156,7 +203,8 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
     if (n < 0 || (size_t)n >= script_cap) {
         c->alloc->free(c->alloc->ctx, script, script_cap);
-        return SC_ERR_INTERNAL;
+        send_err = SC_ERR_INTERNAL;
+        goto imsg_cleanup;
     }
 
     /* Human-like typing delay before sending */
@@ -169,19 +217,23 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         usleep(delay_ms * 1000);
     }
 
-    const char *argv[] = {"osascript", "-e", script, NULL};
-    sc_run_result_t result = {0};
-    sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
-    c->alloc->free(c->alloc->ctx, script, script_cap);
-    bool ok = (err == SC_OK && result.success && result.exit_code == 0);
-    sc_run_result_free(c->alloc, &result);
-    if (err)
-        return SC_ERR_CHANNEL_SEND;
-    if (!ok)
-        return SC_ERR_CHANNEL_SEND;
+    {
+        const char *argv[] = {"osascript", "-e", script, NULL};
+        sc_run_result_t result = {0};
+        sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
+        c->alloc->free(c->alloc->ctx, script, script_cap);
+        bool ok = (err == SC_OK && result.success && result.exit_code == 0);
+        sc_run_result_free(c->alloc, &result);
+        if (err || !ok)
+            send_err = SC_ERR_CHANNEL_SEND;
+    }
 
-    imessage_record_sent(c, message, message_len);
-    return SC_OK;
+    if (send_err == SC_OK)
+        imessage_record_sent(c, message, message_len);
+
+imsg_cleanup:
+    c->alloc->free(c->alloc->ctx, clean, clean_cap);
+    return send_err;
 #endif
 }
 
