@@ -7,8 +7,6 @@ import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { SESSION_KEY_VOICE, formatRelative } from "../utils.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-stat-card.js";
 import "../components/sc-button.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-message-stream.js";
@@ -448,9 +446,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: var(--sc-space-md);
-      padding: var(--sc-space-2xl, 2rem) var(--sc-space-lg);
+      padding: var(--sc-space-lg);
       text-align: center;
+      flex: 1;
     }
 
     .empty-icon {
@@ -490,7 +490,10 @@ export class ScVoiceView extends GatewayAwareLitElement {
     @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       :host {
         max-width: 100%;
-        padding: var(--sc-space-md);
+        padding: var(--sc-space-sm) var(--sc-space-md);
+      }
+      .hero {
+        padding: var(--sc-space-sm) var(--sc-space-md);
       }
       .input-bar {
         flex-direction: column;
@@ -498,6 +501,14 @@ export class ScVoiceView extends GatewayAwareLitElement {
       }
       .send-btn {
         min-height: 40px;
+      }
+      .mic-btn {
+        width: 72px;
+        height: 72px;
+      }
+      .mic-btn svg {
+        width: 2rem;
+        height: 2rem;
       }
     }
 
@@ -762,11 +773,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
   private _renderSkeleton() {
     return html`
       <sc-skeleton variant="card" class="skeleton-hero"></sc-skeleton>
+      <sc-skeleton variant="card" style="flex:1"></sc-skeleton>
       <div class="skeleton-mic">
         <sc-skeleton variant="circle" width="96px" height="96px"></sc-skeleton>
       </div>
       <sc-skeleton variant="card" height="60px" class="skeleton-input"></sc-skeleton>
-      <sc-skeleton variant="card" height="200px"></sc-skeleton>
     `;
   }
 
