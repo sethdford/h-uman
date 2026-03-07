@@ -83,8 +83,15 @@ body {
 }
 
 :focus-visible {
-  outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring, var(--sc-accent));
+  outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
   outline-offset: var(--sc-focus-ring-offset, 2px);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+}
+
+/* ─── Selection ───────────────────────────────────────────────────── */
+::selection {
+  background: var(--sc-accent-subtle);
+  color: var(--sc-text);
 }
 
 /* ─── Layout Utilities ────────────────────────────────────────────── */
@@ -151,12 +158,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--sc-border);
-  border-radius: var(--sc-radius-sm);
+  background: var(--sc-bg-elevated);
+  border-radius: var(--sc-radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--sc-text-muted);
+  background: var(--sc-border);
 }
 
 /* ─── Keyframes ────────────────────────────────────────────────────── */
