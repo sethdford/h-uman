@@ -38,6 +38,7 @@ export class ChatController implements ReactiveController {
   lastFailedMessage = "";
   errorBanner = "";
   streamElapsed = "";
+  historyLoading = false;
 
   private _getGateway: () => GatewayLike | null;
   private _streamStartTime = 0;
@@ -105,6 +106,8 @@ export class ChatController implements ReactiveController {
     const gw = this._getGateway();
     if (!gw) return;
 
+    this.historyLoading = true;
+    this._requestUpdate();
     try {
       const res = await gw.request<{
         messages?: { role: string; content: string }[];
@@ -121,6 +124,9 @@ export class ChatController implements ReactiveController {
       }
     } catch {
       /* history load is best-effort */
+    } finally {
+      this.historyLoading = false;
+      this._requestUpdate();
     }
     if (this.restoreFromCache(sessionKey)) {
       this._requestUpdate();

@@ -4,9 +4,10 @@ import type { ContextMenuItem } from "../components/sc-context-menu.js";
 import type { GatewayStatus } from "../gateway.js";
 import { GatewayClient as GatewayClientClass } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
-import { EVENT_NAMES, formatTime } from "../utils.js";
+import { formatTime } from "../utils.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
+import { ChatController, type ChatItem, type GatewayLike } from "../controllers/chat-controller.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-thinking.js";
 import "../components/sc-tool-result.js";
@@ -15,31 +16,6 @@ import "../components/sc-reasoning-block.js";
 import "../components/sc-chat-search.js";
 import "../components/sc-context-menu.js";
 import "../components/sc-skeleton.js";
-
-type ChatItem =
-  | {
-      type: "message";
-      role: "user" | "assistant";
-      content: string;
-      id?: string;
-      ts?: number;
-    }
-  | {
-      type: "tool_call";
-      id: string;
-      name: string;
-      input?: string;
-      status: "running" | "completed";
-      result?: string;
-      ts?: number;
-    }
-  | {
-      type: "thinking";
-      content: string;
-      streaming: boolean;
-      duration?: string;
-      ts?: number;
-    };
 
 @customElement("sc-chat-view")
 export class ScChatView extends GatewayAwareLitElement {
@@ -399,19 +375,15 @@ export class ScChatView extends GatewayAwareLitElement {
 
   @property() sessionKey = "default";
 
-  @state() private items: ChatItem[] = [];
+  private chat = new ChatController(this, () => this.gateway as GatewayLike | null);
+
   @state() private inputValue = "";
-  @state() private isWaiting = false;
-  @state() private errorBanner = "";
   @state() private connectionStatus: GatewayStatus = "disconnected";
   @state() private showScrollPill = false;
-  @state() private lastFailedMessage = "";
-  @state() private _streamElapsed = "";
   @state() private _searchOpen = false;
   @state() private _searchQuery = "";
   @state() private _searchCurrentMatch = 0;
   @state() private _dragOver = false;
-  @state() private _historyLoading = false;
   @state() private _contextMenu: {
     open: boolean;
     x: number;
@@ -420,9 +392,6 @@ export class ScChatView extends GatewayAwareLitElement {
   } = { open: false, x: 0, y: 0, items: [] };
   @query("#message-list") private messageList!: HTMLElement;
   @query("#chat-input") private inputEl!: HTMLTextAreaElement;
-
-  private _streamStartTime = 0;
-  private _streamTimer = 0;
 
   private messageHandler = (e: Event) => this.onGatewayMessage(e);
   private statusHandler = (e: Event) => {
@@ -447,7 +416,7 @@ export class ScChatView extends GatewayAwareLitElement {
     const q = this._searchQuery.trim().toLowerCase();
     if (!q) return [];
     const indices: number[] = [];
-    this.items.forEach((item, idx) => {
+    this.chat.items.forEach((item, idx) => {
       if (item.type === "message" && item.content.toLowerCase().includes(q)) {
         indices.push(idx);
       }
@@ -483,8 +452,21 @@ export class ScChatView extends GatewayAwareLitElement {
     }
   }
 
-  private _handleFiles(_files: File[]): void {
-    ScToast.show({ message: "File attachments are not yet supported", variant: "info" });
+  private _handleFiles(files: File[]): void {
+    for (const file of files) {
+      this.chat.items = [
+        ...this.chat.items,
+        {
+          type: "message",
+          role: "user",
+          content: `[Attached file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)]`,
+          ts: Date.now(),
+        },
+      ];
+    }
+    this.chat.cacheMessages(this.sessionKey);
+    this.requestUpdate();
+    this.scrollToBottom();
   }
 
   override firstUpdated(): void {
@@ -498,111 +480,15 @@ export class ScChatView extends GatewayAwareLitElement {
     document.addEventListener("keydown", this._handleKeyDown);
   }
 
-  private get _cacheKey(): string {
-    return `sc-chat-${this.sessionKey}`;
-  }
-
-  private _startStreamTimer(): void {
-    this._streamStartTime = Date.now();
-    this._streamElapsed = "0s";
-    this._streamTimer = window.setInterval(() => {
-      const elapsed = Math.floor((Date.now() - this._streamStartTime) / 1000);
-      this._streamElapsed =
-        elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
-      this.requestUpdate();
-    }, 1000);
-  }
-
-  private _stopStreamTimer(): void {
-    if (this._streamTimer) {
-      window.clearInterval(this._streamTimer);
-      this._streamTimer = 0;
-    }
-    this._streamElapsed = "";
-  }
-
-  private _cacheMessages(): void {
-    try {
-      sessionStorage.setItem(this._cacheKey, JSON.stringify(this.items));
-    } catch {
-      /* quota exceeded — ignore */
-    }
-  }
-
-  private _restoreFromCache(): boolean {
-    try {
-      const raw = sessionStorage.getItem(this._cacheKey);
-      if (!raw) return false;
-      const cached = JSON.parse(raw) as unknown;
-      if (!Array.isArray(cached) || cached.length === 0) return false;
-      this.items = cached
-        .map((item: unknown) => {
-          const obj = item as Record<string, unknown>;
-          if (obj?.type === "message" || obj?.type === "tool_call" || obj?.type === "thinking") {
-            return item as ChatItem;
-          }
-          if (obj?.role && obj?.content) {
-            return {
-              type: "message",
-              role: obj.role as "user" | "assistant",
-              content: String(obj.content ?? ""),
-            } as ChatItem;
-          }
-          return null;
-        })
-        .filter((i): i is ChatItem => i != null);
-      if (this.items.length > 0) {
-        this.scrollToBottom();
-        return true;
-      }
-    } catch {
-      /* corrupt cache — ignore */
-    }
-    return false;
-  }
-
   protected override async load(): Promise<void> {
-    await this.loadHistory();
-  }
-
-  private async loadHistory(): Promise<void> {
-    if (!this.gateway) return;
-    this._historyLoading = true;
-    try {
-      const res = await this.gateway.request<{
-        messages?: { role: string; content: string }[];
-      }>("chat.history", { sessionKey: this.sessionKey });
-      if (res?.messages && Array.isArray(res.messages) && res.messages.length > 0) {
-        this.items = res.messages.map((m) => ({
-          type: "message",
-          role: m.role as "user" | "assistant",
-          content: m.content ?? "",
-        }));
-        this._cacheMessages();
-        this.scrollToBottom();
-        return;
-      }
-    } catch {
-      /* history load is best-effort */
-    } finally {
-      this._historyLoading = false;
-    }
-    this._restoreFromCache();
+    await this.chat.loadHistory(this.sessionKey);
   }
 
   private async handleAbort(): Promise<void> {
-    if (!this.gateway) return;
-    try {
-      await this.gateway.abort();
-    } catch {
-      /* abort is best-effort */
-    }
-    this.isWaiting = false;
-    this._stopStreamTimer();
+    await this.chat.abort();
   }
 
   override disconnectedCallback(): void {
-    this._stopStreamTimer();
     document.removeEventListener("keydown", this._handleKeyDown);
     const gw = this.gateway;
     gw?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
@@ -613,177 +499,24 @@ export class ScChatView extends GatewayAwareLitElement {
 
   private onGatewayMessage(e: Event): void {
     const ev = e as CustomEvent;
-    const detail = ev.detail as {
-      event?: string;
-      payload?: Record<string, unknown>;
-    };
+    const detail = ev.detail as { event?: string; payload?: Record<string, unknown> };
     if (!detail?.event) return;
     const payload = detail.payload ?? {};
 
-    if (detail.event === EVENT_NAMES.ERROR) {
-      this._handleError(payload);
-    } else if (detail.event === EVENT_NAMES.HEALTH) {
+    if (detail.event === "health") {
       this.requestUpdate();
-    } else if (
-      detail.event === "thinking" ||
-      (detail.event === EVENT_NAMES.CHAT && (payload.state as string) === "thinking")
-    ) {
-      this._handleThinking(payload);
-    } else if (detail.event === EVENT_NAMES.CHAT) {
-      this._handleChat(payload);
-    } else if (detail.event === EVENT_NAMES.TOOL_CALL) {
-      this._handleToolCall(payload);
+      return;
     }
-  }
 
-  private _handleError(payload: Record<string, unknown>): void {
-    const msg = (payload.message as string) ?? (payload.error as string) ?? "Unknown error";
-    this.errorBanner = msg;
-    this.requestUpdate();
-  }
-
-  private _handleThinking(payload: Record<string, unknown>): void {
-    const content = (payload.message as string) ?? "";
-    const streaming = this.items.filter(
-      (i): i is Extract<ChatItem, { type: "thinking" }> => i.type === "thinking" && i.streaming,
-    );
-    const existingThinking = streaming.length > 0 ? streaming[streaming.length - 1] : null;
-    if (existingThinking) {
-      this.items = this.items.map((i) =>
-        i === existingThinking ? { ...i, content: i.content + content } : i,
-      );
-    } else {
-      this.items = [...this.items, { type: "thinking", content, streaming: true, ts: Date.now() }];
-    }
-    this.requestUpdate();
+    this.chat.handleEvent(detail.event, payload, this.sessionKey);
     this.scrollToBottom();
-    this._cacheMessages();
-  }
-
-  private _handleChat(payload: Record<string, unknown>): void {
-    const state = payload.state as string;
-    const content = (payload.message as string) ?? "";
-    if (state === "received" && content) {
-      const recentUser = this.items
-        .slice(-6)
-        .some((i) => i.type === "message" && i.role === "user" && i.content === content);
-      if (!recentUser) {
-        this.items = [
-          ...this.items,
-          {
-            type: "message",
-            role: "user" as const,
-            content,
-            id: payload.id as string,
-            ts: Date.now(),
-          },
-        ];
-      }
-    }
-    if (state === "sent" && content) {
-      this.items = this.items.map((i) =>
-        i.type === "thinking" && i.streaming ? { ...i, streaming: false } : i,
-      );
-      this.items = [
-        ...this.items,
-        {
-          type: "message",
-          role: "assistant" as const,
-          content,
-          id: payload.id as string,
-          ts: Date.now(),
-        },
-      ];
-      this.isWaiting = false;
-      this._stopStreamTimer();
-    }
-    if (state === "chunk" && content) {
-      this.items = this.items.map((i) =>
-        i.type === "thinking" && i.streaming ? { ...i, streaming: false } : i,
-      );
-      const lastMsgIdx = this._findLastAssistantIdx();
-      if (lastMsgIdx >= 0) {
-        const last = this.items[lastMsgIdx];
-        if (last.type === "message") {
-          this.items = [
-            ...this.items.slice(0, lastMsgIdx),
-            { ...last, content: last.content + content },
-            ...this.items.slice(lastMsgIdx + 1),
-          ];
-        }
-      } else {
-        this.items = [
-          ...this.items,
-          {
-            type: "message",
-            role: "assistant" as const,
-            content,
-            id: payload.id as string,
-            ts: Date.now(),
-          },
-        ];
-      }
-    }
-    if (state === "sent" && !content) {
-      this.isWaiting = true;
-      this._startStreamTimer();
-    }
-    this.requestUpdate();
-    this.scrollToBottom();
-    this._cacheMessages();
-  }
-
-  private _handleToolCall(payload: Record<string, unknown>): void {
-    const id = (payload.id as string) ?? `tool-${Date.now()}`;
-    const name = (payload.message as string) ?? "tool";
-    const input =
-      typeof payload.input === "string"
-        ? payload.input
-        : payload.args != null
-          ? JSON.stringify(payload.args)
-          : undefined;
-    const result = payload.result != null ? String(payload.result) : undefined;
-    const existingIdx = this.items.findIndex(
-      (i): i is Extract<ChatItem, { type: "tool_call" }> => i.type === "tool_call" && i.id === id,
-    );
-    if (existingIdx < 0) {
-      this.items = [
-        ...this.items,
-        {
-          type: "tool_call",
-          id,
-          name,
-          input,
-          status: result != null ? "completed" : "running",
-          result,
-          ts: Date.now(),
-        },
-      ];
-    } else {
-      const existing = this.items[existingIdx];
-      if (existing.type === "tool_call") {
-        this.items = [
-          ...this.items.slice(0, existingIdx),
-          {
-            ...existing,
-            input: existing.input ?? input,
-            status: "completed" as const,
-            result: result ?? existing.result,
-          },
-          ...this.items.slice(existingIdx + 1),
-        ];
-      }
-    }
-    this.requestUpdate();
-    this.scrollToBottom();
-    this._cacheMessages();
   }
 
   private _findLastAssistantIdx(): number {
-    for (let i = this.items.length - 1; i >= 0; i--) {
+    for (let i = this.chat.items.length - 1; i >= 0; i--) {
       if (
-        this.items[i].type === "message" &&
-        (this.items[i] as { role: string }).role === "assistant"
+        this.chat.items[i].type === "message" &&
+        (this.chat.items[i] as { role: string }).role === "assistant"
       ) {
         return i;
       }
@@ -815,11 +548,14 @@ export class ScChatView extends GatewayAwareLitElement {
     });
   }
 
-  private _retry(): void {
-    if (!this.lastFailedMessage) return;
-    this.inputValue = this.lastFailedMessage;
-    this.lastFailedMessage = "";
-    this.send();
+  private async _retry(): Promise<void> {
+    try {
+      await this.chat.retry(this.sessionKey);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to send message";
+      ScToast.show({ message: msg, variant: "error" });
+    }
+    this.scrollToBottom();
   }
 
   private _copyMessage(item: Extract<ChatItem, { type: "message" }>): void {
@@ -859,26 +595,15 @@ export class ScChatView extends GatewayAwareLitElement {
   private async send(): Promise<void> {
     const text = this.inputValue.trim();
     if (!text || !this.gateway) return;
-    this.items = [...this.items, { type: "message", role: "user", content: text, ts: Date.now() }];
     this.inputValue = "";
-    this.lastFailedMessage = "";
-    this.isWaiting = true;
-    this._startStreamTimer();
-    this._cacheMessages();
     this.resizeTextarea();
-    this.scrollToBottom();
     try {
-      await this.gateway.request("chat.send", {
-        message: text,
-        sessionKey: this.sessionKey,
-      });
+      await this.chat.send(text, this.sessionKey);
     } catch (err) {
-      this.isWaiting = false;
-      this._stopStreamTimer();
-      this.lastFailedMessage = text;
       const msg = err instanceof Error ? err.message : "Failed to send message";
       ScToast.show({ message: msg, variant: "error" });
     }
+    this.scrollToBottom();
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
@@ -908,18 +633,23 @@ export class ScChatView extends GatewayAwareLitElement {
           @dragleave=${this._handleDragLeave}
           @drop=${this._handleDrop}
         >
-          ${this._renderSearch()} ${this.items.length === 0 ? this._renderEmptyState() : nothing}
-          ${this._renderMessages()} ${this.isWaiting ? this._renderThinking() : nothing}
+          ${this._renderSearch()}
+          ${this.chat.items.length === 0 ? this._renderEmptyState() : nothing}
+          ${this._renderMessages()} ${this.chat.isWaiting ? this._renderThinking() : nothing}
         </div>
         ${this._renderScrollPill()} ${this._renderRetryButton()} ${this._renderInputBar()}
+        ${this._contextMenu.open
+          ? html`
+              <sc-context-menu
+                .open=${this._contextMenu.open}
+                .x=${this._contextMenu.x}
+                .y=${this._contextMenu.y}
+                .items=${this._contextMenu.items}
+                @close=${() => (this._contextMenu = { ...this._contextMenu, open: false })}
+              ></sc-context-menu>
+            `
+          : nothing}
       </div>
-      <sc-context-menu
-        .open=${this._contextMenu.open}
-        .x=${this._contextMenu.x}
-        .y=${this._contextMenu.y}
-        .items=${this._contextMenu.items}
-        @close=${() => (this._contextMenu = { ...this._contextMenu, open: false })}
-      ></sc-context-menu>
     `;
   }
 
@@ -939,11 +669,15 @@ export class ScChatView extends GatewayAwareLitElement {
   }
 
   private _renderErrorBanner() {
-    if (!this.errorBanner) return nothing;
+    if (!this.chat.errorBanner) return nothing;
     return html`
       <div class="error-banner">
-        <span>${this.errorBanner}</span>
-        <button class="dismiss-btn" @click=${() => (this.errorBanner = "")} aria-label="Dismiss">
+        <span>${this.chat.errorBanner}</span>
+        <button
+          class="dismiss-btn"
+          @click=${() => (this.chat.errorBanner = "")}
+          aria-label="Dismiss"
+        >
           ${icons.x}
         </button>
       </div>
@@ -1016,7 +750,7 @@ export class ScChatView extends GatewayAwareLitElement {
   }
 
   private _renderMessages() {
-    if (this._historyLoading) {
+    if (this.chat.historyLoading) {
       return html`
         <div class="history-skeleton">
           <sc-skeleton variant="line" width="60%"></sc-skeleton>
@@ -1026,9 +760,10 @@ export class ScChatView extends GatewayAwareLitElement {
       `;
     }
     const lastAssistantIdx = this._findLastAssistantIdx();
-    return this.items.map((item, idx) => {
+    return this.chat.items.map((item, idx) => {
       if (item.type === "message") {
-        const isStreaming = this.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
+        const isStreaming =
+          this.chat.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
         return html`
           <div
             id="msg-${idx}"
@@ -1077,7 +812,7 @@ export class ScChatView extends GatewayAwareLitElement {
     return html`
       <div class="thinking">
         <sc-thinking .active=${true} .steps=${[]}></sc-thinking>
-        <span class="stream-elapsed">${this._streamElapsed}</span>
+        <span class="stream-elapsed">${this.chat.streamElapsed}</span>
         <button class="abort-btn" @click=${() => this.handleAbort()} aria-label="Stop generating">
           Abort
         </button>
@@ -1099,7 +834,7 @@ export class ScChatView extends GatewayAwareLitElement {
   }
 
   private _renderRetryButton() {
-    if (!this.lastFailedMessage) return nothing;
+    if (!this.chat.lastFailedMessage) return nothing;
     return html`<button class="retry-btn" @click=${this._retry} aria-label="Retry last message">
       Retry last message
     </button>`;
@@ -1122,7 +857,7 @@ export class ScChatView extends GatewayAwareLitElement {
           <button
             class="send-btn"
             ?disabled=${!this.inputValue.trim() ||
-            this.isWaiting ||
+            this.chat.isWaiting ||
             this.connectionStatus === "disconnected"}
             @click=${() => this.send()}
             aria-label="Send"
