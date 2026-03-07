@@ -8,11 +8,11 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/tool.h"
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
+#include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -102,20 +102,23 @@ static sc_error_t skill_write_execute(void *ctx, sc_allocator_t *alloc, const sc
     }
 
 #ifndef _WIN32
+    char base_dir[512];
+    int n = snprintf(base_dir, sizeof(base_dir), "%s/.seaclaw/skills", home);
+    if (n <= 0 || (size_t)n >= sizeof(base_dir)) {
+        *out = sc_tool_result_fail("path too long", 13);
+        return SC_OK;
+    }
+    mkdir(base_dir, 0755);
+
     char dir_path[512];
-    int n = snprintf(dir_path, sizeof(dir_path), "%s/.seaclaw/skills/%.*s", home,
-                     (int)name_len, name);
+    n = snprintf(dir_path, sizeof(dir_path), "%s/.seaclaw/skills/%.*s", home, (int)name_len, name);
     if (n <= 0 || (size_t)n >= sizeof(dir_path)) {
         *out = sc_tool_result_fail("path too long", 13);
         return SC_OK;
     }
-    if (mkdir(dir_path, 0755) != 0) {
-        /* Check if dir already exists */
-        struct stat st;
-        if (stat(dir_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
-            *out = sc_tool_result_fail("failed to create skill directory", 32);
-            return SC_OK;
-        }
+    if (mkdir(dir_path, 0755) != 0 && errno != EEXIST) {
+        *out = sc_tool_result_fail("failed to create skill directory", 32);
+        return SC_OK;
     }
 
     /* Build manifest: {"name":"...","description":"...","command":"...","parameters":...} */
@@ -186,7 +189,12 @@ static sc_error_t skill_write_execute(void *ctx, sc_allocator_t *alloc, const sc
         *out = sc_tool_result_ok_owned(msg, len);
     }
     return SC_OK;
-#endif
+#else  /* _WIN32 */
+    (void)parameters;
+    *out = sc_tool_result_fail("skill_write not supported on Windows", 34);
+    return SC_OK;
+#endif /* _WIN32 */
+#endif /* SC_IS_TEST */
 }
 
 static const char *skill_write_name(void *ctx) {

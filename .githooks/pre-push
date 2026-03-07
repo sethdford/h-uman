@@ -25,7 +25,7 @@ if [ -f "CMakeLists.txt" ]; then
     fi
     cd ..
 
-    # Auto-sync stats in AGENTS.md, README.md, and STUBS.md
+    # Auto-sync stats across all docs (AGENTS.md, README.md, CONTRIBUTING.md, etc.)
     if [ -x "scripts/update-stats.sh" ]; then
         echo "Syncing project stats..."
         bash scripts/update-stats.sh --apply 2>/dev/null || true

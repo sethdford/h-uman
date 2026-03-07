@@ -45,6 +45,8 @@ static int get_pid_path(char *buf, size_t buf_size) {
     const char *home = getenv("HOME");
     if (!home)
         home = ".";
+    if (validate_home(home) != SC_OK)
+        return -1;
     return snprintf(buf, buf_size, "%s/%s/%s", home, SC_DAEMON_PID_DIR, SC_DAEMON_PID_FILE);
 }
 

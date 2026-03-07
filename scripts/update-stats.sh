@@ -159,4 +159,102 @@ sed -i.bak -E \
     "s/^Tests: [0-9,]+$/Tests: ${TEST_COUNT_FMT}/" \
     README.md && rm -f README.md.bak
 
-echo "Done. Review changes with: git diff AGENTS.md README.md"
+echo "Patching CONTRIBUTING.md..."
+
+# "All N+ tests must pass" line
+sed -i.bak -E \
+    "s/All [0-9,]+\+ tests must pass/All ${TEST_COUNT_FMT}+ tests must pass/" \
+    CONTRIBUTING.md && rm -f CONTRIBUTING.md.bak
+
+echo "Patching PROJECT_STATUS.md..."
+
+if [ -f PROJECT_STATUS.md ]; then
+    # Test files
+    sed -i.bak -E \
+        "s/Test files[[:space:]]+\| [0-9]+/Test files                     | ${TEST_FILES}/" \
+        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+
+    # Tests passing
+    sed -i.bak -E \
+        "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
+        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+
+    # Binary size
+    if [ "$BINARY_KB" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/Binary size \(MinSizeRel\+LTO\)[[:space:]]+\| \*\*~[0-9]+ KB\*\*/Binary size (MinSizeRel+LTO)   | **~${BINARY_KB} KB**/" \
+            PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+    fi
+
+    # Source files
+    sed -i.bak -E \
+        "s/Source files \(src\/ \+ include\/\)[[:space:]]*\| \*\*[0-9]+\*\*/Source files (src\/ + include\/) | **${SRC_COUNT}**/" \
+        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+
+    # Lines of code
+    sed -i.bak -E \
+        "s/Lines of C\/H\/ASM code[[:space:]]+\| \*\*~[0-9]+K\*\*/Lines of C\/H\/ASM code          | **~${C_LINES_K}K**/" \
+        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+
+    # Tools count in section header
+    sed -i.bak -E \
+        "s/All [0-9]+ Real \(with all feature flags\)/All ${TOOL_COUNT} Real (with all feature flags)/" \
+        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+
+    # Update date
+    sed -i.bak -E \
+        "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
+        PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
+fi
+
+echo "Patching seaclaw/STUBS.md..."
+
+if [ -f seaclaw/STUBS.md ]; then
+    # Test count in header blurb
+    sed -i.bak -E \
+        "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
+        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+
+    # Tests passing table row
+    sed -i.bak -E \
+        "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
+        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+
+    # Test files
+    sed -i.bak -E \
+        "s/Test files[[:space:]]+\| [0-9]+/Test files                     | ${TEST_FILES}/" \
+        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+
+    # Update date
+    sed -i.bak -E \
+        "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
+        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+fi
+
+echo "Patching CLAUDE.md..."
+
+if [ -f CLAUDE.md ]; then
+    # Binary size in tagline
+    if [ "$BINARY_KB" != "unknown" ]; then
+        sed -i.bak -E \
+            "s/~[0-9]+ KB binary/~${BINARY_KB} KB binary/" \
+            CLAUDE.md && rm -f CLAUDE.md.bak
+    fi
+
+    # Test count references
+    sed -i.bak -E \
+        "s/[0-9,]+\+ tests/${TEST_COUNT_FMT}+ tests/g" \
+        CLAUDE.md && rm -f CLAUDE.md.bak
+
+    # Test files in paths table
+    sed -i.bak -E \
+        "s/[0-9]+ test files, [0-9,]+\+ tests/${TEST_FILES} test files, ${TEST_COUNT_FMT}+ tests/" \
+        CLAUDE.md && rm -f CLAUDE.md.bak
+
+    # Source file count
+    sed -i.bak -E \
+        "s/~[0-9]+ files, ~[0-9]+K lines/~${SRC_COUNT} files, ~${C_LINES_K}K lines/" \
+        CLAUDE.md && rm -f CLAUDE.md.bak
+fi
+
+echo "Done. Review changes with: git diff"
