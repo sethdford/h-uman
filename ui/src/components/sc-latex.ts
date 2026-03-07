@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import DOMPurify from "dompurify";
 
 @customElement("sc-latex")
 export class ScLatex extends LitElement {
@@ -27,30 +28,17 @@ export class ScLatex extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    if (this.latex && !this._loaded) {
-      import("katex")
-        .then((katex) => {
-          try {
-            this._rendered = katex.default.renderToString(this.latex, {
-              displayMode: this.display,
-              throwOnError: false,
-            });
-          } catch {
-            this._rendered = this.latex;
-          }
-          this._loaded = true;
-          this.requestUpdate();
-        })
-        .catch(() => {
-          this._rendered = this.latex;
-          this._loaded = true;
-          this.requestUpdate();
-        });
-    }
+    if (this.latex) this._render();
   }
 
   override updated(changed: Map<string, unknown>): void {
-    if (changed.has("latex") && this.latex && this._loaded) {
+    if ((changed.has("latex") || changed.has("display")) && this.latex) {
+      this._render();
+    }
+  }
+
+  private _render(): void {
+    if (!this._loaded) {
       import("katex")
         .then((katex) => {
           try {
@@ -61,18 +49,37 @@ export class ScLatex extends LitElement {
           } catch {
             this._rendered = this.latex;
           }
+          this._loaded = true;
           this.requestUpdate();
         })
         .catch(() => {
           this._rendered = this.latex;
+          this._loaded = true;
           this.requestUpdate();
         });
+      return;
     }
+    import("katex")
+      .then((katex) => {
+        try {
+          this._rendered = katex.default.renderToString(this.latex, {
+            displayMode: this.display,
+            throwOnError: false,
+          });
+        } catch {
+          this._rendered = this.latex;
+        }
+        this.requestUpdate();
+      })
+      .catch(() => {
+        this._rendered = this.latex;
+        this.requestUpdate();
+      });
   }
 
   override render() {
     if (this._rendered) {
-      return html`<span class="katex">${unsafeHTML(this._rendered)}</span>`;
+      return html`<span class="katex">${unsafeHTML(DOMPurify.sanitize(this._rendered))}</span>`;
     }
     return html`<span class="latex-raw">${this.latex}</span>`;
   }

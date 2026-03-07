@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
+import DOMPurify from "dompurify";
 import "./sc-toast.js";
 import { ScToast } from "./sc-toast.js";
 
@@ -38,6 +39,7 @@ export class ScCodeBlock extends LitElement {
   @state() private _highlighted = "";
   @state() private _copied = false;
   @state() private _shikiReady = false;
+  private _copyTimeout = 0;
 
   static override styles = css`
     :host {
@@ -126,6 +128,11 @@ export class ScCodeBlock extends LitElement {
     this._highlight();
   }
 
+  override disconnectedCallback(): void {
+    clearTimeout(this._copyTimeout);
+    super.disconnectedCallback();
+  }
+
   override updated(changed: Map<string, unknown>): void {
     if (changed.has("code") || changed.has("language")) {
       this._highlight();
@@ -157,7 +164,7 @@ export class ScCodeBlock extends LitElement {
     if (this.onCopy) {
       this.onCopy(this.code);
       this._copied = true;
-      setTimeout(() => {
+      this._copyTimeout = window.setTimeout(() => {
         this._copied = false;
         this.requestUpdate();
       }, 2000);
@@ -167,7 +174,7 @@ export class ScCodeBlock extends LitElement {
       await navigator.clipboard.writeText(this.code);
       ScToast.show({ message: "Copied to clipboard", variant: "success", duration: 2000 });
       this._copied = true;
-      setTimeout(() => {
+      this._copyTimeout = window.setTimeout(() => {
         this._copied = false;
         this.requestUpdate();
       }, 2000);
@@ -198,7 +205,7 @@ export class ScCodeBlock extends LitElement {
         </div>
         <div class="content">
           ${showHighlighted
-            ? html`${unsafeHTML(this._highlighted)}`
+            ? html`${unsafeHTML(DOMPurify.sanitize(this._highlighted))}`
             : html`<pre><code>${this.code}</code></pre>`}
         </div>
       </div>

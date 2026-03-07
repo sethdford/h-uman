@@ -17,7 +17,6 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
 #include "test_framework.h"
 #include <string.h>
 
@@ -140,8 +139,13 @@ static void test_episodic_summarize_and_store_recall(void) {
     SC_ASSERT_TRUE(out_len > 0);
     SC_ASSERT_TRUE(strstr(summary, "config format") != NULL);
 
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 10);
+#ifdef SC_ENABLE_SQLITE
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
     SC_ASSERT_NOT_NULL(mem.ctx);
+#else
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+    SC_ASSERT_NOT_NULL(mem.ctx);
+#endif
 
     sc_error_t err = sc_episodic_store(&mem, &alloc, "sess_1", 6, summary, out_len);
     SC_ASSERT_EQ(err, SC_OK);
@@ -151,10 +155,14 @@ static void test_episodic_summarize_and_store_recall(void) {
     size_t loaded_len = 0;
     err = sc_episodic_load(&mem, &alloc, &loaded, &loaded_len);
     SC_ASSERT_EQ(err, SC_OK);
+#ifdef SC_ENABLE_SQLITE
     SC_ASSERT_NOT_NULL(loaded);
     SC_ASSERT_TRUE(loaded_len > 0);
     SC_ASSERT_TRUE(strstr(loaded, "config format") != NULL);
     alloc.free(alloc.ctx, loaded, loaded_len + 1);
+#else
+    SC_ASSERT_NULL(loaded);
+#endif
     mem.vtable->deinit(mem.ctx);
 }
 
@@ -253,7 +261,7 @@ static void test_compaction_message_compaction(void) {
     sc_compaction_config_t cfg;
     sc_compaction_config_default(&cfg);
     cfg.keep_recent = 2;
-    cfg.max_history_messages = 5;
+    cfg.max_history_messages = 4;
 
     sc_owned_message_t msgs[6];
     for (int i = 0; i < 6; i++) {

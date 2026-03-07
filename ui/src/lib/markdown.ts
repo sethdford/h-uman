@@ -175,13 +175,18 @@ function renderToken(token: Token, options?: RenderOptions): TemplateResult | ty
     }
     case "list": {
       const list = token as Tokens.List;
-      const tag = list.ordered ? "ol" : "ul";
-      const startAttr =
-        list.ordered && typeof list.start === "number" ? html`start="${list.start}"` : nothing;
-      return html`<${tag} class="md-list" ${startAttr}>${list.items.map(
+      const items = list.items.map(
         (item) =>
           html`<li class="md-list-item">${item.tokens.map((t) => renderToken(t, options))}</li>`,
-      )}</${tag}>`;
+      );
+      if (list.ordered) {
+        return html`<ol class="md-list" start=${list.start || 1}>
+          ${items}
+        </ol>`;
+      }
+      return html`<ul class="md-list">
+        ${items}
+      </ul>`;
     }
     case "table": {
       const table = token as Tokens.Table;

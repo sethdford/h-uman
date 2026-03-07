@@ -1,6 +1,7 @@
 #include "seaclaw/agent/awareness.h"
 #include "seaclaw/agent/cli.h"
 #include "seaclaw/agent.h"
+#include "seaclaw/agent/outcomes.h"
 #include "seaclaw/agent/profile.h"
 #include "seaclaw/agent/tui.h"
 #include "seaclaw/channels/cli.h"
@@ -477,6 +478,11 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
     if (cli_awareness.bus)
         sc_agent_set_awareness(&agent, (struct sc_awareness *)&cli_awareness);
+
+    sc_outcome_tracker_t cli_outcomes;
+    sc_outcome_tracker_init(&cli_outcomes, true);
+    sc_agent_set_outcomes(&agent, &cli_outcomes);
+    agent.scheduler = (struct sc_cron_scheduler *)cron;
 
     /* TUI mode: launch split-pane terminal UI if --tui was passed */
     if (parsed_args.use_tui) {

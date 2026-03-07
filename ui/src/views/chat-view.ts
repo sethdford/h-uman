@@ -426,7 +426,7 @@ export class ScChatView extends GatewayAwareLitElement {
       }
     }
     @media (prefers-reduced-motion: reduce) {
-      .status-dot.reconnecting,
+      .status-dot.connecting,
       .message,
       .scroll-bottom-pill,
       .tool-spinner,

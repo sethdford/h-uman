@@ -675,6 +675,7 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent, const char *message, size
                            "  /provider         Show current provider\n"
                            "  /tools            List available tools\n"
                            "  /plan <json>      Execute a structured plan\n"
+                           "  /goal <text>      Generate and execute plan from a goal\n"
                            "  /cost             Show token usage\n"
                            "  /status           Show agent status\n"
                            "  /spawn <task>     Spawn a sub-agent\n"
@@ -836,6 +837,42 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent, const char *message, size
         if (err != SC_OK) {
             return sc_sprintf(agent->alloc, "Plan failed: %s", sc_error_string(err));
         }
+        return summary;
+    }
+
+    if (sc_strncasecmp(cmd_buf, "goal", 4) == 0) {
+        if (arg_len == 0) {
+            return sc_strndup(agent->alloc,
+                              "Usage: /goal <describe what you want to accomplish>", 51);
+        }
+        const char **tool_names = NULL;
+        size_t tn_count = 0;
+        if (agent->tools_count > 0) {
+            tool_names =
+                (const char **)agent->alloc->alloc(agent->alloc->ctx,
+                                                   agent->tools_count * sizeof(const char *));
+            if (tool_names) {
+                for (size_t i = 0; i < agent->tools_count; i++) {
+                    const char *tn =
+                        agent->tools[i].vtable->name ? agent->tools[i].vtable->name(agent->tools[i].ctx) : NULL;
+                    if (tn)
+                        tool_names[tn_count++] = tn;
+                }
+            }
+        }
+        sc_plan_t *plan = NULL;
+        sc_error_t err = sc_planner_generate(agent->alloc, &agent->provider, agent->model_name,
+                                             agent->model_name_len, arg_buf, arg_len, tool_names,
+                                             tn_count, &plan);
+        if (tool_names)
+            agent->alloc->free(agent->alloc->ctx, (void *)tool_names,
+                               agent->tools_count * sizeof(const char *));
+        if (err != SC_OK || !plan) {
+            return sc_sprintf(agent->alloc, "Goal planning failed: %s", sc_error_string(err));
+        }
+        char *summary = sc_sprintf(agent->alloc, "Plan generated with %zu steps.",
+                                    plan->steps_count);
+        sc_plan_free(agent->alloc, plan);
         return summary;
     }
 
@@ -1369,6 +1406,7 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
     req.tools_count = agent->tool_specs_count;
 
     uint32_t iter = 0;
+    int reflection_retries_left = agent->reflection.max_retries;
     uint64_t max_tokens =
         agent->token_limit ? agent->token_limit
                            : sc_context_tokens_resolve(0, agent->model_name, agent->model_name_len);
@@ -1543,8 +1581,8 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
                     msg, msg_len, resp.content, resp.content_len, &agent->reflection);
 
                 if (quality == SC_QUALITY_NEEDS_RETRY && agent->reflection.enabled &&
-                    agent->reflection.max_retries > 0 && iter < agent->max_tool_iterations - 1) {
-                    agent->reflection.max_retries--;
+                    reflection_retries_left > 0 && iter < agent->max_tool_iterations - 1) {
+                    reflection_retries_left--;
                     char *critique = NULL;
                     size_t critique_len = 0;
                     sc_error_t cerr = sc_reflection_build_critique_prompt(
@@ -2148,19 +2186,9 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
 }
 
 /* ── Planner execution (Tier 1.4) ────────────────────────────────────── */
-sc_error_t sc_agent_execute_plan(sc_agent_t *agent, const char *plan_json, size_t plan_json_len,
-                                 char **summary_out, size_t *summary_len_out) {
-    if (!agent || !plan_json || !summary_out)
-        return SC_ERR_INVALID_ARGUMENT;
-    *summary_out = NULL;
-    if (summary_len_out)
-        *summary_len_out = 0;
 
-    sc_plan_t *plan = NULL;
-    sc_error_t err = sc_planner_create_plan(agent->alloc, plan_json, plan_json_len, &plan);
-    if (err != SC_OK)
-        return err;
-
+static sc_error_t execute_plan_steps(sc_agent_t *agent, sc_plan_t *plan, char **summary_out,
+                                     size_t *summary_len_out) {
     char result_buf[4096];
     int result_off = 0;
     result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
@@ -2235,12 +2263,28 @@ sc_error_t sc_agent_execute_plan(sc_agent_t *agent, const char *plan_json, size_
         sc_tool_result_free(agent->alloc, &result);
     }
 
-    sc_plan_free(agent->alloc, plan);
-
     *summary_out = sc_strndup(agent->alloc, result_buf, (size_t)result_off);
     if (!*summary_out)
         return SC_ERR_OUT_OF_MEMORY;
     if (summary_len_out)
         *summary_len_out = (size_t)result_off;
     return SC_OK;
+}
+
+sc_error_t sc_agent_execute_plan(sc_agent_t *agent, const char *plan_json, size_t plan_json_len,
+                                 char **summary_out, size_t *summary_len_out) {
+    if (!agent || !plan_json || !summary_out)
+        return SC_ERR_INVALID_ARGUMENT;
+    *summary_out = NULL;
+    if (summary_len_out)
+        *summary_len_out = 0;
+
+    sc_plan_t *plan = NULL;
+    sc_error_t err = sc_planner_create_plan(agent->alloc, plan_json, plan_json_len, &plan);
+    if (err != SC_OK)
+        return err;
+
+    err = execute_plan_steps(agent, plan, summary_out, summary_len_out);
+    sc_plan_free(agent->alloc, plan);
+    return err;
 }

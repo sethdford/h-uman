@@ -10,6 +10,7 @@
 #endif
 #include "seaclaw/agent.h"
 #include "seaclaw/agent/awareness.h"
+#include "seaclaw/agent/outcomes.h"
 #include "seaclaw/agent/cli.h"
 #include "seaclaw/agent/episodic.h"
 #include "seaclaw/agent/spawn.h"

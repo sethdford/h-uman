@@ -86,6 +86,7 @@ static sc_error_t skill_write_execute(void *ctx, sc_allocator_t *alloc, const sc
     }
 
 #ifdef SC_IS_TEST
+    (void)parameters;
     {
         char *msg = sc_sprintf(alloc, "Skill '%s' created", name);
         if (!msg) {

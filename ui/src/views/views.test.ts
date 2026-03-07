@@ -68,7 +68,7 @@ describe("sc-chat-view", () => {
     };
     document.body.appendChild(el);
     await el.updateComplete;
-    const pills = el.shadowRoot?.querySelectorAll(".prompt-pill");
+    const pills = el.shadowRoot?.querySelectorAll(".prompt-pill") ?? [];
     expect(pills.length).toBeGreaterThanOrEqual(1);
     el.remove();
   });
