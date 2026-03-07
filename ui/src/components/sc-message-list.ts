@@ -42,16 +42,26 @@ export class ScMessageList extends LitElement {
       flex-direction: column;
       gap: var(--sc-space-md);
     }
+    @keyframes sc-slide-up {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
     .message {
       position: relative;
-      max-width: 85%;
+      max-width: 75%;
       padding: var(--sc-space-md) var(--sc-space-md);
-      border-radius: var(--sc-radius);
       font-size: var(--sc-text-base);
       line-height: 1.5;
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-xs);
+      box-shadow: var(--sc-shadow-xs);
       animation: sc-slide-up var(--sc-duration-normal)
         var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
@@ -60,14 +70,16 @@ export class ScMessageList extends LitElement {
     }
     .message.user {
       align-self: flex-end;
-      background: var(--sc-accent);
-      color: var(--sc-bg);
+      background: var(--sc-user-message-gradient);
+      color: var(--sc-on-accent);
+      border-radius: var(--sc-radius-lg) var(--sc-radius-lg) var(--sc-radius-sm) var(--sc-radius-lg);
     }
     .message.assistant {
       align-self: flex-start;
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
       color: var(--sc-text);
+      border-radius: var(--sc-radius-lg) var(--sc-radius-lg) var(--sc-radius-lg) var(--sc-radius-sm);
     }
     .message.continuation {
       margin-top: calc(var(--sc-space-xs) - var(--sc-space-md));
@@ -77,7 +89,15 @@ export class ScMessageList extends LitElement {
     }
     .message-meta {
       font-size: var(--sc-text-xs);
-      opacity: var(--sc-opacity-muted, 0.8);
+      opacity: 0;
+      transform: translateY(-4px);
+      transition:
+        opacity var(--sc-duration-fast) var(--sc-ease-out),
+        transform var(--sc-duration-fast) var(--sc-ease-out);
+    }
+    .message:hover .message-meta {
+      opacity: 0.8;
+      transform: translateY(0);
     }
     .message.user .message-meta {
       align-self: flex-end;
@@ -155,17 +175,23 @@ export class ScMessageList extends LitElement {
     .abort-btn {
       margin-left: var(--sc-space-md);
       padding: var(--sc-space-xs) var(--sc-space-md);
-      background: var(--sc-error-dim);
-      color: var(--sc-error);
-      border: 1px solid var(--sc-error);
+      background: transparent;
+      color: var(--sc-text-muted);
+      border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
       cursor: pointer;
       font-size: var(--sc-text-xs);
+      font-family: var(--sc-font);
       font-style: normal;
+      transition:
+        color var(--sc-duration-fast),
+        border-color var(--sc-duration-fast),
+        background var(--sc-duration-fast);
     }
     .abort-btn:hover {
-      background: var(--sc-error-dim);
+      color: var(--sc-error);
       border-color: var(--sc-error);
+      background: var(--sc-error-dim);
     }
     .history-skeleton {
       display: flex;
@@ -182,6 +208,9 @@ export class ScMessageList extends LitElement {
       .message,
       .scroll-bottom-pill {
         animation: none !important;
+      }
+      .message-meta {
+        transition: none;
       }
     }
   `;
@@ -269,7 +298,7 @@ export class ScMessageList extends LitElement {
         <div
           id="msg-${idx}"
           class="message ${item.role} ${isContinuation ? "continuation" : ""}"
-          style="--sc-stagger-index: ${idx}; animation-delay: min(calc(var(--sc-stagger-delay) * var(--sc-stagger-index)), var(--sc-stagger-max));"
+          style="--sc-stagger-index: ${idx}; animation-delay: min(calc(50ms * var(--sc-stagger-index)), 300ms);"
           @contextmenu=${(ev: MouseEvent) => this._onContextMenu(ev, item)}
         >
           <sc-message-actions
