@@ -20,9 +20,9 @@ if [ "${1:-}" = "--all" ]; then
 fi
 
 if [ "$MODE" = "all" ]; then
-  FILES=$(find ui/src website/src \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' -o -name '*.astro' \) 2>/dev/null || true)
+  FILES=$(find ui/src website/src ui/index.html \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' -o -name '*.astro' -o -name '*.html' \) 2>/dev/null || true)
 else
-  FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.css' '*.ts' '*.tsx' '*.astro' 2>/dev/null || true)
+  FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.css' '*.ts' '*.tsx' '*.astro' '*.html' 2>/dev/null || true)
 fi
 
 if [ -z "$FILES" ]; then
@@ -34,7 +34,7 @@ VIOLATIONS=0
 
 while IFS= read -r file; do
   case "$file" in
-    */_tokens.css|design-tokens/*|*/generate-assets*|*.svg|*.json|docs/tokens.*|*/DesignTokens.*|*/design_tokens.*|website/src/pages/index.astro) continue ;;
+    */_tokens.css|design-tokens/*|*/generate-assets*|*.svg|*.json|docs/tokens.*|*/DesignTokens.*|*/design_tokens.*|website/src/pages/index.astro|ui/index.html) continue ;;
   esac
 
   if [ "$MODE" = "all" ]; then

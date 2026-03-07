@@ -1024,6 +1024,61 @@
         <div class="code-snippet"><code>&lt;sc-page-hero&gt;...content...&lt;/sc-page-hero&gt;</code></div>
       </section>
 
+      <section class="component-section" id="sc-schedule-builder">
+        <h2>sc-schedule-builder</h2>
+        <p>Interactive cron schedule builder with natural language input and visual interval selector.</p>
+        <div class="playground">
+          <div class="preview" style="width:100%">
+            <sc-schedule-builder></sc-schedule-builder>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-schedule-builder&gt;&lt;/sc-schedule-builder&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-message-actions">
+        <h2>sc-message-actions</h2>
+        <p>Floating action bar for chat messages — copy, retry, regenerate. Appears on hover.</p>
+        <div class="playground">
+          <div class="preview">
+            <sc-message-actions role="assistant" content="Hello from the catalog demo"></sc-message-actions>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-message-actions role="assistant" content="Hello"&gt;&lt;/sc-message-actions&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-automation-card">
+        <h2>sc-automation-card</h2>
+        <p>Card for displaying a cron/automation job with status, schedule, cost, and run history sparkline.</p>
+        <div class="playground">
+          <div class="preview" style="width:100%">
+            <sc-automation-card></sc-automation-card>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-automation-card .job=${"{ ... }"} .runs=${"[...]"}&gt;&lt;/sc-automation-card&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-chat-sessions-panel">
+        <h2>sc-chat-sessions-panel</h2>
+        <p>Slide-out panel listing chat sessions with time groups, inline rename, and spring entrance animations.</p>
+        <div class="playground">
+          <div class="preview" style="width:100%;position:relative;min-height:120px">
+            <sc-chat-sessions-panel open></sc-chat-sessions-panel>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-chat-sessions-panel open .sessions=${"[...]"}&gt;&lt;/sc-chat-sessions-panel&gt;</code></div>
+      </section>
+
+      <section class="component-section" id="sc-file-preview">
+        <h2>sc-file-preview</h2>
+        <p>Displays attached file previews (images, documents) in the chat composer area.</p>
+        <div class="playground">
+          <div class="preview">
+            <sc-file-preview></sc-file-preview>
+          </div>
+        </div>
+        <div class="code-snippet"><code>&lt;sc-file-preview .files=${"[{ name: 'doc.pdf', size: 1024, type: 'application/pdf' }]"}&gt;&lt;/sc-file-preview&gt;</code></div>
+      </section>
+
     <sc-toast></sc-toast>
 
     <script type="module">
@@ -1079,6 +1134,11 @@
       import "/src/components/sc-timeline.js";
       import "/src/components/sc-sparkline-enhanced.js";
       import "/src/components/sc-page-hero.js";
+      import "/src/components/sc-schedule-builder.js";
+      import "/src/components/sc-message-actions.js";
+      import "/src/components/sc-automation-card.js";
+      import "/src/components/sc-chat-sessions-panel.js";
+      import "/src/components/sc-file-preview.js";
 
       // Theme toggle
       function setTheme(theme) {

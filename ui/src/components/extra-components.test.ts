@@ -29,6 +29,8 @@ import "./sc-metric-row.js";
 import "./sc-timeline.js";
 import "./sc-sparkline-enhanced.js";
 import "./sc-page-hero.js";
+import "./sc-schedule-builder.js";
+import "./sc-automation-card.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -1431,6 +1433,117 @@ describe("sc-page-hero", () => {
     await el.updateComplete;
     const slot = el.shadowRoot?.querySelector("slot");
     expect(slot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-schedule-builder", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-schedule-builder")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-schedule-builder");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render with shadow DOM", async () => {
+    const el = document.createElement("sc-schedule-builder") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-message-actions", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-message-actions")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-message-actions");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should accept role and content properties", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+      role: string;
+      content: string;
+    };
+    el.role = "assistant";
+    el.content = "test content";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-automation-card", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-automation-card")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-automation-card");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render empty state without job", async () => {
+    const el = document.createElement("sc-automation-card") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-chat-sessions-panel", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-chat-sessions-panel")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-chat-sessions-panel");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should accept open property", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+      open: boolean;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-file-preview", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-file-preview")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-file-preview");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render empty with no files", async () => {
+    const el = document.createElement("sc-file-preview") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
     el.remove();
   });
 });

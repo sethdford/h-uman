@@ -162,7 +162,7 @@ jobs:
       - name: Build
         run: cd ui && npm run build
       - name: E2E tests
-        run: cd ui && npx playwright test --update-snapshots
+        run: cd ui && npx playwright test
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -184,7 +184,7 @@ jobs:
       - name: Install Playwright browsers
         run: cd ui && npx playwright install --with-deps chromium
       - name: Visual regression tests
-        run: cd ui && npx playwright test visual --update-snapshots
+        run: cd ui && npx playwright test visual
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
