@@ -8,7 +8,7 @@ export class ScMessageGroup extends LitElement {
   static override styles = css`
     :host {
       display: block;
-      margin-bottom: var(--sc-space-lg, 16px);
+      margin-bottom: var(--sc-space-lg, 1rem);
     }
 
     .group {
@@ -38,8 +38,8 @@ export class ScMessageGroup extends LitElement {
 
     .avatar {
       flex-shrink: 0;
-      width: 28px;
-      height: 28px;
+      width: 1.75rem;
+      height: 1.75rem;
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -57,8 +57,8 @@ export class ScMessageGroup extends LitElement {
     }
 
     .avatar svg {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
     }
 
     .messages {
@@ -75,7 +75,7 @@ export class ScMessageGroup extends LitElement {
       margin-top: var(--sc-space-2xs);
       opacity: 0;
       transition: opacity var(--sc-duration-fast) var(--sc-ease-out);
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-2xs, 0.625rem);
       color: var(--sc-text-faint);
     }
 

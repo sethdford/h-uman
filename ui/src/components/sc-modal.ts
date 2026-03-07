@@ -10,8 +10,8 @@ export class ScModal extends LitElement {
       inset: 0;
       z-index: 9999;
       background: color-mix(in srgb, var(--sc-bg) 50%, transparent);
-      backdrop-filter: blur(var(--sc-blur-sm, 4px));
-      -webkit-backdrop-filter: blur(var(--sc-blur-sm, 4px));
+      backdrop-filter: blur(var(--sc-blur-sm, var(--sc-space-xs)));
+      -webkit-backdrop-filter: blur(var(--sc-blur-sm, var(--sc-space-xs)));
       display: flex;
       align-items: center;
       justify-content: center;
@@ -25,7 +25,7 @@ export class ScModal extends LitElement {
     }
 
     .panel {
-      max-width: 480px;
+      max-width: 30rem;
       width: 100%;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-xl);

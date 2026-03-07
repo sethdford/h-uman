@@ -28,8 +28,8 @@ export class ScChatSessionsPanel extends LitElement {
 
   static override styles = css`
     :host {
-      --_panel-width: 260px;
-      --_panel-width-expanded: 280px;
+      --_panel-width: 16.25rem;
+      --_panel-width-expanded: 17.5rem;
       display: block;
       width: 0;
       overflow: hidden;
@@ -143,7 +143,7 @@ export class ScChatSessionsPanel extends LitElement {
       position: sticky;
       top: 0;
       display: block;
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-2xs, 0.625rem);
       font-weight: var(--sc-weight-medium);
       color: var(--sc-text-muted);
       text-transform: uppercase;
@@ -254,8 +254,8 @@ export class ScChatSessionsPanel extends LitElement {
     }
 
     .delete-btn svg {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
     }
 
     .empty-state {

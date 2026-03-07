@@ -14,6 +14,7 @@ import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 
 interface ConfigData {
   default_provider?: string;
@@ -63,13 +64,6 @@ export class ScAgentsView extends GatewayAwareLitElement {
     .staleness {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
-    }
-
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
     }
 
     .section-header {
@@ -305,7 +299,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
     ];
 
     return html`
-      <div class="stats-row">
+      <sc-stats-row>
         ${metrics.map(
           (m, i) => html`
             <sc-stat-card
@@ -315,7 +309,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
             ></sc-stat-card>
           `,
         )}
-      </div>
+      </sc-stats-row>
     `;
   }
 
@@ -398,12 +392,12 @@ export class ScAgentsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </div>
+      </sc-stats-row>
       <sc-skeleton variant="card" height="160px" class="skeleton-sessions"></sc-skeleton>
       <sc-skeleton variant="card" height="100px"></sc-skeleton>
     `;

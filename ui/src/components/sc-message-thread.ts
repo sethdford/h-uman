@@ -105,7 +105,7 @@ export class ScMessageThread extends LitElement {
     }
     .scroll-bottom-pill {
       position: absolute;
-      bottom: 90px; /* sc-lint-ok: scroll-to-bottom offset above composer */
+      bottom: 5.625rem; /* sc-lint-ok: scroll-to-bottom offset above composer */
       left: 50%;
       transform: translateX(-50%);
       background: var(--sc-bg-surface);
@@ -126,9 +126,9 @@ export class ScMessageThread extends LitElement {
       background: var(--sc-bg-elevated);
     }
     .pill-icon svg {
-      width: 14px;
-      height: 14px;
-      vertical-align: -2px;
+      width: 0.875rem;
+      height: 0.875rem;
+      vertical-align: -0.125rem;
     }
     .waiting-row {
       display: flex;
@@ -161,7 +161,7 @@ export class ScMessageThread extends LitElement {
       align-items: center;
       gap: var(--sc-space-2xs);
       margin-top: var(--sc-space-2xs);
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-2xs, 0.625rem);
       color: var(--sc-text-muted);
       font-family: var(--sc-font);
     }
@@ -183,12 +183,12 @@ export class ScMessageThread extends LitElement {
       border-color: var(--sc-accent);
     }
     .branch-btn svg {
-      width: 12px;
-      height: 12px;
+      width: 0.75rem;
+      height: 0.75rem;
     }
     .branch-label {
       font-variant-numeric: tabular-nums;
-      min-width: 32px;
+      min-width: 2rem;
       text-align: center;
     }
     .reaction-pills {

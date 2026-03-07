@@ -338,7 +338,7 @@ set(SC_CORE_SOURCES
     src/runtime/factory.c
     src/agent/action_preview.c
     src/agent/agent.c
-    src/agent/agent_slash.c
+    src/agent/agent_plan.c
     src/agent/agent_stream.c
     src/agent/agent_turn.c
     src/agent/context.c

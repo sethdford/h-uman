@@ -81,6 +81,8 @@ struct sc_memory_vtable;
 typedef struct sc_memory {
     void *ctx;
     const struct sc_memory_vtable *vtable;
+    const char *current_session_id;
+    size_t current_session_id_len;
 } sc_memory_t;
 
 typedef struct sc_memory_vtable {

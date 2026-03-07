@@ -44,7 +44,7 @@ export class ScComposer extends LitElement {
     }
     .input-wrap.drag-over {
       outline: 2px dashed var(--sc-accent);
-      outline-offset: -4px;
+      outline-offset: calc(-1 * var(--sc-space-xs));
       background: color-mix(in srgb, var(--sc-accent) 4%, transparent);
     }
     .input-bar {
@@ -54,8 +54,8 @@ export class ScComposer extends LitElement {
     }
     .input-bar textarea {
       flex: 1;
-      min-height: 44px;
-      max-height: ${LINE_HEIGHT * MAX_LINES}px;
+      min-height: 2.75rem;
+      max-height: ${(LINE_HEIGHT * MAX_LINES) / 16}rem;
       padding: var(--sc-space-sm) var(--sc-space-md);
       background: transparent;
       border: none;
@@ -64,7 +64,7 @@ export class ScComposer extends LitElement {
       font-family: var(--sc-font);
       font-size: var(--sc-text-base);
       resize: none;
-      line-height: ${LINE_HEIGHT}px;
+      line-height: ${LINE_HEIGHT / 16}rem;
     }
     .input-bar textarea:focus {
       outline: none;
@@ -102,16 +102,16 @@ export class ScComposer extends LitElement {
       cursor: not-allowed;
     }
     .attach-btn svg {
-      width: 20px;
-      height: 20px;
+      width: 1.25rem;
+      height: 1.25rem;
     }
     .send-btn {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 40px;
-      height: 40px;
-      min-height: 40px;
+      width: 2.5rem;
+      height: 2.5rem;
+      min-height: 2.5rem;
       padding: 0;
       background: var(--sc-accent);
       color: var(--sc-bg);
@@ -168,7 +168,7 @@ export class ScComposer extends LitElement {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: var(--sc-space-sm);
-      max-width: 420px;
+      max-width: 26.25rem;
       width: 100%;
     }
     .bento-card {
@@ -195,7 +195,7 @@ export class ScComposer extends LitElement {
       background: var(--sc-bg-elevated);
       border-color: var(--sc-accent);
       box-shadow: var(--sc-shadow-glow-blue);
-      transform: translateY(-1px);
+      transform: translateY(-0.0625rem);
     }
     .bento-card:focus-visible {
       outline: 2px solid var(--sc-accent);

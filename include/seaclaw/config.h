@@ -261,6 +261,42 @@ typedef struct sc_nostr_channel_config {
     char *seckey_hex;
 } sc_nostr_channel_config_t;
 
+typedef struct sc_lark_channel_config {
+    char *app_id;
+    char *app_secret;
+    char *webhook_url;
+} sc_lark_channel_config_t;
+
+typedef struct sc_dingtalk_channel_config {
+    char *app_key;
+    char *app_secret;
+    char *webhook_url;
+} sc_dingtalk_channel_config_t;
+
+typedef struct sc_teams_channel_config {
+    char *webhook_url;
+} sc_teams_channel_config_t;
+
+typedef struct sc_twilio_channel_config {
+    char *account_sid;
+    char *auth_token;
+    char *from_number;
+    char *to_number;
+} sc_twilio_channel_config_t;
+
+typedef struct sc_onebot_channel_config {
+    char *api_base;
+    char *access_token;
+    char *user_id;
+} sc_onebot_channel_config_t;
+
+typedef struct sc_qq_channel_config {
+    char *app_id;
+    char *bot_token;
+    char *channel_id;
+    bool sandbox;
+} sc_qq_channel_config_t;
+
 typedef struct sc_channels_config {
     bool cli;
     char *default_channel;
@@ -286,6 +322,12 @@ typedef struct sc_channels_config {
     sc_matrix_channel_config_t matrix;
     sc_irc_channel_config_t irc;
     sc_nostr_channel_config_t nostr;
+    sc_lark_channel_config_t lark;
+    sc_dingtalk_channel_config_t dingtalk;
+    sc_teams_channel_config_t teams;
+    sc_twilio_channel_config_t twilio;
+    sc_onebot_channel_config_t onebot;
+    sc_qq_channel_config_t qq;
 } sc_channels_config_t;
 
 typedef struct sc_memory_config {

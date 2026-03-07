@@ -20,7 +20,7 @@ export class ScErrorBoundary extends LitElement {
       justify-content: center;
       text-align: center;
       padding: var(--sc-space-2xl) var(--sc-space-xl);
-      min-height: 200px;
+      min-height: 12.5rem;
     }
 
     .icon {
@@ -45,7 +45,7 @@ export class ScErrorBoundary extends LitElement {
     .description {
       font-size: var(--sc-text-sm);
       color: var(--sc-text-muted);
-      max-width: 320px;
+      max-width: 20rem;
       line-height: var(--sc-leading-relaxed);
       margin: 0 0 var(--sc-space-lg);
     }

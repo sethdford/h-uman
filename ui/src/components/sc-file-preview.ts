@@ -37,7 +37,7 @@ export class ScFilePreview extends LitElement {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 80px;
+      min-height: 5rem;
       padding: var(--sc-space-sm);
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
@@ -56,18 +56,18 @@ export class ScFilePreview extends LitElement {
 
     .card-image {
       width: 100%;
-      height: 80px;
+      height: 5rem;
       object-fit: cover;
       border-radius: var(--sc-radius-sm);
-      box-shadow: inset 0 1px 3px color-mix(in srgb, var(--sc-text) 15%, transparent);
+      box-shadow: inset 0 1px 0.1875rem color-mix(in srgb, var(--sc-text) 15%, transparent);
     }
 
     .card-icon {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 40px;
-      height: 40px;
+      width: 2.5rem;
+      height: 2.5rem;
       color: var(--sc-text-muted);
     }
 

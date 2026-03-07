@@ -54,8 +54,10 @@ static sc_error_t memory_recall_execute(void *ctx, sc_allocator_t *alloc,
     size_t limit = (size_t)limit_val;
     sc_memory_entry_t *entries = NULL;
     size_t count = 0;
+    const char *sid = c->memory->current_session_id;
+    size_t sid_len = c->memory->current_session_id_len;
     sc_error_t err = c->memory->vtable->recall(c->memory->ctx, alloc, query, strlen(query), limit,
-                                               NULL, 0, &entries, &count);
+                                               sid, sid_len, &entries, &count);
     if (err != SC_OK) {
         *out = sc_tool_result_fail("recall failed", 13);
         return SC_OK;

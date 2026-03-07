@@ -19,4 +19,11 @@ sc_error_t sc_whatsapp_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
 
 void sc_whatsapp_destroy(sc_channel_t *ch);
 
+#if SC_IS_TEST
+sc_error_t sc_whatsapp_test_inject_mock(sc_channel_t *ch, const char *session_key,
+                                        size_t session_key_len, const char *content,
+                                        size_t content_len);
+const char *sc_whatsapp_test_get_last_message(sc_channel_t *ch, size_t *out_len);
+#endif
+
 #endif /* SC_CHANNELS_WHATSAPP_H */

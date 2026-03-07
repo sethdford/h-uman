@@ -28,6 +28,15 @@ typedef struct sc_teams_ctx {
     size_t queue_head;
     size_t queue_tail;
     size_t queue_count;
+#if SC_IS_TEST
+    char last_message[4096];
+    size_t last_message_len;
+    struct {
+        char session_key[128];
+        char content[4096];
+    } mock_msgs[8];
+    size_t mock_count;
+#endif
 } sc_teams_ctx_t;
 
 static sc_error_t teams_start(void *ctx) {
@@ -68,12 +77,14 @@ static sc_error_t teams_send(void *ctx, const char *target, size_t target_len, c
     sc_teams_ctx_t *c = (sc_teams_ctx_t *)ctx;
 
 #if SC_IS_TEST
-    if (!c || !message)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (!c->webhook_url || c->webhook_url_len == 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
-    teams_queue_push(c, "test-sender", 11, message, message_len);
-    return SC_OK;
+    {
+        size_t len = message_len > 4095 ? 4095 : message_len;
+        if (message && len > 0)
+            memcpy(c->last_message, message, len);
+        c->last_message[len] = '\0';
+        c->last_message_len = len;
+        return SC_OK;
+    }
 #else
     if (!c || !c->alloc)
         return SC_ERR_INVALID_ARGUMENT;
@@ -172,6 +183,18 @@ sc_error_t sc_teams_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_lo
     if (!c || !msgs || !out_count)
         return SC_ERR_INVALID_ARGUMENT;
     *out_count = 0;
+#if SC_IS_TEST
+    {
+        size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
+        for (size_t i = 0; i < n; i++) {
+            memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
+            memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
+        }
+        *out_count = n;
+        c->mock_count = 0;
+        return SC_OK;
+    }
+#endif
     size_t cnt = 0;
     while (c->queue_count > 0 && cnt < max_msgs) {
         sc_teams_queued_msg_t *slot = &c->queue[c->queue_head];
@@ -227,3 +250,33 @@ void sc_teams_destroy(sc_channel_t *ch) {
         ch->vtable = NULL;
     }
 }
+
+#if SC_IS_TEST
+sc_error_t sc_teams_test_inject_mock(sc_channel_t *ch, const char *session_key,
+                                     size_t session_key_len, const char *content,
+                                     size_t content_len) {
+    if (!ch || !ch->ctx)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_teams_ctx_t *c = (sc_teams_ctx_t *)ch->ctx;
+    if (c->mock_count >= 8)
+        return SC_ERR_OUT_OF_MEMORY;
+    size_t i = c->mock_count++;
+    size_t sk = session_key_len > 127 ? 127 : session_key_len;
+    size_t ct = content_len > 4095 ? 4095 : content_len;
+    if (session_key && sk > 0)
+        memcpy(c->mock_msgs[i].session_key, session_key, sk);
+    c->mock_msgs[i].session_key[sk] = '\0';
+    if (content && ct > 0)
+        memcpy(c->mock_msgs[i].content, content, ct);
+    c->mock_msgs[i].content[ct] = '\0';
+    return SC_OK;
+}
+const char *sc_teams_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    sc_teams_ctx_t *c = (sc_teams_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = c->last_message_len;
+    return c->last_message;
+}
+#endif

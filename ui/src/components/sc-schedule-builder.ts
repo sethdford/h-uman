@@ -173,7 +173,7 @@ export class ScScheduleBuilder extends LitElement {
 
     .preset-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
       gap: var(--sc-space-sm);
     }
 
@@ -281,7 +281,7 @@ export class ScScheduleBuilder extends LitElement {
     .custom-input:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+      box-shadow: 0 0 0 0.1875rem var(--sc-accent-subtle);
     }
 
     .custom-input:focus-visible {
@@ -320,7 +320,7 @@ export class ScScheduleBuilder extends LitElement {
     .nl-input:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+      box-shadow: 0 0 0 0.1875rem var(--sc-accent-subtle);
     }
 
     .nl-hint {
@@ -367,8 +367,8 @@ export class ScScheduleBuilder extends LitElement {
     }
 
     .mode-link svg {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
     }
 
     .footer {

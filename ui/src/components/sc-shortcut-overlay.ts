@@ -78,7 +78,7 @@ export class ScShortcutOverlay extends LitElement {
           transparent
         );
       border-radius: var(--sc-radius-xl);
-      max-width: 480px;
+      max-width: 30rem;
       width: 100%;
       padding: var(--sc-space-xl);
       box-sizing: border-box;

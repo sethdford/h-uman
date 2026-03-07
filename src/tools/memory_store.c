@@ -56,8 +56,10 @@ static sc_error_t memory_store_execute(void *ctx, sc_allocator_t *alloc,
         return SC_OK;
     }
     sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CUSTOM};
+    const char *sid = c->memory->current_session_id;
+    size_t sid_len = c->memory->current_session_id_len;
     sc_error_t err = c->memory->vtable->store(c->memory->ctx, key, strlen(key), content,
-                                              strlen(content), &cat, NULL, 0);
+                                              strlen(content), &cat, sid, sid_len);
     if (err != SC_OK) {
         *out = sc_tool_result_fail("store failed", 12);
         return SC_OK;

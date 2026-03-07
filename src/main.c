@@ -486,32 +486,6 @@ static sc_error_t cmd_service(sc_allocator_t *alloc, int argc, char **argv) {
     return SC_ERR_INVALID_ARGUMENT;
 }
 
-/* Memory from config — delegates to shared factory in src/memory/factory.c */
-
-static sc_error_t plugin_register_tool(void *ctx, const char *name, void *tool_vtable) {
-    sc_plugin_registry_t *reg = (sc_plugin_registry_t *)ctx;
-    if (!reg || !name)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_plugin_info_t info = {.name = name, .api_version = SC_PLUGIN_API_VERSION};
-    sc_tool_t tool;
-    memset(&tool, 0, sizeof(tool));
-    tool.ctx = tool_vtable;
-    tool.vtable = (const sc_tool_vtable_t *)tool_vtable;
-    return sc_plugin_register(reg, &info, &tool, 1);
-}
-static sc_error_t plugin_register_provider_stub(void *ctx, const char *name,
-                                                void *provider_vtable) {
-    (void)ctx;
-    (void)name;
-    (void)provider_vtable;
-    return SC_OK;
-}
-static sc_error_t plugin_register_channel_stub(void *ctx, const sc_channel_t *channel) {
-    (void)ctx;
-    (void)channel;
-    return SC_OK;
-}
-
 /* Gateway thread context for --with-gateway mode */
 typedef struct svc_gw_thread_ctx {
     sc_allocator_t *alloc;
@@ -999,42 +973,41 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
             with_agent = true;
     }
 
-    sc_config_t cfg;
-    sc_error_t err = sc_config_load(alloc, &cfg);
+    sc_app_ctx_t app;
+    sc_error_t err = sc_app_bootstrap(&app, alloc, NULL, with_agent, false);
     if (err != SC_OK) {
-        fprintf(stderr, "[%s] Config error: %s\n", SC_CODENAME, sc_error_string(err));
+        fprintf(stderr, "[%s] Bootstrap failed: %s\n", SC_CODENAME, sc_error_string(err));
         return err;
     }
 
-    /* ── Load plugins ─────────────────────────────────────────────────── */
-    sc_plugin_registry_t *gw_plugin_reg = sc_plugin_registry_create(alloc, 16);
-    sc_plugin_host_t gw_plugin_host = {
-        .alloc = alloc,
-        .register_tool = plugin_register_tool,
-        .register_provider = plugin_register_provider_stub,
-        .register_channel = plugin_register_channel_stub,
-        .host_ctx = gw_plugin_reg,
-    };
-    for (size_t i = 0; i < cfg.plugins.plugin_paths_len; i++) {
-        if (cfg.plugins.plugin_paths[i]) {
-            sc_plugin_info_t info = {0};
-            sc_plugin_handle_t *handle = NULL;
-            sc_error_t pl_err =
-                sc_plugin_load(alloc, cfg.plugins.plugin_paths[i], &gw_plugin_host, &info, &handle);
-            if (pl_err != SC_OK) {
-                fprintf(stderr, "[%s] warning: failed to load plugin: %s\n", SC_CODENAME,
-                        cfg.plugins.plugin_paths[i]);
-            }
-        }
-    }
+    const char *ws = app.cfg->workspace_dir ? app.cfg->workspace_dir : ".";
 
-    /* ── Build all backend subsystems ──────────────────────────────────── */
+    /* ── Gateway-specific subsystems (not in bootstrap) ──────────────────── */
     sc_session_manager_t sessions;
     sc_session_manager_init(&sessions, alloc);
 
+    sc_bus_t bus;
+    sc_bus_init(&bus);
+
+    sc_cost_tracker_t costs;
+    sc_cost_tracker_init(&costs, alloc, ws, true,
+                         app.cfg->cost.daily_limit_usd > 0 ? app.cfg->cost.daily_limit_usd : 100.0,
+                         app.cfg->cost.monthly_limit_usd > 0 ? app.cfg->cost.monthly_limit_usd
+                                                             : 1000.0,
+                         app.cfg->cost.warn_at_percent > 0 ? app.cfg->cost.warn_at_percent : 80);
+    sc_cost_load_history(&costs);
+
+#ifdef SC_HAS_SKILLS
+    sc_skillforge_t skills;
+    memset(&skills, 0, sizeof(skills));
+    err = sc_skillforge_create(alloc, &skills);
+    if (err != SC_OK)
+        fprintf(stderr, "[%s] Skillforge init failed: %s\n", SC_CODENAME, sc_error_string(err));
+#endif
+
+    /* Load crontab into bootstrap's cron (bootstrap creates cron but does not load file) */
 #ifdef SC_HAS_CRON
-    sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
-    if (cron) {
+    if (app.cron) {
         char *cron_path = NULL;
         size_t cron_path_len = 0;
         if (sc_crontab_get_path(alloc, &cron_path, &cron_path_len) == SC_OK) {
@@ -1044,8 +1017,9 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
                 for (size_t ci = 0; ci < entry_count; ci++) {
                     if (entries[ci].enabled && entries[ci].schedule && entries[ci].command) {
                         uint64_t unused_id = 0;
-                        sc_cron_add_job(cron, alloc, entries[ci].schedule, entries[ci].command,
-                                        entries[ci].id, &unused_id);
+                        sc_cron_add_job((sc_cron_scheduler_t *)app.cron, alloc,
+                                        entries[ci].schedule, entries[ci].command, entries[ci].id,
+                                        &unused_id);
                     }
                 }
                 sc_crontab_entries_free(alloc, entries, entry_count);
@@ -1053,154 +1027,19 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
             alloc->free(alloc->ctx, cron_path, cron_path_len + 1);
         }
     }
-#else
-    sc_cron_scheduler_t *cron = NULL;
 #endif
 
-#ifdef SC_HAS_SKILLS
-    sc_skillforge_t skills;
-    memset(&skills, 0, sizeof(skills));
-    err = sc_skillforge_create(alloc, &skills);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Skillforge init failed: %s\n", SC_CODENAME, sc_error_string(err));
-    }
-#endif
-
-    const char *ws = cfg.workspace_dir ? cfg.workspace_dir : ".";
-    sc_cost_tracker_t costs;
-    sc_cost_tracker_init(&costs, alloc, ws, true,
-                         cfg.cost.daily_limit_usd > 0 ? cfg.cost.daily_limit_usd : 100.0,
-                         cfg.cost.monthly_limit_usd > 0 ? cfg.cost.monthly_limit_usd : 1000.0,
-                         cfg.cost.warn_at_percent > 0 ? cfg.cost.warn_at_percent : 80);
-    sc_cost_load_history(&costs);
-
-    sc_bus_t bus;
-    sc_bus_init(&bus);
-
-    /* ── Tools ─────────────────────────────────────────────────────────── */
-    sc_security_policy_t policy = {0};
-    policy.autonomy = (sc_autonomy_level_t)cfg.security.autonomy_level;
-    policy.workspace_dir = ws;
-    policy.workspace_only = true;
-    policy.allow_shell = (policy.autonomy != SC_AUTONOMY_READ_ONLY);
-    policy.block_high_risk_commands = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
-    policy.require_approval_for_medium_risk = false;
-    policy.max_actions_per_hour = 200;
-    policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
-
-    sc_sandbox_alloc_t gw_sb_alloc = {
-        .ctx = alloc->ctx,
-        .alloc = alloc->alloc,
-        .free = alloc->free,
-    };
-    sc_sandbox_storage_t *gw_sb_storage = NULL;
-    sc_sandbox_t gw_sandbox = {0};
-    sc_net_proxy_t gw_net_proxy = {0};
-
-    if (cfg.security.sandbox_config.enabled ||
-        cfg.security.sandbox_config.backend != SC_SANDBOX_NONE) {
-        gw_sb_storage = sc_sandbox_storage_create(&gw_sb_alloc);
-        if (gw_sb_storage) {
-            gw_sandbox = sc_sandbox_create(cfg.security.sandbox_config.backend, ws, gw_sb_storage,
-                                           &gw_sb_alloc);
-            if (gw_sandbox.vtable) {
-                policy.sandbox = &gw_sandbox;
-#if defined(__linux__)
-                if (strcmp(sc_sandbox_name(&gw_sandbox), "firejail") == 0 &&
-                    cfg.security.sandbox_config.firejail_args_len > 0) {
-                    sc_firejail_sandbox_set_extra_args(
-                        (sc_firejail_ctx_t *)gw_sandbox.ctx,
-                        (const char *const *)cfg.security.sandbox_config.firejail_args,
-                        cfg.security.sandbox_config.firejail_args_len);
-                }
-#endif
-            }
-        }
-    }
-
-    if (cfg.security.sandbox_config.net_proxy.enabled) {
-        gw_net_proxy.enabled = true;
-        gw_net_proxy.deny_all = cfg.security.sandbox_config.net_proxy.deny_all;
-        gw_net_proxy.proxy_addr = cfg.security.sandbox_config.net_proxy.proxy_addr;
-        gw_net_proxy.allowed_domains_count = 0;
-        for (size_t i = 0; i < cfg.security.sandbox_config.net_proxy.allowed_domains_len &&
-                           i < SC_NET_PROXY_MAX_DOMAINS;
-             i++) {
-            gw_net_proxy.allowed_domains[gw_net_proxy.allowed_domains_count++] =
-                cfg.security.sandbox_config.net_proxy.allowed_domains[i];
-        }
-        policy.net_proxy = &gw_net_proxy;
-    }
-
-    /* ── Agent state (declared early so tools get memory pointer) ─────── */
-    sc_provider_t provider = {0};
-    sc_agent_t agent = {0};
-    sc_memory_t memory = {0};
-    sc_embedder_t gw_embedder = {0};
-    sc_vector_store_t gw_vector_store = {0};
-    sc_retrieval_engine_t gw_retrieval_engine = {0};
+    sc_thread_binding_t *gw_thread_binding =
+        with_agent ? sc_thread_binding_create(alloc, 64) : NULL;
     gw_agent_bridge_t agent_bridge = {0};
     sc_awareness_t gw_awareness = {0};
-    bool agent_active = false;
 
-    if (with_agent)
-        memory = sc_memory_create_from_config(alloc, &cfg, ws);
-
-    sc_agent_pool_t *gw_agent_pool = sc_agent_pool_create(alloc, cfg.agent.pool_max_concurrent);
-    sc_thread_binding_t *gw_thread_binding = sc_thread_binding_create(alloc, 64);
-
-    sc_tool_t *tools = NULL;
-    size_t tools_count = 0;
-    sc_mailbox_t *gw_mailbox = sc_mailbox_create(alloc, 64);
-    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
-                                  memory.vtable ? &memory : NULL, cron, gw_agent_pool, gw_mailbox,
-                                  &tools, &tools_count);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
-        if (gw_plugin_reg)
-            sc_plugin_registry_destroy(gw_plugin_reg);
-        if (memory.vtable && memory.vtable->deinit)
-            memory.vtable->deinit(memory.ctx);
-        sc_cost_tracker_deinit(&costs);
-        sc_session_manager_deinit(&sessions);
-        if (cron)
-            sc_cron_destroy(cron, alloc);
-#ifdef SC_HAS_SKILLS
-        sc_skillforge_destroy(&skills);
-#endif
-        if (policy.tracker)
-            sc_rate_tracker_destroy(policy.tracker);
-        if (gw_sb_storage)
-            sc_sandbox_storage_destroy(gw_sb_storage, &gw_sb_alloc);
-        sc_config_deinit(&cfg);
-        return err;
-    }
-
-    /* Merge plugin-registered tools */
-    if (gw_plugin_reg) {
-        sc_tool_t *plugin_tools = NULL;
-        size_t plugin_tools_count = 0;
-        if (sc_plugin_get_tools(gw_plugin_reg, &plugin_tools, &plugin_tools_count) == SC_OK &&
-            plugin_tools_count > 0) {
-            sc_tool_t *merged = (sc_tool_t *)alloc->alloc(
-                alloc->ctx, (tools_count + plugin_tools_count) * sizeof(sc_tool_t));
-            if (merged) {
-                memcpy(merged, tools, tools_count * sizeof(sc_tool_t));
-                memcpy(merged + tools_count, plugin_tools, plugin_tools_count * sizeof(sc_tool_t));
-                alloc->free(alloc->ctx, tools, tools_count * sizeof(sc_tool_t));
-                tools = merged;
-                tools_count += plugin_tools_count;
-            }
-            alloc->free(alloc->ctx, plugin_tools, plugin_tools_count * sizeof(sc_tool_t));
-        }
-    }
-
-    /* ── App context ───────────────────────────────────────────────────── */
-    sc_app_context_t app_ctx = {
-        .config = &cfg,
+    /* ── Gateway app context (sc_app_context_t for RPC handlers) ───────── */
+    sc_app_context_t gw_app_ctx = {
+        .config = app.cfg,
         .alloc = alloc,
         .sessions = &sessions,
-        .cron = cron,
+        .cron = app.cron,
 #ifdef SC_HAS_SKILLS
         .skills = &skills,
 #else
@@ -1208,149 +1047,50 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
 #endif
         .costs = &costs,
         .bus = &bus,
-        .tools = tools,
-        .tools_count = tools_count,
+        .tools = app.tools,
+        .tools_count = app.tools_count,
         .agent = NULL,
     };
 
-    /* ── Gateway config ────────────────────────────────────────────────── */
     sc_gateway_config_t gw_config;
-    sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
-    gw_config.app_ctx = &app_ctx;
+    sc_gateway_config_from_cfg(&app.cfg->gateway, &gw_config);
+    gw_config.app_ctx = &gw_app_ctx;
 
-    /* ── Optional agent integration (provider + retrieval) ─────────────── */
-    if (with_agent) {
-        const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
-        size_t prov_name_len = strlen(prov_name);
-
-        err = sc_provider_create_from_config(alloc, &cfg, prov_name, prov_name_len, &provider);
-        if (err == SC_ERR_NOT_SUPPORTED) {
-            const char *api_key = sc_config_default_provider_key(&cfg);
-            size_t api_key_len = api_key ? strlen(api_key) : 0;
-            const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
-            size_t base_url_len = base_url ? strlen(base_url) : 0;
-            err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len,
-                                     base_url, base_url_len, &provider);
-        }
-        if (err != SC_OK) {
-            fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", SC_CODENAME, prov_name,
-                    sc_error_string(err));
-            goto cleanup;
-        }
-
-        const char *model = cfg.default_model ? cfg.default_model : "";
-        double temp = cfg.temperature > 0.0 ? cfg.temperature : 0.7;
-        uint32_t max_iters = cfg.agent.max_tool_iterations > 0 ? cfg.agent.max_tool_iterations : 25;
-        uint32_t max_hist =
-            cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
-
-        gw_embedder = sc_embedder_local_create(alloc);
-        gw_vector_store = sc_vector_store_mem_create(alloc);
-        gw_retrieval_engine =
-            sc_retrieval_create_with_vector(alloc, &memory, &gw_embedder, &gw_vector_store);
-
-        sc_agent_context_config_t gw_ctx_cfg = {
-            .token_limit = cfg.agent.token_limit,
-            .pressure_warn = cfg.agent.context_pressure_warn,
-            .pressure_compact = cfg.agent.context_pressure_compact,
-            .compact_target = cfg.agent.context_compact_target,
-        };
-        err = sc_agent_from_config(
-            &agent, alloc, provider, tools, tools_count, memory.vtable ? &memory : NULL, NULL, NULL,
-            &policy, model, strlen(model), prov_name, prov_name_len, temp, ws, strlen(ws),
-            max_iters, max_hist, cfg.memory.auto_save, 2, NULL, 0, cfg.agent.persona,
-            cfg.agent.persona ? strlen(cfg.agent.persona) : 0, &gw_ctx_cfg);
-        if (err != SC_OK) {
-            fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
-            if (gw_retrieval_engine.vtable && gw_retrieval_engine.vtable->deinit)
-                gw_retrieval_engine.vtable->deinit(gw_retrieval_engine.ctx, alloc);
-            if (gw_vector_store.vtable && gw_vector_store.vtable->deinit)
-                gw_vector_store.vtable->deinit(gw_vector_store.ctx, alloc);
-            if (gw_embedder.vtable && gw_embedder.vtable->deinit)
-                gw_embedder.vtable->deinit(gw_embedder.ctx, alloc);
-            goto cleanup;
-        }
-        sc_agent_set_retrieval_engine(&agent, &gw_retrieval_engine);
-        agent.chain_of_thought = true;
-        agent_active = true;
-
-        /* Proactive awareness: subscribe to bus events */
+    if (with_agent && app.agent_ok && app.agent) {
+        gw_app_ctx.agent = app.agent;
         (void)sc_awareness_init(&gw_awareness, &bus);
         if (gw_awareness.bus)
-            sc_agent_set_awareness(&agent, (struct sc_awareness *)&gw_awareness);
-
-        if (cfg.security.audit.enabled) {
-            sc_audit_config_t acfg = SC_AUDIT_CONFIG_DEFAULT;
-            acfg.enabled = true;
-            acfg.log_path = cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
-            acfg.max_size_mb =
-                cfg.security.audit.max_size_mb > 0 ? cfg.security.audit.max_size_mb : 10;
-            agent.audit_logger = sc_audit_logger_create(alloc, &acfg, ws);
-        }
-
-        agent.agent_pool = gw_agent_pool;
-        agent.scheduler = (struct sc_cron_scheduler *)cron;
-        sc_agent_set_mailbox(&agent, gw_mailbox);
-        agent.policy_engine = NULL;
-        if (cfg.policy.enabled)
-            agent.policy_engine = sc_policy_engine_create(alloc);
-        agent_bridge.agent = &agent;
+            sc_agent_set_awareness(app.agent, (struct sc_awareness *)&gw_awareness);
+        agent_bridge.agent = app.agent;
         agent_bridge.bus = &bus;
         agent_bridge.thread_binding = gw_thread_binding;
-        app_ctx.agent = &agent;
         sc_bus_subscribe(&bus, gw_agent_on_message, &agent_bridge, SC_BUS_MESSAGE_RECEIVED);
-
-        fprintf(stderr, "[%s] gateway+agent mode (provider=%s tools=%zu)\n", SC_CODENAME, prov_name,
-                tools_count);
+        fprintf(stderr, "[%s] gateway+agent mode (provider=%s tools=%zu)\n", SC_CODENAME,
+                app.cfg->default_provider ? app.cfg->default_provider : "openai", app.tools_count);
     } else {
         fprintf(stderr, "[%s] gateway-only mode (use --with-agent for full agent)\n", SC_CODENAME);
     }
 
     /* ── Run gateway (blocks) ──────────────────────────────────────────── */
     err = sc_gateway_run(alloc, gw_config.host, gw_config.port, &gw_config);
-    if (err != SC_OK) {
+    if (err != SC_OK)
         fprintf(stderr, "[%s] Gateway error: %s\n", SC_CODENAME, sc_error_string(err));
-    }
 
-cleanup:
-    if (agent_active) {
+    /* ── Cleanup: gateway-specific first, then bootstrap ───────────────── */
+    if (with_agent && app.agent_ok && app.agent) {
         sc_awareness_deinit(&gw_awareness);
         sc_bus_unsubscribe(&bus, gw_agent_on_message, &agent_bridge);
-        sc_agent_deinit(&agent);
-        if (gw_retrieval_engine.vtable && gw_retrieval_engine.vtable->deinit)
-            gw_retrieval_engine.vtable->deinit(gw_retrieval_engine.ctx, alloc);
-        if (gw_vector_store.vtable && gw_vector_store.vtable->deinit)
-            gw_vector_store.vtable->deinit(gw_vector_store.ctx, alloc);
-        if (gw_embedder.vtable && gw_embedder.vtable->deinit)
-            gw_embedder.vtable->deinit(gw_embedder.ctx, alloc);
     }
-    if (memory.vtable && memory.vtable->deinit)
-        memory.vtable->deinit(memory.ctx);
-    sc_tools_destroy_default(alloc, tools, tools_count);
-    if (gw_plugin_reg)
-        sc_plugin_registry_destroy(gw_plugin_reg);
-    if (agent_active && agent.policy_engine)
-        sc_policy_engine_destroy(agent.policy_engine);
     if (gw_thread_binding)
         sc_thread_binding_destroy(gw_thread_binding);
-    if (gw_mailbox)
-        sc_mailbox_destroy(gw_mailbox);
-    if (gw_agent_pool)
-        sc_agent_pool_destroy(gw_agent_pool);
-    if (policy.tracker)
-        sc_rate_tracker_destroy(policy.tracker);
-    if (gw_sb_storage)
-        sc_sandbox_storage_destroy(gw_sb_storage, &gw_sb_alloc);
     sc_bus_deinit(&bus);
     sc_cost_tracker_deinit(&costs);
     sc_session_manager_deinit(&sessions);
-    if (cron)
-        sc_cron_destroy(cron, alloc);
 #ifdef SC_HAS_SKILLS
     sc_skillforge_destroy(&skills);
 #endif
+    sc_app_teardown(&app);
     sc_plugin_unload_all();
-    sc_config_deinit(&cfg);
     return err;
 }
 

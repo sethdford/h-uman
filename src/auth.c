@@ -112,7 +112,8 @@ sc_error_t sc_auth_save_credential(sc_allocator_t *alloc, const char *provider,
     char *enc_access = NULL;
     char *enc_refresh = NULL;
     if (store && token->access_token) {
-        sc_error_t enc_err = sc_secret_store_encrypt(store, alloc, token->access_token, &enc_access);
+        sc_error_t enc_err =
+            sc_secret_store_encrypt(store, alloc, token->access_token, &enc_access);
         if (enc_err != SC_OK) {
             enc_access = NULL; /* fall back to plaintext */
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
@@ -121,7 +122,8 @@ sc_error_t sc_auth_save_credential(sc_allocator_t *alloc, const char *provider,
         }
     }
     if (store && token->refresh_token) {
-        sc_error_t enc_err = sc_secret_store_encrypt(store, alloc, token->refresh_token, &enc_refresh);
+        sc_error_t enc_err =
+            sc_secret_store_encrypt(store, alloc, token->refresh_token, &enc_refresh);
         if (enc_err != SC_OK) {
             enc_refresh = NULL; /* fall back to plaintext */
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
@@ -226,7 +228,9 @@ sc_error_t sc_auth_load_credential(sc_allocator_t *alloc, const char *provider,
             alloc->free(alloc->ctx, lpath, strlen(lpath) + 1);
             store = sc_secret_store_create(alloc, cdir, false);
             if (store) {
-                (void)sc_secret_store_decrypt(store, alloc, at, &decrypted_at);
+                sc_error_t dec_err = sc_secret_store_decrypt(store, alloc, at, &decrypted_at);
+                if (dec_err != SC_OK)
+                    decrypted_at = NULL; /* fall back to raw value */
             }
         }
     }

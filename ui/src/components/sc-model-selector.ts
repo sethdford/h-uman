@@ -44,8 +44,8 @@ export class ScModelSelector extends LitElement {
     }
 
     .trigger svg {
-      width: 12px;
-      height: 12px;
+      width: 0.75rem;
+      height: 0.75rem;
     }
 
     .dropdown {
@@ -57,9 +57,9 @@ export class ScModelSelector extends LitElement {
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
       box-shadow: var(--sc-shadow-lg);
-      max-height: 240px;
+      max-height: 15rem;
       overflow-y: auto;
-      min-width: 180px;
+      min-width: 11.25rem;
       z-index: 20;
       animation: sc-dropdown-enter var(--sc-duration-fast) var(--sc-ease-out);
     }
@@ -67,7 +67,7 @@ export class ScModelSelector extends LitElement {
     @keyframes sc-dropdown-enter {
       from {
         opacity: 0;
-        transform: translateY(4px);
+        transform: translateY(var(--sc-space-xs));
       }
       to {
         opacity: 1;
@@ -101,8 +101,8 @@ export class ScModelSelector extends LitElement {
     }
 
     .option .check {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
       display: flex;
     }
 
@@ -112,7 +112,7 @@ export class ScModelSelector extends LitElement {
     }
 
     .provider {
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-2xs, 0.625rem);
       color: var(--sc-text-faint);
       margin-left: var(--sc-space-xs);
     }

@@ -1105,6 +1105,11 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     gw->rate_limiter =
         sc_rate_limiter_create(alloc, cfg.rate_limit_requests > 0 ? cfg.rate_limit_requests : 60,
                                cfg.rate_limit_window > 0 ? cfg.rate_limit_window : 60);
+    gw->http_pool = sc_thread_pool_create(4);
+    if (!gw->http_pool) {
+        err = SC_ERR_OUT_OF_MEMORY;
+        goto cleanup;
+    }
     sc_health_mark_ok("gateway");
 
     body_buf = (char *)alloc->alloc(alloc->ctx, cfg.max_body_size + 1);

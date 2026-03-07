@@ -7,6 +7,7 @@ export class ScCheckbox extends LitElement {
   @property({ type: Boolean }) indeterminate = false;
   @property({ type: Boolean }) disabled = false;
   @property({ type: String }) label = "";
+  @property({ type: String, attribute: "aria-label" }) ariaLabel = "";
   @property({ type: String }) error = "";
 
   @state() private _checkboxId = `sc-checkbox-${Math.random().toString(36).slice(2, 11)}`;
@@ -140,6 +141,7 @@ export class ScCheckbox extends LitElement {
           aria-disabled=${this.disabled}
           aria-invalid=${this.error ? "true" : "false"}
           aria-describedby=${this.error ? `${this._checkboxId}-error` : undefined}
+          aria-label=${this.label ? undefined : this.ariaLabel || undefined}
           tabindex=${this.disabled ? -1 : 0}
           @click=${this._onClick}
           @keydown=${this._onKeyDown}

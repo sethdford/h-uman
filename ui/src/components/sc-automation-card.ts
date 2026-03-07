@@ -92,7 +92,7 @@ export class ScAutomationCard extends LitElement {
 
     .card-wrapper {
       position: relative;
-      border-left: 3px solid transparent;
+      border-left: 0.1875rem solid transparent;
       border-radius: var(--sc-radius-xl);
       transition:
         opacity var(--sc-duration-fast) var(--sc-ease-out),
@@ -132,8 +132,8 @@ export class ScAutomationCard extends LitElement {
     .toggle {
       position: relative;
       display: inline-block;
-      width: 36px;
-      height: 20px;
+      width: 2.25rem;
+      height: 1.25rem;
       cursor: pointer;
     }
 
@@ -154,8 +154,8 @@ export class ScAutomationCard extends LitElement {
     .toggle-slider::before {
       content: "";
       position: absolute;
-      height: 16px;
-      width: 16px;
+      height: 1rem;
+      width: 1rem;
       left: 2px; /* sc-lint-ok: sub-token toggle position */
       bottom: 2px; /* sc-lint-ok: sub-token toggle position */
       background: var(--sc-bg);
@@ -171,7 +171,7 @@ export class ScAutomationCard extends LitElement {
     }
 
     .toggle input:checked + .toggle-slider::before {
-      transform: translateX(16px);
+      transform: translateX(1rem);
     }
 
     .toggle input:focus-visible + .toggle-slider {
@@ -349,8 +349,8 @@ export class ScAutomationCard extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 32px;
-      height: 32px;
+      width: 2rem;
+      height: 2rem;
       padding: 0;
       background: transparent;
       border: none;

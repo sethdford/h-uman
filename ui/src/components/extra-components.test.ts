@@ -24,6 +24,7 @@ import "./sc-message-actions.js";
 import "./sc-chat-sessions-panel.js";
 import "./sc-file-preview.js";
 import "./sc-stat-card.js";
+import "./sc-stats-row.js";
 import "./sc-section-header.js";
 import "./sc-metric-row.js";
 import "./sc-timeline.js";
@@ -1644,6 +1645,30 @@ describe("sc-stat-card", () => {
     await el.updateComplete;
     const shadow = el.shadowRoot;
     expect(shadow?.textContent).toContain("Tests");
+    el.remove();
+  });
+});
+
+describe("sc-stats-row", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-stats-row")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-stats-row");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render slot content", async () => {
+    const el = document.createElement("sc-stats-row");
+    const card = document.createElement("sc-stat-card");
+    (card as HTMLElement & { value: number; label: string }).value = 42;
+    (card as HTMLElement & { value: number; label: string }).label = "Tests";
+    el.appendChild(card);
+    document.body.appendChild(el);
+    await (el as HTMLElement & { updateComplete: Promise<boolean> }).updateComplete;
+    const slot = el.shadowRoot?.querySelector("slot");
+    expect(slot).toBeDefined();
     el.remove();
   });
 });

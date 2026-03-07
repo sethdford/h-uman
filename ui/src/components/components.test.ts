@@ -127,6 +127,29 @@ describe("sc-avatar", () => {
   });
 });
 
+describe("sc-status-dot", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-status-dot.js");
+    expect(customElements.get("sc-status-dot")).toBeDefined();
+  });
+
+  it("should default to disconnected status and sm size", async () => {
+    const { ScStatusDot } = await import("./sc-status-dot.js");
+    const el = new ScStatusDot();
+    expect(el.status).toBe("disconnected");
+    expect(el.size).toBe("sm");
+  });
+
+  it("should reflect status and size properties", async () => {
+    const { ScStatusDot } = await import("./sc-status-dot.js");
+    const el = new ScStatusDot();
+    el.status = "connected";
+    el.size = "md";
+    expect(el.status).toBe("connected");
+    expect(el.size).toBe("md");
+  });
+});
+
 describe("sc-progress", () => {
   it("should be defined as a custom element", async () => {
     await import("./sc-progress.js");

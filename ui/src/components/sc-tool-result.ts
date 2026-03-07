@@ -35,7 +35,7 @@ export class ScToolResult extends LitElement {
     .container {
       background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
-      border-left: 3px solid var(--sc-info);
+      border-left: 0.1875rem solid var(--sc-info);
       border-radius: var(--sc-radius);
       box-shadow: var(--sc-shadow-xs);
       overflow: hidden;
@@ -110,7 +110,7 @@ export class ScToolResult extends LitElement {
       overflow-x: auto;
       white-space: pre-wrap;
       word-break: break-word;
-      max-height: 300px;
+      max-height: 18.75rem;
       overflow-y: auto;
       transition: max-height var(--sc-duration-normal) var(--sc-ease-out);
     }

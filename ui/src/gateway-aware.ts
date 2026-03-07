@@ -63,8 +63,9 @@ export class GatewayAwareLitElement extends LitElement {
   private async _doLoad(): Promise<void> {
     try {
       await this.load();
-    } finally {
       this.lastLoadedAt = Date.now();
+    } catch {
+      /* leave lastLoadedAt unchanged on failure */
     }
   }
 

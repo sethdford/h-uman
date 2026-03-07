@@ -50,7 +50,7 @@ export class ScSlider extends LitElement {
 
     .track-wrap {
       position: relative;
-      height: 20px;
+      height: 1.25rem;
       display: flex;
       align-items: center;
       cursor: pointer;
@@ -63,7 +63,7 @@ export class ScSlider extends LitElement {
 
     .track {
       flex: 1;
-      height: 4px;
+      height: var(--sc-space-xs);
       background: var(--sc-border-subtle);
       border-radius: var(--sc-radius-full);
       position: relative;
@@ -85,8 +85,8 @@ export class ScSlider extends LitElement {
       position: absolute;
       top: 50%;
       left: var(--thumb-percent, 0%);
-      width: 20px;
-      height: 20px;
+      width: 1.25rem;
+      height: 1.25rem;
       margin-left: calc(-1 * var(--sc-space-md));
       margin-top: calc(-1 * var(--sc-space-md));
       background: var(--sc-bg-surface);

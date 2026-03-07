@@ -447,12 +447,14 @@ void sc_vault_destroy(sc_vault_t *vault) {
 }
 
 static void env_key_for_provider(const char *provider, char *buf, size_t buf_size) {
+    if (buf_size == 0)
+        return;
     size_t i = 0;
-    for (; provider[i] && i < buf_size - 10; i++)
+    for (; provider[i] && i + 9 < buf_size; i++)
         buf[i] = (char)(unsigned char)toupper((unsigned char)provider[i]);
     buf[i] = '\0';
-    if (buf_size > 9)
-        strncat(buf, "_API_KEY", buf_size - strlen(buf) - 1);
+    if (i + 9 <= buf_size)
+        snprintf(buf + i, buf_size - i, "_API_KEY");
 }
 
 sc_error_t sc_vault_get_api_key(sc_vault_t *vault, sc_allocator_t *alloc, const char *provider_name,

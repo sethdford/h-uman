@@ -12,8 +12,8 @@ export class ScFloatingMic extends LitElement {
       z-index: 9999;
     }
     .btn {
-      width: 48px;
-      height: 48px;
+      width: 3rem;
+      height: 3rem;
       border-radius: 50%;
       background: var(--sc-accent);
       color: var(--sc-bg);
@@ -42,7 +42,7 @@ export class ScFloatingMic extends LitElement {
         box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc-error) 50%, transparent);
       }
       50% {
-        box-shadow: 0 0 0 12px color-mix(in srgb, var(--sc-error) 0%, transparent);
+        box-shadow: 0 0 0 0.75rem color-mix(in srgb, var(--sc-error) 0%, transparent);
       }
     }
     .btn svg {
@@ -52,15 +52,15 @@ export class ScFloatingMic extends LitElement {
     @media (prefers-reduced-motion: reduce) {
       .btn.listening {
         animation: none;
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--sc-error) 30%, transparent);
+        box-shadow: 0 0 0 var(--sc-space-xs) color-mix(in srgb, var(--sc-error) 30%, transparent);
       }
     }
     .overlay {
       position: absolute;
       bottom: calc(100% + var(--sc-space-sm));
       right: 0;
-      min-width: 200px;
-      max-width: 300px;
+      min-width: 12.5rem;
+      max-width: 18.75rem;
       padding: var(--sc-space-sm) var(--sc-space-md);
       background: var(--sc-bg-elevated);
       border: 1px solid var(--sc-border);
@@ -68,7 +68,7 @@ export class ScFloatingMic extends LitElement {
       font-size: var(--sc-text-sm);
       font-family: var(--sc-font-mono);
       color: var(--sc-text);
-      max-height: 120px;
+      max-height: 7.5rem;
       overflow-y: auto;
     }
   `;

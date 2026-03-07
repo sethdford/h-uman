@@ -101,20 +101,20 @@ export class ScSkeleton extends LitElement {
       padding: var(--sc-space-lg);
     }
     .stat-inner .skel-label {
-      height: 10px;
+      height: 0.625rem;
       width: 60%;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-sm);
     }
     .stat-inner .skel-value {
-      height: 28px;
+      height: 1.75rem;
       width: 40%;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-sm);
     }
     .stat-inner .skel-spark {
-      height: 24px;
-      width: 80px;
+      height: 1.5rem;
+      width: 5rem;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-sm);
       align-self: flex-end;
@@ -133,13 +133,13 @@ export class ScSkeleton extends LitElement {
     }
     .channel-inner .skel-name {
       flex: 1;
-      height: 16px;
+      height: 1rem;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-sm);
     }
     .channel-inner .skel-badge {
-      height: 22px;
-      width: 56px;
+      height: 1.375rem;
+      width: 3.5rem;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-full);
     }
@@ -155,13 +155,13 @@ export class ScSkeleton extends LitElement {
       padding: var(--sc-space-md) var(--sc-space-lg);
     }
     .session-inner .skel-title {
-      height: 14px;
+      height: 0.875rem;
       width: 70%;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-sm);
     }
     .session-inner .skel-meta {
-      height: 10px;
+      height: 0.625rem;
       width: 50%;
       background: var(--sc-bg-overlay);
       border-radius: var(--sc-radius-sm);

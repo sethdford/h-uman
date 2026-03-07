@@ -15,6 +15,7 @@ import "../components/sc-tapback-menu.js";
 import "../components/sc-chat-search.js";
 import "../components/sc-chat-sessions-panel.js";
 import "../components/sc-context-menu.js";
+import "../components/sc-status-dot.js";
 
 @customElement("sc-chat-view")
 export class ScChatView extends GatewayAwareLitElement {
@@ -80,21 +81,6 @@ export class ScChatView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
       line-height: 1;
     }
-    .status-dot {
-      width: var(--sc-space-sm);
-      height: var(--sc-space-sm);
-      border-radius: 50%;
-    }
-    .status-dot.connected {
-      background: var(--sc-success);
-    }
-    .status-dot.connecting {
-      background: var(--sc-warning);
-      animation: sc-pulse var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
-    }
-    .status-dot.disconnected {
-      background: var(--sc-text-muted);
-    }
     .retry-btn {
       margin-top: var(--sc-space-xs);
     }
@@ -116,7 +102,7 @@ export class ScChatView extends GatewayAwareLitElement {
       cursor: pointer;
       display: flex;
       align-items: center;
-      padding: var(--sc-space-2xs, var(--sc-space-xs));
+      padding: var(--sc-space-2xs) var(--sc-space-xs);
     }
     .error-banner button svg {
       width: 1rem;
@@ -144,11 +130,6 @@ export class ScChatView extends GatewayAwareLitElement {
     .sessions-toggle svg {
       width: 1.125rem;
       height: 1.125rem;
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .status-dot.connecting {
-        animation: none !important;
-      }
     }
   `;
 
@@ -215,7 +196,7 @@ export class ScChatView extends GatewayAwareLitElement {
 
   protected override async load(): Promise<void> {
     await this.chat.loadHistory(this.sessionKey);
-    this._loadSessions();
+    await this._loadSessions();
   }
 
   private async _loadSessions(): Promise<void> {
@@ -485,19 +466,24 @@ export class ScChatView extends GatewayAwareLitElement {
             }}
             @sc-toggle-reaction=${(e: CustomEvent<{ index: number; value: string }>) =>
               this.chat.toggleReaction?.(e.detail.index, e.detail.value)}
-            @sc-retry=${(e: CustomEvent<{ content?: string }>) => {
-              if (e.detail?.content) this._handleSend(e.detail.content);
-              else this._retry();
+            @sc-retry=${(e: CustomEvent<{ content?: string; index?: number }>) => {
+              if (e.detail?.content != null) {
+                const idx = e.detail.index ?? -1;
+                const item = idx >= 0 ? this.chat.items[idx] : undefined;
+                if (item?.type === "message" && item.role === "user" && item.status === "failed") {
+                  this.chat.items = [
+                    ...this.chat.items.slice(0, idx),
+                    ...this.chat.items.slice(idx + 1),
+                  ];
+                  this.chat.cacheMessages(this.sessionKey);
+                }
+                this._handleSend(e.detail.content);
+              } else {
+                this._retry();
+              }
             }}
             @sc-regenerate=${(e: CustomEvent<{ content: string; index: number }>) => {
-              const item = this.chat.items[e.detail.index];
-              if (item?.type === "message" && item.role === "assistant" && e.detail.index > 0) {
-                const prevUser = this.chat.items
-                  .slice(0, e.detail.index)
-                  .reverse()
-                  .find((i) => i.type === "message" && i.role === "user");
-                if (prevUser?.type === "message") this._handleSend(prevUser.content);
-              }
+              this._handleRegenerate(e.detail.index);
             }}
             @sc-edit=${(e: CustomEvent<{ content: string; index: number }>) => {
               this._handleEdit(e.detail.content, e.detail.index);
@@ -583,7 +569,7 @@ export class ScChatView extends GatewayAwareLitElement {
           >
             ${icons["sidebar-toggle"]}
           </button>
-          <span class="status-dot ${this.connectionStatus}" aria-hidden="true"></span>
+          <sc-status-dot status=${this.connectionStatus}></sc-status-dot>
           <span>${label}</span>
         </div>
         <span class="status-title"

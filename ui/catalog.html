@@ -51,6 +51,7 @@
       <a href="#sc-toast">sc-toast</a>
       <a href="#sc-tabs">sc-tabs</a>
       <a href="#sc-avatar">sc-avatar</a>
+      <a href="#sc-status-dot">sc-status-dot</a>
       <a href="#sc-progress">sc-progress</a>
       <a href="#sc-input">sc-input</a>
       <a href="#sc-select">sc-select</a>
@@ -89,6 +90,7 @@
       <a href="#sc-shortcut-overlay">sc-shortcut-overlay</a>
       <a href="#sc-context-menu">sc-context-menu</a>
       <a href="#sc-stat-card">sc-stat-card</a>
+      <a href="#sc-stats-row">sc-stats-row</a>
       <a href="#sc-section-header">sc-section-header</a>
       <a href="#sc-metric-row">sc-metric-row</a>
       <a href="#sc-timeline">sc-timeline</a>
@@ -109,6 +111,18 @@
       <a href="#sc-typing-indicator">sc-typing-indicator</a>
       <a href="#sc-delivery-status">sc-delivery-status</a>
       <a href="#sc-link-preview">sc-link-preview</a>
+      <a href="#sc-skill-card">sc-skill-card</a>
+      <a href="#sc-skill-detail">sc-skill-detail</a>
+      <a href="#sc-skill-registry">sc-skill-registry</a>
+      <a href="#sc-overview-stats">sc-overview-stats</a>
+      <a href="#sc-chart">sc-chart</a>
+      <a href="#sc-model-selector">sc-model-selector</a>
+      <a href="#sc-form-group">sc-form-group</a>
+      <a href="#sc-sidebar">sc-sidebar</a>
+      <a href="#sc-command-palette">sc-command-palette</a>
+      <a href="#sc-floating-mic">sc-floating-mic</a>
+      <a href="#sc-activity-timeline">sc-activity-timeline</a>
+      <a href="#sc-sessions-table">sc-sessions-table</a>
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
@@ -564,6 +578,22 @@
           </div>
         </div>
         <div class="code-snippet"><pre><code>&lt;sc-avatar name="Alice Smith" size="md"&gt;&lt;/sc-avatar&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-status-dot">
+        <h2>sc-status-dot</h2>
+        <div class="playground">
+          <div class="preview" style="gap: var(--sc-space-md); display: flex; align-items: center;">
+            <sc-status-dot status="connected"></sc-status-dot>
+            <sc-status-dot status="connecting"></sc-status-dot>
+            <sc-status-dot status="disconnected"></sc-status-dot>
+            <sc-status-dot status="operational" size="md"></sc-status-dot>
+            <sc-status-dot status="online"></sc-status-dot>
+            <sc-status-dot status="busy"></sc-status-dot>
+            <sc-status-dot status="away"></sc-status-dot>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-status-dot status="connected" size="sm"&gt;&lt;/sc-status-dot&gt;</code></pre></div>
       </section>
 
       <section class="component-section" id="sc-progress">
@@ -1272,6 +1302,220 @@
         <div class="code-snippet"><code>&lt;sc-link-preview url="https://example.com" title="Title" description="Description"&gt;&lt;/sc-link-preview&gt;</code></div>
       </section>
 
+      <section class="component-section" id="sc-skill-card">
+        <h2>sc-skill-card</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Card for displaying installed or registry skills with toggle, install button, and tags.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; display: flex; gap: var(--sc-space-lg); flex-wrap: wrap;">
+            <sc-skill-card id="skill-card-installed" variant="installed"></sc-skill-card>
+            <sc-skill-card id="skill-card-registry" variant="registry"></sc-skill-card>
+          </div>
+          <div class="controls">
+            <label>variant
+              <select data-target="skill-card-installed" data-prop="variant">
+                <option value="installed" selected>installed</option>
+                <option value="registry">registry</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "...", enabled: true }'}&gt;&lt;/sc-skill-card&gt;</code></pre></div>
+        <div class="variants"><h3>All Variants</h3><div class="row" style="display: flex; gap: var(--sc-space-md); flex-wrap: wrap;">
+          <sc-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "Automated PR review and suggestions.", enabled: true }'}></sc-skill-card>
+          <sc-skill-card variant="installed" .skill=${'{ name: "Disabled Skill", description: "A skill that is turned off.", enabled: false }'}></sc-skill-card>
+          <sc-skill-card variant="registry" .skill=${'{ name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" }'} .installed=${false}></sc-skill-card>
+          <sc-skill-card variant="registry" .skill=${'{ name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "SeaClaw", tags: "demo" }'} .installed=${true}></sc-skill-card>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-skill-detail">
+        <h2>sc-skill-detail</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Sheet detail view for a selected skill with enable/disable, install/uninstall actions.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; position: relative; min-height: 120px;">
+            <sc-button id="skill-detail-trigger-installed">Open installed skill</sc-button>
+            <sc-button variant="secondary" id="skill-detail-trigger-registry">Open registry skill</sc-button>
+            <sc-skill-detail id="skill-detail-preview"></sc-skill-detail>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-skill-detail .skill=${'{ source: "installed", skill: {...} }'} .installedNames=${'["other"]'}&gt;&lt;/sc-skill-detail&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-skill-registry">
+        <h2>sc-skill-registry</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Searchable registry grid of skills with tag filters and install actions.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%;">
+            <sc-skill-registry id="skill-registry-preview"></sc-skill-registry>
+          </div>
+          <div class="controls">
+            <label><input type="checkbox" id="skill-registry-loading" /> loading</label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-skill-registry .results=${skills} .tags=${'["slack","ai"]'} .installedNames=${'["slack-notify"]'}&gt;&lt;/sc-skill-registry&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-overview-stats">
+        <h2>sc-overview-stats</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Overview dashboard stats: stat cards grid plus metric row.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%;">
+            <sc-overview-stats id="overview-stats-preview"></sc-overview-stats>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-overview-stats .metrics=${'[{ label: "Tests", value: 2895 }, { label: "Channels", valueStr: "12" }]'} .metricRowItems=${'[{ label: "CPU", value: "23%" }, { label: "RAM", value: "1.2 GB" }]'}&gt;&lt;/sc-overview-stats&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-chart">
+        <h2>sc-chart</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Chart.js wrapper for bar, line, area, and doughnut charts. Uses design token colors.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 320px;">
+            <sc-chart id="chart-preview" type="bar" height="200"></sc-chart>
+          </div>
+          <div class="controls">
+            <label>type
+              <select data-target="chart-preview" data-prop="type">
+                <option value="bar" selected>bar</option>
+                <option value="line">line</option>
+                <option value="area">area</option>
+                <option value="doughnut">doughnut</option>
+              </select>
+            </label>
+            <label>height
+              <input type="number" data-target="chart-preview" data-prop="height" value="200">
+            </label>
+            <label>horizontal
+              <input type="checkbox" data-target="chart-preview" data-prop="horizontal">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-chart type="bar" .data=${'{ labels: ["A","B","C"], datasets: [{ data: [10,20,15] }] }'} height="200"&gt;&lt;/sc-chart&gt;</code></pre></div>
+        <div class="variants"><h3>All Types</h3><div class="row" style="display: flex; gap: var(--sc-space-xl); flex-wrap: wrap;">
+          <div><sc-chart id="chart-variant-bar" type="bar" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Bar</div></div>
+          <div><sc-chart id="chart-variant-line" type="line" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Line</div></div>
+          <div><sc-chart id="chart-variant-area" type="area" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Area</div></div>
+          <div><sc-chart id="chart-variant-doughnut" type="doughnut" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Doughnut</div></div>
+        </div></div>
+      </section>
+
+      <section class="component-section" id="sc-model-selector">
+        <h2>sc-model-selector</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Compact model picker dropdown for chat composer. Dispatches sc-model-change.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%;">
+            <sc-model-selector id="model-selector-preview"></sc-model-selector>
+          </div>
+          <div class="controls">
+            <label>value
+              <select id="model-selector-value-control">
+                <option value="gpt-4o">gpt-4o</option>
+                <option value="claude-3">claude-3</option>
+                <option value="gemini-2">gemini-2</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-model-selector .value=${"gpt-4o"} .models=${models} @sc-model-change=${handler}&gt;&lt;/sc-model-selector&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-form-group">
+        <h2>sc-form-group</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Form wrapper with title, description, dirty indicator, and validation. Wraps sc-input, sc-select, sc-textarea, etc.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 400px;">
+            <sc-form-group id="form-group-preview" title="Profile Settings" description="Update your account details.">
+              <sc-input label="Name" placeholder="Your name"></sc-input>
+              <sc-input label="Email" placeholder="you@example.com" type="email"></sc-input>
+            </sc-form-group>
+          </div>
+          <div class="controls">
+            <label>title
+              <input type="text" data-target="form-group-preview" data-prop="title" value="Profile Settings">
+            </label>
+            <label>description
+              <input type="text" data-target="form-group-preview" data-prop="description" value="Update your account details.">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-form-group title="Settings" description="..."&gt;&lt;sc-input label="Name"&gt;&lt;/sc-input&gt;&lt;/sc-form-group&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-sidebar">
+        <h2>sc-sidebar</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">App navigation sidebar with sections, connection status, theme toggle, and collapse.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-height: 400px; display: flex;">
+            <sc-sidebar id="sidebar-preview" activeTab="overview" connectionStatus="connected"></sc-sidebar>
+            <div style="flex: 1; padding: var(--sc-space-lg); color: var(--sc-text-muted);">Main content area</div>
+          </div>
+          <div class="controls">
+            <label>activeTab
+              <input type="text" data-target="sidebar-preview" data-prop="activeTab" value="overview">
+            </label>
+            <label>connectionStatus
+              <select data-target="sidebar-preview" data-prop="connectionStatus">
+                <option value="connected" selected>connected</option>
+                <option value="connecting">connecting</option>
+                <option value="disconnected">disconnected</option>
+              </select>
+            </label>
+            <label>collapsed
+              <input type="checkbox" data-target="sidebar-preview" data-prop="collapsed">
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-sidebar activeTab="overview" connectionStatus="connected"&gt;&lt;/sc-sidebar&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-command-palette">
+        <h2>sc-command-palette</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Command palette overlay for navigation and actions. Open with Cmd+K / Ctrl+K.</p>
+        <div class="playground">
+          <div class="preview">
+            <sc-button id="command-palette-trigger">Open command palette</sc-button>
+            <sc-command-palette id="command-palette-preview"></sc-command-palette>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-command-palette .open=${open} @close=${onClose} @execute=${onExecute}&gt;&lt;/sc-command-palette&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-floating-mic">
+        <h2>sc-floating-mic</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Floating voice input button. Cmd+Shift+M to toggle. Injects transcript into focused input.</p>
+        <div class="playground" style="position: relative; min-height: 120px;">
+          <div class="preview" style="position: relative;">
+            <sc-floating-mic></sc-floating-mic>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-floating-mic&gt;&lt;/sc-floating-mic&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-activity-timeline">
+        <h2>sc-activity-timeline</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Live activity with sparkline and timeline. Converts ActivityEvent[] to timeline items.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 480px;">
+            <sc-activity-timeline id="activity-timeline-preview"></sc-activity-timeline>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-activity-timeline .events=${events} maxItems="10"&gt;&lt;/sc-activity-timeline&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-sessions-table">
+        <h2>sc-sessions-table</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Table of chat sessions with empty state. Dispatches session-select and navigate.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 560px;">
+            <sc-sessions-table id="sessions-table-preview"></sc-sessions-table>
+          </div>
+          <div class="controls">
+            <label><input type="checkbox" id="sessions-table-has-data" checked /> Has data</label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-sessions-table .sessions=${sessions} @session-select=${handler}&gt;&lt;/sc-sessions-table&gt;</code></pre></div>
+      </section>
+
     <sc-toast></sc-toast>
 
     <script type="module">
@@ -1286,6 +1530,7 @@
       import "/src/components/sc-sheet.js";
       import "/src/components/sc-toast.js";
       import "/src/components/sc-avatar.js";
+      import "/src/components/sc-status-dot.js";
       import "/src/components/sc-tabs.js";
       import "/src/components/sc-progress.js";
       import "/src/components/sc-input.js";
@@ -1325,6 +1570,7 @@
       import "/src/components/sc-shortcut-overlay.js";
       import "/src/components/sc-context-menu.js";
       import "/src/components/sc-stat-card.js";
+      import "/src/components/sc-stats-row.js";
       import "/src/components/sc-section-header.js";
       import "/src/components/sc-metric-row.js";
       import "/src/components/sc-timeline.js";
@@ -1345,6 +1591,18 @@
       import "/src/components/sc-typing-indicator.js";
       import "/src/components/sc-delivery-status.js";
       import "/src/components/sc-link-preview.js";
+      import "/src/components/sc-skill-card.js";
+      import "/src/components/sc-skill-detail.js";
+      import "/src/components/sc-skill-registry.js";
+      import "/src/components/sc-overview-stats.js";
+      import "/src/components/sc-chart.js";
+      import "/src/components/sc-model-selector.js";
+      import "/src/components/sc-form-group.js";
+      import "/src/components/sidebar.js";
+      import "/src/components/command-palette.js";
+      import "/src/components/floating-mic.js";
+      import "/src/components/sc-activity-timeline.js";
+      import "/src/components/sc-sessions-table.js";
 
       // Theme toggle
       function setTheme(theme) {
@@ -1823,6 +2081,152 @@
       if (jsonViewerPreview) {
         jsonViewerPreview.data = { name: "SeaClaw", version: "1.0", features: ["AI", "Channels", "Tools"] };
       }
+
+      // sc-skill-card
+      const skillCardInstalled = document.getElementById("skill-card-installed");
+      const skillCardRegistry = document.getElementById("skill-card-registry");
+      if (skillCardInstalled) {
+        skillCardInstalled.skill = { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true };
+      }
+      if (skillCardRegistry) {
+        skillCardRegistry.skill = { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" };
+        skillCardRegistry.installed = false;
+      }
+      ["skill-card-v1", "skill-card-v2", "skill-card-v3", "skill-card-v4"].forEach((id, i) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const variant = i < 2 ? "installed" : "registry";
+        const skills = [
+          { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true },
+          { name: "Disabled Skill", description: "A skill that is turned off.", enabled: false },
+          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" },
+          { name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "SeaClaw", tags: "demo" },
+        ];
+        el.skill = skills[i];
+        if (variant === "registry") el.installed = i === 3;
+      });
+
+      // sc-skill-detail
+      const skillDetailPreview = document.getElementById("skill-detail-preview");
+      const skillDetailTriggerInstalled = document.getElementById("skill-detail-trigger-installed");
+      const skillDetailTriggerRegistry = document.getElementById("skill-detail-trigger-registry");
+      if (skillDetailPreview) {
+        skillDetailPreview.installedNames = ["other-skill"];
+        skillDetailPreview.addEventListener("sc-close", () => { skillDetailPreview.skill = null; });
+      }
+      if (skillDetailTriggerInstalled && skillDetailPreview) {
+        skillDetailTriggerInstalled.addEventListener("click", () => {
+          skillDetailPreview.skill = { source: "installed", skill: { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true, parameters: '{"strict": true}' } };
+        });
+      }
+      if (skillDetailTriggerRegistry && skillDetailPreview) {
+        skillDetailTriggerRegistry.addEventListener("click", () => {
+          skillDetailPreview.skill = { source: "registry", skill: { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" } };
+        });
+      }
+
+      // sc-skill-registry
+      const skillRegistryPreview = document.getElementById("skill-registry-preview");
+      if (skillRegistryPreview) {
+        skillRegistryPreview.results = [
+          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" },
+          { name: "GitHub PR", description: "Create and manage pull requests.", version: "2.1.0", author: "SeaClaw", tags: "github,pr" },
+          { name: "Calendar Sync", description: "Sync with Google Calendar.", version: "1.0.0", author: "SeaClaw", tags: "calendar,google" },
+        ];
+        skillRegistryPreview.tags = ["slack", "github", "calendar", "pr", "notifications"];
+        skillRegistryPreview.installedNames = ["slack-notify"];
+      }
+      document.getElementById("skill-registry-loading")?.addEventListener("change", (e) => {
+        if (skillRegistryPreview) skillRegistryPreview.loading = (e.target).checked;
+      });
+
+      // sc-overview-stats
+      const overviewStatsPreview = document.getElementById("overview-stats-preview");
+      if (overviewStatsPreview) {
+        overviewStatsPreview.metrics = [
+          { label: "Tests", value: 2895 },
+          { label: "Channels", value: 12 },
+          { label: "Agents", valueStr: "3" },
+        ];
+        overviewStatsPreview.metricRowItems = [
+          { label: "CPU", value: "23%" },
+          { label: "RAM", value: "1.2 GB" },
+          { label: "Uptime", value: "4d 12h" },
+        ];
+      }
+
+      // sc-chart
+      const chartDemoData = { labels: ["A", "B", "C", "D"], datasets: [{ label: "Series 1", data: [10, 20, 15, 25] }] };
+      const chartPreview = document.getElementById("chart-preview");
+      if (chartPreview) chartPreview.data = chartDemoData;
+      ["chart-variant-bar", "chart-variant-line", "chart-variant-area", "chart-variant-doughnut"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.data = chartDemoData;
+      });
+
+      // sc-model-selector
+      const modelSelectorPreview = document.getElementById("model-selector-preview");
+      if (modelSelectorPreview) {
+        modelSelectorPreview.models = [
+          { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI" },
+          { id: "claude-3", name: "Claude 3", provider: "Anthropic" },
+          { id: "gemini-2", name: "Gemini 2", provider: "Google" },
+        ];
+        modelSelectorPreview.value = "gpt-4o";
+      }
+      document.getElementById("model-selector-value-control")?.addEventListener("change", (e) => {
+        if (modelSelectorPreview) modelSelectorPreview.value = (e.target).value;
+      });
+
+      // sc-sidebar
+      const sidebarPreview = document.getElementById("sidebar-preview");
+      if (sidebarPreview) {
+        sidebarPreview.addEventListener("tab-change", (e) => {
+          sidebarPreview.activeTab = e.detail;
+        });
+      }
+
+      // sc-command-palette
+      const commandPalettePreview = document.getElementById("command-palette-preview");
+      if (commandPalettePreview) {
+        commandPalettePreview.addEventListener("close", () => { commandPalettePreview.open = false; });
+      }
+      document.getElementById("command-palette-trigger")?.addEventListener("click", () => {
+        if (commandPalettePreview) commandPalettePreview.open = true;
+      });
+
+      // sc-activity-timeline
+      const activityTimelinePreview = document.getElementById("activity-timeline-preview");
+      if (activityTimelinePreview) {
+        activityTimelinePreview.events = [
+          { type: "message", channel: "Telegram", user: "Alice", preview: "Can you review the PR?", time: Date.now() - 30000 },
+          { type: "tool_exec", tool: "shell", command: "git status", time: Date.now() - 120000 },
+          { type: "message", channel: "Discord", user: "Bob", preview: "Deploy looks good", time: Date.now() - 300000 },
+          { type: "session_start", session: "Code Review", time: Date.now() - 600000 },
+          { type: "message", channel: "Slack", user: "Charlie", preview: "Tests passing on CI", time: Date.now() - 1800000 },
+        ];
+      }
+
+      // sc-sessions-table
+      const sessionsTablePreview = document.getElementById("sessions-table-preview");
+      if (sessionsTablePreview) {
+        sessionsTablePreview.sessions = [
+          { key: "s1", label: "Code review help", turn_count: 12, last_active: Date.now() - 3600000, created_at: Date.now() - 86400000 },
+          { key: "s2", label: "Deployment setup", turn_count: 8, last_active: Date.now() - 7200000, created_at: Date.now() - 172800000 },
+          { key: "s3", label: "API design", turn_count: 24, last_active: Date.now() - 86400000, created_at: Date.now() - 259200000 },
+        ];
+      }
+      document.getElementById("sessions-table-has-data")?.addEventListener("change", (e) => {
+        if (sessionsTablePreview) {
+          sessionsTablePreview.sessions = (e.target).checked
+            ? [
+                { key: "s1", label: "Code review help", turn_count: 12, last_active: Date.now() - 3600000, created_at: Date.now() - 86400000 },
+                { key: "s2", label: "Deployment setup", turn_count: 8, last_active: Date.now() - 7200000, created_at: Date.now() - 172800000 },
+                { key: "s3", label: "API design", turn_count: 24, last_active: Date.now() - 86400000, created_at: Date.now() - 259200000 },
+              ]
+            : [];
+        }
+      });
     </script>
   </body>
 </html>

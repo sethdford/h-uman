@@ -103,8 +103,7 @@ sc_error_t sc_bus_subscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_c
 void sc_bus_unsubscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx) {
     if (!bus || !fn)
         return;
-    ensure_mutex();
-    sc_mutex_lock(&s_bus_mutex);
+    lock_bus(bus);
     for (size_t i = 0; i < bus->count; i++) {
         if (bus->subscribers[i].fn == fn && bus->subscribers[i].user_ctx == user_ctx) {
             memmove(&bus->subscribers[i], &bus->subscribers[i + 1],
@@ -113,7 +112,7 @@ void sc_bus_unsubscribe(sc_bus_t *bus, sc_bus_subscriber_fn fn, void *user_ctx) 
             break;
         }
     }
-    sc_mutex_unlock(&s_bus_mutex);
+    unlock_bus(bus);
 }
 
 void sc_bus_publish(sc_bus_t *bus, const sc_bus_event_t *ev) {

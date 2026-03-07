@@ -26,7 +26,7 @@ sc_error_t sc_agent_commands_bare_session_reset_prompt(sc_allocator_t *alloc, co
 void sc_agent_commands_free_owned_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs,
                                              size_t count);
 
-/* Execute plan steps (used by /goal and sc_agent_execute_plan). Implemented in agent_slash.c. */
+/* Execute plan steps (used by /goal and sc_agent_execute_plan). Implemented in agent_plan.c. */
 typedef struct sc_agent sc_agent_t;
 sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *plan,
                                                 char **summary_out, size_t *summary_len_out,

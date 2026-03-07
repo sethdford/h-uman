@@ -40,6 +40,15 @@ typedef struct sc_signal_ctx {
     size_t group_allow_from_count;
     char *group_policy;
     size_t group_policy_len;
+#if SC_IS_TEST
+    char last_message[4096];
+    size_t last_message_len;
+    struct {
+        char session_key[128];
+        char content[4096];
+    } mock_msgs[8];
+    size_t mock_count;
+#endif
 #if !SC_IS_TEST && defined(SC_HTTP_CURL)
     pthread_mutex_t typing_mu;
     char *typing_target;
@@ -282,10 +291,14 @@ static sc_error_t signal_send(void *ctx, const char *target, size_t target_len, 
         return SC_ERR_INVALID_ARGUMENT;
 
 #if SC_IS_TEST
-    (void)message_len;
-    (void)media;
-    (void)media_count;
-    return SC_OK;
+    {
+        size_t len = message_len > 4095 ? 4095 : message_len;
+        if (message && len > 0)
+            memcpy(c->last_message, message, len);
+        c->last_message[len] = '\0';
+        c->last_message_len = len;
+        return SC_OK;
+    }
 #else
     int is_group = 0;
     const char *id = NULL;
@@ -584,7 +597,17 @@ sc_error_t sc_signal_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_l
     *out_count = 0;
 
 #if SC_IS_TEST
-    return SC_OK;
+    {
+        (void)alloc;
+        size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
+        for (size_t i = 0; i < n; i++) {
+            memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
+            memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
+        }
+        *out_count = n;
+        c->mock_count = 0;
+        return SC_OK;
+    }
 #else
     if (!c->http_url || !c->account || c->account_len == 0)
         return SC_OK;
@@ -608,6 +631,37 @@ sc_error_t sc_signal_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_l
     return SC_OK;
 #endif
 }
+
+#if SC_IS_TEST
+sc_error_t sc_signal_test_inject_mock(sc_channel_t *ch, const char *session_key,
+                                      size_t session_key_len, const char *content,
+                                      size_t content_len) {
+    if (!ch || !ch->ctx)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ch->ctx;
+    if (c->mock_count >= 8)
+        return SC_ERR_OUT_OF_MEMORY;
+    size_t i = c->mock_count++;
+    size_t sk = session_key_len > 127 ? 127 : session_key_len;
+    size_t ct = content_len > 4095 ? 4095 : content_len;
+    if (session_key && sk > 0)
+        memcpy(c->mock_msgs[i].session_key, session_key, sk);
+    c->mock_msgs[i].session_key[sk] = '\0';
+    if (content && ct > 0)
+        memcpy(c->mock_msgs[i].content, content, ct);
+    c->mock_msgs[i].content[ct] = '\0';
+    return SC_OK;
+}
+
+const char *sc_signal_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = c->last_message_len;
+    return c->last_message;
+}
+#endif
 
 void sc_signal_destroy(sc_channel_t *ch) {
     if (ch && ch->ctx) {

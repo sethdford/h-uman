@@ -32,8 +32,9 @@ const VIEWS = [
 test.describe("Accessibility", () => {
   for (const view of VIEWS) {
     test(`${view.name} view passes axe accessibility`, async ({ page }) => {
-      await page.goto(view.path);
-      await page.waitForLoadState("networkidle");
+      const url = view.path === "/" ? "/?demo" : `/?demo${view.path.slice(1)}`;
+      await page.goto(url);
+      await page.waitForLoadState("domcontentloaded");
       const results = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
         .disableRules(SHADOW_DOM_EXCLUDED_RULES)
@@ -61,7 +62,7 @@ test.describe("Accessibility", () => {
   }
 
   test("all navigation views are keyboard accessible", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/?demo");
     for (let i = 0; i < 5; i++) {
       await page.keyboard.press("Tab");
     }
@@ -80,7 +81,7 @@ test.describe("Accessibility", () => {
   });
 
   test("modal traps focus", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/?demo");
     await page.keyboard.press("Control+k");
     await page.waitForTimeout(200);
     await page.keyboard.press("Escape");

@@ -15,6 +15,7 @@ import {
   shadowComputedStyle,
   shadowDomOrder,
   shadowInteractiveRects,
+  shadowText,
   VIEW_TAGS,
   WAIT,
   POLL,
@@ -299,15 +300,21 @@ test.describe("Wave 3: Loading & Empty States", () => {
       await page.goto(`/?demo#${view.hash}`);
       // Check immediately — skeleton should be visible before data loads
       const hasSkeleton = await page.evaluate(shadowExists(view.tag, "sc-skeleton"));
-      // Skeleton may have already resolved if demo data is fast
-      // This is a best-effort check — if we catch it, great
-      if (!hasSkeleton) {
+      if (hasSkeleton) {
+        expect(hasSkeleton).toBe(true);
+      } else {
         test.info().annotations.push({
-          type: "note",
+          type: "warning",
           description: "Skeleton resolved before check — demo data too fast",
         });
+        await page.waitForTimeout(WAIT);
+        const hasContent = await page.evaluate(`(() => {
+          const app = document.querySelector("sc-app");
+          const v = app?.shadowRoot?.querySelector("${view.tag}");
+          return v && (v?.shadowRoot?.children.length ?? 0) > 0;
+        })()`);
+        expect(hasContent).toBe(true);
       }
-      expect(true).toBe(true);
     });
   }
 
@@ -481,5 +488,98 @@ test.describe("Wave 5: Theme Parity", () => {
     expect(colors.text).not.toBe(colors.bg);
     expect(colors.text.length).toBeGreaterThan(0);
     expect(colors.bg.length).toBeGreaterThan(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Wave 6: Error State Coverage (ux-patterns.md §3, error boundaries)
+// ═══════════════════════════════════════════════════════════════════
+
+test.describe("Wave 6: Error States", () => {
+  const ERROR_BOUNDARY_VIEWS = [
+    { hash: "overview", tag: "sc-overview-view" },
+    { hash: "chat", tag: "sc-chat-view" },
+    { hash: "tools", tag: "sc-tools-view" },
+  ];
+
+  test("sc-error-boundary exists on every view and renders fallback when triggered", async ({
+    page,
+  }) => {
+    for (const view of ERROR_BOUNDARY_VIEWS) {
+      await page.goto(`/?demo#${view.hash}`);
+      await page.waitForTimeout(WAIT);
+
+      await expect(async () => {
+        const hasBoundary = await page.evaluate(() => {
+          const app = document.querySelector("sc-app");
+          return !!app?.shadowRoot?.querySelector("sc-error-boundary");
+        });
+        expect(hasBoundary).toBe(true);
+      }).toPass({ timeout: POLL });
+
+      await page.evaluate(() => {
+        const app = document.querySelector("sc-app") as HTMLElement & { _viewError?: Error };
+        app._viewError = new Error("E2E test");
+        (app as unknown as { requestUpdate?: () => void }).requestUpdate?.();
+      });
+      await page.waitForTimeout(400);
+
+      await expect(async () => {
+        const hasFallback = await page.evaluate(() => {
+          const app = document.querySelector("sc-app");
+          const boundary = app?.shadowRoot?.querySelector("sc-error-boundary");
+          const fallback = boundary?.shadowRoot?.querySelector(".fallback");
+          const text = boundary?.shadowRoot?.textContent ?? "";
+          return !!fallback || text.includes("Something went wrong");
+        });
+        expect(hasFallback).toBe(true);
+      }).toPass({ timeout: POLL });
+
+      await page.evaluate(() => {
+        const app = document.querySelector("sc-app") as HTMLElement & { _viewError?: Error };
+        app._viewError = null;
+        (app as unknown as { requestUpdate?: () => void }).requestUpdate?.();
+      });
+      await page.waitForTimeout(200);
+    }
+  });
+
+  const GATEWAY_ERROR_VIEWS = [
+    { hash: "overview", tag: "sc-overview-view" },
+    { hash: "agents", tag: "sc-agents-view" },
+    { hash: "security", tag: "sc-security-view" },
+  ];
+
+  test("views display error state when gateway is unavailable", async ({ page }) => {
+    for (const view of GATEWAY_ERROR_VIEWS) {
+      await page.goto(`/?demo#${view.hash}`);
+      await page.waitForTimeout(WAIT);
+
+      await expect(async () => {
+        const hasError = await page.evaluate(
+          ({ viewTag }) => {
+            const app = document.querySelector("sc-app");
+            const boundary = app?.shadowRoot?.querySelector("sc-error-boundary");
+            const viewEl = boundary?.querySelector(viewTag) as HTMLElement & { error?: string };
+            if (!viewEl) return false;
+            viewEl.error = "Not connected";
+            (viewEl as unknown as { requestUpdate?: () => void }).requestUpdate?.();
+            return true;
+          },
+          { viewTag: view.tag },
+        );
+        expect(hasError).toBe(true);
+      }).toPass({ timeout: POLL });
+
+      await page.waitForTimeout(300);
+      await expect(async () => {
+        const hasErrorUI = await page.evaluate(
+          shadowExistsIn(view.tag, "sc-empty-state", ".heading"),
+        );
+        const txt = await page.evaluate(shadowText(view.tag));
+        const showsError = hasErrorUI || txt.toLowerCase().includes("error");
+        expect(showsError).toBe(true);
+      }).toPass({ timeout: POLL });
+    }
   });
 });

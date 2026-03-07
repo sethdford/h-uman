@@ -14,6 +14,7 @@ import "../components/sc-empty-state.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-input.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 import "../components/sc-skill-card.js";
 import "../components/sc-skill-registry.js";
 import "../components/sc-skill-detail.js";
@@ -35,12 +36,6 @@ export class ScSkillsView extends GatewayAwareLitElement {
       view-transition-name: view-skills;
       display: block;
       color: var(--sc-text);
-    }
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
     }
     .toolbar {
       display: flex;
@@ -127,15 +122,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     .grid-full {
       grid-column: 1 / -1;
     }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
     @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
       .skills-grid {
         grid-template-columns: 1fr;
       }
@@ -397,7 +384,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
 
   private _renderStats(): TemplateResult {
     const c = this.statusCounts;
-    return html`<div class="stats-row">
+    return html`<sc-stats-row>
       <sc-stat-card
         label="Installed"
         .value=${c.total}
@@ -422,7 +409,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
         accent="primary"
         style="--sc-stagger-delay: 150ms"
       ></sc-stat-card>
-    </div>`;
+    </sc-stats-row>`;
   }
 
   private _renderTagChips(): TemplateResult | typeof nothing {
@@ -544,12 +531,12 @@ export class ScSkillsView extends GatewayAwareLitElement {
   }
 
   private _renderSkeleton(): TemplateResult {
-    return html`<div class="stats-row">
+    return html`<sc-stats-row>
         <sc-skeleton variant="stat-card"></sc-skeleton
         ><sc-skeleton variant="stat-card"></sc-skeleton
         ><sc-skeleton variant="stat-card"></sc-skeleton
         ><sc-skeleton variant="stat-card"></sc-skeleton>
-      </div>
+      </sc-stats-row>
       <div class="skills-grid sc-stagger">
         <sc-skeleton variant="card" height="140px"></sc-skeleton
         ><sc-skeleton variant="card" height="140px"></sc-skeleton

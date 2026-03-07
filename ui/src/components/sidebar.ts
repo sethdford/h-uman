@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { icons } from "../icons.js";
+import "./sc-status-dot.js";
 
 type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
@@ -253,26 +254,6 @@ export class ScSidebar extends LitElement {
       justify-content: center;
     }
 
-    .status-dot {
-      flex-shrink: 0;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-
-    .status-dot.connected {
-      background: var(--sc-success);
-    }
-
-    .status-dot.connecting {
-      background: var(--sc-warning);
-      animation: sc-pulse var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
-    }
-
-    .status-dot.disconnected {
-      background: var(--sc-text-muted);
-    }
-
     .theme-toggle {
       display: flex;
       align-items: center;
@@ -433,7 +414,7 @@ export class ScSidebar extends LitElement {
 
         <footer class="footer">
           <div class="status-row">
-            <span class="status-dot ${this.connectionStatus}" aria-hidden="true"></span>
+            <sc-status-dot status=${this.connectionStatus}></sc-status-dot>
             <span class="status-label">${this.connectionStatus}</span>
           </div>
           <button

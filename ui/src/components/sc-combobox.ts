@@ -12,6 +12,7 @@ export class ScCombobox extends LitElement {
   @property({ type: Boolean }) disabled = false;
   @property({ type: String }) error = "";
   @property({ type: String }) label = "";
+  @property({ type: String, attribute: "aria-label" }) ariaLabel = "";
 
   @state() private _open = false;
   @state() private _activeIndex = -1;
@@ -294,6 +295,7 @@ export class ScCombobox extends LitElement {
             aria-activedescendant=${activeId ?? undefined}
             aria-invalid=${this.error ? "true" : "false"}
             aria-describedby=${this.error ? `${this._inputId}-error` : undefined}
+            aria-label=${this.label ? undefined : this.ariaLabel || undefined}
             .value=${this._inputValue ?? this._displayValue}
             placeholder=${this.placeholder}
             ?disabled=${this.disabled}

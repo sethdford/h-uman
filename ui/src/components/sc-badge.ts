@@ -51,8 +51,8 @@ export class ScBadge extends LitElement {
     }
 
     .dot {
-      width: 6px;
-      height: 6px;
+      width: var(--sc-space-xs);
+      height: var(--sc-space-xs);
       border-radius: 50%;
       flex-shrink: 0;
     }

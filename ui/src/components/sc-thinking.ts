@@ -16,7 +16,7 @@ export class ScThinking extends LitElement {
         transform: translateY(0);
       }
       40% {
-        transform: translateY(-6px);
+        transform: translateY(calc(-1 * var(--sc-space-xs)));
       }
     }
 
@@ -74,8 +74,8 @@ export class ScThinking extends LitElement {
     }
 
     .dot {
-      width: 6px;
-      height: 6px;
+      width: var(--sc-space-xs);
+      height: var(--sc-space-xs);
       border-radius: 50%;
       background: var(--sc-info);
       animation: sc-dot-bounce var(--sc-duration-slow) ease-in-out infinite;

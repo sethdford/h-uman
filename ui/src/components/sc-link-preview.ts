@@ -103,7 +103,7 @@ export class ScLinkPreview extends LitElement {
 
     .domain {
       font-family: var(--sc-font);
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-2xs, 0.625rem);
       color: var(--sc-text-faint);
     }
 

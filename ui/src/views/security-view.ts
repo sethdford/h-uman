@@ -6,6 +6,7 @@ import { ScToast } from "../components/sc-toast.js";
 import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 import "../components/sc-card.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-skeleton.js";
@@ -66,22 +67,6 @@ export class ScSecurityView extends GatewayAwareLitElement {
       view-transition-name: view-security;
       display: block;
       color: var(--sc-text);
-    }
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
-    }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
     }
     .grid {
       display: grid;
@@ -647,7 +632,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
 
     return html`
       ${hero}
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-stat-card
           .value=${this.securityScore}
           label="Security Score"
@@ -676,7 +661,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
           accent=${this.sandboxEnabled ? "primary" : "error"}
           style="--sc-stagger-delay: 150ms"
         ></sc-stat-card>
-      </div>
+      </sc-stats-row>
       <div class="grid">
         ${this._renderAutonomy()} ${this._renderSandbox()} ${this._renderNetwork()}
         ${this._renderPairing()}

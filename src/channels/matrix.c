@@ -22,6 +22,15 @@ typedef struct sc_matrix_ctx {
     bool running;
     char *since_token;
     char *user_id;
+#if SC_IS_TEST
+    char last_message[4096];
+    size_t last_message_len;
+    struct {
+        char session_key[128];
+        char content[4096];
+    } mock_msgs[8];
+    size_t mock_count;
+#endif
 } sc_matrix_ctx_t;
 
 static sc_error_t matrix_start(void *ctx) {
@@ -49,8 +58,14 @@ static sc_error_t matrix_send(void *ctx, const char *target, size_t target_len, 
     sc_matrix_ctx_t *c = (sc_matrix_ctx_t *)ctx;
 
 #if SC_IS_TEST
-    (void)c;
-    return SC_OK;
+    {
+        size_t len = message_len > 4095 ? 4095 : message_len;
+        if (message && len > 0)
+            memcpy(c->last_message, message, len);
+        c->last_message[len] = '\0';
+        c->last_message_len = len;
+        return SC_OK;
+    }
 #else
     if (!c || !c->alloc)
         return SC_ERR_INVALID_ARGUMENT;
@@ -139,9 +154,16 @@ sc_error_t sc_matrix_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_l
         return SC_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 #if SC_IS_TEST
-    (void)alloc;
-    (void)max_msgs;
-    return SC_OK;
+    {
+        size_t n = ctx->mock_count < max_msgs ? ctx->mock_count : max_msgs;
+        for (size_t i = 0; i < n; i++) {
+            memcpy(msgs[i].session_key, ctx->mock_msgs[i].session_key, 128);
+            memcpy(msgs[i].content, ctx->mock_msgs[i].content, 4096);
+        }
+        *out_count = n;
+        ctx->mock_count = 0;
+        return SC_OK;
+    }
 #else
 #if defined(SC_HTTP_CURL)
     if (!ctx->homeserver || ctx->homeserver_len == 0)
@@ -306,3 +328,33 @@ void sc_matrix_destroy(sc_channel_t *ch) {
         ch->vtable = NULL;
     }
 }
+
+#if SC_IS_TEST
+sc_error_t sc_matrix_test_inject_mock(sc_channel_t *ch, const char *session_key,
+                                      size_t session_key_len, const char *content,
+                                      size_t content_len) {
+    if (!ch || !ch->ctx)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_matrix_ctx_t *c = (sc_matrix_ctx_t *)ch->ctx;
+    if (c->mock_count >= 8)
+        return SC_ERR_OUT_OF_MEMORY;
+    size_t i = c->mock_count++;
+    size_t sk = session_key_len > 127 ? 127 : session_key_len;
+    size_t ct = content_len > 4095 ? 4095 : content_len;
+    if (session_key && sk > 0)
+        memcpy(c->mock_msgs[i].session_key, session_key, sk);
+    c->mock_msgs[i].session_key[sk] = '\0';
+    if (content && ct > 0)
+        memcpy(c->mock_msgs[i].content, content, ct);
+    c->mock_msgs[i].content[ct] = '\0';
+    return SC_OK;
+}
+const char *sc_matrix_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    sc_matrix_ctx_t *c = (sc_matrix_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = c->last_message_len;
+    return c->last_message;
+}
+#endif

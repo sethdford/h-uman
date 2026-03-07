@@ -46,8 +46,8 @@ export class ScChatComposer extends LitElement {
       gap: var(--sc-space-xs);
       padding: var(--sc-space-sm) var(--sc-space-md);
       background: color-mix(in srgb, var(--sc-bg-surface) 65%, transparent);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(var(--sc-space-md));
+      -webkit-backdrop-filter: blur(var(--sc-space-md));
       border: 1px solid var(--sc-border-subtle);
       border-radius: var(--sc-radius-xl);
       transition:
@@ -60,7 +60,7 @@ export class ScChatComposer extends LitElement {
     }
     .composer.drag-over {
       outline: 2px dashed var(--sc-accent);
-      outline-offset: -4px;
+      outline-offset: calc(-1 * var(--sc-space-xs));
     }
     .suggestions {
       display: flex;
@@ -120,8 +120,8 @@ export class ScChatComposer extends LitElement {
     }
     textarea {
       flex: 1;
-      min-height: 44px;
-      max-height: ${LINE_HEIGHT * MAX_LINES}px;
+      min-height: 2.75rem;
+      max-height: ${(LINE_HEIGHT * MAX_LINES) / 16}rem;
       padding: var(--sc-space-sm) 0;
       background: transparent;
       border: none;
@@ -129,7 +129,7 @@ export class ScChatComposer extends LitElement {
       font-family: var(--sc-font);
       font-size: var(--sc-text-base);
       resize: none;
-      line-height: ${LINE_HEIGHT}px;
+      line-height: ${LINE_HEIGHT / 16}rem;
     }
     textarea:focus {
       outline: none;
@@ -171,8 +171,8 @@ export class ScChatComposer extends LitElement {
       cursor: not-allowed;
     }
     .icon-btn svg {
-      width: 20px;
-      height: 20px;
+      width: 1.25rem;
+      height: 1.25rem;
     }
     .mic-btn.active {
       background: var(--sc-accent-subtle);
@@ -182,9 +182,9 @@ export class ScChatComposer extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 40px;
-      height: 40px;
-      min-width: 40px;
+      width: 2.5rem;
+      height: 2.5rem;
+      min-width: 2.5rem;
       padding: 0;
       border: none;
       border-radius: var(--sc-radius-full);
@@ -234,7 +234,7 @@ export class ScChatComposer extends LitElement {
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
       box-shadow: var(--sc-shadow-md);
-      min-width: 200px;
+      min-width: 12.5rem;
       z-index: 10;
       overflow: hidden;
     }

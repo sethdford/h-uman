@@ -80,8 +80,8 @@ export class ScSheet extends LitElement {
     }
 
     .handle {
-      width: 32px;
-      height: 4px;
+      width: 2rem;
+      height: var(--sc-space-xs);
       background: var(--sc-border);
       border-radius: var(--sc-radius-full);
     }

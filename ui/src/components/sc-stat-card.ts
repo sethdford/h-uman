@@ -33,7 +33,7 @@ export class ScStatCard extends LitElement {
     .stat-card {
       position: relative;
       padding: var(--sc-space-lg);
-      min-width: 140px;
+      min-width: 8.75rem;
     }
 
     .trend {
@@ -60,8 +60,8 @@ export class ScStatCard extends LitElement {
     }
 
     .trend-icon svg {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
     }
 
     .value {
@@ -79,7 +79,7 @@ export class ScStatCard extends LitElement {
     }
 
     .progress-bar {
-      height: 2px;
+      height: 0.125rem;
       background: var(--sc-bg-inset);
       border-radius: var(--sc-radius-full);
       margin-top: var(--sc-space-md);

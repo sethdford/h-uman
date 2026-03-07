@@ -12,6 +12,7 @@ import "../components/sc-section-header.js";
 import "../components/sc-sheet.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 
 interface NodeItem {
   id?: string;
@@ -44,22 +45,6 @@ export class ScNodesView extends GatewayAwareLitElement {
       view-transition-name: view-nodes;
       display: block;
       max-width: 75rem;
-    }
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
-    }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
     }
     .header-actions {
       display: flex;
@@ -190,10 +175,10 @@ export class ScNodesView extends GatewayAwareLitElement {
           description="Connected node instances and their status"
         ></sc-section-header>
       </sc-page-hero>
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </div>
+      </sc-stats-row>
       <div class="table-section">
         <sc-skeleton variant="card" height="200px"></sc-skeleton>
       </div>
@@ -208,7 +193,7 @@ export class ScNodesView extends GatewayAwareLitElement {
           description="Connected node instances and their status"
         ></sc-section-header>
       </sc-page-hero>
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-stat-card
           .value=${this.nodes.length}
           label="Total Nodes"
@@ -221,7 +206,7 @@ export class ScNodesView extends GatewayAwareLitElement {
           label="Healthy"
           style="--sc-stagger-delay: 50ms"
         ></sc-stat-card>
-      </div>
+      </sc-stats-row>
       <div class="header-actions">
         ${this.lastLoadedAt
           ? html`<span class="staleness">Last updated ${this.stalenessLabel}</span>`

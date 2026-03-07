@@ -90,7 +90,7 @@ export class ScReasoningBlock extends LitElement {
       font-size: var(--sc-text-sm);
       color: var(--sc-text);
       padding: 0 var(--sc-space-md) var(--sc-space-md);
-      max-height: 2000px;
+      max-height: 125rem;
       overflow: hidden;
       transition: max-height var(--sc-duration-normal) var(--sc-ease-out);
     }
@@ -142,7 +142,7 @@ export class ScReasoningBlock extends LitElement {
     }
 
     .md-blockquote {
-      border-left: 3px solid var(--sc-accent);
+      border-left: 0.1875rem solid var(--sc-accent);
       padding-left: var(--sc-space-md);
       margin: var(--sc-space-sm) 0;
       color: var(--sc-text-muted);

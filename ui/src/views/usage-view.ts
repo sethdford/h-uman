@@ -5,6 +5,7 @@ import { icons } from "../icons.js";
 import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 import "../components/sc-card.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
@@ -65,22 +66,6 @@ export class ScUsageView extends GatewayAwareLitElement {
       display: block;
       color: var(--sc-text);
       max-width: 60rem;
-    }
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
-    }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
     }
     .section {
       margin-bottom: var(--sc-space-2xl);
@@ -273,11 +258,11 @@ export class ScUsageView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </div>
+      </sc-stats-row>
       <sc-skeleton variant="card" height="200px"></sc-skeleton>
       <sc-skeleton variant="card" height="200px"></sc-skeleton>
     `;
@@ -397,7 +382,7 @@ export class ScUsageView extends GatewayAwareLitElement {
         </sc-section-header>
       </sc-page-hero>
 
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-stat-card
           .value=${totalTokens}
           label="Tokens Today"
@@ -414,7 +399,7 @@ export class ScUsageView extends GatewayAwareLitElement {
           label="Requests"
           style="--sc-stagger-delay: 100ms"
         ></sc-stat-card>
-      </div>
+      </sc-stats-row>
 
       ${this.error
         ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>

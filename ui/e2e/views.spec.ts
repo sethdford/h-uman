@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Secondary Views", () => {
   test("config view renders", async ({ page }) => {
     await page.goto("/#config");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const configView = app.locator("sc-config-view");
@@ -12,7 +12,7 @@ test.describe("Secondary Views", () => {
 
   test("models view renders", async ({ page }) => {
     await page.goto("/#models");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const modelsView = app.locator("sc-models-view");
@@ -21,7 +21,7 @@ test.describe("Secondary Views", () => {
 
   test("tools view renders", async ({ page }) => {
     await page.goto("/#tools");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const toolsView = app.locator("sc-tools-view");
@@ -30,7 +30,7 @@ test.describe("Secondary Views", () => {
 
   test("sessions view redirects to chat", async ({ page }) => {
     await page.goto("/?demo#sessions");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-chat-view")).toBeAttached({ timeout: 10000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -42,7 +42,7 @@ test.describe("Secondary Views", () => {
 
   test("nodes view renders", async ({ page }) => {
     await page.goto("/#nodes");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const nodesView = app.locator("sc-nodes-view");
@@ -51,7 +51,7 @@ test.describe("Secondary Views", () => {
 
   test("agents view renders", async ({ page }) => {
     await page.goto("/#agents");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const agentsView = app.locator("sc-agents-view");
@@ -60,7 +60,7 @@ test.describe("Secondary Views", () => {
 
   test("automations view renders", async ({ page }) => {
     await page.goto("/#automations");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const automationsView = app.locator("sc-automations-view");
@@ -69,7 +69,7 @@ test.describe("Secondary Views", () => {
 
   test("skills view renders", async ({ page }) => {
     await page.goto("/#skills");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const skillsView = app.locator("sc-skills-view");
@@ -78,7 +78,7 @@ test.describe("Secondary Views", () => {
 
   test("voice view renders", async ({ page }) => {
     await page.goto("/#voice");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const voiceView = app.locator("sc-voice-view");
@@ -87,7 +87,7 @@ test.describe("Secondary Views", () => {
 
   test("usage view renders", async ({ page }) => {
     await page.goto("/#usage");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const usageView = app.locator("sc-usage-view");
@@ -96,7 +96,7 @@ test.describe("Secondary Views", () => {
 
   test("security view renders", async ({ page }) => {
     await page.goto("/#security");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const securityView = app.locator("sc-security-view");
@@ -105,7 +105,7 @@ test.describe("Secondary Views", () => {
 
   test("logs view renders", async ({ page }) => {
     await page.goto("/#logs");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const logsView = app.locator("sc-logs-view");
@@ -114,7 +114,7 @@ test.describe("Secondary Views", () => {
 
   test("overview view renders", async ({ page }) => {
     await page.goto("/");
-    await page.waitForTimeout(500);
+    await page.waitForLoadState("domcontentloaded");
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
     const overviewView = app.locator("sc-overview-view");
@@ -123,7 +123,7 @@ test.describe("Secondary Views", () => {
 
   test("nodes view shows data table in demo mode", async ({ page }) => {
     await page.goto("/?demo#nodes");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-nodes-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -136,7 +136,7 @@ test.describe("Secondary Views", () => {
 
   test("nodes view shows page hero in demo mode", async ({ page }) => {
     await page.goto("/?demo#nodes");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-nodes-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -149,7 +149,7 @@ test.describe("Secondary Views", () => {
 
   test("nodes view shows refresh button in demo mode", async ({ page }) => {
     await page.goto("/?demo#nodes");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-nodes-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const text = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -164,7 +164,6 @@ test.describe("Secondary Views", () => {
 test.describe("Skills View (Demo Mode)", () => {
   test("skills view shows stat cards in demo mode", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
     const view = page.locator("sc-app >> sc-skills-view");
     await expect(view).toBeAttached({ timeout: 5000 });
     await expect(async () => {
@@ -179,7 +178,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view renders installed skill cards", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const count = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -192,7 +191,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view installed cards have switches", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const count = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -210,7 +209,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view renders registry section", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -223,7 +222,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view registry search input exists", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -237,7 +236,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view has toolbar with search", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -250,7 +249,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view detail sheet opens on card click", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const count = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -266,7 +265,9 @@ test.describe("Skills View (Demo Mode)", () => {
       const inner = card?.shadowRoot?.querySelector("sc-card") as HTMLElement;
       inner?.click();
     });
-    await page.waitForTimeout(800);
+    await expect(page.locator("sc-app >> sc-skills-view >> sc-skill-detail")).toBeAttached({
+      timeout: 5000,
+    });
     await expect(async () => {
       const hasDetail = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -279,7 +280,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view detail sheet shows detail name", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const count = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -295,7 +296,9 @@ test.describe("Skills View (Demo Mode)", () => {
       const inner = card?.shadowRoot?.querySelector("sc-card") as HTMLElement;
       inner?.click();
     });
-    await page.waitForTimeout(800);
+    await expect(page.locator("sc-app >> sc-skills-view >> sc-skill-detail")).toBeAttached({
+      timeout: 5000,
+    });
     await expect(async () => {
       const hasName = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -309,7 +312,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view detail sheet has action buttons", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const count = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -325,7 +328,9 @@ test.describe("Skills View (Demo Mode)", () => {
       const inner = card?.shadowRoot?.querySelector("sc-card") as HTMLElement;
       inner?.click();
     });
-    await page.waitForTimeout(800);
+    await expect(page.locator("sc-app >> sc-skills-view >> sc-skill-detail")).toBeAttached({
+      timeout: 5000,
+    });
     await expect(async () => {
       const btnCount = await page.evaluate(() => {
         const app = document.querySelector("sc-app");
@@ -339,7 +344,7 @@ test.describe("Skills View (Demo Mode)", () => {
 
   test("skills view page hero renders", async ({ page }) => {
     await page.goto("/?demo#skills");
-    await page.waitForTimeout(1500);
+    await expect(page.locator("sc-app >> sc-skills-view")).toBeAttached({ timeout: 5000 });
     await expect(async () => {
       const exists = await page.evaluate(() => {
         const app = document.querySelector("sc-app");

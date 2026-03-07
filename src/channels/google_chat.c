@@ -28,6 +28,15 @@ typedef struct sc_google_chat_ctx {
     size_t queue_head;
     size_t queue_tail;
     size_t queue_count;
+#if SC_IS_TEST
+    char last_message[4096];
+    size_t last_message_len;
+    struct {
+        char session_key[128];
+        char content[4096];
+    } mock_msgs[8];
+    size_t mock_count;
+#endif
 } sc_google_chat_ctx_t;
 
 static sc_error_t google_chat_start(void *ctx) {
@@ -52,14 +61,14 @@ static sc_error_t google_chat_send(void *ctx, const char *target, size_t target_
     sc_google_chat_ctx_t *c = (sc_google_chat_ctx_t *)ctx;
 
 #if SC_IS_TEST
-    (void)message_len;
-    (void)media;
-    (void)media_count;
-    if (!c || !message)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (!c->webhook_url || c->webhook_url_len == 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
-    return SC_OK;
+    {
+        size_t len = message_len > 4095 ? 4095 : message_len;
+        if (message && len > 0)
+            memcpy(c->last_message, message, len);
+        c->last_message[len] = '\0';
+        c->last_message_len = len;
+        return SC_OK;
+    }
 #else
     if (!c || !c->alloc)
         return SC_ERR_INVALID_ARGUMENT;

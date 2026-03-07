@@ -9,6 +9,7 @@ import "../components/sc-json-viewer.js";
 import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
 
@@ -25,22 +26,6 @@ export class ScToolsView extends GatewayAwareLitElement {
       view-transition-name: view-tools;
       display: block;
       max-width: 75rem;
-    }
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
-    }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
     }
     .table-section {
       margin-top: var(--sc-space-xl);
@@ -142,11 +127,11 @@ export class ScToolsView extends GatewayAwareLitElement {
           description="Available tool integrations and their configurations"
         ></sc-section-header>
       </sc-page-hero>
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </div>
+      </sc-stats-row>
       <div class="table-section">
         <sc-skeleton variant="card" height="200px"></sc-skeleton>
       </div>
@@ -165,7 +150,7 @@ export class ScToolsView extends GatewayAwareLitElement {
           description="Available tool integrations and their configurations"
         ></sc-section-header>
       </sc-page-hero>
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-stat-card
           .value=${count}
           label="Total Tools"
@@ -185,7 +170,7 @@ export class ScToolsView extends GatewayAwareLitElement {
           label="Total Parameters"
           style="--sc-stagger-delay: 100ms"
         ></sc-stat-card>
-      </div>
+      </sc-stats-row>
       ${this.error
         ? html`<sc-empty-state
             .icon=${icons.warning}

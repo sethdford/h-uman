@@ -1024,6 +1024,182 @@ static void parse_irc_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json
         cfg->channels.irc.port = (uint16_t)port;
 }
 
+static void parse_lark_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_lark_channel_config_t *lk = &cfg->channels.lark;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
+        obj->data.array.items[0])
+        val = obj->data.array.items[0];
+    if (!val || val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "app_id");
+    if (s) {
+        if (lk->app_id)
+            a->free(a->ctx, lk->app_id, strlen(lk->app_id) + 1);
+        lk->app_id = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "app_secret");
+    if (s) {
+        if (lk->app_secret)
+            a->free(a->ctx, lk->app_secret, strlen(lk->app_secret) + 1);
+        lk->app_secret = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "webhook_url");
+    if (s) {
+        if (lk->webhook_url)
+            a->free(a->ctx, lk->webhook_url, strlen(lk->webhook_url) + 1);
+        lk->webhook_url = sc_strdup(a, s);
+    }
+}
+
+static void parse_dingtalk_channel(sc_allocator_t *a, sc_config_t *cfg,
+                                   const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_dingtalk_channel_config_t *dt = &cfg->channels.dingtalk;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
+        obj->data.array.items[0])
+        val = obj->data.array.items[0];
+    if (!val || val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "app_key");
+    if (s) {
+        if (dt->app_key)
+            a->free(a->ctx, dt->app_key, strlen(dt->app_key) + 1);
+        dt->app_key = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "app_secret");
+    if (s) {
+        if (dt->app_secret)
+            a->free(a->ctx, dt->app_secret, strlen(dt->app_secret) + 1);
+        dt->app_secret = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "webhook_url");
+    if (s) {
+        if (dt->webhook_url)
+            a->free(a->ctx, dt->webhook_url, strlen(dt->webhook_url) + 1);
+        dt->webhook_url = sc_strdup(a, s);
+    }
+}
+
+static void parse_teams_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_teams_channel_config_t *tm = &cfg->channels.teams;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
+        obj->data.array.items[0])
+        val = obj->data.array.items[0];
+    if (!val || val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "webhook_url");
+    if (s) {
+        if (tm->webhook_url)
+            a->free(a->ctx, tm->webhook_url, strlen(tm->webhook_url) + 1);
+        tm->webhook_url = sc_strdup(a, s);
+    }
+}
+
+static void parse_twilio_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_twilio_channel_config_t *tw = &cfg->channels.twilio;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
+        obj->data.array.items[0])
+        val = obj->data.array.items[0];
+    if (!val || val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "account_sid");
+    if (s) {
+        if (tw->account_sid)
+            a->free(a->ctx, tw->account_sid, strlen(tw->account_sid) + 1);
+        tw->account_sid = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "auth_token");
+    if (s) {
+        if (tw->auth_token)
+            a->free(a->ctx, tw->auth_token, strlen(tw->auth_token) + 1);
+        tw->auth_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "from_number");
+    if (s) {
+        if (tw->from_number)
+            a->free(a->ctx, tw->from_number, strlen(tw->from_number) + 1);
+        tw->from_number = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "to_number");
+    if (s) {
+        if (tw->to_number)
+            a->free(a->ctx, tw->to_number, strlen(tw->to_number) + 1);
+        tw->to_number = sc_strdup(a, s);
+    }
+}
+
+static void parse_onebot_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_onebot_channel_config_t *ob = &cfg->channels.onebot;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
+        obj->data.array.items[0])
+        val = obj->data.array.items[0];
+    if (!val || val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "api_base");
+    if (s) {
+        if (ob->api_base)
+            a->free(a->ctx, ob->api_base, strlen(ob->api_base) + 1);
+        ob->api_base = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "access_token");
+    if (s) {
+        if (ob->access_token)
+            a->free(a->ctx, ob->access_token, strlen(ob->access_token) + 1);
+        ob->access_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "user_id");
+    if (s) {
+        if (ob->user_id)
+            a->free(a->ctx, ob->user_id, strlen(ob->user_id) + 1);
+        ob->user_id = sc_strdup(a, s);
+    }
+}
+
+static void parse_qq_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
+    if (!obj)
+        return;
+    sc_qq_channel_config_t *qq = &cfg->channels.qq;
+    const sc_json_value_t *val = obj;
+    if (obj->type == SC_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
+        obj->data.array.items[0])
+        val = obj->data.array.items[0];
+    if (!val || val->type != SC_JSON_OBJECT)
+        return;
+    const char *s = sc_json_get_string(val, "app_id");
+    if (s) {
+        if (qq->app_id)
+            a->free(a->ctx, qq->app_id, strlen(qq->app_id) + 1);
+        qq->app_id = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "bot_token");
+    if (s) {
+        if (qq->bot_token)
+            a->free(a->ctx, qq->bot_token, strlen(qq->bot_token) + 1);
+        qq->bot_token = sc_strdup(a, s);
+    }
+    s = sc_json_get_string(val, "channel_id");
+    if (s) {
+        if (qq->channel_id)
+            a->free(a->ctx, qq->channel_id, strlen(qq->channel_id) + 1);
+        qq->channel_id = sc_strdup(a, s);
+    }
+    qq->sandbox = sc_json_get_bool(val, "sandbox", qq->sandbox);
+}
+
 static void parse_nostr_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {
     if (!obj || obj->type != SC_JSON_OBJECT)
         return;
@@ -1141,6 +1317,30 @@ static sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_j
     sc_json_value_t *nostr_obj = sc_json_object_get(obj, "nostr");
     if (nostr_obj)
         parse_nostr_channel(a, cfg, nostr_obj);
+
+    sc_json_value_t *lark_obj = sc_json_object_get(obj, "lark");
+    if (lark_obj)
+        parse_lark_channel(a, cfg, lark_obj);
+
+    sc_json_value_t *dingtalk_obj = sc_json_object_get(obj, "dingtalk");
+    if (dingtalk_obj)
+        parse_dingtalk_channel(a, cfg, dingtalk_obj);
+
+    sc_json_value_t *teams_obj = sc_json_object_get(obj, "teams");
+    if (teams_obj)
+        parse_teams_channel(a, cfg, teams_obj);
+
+    sc_json_value_t *twilio_obj = sc_json_object_get(obj, "twilio");
+    if (twilio_obj)
+        parse_twilio_channel(a, cfg, twilio_obj);
+
+    sc_json_value_t *onebot_obj = sc_json_object_get(obj, "onebot");
+    if (onebot_obj)
+        parse_onebot_channel(a, cfg, onebot_obj);
+
+    sc_json_value_t *qq_obj = sc_json_object_get(obj, "qq");
+    if (qq_obj)
+        parse_qq_channel(a, cfg, qq_obj);
 
     cfg->channels.channel_config_len = 0;
     if (obj->data.object.pairs && cfg->channels.channel_config_len < SC_CHANNEL_CONFIG_MAX) {

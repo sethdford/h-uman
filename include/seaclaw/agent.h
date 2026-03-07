@@ -99,6 +99,10 @@ struct sc_agent {
     size_t conversation_context_len;
     uint32_t max_response_chars;
 
+    /* Per-contact memory scoping (set by daemon, not owned) */
+    const char *memory_session_id;
+    size_t memory_session_id_len;
+
     sc_owned_message_t *history; /* owned array; grows */
     size_t history_count;
     size_t history_cap;

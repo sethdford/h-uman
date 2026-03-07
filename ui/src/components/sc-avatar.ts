@@ -1,5 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import "./sc-status-dot.js";
 
 type AvatarSize = "sm" | "md" | "lg";
 type AvatarStatus = "online" | "offline" | "busy" | "away" | "";
@@ -63,48 +64,27 @@ export class ScAvatar extends LitElement {
       object-fit: cover;
     }
 
-    .status-dot {
+    .status-dot-wrap {
       position: absolute;
       bottom: 0;
       right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border-radius: 50%;
       border: 2px solid var(--sc-bg-overlay);
+      box-sizing: border-box;
     }
 
-    .status-dot.online {
-      background: var(--sc-success);
+    .status-dot-wrap.size-sm {
+      width: calc(var(--sc-space-sm) + var(--sc-space-2xs) * 2);
+      height: calc(var(--sc-space-sm) + var(--sc-space-2xs) * 2);
     }
 
-    .status-dot.online.pulse {
-      animation: sc-avatar-pulse var(--sc-duration-slow) ease-in-out infinite;
-    }
-
-    @keyframes sc-avatar-pulse {
-      0%,
-      100% {
-        box-shadow: 0 0 0 0 var(--sc-success);
-      }
-      50% {
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--sc-success) 30%, transparent);
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .status-dot.online.pulse {
-        animation: none;
-      }
-    }
-
-    .status-dot.offline {
-      background: var(--sc-text-muted);
-    }
-
-    .status-dot.busy {
-      background: var(--sc-error);
-    }
-
-    .status-dot.away {
-      background: var(--sc-warning);
+    .status-dot-wrap.size-md,
+    .status-dot-wrap.size-lg {
+      width: calc(0.625rem + var(--sc-space-2xs) * 2);
+      height: calc(0.625rem + var(--sc-space-2xs) * 2);
     }
   `;
 
@@ -125,17 +105,12 @@ export class ScAvatar extends LitElement {
     return SIZE_MAP[this.size];
   }
 
-  private get _statusDotSize(): number {
-    return Math.round(this._sizePx * 0.3);
-  }
-
   private _onImageError = (): void => {
     this._imageError = true;
   };
 
   override render() {
     const sizePx = this._sizePx;
-    const dotSize = this._statusDotSize;
     const showImage = this.src && !this._imageError;
     const initials = getInitials(this.name || "?");
     const initialsBg = getInitialsBg(this.name || "0");
@@ -153,19 +128,21 @@ export class ScAvatar extends LitElement {
         "
       >
         ${showImage
-          ? html`<img src=${this.src} alt="" @error=${this._onImageError} />`
+          ? html`<img
+              src=${this.src}
+              alt=${this.name || "User avatar"}
+              @error=${this._onImageError}
+            />`
           : html`<span>${initials}</span>`}
       </div>
       ${this.status
         ? html`
-            <div
-              class="status-dot ${this.status} ${this.status === "online" ? "pulse" : ""}"
-              aria-hidden="true"
-              style="
-                width: ${dotSize}px;
-                height: ${dotSize}px;
-              "
-            ></div>
+            <div class="status-dot-wrap size-${this.size}" aria-hidden="true">
+              <sc-status-dot
+                status=${this.status}
+                size=${this.size === "lg" ? "md" : "sm"}
+              ></sc-status-dot>
+            </div>
           `
         : null}
     `;

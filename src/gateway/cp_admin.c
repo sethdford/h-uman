@@ -7,6 +7,7 @@
 #include "seaclaw/channel_catalog.h"
 #include "seaclaw/config.h"
 #include "seaclaw/core/process_util.h"
+#include "seaclaw/core/string.h"
 #include "seaclaw/cost.h"
 #include "seaclaw/gateway/oauth.h"
 #include "seaclaw/security.h"
@@ -18,6 +19,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef SC_GATEWAY_POSIX
+#include <pthread.h>
+#endif
 
 #ifdef SC_HAS_CRON
 #include "seaclaw/cron.h"
@@ -1089,6 +1093,78 @@ sc_error_t cp_admin_cron_remove(sc_allocator_t *alloc, sc_app_context_t *app, sc
 
 /* ── cron.run ────────────────────────────────────────────────────────── */
 
+#if !SC_IS_TEST && defined(SC_GATEWAY_POSIX)
+typedef struct cron_run_work {
+    sc_app_context_t *app;
+    uint64_t job_id;
+    char *command;
+    char *channel;
+    sc_cron_job_type_t type;
+} cron_run_work_t;
+
+static void *cron_run_worker(void *arg) {
+    cron_run_work_t *w = (cron_run_work_t *)arg;
+    if (!w || !w->app || !w->app->alloc || !w->command) {
+        if (w && w->app && w->app->alloc) {
+            if (w->command)
+                w->app->alloc->free(w->app->alloc->ctx, w->command, strlen(w->command) + 1);
+            if (w->channel)
+                w->app->alloc->free(w->app->alloc->ctx, w->channel, strlen(w->channel) + 1);
+            w->app->alloc->free(w->app->alloc->ctx, w, sizeof(cron_run_work_t));
+        }
+        return NULL;
+    }
+    sc_app_context_t *app = w->app;
+    sc_allocator_t *alloc = app->alloc;
+    uint64_t job_id = w->job_id;
+    bool started = false;
+
+    if (w->type == SC_CRON_JOB_AGENT && app->agent) {
+        char *reply = NULL;
+        size_t reply_len = 0;
+        app->agent->active_channel = w->channel ? w->channel : "gateway";
+        app->agent->active_channel_len = strlen(app->agent->active_channel);
+        app->agent->active_job_id = job_id;
+        sc_error_t run_err =
+            sc_agent_turn(app->agent, w->command, strlen(w->command), &reply, &reply_len);
+        app->agent->active_job_id = 0;
+        started = (run_err == SC_OK);
+        sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL),
+                        started ? "completed" : "failed", reply);
+        if (reply)
+            app->alloc->free(app->alloc->ctx, reply, reply_len + 1);
+    } else {
+        const char *argv[] = {"/bin/sh", "-c", w->command, NULL};
+        sc_run_result_t run_result = {0};
+        sc_error_t run_err = sc_process_run(app->alloc, argv, NULL, 65536, &run_result);
+        started = (run_err == SC_OK);
+        const char *run_output = run_result.stdout_buf;
+        sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL),
+                        started ? "completed" : "failed", run_output);
+        sc_run_result_free(app->alloc, &run_result);
+    }
+
+    if (app->bus) {
+        sc_bus_event_t bev;
+        memset(&bev, 0, sizeof(bev));
+        bev.type = SC_BUS_CRON_COMPLETED;
+        snprintf(bev.channel, SC_BUS_CHANNEL_LEN, "cron");
+        snprintf(bev.id, SC_BUS_ID_LEN, "%llu", (unsigned long long)job_id);
+        snprintf(bev.message, SC_BUS_MSG_LEN, "%s", started ? "completed" : "failed");
+        sc_bus_publish(app->bus, &bev);
+    }
+
+    if (w && alloc) {
+        if (w->command)
+            alloc->free(alloc->ctx, w->command, strlen(w->command) + 1);
+        if (w->channel)
+            alloc->free(alloc->ctx, w->channel, strlen(w->channel) + 1);
+        alloc->free(alloc->ctx, w, sizeof(cron_run_work_t));
+    }
+    return NULL;
+}
+#endif
+
 sc_error_t cp_admin_cron_run(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
                              const sc_control_protocol_t *proto, const sc_json_value_t *root,
                              char **out, size_t *out_len) {
@@ -1116,7 +1192,47 @@ sc_error_t cp_admin_cron_run(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws
                         snprintf(bev.message, SC_BUS_MSG_LEN, "%s", job->name ? job->name : "");
                         sc_bus_publish(app->bus, &bev);
                     }
-#if !SC_IS_TEST
+#if !SC_IS_TEST && defined(SC_GATEWAY_POSIX)
+                    cron_run_work_t *w = (cron_run_work_t *)app->alloc->alloc(
+                        app->alloc->ctx, sizeof(cron_run_work_t));
+                    if (w) {
+                        memset(w, 0, sizeof(*w));
+                        w->app = app;
+                        w->job_id = job_id;
+                        w->command = sc_strdup(app->alloc, job->command);
+                        w->channel = job->channel ? sc_strdup(app->alloc, job->channel) : NULL;
+                        w->type = job->type;
+                        if (w->command) {
+                            pthread_attr_t attr;
+                            pthread_t tid;
+                            pthread_attr_init(&attr);
+                            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+                            if (pthread_create(&tid, &attr, cron_run_worker, w) == 0) {
+                                started = true;
+                                status_msg = "running";
+                            } else {
+                                app->alloc->free(app->alloc->ctx, w->command,
+                                                 strlen(w->command) + 1);
+                                if (w->channel)
+                                    app->alloc->free(app->alloc->ctx, w->channel,
+                                                     strlen(w->channel) + 1);
+                                app->alloc->free(app->alloc->ctx, w, sizeof(cron_run_work_t));
+                                status_msg = "failed to start worker";
+                            }
+                            pthread_attr_destroy(&attr);
+                        } else {
+                            app->alloc->free(app->alloc->ctx, w, sizeof(cron_run_work_t));
+                            status_msg = "out of memory";
+                        }
+                    } else {
+                        status_msg = "out of memory";
+                    }
+#else
+                    started = true;
+#if SC_IS_TEST
+                    status_msg = "running";
+#else
+                    /* Non-POSIX or fallback: run synchronously (blocks WebSocket thread) */
                     if (job->type == SC_CRON_JOB_AGENT && app->agent) {
                         char *reply = NULL;
                         size_t reply_len = 0;
@@ -1142,9 +1258,6 @@ sc_error_t cp_admin_cron_run(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws
                                         started ? "completed" : "failed", run_output);
                         sc_run_result_free(app->alloc, &run_result);
                     }
-#else
-                    started = true;
-#endif
                     if (app->bus) {
                         sc_bus_event_t bev;
                         memset(&bev, 0, sizeof(bev));
@@ -1156,6 +1269,8 @@ sc_error_t cp_admin_cron_run(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws
                         sc_bus_publish(app->bus, &bev);
                     }
                     status_msg = started ? "completed" : "failed";
+#endif
+#endif
                 } else {
                     status_msg = "job not found";
                 }

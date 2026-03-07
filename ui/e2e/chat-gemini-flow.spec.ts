@@ -8,9 +8,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Chat Gemini Flow", () => {
   test("full chat flow - send message and get demo response", async ({ page }) => {
     await page.goto("/?demo#chat");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(1500);
-
+    await page.waitForLoadState("domcontentloaded");
     const chatView = page.locator("sc-app >> sc-chat-view");
     await expect(chatView).toBeAttached({ timeout: 10000 });
 

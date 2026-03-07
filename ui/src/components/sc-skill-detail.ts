@@ -30,8 +30,8 @@ export class ScSkillDetail extends LitElement {
     }
 
     .detail-icon {
-      width: 40px;
-      height: 40px;
+      width: 2.5rem;
+      height: 2.5rem;
       border-radius: var(--sc-radius-lg);
       background: var(--sc-bg-inset);
       display: flex;

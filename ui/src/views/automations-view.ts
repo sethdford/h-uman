@@ -8,6 +8,7 @@ import "../components/sc-button.js";
 import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 import "../components/sc-metric-row.js";
 import "../components/sc-tabs.js";
 import "../components/sc-modal.js";
@@ -59,13 +60,6 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       margin: 0 auto;
       font-family: var(--sc-font);
       color: var(--sc-text);
-    }
-
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
     }
 
     .job-list {
@@ -127,17 +121,6 @@ export class ScAutomationsView extends GatewayAwareLitElement {
     .template-card .template-schedule {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-faint);
-    }
-
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
     }
   `;
 
@@ -403,7 +386,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   private _renderStats() {
     return html`
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-stat-card
           .value=${this.totalCount}
           label="Total"
@@ -427,7 +410,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           accent="error"
           style="--sc-stagger-delay: 150ms"
         ></sc-stat-card>
-      </div>
+      </sc-stats-row>
       <sc-metric-row
         .items=${[
           {
@@ -452,7 +435,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>
         <sc-skeleton variant="card" height="90px"></sc-skeleton>

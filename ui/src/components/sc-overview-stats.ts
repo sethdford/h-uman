@@ -2,6 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import "../components/sc-stat-card.js";
 import "../components/sc-metric-row.js";
+import "../components/sc-stats-row.js";
 
 export interface StatMetric {
   label: string;
@@ -28,31 +29,12 @@ export class ScOverviewStats extends LitElement {
     .metrics-block {
       margin-bottom: var(--sc-space-2xl);
     }
-
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
-    }
-
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
-    }
   `;
 
   override render() {
     return html`
       <div class="metrics-block">
-        <div class="stats-row">
+        <sc-stats-row>
           ${this.metrics.map(
             (m, i) => html`
               <sc-stat-card
@@ -63,7 +45,7 @@ export class ScOverviewStats extends LitElement {
               ></sc-stat-card>
             `,
           )}
-        </div>
+        </sc-stats-row>
         <sc-metric-row .items=${this.metricRowItems}></sc-metric-row>
       </div>
     `;

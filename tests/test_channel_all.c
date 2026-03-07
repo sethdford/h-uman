@@ -7,6 +7,7 @@
 #include <string.h>
 
 #if SC_HAS_TELEGRAM
+#include "seaclaw/channel_loop.h"
 #include "seaclaw/channels/telegram.h"
 #endif
 
@@ -15,6 +16,7 @@
 #include "seaclaw/channels/discord.h"
 #endif
 #if SC_HAS_SLACK
+#include "seaclaw/channel_loop.h"
 #include "seaclaw/channels/slack.h"
 #endif
 #if SC_HAS_WHATSAPP
@@ -269,6 +271,40 @@ static void test_slack_webhook_malformed(void) {
     SC_ASSERT_EQ(err, SC_OK);
     sc_slack_destroy(&ch);
 }
+
+#if SC_IS_TEST
+static void test_slack_inject_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_slack_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_slack_test_inject_mock(&ch, "C0001", 5, "Hello from test!", 16);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_slack_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(msgs[0].content, "Hello from test!");
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "C0001");
+    sc_slack_destroy(&ch);
+}
+
+static void test_slack_send_captures_last_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_slack_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "C0001", 5, "Test reply", 10, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *msg = sc_slack_test_get_last_message(&ch, &len);
+    SC_ASSERT(msg != NULL);
+    SC_ASSERT_EQ(len, 10);
+    SC_ASSERT_STR_EQ(msg, "Test reply");
+    sc_slack_destroy(&ch);
+}
+#endif
 #endif
 
 /* ─── WhatsApp ────────────────────────────────────────────────────────────── */
@@ -1071,6 +1107,40 @@ static void test_imessage_poll_null_args(void) {
     sc_error_t err = sc_imessage_poll(NULL, NULL, NULL, 0, NULL);
     SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
 }
+
+#if SC_IS_TEST
+static void test_imessage_inject_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_imessage_test_inject_mock(&ch, "+15559876543", 12, "Hello from test!", 16);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_imessage_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(msgs[0].content, "Hello from test!");
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "+15559876543");
+    sc_imessage_destroy(&ch);
+}
+
+static void test_imessage_send_captures_last_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "+15551234567", 12, "Test reply", 10, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *msg = sc_imessage_test_get_last_message(&ch, &len);
+    SC_ASSERT(msg != NULL);
+    SC_ASSERT_EQ(len, 10);
+    SC_ASSERT_STR_EQ(msg, "Test reply");
+    sc_imessage_destroy(&ch);
+}
+#endif
 #endif
 
 /* ─── Mattermost ───────────────────────────────────────────────────────────── */
@@ -1168,6 +1238,7 @@ static void test_dingtalk_health_check(void) {
 
 /* ─── Signal, Nostr, QQ, MaixCam, Dispatch (always in test build) ───────── */
 #if SC_HAS_SIGNAL
+#include "seaclaw/channel_loop.h"
 #include "seaclaw/channels/signal.h"
 static void test_signal_create(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -1230,6 +1301,40 @@ static void test_signal_send_long_message(void) {
     SC_ASSERT_EQ(err, SC_OK);
     sc_signal_destroy(&ch);
 }
+
+#if SC_IS_TEST
+static void test_signal_inject_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_signal_create(&alloc, "http://localhost:8080", 21, "+15551234567", 12, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_signal_test_inject_mock(&ch, "+15559876543", 12, "Hello from test!", 16);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_signal_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(msgs[0].content, "Hello from test!");
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "+15559876543");
+    sc_signal_destroy(&ch);
+}
+
+static void test_signal_send_captures_last_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_signal_create(&alloc, "http://localhost", 16, "a", 1, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "+15551234567", 12, "Test reply", 10, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *msg = sc_signal_test_get_last_message(&ch, &len);
+    SC_ASSERT(msg != NULL);
+    SC_ASSERT_EQ(len, 10);
+    SC_ASSERT_STR_EQ(msg, "Test reply");
+    sc_signal_destroy(&ch);
+}
+#endif
 #endif
 
 #if SC_HAS_NOSTR
@@ -1588,6 +1693,40 @@ static void test_telegram_webhook_malformed(void) {
     SC_ASSERT_EQ(err, SC_OK);
     sc_telegram_destroy(&ch);
 }
+
+#if SC_IS_TEST
+static void test_telegram_inject_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_telegram_create(&alloc, "test:token", 10, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_telegram_test_inject_mock(&ch, "chat123", 7, "Hello from test!", 16);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_telegram_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(msgs[0].content, "Hello from test!");
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "chat123");
+    sc_telegram_destroy(&ch);
+}
+
+static void test_telegram_send_captures_last_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_telegram_create(&alloc, "test:token", 10, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "12345", 5, "Test reply", 10, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *msg = sc_telegram_test_get_last_message(&ch, &len);
+    SC_ASSERT(msg != NULL);
+    SC_ASSERT_EQ(len, 10);
+    SC_ASSERT_STR_EQ(msg, "Test reply");
+    sc_telegram_destroy(&ch);
+}
+#endif
 #endif
 
 #if SC_HAS_DISCORD
@@ -1648,6 +1787,40 @@ static void test_discord_webhook_malformed(void) {
     SC_ASSERT_EQ(err, SC_OK);
     sc_discord_destroy(&ch);
 }
+
+#if SC_IS_TEST
+static void test_discord_inject_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_discord_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_discord_test_inject_mock(&ch, "channel1", 8, "Hello from test!", 16);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_discord_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(msgs[0].content, "Hello from test!");
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "channel1");
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_send_captures_last_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_discord_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "channel1", 8, "Test reply", 10, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *msg = sc_discord_test_get_last_message(&ch, &len);
+    SC_ASSERT(msg != NULL);
+    SC_ASSERT_EQ(len, 10);
+    SC_ASSERT_STR_EQ(msg, "Test reply");
+    sc_discord_destroy(&ch);
+}
+#endif
 #endif
 
 #if SC_HAS_WEB
@@ -1944,6 +2117,10 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_signal_health_check);
     SC_RUN_TEST(test_signal_start_stop_typing);
     SC_RUN_TEST(test_signal_send_long_message);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_signal_inject_and_poll);
+    SC_RUN_TEST(test_signal_send_captures_last_message);
+#endif
 #endif
 #if SC_HAS_NOSTR
     SC_RUN_TEST(test_nostr_create);
@@ -1991,6 +2168,10 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_telegram_allowlist);
     SC_RUN_TEST(test_telegram_send_long_message);
     SC_RUN_TEST(test_telegram_webhook_malformed);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_telegram_inject_and_poll);
+    SC_RUN_TEST(test_telegram_send_captures_last_message);
+#endif
 #endif
 #if SC_HAS_DISCORD
     SC_RUN_TEST(test_discord_start_stop_lifecycle);
@@ -2002,6 +2183,10 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_discord_poll_test_mode);
     SC_RUN_TEST(test_discord_poll_empty);
     SC_RUN_TEST(test_discord_webhook_malformed);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_discord_inject_and_poll);
+    SC_RUN_TEST(test_discord_send_captures_last_message);
+#endif
 #endif
 #if SC_HAS_SLACK
     SC_RUN_TEST(test_slack_create);
@@ -2012,6 +2197,10 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_slack_create_ex);
     SC_RUN_TEST(test_slack_poll_test_mode);
     SC_RUN_TEST(test_slack_webhook_malformed);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_slack_inject_and_poll);
+    SC_RUN_TEST(test_slack_send_captures_last_message);
+#endif
 #endif
 #if SC_HAS_WHATSAPP
     SC_RUN_TEST(test_whatsapp_create);
@@ -2120,6 +2309,10 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_imessage_is_configured);
     SC_RUN_TEST(test_imessage_poll_test_mode);
     SC_RUN_TEST(test_imessage_poll_null_args);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_imessage_inject_and_poll);
+    SC_RUN_TEST(test_imessage_send_captures_last_message);
+#endif
 #endif
 #if SC_HAS_MATTERMOST
     SC_RUN_TEST(test_mattermost_create);

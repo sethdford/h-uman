@@ -39,7 +39,10 @@ test.describe("Chat via Gateway Direct", () => {
         return { ok: false, error: String(e) };
       }
     });
-    console.log("Send result:", sendResult);
+    expect(
+      sendResult.ok,
+      `chat.send should succeed: ${(sendResult as { error?: string }).error ?? "unknown"}`,
+    ).toBe(true);
 
     // 4. Wait 15 seconds for Gemini response
     await page.waitForTimeout(15000);
@@ -50,11 +53,11 @@ test.describe("Chat via Gateway Direct", () => {
       fullPage: true,
     });
 
-    // 6. Check for errors
+    // 6. Assert assistant content appeared
     const pageText = await page.evaluate(() => document.body.innerText);
-    const hasError = pageText.includes("Retry last message") || pageText.includes("error");
     const hasAssistant =
       pageText.includes("assistant") || pageText.includes("SeaClaw") || pageText.includes("Gemini");
+    expect(hasAssistant, "Page should contain assistant response content").toBe(true);
 
     // 7. Try interacting with chat input (skip if no chat view, e.g. demo mode)
     const chatView = page.locator("sc-app >> sc-chat-view");
@@ -75,8 +78,5 @@ test.describe("Chat via Gateway Direct", () => {
         fullPage: true,
       });
     }
-
-    console.log("Has error indicator:", hasError);
-    console.log("Has assistant content:", hasAssistant);
   });
 });

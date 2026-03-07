@@ -61,7 +61,7 @@ export class ScCard extends LitElement {
       top: 0;
       left: 0;
       right: 0;
-      height: 100px;
+      height: 6.25rem;
       background: radial-gradient(
         ellipse 90% 70% at 50% -20%,
         color-mix(in srgb, var(--sc-accent) 6%, transparent),
@@ -88,10 +88,10 @@ export class ScCard extends LitElement {
     /* Accent top-band — teal gradient bar + tinted wash below */
     .card.accent {
       border-top: none;
-      padding-top: calc(var(--sc-space-xl) + 4px); /* sc-lint-ok: token + micro-adjust */
+      padding-top: calc(var(--sc-space-xl) + var(--sc-space-xs));
     }
     .card.accent::after {
-      height: 4px;
+      height: var(--sc-space-xs);
       top: 0;
       background: linear-gradient(
         90deg,

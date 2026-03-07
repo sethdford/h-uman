@@ -17,6 +17,7 @@ export class ScDropdown extends LitElement {
   @property({ type: Boolean }) open = false;
   @property({ type: Array }) items: DropdownItem[] = [];
   @property({ type: String }) align: DropdownAlign = "start";
+  @property({ type: String, attribute: "aria-label" }) ariaLabel = "";
 
   @state() private _focusedIndex = -1;
   private _keyHandler = this._onKeyDown.bind(this);
@@ -252,7 +253,12 @@ export class ScDropdown extends LitElement {
     let itemIndex = -1;
 
     return html`
-      <div class="trigger" aria-haspopup="menu" aria-expanded=${this.open}>
+      <div
+        class="trigger"
+        aria-haspopup="menu"
+        aria-expanded=${this.open}
+        aria-label=${this.ariaLabel || undefined}
+      >
         <slot></slot>
       </div>
       ${this.open

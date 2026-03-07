@@ -20,24 +20,27 @@ Response: `{ "id": "uuid", ...result }` or `{ "id": "uuid", "error": "message" }
 
 All methods follow `noun.verb` convention (e.g., `chat.send`, `sessions.list`).
 
-## Method Catalog (35 methods)
+## Method Catalog (41 methods)
 
 | Namespace    | Methods |
 |-------------|---------|
-| `chat`      | `send`, `history` |
+| `chat`      | `send`, `history`, `abort` |
 | `sessions`  | `list`, `delete`, `patch` |
 | `channels`  | `status` |
-| `tools`     | `list`, `catalog` |
+| `tools`     | `catalog` |
 | `models`    | `list` |
-| `config`    | `get`, `set`, `schema` |
+| `config`    | `get`, `set`, `schema`, `apply` |
 | `skills`    | `list`, `search`, `install`, `uninstall`, `enable`, `disable`, `update` |
-| `nodes`     | `list`, `action` |
+| `nodes`     | `list` |
 | `agents`    | `list` |
 | `cron`      | `list`, `add`, `remove`, `update`, `run`, `runs` |
 | `usage`     | `summary` |
 | `activity`  | `recent` |
 | `persona`   | `set` |
-| `update`    | `check` |
+| `update`    | `check`, `run` |
+| `auth`      | `token`, `oauth.start`, `oauth.callback`, `oauth.refresh` |
+| `exec`      | `approval.resolve` |
+| `push`      | `register`, `unregister` |
 | Singletons  | `connect`, `health`, `capabilities` |
 
 ## Demo Gateway Rules

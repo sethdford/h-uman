@@ -20,4 +20,11 @@ bool sc_imessage_is_configured(sc_channel_t *ch);
 sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
                             size_t max_msgs, size_t *out_count);
 
+#if SC_IS_TEST
+sc_error_t sc_imessage_test_inject_mock(sc_channel_t *ch, const char *session_key,
+                                        size_t session_key_len, const char *content,
+                                        size_t content_len);
+const char *sc_imessage_test_get_last_message(sc_channel_t *ch, size_t *out_len);
+#endif
+
 #endif /* SC_CHANNELS_IMESSAGE_H */

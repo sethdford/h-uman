@@ -80,6 +80,24 @@
 #if SC_HAS_NOSTR
 #include "seaclaw/channels/nostr.h"
 #endif
+#if SC_HAS_LARK
+#include "seaclaw/channels/lark.h"
+#endif
+#if SC_HAS_DINGTALK
+#include "seaclaw/channels/dingtalk.h"
+#endif
+#if SC_HAS_TEAMS
+#include "seaclaw/channels/teams.h"
+#endif
+#if SC_HAS_TWILIO
+#include "seaclaw/channels/twilio.h"
+#endif
+#if SC_HAS_ONEBOT
+#include "seaclaw/channels/onebot.h"
+#endif
+#if SC_HAS_QQ
+#include "seaclaw/channels/qq.h"
+#endif
 
 #ifdef SC_HAS_CRON
 #include "seaclaw/cron.h"
@@ -212,6 +230,48 @@ static void destroy_irc_wrap(sc_channel_t *ch, sc_allocator_t *a) {
 static void destroy_nostr_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
     sc_nostr_destroy(ch);
+    (void)ch;
+}
+#endif
+#if SC_HAS_LARK
+static void destroy_lark_wrap(sc_channel_t *ch, sc_allocator_t *a) {
+    (void)a;
+    sc_lark_destroy(ch);
+    (void)ch;
+}
+#endif
+#if SC_HAS_DINGTALK
+static void destroy_dingtalk_wrap(sc_channel_t *ch, sc_allocator_t *a) {
+    (void)a;
+    sc_dingtalk_destroy(ch);
+    (void)ch;
+}
+#endif
+#if SC_HAS_TEAMS
+static void destroy_teams_wrap(sc_channel_t *ch, sc_allocator_t *a) {
+    (void)a;
+    sc_teams_destroy(ch);
+    (void)ch;
+}
+#endif
+#if SC_HAS_TWILIO
+static void destroy_twilio_wrap(sc_channel_t *ch, sc_allocator_t *a) {
+    (void)a;
+    sc_twilio_destroy(ch);
+    (void)ch;
+}
+#endif
+#if SC_HAS_ONEBOT
+static void destroy_onebot_wrap(sc_channel_t *ch, sc_allocator_t *a) {
+    (void)a;
+    sc_onebot_destroy(ch);
+    (void)ch;
+}
+#endif
+#if SC_HAS_QQ
+static void destroy_qq_wrap(sc_channel_t *ch, sc_allocator_t *a) {
+    (void)a;
+    sc_qq_destroy(ch);
     (void)ch;
 }
 #endif
@@ -899,6 +959,146 @@ sc_error_t sc_app_bootstrap(sc_app_ctx_t *ctx, sc_allocator_t *alloc, const char
                 bi->channels[ch_count].interval_ms = 2000;
                 bi->channels[ch_count].last_poll_ms = 0;
                 bi->channel_destroys[ch_count] = destroy_nostr_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if SC_HAS_LARK
+        if (((cfg->channels.lark.app_id && cfg->channels.lark.app_secret) ||
+             cfg->channels.lark.webhook_url) &&
+            ch_count < SC_BOOTSTRAP_CHANNELS_MAX) {
+            const char *id_or_wh = cfg->channels.lark.webhook_url ? cfg->channels.lark.webhook_url
+                                                                  : cfg->channels.lark.app_id;
+            size_t id_len = cfg->channels.lark.webhook_url ? strlen(cfg->channels.lark.webhook_url)
+                                                           : strlen(cfg->channels.lark.app_id);
+            const char *secret =
+                cfg->channels.lark.webhook_url ? "" : cfg->channels.lark.app_secret;
+            size_t secret_len =
+                cfg->channels.lark.webhook_url ? 0 : strlen(cfg->channels.lark.app_secret);
+            err = sc_lark_create(alloc, id_or_wh, id_len, secret, secret_len,
+                                 &bi->channel_slots[ch_count]);
+            if (err == SC_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = sc_lark_poll;
+                bi->channels[ch_count].webhook_fn = sc_lark_on_webhook;
+                bi->channels[ch_count].interval_ms = 1000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_lark_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if SC_HAS_DINGTALK
+        if (((cfg->channels.dingtalk.app_key && cfg->channels.dingtalk.app_secret) ||
+             cfg->channels.dingtalk.webhook_url) &&
+            ch_count < SC_BOOTSTRAP_CHANNELS_MAX) {
+            const char *key_or_wh = cfg->channels.dingtalk.webhook_url
+                                        ? cfg->channels.dingtalk.webhook_url
+                                        : cfg->channels.dingtalk.app_key;
+            size_t key_len = cfg->channels.dingtalk.webhook_url
+                                 ? strlen(cfg->channels.dingtalk.webhook_url)
+                                 : strlen(cfg->channels.dingtalk.app_key);
+            const char *secret =
+                cfg->channels.dingtalk.webhook_url ? "" : cfg->channels.dingtalk.app_secret;
+            size_t secret_len =
+                cfg->channels.dingtalk.webhook_url ? 0 : strlen(cfg->channels.dingtalk.app_secret);
+            err = sc_dingtalk_create(alloc, key_or_wh, key_len, secret, secret_len,
+                                     &bi->channel_slots[ch_count]);
+            if (err == SC_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = sc_dingtalk_poll;
+                bi->channels[ch_count].webhook_fn = sc_dingtalk_on_webhook;
+                bi->channels[ch_count].interval_ms = 1000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_dingtalk_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if SC_HAS_TEAMS
+        if (cfg->channels.teams.webhook_url && ch_count < SC_BOOTSTRAP_CHANNELS_MAX) {
+            err = sc_teams_create(alloc, cfg->channels.teams.webhook_url,
+                                  strlen(cfg->channels.teams.webhook_url),
+                                  &bi->channel_slots[ch_count]);
+            if (err == SC_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = sc_teams_poll;
+                bi->channels[ch_count].webhook_fn = sc_teams_on_webhook;
+                bi->channels[ch_count].interval_ms = 1000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_teams_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if SC_HAS_TWILIO
+        if (cfg->channels.twilio.account_sid && cfg->channels.twilio.auth_token &&
+            cfg->channels.twilio.from_number && cfg->channels.twilio.to_number &&
+            ch_count < SC_BOOTSTRAP_CHANNELS_MAX) {
+            err = sc_twilio_create(
+                alloc, cfg->channels.twilio.account_sid, strlen(cfg->channels.twilio.account_sid),
+                cfg->channels.twilio.auth_token, strlen(cfg->channels.twilio.auth_token),
+                cfg->channels.twilio.from_number, strlen(cfg->channels.twilio.from_number),
+                cfg->channels.twilio.to_number, strlen(cfg->channels.twilio.to_number),
+                &bi->channel_slots[ch_count]);
+            if (err == SC_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = sc_twilio_poll;
+                bi->channels[ch_count].webhook_fn = sc_twilio_on_webhook;
+                bi->channels[ch_count].interval_ms = 1000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_twilio_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if SC_HAS_ONEBOT
+        if (cfg->channels.onebot.api_base && cfg->channels.onebot.user_id &&
+            ch_count < SC_BOOTSTRAP_CHANNELS_MAX) {
+            const char *tok = cfg->channels.onebot.access_token;
+            const char *uid = cfg->channels.onebot.user_id;
+            err = sc_onebot_create_ex(alloc, cfg->channels.onebot.api_base,
+                                      strlen(cfg->channels.onebot.api_base), tok ? tok : "",
+                                      tok ? strlen(tok) : 0, uid, strlen(uid),
+                                      &bi->channel_slots[ch_count]);
+            if (err == SC_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = sc_onebot_poll;
+                bi->channels[ch_count].webhook_fn = sc_onebot_on_webhook;
+                bi->channels[ch_count].interval_ms = 1000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_onebot_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if SC_HAS_QQ
+        if (cfg->channels.qq.app_id && cfg->channels.qq.bot_token &&
+            ch_count < SC_BOOTSTRAP_CHANNELS_MAX) {
+            const char *ch_id = cfg->channels.qq.channel_id;
+            err = sc_qq_create_ex(alloc, cfg->channels.qq.app_id, strlen(cfg->channels.qq.app_id),
+                                  cfg->channels.qq.bot_token, strlen(cfg->channels.qq.bot_token),
+                                  ch_id ? ch_id : "", ch_id ? strlen(ch_id) : 0,
+                                  cfg->channels.qq.sandbox, &bi->channel_slots[ch_count]);
+            if (err == SC_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = sc_qq_poll;
+                bi->channels[ch_count].webhook_fn = sc_qq_on_webhook;
+                bi->channels[ch_count].interval_ms = 1000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_qq_wrap;
                 ch_count++;
             }
         }

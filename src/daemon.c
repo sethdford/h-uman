@@ -792,6 +792,14 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->conversation_context = convo_ctx;
                 agent->conversation_context_len = convo_ctx_len;
                 agent->max_response_chars = max_chars;
+
+                /* Scope memory to this contact */
+                agent->memory_session_id = batch_key;
+                agent->memory_session_id_len = key_len;
+                if (agent->memory && agent->memory->vtable) {
+                    agent->memory->current_session_id = batch_key;
+                    agent->memory->current_session_id_len = key_len;
+                }
 #endif
 
                 sc_error_t err =
@@ -804,6 +812,12 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 agent->conversation_context = NULL;
                 agent->conversation_context_len = 0;
                 agent->max_response_chars = 0;
+                agent->memory_session_id = NULL;
+                agent->memory_session_id_len = 0;
+                if (agent->memory && agent->memory->vtable) {
+                    agent->memory->current_session_id = NULL;
+                    agent->memory->current_session_id_len = 0;
+                }
                 if (contact_ctx)
                     alloc->free(alloc->ctx, contact_ctx, contact_ctx_len + 1);
                 if (convo_ctx)

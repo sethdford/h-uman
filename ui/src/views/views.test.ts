@@ -179,18 +179,26 @@ describe("sc-channels-view", () => {
 });
 
 describe("sc-sessions-view", () => {
-  it("dispatches navigate to chat on connect", async () => {
-    const wrapper = document.createElement("div");
-    const el = document.createElement("sc-sessions-view") as LitView;
-    let captured: string | undefined;
-    wrapper.addEventListener("navigate", ((e: CustomEvent<string>) => {
-      captured = e.detail;
-    }) as EventListener);
-    wrapper.appendChild(el);
-    document.body.appendChild(wrapper);
+  it("renders sc-page-hero with heading", async () => {
+    const el = createView("sc-sessions-view");
     await el.updateComplete;
-    expect(captured).toBe("chat");
-    wrapper.remove();
+    const hero = el.shadowRoot?.querySelector("sc-page-hero");
+    expect(hero).toBeTruthy();
+    const header = el.shadowRoot?.querySelector("sc-section-header");
+    expect(header?.getAttribute("heading")).toBe("Sessions");
+    el.remove();
+  });
+
+  it("renders skeleton while loading or content when loaded", async () => {
+    const el = createView("sc-sessions-view");
+    await el.updateComplete;
+    const hasSkeleton = el.shadowRoot?.querySelector("sc-skeleton");
+    const hasCard = el.shadowRoot?.querySelector("sc-card");
+    const hasEmptyState = el.shadowRoot?.querySelector("sc-empty-state");
+    const hasHero = el.shadowRoot?.querySelector("sc-page-hero");
+    expect(hasHero).toBeTruthy();
+    expect(hasSkeleton || hasCard || hasEmptyState).toBeTruthy();
+    el.remove();
   });
 });
 
@@ -337,6 +345,7 @@ describe("view accessibility", () => {
     "sc-overview-view",
     "sc-chat-view",
     "sc-agents-view",
+    "sc-sessions-view",
     "sc-models-view",
     "sc-config-view",
     "sc-tools-view",
@@ -424,18 +433,24 @@ describe("sc-security-view deep", () => {
 });
 
 describe("sc-sessions-view deep", () => {
-  it("dispatches navigate event with chat detail", async () => {
-    const wrapper = document.createElement("div");
-    const el = document.createElement("sc-sessions-view") as LitView;
-    let detail: string | undefined;
-    wrapper.addEventListener("navigate", ((e: CustomEvent<string>) => {
-      detail = e.detail;
-    }) as EventListener);
-    wrapper.appendChild(el);
-    document.body.appendChild(wrapper);
+  it("has page hero with Sessions heading", async () => {
+    const el = createView("sc-sessions-view");
     await el.updateComplete;
-    expect(detail).toBe("chat");
-    wrapper.remove();
+    const hero = el.shadowRoot?.querySelector("sc-page-hero");
+    expect(hero).toBeTruthy();
+    const header = el.shadowRoot?.querySelector("sc-section-header");
+    expect(header?.getAttribute("heading")).toBe("Sessions");
+    el.remove();
+  });
+
+  it("renders sc-skeleton, sc-card, or sc-empty-state", async () => {
+    const el = createView("sc-sessions-view");
+    await el.updateComplete;
+    const skeleton = el.shadowRoot?.querySelector("sc-skeleton");
+    const card = el.shadowRoot?.querySelector("sc-card");
+    const emptyState = el.shadowRoot?.querySelector("sc-empty-state");
+    expect(skeleton || card || emptyState).toBeTruthy();
+    el.remove();
   });
 });
 

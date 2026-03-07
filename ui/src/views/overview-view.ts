@@ -17,6 +17,7 @@ import "../components/sc-section-header.js";
 import "../components/sc-overview-stats.js";
 import "../components/sc-sessions-table.js";
 import "../components/sc-activity-timeline.js";
+import "../components/sc-status-dot.js";
 import "../components/sc-chart.js";
 
 interface HealthRes {
@@ -130,41 +131,6 @@ export class ScOverviewView extends GatewayAwareLitElement {
     .staleness {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
-    }
-
-    .status-dot {
-      width: 0.625rem;
-      height: 0.625rem;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .status-dot.operational {
-      background: var(--sc-success);
-      box-shadow: 0 0 var(--sc-space-sm) var(--sc-success);
-      animation: sc-status-pulse var(--sc-duration-slow) ease-in-out infinite;
-    }
-
-    .status-dot.offline {
-      background: var(--sc-error);
-    }
-
-    @keyframes sc-status-pulse {
-      0%,
-      100% {
-        box-shadow: 0 0 var(--sc-space-xs) var(--sc-success);
-        opacity: 1;
-      }
-      50% {
-        box-shadow: 0 0 var(--sc-space-md) var(--sc-success);
-        opacity: 0.8;
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .status-dot.operational {
-        animation: none;
-      }
     }
 
     /* ── Detail zone (asymmetric bento) ────────────────── */
@@ -517,10 +483,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
         <div class="hero-inner">
           <div class="hero-left">
             <sc-tooltip text=${gwOk ? "All subsystems responding" : "Gateway is unreachable"}>
-              <span
-                class="status-dot ${gwOk ? "operational" : "offline"}"
-                aria-hidden="true"
-              ></span>
+              <sc-status-dot status=${gwOk ? "operational" : "offline"} size="md"></sc-status-dot>
             </sc-tooltip>
             <div class="hero-status">
               <div class="hero-meta">

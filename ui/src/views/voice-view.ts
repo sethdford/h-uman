@@ -13,6 +13,7 @@ import "../components/sc-skeleton.js";
 import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
 import "../components/sc-stat-card.js";
+import "../components/sc-stats-row.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-voice-orb.js";
 import "../components/sc-voice-conversation.js";
@@ -46,23 +47,6 @@ export class ScVoiceView extends GatewayAwareLitElement {
     }
 
     /* ── Stats row ────────────────────────────────────── */
-
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xl);
-    }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
-      .stats-row {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      .stats-row {
-        grid-template-columns: 1fr;
-      }
-    }
 
     .staleness {
       font-size: var(--sc-text-xs);
@@ -521,7 +505,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
           </sc-button>
         </sc-section-header>
       </sc-page-hero>
-      <div class="stats-row">
+      <sc-stats-row>
         <sc-stat-card
           .value=${this._messages.length}
           label="Messages"
@@ -538,7 +522,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
           label="Sessions"
           style="--sc-stagger-delay: 100ms"
         ></sc-stat-card>
-      </div>
+      </sc-stats-row>
     `;
   }
 

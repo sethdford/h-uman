@@ -16,4 +16,10 @@ sc_error_t sc_irc_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop
 
 void sc_irc_destroy(sc_channel_t *ch);
 
-#endif /* SC_CHANNELS_IRC_H */
+#if SC_IS_TEST
+sc_error_t sc_irc_test_inject_mock(sc_channel_t *ch, const char *session_key,
+                                   size_t session_key_len, const char *content, size_t content_len);
+const char *sc_irc_test_get_last_message(sc_channel_t *ch, size_t *out_len);
+#endif
+
+#endif /* SC_CHANNELS_IRC_H */ /* SC_CHANNELS_IRC_H */

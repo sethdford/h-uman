@@ -28,7 +28,7 @@ export class ScContextMenu extends LitElement {
     .menu {
       position: fixed;
       z-index: 10000;
-      min-width: 180px;
+      min-width: 11.25rem;
       background: color-mix(in srgb, var(--sc-bg-overlay) 92%, transparent);
       backdrop-filter: blur(var(--sc-glass-standard-blur))
         saturate(var(--sc-glass-standard-saturate));

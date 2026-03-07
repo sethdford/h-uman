@@ -266,11 +266,12 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
             (void)sc_agent_internal_append_history(agent, SC_ROLE_ASSISTANT, sresp.content,
                                                    sresp.content_len, NULL, 0, NULL, 0);
             *response_out = sc_strndup(agent->alloc, sresp.content, sresp.content_len);
+            sc_agent_internal_maybe_tts(agent, sresp.content, sresp.content_len);
+            agent->alloc->free(agent->alloc->ctx, (void *)sresp.content, sresp.content_len + 1);
             if (!*response_out)
                 return SC_ERR_OUT_OF_MEMORY;
             if (response_len_out)
                 *response_len_out = sresp.content_len;
-            sc_agent_internal_maybe_tts(agent, sresp.content, sresp.content_len);
         }
         sc_agent_clear_current_for_tools();
         return SC_OK;
