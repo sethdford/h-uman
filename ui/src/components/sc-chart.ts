@@ -145,7 +145,7 @@ export class ScChart extends LitElement {
     const fontFamily = cs.getPropertyValue("--sc-font").trim() || "Avenir, system-ui, sans-serif";
     const textMuted = cs.getPropertyValue("--sc-text-muted").trim() || "hsl(207 24% 47%)";
     const borderSubtle =
-      cs.getPropertyValue("--sc-border-subtle").trim() || "rgba(255,255,255,0.06)";
+      cs.getPropertyValue("--sc-border-subtle").trim() || "color-mix(in srgb, white 6%, transparent)";
 
     const chartType = this.type === "area" ? "line" : this.type;
     const config = {

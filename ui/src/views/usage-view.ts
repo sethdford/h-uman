@@ -70,12 +70,12 @@ export class ScUsageView extends GatewayAwareLitElement {
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
-    @media (max-width: 640px) {
+    @media (max-width: 640px) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: repeat(2, 1fr);
       }
     }
-    @media (max-width: 480px) {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -150,7 +150,7 @@ export class ScUsageView extends GatewayAwareLitElement {
       min-width: 2.5rem;
       text-align: right;
     }
-    @media (max-width: 480px) {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
       .provider-name {
         width: 5rem;
       }
