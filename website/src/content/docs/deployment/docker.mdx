@@ -11,7 +11,7 @@ SeaClaw can run in Docker for isolated, reproducible deployments. The official D
 docker run -it --rm \
   -v ~/.seaclaw:/seaclaw-data/.seaclaw \
   -p 3000:3000 \
-  ghcr.io/seaclaw/seaclaw:latest \
+  ghcr.io/sethdford/seaclaw:latest \
   gateway
 ```
 
@@ -23,7 +23,7 @@ Mount your config directory so the container uses your existing config and data.
 version: "3.8"
 services:
   seaclaw:
-    image: ghcr.io/seaclaw/seaclaw:latest
+    image: ghcr.io/sethdford/seaclaw:latest
     ports:
       - "3000:3000"
     volumes:

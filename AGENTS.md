@@ -32,7 +32,7 @@ Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
 | Metric                   | Measured       |
 | ------------------------ | -------------- |
-| Binary size              | ~511 KB        |
+| Binary size              | ~528 KB        |
 | Text section             | 480 KB         |
 | Cold-start (`--version`) | 4–27 ms avg    |
 | Peak RSS (`--version`)   | ~5.7 MB        |

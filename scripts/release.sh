@@ -90,6 +90,14 @@ if grep -q '#define SC_VERSION' src/main.c; then
     sed -i.bak "s/#define SC_VERSION \"[^\"]*\"/#define SC_VERSION \"$VERSION\"/" src/main.c && rm -f src/main.c.bak
 fi
 
+if grep -q '#define SC_VERSION' src/version.c; then
+    sed -i.bak "s/#define SC_VERSION \"[^\"]*\"/#define SC_VERSION \"$VERSION\"/" src/version.c && rm -f src/version.c.bak
+fi
+
+if [ -f flake.nix ] && grep -q 'version = ' flake.nix; then
+    sed -i.bak "s/version = \"[^\"]*\"/version = \"$VERSION\"/" flake.nix && rm -f flake.nix.bak
+fi
+
 info "Generating changelog entry..."
 if command -v git-cliff >/dev/null 2>&1; then
     git-cliff --unreleased --tag "$TAG" > /tmp/cliff_entry.md 2>/dev/null

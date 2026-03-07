@@ -597,7 +597,11 @@ Use `channels.web` for browser UI events (WebChannel v1):
 
 ## Development
 
-Build and tests require a C11 compiler and CMake 3.16+.
+Build and tests require a C11 compiler and CMake 3.16+. One-time setup:
+
+```bash
+./scripts/setup-dev.sh   # activates git hooks, installs token pipeline
+```
 
 ```bash
 mkdir -p build && cd build

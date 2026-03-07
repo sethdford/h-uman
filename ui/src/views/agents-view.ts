@@ -126,6 +126,12 @@ export class ScAgentsView extends GatewayAwareLitElement {
         grid-template-columns: 1fr 1fr;
       }
     }
+    .skeleton-spacer {
+      margin-bottom: var(--sc-space-lg);
+    }
+    .card-spacer {
+      margin-bottom: var(--sc-space-2xl);
+    }
     @media (max-width: 480px) {
       .profile-grid {
         grid-template-columns: 1fr;
@@ -183,27 +189,20 @@ export class ScAgentsView extends GatewayAwareLitElement {
     return this.sessions.reduce((s, x) => s + (x.turn_count ?? 0), 0);
   }
 
-  override render() {
-    if (this.loading) {
-      return html`
-        <div class="header"><h2>Agents</h2></div>
-        <sc-skeleton
-          variant="card"
-          height="80px"
-          style="margin-bottom: var(--sc-space-lg);"
-        ></sc-skeleton>
-      `;
-    }
-
+  private get _toolCount(): number {
     const t = this.capabilities.tools;
-    const toolCount = typeof t === "number" ? t : Array.isArray(t) ? t.length : 0;
-    const ch = this.capabilities.channels;
-    const channelCount = typeof ch === "number" ? ch : Array.isArray(ch) ? ch.length : 0;
+    return typeof t === "number" ? t : Array.isArray(t) ? t.length : 0;
+  }
 
+  private get _channelCount(): number {
+    const ch = this.capabilities.channels;
+    return typeof ch === "number" ? ch : Array.isArray(ch) ? ch.length : 0;
+  }
+
+  override render() {
+    if (this.loading) return this._renderSkeleton();
     return html`
-      <div class="header">
-        <h2>Agents</h2>
-      </div>
+      <div class="header"><h2>Agents</h2></div>
       ${this.error
         ? html`<sc-empty-state
             .icon=${icons.warning}
@@ -211,7 +210,20 @@ export class ScAgentsView extends GatewayAwareLitElement {
             description=${this.error}
           ></sc-empty-state>`
         : nothing}
-      <sc-card style="margin-bottom: var(--sc-space-2xl);">
+      ${this._renderProfile()} ${this._renderSessions()} ${this._renderStats()}
+    `;
+  }
+
+  private _renderSkeleton() {
+    return html`
+      <div class="header"><h2>Agents</h2></div>
+      <sc-skeleton variant="card" height="80px" class="skeleton-spacer"></sc-skeleton>
+    `;
+  }
+
+  private _renderProfile() {
+    return html`
+      <sc-card class="card-spacer">
         <div class="profile-header">
           <span class="profile-title">Agent profile</span>
           <sc-button variant="primary" size="sm" @click=${() => this.dispatchNavigate("config")}>
@@ -220,22 +232,26 @@ export class ScAgentsView extends GatewayAwareLitElement {
         </div>
         <div class="profile-grid">
           <div class="profile-item">
-            Provider: <strong>${this.config.default_provider ?? "—"}</strong>
+            Provider: <strong>${this.config.default_provider ?? "\u2014"}</strong>
           </div>
           <div class="profile-item">
-            Model: <strong>${this.config.default_model ?? "—"}</strong>
+            Model: <strong>${this.config.default_model ?? "\u2014"}</strong>
           </div>
           <div class="profile-item">
-            Temperature: <strong>${this.config.temperature ?? "—"}</strong>
+            Temperature: <strong>${this.config.temperature ?? "\u2014"}</strong>
           </div>
           <div class="profile-item">
-            Max tokens: <strong>${this.config.max_tokens ?? "—"}</strong>
+            Max tokens: <strong>${this.config.max_tokens ?? "\u2014"}</strong>
           </div>
-          <div class="profile-item">Tools: <strong>${toolCount}</strong></div>
-          <div class="profile-item">Channels: <strong>${channelCount}</strong></div>
+          <div class="profile-item">Tools: <strong>${this._toolCount}</strong></div>
+          <div class="profile-item">Channels: <strong>${this._channelCount}</strong></div>
         </div>
       </sc-card>
+    `;
+  }
 
+  private _renderSessions() {
+    return html`
       <div class="section-title">Active Sessions</div>
       <div class="sessions-list sc-stagger">
         ${this.sessions.length === 0
@@ -251,7 +267,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
                 <sc-card>
                   <div class="session-row">
                     <div class="session-info">
-                      <div class="session-key">${s.label ?? s.key ?? "—"}</div>
+                      <div class="session-key">${s.label ?? s.key ?? "\u2014"}</div>
                       <div class="session-meta">
                         ${s.turn_count ?? 0} turns · Last: ${formatDate(s.last_active)}
                       </div>
@@ -268,7 +284,11 @@ export class ScAgentsView extends GatewayAwareLitElement {
               `,
             )}
       </div>
+    `;
+  }
 
+  private _renderStats() {
+    return html`
       <div class="stats-bar">
         <span class="stats-item"
           >Sessions: <span class="stats-value">${this.sessions.length}</span></span
@@ -276,8 +296,10 @@ export class ScAgentsView extends GatewayAwareLitElement {
         <span class="stats-item"
           >Total turns: <span class="stats-value">${this.totalTurns}</span></span
         >
-        <span class="stats-item">Channels: <span class="stats-value">${channelCount}</span></span>
-        <span class="stats-item">Tools: <span class="stats-value">${toolCount}</span></span>
+        <span class="stats-item"
+          >Channels: <span class="stats-value">${this._channelCount}</span></span
+        >
+        <span class="stats-item">Tools: <span class="stats-value">${this._toolCount}</span></span>
       </div>
     `;
   }

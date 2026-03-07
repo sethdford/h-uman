@@ -10,7 +10,7 @@ red()   { [ -t 1 ] && printf '\033[31m%s\033[0m\n' "$1" || printf '%s\n' "$1"; }
 # shellcheck disable=SC2039
 bold()  { [ -t 1 ] && printf '\033[1m%s\033[0m' "$1" || printf '%s' "$1"; }
 
-REPO="seaclaw/seaclaw"
+REPO="sethdford/seaclaw"
 INSTALL_URL="https://seaclaw.ai/install.sh"
 
 print_help() {

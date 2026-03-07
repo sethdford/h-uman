@@ -79,6 +79,8 @@
       <a href="#sc-message-stream">sc-message-stream</a>
       <a href="#sc-message-branch">sc-message-branch</a>
       <a href="#sc-reasoning-block">sc-reasoning-block</a>
+      <a href="#sc-code-block">sc-code-block</a>
+      <a href="#sc-latex">sc-latex</a>
       <a href="#sc-shortcut-overlay">sc-shortcut-overlay</a>
       <a href="#sc-context-menu">sc-context-menu</a>
     </nav>
@@ -871,6 +873,26 @@
         <div class="code-snippet"><pre><code>&lt;sc-reasoning-block content=&quot;...&quot; duration=&quot;Thought for 12s&quot;&gt;&lt;/sc-reasoning-block&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-code-block">
+        <h2>sc-code-block</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 480px;">
+            <sc-code-block code="const greet = (name) => `Hello, ${name}!`;" language="javascript"></sc-code-block>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-code-block code=&quot;...&quot; language=&quot;javascript&quot;&gt;&lt;/sc-code-block&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-latex">
+        <h2>sc-latex</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 480px;">
+            <sc-latex content="E = mc^2"></sc-latex>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-latex content=&quot;E = mc^2&quot;&gt;&lt;/sc-latex&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="sc-shortcut-overlay">
         <h2>sc-shortcut-overlay</h2>
         <div class="playground">
@@ -937,6 +959,8 @@
       import "/src/components/sc-message-branch.js";
       import "/src/components/sc-message-stream.js";
       import "/src/components/sc-reasoning-block.js";
+      import "/src/components/sc-code-block.js";
+      import "/src/components/sc-latex.js";
       import "/src/components/sc-shortcut-overlay.js";
       import "/src/components/sc-context-menu.js";
 

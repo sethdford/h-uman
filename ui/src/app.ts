@@ -205,7 +205,7 @@ export class ScApp extends LitElement {
       background: var(--sc-error);
       color: var(--sc-on-accent, #fff);
       font-size: var(--sc-text-sm);
-      font-weight: 500;
+      font-weight: var(--sc-weight-medium);
       animation: sc-slide-down var(--sc-duration-normal) var(--sc-ease-out);
     }
     @keyframes sc-slide-down {
@@ -311,7 +311,7 @@ export class ScApp extends LitElement {
       box-shadow: var(--sc-shadow-lg);
       padding: var(--sc-space-md) var(--sc-space-md)
         calc(var(--sc-space-lg) + env(safe-area-inset-bottom, 0));
-      animation: sc-sheet-up 0.25s var(--sc-ease-out);
+      animation: sc-sheet-up var(--sc-duration-normal) var(--sc-ease-out);
       max-height: 70vh;
       overflow-y: auto;
     }

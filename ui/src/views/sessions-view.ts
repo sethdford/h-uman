@@ -150,6 +150,10 @@ export class ScSessionsView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
       padding: var(--sc-space-md);
     }
+    .history-placeholder {
+      flex: 1;
+      min-height: 120px;
+    }
     @media (max-width: 768px) {
       .layout {
         flex-direction: column;
@@ -261,8 +265,6 @@ export class ScSessionsView extends GatewayAwareLitElement {
   }
 
   override render() {
-    const sel = this.selectedSession();
-
     return html`
       <div class="header">
         <h2>Sessions</h2>
@@ -275,122 +277,112 @@ export class ScSessionsView extends GatewayAwareLitElement {
             description=${this.error}
           ></sc-empty-state>`
         : nothing}
-      ${this.loading
-        ? html`
-            <div class="layout">
-              <div class="session-list sc-stagger">
-                <sc-skeleton variant="session-card"></sc-skeleton>
-                <sc-skeleton variant="session-card"></sc-skeleton>
-                <sc-skeleton variant="session-card"></sc-skeleton>
-                <sc-skeleton variant="session-card"></sc-skeleton>
-              </div>
-              <div class="detail">
-                <sc-card class="history-inner" style="flex: 1; min-height: 120px;">
-                  <sc-skeleton variant="line" width="80%"></sc-skeleton>
-                </sc-card>
-              </div>
-            </div>
-          `
-        : html`
-            <div class="layout">
-              <div class="session-list sc-stagger">
-                ${this.sessions.length === 0
-                  ? html`
-                      <sc-empty-state
-                        .icon=${icons["message-square"]}
-                        heading="No conversations yet"
-                        description="Start a chat to see your conversation history here."
-                      ></sc-empty-state>
-                    `
-                  : this.sessions.map(
-                      (s) => html`
-                        <div
-                          class="session-item ${this.selectedKey === s.key ? "active" : ""}"
-                          @click=${() => this.selectSession(s.key ?? "")}
-                        >
-                          <sc-card>
-                            <div class="session-key">${s.label || s.key || "unnamed"}</div>
-                            <div class="session-meta">
-                              ${s.turn_count ?? 0} turns · ${formatRelative(s.last_active)}
-                            </div>
-                          </sc-card>
-                        </div>
-                      `,
-                    )}
-              </div>
-              <div class="detail">
-                ${sel
-                  ? html`
-                      <div class="detail-header">
-                        ${this.renaming
-                          ? html`
-                              <div class="rename-row">
-                                <sc-input
-                                  type="text"
-                                  .value=${this.renameValue}
-                                  @sc-input=${(e: CustomEvent<{ value: string }>) =>
-                                    (this.renameValue = e.detail.value)}
-                                ></sc-input>
-                                <sc-button variant="primary" @click=${() => this.saveRename()}>
-                                  Save
-                                </sc-button>
-                                <sc-button
-                                  variant="secondary"
-                                  @click=${() => (this.renaming = false)}
-                                >
-                                  Cancel
-                                </sc-button>
-                              </div>
-                            `
-                          : html`
-                              <h3>${sel.label || sel.key}</h3>
-                              <sc-button
-                                variant="primary"
-                                @click=${() =>
-                                  this.dispatchNavigate("chat:" + (this.selectedKey || "default"))}
-                              >
-                                Resume
-                              </sc-button>
-                              <sc-button variant="secondary" @click=${() => this.startRename()}>
-                                Rename
-                              </sc-button>
-                              ${this.confirmDelete
-                                ? html`
-                                    <sc-button
-                                      variant="destructive"
-                                      @click=${() => this.deleteSession()}
-                                    >
-                                      Confirm Delete
-                                    </sc-button>
-                                    <sc-button
-                                      variant="secondary"
-                                      @click=${() => (this.confirmDelete = false)}
-                                    >
-                                      Cancel
-                                    </sc-button>
-                                  `
-                                : html`
-                                    <sc-button
-                                      variant="destructive"
-                                      @click=${() => (this.confirmDelete = true)}
-                                    >
-                                      Delete
-                                    </sc-button>
-                                  `}
-                            `}
+      ${this.loading ? this._renderSkeleton() : this._renderLayout()}
+    `;
+  }
+
+  private _renderSkeleton() {
+    return html`
+      <div class="layout">
+        <div class="session-list sc-stagger">
+          <sc-skeleton variant="session-card"></sc-skeleton>
+          <sc-skeleton variant="session-card"></sc-skeleton>
+          <sc-skeleton variant="session-card"></sc-skeleton>
+          <sc-skeleton variant="session-card"></sc-skeleton>
+        </div>
+        <div class="detail">
+          <sc-card class="history-inner history-placeholder">
+            <sc-skeleton variant="line" width="80%"></sc-skeleton>
+          </sc-card>
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderLayout() {
+    return html`
+      <div class="layout">
+        <div class="session-list sc-stagger">
+          ${this.sessions.length === 0
+            ? html`
+                <sc-empty-state
+                  .icon=${icons["message-square"]}
+                  heading="No conversations yet"
+                  description="Start a chat to see your conversation history here."
+                ></sc-empty-state>
+              `
+            : this.sessions.map(
+                (s) => html`
+                  <div
+                    class="session-item ${this.selectedKey === s.key ? "active" : ""}"
+                    @click=${() => this.selectSession(s.key ?? "")}
+                  >
+                    <sc-card>
+                      <div class="session-key">${s.label || s.key || "unnamed"}</div>
+                      <div class="session-meta">
+                        ${s.turn_count ?? 0} turns · ${formatRelative(s.last_active)}
                       </div>
-                      <div class="history">
-                        ${this.messages.length === 0
-                          ? html`<div class="empty">No messages</div>`
-                          : this.messages.map(
-                              (m) => html` <div class="msg ${m.role}">${m.content}</div> `,
-                            )}
-                      </div>
-                    `
-                  : html`<div class="empty">Select a session to view history</div>`}
+                    </sc-card>
+                  </div>
+                `,
+              )}
+        </div>
+        <div class="detail">${this._renderDetail()}</div>
+      </div>
+    `;
+  }
+
+  private _renderDetail() {
+    const sel = this.selectedSession();
+    if (!sel) return html`<div class="empty">Select a session to view history</div>`;
+
+    return html`
+      <div class="detail-header">
+        ${this.renaming
+          ? html`
+              <div class="rename-row">
+                <sc-input
+                  type="text"
+                  .value=${this.renameValue}
+                  @sc-input=${(e: CustomEvent<{ value: string }>) =>
+                    (this.renameValue = e.detail.value)}
+                ></sc-input>
+                <sc-button variant="primary" @click=${() => this.saveRename()}>Save</sc-button>
+                <sc-button variant="secondary" @click=${() => (this.renaming = false)}>
+                  Cancel
+                </sc-button>
               </div>
-            </div>
-          `}
+            `
+          : html`
+              <h3>${sel.label || sel.key}</h3>
+              <sc-button
+                variant="primary"
+                @click=${() => this.dispatchNavigate("chat:" + (this.selectedKey || "default"))}
+              >
+                Resume
+              </sc-button>
+              <sc-button variant="secondary" @click=${() => this.startRename()}>Rename</sc-button>
+              ${this.confirmDelete
+                ? html`
+                    <sc-button variant="destructive" @click=${() => this.deleteSession()}>
+                      Confirm Delete
+                    </sc-button>
+                    <sc-button variant="secondary" @click=${() => (this.confirmDelete = false)}>
+                      Cancel
+                    </sc-button>
+                  `
+                : html`
+                    <sc-button variant="destructive" @click=${() => (this.confirmDelete = true)}>
+                      Delete
+                    </sc-button>
+                  `}
+            `}
+      </div>
+      <div class="history">
+        ${this.messages.length === 0
+          ? html`<div class="empty">No messages</div>`
+          : this.messages.map((m) => html`<div class="msg ${m.role}">${m.content}</div>`)}
+      </div>
     `;
   }
 }

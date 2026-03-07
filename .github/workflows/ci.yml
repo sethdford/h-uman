@@ -283,7 +283,7 @@ jobs:
       - name: Run clang-tidy on changed files
         run: |
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
-            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF" -- 'src/*.c' | head -20)
+            FILES=$(git diff --name-only "origin/$GITHUB_BASE_REF" -- 'src/**/*.c' | head -20)
           else
             FILES=$(find src -name '*.c' -newer CMakeLists.txt | head -20)
           fi

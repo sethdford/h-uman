@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: seaclaw
 Upstream-Contact: team@seaclaw.ai
-Source: https://github.com/seaclaw/seaclaw
+Source: https://github.com/sethdford/seaclaw
 
 Files: *
 Copyright: 2024-2026 SeaClaw Contributors

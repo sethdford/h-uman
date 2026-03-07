@@ -7,10 +7,10 @@ class Seaclaw < Formula
   license "MIT"
 
   # Tagged releases: uncomment when publishing v0.2.0+ tarballs to GitHub.
-  # url "https://github.com/seaclaw/seaclaw/archive/refs/tags/v0.2.0.tar.gz"
+  # url "https://github.com/sethdford/seaclaw/archive/refs/tags/v0.2.0.tar.gz"
   # sha256 "..."  # Run: curl -sL <url> | sha256sum
 
-  head "https://github.com/seaclaw/seaclaw.git", branch: "main"
+  head "https://github.com/sethdford/seaclaw.git", branch: "main"
 
   depends_on "cmake" => :build
   depends_on "sqlite"

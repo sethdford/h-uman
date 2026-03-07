@@ -172,7 +172,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
 
     .stat-label {
-      font-size: 0.6875rem;
+      font-size: var(--sc-text-xs);
       font-weight: var(--sc-weight-semibold, 600);
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -211,7 +211,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
 
     .section-label {
-      font-size: 0.6875rem;
+      font-size: var(--sc-text-xs);
       font-weight: var(--sc-weight-semibold, 600);
       letter-spacing: 0.08em;
       text-transform: uppercase;

@@ -536,7 +536,7 @@ sc_error_t cmd_update(sc_allocator_t *alloc, int argc, char **argv) {
     char latest[64];
     sc_error_t err = sc_update_check(latest, sizeof(latest));
     if (err != SC_OK) {
-        printf("Could not check for updates. Check https://github.com/seaclaw/seaclaw/releases\n");
+        printf("Could not check for updates. Check https://github.com/sethdford/seaclaw/releases\n");
         return SC_OK;
     }
 
@@ -556,7 +556,7 @@ sc_error_t cmd_update(sc_allocator_t *alloc, int argc, char **argv) {
     err = sc_update_apply();
     if (err != SC_OK)
         printf(
-            "Update failed. Download manually from https://github.com/seaclaw/seaclaw/releases\n");
+            "Update failed. Download manually from https://github.com/sethdford/seaclaw/releases\n");
     return SC_OK;
 #else
     (void)alloc;

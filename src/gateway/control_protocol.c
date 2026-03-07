@@ -52,7 +52,7 @@ static sc_error_t build_connect_response(sc_allocator_t *alloc, const sc_app_con
     json_set_str(alloc, root, "type", "hello-ok");
 
     sc_json_value_t *server = sc_json_object_new(alloc);
-    json_set_str(alloc, server, "version", "0.3.0");
+    json_set_str(alloc, server, "version", sc_version_string());
     sc_json_object_set(alloc, root, "server", server);
     sc_json_object_set(alloc, root, "protocol", sc_json_number_new(alloc, 1));
 
@@ -214,7 +214,7 @@ static sc_error_t handle_capabilities(sc_allocator_t *alloc, const sc_app_contex
     if (!obj)
         return SC_ERR_OUT_OF_MEMORY;
 
-    json_set_str(alloc, obj, "version", "0.3.0");
+    json_set_str(alloc, obj, "version", sc_version_string());
 
     size_t tool_count = app ? app->tools_count : 0;
     sc_json_object_set(alloc, obj, "tools", sc_json_number_new(alloc, (double)tool_count));

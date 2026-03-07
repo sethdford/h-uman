@@ -63,7 +63,7 @@ runs:
         if [ "${{ inputs.enable-curl }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_CURL=ON"; fi
         if [ "${{ inputs.enable-all-channels }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_ALL_CHANNELS=ON"; fi
         if [ "${{ inputs.enable-lto }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_LTO=ON"; fi
-        if [ "${{ inputs.enable-fuzz }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_FUZZING=ON"; fi
+        if [ "${{ inputs.enable-fuzz }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DSC_ENABLE_FUZZ=ON"; fi
         if [ "${{ inputs.enable-coverage }}" = "true" ]; then
           CMAKE_FLAGS="$CMAKE_FLAGS -DCMAKE_C_FLAGS=--coverage"
         fi

@@ -9,7 +9,7 @@ services:
       - path: .env
         required: false
     volumes:
-      - seaclaw-data:/root/.seaclaw
+      - seaclaw-data:/seaclaw-data
     restart: unless-stopped
 
   gateway:
@@ -22,7 +22,7 @@ services:
       - path: .env
         required: false
     volumes:
-      - seaclaw-data:/root/.seaclaw
+      - seaclaw-data:/seaclaw-data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]

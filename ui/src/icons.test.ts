@@ -7,7 +7,6 @@ describe("icons", () => {
     "message-square",
     "clock",
     "cpu",
-    "box",
     "mic",
     "wrench",
     "radio",
@@ -36,7 +35,7 @@ describe("icons", () => {
   });
 
   it("includes utility icons", () => {
-    expect(icons).toHaveProperty("search");
+    expect(icons).toHaveProperty("magnifyingGlass");
     expect(icons).toHaveProperty("refresh");
     expect(icons).toHaveProperty("chevron");
     expect(icons).toHaveProperty("warning");

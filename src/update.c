@@ -28,8 +28,8 @@
 #include <stdlib.h>
 #endif
 
-#define GITHUB_API_URL "https://api.github.com/repos/seaclaw/seaclaw/releases/latest"
-#define RELEASE_BASE   "https://github.com/seaclaw/seaclaw/releases/latest/download/"
+#define GITHUB_API_URL "https://api.github.com/repos/sethdford/seaclaw/releases/latest"
+#define RELEASE_BASE   "https://github.com/sethdford/seaclaw/releases/latest/download/"
 
 typedef enum {
     INSTALL_NIX,
@@ -108,7 +108,7 @@ static void print_package_instructions(install_method_t method) {
         break;
     case INSTALL_DOCKER:
         printf("Detected installation via: Docker\nTo update, run:\n  docker pull "
-               "ghcr.io/seaclaw/seaclaw:latest\n");
+               "ghcr.io/sethdford/seaclaw:latest\n");
         break;
     case INSTALL_DEV:
         printf("Development installation detected.\nTo update, run:\n  git pull && cmake --build "
@@ -193,7 +193,7 @@ sc_error_t sc_update_apply(void) {
     const char *asset = get_platform_asset();
     if (!asset) {
         printf("Unsupported platform for auto-update. Please download manually from:\n  %s\n",
-               "https://github.com/seaclaw/seaclaw/releases/latest");
+               "https://github.com/sethdford/seaclaw/releases/latest");
         alloc.free(alloc.ctx, exe_path, strlen(exe_path) + 1);
         return SC_ERR_NOT_SUPPORTED;
     }

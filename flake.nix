@@ -20,13 +20,15 @@
           nativeBuildInputs = [ pkgs.cmake ];
           buildInputs = [
             pkgs.sqlite
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             pkgs.curl
           ];
 
           cmakeFlags = [
             "-DCMAKE_BUILD_TYPE=MinSizeRel"
             "-DSC_ENABLE_LTO=ON"
+            "-DSC_ENABLE_CURL=ON"
+            "-DSC_ENABLE_SQLITE=ON"
+            "-DSC_ENABLE_ALL_CHANNELS=ON"
           ];
 
           meta = with pkgs.lib; {
