@@ -65,11 +65,11 @@ test.describe("SeaClaw Control UI", () => {
     await expect(view).toBeAttached({ timeout: 5000 });
   });
 
-  test("hash navigation loads sessions view", async ({ page }) => {
+  test("hash navigation #sessions redirects to chat", async ({ page }) => {
     await page.goto("/#sessions");
     await page.waitForTimeout(500);
-    const view = page.locator("sc-app >> sc-sessions-view");
-    await expect(view).toBeAttached({ timeout: 5000 });
+    const chatView = page.locator("sc-app >> sc-chat-view");
+    await expect(chatView).toBeAttached({ timeout: 5000 });
   });
 
   test("hash navigation loads channels view", async ({ page }) => {
@@ -167,16 +167,7 @@ test.describe("SeaClaw Control UI", () => {
     await page.goto("/");
     await page.waitForTimeout(300);
 
-    const tabs = [
-      "chat",
-      "agents",
-      "sessions",
-      "models",
-      "tools",
-      "channels",
-      "skills",
-      "overview",
-    ];
+    const tabs = ["chat", "agents", "models", "tools", "channels", "skills", "overview"];
 
     for (const tab of tabs) {
       await page.evaluate((t) => (window.location.hash = t), tab);

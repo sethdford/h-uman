@@ -28,13 +28,13 @@ test.describe("Secondary Views", () => {
     await expect(toolsView).toBeAttached({ timeout: 5000 });
   });
 
-  test("sessions view renders", async ({ page }) => {
+  test("sessions redirects to chat", async ({ page }) => {
     await page.goto("/#sessions");
     await page.waitForTimeout(500);
     const app = page.locator("sc-app");
     await expect(app).toBeAttached({ timeout: 5000 });
-    const sessionsView = app.locator("sc-sessions-view");
-    await expect(sessionsView).toBeAttached({ timeout: 5000 });
+    const chatView = app.locator("sc-chat-view");
+    await expect(chatView).toBeAttached({ timeout: 5000 });
   });
 
   test("nodes view renders", async ({ page }) => {

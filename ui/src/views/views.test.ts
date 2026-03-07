@@ -179,12 +179,18 @@ describe("sc-channels-view", () => {
 });
 
 describe("sc-sessions-view", () => {
-  it("renders session list panel", async () => {
-    const el = createView("sc-sessions-view");
+  it("dispatches navigate to chat on connect", async () => {
+    const wrapper = document.createElement("div");
+    const el = document.createElement("sc-sessions-view") as LitView;
+    let captured: string | undefined;
+    wrapper.addEventListener("navigate", ((e: CustomEvent<string>) => {
+      captured = e.detail;
+    }) as EventListener);
+    wrapper.appendChild(el);
+    document.body.appendChild(wrapper);
     await el.updateComplete;
-    const panel = el.shadowRoot?.querySelector(".session-list-panel");
-    expect(panel).toBeTruthy();
-    el.remove();
+    expect(captured).toBe("chat");
+    wrapper.remove();
   });
 });
 
@@ -313,7 +319,6 @@ describe("view accessibility", () => {
     "sc-overview-view",
     "sc-chat-view",
     "sc-agents-view",
-    "sc-sessions-view",
     "sc-models-view",
     "sc-config-view",
     "sc-tools-view",
@@ -390,12 +395,18 @@ describe("sc-security-view deep", () => {
 });
 
 describe("sc-sessions-view deep", () => {
-  it("has session panel or skeleton", async () => {
-    const el = createView("sc-sessions-view");
+  it("dispatches navigate event with chat detail", async () => {
+    const wrapper = document.createElement("div");
+    const el = document.createElement("sc-sessions-view") as LitView;
+    let detail: string | undefined;
+    wrapper.addEventListener("navigate", ((e: CustomEvent<string>) => {
+      detail = e.detail;
+    }) as EventListener);
+    wrapper.appendChild(el);
+    document.body.appendChild(wrapper);
     await el.updateComplete;
-    const panel = el.shadowRoot?.querySelector(".session-list-panel, .sessions, sc-skeleton");
-    expect(panel).toBeTruthy();
-    el.remove();
+    expect(detail).toBe("chat");
+    wrapper.remove();
   });
 });
 

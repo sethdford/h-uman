@@ -15,7 +15,6 @@ const VIEWS = [
   { path: "/", name: "Overview" },
   { path: "/#chat", name: "Chat" },
   { path: "/#agents", name: "Agents" },
-  { path: "/#sessions", name: "Sessions" },
   { path: "/#models", name: "Models" },
   { path: "/#config", name: "Config" },
   { path: "/#tools", name: "Tools" },

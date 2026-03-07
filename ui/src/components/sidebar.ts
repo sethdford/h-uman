@@ -21,7 +21,6 @@ const SECTIONS: NavSection[] = [
     items: [
       { id: "overview", label: "Overview", icon: icons.grid },
       { id: "chat", label: "Chat", icon: icons["message-square"] },
-      { id: "sessions", label: "Sessions", icon: icons.clock },
     ],
   },
   {

@@ -79,7 +79,6 @@ const MOBILE_TABS: { id: TabId; label: string; icon: ReturnType<typeof html> }[]
 
 const MORE_TABS: { id: TabId; label: string; icon: ReturnType<typeof html> }[] = [
   { id: "tools", label: "Tools", icon: icons.wrench },
-  { id: "sessions", label: "Sessions", icon: icons.clock },
   { id: "models", label: "Models", icon: icons.cpu },
   { id: "channels", label: "Channels", icon: icons["message-square"] },
   { id: "automations", label: "Automations", icon: icons.timer },
