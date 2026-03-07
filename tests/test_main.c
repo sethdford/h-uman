@@ -69,6 +69,7 @@ void run_security_pipeline_tests(void);
 void run_core_extended_tests(void);
 void run_gateway_extended_tests(void);
 void run_gateway_auth_tests(void);
+void run_pairing_tests(void);
 void run_agent_extended_tests(void);
 void run_agent_security_tests(void);
 void run_agent_teams_tests(void);
@@ -172,6 +173,7 @@ int main(void) {
     run_core_extended_tests();
     run_gateway_extended_tests();
     run_gateway_auth_tests();
+    run_pairing_tests();
     run_agent_extended_tests();
     run_agent_security_tests();
     run_agent_teams_tests();

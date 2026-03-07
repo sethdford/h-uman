@@ -543,6 +543,91 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
 }
 #endif
 
+#if SC_IS_TEST
+/* Test-only: process POST /api/pair body, return HTTP status and JSON body.
+ * out_body is allocated via alloc; caller must free. */
+int sc_gateway_test_pair_request(sc_allocator_t *alloc, void *guard, size_t max_body,
+                                 const char *body, size_t body_len, char **out_body,
+                                 size_t *out_len) {
+    sc_pairing_guard_t *g = (sc_pairing_guard_t *)guard;
+    if (!alloc || !out_body || !out_len)
+        return 400;
+    *out_body = NULL;
+    *out_len = 0;
+
+    if (!g) {
+        *out_body = sc_strndup(alloc, "{\"error\":\"pairing not required\"}", 35);
+        *out_len = *out_body ? 35 : 0;
+        return 400;
+    }
+    char *code = NULL;
+    if (body_len > 0 && body_len <= max_body) {
+        sc_json_value_t *root = NULL;
+        if (sc_json_parse(alloc, body, body_len, &root) == SC_OK && root &&
+            root->type == SC_JSON_OBJECT) {
+            const char *raw = sc_json_get_string(root, "code");
+            if (raw && raw[0])
+                code = sc_strndup(alloc, raw, strlen(raw));
+            sc_json_free(alloc, root);
+        }
+    }
+    if (!code || !code[0]) {
+        *out_body = sc_strndup(alloc, "{\"error\":\"missing code\"}", 24);
+        *out_len = *out_body ? 24 : 0;
+        return 400;
+    }
+    char *token = NULL;
+    sc_pair_attempt_result_t result = sc_pairing_guard_attempt_pair(g, code, &token);
+    alloc->free(alloc->ctx, code, strlen(code) + 1);
+
+    if (result == SC_PAIR_PAIRED && token) {
+        size_t tok_len = strlen(token);
+        size_t cap = 32 + tok_len * 2;
+        char *resp_buf = (char *)alloc->alloc(alloc->ctx, cap);
+        if (resp_buf) {
+            size_t pos = 0;
+            pos += (size_t)snprintf(resp_buf, cap, "{\"token\":\"");
+            for (size_t i = 0; i < tok_len && pos + 4 < cap; i++) {
+                char c = token[i];
+                if (c == '"' || c == '\\')
+                    resp_buf[pos++] = '\\';
+                resp_buf[pos++] = c;
+            }
+            pos += (size_t)snprintf(resp_buf + pos, cap - pos, "\"}");
+            /* Copy to exact-size buffer so caller can free(out_body, out_len+1) */
+            char *copy = sc_strndup(alloc, resp_buf, pos);
+            alloc->free(alloc->ctx, resp_buf, cap);
+            *out_body = copy;
+            *out_len = pos;
+            alloc->free(alloc->ctx, token, tok_len + 1);
+            return 200;
+        }
+        alloc->free(alloc->ctx, token, tok_len + 1);
+        *out_body = sc_strndup(alloc, "{\"error\":\"internal\"}", 21);
+        *out_len = *out_body ? 21 : 0;
+        return 500;
+    }
+    if (result == SC_PAIR_INVALID_CODE) {
+        *out_body = sc_strndup(alloc, "{\"error\":\"invalid_code\"}", 25);
+        *out_len = *out_body ? 25 : 0;
+        return 401;
+    }
+    if (result == SC_PAIR_LOCKED_OUT) {
+        *out_body = sc_strndup(alloc, "{\"error\":\"locked_out\"}", 23);
+        *out_len = *out_body ? 23 : 0;
+        return 429;
+    }
+    if (result == SC_PAIR_ALREADY_PAIRED) {
+        *out_body = sc_strndup(alloc, "{\"error\":\"already_paired\"}", 27);
+        *out_len = *out_body ? 27 : 0;
+        return 400;
+    }
+    *out_body = sc_strndup(alloc, "{\"error\":\"pairing_failed\"}", 26);
+    *out_len = *out_body ? 26 : 0;
+    return 400;
+}
+#endif /* SC_IS_TEST */
+
 /* ── Main gateway run loop (poll-based) ─────────────────────────────────── */
 
 sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port,

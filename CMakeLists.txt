@@ -444,6 +444,7 @@ set(SC_CORE_SOURCES
     src/tools/facebook.c
     src/tools/instagram.c
     src/tools/twitter.c
+    src/tools/cli_wrapper_common.c
     src/tools/gcloud.c
     src/tools/firebase.c
     src/tools/crm.c
@@ -1010,7 +1011,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"
 endif()
 
 # --- Strip MinSizeRel binary (macOS: -x to preserve local syms, Linux: full strip) ---
-if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel" AND UNIX)
+# Skip strip when cross-compiling (host strip can't parse target binary)
+if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel" AND UNIX AND NOT CMAKE_CROSSCOMPILING)
     if(APPLE)
         add_custom_command(TARGET seaclaw POST_BUILD COMMAND strip -x $<TARGET_FILE:seaclaw>)
     else()
@@ -1330,6 +1332,7 @@ set(SC_TEST_SOURCES
     tests/test_core_extended.c
     tests/test_gateway_extended.c
     tests/test_gateway_auth.c
+    tests/test_pairing.c
     tests/test_agent_extended.c
     tests/test_agent_security.c
     tests/test_skills.c

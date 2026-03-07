@@ -137,6 +137,8 @@ static const sc_tool_vtable_t file_write_vtable = {
 sc_error_t sc_file_write_create(sc_allocator_t *alloc, const char *workspace_dir,
                                 size_t workspace_dir_len, sc_security_policy_t *policy,
                                 sc_tool_t *out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_file_write_ctx_t *c = (sc_file_write_ctx_t *)calloc(1, sizeof(*c));
     if (!c)
         return SC_ERR_OUT_OF_MEMORY;

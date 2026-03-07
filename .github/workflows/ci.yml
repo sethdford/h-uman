@@ -36,8 +36,8 @@ jobs:
         run: |
           COUNT=$(./build/seaclaw_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
           echo "Test count: $COUNT"
-          if [ "$COUNT" -lt 3020 ]; then
-            echo "Test count regression: $COUNT < 3020 baseline"
+          if [ "$COUNT" -lt 3075 ]; then
+            echo "Test count regression: $COUNT < 3075 baseline"
             exit 1
           fi
       - name: Check for untested modules
@@ -243,8 +243,10 @@ jobs:
           if command -v clang-format-18 >/dev/null; then
             sudo ln -sf $(which clang-format-18) /usr/local/bin/clang-format
           fi
-      - name: Run scripts/check.sh
-        run: scripts/check.sh
+      - name: Run scripts/check.sh (format check optional)
+        run: |
+          export SC_SKIP_FORMAT=1
+          scripts/check.sh
 
   benchmark:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'

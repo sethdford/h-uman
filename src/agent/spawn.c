@@ -1,11 +1,13 @@
 #include "seaclaw/agent/spawn.h"
 #include "seaclaw/agent.h"
+#include "seaclaw/core/error.h"
 #include "seaclaw/agent/mailbox.h"
 #include "seaclaw/agent/team.h"
 #include "seaclaw/agent/worktree.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/providers/factory.h"
 #include "seaclaw/security.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -214,8 +216,15 @@ static void *spawn_thread(void *arg) {
             const char *err_str = sc_error_string(turn_err);
             result = sc_strndup(a, err_str, strlen(err_str));
         }
-        if (pool->worktree_mgr)
-            (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+        if (pool->worktree_mgr) {
+            sc_error_t rm_err = sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+            if (rm_err != SC_OK)
+                fprintf(stderr, "[spawn] worktree cleanup failed: %s\n", sc_error_string(rm_err));
+#else
+            (void)rm_err;
+#endif
+        }
     }
 
 done:
@@ -281,8 +290,15 @@ void sc_agent_pool_destroy(sc_agent_pool_t *pool) {
         if (!pool->used[i])
             continue;
         sc_pool_slot_t *s = &pool->slots[i];
-        if (pool->worktree_mgr && s->agent_id)
-            (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+        if (pool->worktree_mgr && s->agent_id) {
+            sc_error_t rm_err = sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+            if (rm_err != SC_OK)
+                fprintf(stderr, "[spawn] worktree cleanup failed: %s\n", sc_error_string(rm_err));
+#else
+            (void)rm_err;
+#endif
+        }
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
         if (s->thread_valid) {
             pthread_t th = s->thread;
@@ -369,8 +385,15 @@ sc_error_t sc_agent_pool_spawn(sc_agent_pool_t *pool, const sc_spawn_config_t *c
     if (!s->result)
         s->result = sc_strndup(a, "(spawned)", 9);
     s->status = (cfg->mode == SC_SPAWN_PERSISTENT) ? SC_AGENT_IDLE : SC_AGENT_COMPLETED;
-    if (pool->worktree_mgr && s->status == SC_AGENT_COMPLETED)
-        (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+    if (pool->worktree_mgr && s->status == SC_AGENT_COMPLETED) {
+        sc_error_t rm_err = sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+        if (rm_err != SC_OK)
+            fprintf(stderr, "[spawn] worktree cleanup failed: %s\n", sc_error_string(rm_err));
+#else
+        (void)rm_err;
+#endif
+    }
 #elif defined(SC_GATEWAY_POSIX)
     {
         sc_spawn_tctx_t *tc = (sc_spawn_tctx_t *)a->alloc(a->ctx, sizeof(*tc));
@@ -501,8 +524,15 @@ sc_error_t sc_agent_pool_cancel(sc_agent_pool_t *pool, uint64_t agent_id) {
     }
     s->cancelled = true;
     if (s->status == SC_AGENT_IDLE || s->status == SC_AGENT_COMPLETED) {
-        if (pool->worktree_mgr)
-            (void)sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+        if (pool->worktree_mgr) {
+            sc_error_t rm_err = sc_worktree_remove(pool->worktree_mgr, s->agent_id);
+#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+            if (rm_err != SC_OK)
+                fprintf(stderr, "[spawn] worktree cleanup failed: %s\n", sc_error_string(rm_err));
+#else
+            (void)rm_err;
+#endif
+        }
         slot_deinit_agent(pool->alloc, s);
         s->status = SC_AGENT_CANCELLED;
     }

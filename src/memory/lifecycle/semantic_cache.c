@@ -125,7 +125,7 @@ sc_error_t sc_semantic_cache_put(sc_semantic_cache_t *cache, sc_allocator_t *all
     (void)model;
     (void)model_len;
     (void)token_count;
-    if (!cache || !alloc)
+    if (!cache || !alloc || !key_hex)
         return SC_ERR_INVALID_ARGUMENT;
 
     /* Remove existing entry for same key */

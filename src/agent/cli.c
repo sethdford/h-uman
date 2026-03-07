@@ -1,3 +1,4 @@
+#include "seaclaw/agent/awareness.h"
 #include "seaclaw/agent/cli.h"
 #include "seaclaw/agent.h"
 #include "seaclaw/agent/profile.h"
@@ -9,6 +10,7 @@
 #ifdef SC_HAS_CRON
 #include "seaclaw/cron.h"
 #endif
+#include "seaclaw/bus.h"
 #include "seaclaw/design_tokens.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
@@ -327,6 +329,11 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             observer = sc_log_observer_create(alloc, log_fp);
     }
 
+    sc_bus_t cli_bus;
+    sc_bus_init(&cli_bus);
+    sc_awareness_t cli_awareness = {0};
+    (void)sc_awareness_init(&cli_awareness, &cli_bus);
+
     sc_memory_t memory = sc_memory_create_from_config(alloc, &cfg, ws);
     sc_session_store_t session_store = {0};
     if (memory.vtable &&
@@ -368,6 +375,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
             sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        sc_awareness_deinit(&cli_awareness);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -403,6 +411,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
             sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        sc_awareness_deinit(&cli_awareness);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -466,6 +475,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 #endif
 
     sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
+    if (cli_awareness.bus)
+        sc_agent_set_awareness(&agent, (struct sc_awareness *)&cli_awareness);
 
     /* TUI mode: launch split-pane terminal UI if --tui was passed */
     if (parsed_args.use_tui) {
@@ -505,6 +516,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
             sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        sc_awareness_deinit(&cli_awareness);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -641,6 +653,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         sc_rate_tracker_destroy(policy.tracker);
     if (sb_storage)
         sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+    sc_awareness_deinit(&cli_awareness);
     sc_config_deinit(&cfg);
     return SC_OK;
 }

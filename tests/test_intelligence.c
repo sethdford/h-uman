@@ -1,10 +1,13 @@
 #include "seaclaw/agent/awareness.h"
 #include "seaclaw/agent/compaction.h"
+#include "seaclaw/agent/outcomes.h"
+#include "seaclaw/agent/planner.h"
 #include "seaclaw/agent/episodic.h"
 #include "seaclaw/agent/preferences.h"
 #include "seaclaw/agent/prompt.h"
 #include "seaclaw/agent/reflection.h"
 #include "seaclaw/bus.h"
+#include "seaclaw/cron.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
@@ -444,6 +447,291 @@ static void test_compaction_llm_fallback(void) {
     }
 }
 
+/* ── Upgrade 1: Awareness prompt injection ──────────────────────────── */
+
+static void test_awareness_prompt_injection(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.awareness_context = "## Situational Awareness\n- Session stats: 5 msgs received\n";
+    cfg.awareness_context_len = strlen(cfg.awareness_context);
+
+    char *prompt = NULL;
+    size_t prompt_len = 0;
+    sc_error_t err = sc_prompt_build_system(&alloc, &cfg, &prompt, &prompt_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(prompt);
+    SC_ASSERT_TRUE(strstr(prompt, "Situational Awareness") != NULL);
+    SC_ASSERT_TRUE(strstr(prompt, "5 msgs received") != NULL);
+    alloc.free(alloc.ctx, prompt, prompt_len + 1);
+}
+
+static void test_awareness_prompt_null_skipped(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_prompt_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+
+    char *prompt = NULL;
+    size_t prompt_len = 0;
+    sc_error_t err = sc_prompt_build_system(&alloc, &cfg, &prompt, &prompt_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(strstr(prompt, "Situational Awareness") == NULL);
+    alloc.free(alloc.ctx, prompt, prompt_len + 1);
+}
+
+/* ── Upgrade 2: Agent cron jobs ─────────────────────────────────────── */
+
+static void test_cron_add_agent_job(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_cron_scheduler_t *sched = sc_cron_create(&alloc, 64, true);
+    SC_ASSERT_NOT_NULL(sched);
+
+    uint64_t id = 0;
+    sc_error_t err = sc_cron_add_agent_job(sched, &alloc, "0 8 * * *",
+                                           "Check my calendar and send a daily brief", "slack",
+                                           "daily-brief", &id);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(id > 0);
+
+    const sc_cron_job_t *job = sc_cron_get_job(sched, id);
+    SC_ASSERT_NOT_NULL(job);
+    SC_ASSERT_EQ(job->type, SC_CRON_JOB_AGENT);
+    SC_ASSERT_NOT_NULL(job->channel);
+    SC_ASSERT_TRUE(strcmp(job->channel, "slack") == 0);
+    SC_ASSERT_TRUE(strcmp(job->command, "Check my calendar and send a daily brief") == 0);
+
+    sc_cron_destroy(sched, &alloc);
+}
+
+static void test_cron_add_agent_job_null_prompt(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_cron_scheduler_t *sched = sc_cron_create(&alloc, 64, true);
+    uint64_t id = 0;
+    sc_error_t err = sc_cron_add_agent_job(sched, &alloc, "* * * * *", NULL, NULL, NULL, &id);
+    SC_ASSERT_NEQ(err, SC_OK);
+    sc_cron_destroy(sched, &alloc);
+}
+
+static void test_cron_shell_job_type_default(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_cron_scheduler_t *sched = sc_cron_create(&alloc, 64, true);
+    uint64_t id = 0;
+    sc_error_t err = sc_cron_add_job(sched, &alloc, "* * * * *", "echo hello", NULL, &id);
+    SC_ASSERT_EQ(err, SC_OK);
+    const sc_cron_job_t *job = sc_cron_get_job(sched, id);
+    SC_ASSERT_NOT_NULL(job);
+    SC_ASSERT_EQ(job->type, SC_CRON_JOB_SHELL);
+    sc_cron_destroy(sched, &alloc);
+}
+
+/* ── Upgrade 3: Reflection retry ────────────────────────────────────── */
+
+static void test_reflection_needs_retry_on_empty(void) {
+    sc_reflection_config_t cfg = {.enabled = true, .min_response_tokens = 0, .max_retries = 2};
+    sc_reflection_quality_t q = sc_reflection_evaluate("hello?", 6, "", 0, &cfg);
+    SC_ASSERT_EQ(q, SC_QUALITY_NEEDS_RETRY);
+}
+
+static void test_reflection_good_after_long_response(void) {
+    sc_reflection_config_t cfg = {.enabled = true, .min_response_tokens = 0, .max_retries = 2};
+    const char *resp = "This is a comprehensive answer that thoroughly addresses the question "
+                       "about configuration settings and runtime behavior.";
+    sc_reflection_quality_t q = sc_reflection_evaluate("How does config?", 16, resp, strlen(resp), &cfg);
+    SC_ASSERT_EQ(q, SC_QUALITY_GOOD);
+}
+
+static void test_reflection_critique_prompt_format(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *critique = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_reflection_build_critique_prompt(&alloc, "what is 2+2?", 12, "idk", 3,
+                                                         &critique, &len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(critique);
+    SC_ASSERT_TRUE(strstr(critique, "what is 2+2?") != NULL);
+    SC_ASSERT_TRUE(strstr(critique, "idk") != NULL);
+    alloc.free(alloc.ctx, critique, len + 1);
+}
+
+/* ── Upgrade 4: Plan generation ─────────────────────────────────────── */
+
+static void test_planner_generate_stub(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_plan_t *plan = NULL;
+    const char *tools[] = {"shell", "file_read", "web_search"};
+
+    /* In test mode, sc_planner_generate returns a stub plan */
+    sc_provider_vtable_t dummy_vtable;
+    memset(&dummy_vtable, 0, sizeof(dummy_vtable));
+    sc_provider_t dummy_provider = {.vtable = &dummy_vtable, .ctx = NULL};
+
+    sc_error_t err = sc_planner_generate(&alloc, &dummy_provider, "gpt-4o", 6,
+                                         "Find all TODO comments in the codebase", 39, tools, 3,
+                                         &plan);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(plan);
+    SC_ASSERT_TRUE(plan->steps_count > 0);
+    SC_ASSERT_NOT_NULL(plan->steps[0].tool_name);
+    sc_plan_free(&alloc, plan);
+}
+
+static void test_planner_generate_null_args(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_plan_t *plan = NULL;
+    sc_error_t err = sc_planner_generate(NULL, NULL, NULL, 0, NULL, 0, NULL, 0, &plan);
+    SC_ASSERT_NEQ(err, SC_OK);
+    err = sc_planner_generate(&alloc, NULL, NULL, 0, "test", 4, NULL, 0, &plan);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+/* ── Upgrade 5: Outcome tracking ─────────────────────────────────────── */
+
+static void test_outcome_tracker_init(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, true);
+    SC_ASSERT_EQ(tracker.total, 0);
+    SC_ASSERT_EQ(tracker.tool_successes, 0);
+    SC_ASSERT_EQ(tracker.tool_failures, 0);
+    SC_ASSERT_EQ(tracker.corrections, 0);
+    SC_ASSERT_EQ(tracker.positives, 0);
+    SC_ASSERT_TRUE(tracker.auto_apply_feedback);
+}
+
+static void test_outcome_record_tool_success(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "executed echo hello");
+    SC_ASSERT_EQ(tracker.total, 1);
+    SC_ASSERT_EQ(tracker.tool_successes, 1);
+    SC_ASSERT_EQ(tracker.tool_failures, 0);
+}
+
+static void test_outcome_record_tool_failure(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", false, "command not found");
+    SC_ASSERT_EQ(tracker.total, 1);
+    SC_ASSERT_EQ(tracker.tool_successes, 0);
+    SC_ASSERT_EQ(tracker.tool_failures, 1);
+}
+
+static void test_outcome_record_correction(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_correction(&tracker, "I said X", "no, actually Y");
+    SC_ASSERT_EQ(tracker.total, 1);
+    SC_ASSERT_EQ(tracker.corrections, 1);
+}
+
+static void test_outcome_record_positive(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_positive(&tracker, "thanks, that's great");
+    SC_ASSERT_EQ(tracker.total, 1);
+    SC_ASSERT_EQ(tracker.positives, 1);
+}
+
+static void test_outcome_get_recent(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    sc_outcome_record_tool(&tracker, "web_search", false, "timeout");
+    size_t count = 0;
+    const sc_outcome_entry_t *entries = sc_outcome_get_recent(&tracker, &count);
+    SC_ASSERT_NOT_NULL(entries);
+    SC_ASSERT_EQ(count, 2);
+}
+
+static void test_outcome_build_summary(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+
+    char *summary = sc_outcome_build_summary(&tracker, &alloc, NULL);
+    SC_ASSERT_NULL(summary); /* empty tracker returns NULL */
+
+    sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    sc_outcome_record_tool(&tracker, "web_search", false, "fail");
+    sc_outcome_record_correction(&tracker, NULL, "actually do X");
+
+    size_t len = 0;
+    summary = sc_outcome_build_summary(&tracker, &alloc, &len);
+    SC_ASSERT_NOT_NULL(summary);
+    SC_ASSERT_TRUE(len > 0);
+    SC_ASSERT_TRUE(strstr(summary, "1 succeeded") != NULL);
+    SC_ASSERT_TRUE(strstr(summary, "1 failed") != NULL);
+    SC_ASSERT_TRUE(strstr(summary, "corrections: 1") != NULL);
+    alloc.free(alloc.ctx, summary, len + 1);
+}
+
+static void test_outcome_detect_repeated_failure(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    SC_ASSERT_FALSE(sc_outcome_detect_repeated_failure(&tracker, "shell", 3));
+    sc_outcome_record_tool(&tracker, "shell", false, "err1");
+    sc_outcome_record_tool(&tracker, "shell", false, "err2");
+    SC_ASSERT_FALSE(sc_outcome_detect_repeated_failure(&tracker, "shell", 3));
+    sc_outcome_record_tool(&tracker, "shell", false, "err3");
+    SC_ASSERT_TRUE(sc_outcome_detect_repeated_failure(&tracker, "shell", 3));
+}
+
+static void test_outcome_circular_buffer(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    for (size_t i = 0; i < SC_OUTCOME_MAX_RECENT + 10; i++)
+        sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    SC_ASSERT_EQ(tracker.total, SC_OUTCOME_MAX_RECENT + 10);
+    size_t count = 0;
+    (void)sc_outcome_get_recent(&tracker, &count);
+    SC_ASSERT_EQ(count, SC_OUTCOME_MAX_RECENT);
+}
+
+static void test_outcome_null_safety(void) {
+    sc_outcome_record_tool(NULL, "shell", true, "ok");
+    sc_outcome_record_correction(NULL, NULL, NULL);
+    sc_outcome_record_positive(NULL, NULL);
+    SC_ASSERT_FALSE(sc_outcome_detect_repeated_failure(NULL, "shell", 1));
+    size_t count = 0;
+    SC_ASSERT_NULL(sc_outcome_get_recent(NULL, &count));
+}
+
+static void test_outcome_tracker_init_null(void) {
+    sc_outcome_tracker_init(NULL, true);
+    /* no-op, should not crash */
+}
+
+static void test_outcome_get_recent_null_count(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    SC_ASSERT_NULL(sc_outcome_get_recent(&tracker, NULL));
+}
+
+static void test_outcome_build_summary_null_alloc(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    SC_ASSERT_NULL(sc_outcome_build_summary(&tracker, NULL, NULL));
+}
+
+static void test_outcome_build_summary_null_tracker(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    SC_ASSERT_NULL(sc_outcome_build_summary(NULL, &alloc, NULL));
+}
+
+static void test_outcome_detect_repeated_failure_null_tool_name(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    SC_ASSERT_FALSE(sc_outcome_detect_repeated_failure(&tracker, NULL, 1));
+}
+
+static void test_outcome_detect_repeated_failure_zero_threshold(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", false, "err");
+    SC_ASSERT_FALSE(sc_outcome_detect_repeated_failure(&tracker, "shell", 0));
+}
+
 /* ── Run all ────────────────────────────────────────────────────────────── */
 
 void run_intelligence_tests(void) {
@@ -490,4 +778,40 @@ void run_intelligence_tests(void) {
     SC_RUN_TEST(test_prompt_with_tone_and_prefs);
 
     SC_RUN_TEST(test_compaction_llm_fallback);
+
+    /* Upgrade 1: Awareness prompt injection */
+    SC_RUN_TEST(test_awareness_prompt_injection);
+    SC_RUN_TEST(test_awareness_prompt_null_skipped);
+
+    /* Upgrade 2: Agent cron jobs */
+    SC_RUN_TEST(test_cron_add_agent_job);
+    SC_RUN_TEST(test_cron_add_agent_job_null_prompt);
+    SC_RUN_TEST(test_cron_shell_job_type_default);
+
+    /* Upgrade 3: Reflection retry */
+    SC_RUN_TEST(test_reflection_needs_retry_on_empty);
+    SC_RUN_TEST(test_reflection_good_after_long_response);
+    SC_RUN_TEST(test_reflection_critique_prompt_format);
+
+    /* Upgrade 4: Plan generation */
+    SC_RUN_TEST(test_planner_generate_stub);
+    SC_RUN_TEST(test_planner_generate_null_args);
+
+    /* Upgrade 5: Outcome tracking */
+    SC_RUN_TEST(test_outcome_tracker_init);
+    SC_RUN_TEST(test_outcome_record_tool_success);
+    SC_RUN_TEST(test_outcome_record_tool_failure);
+    SC_RUN_TEST(test_outcome_record_correction);
+    SC_RUN_TEST(test_outcome_record_positive);
+    SC_RUN_TEST(test_outcome_get_recent);
+    SC_RUN_TEST(test_outcome_build_summary);
+    SC_RUN_TEST(test_outcome_detect_repeated_failure);
+    SC_RUN_TEST(test_outcome_circular_buffer);
+    SC_RUN_TEST(test_outcome_null_safety);
+    SC_RUN_TEST(test_outcome_tracker_init_null);
+    SC_RUN_TEST(test_outcome_get_recent_null_count);
+    SC_RUN_TEST(test_outcome_build_summary_null_alloc);
+    SC_RUN_TEST(test_outcome_build_summary_null_tracker);
+    SC_RUN_TEST(test_outcome_detect_repeated_failure_null_tool_name);
+    SC_RUN_TEST(test_outcome_detect_repeated_failure_zero_threshold);
 }

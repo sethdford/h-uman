@@ -5,7 +5,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.lazy.animateItemPlacement
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
@@ -28,11 +26,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -167,8 +167,7 @@ fun ChatScreen(gatewayManager: GatewayManager) {
                 ) {
                     ChatBubble(
                         text = msg.text,
-                        role = msg.role,
-                        modifier = Modifier.animateItemPlacement()
+                        role = msg.role
                     )
                 }
             }
@@ -177,8 +176,7 @@ fun ChatScreen(gatewayManager: GatewayManager) {
                     name = tc.name,
                     arguments = tc.arguments,
                     status = tc.status,
-                    result = tc.result,
-                    modifier = Modifier.animateItemPlacement()
+                    result = tc.result
                 )
             }
         }
@@ -189,30 +187,16 @@ fun ChatScreen(gatewayManager: GatewayManager) {
                 .padding(vertical = SCTokens.spaceSm),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BasicTextField(
+            OutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
                 modifier = Modifier
                     .weight(1f)
-                    .padding(SCTokens.spaceMd)
-                    .height(SCTokens.space2xl),
-                decorationBox = { inner ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(SCTokens.spaceXs),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (inputText.isEmpty()) {
-                            Text(
-                                "Message",
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                        }
-                        inner()
-                    }
-                },
-                textStyle = MaterialTheme.typography.bodyLarge
+                    .padding(end = SCTokens.spaceSm),
+                placeholder = { Text("Message") },
+                textStyle = MaterialTheme.typography.bodyLarge,
+                singleLine = true,
+                shape = RoundedCornerShape(SCTokens.radiusLg)
             )
             IconButton(
                 onClick = {
@@ -250,7 +234,7 @@ private fun ChatBubble(
         ) {
             Text(
                 text = text,
-                modifier = Modifier.padding(SCTokens.spaceMd)
+                modifier = Modifier.padding(SCTokens.spaceMd),
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (role == Role.USER) Color.White else MaterialTheme.colorScheme.onSurface
             )

@@ -9,7 +9,7 @@ Last updated: 2026-03-07
 | Source files (src/ + include/) | **594**                |
 | Lines of C/H/ASM code          | **~102K**              |
 | Test files                     | 96                     |
-| Tests passing                  | **3032/3032 (100%)** |
+| Tests passing                  | **3,087/3,087 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **~511 KB**            |
 | Peak RSS (test suite)          | **~5.9 MB**            |
 

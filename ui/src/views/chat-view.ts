@@ -10,7 +10,6 @@ import "../components/sc-empty-state.js";
 import "../components/sc-thinking.js";
 import "../components/sc-tool-result.js";
 import "../components/sc-message-stream.js";
-import "../components/sc-message-branch.js";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -118,53 +117,6 @@ export class ScChatView extends GatewayAwareLitElement {
     .message.assistant .message-meta {
       align-self: flex-start;
     }
-    .code-block {
-      background: var(--sc-bg);
-      border-radius: var(--sc-radius-sm);
-      overflow: hidden;
-      margin: var(--sc-space-sm) 0;
-    }
-    .code-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--sc-space-2xs) var(--sc-space-sm);
-      background: var(--sc-bg-elevated);
-      border-bottom: 1px solid var(--sc-border);
-      font-size: var(--sc-text-xs);
-    }
-    .code-lang {
-      color: var(--sc-text-muted);
-      font-family: var(--sc-font-mono);
-    }
-    .copy-btn {
-      background: transparent;
-      border: 1px solid var(--sc-border);
-      color: var(--sc-text-muted);
-      font-size: var(--sc-text-xs);
-      font-family: var(--sc-font);
-      padding: 2px var(--sc-space-xs);
-      border-radius: var(--sc-radius-sm);
-      cursor: pointer;
-      transition:
-        color var(--sc-duration-fast),
-        border-color var(--sc-duration-fast);
-    }
-    .copy-btn:hover {
-      color: var(--sc-text);
-      border-color: var(--sc-text-muted);
-    }
-    .code-block pre {
-      margin: 0;
-      padding: var(--sc-space-sm);
-      overflow-x: auto;
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-sm);
-    }
-    .code-block pre code {
-      background: none;
-      padding: 0;
-    }
     .message code {
       font-family: var(--sc-font-mono);
       font-size: var(--sc-text-sm);
@@ -172,37 +124,34 @@ export class ScChatView extends GatewayAwareLitElement {
       padding: var(--sc-space-2xs) var(--sc-space-xs);
       border-radius: var(--sc-radius-sm);
     }
-    .md-blockquote {
-      margin: var(--sc-space-sm) 0;
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      border-left: 3px solid var(--sc-accent);
-      color: var(--sc-text-muted);
-      font-style: italic;
+    .suggested-prompts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sc-space-sm);
+      justify-content: center;
+      margin-top: var(--sc-space-md);
     }
-    .md-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: var(--sc-space-sm) 0;
-      font-size: var(--sc-text-sm);
-    }
-    .md-table th,
-    .md-table td {
-      padding: var(--sc-space-xs) var(--sc-space-sm);
+    .prompt-pill {
+      background: var(--sc-bg-surface);
       border: 1px solid var(--sc-border);
-      text-align: left;
+      border-radius: var(--sc-radius-full);
+      padding: var(--sc-space-xs) var(--sc-space-md);
+      font-family: var(--sc-font);
+      font-size: var(--sc-text-sm);
+      color: var(--sc-text);
+      cursor: pointer;
+      transition: all var(--sc-duration-fast) var(--sc-ease-out);
+      white-space: nowrap;
     }
-    .md-table th {
+    .prompt-pill:hover {
       background: var(--sc-bg-elevated);
-      font-weight: var(--sc-weight-semibold);
+      border-color: var(--sc-accent);
+      color: var(--sc-accent);
     }
-    .md-list {
-      margin: var(--sc-space-xs) 0;
-      padding-left: var(--sc-space-lg);
+    .prompt-pill:focus-visible {
+      outline: 2px solid var(--sc-accent);
+      outline-offset: 2px;
     }
-    .md-list li {
-      margin-bottom: var(--sc-space-2xs);
-    }
-
     .scroll-bottom-pill {
       position: absolute;
       bottom: 90px;
@@ -221,7 +170,7 @@ export class ScChatView extends GatewayAwareLitElement {
       align-items: center;
       gap: var(--sc-space-xs);
       z-index: 5;
-      animation: sc-fade-up 0.2s var(--sc-ease-out);
+      animation: sc-fade-up var(--sc-duration-fast) var(--sc-ease-out);
     }
     .scroll-bottom-pill:hover {
       background: var(--sc-bg-elevated);
@@ -721,6 +670,14 @@ export class ScChatView extends GatewayAwareLitElement {
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
   }
 
+  private _useSuggestion(text: string): void {
+    this.inputValue = text;
+    this.requestUpdate();
+    this.updateComplete.then(() => {
+      this.inputEl?.focus();
+    });
+  }
+
   private _retry(): void {
     if (!this.lastFailedMessage) return;
     this.inputValue = this.lastFailedMessage;
@@ -791,24 +748,47 @@ export class ScChatView extends GatewayAwareLitElement {
               </div>
             `
           : nothing}
-        <div id="message-list" class="messages">
+        <div
+          id="message-list"
+          class="messages"
+          role="log"
+          aria-live="polite"
+          aria-label="Chat messages"
+        >
           ${this.messages.length === 0 && this.toolCalls.length === 0
             ? html`
-                <div
-                  style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--sc-text-muted);gap:var(--sc-space-md);text-align:center;padding:var(--sc-space-2xl);"
+                <sc-empty-state
+                  .icon=${icons["chat-circle"]}
+                  heading="Start a conversation"
+                  description="Ask SeaClaw anything — write code, answer questions, use tools."
                 >
-                  <div style="width:48px;height:48px;opacity:0.4">${icons["chat-circle"]}</div>
-                  <div>
-                    <p
-                      style="margin:0;font-size:var(--sc-text-lg);font-weight:var(--sc-weight-semibold);color:var(--sc-text)"
+                  <div class="suggested-prompts">
+                    <button
+                      class="prompt-pill"
+                      @click=${() => this._useSuggestion("Explain how this project is architected")}
                     >
-                      Start a conversation
-                    </p>
-                    <p style="margin:var(--sc-space-xs) 0 0;font-size:var(--sc-text-sm)">
-                      Type a message below to begin chatting with SeaClaw.
-                    </p>
+                      Explain how this project is architected
+                    </button>
+                    <button
+                      class="prompt-pill"
+                      @click=${() => this._useSuggestion("Write a Python web scraper")}
+                    >
+                      Write a Python web scraper
+                    </button>
+                    <button
+                      class="prompt-pill"
+                      @click=${() => this._useSuggestion("Help me debug an issue")}
+                    >
+                      Help me debug an issue
+                    </button>
+                    <button
+                      class="prompt-pill"
+                      @click=${() => this._useSuggestion("What can you do?")}
+                    >
+                      What can you do?
+                    </button>
                   </div>
-                </div>
+                </sc-empty-state>
               `
             : nothing}
           ${this.messages.map(
@@ -821,9 +801,6 @@ export class ScChatView extends GatewayAwareLitElement {
                   i === this.messages.length - 1}
                   .role=${m.role}
                 ></sc-message-stream>
-                ${m.role === "assistant" && i > 0
-                  ? html`<sc-message-branch .branches=${1} .current=${0}></sc-message-branch>`
-                  : nothing}
                 ${m.ts != null
                   ? html`<span class="message-meta">${formatTime(m.ts)}</span>`
                   : nothing}

@@ -151,6 +151,28 @@ static void test_agent_from_config_basic(void) {
     sc_agent_deinit(&agent);
 }
 
+static void test_agent_from_config_null_alloc(void) {
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    mock_provider_t mock_ctx;
+    sc_provider_t prov = mock_provider_create(NULL, &mock_ctx);
+    sc_error_t err =
+        sc_agent_from_config(&agent, NULL, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_agent_from_config_null_provider(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    sc_provider_t prov = {0};
+    sc_error_t err =
+        sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
 static void test_agent_turn_simple(void) {
     sc_allocator_t alloc = sc_system_allocator();
     mock_provider_t mock_ctx;
@@ -794,9 +816,85 @@ static void test_agent_tool_call_round_trip(void) {
     sc_agent_deinit(&agent);
 }
 
+/* ── Outcome Tracker ─────────────────────────────────────────────────── */
+
+#include "seaclaw/agent/outcomes.h"
+
+static void test_outcome_tracker_init(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    SC_ASSERT_EQ(tracker.total, 0u);
+    SC_ASSERT_EQ(tracker.tool_successes, 0u);
+    SC_ASSERT_EQ(tracker.tool_failures, 0u);
+    SC_ASSERT_FALSE(tracker.auto_apply_feedback);
+}
+
+static void test_outcome_record_tool_success(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "ran ls");
+    SC_ASSERT_EQ(tracker.total, 1u);
+    SC_ASSERT_EQ(tracker.tool_successes, 1u);
+}
+
+static void test_outcome_record_tool_failure(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", false, "permission denied");
+    SC_ASSERT_EQ(tracker.tool_failures, 1u);
+}
+
+static void test_outcome_record_correction(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_correction(&tracker, "original", "corrected");
+    SC_ASSERT_EQ(tracker.corrections, 1u);
+}
+
+static void test_outcome_record_positive(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_positive(&tracker, "thanks");
+    SC_ASSERT_EQ(tracker.positives, 1u);
+}
+
+static void test_outcome_get_recent(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    size_t count = 0;
+    const sc_outcome_entry_t *entries = sc_outcome_get_recent(&tracker, &count);
+    SC_ASSERT_NOT_NULL(entries);
+    SC_ASSERT_EQ(count, 1u);
+}
+
+static void test_outcome_build_summary(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    sc_outcome_record_tool(&tracker, "shell", true, "ok");
+    size_t len = 0;
+    char *summary = sc_outcome_build_summary(&tracker, &alloc, &len);
+    SC_ASSERT_NOT_NULL(summary);
+    SC_ASSERT_TRUE(len > 0);
+    alloc.free(alloc.ctx, summary, len + 1);
+}
+
+static void test_outcome_detect_repeated_failure(void) {
+    sc_outcome_tracker_t tracker;
+    sc_outcome_tracker_init(&tracker, false);
+    SC_ASSERT_FALSE(sc_outcome_detect_repeated_failure(&tracker, "shell", 3));
+    sc_outcome_record_tool(&tracker, "shell", false, "fail1");
+    sc_outcome_record_tool(&tracker, "shell", false, "fail2");
+    sc_outcome_record_tool(&tracker, "shell", false, "fail3");
+    SC_ASSERT_TRUE(sc_outcome_detect_repeated_failure(&tracker, "shell", 3));
+}
+
 void run_e2e_tests(void) {
     SC_TEST_SUITE("E2E");
     SC_RUN_TEST(test_agent_from_config_basic);
+    SC_RUN_TEST(test_agent_from_config_null_alloc);
+    SC_RUN_TEST(test_agent_from_config_null_provider);
     SC_RUN_TEST(test_agent_turn_simple);
     SC_RUN_TEST(test_agent_slash_help);
     SC_RUN_TEST(test_agent_slash_clear);
@@ -824,4 +922,13 @@ void run_e2e_tests(void) {
     SC_RUN_TEST(test_provider_create_from_config);
     SC_RUN_TEST(test_config_validate_after_load);
     SC_RUN_TEST(test_agent_tool_call_round_trip);
+
+    SC_RUN_TEST(test_outcome_tracker_init);
+    SC_RUN_TEST(test_outcome_record_tool_success);
+    SC_RUN_TEST(test_outcome_record_tool_failure);
+    SC_RUN_TEST(test_outcome_record_correction);
+    SC_RUN_TEST(test_outcome_record_positive);
+    SC_RUN_TEST(test_outcome_get_recent);
+    SC_RUN_TEST(test_outcome_build_summary);
+    SC_RUN_TEST(test_outcome_detect_repeated_failure);
 }

@@ -50,7 +50,9 @@ static bool validate_name(const char *name, size_t len) {
 static sc_error_t skill_write_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                       sc_tool_result_t *out) {
     (void)ctx;
-    if (!args || !out) {
+    if (!out)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (!args) {
         *out = sc_tool_result_fail("invalid args", 12);
         return SC_ERR_INVALID_ARGUMENT;
     }

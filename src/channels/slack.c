@@ -489,6 +489,7 @@ static sc_error_t slack_set_thread_status(sc_slack_ctx_t *c, const char *channel
     if (!c->token || channel_id_len == 0 || thread_ts_len == 0)
         return SC_OK;
 
+    sc_error_t post_err = SC_OK;
     sc_json_buf_t jbuf;
     if (sc_json_buf_init(&jbuf, c->alloc) != SC_OK)
         return SC_OK;
@@ -513,12 +514,12 @@ static sc_error_t slack_set_thread_status(sc_slack_ctx_t *c, const char *channel
     snprintf(auth_buf, sizeof(auth_buf), "Authorization: Bearer %.*s", (int)c->token_len, c->token);
 
     sc_http_response_t resp = {0};
-    sc_http_post_json(c->alloc, url_buf, auth_buf, jbuf.ptr, jbuf.len, &resp);
+    post_err = sc_http_post_json(c->alloc, url_buf, auth_buf, jbuf.ptr, jbuf.len, &resp);
     if (resp.owned && resp.body)
         sc_http_response_free(c->alloc, &resp);
 out:
     sc_json_buf_free(&jbuf);
-    return SC_OK;
+    return (post_err != SC_OK) ? post_err : SC_OK;
 #endif
 }
 

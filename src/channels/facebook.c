@@ -106,7 +106,7 @@ jfail:
 
 static void facebook_queue_push(sc_facebook_ctx_t *c, const char *from, size_t from_len,
                                 const char *body, size_t body_len) {
-    if (c->queue_count >= FACEBOOK_QUEUE_MAX)
+    if (!c || !from || !body || c->queue_count >= FACEBOOK_QUEUE_MAX)
         return;
     sc_facebook_queued_msg_t *slot = &c->queue[c->queue_tail];
     size_t sk = from_len < FACEBOOK_SESSION_KEY_MAX ? from_len : FACEBOOK_SESSION_KEY_MAX;

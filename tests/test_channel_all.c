@@ -1325,6 +1325,71 @@ static void test_mqtt_create_valid_health_check_when_running(void) {
     ch.vtable->stop(ch.ctx);
     sc_mqtt_destroy(&ch, &alloc);
 }
+
+static void test_mqtt_send_stores_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err =
+        sc_mqtt_create(&alloc, "mqtt://broker", 13, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, NULL, 0, "hello world", 11, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *last = sc_mqtt_test_get_last_message(&ch, &len);
+    SC_ASSERT_NOT_NULL(last);
+    SC_ASSERT_EQ(len, 11u);
+    SC_ASSERT_STR_EQ(last, "hello world");
+    sc_mqtt_destroy(&ch, &alloc);
+}
+
+static void test_mqtt_poll_returns_injected_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err =
+        sc_mqtt_create(&alloc, "mqtt://broker", 13, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_mqtt_test_inject_mock(&ch, "sess1", 5, "injected payload", 16);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_mqtt_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1u);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "sess1");
+    SC_ASSERT_STR_EQ(msgs[0].content, "injected payload");
+    sc_mqtt_destroy(&ch, &alloc);
+}
+
+static void test_mqtt_send_before_start_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err =
+        sc_mqtt_create(&alloc, "mqtt://broker", 13, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, NULL, 0, "hello", 5, NULL, 0);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    sc_mqtt_destroy(&ch, &alloc);
+}
+
+static void test_mqtt_poll_empty_returns_no_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err =
+        sc_mqtt_create(&alloc, "mqtt://broker", 13, NULL, 0, NULL, 0, NULL, 0, NULL, 0, 0, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    err = sc_mqtt_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 0u);
+    sc_mqtt_destroy(&ch, &alloc);
+}
 #endif
 
 #if SC_HAS_QQ
@@ -1892,6 +1957,10 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_mqtt_create_null_broker_returns_error);
     SC_RUN_TEST(test_mqtt_create_valid_lifecycle);
     SC_RUN_TEST(test_mqtt_create_valid_health_check_when_running);
+    SC_RUN_TEST(test_mqtt_send_stores_message);
+    SC_RUN_TEST(test_mqtt_poll_returns_injected_message);
+    SC_RUN_TEST(test_mqtt_send_before_start_fails);
+    SC_RUN_TEST(test_mqtt_poll_empty_returns_no_message);
 #endif
 #if SC_HAS_QQ
     SC_RUN_TEST(test_qq_create);

@@ -55,9 +55,9 @@ static sc_error_t gce_wrap_command(void *ctx, const char **argv_in, size_t argc_
     if (!argv_out || !argc_out || max_out < 8)
         return SC_ERR_INVALID_ARGUMENT;
 
-    static char zone_arg[160];
-    static char project_arg[288];
-    static char cmd_buf[4096];
+    char zone_arg[160];
+    char project_arg[288];
+    char cmd_buf[4096];
 
     size_t idx = 0;
     argv_out[idx++] = "gcloud";

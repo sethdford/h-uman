@@ -500,9 +500,14 @@ sc_error_t sc_gmail_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_lo
         if (nm > 0 && (size_t)nm < sizeof(mod_url)) {
             const char *mod_body = "{\"removeLabelIds\":[\"UNREAD\"]}";
             sc_http_response_t mresp = {0};
-            sc_http_post_json(alloc, mod_url, auth_buf, mod_body, 29, &mresp);
+            sc_error_t mod_err = sc_http_post_json(alloc, mod_url, auth_buf, mod_body, 29, &mresp);
             if (mresp.owned && mresp.body)
                 sc_http_response_free(alloc, &mresp);
+            if (mod_err != SC_OK) {
+                sc_json_free(alloc, parsed);
+                *out_count = cnt;
+                return mod_err;
+            }
         }
     }
 

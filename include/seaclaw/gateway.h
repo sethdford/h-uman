@@ -87,4 +87,12 @@ bool sc_gateway_is_allowed_origin(const char *origin, const char *const *allowed
  * SC_ERR_GATEWAY_BODY_TOO_LARGE (exceeds max). value is the part after "Content-Length: " */
 sc_error_t sc_gateway_parse_content_length(const char *value, size_t max_body, size_t *out_len);
 
+#if SC_IS_TEST
+/* Test-only: process POST /api/pair body, return HTTP status and JSON body.
+ * guard may be NULL (pairing not enabled). out_body allocated via alloc; caller must free. */
+int sc_gateway_test_pair_request(sc_allocator_t *alloc, void *guard, size_t max_body,
+                                 const char *body, size_t body_len, char **out_body,
+                                 size_t *out_len);
+#endif
+
 #endif /* SC_GATEWAY_H */

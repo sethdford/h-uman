@@ -1,6 +1,7 @@
 /*
  * gcloud CLI tool — execute Google Cloud CLI commands.
  */
+#include "seaclaw/tools/cli_wrapper_common.h"
 #include "seaclaw/tools/gcloud.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
@@ -9,7 +10,6 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/security.h"
 #include "seaclaw/tool.h"
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,36 +26,6 @@ typedef struct sc_gcloud_ctx {
     sc_security_policy_t *policy;
 } sc_gcloud_ctx_t;
 
-static bool gcloud_sanitize_command(const char *cmd) {
-    if (!cmd)
-        return true;
-    if (strstr(cmd, "$(") || strchr(cmd, '`') || strchr(cmd, '|') || strchr(cmd, ';'))
-        return false;
-    return true;
-}
-
-#if !SC_IS_TEST
-static size_t gcloud_split_args(char *cmd, const char **argv_out, size_t max_out) {
-    size_t argc = 0;
-    char *p = cmd;
-    while (*p && argc < max_out) {
-        while (*p && isspace((unsigned char)*p))
-            p++;
-        if (!*p)
-            break;
-        char *start = p;
-        while (*p && !isspace((unsigned char)*p))
-            p++;
-        if (*p) {
-            *p = '\0';
-            p++;
-        }
-        argv_out[argc++] = start;
-    }
-    return argc;
-}
-#endif /* !SC_IS_TEST */
-
 static sc_error_t gcloud_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
                                  sc_tool_result_t *out) {
     sc_gcloud_ctx_t *c = (sc_gcloud_ctx_t *)ctx;
@@ -66,7 +36,7 @@ static sc_error_t gcloud_execute(void *ctx, sc_allocator_t *alloc, const sc_json
         *out = sc_tool_result_fail("Missing 'command'", 16);
         return SC_OK;
     }
-    if (!gcloud_sanitize_command(cmd)) {
+    if (!sc_cli_sanitize_command(cmd)) {
         *out = sc_tool_result_fail("Unsafe command characters detected", 33);
         return SC_OK;
     }
@@ -91,7 +61,7 @@ static sc_error_t gcloud_execute(void *ctx, sc_allocator_t *alloc, const sc_json
         return SC_ERR_OUT_OF_MEMORY;
     }
     memcpy(cmd_copy, cmd, cmd_len);
-    size_t n = gcloud_split_args(cmd_copy, argv_buf + 1, SC_GCLOUD_MAX_ARGS);
+    size_t n = sc_cli_split_args(cmd_copy, argv_buf + 1, SC_GCLOUD_MAX_ARGS);
     for (size_t i = 1; i <= n; i++) {
         char *dup = sc_strdup(alloc, argv_buf[i]);
         if (!dup) {

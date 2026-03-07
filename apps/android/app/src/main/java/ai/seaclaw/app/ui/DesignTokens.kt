@@ -23,7 +23,7 @@ object SCTokens {
         val accentTertiarySubtle = Color(0x246366F1)
         val accentTertiaryText = Color(0xFF818CF8)
         val accentText = Color(0xFF8DC63F)
-        val backdropOverlay = Color(0x-67000000)
+        val backdropOverlay = Color(0x99000000)
         val bg = Color(0xFF060B12)
         val bgElevated = Color(0xFF162230)
         val bgInset = Color(0xFF0B1219)

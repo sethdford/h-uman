@@ -302,8 +302,11 @@ sc_error_t sc_agent_from_config(
 
     out->audit_logger = NULL;
     out->undo_stack = sc_undo_stack_create(alloc, 100);
-    if (!out->undo_stack)
+    if (!out->undo_stack) {
+        sc_arena_destroy(out->turn_arena);
+        out->turn_arena = NULL;
         return SC_ERR_OUT_OF_MEMORY;
+    }
 
     return SC_OK;
 }
@@ -407,7 +410,7 @@ void sc_agent_deinit(sc_agent_t *agent) {
     sc_agent_clear_history(agent);
     if (agent->history) {
         agent->alloc->free(agent->alloc->ctx, agent->history,
-                           agent->history_cap * sizeof(sc_chat_message_t));
+                           agent->history_cap * sizeof(sc_owned_message_t));
         agent->history = NULL;
         agent->history_cap = 0;
     }
@@ -805,9 +808,14 @@ char *sc_agent_handle_slash_command(sc_agent_t *agent, const char *message, size
         if (!buf)
             return NULL;
         int off = snprintf(buf, 4096, "Tools (%zu):\n", agent->tools_count);
+        if (off < 0 || (size_t)off >= 4096)
+            off = 0;
         for (size_t i = 0; i < agent->tools_count && off < 4000; i++) {
             const char *n = agent->tools[i].vtable->name(agent->tools[i].ctx);
-            off += snprintf(buf + off, 4096 - (size_t)off, "  %s\n", n ? n : "?");
+            int nw = snprintf(buf + off, 4096 - (size_t)off, "  %s\n", n ? n : "?");
+            if (nw < 0)
+                break;
+            off += nw;
         }
         return buf;
     }
@@ -1169,12 +1177,56 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 
     /* Detect preferences from user corrections and store them */
-    if (agent->memory && sc_preferences_is_correction(msg, msg_len)) {
+    bool is_correction = sc_preferences_is_correction(msg, msg_len);
+    if (agent->memory && is_correction) {
         size_t pref_len = 0;
         char *pref = sc_preferences_extract(agent->alloc, msg, msg_len, &pref_len);
         if (pref) {
             sc_preferences_store(agent->memory, agent->alloc, pref, pref_len);
             agent->alloc->free(agent->alloc->ctx, pref, pref_len + 1);
+        }
+    }
+
+    /* Outcome tracking: record corrections and positive feedback */
+    if (agent->outcomes) {
+        if (is_correction) {
+            const char *prev_response = NULL;
+            if (agent->history_count >= 2 &&
+                agent->history[agent->history_count - 2].role == SC_ROLE_ASSISTANT)
+                prev_response = agent->history[agent->history_count - 2].content;
+            sc_outcome_record_correction(agent->outcomes, prev_response, msg);
+
+#ifdef SC_HAS_PERSONA
+            if (agent->outcomes->auto_apply_feedback && agent->persona && agent->persona_name &&
+                prev_response) {
+                sc_persona_feedback_t fb = {
+                    .channel = agent->active_channel,
+                    .channel_len = agent->active_channel_len,
+                    .original_response = prev_response,
+                    .original_response_len = strlen(prev_response),
+                    .corrected_response = msg,
+                    .corrected_response_len = msg_len,
+                };
+                (void)sc_persona_feedback_record(agent->alloc, agent->persona_name,
+                                                 strlen(agent->persona_name), &fb);
+            }
+#endif
+        } else if (msg_len >= 5 && msg_len <= 80) {
+            /* Detect simple positive feedback */
+            bool positive = false;
+            for (size_t k = 0; k + 5 <= msg_len && !positive; k++) {
+                char c0 = msg[k] | 0x20, c1 = msg[k + 1] | 0x20, c2 = msg[k + 2] | 0x20;
+                char c3 = msg[k + 3] | 0x20, c4 = msg[k + 4] | 0x20;
+                if (c0 == 't' && c1 == 'h' && c2 == 'a' && c3 == 'n' && c4 == 'k')
+                    positive = true;
+                if (c0 == 'g' && c1 == 'r' && c2 == 'e' && c3 == 'a' && c4 == 't')
+                    positive = true;
+                if (k + 6 <= msg_len && c0 == 'p' && c1 == 'e' && c2 == 'r' && c3 == 'f' &&
+                    c4 == 'e' && (msg[k + 5] | 0x20) == 'c')
+                    positive = true;
+            }
+            if (positive)
+                sc_outcome_record_positive(agent->outcomes, msg);
         }
     }
 
@@ -1680,6 +1732,15 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
                                     ? NULL
                                     : (result->error_msg ? result->error_msg : "failed");
                             SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+                        }
+
+                        /* Outcome tracking */
+                        if (agent->outcomes) {
+                            const char *sum =
+                                result->success
+                                    ? (result->output ? result->output : "ok")
+                                    : (result->error_msg ? result->error_msg : "failed");
+                            sc_outcome_record_tool(agent->outcomes, tn_buf, result->success, sum);
                         }
 
                         const char *res_content =

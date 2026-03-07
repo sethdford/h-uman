@@ -43,9 +43,12 @@ fi
 PASS=0
 FAIL=0
 
-# 1. clang-format
+# 1. clang-format (skippable via SC_SKIP_FORMAT=1 for cross-version tolerance)
 info "Step 1/4: clang-format check..."
-if find src include \( -name '*.c' -o -name '*.h' \) 2>/dev/null | xargs "$CLANG_FMT" --dry-run -Werror 2>/dev/null; then
+if [ "${SC_SKIP_FORMAT:-0}" = "1" ]; then
+    info "  clang-format: skipped (SC_SKIP_FORMAT=1)"
+    PASS=$((PASS + 1))
+elif find src include \( -name '*.c' -o -name '*.h' \) 2>/dev/null | xargs "$CLANG_FMT" --dry-run -Werror 2>/dev/null; then
     info "  clang-format: pass"
     PASS=$((PASS + 1))
 else

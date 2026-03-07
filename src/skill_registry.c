@@ -79,7 +79,7 @@ void sc_skill_registry_entries_free(sc_allocator_t *alloc, sc_skill_registry_ent
 }
 
 /* install/uninstall/update/publish: reserved for future remote registry support.
-   Currently no-ops — skills are loaded from disk via sc_skill_registry_list(). */
+   Currently no-ops — skills are loaded from disk via sc_skill_registry_search(). */
 
 sc_error_t sc_skill_registry_install(sc_allocator_t *alloc, const char *name) {
     (void)alloc;

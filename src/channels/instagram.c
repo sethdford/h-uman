@@ -1,14 +1,15 @@
 #include "seaclaw/channels/instagram.h"
 #include "seaclaw/channel.h"
-#include "seaclaw/core/http.h"
+#include "seaclaw/channels/meta_common.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define INSTAGRAM_API_BASE        "https://graph.facebook.com/v21.0/"
-#define INSTAGRAM_QUEUE_MAX       32
+#define INSTAGRAM_ENDPOINT        "me/messages"
+#define INSTAGRAM_ENDPOINT_LEN   12
+#define INSTAGRAM_QUEUE_MAX      32
 #define INSTAGRAM_SESSION_KEY_MAX 127
 #define INSTAGRAM_CONTENT_MAX     4095
 
@@ -70,8 +71,6 @@ static sc_error_t instagram_send(void *ctx, const char *target, size_t target_le
     if (!target || target_len == 0 || !message)
         return SC_ERR_INVALID_ARGUMENT;
 
-    const char *url = INSTAGRAM_API_BASE "me/messages";
-
     sc_json_buf_t jbuf;
     sc_error_t err = sc_json_buf_init(&jbuf, c->alloc);
     if (err)
@@ -93,28 +92,11 @@ static sc_error_t instagram_send(void *ctx, const char *target, size_t target_le
     if (err)
         goto jfail;
 
-    char auth_buf[512];
-    int n = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s", (int)c->access_token_len,
-                     c->access_token);
-    if (n <= 0 || (size_t)n >= sizeof(auth_buf)) {
-        sc_json_buf_free(&jbuf);
-        return SC_ERR_INTERNAL;
-    }
-
-    sc_http_response_t resp = {0};
-    err = sc_http_post_json(c->alloc, url, auth_buf, jbuf.ptr, jbuf.len, &resp);
+    err = sc_meta_graph_send(c->alloc, c->access_token, c->access_token_len, INSTAGRAM_ENDPOINT,
+                             INSTAGRAM_ENDPOINT_LEN, jbuf.ptr, jbuf.len);
     sc_json_buf_free(&jbuf);
-    if (err != SC_OK) {
-        if (resp.owned && resp.body)
-            sc_http_response_free(c->alloc, &resp);
+    if (err != SC_OK)
         return SC_ERR_CHANNEL_SEND;
-    }
-    if (resp.owned && resp.body)
-        sc_http_response_free(c->alloc, &resp);
-    if (resp.status_code < 200 || resp.status_code >= 300)
-        return SC_ERR_CHANNEL_SEND;
-
-    (void)media_count;
     return SC_OK;
 jfail:
     sc_json_buf_free(&jbuf);

@@ -60,7 +60,11 @@ static sc_error_t mqtt_send(void *ctx, const char *target, size_t target_len, co
     (void)media_count;
 #if SC_IS_TEST
     sc_mqtt_ctx_t *c = (sc_mqtt_ctx_t *)ctx;
-    if (c && message && message_len > 0) {
+    if (!c)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (!c->running)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (message && message_len > 0) {
         size_t copy = message_len;
         if (copy >= SC_MQTT_LAST_MSG_LEN)
             copy = SC_MQTT_LAST_MSG_LEN - 1;
@@ -154,6 +158,15 @@ sc_error_t sc_mqtt_test_inject_mock(sc_channel_t *ch, const char *session_key,
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
     return SC_OK;
+}
+
+const char *sc_mqtt_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+    if (!ch || !ch->ctx)
+        return NULL;
+    sc_mqtt_ctx_t *c = (sc_mqtt_ctx_t *)ch->ctx;
+    if (out_len)
+        *out_len = c->last_message_len;
+    return c->last_message;
 }
 #endif
 

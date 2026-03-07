@@ -1,4 +1,5 @@
 #include "seaclaw/auth.h"
+#include "seaclaw/core/error.h"
 #include "seaclaw/core/http.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
@@ -111,10 +112,22 @@ sc_error_t sc_auth_save_credential(sc_allocator_t *alloc, const char *provider,
     char *enc_access = NULL;
     char *enc_refresh = NULL;
     if (store && token->access_token) {
-        (void)sc_secret_store_encrypt(store, alloc, token->access_token, &enc_access);
+        sc_error_t enc_err = sc_secret_store_encrypt(store, alloc, token->access_token, &enc_access);
+        if (enc_err != SC_OK) {
+            enc_access = NULL; /* fall back to plaintext */
+#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+            fprintf(stderr, "[auth] encrypt access_token failed: %s\n", sc_error_string(enc_err));
+#endif
+        }
     }
     if (store && token->refresh_token) {
-        (void)sc_secret_store_encrypt(store, alloc, token->refresh_token, &enc_refresh);
+        sc_error_t enc_err = sc_secret_store_encrypt(store, alloc, token->refresh_token, &enc_refresh);
+        if (enc_err != SC_OK) {
+            enc_refresh = NULL; /* fall back to plaintext */
+#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+            fprintf(stderr, "[auth] encrypt refresh_token failed: %s\n", sc_error_string(enc_err));
+#endif
+        }
     }
     const char *access_out = enc_access ? enc_access : token->access_token;
     const char *refresh_out = enc_refresh ? enc_refresh : token->refresh_token;
@@ -227,7 +240,9 @@ sc_error_t sc_auth_load_credential(sc_allocator_t *alloc, const char *provider,
     const char *rt = sc_json_get_string(prov, "refresh_token");
     if (rt && rt[0]) {
         if (store && strncmp(rt, "enc2:", 5) == 0) {
-            (void)sc_secret_store_decrypt(store, alloc, rt, &decrypted_rt);
+            sc_error_t dec_err = sc_secret_store_decrypt(store, alloc, rt, &decrypted_rt);
+            if (dec_err != SC_OK)
+                decrypted_rt = NULL; /* keep encrypted value, caller sees it */
         }
         token_out->refresh_token = decrypted_rt ? decrypted_rt : sc_strdup(alloc, rt);
     }

@@ -76,52 +76,8 @@ sc_error_t sc_web_search_firecrawl(sc_allocator_t *alloc, const char *query, siz
         return SC_OK;
     }
 
-    size_t cap = 4096;
-    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
-    if (!buf) {
-        sc_json_free(alloc, parsed);
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
-    }
-    size_t len = 0;
-    int n = snprintf(buf, cap, "Results for: %.*s\n\n", (int)query_len, query);
-    if (n > 0)
-        len = (size_t)n;
-
-    int max_r = count;
-    if (max_r > (int)results->data.array.len)
-        max_r = (int)results->data.array.len;
-    for (int i = 0; i < max_r; i++) {
-        sc_json_value_t *item = results->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
-            continue;
-        const char *title = sc_json_get_string(item, "title");
-        const char *url = sc_json_get_string(item, "url");
-        const char *desc = sc_json_get_string(item, "description");
-        if (!title)
-            title = "";
-        if (!url)
-            url = "";
-        if (!desc)
-            desc = "";
-
-        char line[1024];
-        int ln = snprintf(line, sizeof(line), "%d. %s\n   %s\n   %s\n\n", i + 1, title, url, desc);
-        if (ln > 0 && len + (size_t)ln < cap) {
-            memcpy(buf + len, line, (size_t)ln + 1);
-            len += (size_t)ln;
-        } else if (ln > 0) {
-            size_t new_cap = cap * 2;
-            char *nbuf = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
-            if (!nbuf)
-                break;
-            buf = nbuf;
-            cap = new_cap;
-            memcpy(buf + len, line, (size_t)ln + 1);
-            len += (size_t)ln;
-        }
-    }
+    sc_error_t fmt_err = sc_web_search_format_results(alloc, query, query_len, results, count,
+                                                      "title", "url", "description", out);
     sc_json_free(alloc, parsed);
-    *out = sc_tool_result_ok_owned(buf, len);
-    return SC_OK;
+    return fmt_err;
 }

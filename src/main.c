@@ -455,11 +455,16 @@ static sc_error_t cmd_service(sc_allocator_t *alloc, int argc, char **argv) {
 
 /* Memory from config — delegates to shared factory in src/memory/factory.c */
 
-static sc_error_t plugin_register_tool_stub(void *ctx, const char *name, void *tool_vtable) {
-    (void)ctx;
-    (void)name;
-    (void)tool_vtable;
-    return SC_OK;
+static sc_error_t plugin_register_tool(void *ctx, const char *name, void *tool_vtable) {
+    sc_plugin_registry_t *reg = (sc_plugin_registry_t *)ctx;
+    if (!reg || !name)
+        return SC_ERR_INVALID_ARGUMENT;
+    sc_plugin_info_t info = {.name = name, .api_version = SC_PLUGIN_API_VERSION};
+    sc_tool_t tool;
+    memset(&tool, 0, sizeof(tool));
+    tool.ctx = tool_vtable;
+    tool.vtable = (const sc_tool_vtable_t *)tool_vtable;
+    return sc_plugin_register(reg, &info, &tool, 1);
 }
 static sc_error_t plugin_register_provider_stub(void *ctx, const char *name,
                                                 void *provider_vtable) {
@@ -528,12 +533,13 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     }
 
     /* ── Load plugins ─────────────────────────────────────────────────── */
+    sc_plugin_registry_t *plugin_reg = sc_plugin_registry_create(alloc, 16);
     sc_plugin_host_t plugin_host = {
         .alloc = alloc,
-        .register_tool = plugin_register_tool_stub,
+        .register_tool = plugin_register_tool,
         .register_provider = plugin_register_provider_stub,
         .register_channel = plugin_register_channel_stub,
-        .host_ctx = NULL,
+        .host_ctx = plugin_reg,
     };
     for (size_t i = 0; i < cfg.plugins.plugin_paths_len; i++) {
         if (cfg.plugins.plugin_paths[i]) {
@@ -564,6 +570,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", SC_CODENAME, prov_name,
                 sc_error_string(err));
+        if (plugin_reg)
+            sc_plugin_registry_destroy(plugin_reg);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -579,6 +587,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     err = sc_runtime_from_config(&cfg, &runtime);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Runtime error: %s\n", SC_CODENAME, sc_error_string(err));
+        if (plugin_reg)
+            sc_plugin_registry_destroy(plugin_reg);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -666,6 +676,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
                                   &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (plugin_reg)
+            sc_plugin_registry_destroy(plugin_reg);
         if (cron)
             sc_cron_destroy(cron, alloc);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
@@ -684,6 +696,26 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         return err;
     }
 
+    /* Merge plugin-registered tools */
+    if (plugin_reg) {
+        sc_tool_t *plugin_tools = NULL;
+        size_t plugin_tools_count = 0;
+        if (sc_plugin_get_tools(plugin_reg, &plugin_tools, &plugin_tools_count) == SC_OK &&
+            plugin_tools_count > 0) {
+            sc_tool_t *merged = (sc_tool_t *)alloc->alloc(
+                alloc->ctx, (tools_count + plugin_tools_count) * sizeof(sc_tool_t));
+            if (merged) {
+                memcpy(merged, tools, tools_count * sizeof(sc_tool_t));
+                memcpy(merged + tools_count, plugin_tools,
+                       plugin_tools_count * sizeof(sc_tool_t));
+                alloc->free(alloc->ctx, tools, tools_count * sizeof(sc_tool_t));
+                tools = merged;
+                tools_count += plugin_tools_count;
+            }
+            alloc->free(alloc->ctx, plugin_tools, plugin_tools_count * sizeof(sc_tool_t));
+        }
+    }
+
     /* ── Create observer from SEACLAW_LOG env ───────────────────────── */
     sc_observer_t observer = {0};
     FILE *log_fp = NULL;
@@ -693,6 +725,11 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         if (log_fp)
             observer = sc_log_observer_create(alloc, log_fp);
     }
+
+    sc_bus_t svc_bus;
+    sc_bus_init(&svc_bus);
+    sc_awareness_t svc_awareness = {0};
+    (void)sc_awareness_init(&svc_awareness, &svc_bus);
 
     /* ── Create agent ─────────────────────────────────────────────────── */
     sc_agent_context_config_t ctx_cfg = {
@@ -710,6 +747,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         cfg.agent.persona ? strlen(cfg.agent.persona) : 0, &ctx_cfg);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (plugin_reg)
+            sc_plugin_registry_destroy(plugin_reg);
         if (observer.vtable && observer.vtable->deinit)
             observer.vtable->deinit(observer.ctx);
         if (log_fp)
@@ -729,6 +768,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
             sc_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
             sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        sc_awareness_deinit(&svc_awareness);
         sc_config_deinit(&cfg);
         return err;
     }
@@ -739,6 +779,8 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     if (cfg.policy.enabled)
         agent.policy_engine = sc_policy_engine_create(alloc);
     sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
+    if (svc_awareness.bus)
+        sc_agent_set_awareness(&agent, (struct sc_awareness *)&svc_awareness);
 
     if (cfg.security.audit.enabled) {
         sc_audit_config_t acfg = SC_AUDIT_CONFIG_DEFAULT;
@@ -1176,6 +1218,9 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         sc_rate_tracker_destroy(policy.tracker);
     if (sb_storage)
         sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
+    if (plugin_reg)
+        sc_plugin_registry_destroy(plugin_reg);
+    sc_awareness_deinit(&svc_awareness);
     sc_plugin_unload_all();
     sc_config_deinit(&cfg);
     return err;
@@ -1477,12 +1522,13 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
     }
 
     /* ── Load plugins ─────────────────────────────────────────────────── */
+    sc_plugin_registry_t *gw_plugin_reg = sc_plugin_registry_create(alloc, 16);
     sc_plugin_host_t gw_plugin_host = {
         .alloc = alloc,
-        .register_tool = plugin_register_tool_stub,
+        .register_tool = plugin_register_tool,
         .register_provider = plugin_register_provider_stub,
         .register_channel = plugin_register_channel_stub,
-        .host_ctx = NULL,
+        .host_ctx = gw_plugin_reg,
     };
     for (size_t i = 0; i < cfg.plugins.plugin_paths_len; i++) {
         if (cfg.plugins.plugin_paths[i]) {
@@ -1590,6 +1636,7 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
     sc_vector_store_t gw_vector_store = {0};
     sc_retrieval_engine_t gw_retrieval_engine = {0};
     gw_agent_bridge_t agent_bridge = {0};
+    sc_awareness_t gw_awareness = {0};
     bool agent_active = false;
 
     if (with_agent)
@@ -1606,6 +1653,8 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
                                   &tools, &tools_count);
     if (err != SC_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+        if (gw_plugin_reg)
+            sc_plugin_registry_destroy(gw_plugin_reg);
         if (memory.vtable && memory.vtable->deinit)
             memory.vtable->deinit(memory.ctx);
         sc_cost_tracker_deinit(&costs);
@@ -1621,6 +1670,26 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
             sc_sandbox_storage_destroy(gw_sb_storage, &gw_sb_alloc);
         sc_config_deinit(&cfg);
         return err;
+    }
+
+    /* Merge plugin-registered tools */
+    if (gw_plugin_reg) {
+        sc_tool_t *plugin_tools = NULL;
+        size_t plugin_tools_count = 0;
+        if (sc_plugin_get_tools(gw_plugin_reg, &plugin_tools, &plugin_tools_count) == SC_OK &&
+            plugin_tools_count > 0) {
+            sc_tool_t *merged = (sc_tool_t *)alloc->alloc(
+                alloc->ctx, (tools_count + plugin_tools_count) * sizeof(sc_tool_t));
+            if (merged) {
+                memcpy(merged, tools, tools_count * sizeof(sc_tool_t));
+                memcpy(merged + tools_count, plugin_tools,
+                       plugin_tools_count * sizeof(sc_tool_t));
+                alloc->free(alloc->ctx, tools, tools_count * sizeof(sc_tool_t));
+                tools = merged;
+                tools_count += plugin_tools_count;
+            }
+            alloc->free(alloc->ctx, plugin_tools, plugin_tools_count * sizeof(sc_tool_t));
+        }
     }
 
     /* ── App context ───────────────────────────────────────────────────── */
@@ -1703,8 +1772,9 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
         agent_active = true;
 
         /* Proactive awareness: subscribe to bus events */
-        sc_awareness_t awareness;
-        sc_awareness_init(&awareness, &bus);
+        (void)sc_awareness_init(&gw_awareness, &bus);
+        if (gw_awareness.bus)
+            sc_agent_set_awareness(&agent, (struct sc_awareness *)&gw_awareness);
 
         if (cfg.security.audit.enabled) {
             sc_audit_config_t acfg = SC_AUDIT_CONFIG_DEFAULT;
@@ -1740,6 +1810,7 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
 
 cleanup:
     if (agent_active) {
+        sc_awareness_deinit(&gw_awareness);
         sc_bus_unsubscribe(&bus, gw_agent_on_message, &agent_bridge);
         sc_agent_deinit(&agent);
         if (gw_retrieval_engine.vtable && gw_retrieval_engine.vtable->deinit)
@@ -1752,6 +1823,8 @@ cleanup:
     if (memory.vtable && memory.vtable->deinit)
         memory.vtable->deinit(memory.ctx);
     sc_tools_destroy_default(alloc, tools, tools_count);
+    if (gw_plugin_reg)
+        sc_plugin_registry_destroy(gw_plugin_reg);
     if (agent_active && agent.policy_engine)
         sc_policy_engine_destroy(agent.policy_engine);
     if (gw_thread_binding)

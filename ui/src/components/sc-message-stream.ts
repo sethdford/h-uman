@@ -1,88 +1,9 @@
 import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import type { TemplateResult } from "lit";
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function processInline(str: string): TemplateResult {
-  const segments: (string | TemplateResult)[] = [];
-  let lastIndex = 0;
-  const re = /\*\*(.+?)\*\*|\*([^*]+)\*|`([^`]+)`/g;
-  let m;
-  while ((m = re.exec(str)) !== null) {
-    if (m.index > lastIndex) {
-      segments.push(escapeHtml(str.slice(lastIndex, m.index)));
-    }
-    if (m[1]) {
-      segments.push(html`<strong>${m[1]}</strong>`);
-    } else if (m[2]) {
-      segments.push(html`<em>${m[2]}</em>`);
-    } else if (m[3]) {
-      segments.push(html`<code class="inline">${escapeHtml(m[3])}</code>`);
-    }
-    lastIndex = re.lastIndex;
-  }
-  if (lastIndex < str.length) {
-    segments.push(escapeHtml(str.slice(lastIndex)));
-  }
-  return html`${segments}`;
-}
-
-function parseMarkdown(text: string, onCopy?: (code: string) => void): TemplateResult[] {
-  const parts: TemplateResult[] = [];
-  let remaining = text;
-  const codeBlockRe = /^```(\w*)\n([\s\S]*?)```/;
-
-  while (remaining.length > 0) {
-    const cbMatch = remaining.match(codeBlockRe);
-    if (cbMatch && remaining.startsWith("```")) {
-      const [full, , code] = cbMatch;
-      const codeStr = code.trim();
-      parts.push(
-        html`<div class="code-block-wrapper">
-          <pre class="code-block"><code>${escapeHtml(codeStr)}</code></pre>
-          <button
-            class="copy-btn"
-            type="button"
-            aria-label="Copy code"
-            @click=${() => onCopy?.(codeStr)}
-          >
-            Copy
-          </button>
-        </div>`,
-      );
-      remaining = remaining.slice(full.length);
-      continue;
-    }
-
-    const lineEnd = remaining.indexOf("\n");
-    const line = lineEnd >= 0 ? remaining.slice(0, lineEnd) : remaining;
-
-    const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
-    if (ulMatch) {
-      parts.push(html`<li class="md-list-item">${processInline(ulMatch[1])}</li>`);
-      remaining = remaining.slice(line.length + (lineEnd >= 0 ? 1 : 0));
-      continue;
-    }
-
-    if (line.trim() === "") {
-      parts.push(html`<br />`);
-      remaining = remaining.slice(line.length + (lineEnd >= 0 ? 1 : 0));
-      continue;
-    }
-
-    parts.push(html`<span class="md-line">${processInline(line)}</span>`);
-    remaining = remaining.slice(line.length + (lineEnd >= 0 ? 1 : 0));
-  }
-
-  return parts;
-}
+import { renderMarkdown } from "../lib/markdown.js";
+import "./sc-code-block.js";
+import "./sc-toast.js";
+import { ScToast } from "./sc-toast.js";
 
 type MessageRole = "user" | "assistant";
 
@@ -146,64 +67,95 @@ export class ScMessageStream extends LitElement {
       color: var(--sc-text);
     }
 
-    .content :global(.inline) {
+    .md-heading {
+      font-weight: var(--sc-weight-semibold);
+      margin: var(--sc-space-sm) 0 var(--sc-space-xs);
+    }
+
+    .md-heading:first-child {
+      margin-top: 0;
+    }
+
+    .md-content h1.md-heading {
+      font-size: var(--sc-text-2xl);
+    }
+    .md-content h2.md-heading {
+      font-size: var(--sc-text-xl);
+    }
+    .md-content h3.md-heading {
+      font-size: var(--sc-text-lg);
+    }
+    .md-content h4.md-heading,
+    .md-content h5.md-heading,
+    .md-content h6.md-heading {
+      font-size: var(--sc-text-base);
+    }
+
+    .md-paragraph {
+      margin: var(--sc-space-xs) 0;
+    }
+
+    .md-blockquote {
+      border-left: 3px solid var(--sc-accent);
+      padding-left: var(--sc-space-md);
+      margin: var(--sc-space-sm) 0;
+      color: var(--sc-text-muted);
+      font-style: italic;
+    }
+
+    .md-list {
+      margin: var(--sc-space-sm) 0;
+      padding-left: var(--sc-space-lg);
+    }
+
+    .md-list-item {
+      margin-bottom: var(--sc-space-2xs);
+    }
+
+    .md-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: var(--sc-space-sm) 0;
+    }
+
+    .md-table th,
+    .md-table td {
+      border: 1px solid var(--sc-border);
+      padding: var(--sc-space-xs) var(--sc-space-sm);
+      text-align: left;
+    }
+
+    .md-table th {
+      background: var(--sc-bg-elevated);
+      font-weight: var(--sc-weight-semibold);
+    }
+
+    .md-hr {
+      border: none;
+      border-top: 1px solid var(--sc-border);
+      margin: var(--sc-space-md) 0;
+    }
+
+    .md-content a {
+      color: var(--sc-accent);
+      text-decoration: none;
+    }
+
+    .md-content a:hover {
+      text-decoration: underline;
+    }
+
+    .md-content img {
+      max-width: 100%;
+      border-radius: var(--sc-radius-md);
+    }
+
+    .md-content code.inline {
       font-family: var(--sc-font-mono);
       font-size: 0.9em;
       padding: 0.1em 0.35em;
       border-radius: var(--sc-radius-sm);
       background: var(--sc-bg-inset);
-    }
-
-    .content :global(.code-block-wrapper) {
-      position: relative;
-      margin: var(--sc-space-sm) 0;
-    }
-
-    .content :global(.code-block) {
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-sm);
-      background: var(--sc-bg-inset);
-      padding: var(--sc-space-md);
-      border-radius: var(--sc-radius-md);
-      overflow-x: auto;
-    }
-
-    .content :global(.code-block) code {
-      white-space: pre;
-    }
-
-    .content :global(.copy-btn) {
-      position: absolute;
-      top: var(--sc-space-xs);
-      right: var(--sc-space-xs);
-      padding: var(--sc-space-2xs) var(--sc-space-sm);
-      font-family: var(--sc-font);
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
-      background: var(--sc-bg-elevated);
-      border: 1px solid var(--sc-border-subtle);
-      border-radius: var(--sc-radius-sm);
-      cursor: pointer;
-      opacity: 0;
-      transition: opacity var(--sc-duration-fast) var(--sc-ease-out);
-    }
-
-    .content :global(.code-block-wrapper:hover .copy-btn) {
-      opacity: 1;
-    }
-
-    .content :global(.copy-btn:focus) {
-      opacity: 1;
-    }
-
-    .content :global(.md-list-item) {
-      margin-left: var(--sc-space-md);
-      margin-bottom: var(--sc-space-2xs);
-    }
-
-    .content :global(.md-line) {
-      display: block;
-      margin-bottom: var(--sc-space-2xs);
     }
 
     .cursor {
@@ -224,16 +176,24 @@ export class ScMessageStream extends LitElement {
   `;
 
   private _copyCode(code: string): void {
-    navigator.clipboard?.writeText(code);
+    navigator.clipboard?.writeText(code).then(
+      () => {
+        ScToast.show({ message: "Copied to clipboard", variant: "success", duration: 2000 });
+      },
+      () => {
+        ScToast.show({ message: "Failed to copy", variant: "error" });
+      },
+    );
   }
 
   override render() {
-    const parsed = parseMarkdown(this.content, (code) => this._copyCode(code));
-
     return html`
       <div class="bubble role-${this.role}">
         <div class="content">
-          ${parsed}
+          ${renderMarkdown(this.content, {
+            onCopyCode: (code) => this._copyCode(code),
+            streaming: this.streaming,
+          })}
           ${this.streaming ? html`<span class="cursor" aria-hidden="true"></span>` : nothing}
         </div>
       </div>

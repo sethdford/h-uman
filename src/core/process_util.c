@@ -237,6 +237,8 @@ static sc_error_t policy_child_setup(void *raw) {
 sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc, const char *const *argv,
                                       const char *cwd, size_t max_output_bytes,
                                       sc_security_policy_t *policy, sc_run_result_t *out) {
+    if (!alloc || !argv || !argv[0] || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     if (!policy) {
         return sc_process_run(alloc, argv, cwd, max_output_bytes, out);
     }
@@ -285,6 +287,8 @@ sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc, const char *const *
                                       const char *cwd, size_t max_output_bytes,
                                       sc_security_policy_t *policy, sc_run_result_t *out) {
     (void)policy;
+    if (!alloc || !argv || !argv[0] || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     return sc_process_run(alloc, argv, cwd, max_output_bytes, out);
 }
 #endif

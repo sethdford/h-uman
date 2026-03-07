@@ -3,6 +3,7 @@
 
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
+#include "seaclaw/core/json.h"
 #include "seaclaw/tool.h"
 
 /* URL-encode a string (for query params). Caller frees with alloc->free(ctx, *out, *out_len + 1).
@@ -41,5 +42,11 @@ sc_error_t sc_web_search_jina(sc_allocator_t *alloc, const char *query, size_t q
 /* SearXNG: requires SEARXNG_BASE_URL (self-hosted, no API key). */
 sc_error_t sc_web_search_searxng(sc_allocator_t *alloc, const char *query, size_t query_len,
                                  int count, const char *base_url, sc_tool_result_t *out);
+
+/* Shared result formatter for providers using standard title/url/snippet JSON. */
+sc_error_t sc_web_search_format_results(sc_allocator_t *alloc, const char *query, size_t query_len,
+                                        sc_json_value_t *results_array, int count,
+                                        const char *title_key, const char *url_key,
+                                        const char *snippet_key, sc_tool_result_t *out);
 
 #endif

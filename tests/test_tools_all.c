@@ -593,6 +593,31 @@ static void test_tools_factory_create_all(void) {
     sc_tools_destroy_default(&alloc, tools, count);
 }
 
+/* ─── File read/write create NULL-argument tests ─────────────────────────── */
+static void test_file_read_create_null_alloc(void) {
+    sc_tool_t tool;
+    sc_error_t err = sc_file_read_create(NULL, ".", 1, NULL, &tool);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_file_read_create_null_out(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_file_read_create(&alloc, ".", 1, NULL, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_file_write_create_null_alloc(void) {
+    sc_tool_t tool;
+    sc_error_t err = sc_file_write_create(NULL, ".", 1, NULL, &tool);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_file_write_create_null_out(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_error_t err = sc_file_write_create(&alloc, ".", 1, NULL, NULL);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
 /* ─── Path security for file tools ───────────────────────────────────────── */
 static void test_file_read_execute_path_traversal_rejected(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -2479,6 +2504,10 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_file_write_create);
     SC_RUN_TEST(test_file_write_name);
     SC_RUN_TEST(test_file_write_execute_empty);
+    SC_RUN_TEST(test_file_read_create_null_alloc);
+    SC_RUN_TEST(test_file_read_create_null_out);
+    SC_RUN_TEST(test_file_write_create_null_alloc);
+    SC_RUN_TEST(test_file_write_create_null_out);
     SC_RUN_TEST(test_file_edit_create);
     SC_RUN_TEST(test_file_edit_name);
     SC_RUN_TEST(test_file_edit_execute_empty);
