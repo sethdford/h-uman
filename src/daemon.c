@@ -318,6 +318,8 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                 }
+#else
+                (void)config;
 #endif
 
                 /* Restore prior conversation for this sender */

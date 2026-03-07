@@ -257,7 +257,7 @@ Example banks provide few-shot style examples per channel. The prompt builder se
 ~/.seaclaw/personas/examples/<persona_name>/<channel>/examples.json
 ```
 
-Example: `~/.seaclaw/personas/seth/examples/imessage/examples.json`
+Example: `~/.seaclaw/personas/examples/seth/imessage/examples.json`
 
 ### Example JSON Format
 
