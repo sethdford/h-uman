@@ -606,10 +606,15 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
             snprintf(job_name, sizeof(job_name), "proactive:%s",
                      cp->name ? cp->name : cp->contact_id);
 
+            /* Encode target as "channel:contact_id" for directed sends */
+            char channel_target[192];
+            snprintf(channel_target, sizeof(channel_target), "%s:%s", cp->proactive_channel,
+                     cp->contact_id);
+
             uint64_t job_id = 0;
             sc_error_t jerr =
                 sc_cron_add_agent_job((sc_cron_scheduler_t *)app_ctx.agent->scheduler, alloc, sched,
-                                      prompt, cp->proactive_channel, job_name, &job_id);
+                                      prompt, channel_target, job_name, &job_id);
             if (jerr == SC_OK) {
                 fprintf(stderr, "[%s] proactive check-in registered for %s (id=%llu sched=%s)\n",
                         SC_CODENAME, cp->name ? cp->name : cp->contact_id,
