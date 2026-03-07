@@ -1,16 +1,19 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { formatRelative } from "../utils.js";
+import { formatDate, formatRelative } from "../utils.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
+import type { DataTableColumnV2 } from "../components/sc-data-table-v2.js";
+import type { ChartData } from "../components/sc-chart.js";
+import "../components/sc-button.js";
 import "../components/sc-card.js";
-import "../components/sc-skeleton.js";
+import "../components/sc-chart.js";
+import "../components/sc-data-table-v2.js";
+import "../components/sc-empty-state.js";
 import "../components/sc-page-hero.js";
 import "../components/sc-section-header.js";
+import "../components/sc-skeleton.js";
 import "../components/sc-stat-card.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-button.js";
-import "../components/sc-tooltip.js";
 
 interface ConfigData {
   default_provider?: string;
@@ -33,6 +36,17 @@ interface Capabilities {
   providers?: unknown[];
 }
 
+function toDateKey(ts: number | undefined): string {
+  if (ts == null) return "";
+  const d = new Date(ts < 1e12 ? ts * 1000 : ts);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatChartLabel(dateKey: string): string {
+  const d = new Date(dateKey + "T12:00:00");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 @customElement("sc-agents-view")
 export class ScAgentsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
@@ -53,11 +67,9 @@ export class ScAgentsView extends GatewayAwareLitElement {
     .metrics {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: var(--sc-space-lg, 1.5rem);
-      margin-bottom: var(--sc-space-2xl, 2rem);
+      gap: var(--sc-space-lg);
+      margin-bottom: var(--sc-space-2xl);
     }
-
-    /* ── Sessions zone ────────────────────────────────── */
 
     .section-header {
       display: flex;
@@ -72,47 +84,13 @@ export class ScAgentsView extends GatewayAwareLitElement {
       color: var(--sc-text);
     }
 
-    .sessions-list {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .session-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--sc-space-md);
-      flex-wrap: wrap;
-      padding: var(--sc-space-sm) 0;
-    }
-
-    .session-divider {
-      height: 1px;
-      background: var(--sc-border);
-    }
-
-    .session-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .session-key {
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text);
-      margin-bottom: var(--sc-space-2xs);
-    }
-
-    .session-meta {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
-    }
-
     .card-spacer {
       margin-bottom: var(--sc-space-2xl);
     }
 
-    /* ── Config zone ──────────────────────────────────── */
+    .chart-section {
+      margin-bottom: var(--sc-space-2xl);
+    }
 
     .profile-header {
       display: flex;
@@ -145,24 +123,15 @@ export class ScAgentsView extends GatewayAwareLitElement {
     .skeleton-metrics {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: var(--sc-space-lg, 1.5rem);
-      margin-bottom: var(--sc-space-2xl, 2rem);
+      gap: var(--sc-space-lg);
+      margin-bottom: var(--sc-space-2xl);
     }
 
     .skeleton-sessions {
       margin-bottom: var(--sc-space-2xl);
     }
 
-    .skeleton-lines {
-      display: flex;
-      flex-direction: column;
-      gap: var(--sc-space-sm);
-      padding: var(--sc-space-md);
-    }
-
-    /* ── Responsive ───────────────────────────────────── */
-
-    @media (max-width: 768px) /* --sc-breakpoint-lg */ {
+    @media (max-width: 768px) {
       .metrics,
       .skeleton-metrics {
         grid-template-columns: repeat(2, 1fr);
@@ -172,7 +141,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
       }
     }
 
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 480px) {
       .metrics,
       .skeleton-metrics {
         grid-template-columns: 1fr;
@@ -243,6 +212,62 @@ export class ScAgentsView extends GatewayAwareLitElement {
     return typeof ch === "number" ? ch : Array.isArray(ch) ? ch.length : 0;
   }
 
+  private get tableRows(): Record<string, unknown>[] {
+    return this.sessions.map((s) => ({
+      label: s.label ?? s.key ?? "—",
+      created: s.created_at,
+      lastActive: s.last_active,
+      turns: s.turn_count ?? 0,
+      _sessionKey: s.key ?? "default",
+    }));
+  }
+
+  private readonly columns: DataTableColumnV2[] = [
+    { key: "label", label: "Label", sortable: true },
+    {
+      key: "created",
+      label: "Created",
+      sortable: true,
+      render: (v) => formatDate(v as number | undefined),
+    },
+    {
+      key: "lastActive",
+      label: "Last Active",
+      sortable: true,
+      render: (v) => formatRelative(v as number | undefined),
+    },
+    {
+      key: "turns",
+      label: "Turns",
+      sortable: true,
+      render: (v) => String(v ?? 0),
+    },
+  ];
+
+  private get sessionsPerDayChart(): ChartData {
+    const counts = new Map<string, number>();
+    for (const s of this.sessions) {
+      const key = toDateKey(s.created_at);
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const sorted = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return {
+      labels: sorted.map(([k]) => formatChartLabel(k)),
+      datasets: [
+        {
+          label: "Sessions",
+          data: sorted.map(([, v]) => v),
+          backgroundColor: "var(--sc-chart-brand, var(--sc-accent))",
+        },
+      ],
+    };
+  }
+
+  private _onRowClick(e: CustomEvent<{ row: Record<string, unknown>; index: number }>): void {
+    const key = e.detail.row._sessionKey as string;
+    this.dispatchNavigate("chat:" + key);
+  }
+
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
@@ -253,12 +278,10 @@ export class ScAgentsView extends GatewayAwareLitElement {
             description=${this.error}
           ></sc-empty-state>`
         : nothing}
-      ${this._renderHero()} ${this._renderMetrics()} ${this._renderSessions()}
-      ${this._renderConfig()}
+      ${this._renderHero()} ${this._renderMetrics()} ${this._renderChart()}
+      ${this._renderSessions()} ${this._renderConfig()}
     `;
   }
-
-  /* ── Hero zone ──────────────────────────────────────── */
 
   private _renderHero() {
     const provider = this.config.default_provider || "\u2014";
@@ -274,8 +297,6 @@ export class ScAgentsView extends GatewayAwareLitElement {
       </sc-page-hero>
     `;
   }
-
-  /* ── Metrics zone ───────────────────────────────────── */
 
   private _renderMetrics() {
     const metrics = [
@@ -300,7 +321,18 @@ export class ScAgentsView extends GatewayAwareLitElement {
     `;
   }
 
-  /* ── Sessions zone ──────────────────────────────────── */
+  private _renderChart() {
+    const chartData = this.sessionsPerDayChart;
+    if (chartData.labels.length === 0) return nothing;
+    return html`
+      <sc-card class="chart-section">
+        <div class="section-header">
+          <span class="section-title">Sessions per day</span>
+        </div>
+        <sc-chart type="bar" .data=${chartData} height=${200}></sc-chart>
+      </sc-card>
+    `;
+  }
 
   private _renderSessions() {
     return html`
@@ -325,35 +357,15 @@ export class ScAgentsView extends GatewayAwareLitElement {
               ></sc-empty-state>
             `
           : html`
-              <div class="sessions-list" role="list">
-                ${this.sessions.map(
-                  (s, idx) => html`
-                    ${idx > 0 ? html`<div class="session-divider"></div>` : nothing}
-                    <div class="session-row" role="listitem">
-                      <div class="session-info">
-                        <div class="session-key">${s.label ?? s.key ?? "\u2014"}</div>
-                        <div class="session-meta">
-                          ${s.turn_count ?? 0} turns &middot; ${formatRelative(s.last_active)}
-                        </div>
-                      </div>
-                      <sc-button
-                        variant="primary"
-                        size="sm"
-                        @click=${() => this.dispatchNavigate("chat:" + (s.key ?? "default"))}
-                        aria-label="Resume session"
-                      >
-                        Resume
-                      </sc-button>
-                    </div>
-                  `,
-                )}
-              </div>
+              <sc-data-table-v2
+                .columns=${this.columns}
+                .rows=${this.tableRows}
+                @sc-row-click=${this._onRowClick}
+              ></sc-data-table-v2>
             `}
       </sc-card>
     `;
   }
-
-  /* ── Config zone ────────────────────────────────────── */
 
   private _renderConfig() {
     return html`
@@ -385,8 +397,6 @@ export class ScAgentsView extends GatewayAwareLitElement {
       </sc-card>
     `;
   }
-
-  /* ── Skeleton ───────────────────────────────────────── */
 
   private _renderSkeleton() {
     return html`
