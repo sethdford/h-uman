@@ -9,9 +9,9 @@ Last updated: 2026-03-06
 | Metric                         | Value                  |
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **~588**               |
-| Lines of C/H code              | **~100,469**           |
-| Test files                     | 94                     |
-| Tests passing                  | **2,797/2,797 (100%)** |
+| Lines of C/H code              | **~101,017**           |
+| Test files                     | 95                     |
+| Tests passing                  | **2,895/2,895 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **529 KB (full)**      |
 | Core binary (no curl/channels) | **463 KB**             |
 | seaclaw module parity          | **100%**               |
