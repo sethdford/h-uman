@@ -157,6 +157,15 @@ static sc_error_t cmd_migrate(sc_allocator_t *alloc, int argc, char **argv);
 static sc_error_t cmd_persona(sc_allocator_t *alloc, int argc, char **argv);
 #endif
 
+/* Forward declarations for gateway→agent bridge (used by both service-loop and gateway) */
+typedef struct gw_agent_bridge {
+    sc_agent_t *agent;
+    sc_bus_t *bus;
+    sc_thread_binding_t *thread_binding;
+} gw_agent_bridge_t;
+
+static bool gw_agent_on_message(sc_bus_event_type_t type, const sc_bus_event_t *ev, void *user_ctx);
+
 static const sc_command_t commands[] = {
     {"agent", "Start interactive agent (--demo: use local Ollama)", cmd_agent},
     {"init", "Initialize config file", cmd_init},
@@ -1141,10 +1150,9 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #if SC_HAS_MATRIX
     sc_channel_t matrix_ch = {0};
     if (cfg.channels.matrix.homeserver && cfg.channels.matrix.access_token) {
-        err = sc_matrix_create(alloc, cfg.channels.matrix.homeserver,
-                               strlen(cfg.channels.matrix.homeserver),
-                               cfg.channels.matrix.access_token,
-                               strlen(cfg.channels.matrix.access_token), &matrix_ch);
+        err = sc_matrix_create(
+            alloc, cfg.channels.matrix.homeserver, strlen(cfg.channels.matrix.homeserver),
+            cfg.channels.matrix.access_token, strlen(cfg.channels.matrix.access_token), &matrix_ch);
         if (err == SC_OK) {
             channels[ch_count].channel_ctx = matrix_ch.ctx;
             channels[ch_count].channel = &matrix_ch;
@@ -1170,8 +1178,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
             channels[ch_count].last_poll_ms = 0;
             ch_count++;
             fprintf(stderr, "[%s] irc channel configured (%s:%u)\n", SC_CODENAME,
-                    cfg.channels.irc.server,
-                    cfg.channels.irc.port ? cfg.channels.irc.port : 6667);
+                    cfg.channels.irc.server, cfg.channels.irc.port ? cfg.channels.irc.port : 6667);
         }
     }
 #endif
@@ -1179,17 +1186,14 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
 #if SC_HAS_NOSTR
     sc_channel_t nostr_ch = {0};
     if (cfg.channels.nostr.relay_url) {
-        err = sc_nostr_create(alloc,
-                              cfg.channels.nostr.nak_path ? cfg.channels.nostr.nak_path : "",
-                              cfg.channels.nostr.nak_path ? strlen(cfg.channels.nostr.nak_path) : 0,
-                              cfg.channels.nostr.bot_pubkey ? cfg.channels.nostr.bot_pubkey : "",
-                              cfg.channels.nostr.bot_pubkey ? strlen(cfg.channels.nostr.bot_pubkey)
-                                                           : 0,
-                              cfg.channels.nostr.relay_url, strlen(cfg.channels.nostr.relay_url),
-                              cfg.channels.nostr.seckey_hex ? cfg.channels.nostr.seckey_hex : "",
-                              cfg.channels.nostr.seckey_hex ? strlen(cfg.channels.nostr.seckey_hex)
-                                                            : 0,
-                              &nostr_ch);
+        err = sc_nostr_create(
+            alloc, cfg.channels.nostr.nak_path ? cfg.channels.nostr.nak_path : "",
+            cfg.channels.nostr.nak_path ? strlen(cfg.channels.nostr.nak_path) : 0,
+            cfg.channels.nostr.bot_pubkey ? cfg.channels.nostr.bot_pubkey : "",
+            cfg.channels.nostr.bot_pubkey ? strlen(cfg.channels.nostr.bot_pubkey) : 0,
+            cfg.channels.nostr.relay_url, strlen(cfg.channels.nostr.relay_url),
+            cfg.channels.nostr.seckey_hex ? cfg.channels.nostr.seckey_hex : "",
+            cfg.channels.nostr.seckey_hex ? strlen(cfg.channels.nostr.seckey_hex) : 0, &nostr_ch);
         if (err == SC_OK) {
             channels[ch_count].channel_ctx = nostr_ch.ctx;
             channels[ch_count].channel = &nostr_ch;
@@ -1217,6 +1221,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     memset(&gw_config, 0, sizeof(gw_config));
     sc_app_context_t svc_app_ctx;
     memset(&svc_app_ctx, 0, sizeof(svc_app_ctx));
+    gw_agent_bridge_t svc_agent_bridge = {0};
     if (with_gateway) {
         sc_gateway_config_from_cfg(&cfg.gateway, &gw_config);
 
@@ -1225,6 +1230,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         svc_app_ctx.tools = tools;
         svc_app_ctx.tools_count = tools_count;
         svc_app_ctx.bus = &svc_bus;
+        svc_app_ctx.agent = &agent;
         gw_config.app_ctx = &svc_app_ctx;
 
         static webhook_dispatcher_ctx_t wh_ctx;
@@ -1239,6 +1245,11 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         gw_tctx.host = cfg.gateway.host ? cfg.gateway.host : "127.0.0.1";
         gw_tctx.port = cfg.gateway.port > 0 ? cfg.gateway.port : 3000;
 
+        svc_agent_bridge.agent = &agent;
+        svc_agent_bridge.bus = &svc_bus;
+        svc_agent_bridge.thread_binding = NULL;
+        sc_bus_subscribe(&svc_bus, gw_agent_on_message, &svc_agent_bridge, SC_BUS_MESSAGE_RECEIVED);
+
         if (pthread_create(&gw_tid, NULL, svc_gateway_thread, &gw_tctx) == 0) {
             fprintf(stderr, "[%s] gateway listening on %s:%u\n", SC_CODENAME, gw_tctx.host,
                     gw_tctx.port);
@@ -1249,6 +1260,9 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     }
 
     err = sc_service_run(alloc, 1000, ch_count > 0 ? channels : NULL, ch_count, &agent, &cfg);
+
+    if (with_gateway)
+        sc_bus_unsubscribe(&svc_bus, gw_agent_on_message, &svc_agent_bridge);
 
     /* ── Cleanup ──────────────────────────────────────────────────────── */
 #if SC_HAS_EMAIL
@@ -1559,14 +1573,7 @@ static sc_error_t cmd_agent(sc_allocator_t *alloc, int argc, char **argv) {
     return sc_agent_cli_run(alloc, (const char *const *)argv, (size_t)argc);
 }
 
-/* Bus→agent bridge: when a SC_BUS_MESSAGE_RECEIVED event arrives from
- * a WebSocket chat.send, feed it into the agent and publish the reply. */
-typedef struct gw_agent_bridge {
-    sc_agent_t *agent;
-    sc_bus_t *bus;
-    sc_thread_binding_t *thread_binding;
-} gw_agent_bridge_t;
-
+/* Bus→agent bridge: streaming context and callback implementation. */
 typedef struct gw_stream_ctx {
     sc_bus_t *bus;
     char channel[SC_BUS_CHANNEL_LEN];

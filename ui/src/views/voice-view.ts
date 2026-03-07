@@ -116,13 +116,6 @@ export class ScVoiceView extends GatewayAwareLitElement {
       gap: var(--sc-space-sm);
     }
 
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-xl);
-    }
-
     .staleness {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
@@ -134,8 +127,9 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: var(--sc-space-2xl) 0 calc(var(--sc-space-2xl, 2rem) * 1.5);
+      padding: var(--sc-space-lg) 0 var(--sc-space-md);
       position: relative;
+      flex-shrink: 0;
     }
 
     .mic-orb-glow {
@@ -293,10 +287,10 @@ export class ScVoiceView extends GatewayAwareLitElement {
       background-image: var(--sc-surface-gradient);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
-      margin-bottom: var(--sc-space-xl);
       box-shadow: var(--sc-shadow-card);
       backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
       -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
+      flex-shrink: 0;
     }
 
     .input-bar textarea {
@@ -385,7 +379,8 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-md);
-      max-height: 420px;
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
       padding: var(--sc-space-lg);
       border: 1px solid var(--sc-border);
@@ -759,8 +754,8 @@ export class ScVoiceView extends GatewayAwareLitElement {
   override render() {
     if (this._loading) return this._renderSkeleton();
     return html`
-      ${this._renderHero()} ${this._renderVoiceZone()} ${this._renderInputBar()}
-      ${this._renderConversation()}
+      ${this._renderHero()} ${this._renderConversation()} ${this._renderVoiceZone()}
+      ${this._renderInputBar()}
     `;
   }
 
@@ -782,39 +777,23 @@ export class ScVoiceView extends GatewayAwareLitElement {
         : this._connectionStatus === "connecting"
           ? "Reconnecting\u2026"
           : "Disconnected";
-    const sessionCount = this._messages.filter((m) => m.role === "user").length;
     return html`
-      <sc-page-hero>
-        <div class="hero">
-          <div class="hero-left">
-            <span class="status-dot ${this._connectionStatus}" aria-hidden="true"></span>
-            <div>
-              <h2 class="hero-title">Voice Assistant</h2>
-              <div class="hero-meta">
-                <span>${statusLabel}</span>
-              </div>
+      <div class="hero">
+        <div class="hero-left">
+          <span class="status-dot ${this._connectionStatus}" aria-hidden="true"></span>
+          <div>
+            <h2 class="hero-title">Voice Assistant</h2>
+            <div class="hero-meta">
+              <span>${statusLabel}</span>
             </div>
           </div>
-          <div class="hero-actions">
-            <span class="staleness">${this.stalenessLabel}</span>
-            <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data">
-              Refresh
-            </sc-button>
-          </div>
         </div>
-      </sc-page-hero>
-      <div class="stats-row">
-        <sc-stat-card
-          .value=${sessionCount}
-          label="Sessions"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
-          .value=${0}
-          label="Duration"
-          suffix="s"
-          style="--sc-stagger-delay: 80ms"
-        ></sc-stat-card>
+        <div class="hero-actions">
+          <span class="staleness">${this.stalenessLabel}</span>
+          <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data">
+            Refresh
+          </sc-button>
+        </div>
       </div>
     `;
   }
