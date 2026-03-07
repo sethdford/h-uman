@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>~528 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
+  <strong>~511 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -18,16 +18,16 @@
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~528 KB binary · <30 ms startup · 3,127+ tests · 50+ providers · 33 channels · 65+ tools · Pluggable everything
+~511 KB binary · <30 ms startup · 3127+ tests · 50+ providers · 33 channels · 66+ tools · Pluggable everything
 ```
 
 ### Features
 
-- **Impossibly Small:** ~528 KB static binary — no runtime, no VM, no framework overhead.
+- **Impossibly Small:** ~511 KB static binary — no runtime, no VM, no framework overhead.
 - **Near-Zero Memory:** < 6 MB peak RSS. Runs comfortably on the cheapest ARM SBCs and microcontrollers.
 - **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
-- **Feature-Complete:** 50+ providers, 33 channels, 65+ tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
+- **Feature-Complete:** 50+ providers, 33 channels, 66+ tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DSC_ENABLE_TUI=ON` and run with `--tui`.
 - **Performance-Optimized:** Per-turn arena allocator, HTTP connection pooling, HTTP/2, system prompt caching — all benefiting from C-level control.
 
@@ -46,7 +46,7 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
 | **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 6 MB**        |
-| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~528 KB**       |
+| **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~511 KB**       |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
 > ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. SeaClaw's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
@@ -54,10 +54,10 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 SeaClaw's verified numbers (measured on macOS arm64, March 2026):
 
 ```
-Binary size:   ~528 KB (MinSizeRel + LTO, all channels)
+Binary size:   ~511 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
-Tests:         3,127 passing, 0 ASan errors
+Tests:         3127 passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -603,7 +603,7 @@ Build and tests require a C11 compiler and CMake 3.16+.
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 3,127+ tests
+./seaclaw_tests                             # 3127+ tests
 cd ..
 ```
 
@@ -615,7 +615,7 @@ cmake --build build
 ./build/seaclaw_tests
 ```
 
-Release build (~528 KB):
+Release build (~511 KB):
 
 ```bash
 mkdir -p build-release && cd build-release
@@ -641,8 +641,8 @@ Language: C11 + ASM (aarch64, x86_64)
 Source files: 597
 Lines of code: ~103K
 Test files: 98
-Tests: 3,127
-Binary: ~528 KB (MinSizeRel + LTO, all channels)
+Tests: 3127
+Binary: ~511 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
 Dependencies: libc + optional SQLite, libcurl
@@ -670,7 +670,7 @@ config.c Config loading/merging (~/.seaclaw/config.json)
 ...
 
 include/seaclaw/ Public C headers
-tests/ 98 test files, 3,127 tests
+tests/ 98 test files, 3127 tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ```

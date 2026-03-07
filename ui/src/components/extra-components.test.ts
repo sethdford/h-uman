@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import "./floating-mic.js";
 import "./sidebar.js";
@@ -737,6 +737,182 @@ describe("sc-shortcut-overlay", () => {
       ?.querySelector(".backdrop")
       ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(closed).toBe(true);
+    el.remove();
+  });
+});
+
+describe("sc-error-boundary", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-error-boundary")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-error-boundary");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should show fallback when error is set", async () => {
+    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+      error: Error | null;
+      updateComplete: Promise<boolean>;
+    };
+    el.error = new Error("Test error");
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const heading = el.shadowRoot?.querySelector(".heading");
+    expect(heading?.textContent).toBe("Something went wrong");
+    const btn = el.shadowRoot?.querySelector("sc-button");
+    expect(btn?.textContent?.trim()).toBe("Try again");
+    el.remove();
+  });
+
+  it("should render slot when no error", async () => {
+    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+      error: Error | null;
+      updateComplete: Promise<boolean>;
+    };
+    el.error = null;
+    const span = document.createElement("span");
+    span.textContent = "content";
+    el.appendChild(span);
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const slot = el.shadowRoot?.querySelector(".slot");
+    expect(slot).toBeTruthy();
+    const fallback = el.shadowRoot?.querySelector(".fallback");
+    expect(fallback).toBeNull();
+    el.remove();
+  });
+
+  it("should fire retry event when Try again is clicked", async () => {
+    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+      error: Error | null;
+      updateComplete: Promise<boolean>;
+    };
+    el.error = new Error("Test");
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("retry", () => (fired = true));
+    const btn = el.shadowRoot?.querySelector("sc-button") as HTMLElement | null;
+    btn?.click();
+    expect(fired).toBe(true);
+    el.remove();
+  });
+
+  it("should have role alert when showing fallback", async () => {
+    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+      error: Error | null;
+      updateComplete: Promise<boolean>;
+    };
+    el.error = new Error("Test");
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const fallback = el.shadowRoot?.querySelector(".fallback");
+    expect(fallback?.getAttribute("role")).toBe("alert");
+    el.remove();
+  });
+});
+
+describe("sc-welcome-card", () => {
+  const ONBOARDED_KEY = "sc-onboarded";
+  const storage: Record<string, string> = {};
+
+  beforeEach(() => {
+    Object.keys(storage).forEach((k) => delete storage[k]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage[key] ?? null,
+      setItem: (key: string, value: string) => {
+        storage[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete storage[key];
+      },
+      clear: () => {
+        Object.keys(storage).forEach((k) => delete storage[k]);
+      },
+      length: 0,
+      key: () => null,
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-welcome-card")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-welcome-card");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should have default visible true and userName empty", () => {
+    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+      visible: boolean;
+      userName: string;
+    };
+    expect(el.visible).toBe(true);
+    expect(el.userName).toBe("");
+  });
+
+  it("should show welcome content when not onboarded", async () => {
+    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const heading = el.shadowRoot?.querySelector(".hero h2");
+    expect(heading?.textContent).toContain("Welcome to SeaClaw");
+    const desc = el.shadowRoot?.querySelector(".hero p");
+    expect(desc?.textContent).toContain("autonomous AI assistant runtime");
+    const features = el.shadowRoot?.querySelectorAll(".feature");
+    expect(features?.length).toBe(3);
+    const cta = el.shadowRoot?.querySelector(".cta sc-button");
+    expect(cta?.textContent?.trim()).toBe("Get Started");
+    el.remove();
+  });
+
+  it("should not render when onboarded", async () => {
+    localStorage.setItem(ONBOARDED_KEY, "true");
+    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const card = el.shadowRoot?.querySelector("sc-card");
+    expect(card).toBeNull();
+    el.remove();
+  });
+
+  it("should fire dismiss and set onboarded when Get Started clicked", async () => {
+    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let dismissFired = false;
+    el.addEventListener("dismiss", () => (dismissFired = true));
+    const btn = el.shadowRoot?.querySelector(".cta sc-button") as HTMLElement | null;
+    btn?.click();
+    await el.updateComplete;
+    expect(dismissFired).toBe(true);
+    expect(localStorage.getItem(ONBOARDED_KEY)).toBe("true");
+    el.remove();
+  });
+
+  it("should show userName in greeting when provided", async () => {
+    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+      userName: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.userName = "Alex";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const heading = el.shadowRoot?.querySelector(".hero h2");
+    expect(heading?.textContent).toContain("Alex");
     el.remove();
   });
 });

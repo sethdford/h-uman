@@ -72,6 +72,8 @@
       <a href="#sc-animated-icon">sc-animated-icon</a>
       <a href="#sc-activity-feed">sc-activity-feed</a>
       <a href="#sc-welcome">sc-welcome</a>
+      <a href="#sc-welcome-card">sc-welcome-card</a>
+      <a href="#sc-error-boundary">sc-error-boundary</a>
       <a href="#sc-thinking">sc-thinking</a>
       <a href="#sc-tool-result">sc-tool-result</a>
       <a href="#sc-message-stream">sc-message-stream</a>
@@ -784,6 +786,38 @@
         <div class="code-snippet"><pre><code>&lt;sc-welcome&gt;&lt;/sc-welcome&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-welcome-card">
+        <h2>sc-welcome-card</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 480px;">
+            <sc-welcome-card></sc-welcome-card>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-welcome-card&gt;&lt;/sc-welcome-card&gt;
+&lt;sc-welcome-card .userName=${"Alex"}&gt;&lt;/sc-welcome-card&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-error-boundary">
+        <h2>sc-error-boundary</h2>
+        <div class="playground">
+          <div class="preview" style="width: 100%; max-width: 400px;">
+            <sc-error-boundary id="error-boundary-preview"></sc-error-boundary>
+          </div>
+          <div class="controls">
+            <label>
+              <span>Error state</span>
+              <select id="error-boundary-state">
+                <option value="none">No error</option>
+                <option value="error">Show error</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-error-boundary .error=${error} @retry=${onRetry}&gt;
+  &lt;your-view&gt;&lt;/your-view&gt;
+&lt;/sc-error-boundary&gt;</code></pre></div>
+      </section>
+
       <section class="component-section" id="sc-thinking">
         <h2>sc-thinking</h2>
         <div class="playground">
@@ -896,6 +930,8 @@
       import "/src/components/sc-animated-icon.js";
       import "/src/components/sc-activity-feed.js";
       import "/src/components/sc-welcome.js";
+      import "/src/components/sc-welcome-card.js";
+      import "/src/components/sc-error-boundary.js";
       import "/src/components/sc-thinking.js";
       import "/src/components/sc-tool-result.js";
       import "/src/components/sc-message-branch.js";
@@ -984,6 +1020,19 @@
       document.getElementById("sheet-preview")?.addEventListener("close", () => {
         document.getElementById("sheet-preview").open = false;
       });
+
+      // Error boundary
+      const errorBoundaryPreview = document.getElementById("error-boundary-preview");
+      const errorBoundaryState = document.getElementById("error-boundary-state");
+      if (errorBoundaryPreview && errorBoundaryState) {
+        const span = document.createElement("span");
+        span.textContent = "Content that would render here";
+        errorBoundaryPreview.appendChild(span);
+        errorBoundaryState.addEventListener("change", (e) => {
+          const val = e.target.value;
+          errorBoundaryPreview.error = val === "error" ? new Error("Demo error") : null;
+        });
+      }
 
       // Tabs
       const tabsPreview = document.getElementById("tabs-preview");
