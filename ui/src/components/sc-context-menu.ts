@@ -1,13 +1,15 @@
 import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
-export interface ContextMenuItem {
-  label: string;
-  icon?: TemplateResult;
-  action: () => void;
-  divider?: boolean;
-  disabled?: boolean;
-}
+export type ContextMenuItem =
+  | {
+      label: string;
+      icon?: TemplateResult;
+      action: () => void;
+      divider?: false;
+      disabled?: boolean;
+    }
+  | { divider: true };
 
 @customElement("sc-context-menu")
 export class ScContextMenu extends LitElement {
@@ -111,7 +113,9 @@ export class ScContextMenu extends LitElement {
   private _keyHandler = (e: KeyboardEvent) => this._onKeyDown(e);
 
   private get _actionItems(): ContextMenuItem[] {
-    return this.items.filter((i) => !i.divider);
+    return this.items.filter(
+      (i): i is Extract<ContextMenuItem, { action: () => void }> => !("divider" in i && i.divider),
+    );
   }
 
   override updated(changedProperties: Map<string, unknown>): void {
@@ -185,7 +189,7 @@ export class ScContextMenu extends LitElement {
     this.dispatchEvent(new CustomEvent("close", { bubbles: true, composed: true }));
   }
 
-  private _runAction(item: ContextMenuItem): void {
+  private _runAction(item: Extract<ContextMenuItem, { action: () => void }>): void {
     if (item.disabled) return;
     item.action();
     this._close();
@@ -204,21 +208,22 @@ export class ScContextMenu extends LitElement {
         style="left: ${this.x}px; top: ${this.y}px"
       >
         ${this.items.map((item) => {
-          if (item.divider) {
+          if ("divider" in item && item.divider) {
             return html`<div class="divider" role="separator"></div>`;
           }
           const idx = actionIdx++;
           const focused = idx === this._focusedIndex;
+          const actionItem = item as Extract<ContextMenuItem, { action: () => void }>;
           return html`
             <button
               class="item ${focused ? "focused" : ""}"
               role="menuitem"
-              ?disabled=${item.disabled}
-              @click=${() => this._runAction(item)}
+              ?disabled=${actionItem.disabled}
+              @click=${() => this._runAction(actionItem)}
               @mouseenter=${() => (this._focusedIndex = idx)}
             >
-              ${item.icon ? html`<span class="icon">${item.icon}</span>` : nothing}
-              <span>${item.label}</span>
+              ${actionItem.icon ? html`<span class="icon">${actionItem.icon}</span>` : nothing}
+              <span>${actionItem.label}</span>
             </button>
           `;
         })}

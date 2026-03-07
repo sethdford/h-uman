@@ -535,6 +535,114 @@ describe("sc-data-table", () => {
   });
 });
 
+describe("sc-chat-search", () => {
+  it("should be defined as a custom element", async () => {
+    await import("./sc-chat-search.js");
+    expect(customElements.get("sc-chat-search")).toBeDefined();
+  });
+
+  it("should reflect default properties", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    expect(el.open).toBe(false);
+    expect(el.query).toBe("");
+    expect(el.matchCount).toBe(0);
+    expect(el.currentMatch).toBe(0);
+  });
+
+  it("should render when open", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const bar = el.shadowRoot?.querySelector(".bar");
+    const input = el.shadowRoot?.querySelector("#search-input");
+    expect(bar).toBeTruthy();
+    expect(input).toBeTruthy();
+    document.body.removeChild(el);
+  });
+
+  it("should focus input when opened", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const input = el.shadowRoot?.querySelector("#search-input") as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    document.body.removeChild(el);
+  });
+
+  it("should fire sc-search-change when query changes", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: { query: string } | null = null;
+    el.addEventListener("sc-search-change", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    const input = el.shadowRoot?.querySelector("#search-input") as HTMLInputElement;
+    input.value = "test";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await el.updateComplete;
+    expect(detail).toEqual({ query: "test" });
+    document.body.removeChild(el);
+  });
+
+  it("should fire sc-search-close when close button clicked", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-search-close", () => {
+      fired = true;
+    });
+    const closeBtn = el.shadowRoot?.querySelector(".close-btn") as HTMLElement;
+    closeBtn?.click();
+    expect(fired).toBe(true);
+    document.body.removeChild(el);
+  });
+
+  it("should fire sc-search-next when next button clicked", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    el.open = true;
+    el.matchCount = 2;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-search-next", () => {
+      fired = true;
+    });
+    const nextBtn = el.shadowRoot?.querySelectorAll(".nav-btn")[1] as HTMLElement;
+    nextBtn?.click();
+    expect(fired).toBe(true);
+    document.body.removeChild(el);
+  });
+
+  it("should fire sc-search-prev when prev button clicked", async () => {
+    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const el = new ScChatSearch();
+    el.open = true;
+    el.matchCount = 2;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-search-prev", () => {
+      fired = true;
+    });
+    const prevBtn = el.shadowRoot?.querySelectorAll(".nav-btn")[0] as HTMLElement;
+    prevBtn?.click();
+    expect(fired).toBe(true);
+    document.body.removeChild(el);
+  });
+});
+
 describe("sc-date-picker", () => {
   it("should be defined as a custom element", async () => {
     await import("./sc-date-picker.js");

@@ -84,4 +84,18 @@ describe("sc-chat-view", () => {
     expect(messageList?.getAttribute("aria-live")).toBe("polite");
     el.remove();
   });
+
+  it("applies drag-over class during drag", async () => {
+    const el = document.createElement("sc-chat-view") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const messageList = el.shadowRoot?.querySelector("#message-list");
+    expect(messageList?.classList.contains("drag-over")).toBe(false);
+    messageList?.dispatchEvent(new DragEvent("dragover", { bubbles: true }));
+    await el.updateComplete;
+    expect(messageList?.classList.contains("drag-over")).toBe(true);
+    el.remove();
+  });
 });

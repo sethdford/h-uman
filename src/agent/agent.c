@@ -1448,6 +1448,7 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
     compact_cfg.max_history_messages = agent->max_history_messages;
     compact_cfg.token_limit = max_tokens;
 
+    generate_trace_id(agent->trace_id);
     clock_t turn_start = clock();
     uint64_t turn_tokens = 0;
     const char *prov_name = agent->provider.vtable->get_name
@@ -2231,6 +2232,7 @@ sc_error_t sc_agent_turn_stream(sc_agent_t *agent, const char *msg, size_t msg_l
 
 static sc_error_t execute_plan_steps(sc_agent_t *agent, sc_plan_t *plan, char **summary_out,
                                      size_t *summary_len_out) {
+    generate_trace_id(agent->trace_id);
     char result_buf[4096];
     int result_off = 0;
     result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,

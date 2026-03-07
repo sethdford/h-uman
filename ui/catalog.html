@@ -63,6 +63,7 @@
       <a href="#sc-breadcrumb">sc-breadcrumb</a>
       <a href="#sc-slider">sc-slider</a>
       <a href="#sc-search">sc-search</a>
+      <a href="#sc-chat-search">sc-chat-search</a>
       <a href="#sc-segmented-control">sc-segmented-control</a>
       <a href="#sc-data-table">sc-data-table</a>
       <a href="#sc-date-picker">sc-date-picker</a>
@@ -595,6 +596,22 @@
           </div>
         </div>
         <div class="code-snippet"><pre><code>&lt;sc-search placeholder="Search..."&gt;&lt;/sc-search&gt;</code></pre></div>
+      </section>
+
+      <section class="component-section" id="sc-chat-search">
+        <h2>sc-chat-search</h2>
+        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Inline search bar for chat conversations. Use Cmd+F / Ctrl+F in chat view to open.</p>
+        <div class="playground">
+          <div class="preview" style="width: 100%; min-width: 320px;">
+            <sc-chat-search
+              .open=${true}
+              .query=${"test"}
+              .matchCount=${3}
+              .currentMatch=${1}
+            ></sc-chat-search>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-chat-search .open=${true} .query=${"test"} .matchCount=${3} .currentMatch=${1}&gt;&lt;/sc-chat-search&gt;</code></pre></div>
       </section>
 
       <section class="component-section" id="sc-segmented-control">

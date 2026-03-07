@@ -59,7 +59,12 @@ static void log_record_event(void *ctx, const sc_observer_event_t *event) {
     FILE *f = c->output ? c->output : stderr;
     format_ts_utc(c->ts_buf, sizeof(c->ts_buf));
 
-    fprintf(f, "{\"ts\":\"%s\",\"event\":\"", c->ts_buf);
+    fprintf(f, "{\"ts\":\"%s\"", c->ts_buf);
+    if (event->trace_id && event->trace_id[0]) {
+        fprintf(f, ",\"trace_id\":");
+        json_escape_fp(f, event->trace_id);
+    }
+    fprintf(f, ",\"event\":\"");
 
     switch (event->tag) {
     case SC_OBSERVER_EVENT_AGENT_START:
