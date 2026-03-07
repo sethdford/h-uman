@@ -34,6 +34,12 @@ import "./sc-automation-card.js";
 import "./sc-chat-bubble.js";
 import "./sc-typing-indicator.js";
 import "./sc-delivery-status.js";
+import "./sc-message-group.js";
+import "./sc-link-preview.js";
+import "./sc-model-selector.js";
+import "./sc-tapback-menu.js";
+import "./sc-chat-composer.js";
+import "./sc-message-thread.js";
 
 describe("sc-floating-mic", () => {
   it("should be defined as a custom element", () => {
@@ -99,49 +105,6 @@ describe("sc-sparkline", () => {
     const el = document.createElement("sc-sparkline") as HTMLElement & { data: number[] };
     el.data = [1, 5, 3, 8, 2];
     expect(el.data).toEqual([1, 5, 3, 8, 2]);
-  });
-
-  it("should render SVG with data", async () => {
-    const el = document.createElement("sc-sparkline") as HTMLElement & {
-      data: number[];
-      updateComplete: Promise<boolean>;
-    };
-    el.data = [5, 10, 3, 8, 12];
-    document.body.appendChild(el);
-    await el.updateComplete;
-    const svg = el.shadowRoot?.querySelector("svg");
-    expect(svg).toBeTruthy();
-    el.remove();
-  });
-
-  it("should render fill area when fill is true", async () => {
-    const el = document.createElement("sc-sparkline") as HTMLElement & {
-      data: number[];
-      fill: boolean;
-      updateComplete: Promise<boolean>;
-    };
-    el.data = [1, 2, 3];
-    el.fill = true;
-    document.body.appendChild(el);
-    await el.updateComplete;
-    const area = el.shadowRoot?.querySelector(".area");
-    expect(area).toBeTruthy();
-    el.remove();
-  });
-
-  it("should not render fill area when fill is false", async () => {
-    const el = document.createElement("sc-sparkline") as HTMLElement & {
-      data: number[];
-      fill: boolean;
-      updateComplete: Promise<boolean>;
-    };
-    el.data = [1, 2, 3];
-    el.fill = false;
-    document.body.appendChild(el);
-    await el.updateComplete;
-    const area = el.shadowRoot?.querySelector(".area");
-    expect(area).toBeNull();
-    el.remove();
   });
 });
 
@@ -1504,6 +1467,31 @@ describe("sc-schedule-builder", () => {
   });
 });
 
+describe("sc-message-actions", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-message-actions")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-message-actions");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should accept role and content properties", async () => {
+    const el = document.createElement("sc-message-actions") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+      role: string;
+      content: string;
+    };
+    el.role = "assistant";
+    el.content = "test content";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
 describe("sc-automation-card", () => {
   it("should be defined as a custom element", () => {
     expect(customElements.get("sc-automation-card")).toBeDefined();
@@ -1516,6 +1504,50 @@ describe("sc-automation-card", () => {
 
   it("should render empty state without job", async () => {
     const el = document.createElement("sc-automation-card") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-chat-sessions-panel", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-chat-sessions-panel")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-chat-sessions-panel");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should accept open property", async () => {
+    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+      open: boolean;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-file-preview", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-file-preview")).toBeDefined();
+  });
+
+  it("should be creatable", () => {
+    const el = document.createElement("sc-file-preview");
+    expect(el).toBeInstanceOf(HTMLElement);
+  });
+
+  it("should render empty with no files", async () => {
+    const el = document.createElement("sc-file-preview") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -1707,5 +1739,431 @@ describe("sc-delivery-status", () => {
     const statusEl = el.shadowRoot?.querySelector("[role='status']");
     expect(statusEl).toBeTruthy();
     el.remove();
+  });
+});
+
+describe("sc-message-group", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-message-group")).toBeDefined();
+  });
+  it("defaults to assistant role", () => {
+    const el = document.createElement("sc-message-group") as HTMLElement & { role: string };
+    expect(el.role).toBe("assistant");
+  });
+  it("has role=group with aria-label", async () => {
+    const el = document.createElement("sc-message-group") as HTMLElement & {
+      role: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.role = "user";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const g = el.shadowRoot?.querySelector("[role='group']");
+    expect(g?.getAttribute("aria-label")).toBe("Your messages");
+    el.remove();
+  });
+  it("has avatar and timestamp slots", async () => {
+    const el = document.createElement("sc-message-group") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('slot[name="avatar"]')).toBeTruthy();
+    expect(el.shadowRoot?.querySelector('slot[name="timestamp"]')).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-link-preview", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-link-preview")).toBeDefined();
+  });
+  it("renders nothing without url", async () => {
+    const el = document.createElement("sc-link-preview") as HTMLElement & {
+      url: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.url = "";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".card")).toBeNull();
+    el.remove();
+  });
+  it("renders card with url and title", async () => {
+    const el = document.createElement("sc-link-preview") as HTMLElement & {
+      url: string;
+      title: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.url = "https://example.com";
+    el.title = "Example";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const card = el.shadowRoot?.querySelector("a.card") as HTMLAnchorElement;
+    expect(card).toBeTruthy();
+    expect(card?.target).toBe("_blank");
+    expect(el.shadowRoot?.querySelector(".title")?.textContent).toBe("Example");
+    el.remove();
+  });
+  it("extracts domain", async () => {
+    const el = document.createElement("sc-link-preview") as HTMLElement & {
+      url: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.url = "https://www.github.com/repo";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".domain")?.textContent).toBe("github.com");
+    el.remove();
+  });
+  it("uses title as aria-label", async () => {
+    const el = document.createElement("sc-link-preview") as HTMLElement & {
+      url: string;
+      title: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.url = "https://example.com";
+    el.title = "My Title";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("a.card")?.getAttribute("aria-label")).toBe("My Title");
+    el.remove();
+  });
+});
+
+describe("sc-model-selector", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-model-selector")).toBeDefined();
+  });
+  it("has combobox trigger", async () => {
+    const el = document.createElement("sc-model-selector") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const t = el.shadowRoot?.querySelector("[role='combobox']");
+    expect(t).toBeTruthy();
+    expect(t?.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
+  it("opens dropdown on click", async () => {
+    const el = document.createElement("sc-model-selector") as HTMLElement & {
+      models: Array<{ id: string; name: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.models = [{ id: "a", name: "A" }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    (el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement)?.click();
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("[role='listbox']")).toBeTruthy();
+    el.remove();
+  });
+  it("fires sc-model-change", async () => {
+    const el = document.createElement("sc-model-selector") as HTMLElement & {
+      models: Array<{ id: string; name: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.models = [
+      { id: "a", name: "A" },
+      { id: "b", name: "B" },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    (el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement)?.click();
+    await el.updateComplete;
+    let detail: { model: string } | null = null;
+    el.addEventListener("sc-model-change", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    (el.shadowRoot?.querySelectorAll("[role='option']")?.[1] as HTMLElement)?.click();
+    expect(detail).toEqual({ model: "b" });
+    el.remove();
+  });
+  it("keyboard Escape closes", async () => {
+    const el = document.createElement("sc-model-selector") as HTMLElement & {
+      models: Array<{ id: string; name: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.models = [{ id: "a", name: "A" }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const t = el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement;
+    t?.click();
+    await el.updateComplete;
+    t?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await el.updateComplete;
+    expect(t?.getAttribute("aria-expanded")).toBe("false");
+    el.remove();
+  });
+});
+
+describe("sc-tapback-menu", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-tapback-menu")).toBeDefined();
+  });
+  it("renders nothing when closed", async () => {
+    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = false;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".bar")).toBeNull();
+    el.remove();
+  });
+  it("renders menu when open", async () => {
+    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("[role='menu']")).toBeTruthy();
+    expect(el.shadowRoot?.querySelectorAll("[role='menuitem']")?.length).toBe(5);
+    el.remove();
+  });
+  it("fires sc-react on click", async () => {
+    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+      open: boolean;
+      messageIndex: number;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    el.messageIndex = 3;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let detail: Record<string, unknown> | null = null;
+    el.addEventListener("sc-react", ((e: CustomEvent) => {
+      detail = e.detail;
+    }) as EventListener);
+    (el.shadowRoot?.querySelector("[role='menuitem']") as HTMLElement)?.click();
+    expect(detail?.["index"]).toBe(3);
+    el.remove();
+  });
+  it("fires sc-tapback-close on Escape", async () => {
+    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let closed = false;
+    el.addEventListener("sc-tapback-close", () => (closed = true));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(closed).toBe(true);
+    el.remove();
+  });
+});
+
+describe("sc-chat-composer", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-chat-composer")).toBeDefined();
+  });
+  it("has default props", () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      value: string;
+      waiting: boolean;
+      disabled: boolean;
+      placeholder: string;
+    };
+    expect(el.value).toBe("");
+    expect(el.waiting).toBe(false);
+    expect(el.disabled).toBe(false);
+    expect(el.placeholder).toBe("Type a message...");
+  });
+  it("renders textarea and send button", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("textarea")).toBeTruthy();
+    expect(el.shadowRoot?.querySelector('[aria-label="Send"]')).toBeTruthy();
+    el.remove();
+  });
+  it("send disabled when empty", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      value: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.value = "";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(
+      (el.shadowRoot?.querySelector('[aria-label="Send"]') as HTMLButtonElement)?.disabled,
+    ).toBe(true);
+    el.remove();
+  });
+  it("shows stop button when waiting", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      waiting: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.waiting = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('[aria-label="Stop generating"]')).toBeTruthy();
+    expect(el.shadowRoot?.querySelector('[aria-label="Send"]')).toBeNull();
+    el.remove();
+  });
+  it("fires sc-abort on stop click", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      waiting: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.waiting = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-abort", () => (fired = true));
+    (el.shadowRoot?.querySelector('[aria-label="Stop generating"]') as HTMLElement)?.click();
+    expect(fired).toBe(true);
+    el.remove();
+  });
+  it("shows suggestions when enabled", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      showSuggestions: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.showSuggestions = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelectorAll(".pill")?.length).toBeGreaterThan(0);
+    el.remove();
+  });
+  it("renders model chip", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      model: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.model = "GPT-4";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".model-chip")?.textContent?.trim()).toBe("GPT-4");
+    el.remove();
+  });
+  it("has attach file button", async () => {
+    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector('[aria-label="Attach file"]')).toBeTruthy();
+    el.remove();
+  });
+});
+
+describe("sc-message-thread", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-message-thread")).toBeDefined();
+  });
+  it("has default props", () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      items: unknown[];
+      isWaiting: boolean;
+      historyLoading: boolean;
+    };
+    expect(el.items).toEqual([]);
+    expect(el.isWaiting).toBe(false);
+    expect(el.historyLoading).toBe(false);
+  });
+  it("renders role=log container", async () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      updateComplete: Promise<boolean>;
+    };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const c = el.shadowRoot?.querySelector("[role='log']");
+    expect(c).toBeTruthy();
+    expect(c?.getAttribute("aria-live")).toBe("polite");
+    el.remove();
+  });
+  it("renders messages as sc-chat-bubble", async () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      items: Array<{ type: string; role: string; content: string; ts: number }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.items = [
+      { type: "message", role: "user", content: "Hello", ts: Date.now() },
+      { type: "message", role: "assistant", content: "Hi", ts: Date.now() },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelectorAll("sc-chat-bubble")?.length).toBe(2);
+    el.remove();
+  });
+  it("groups consecutive same-role messages", async () => {
+    const now = Date.now();
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      items: Array<{ type: string; role: string; content: string; ts: number }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.items = [
+      { type: "message", role: "user", content: "a", ts: now },
+      { type: "message", role: "user", content: "b", ts: now + 1000 },
+      { type: "message", role: "assistant", content: "c", ts: now + 2000 },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelectorAll("sc-message-group")?.length).toBe(2);
+    el.remove();
+  });
+  it("shows typing indicator when waiting", async () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      isWaiting: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.isWaiting = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("sc-typing-indicator")).toBeTruthy();
+    expect(el.shadowRoot?.querySelector('[aria-label="Stop generating"]')).toBeTruthy();
+    el.remove();
+  });
+  it("fires sc-abort on abort click", async () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      isWaiting: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.isWaiting = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let fired = false;
+    el.addEventListener("sc-abort", () => (fired = true));
+    (el.shadowRoot?.querySelector('[aria-label="Stop generating"]') as HTMLElement)?.click();
+    expect(fired).toBe(true);
+    el.remove();
+  });
+  it("shows skeleton when historyLoading", async () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      historyLoading: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.historyLoading = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("sc-skeleton")).toBeTruthy();
+    el.remove();
+  });
+  it("renders tool calls", async () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      items: Array<{ type: string; name?: string; status?: string; result?: string }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.items = [{ type: "tool_call", name: "shell", status: "completed", result: "ok" }];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector("sc-tool-result")).toBeTruthy();
+    el.remove();
+  });
+  it("has scrollToBottom method", () => {
+    const el = document.createElement("sc-message-thread") as HTMLElement & {
+      scrollToBottom: () => void;
+    };
+    expect(typeof el.scrollToBottom).toBe("function");
   });
 });

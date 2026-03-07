@@ -1,6 +1,9 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { EVENT_NAMES } from "../utils.js";
 
+export type MessageStatus = "sending" | "sent" | "streaming" | "complete" | "failed";
+export interface Reaction { emoji: string; count: number; mine: boolean; }
+
 export type ChatItem =
   | {
       type: "message";
@@ -8,6 +11,11 @@ export type ChatItem =
       content: string;
       id?: string;
       ts?: number;
+      status?: MessageStatus;
+      editedFrom?: string;
+      branchIndex?: number;
+      branchCount?: number;
+      reactions?: Reaction[];
     }
   | {
       type: "tool_call";
@@ -379,4 +387,43 @@ export class ChatController implements ReactiveController {
     }
     return -1;
   }
+
+  toggleReaction(index: number, emoji: string): void {
+    if (index < 0 || index >= this.items.length) return;
+    const item = this.items[index];
+    if (item.type !== "message") return;
+    const reactions = [...(item.reactions ?? [])];
+    const existing = reactions.findIndex((r) => r.emoji === emoji);
+    if (existing >= 0) {
+      if (reactions[existing].mine) {
+        reactions[existing] = { ...reactions[existing], count: reactions[existing].count - 1, mine: false };
+        if (reactions[existing].count <= 0) reactions.splice(existing, 1);
+      } else {
+        reactions[existing] = { ...reactions[existing], count: reactions[existing].count + 1, mine: true };
+      }
+    } else {
+      reactions.push({ emoji, count: 1, mine: true });
+    }
+    this.items = [...this.items.slice(0, index), { ...item, reactions }, ...this.items.slice(index + 1)];
+    this._requestUpdate();
+  }
+
+  getBranchMessages(messageId: string): ChatItem[] {
+    return this.items.filter((i) => i.type === "message" && i.id === messageId);
+  }
+
+  exportAsMarkdown(): string {
+    const lines: string[] = [];
+    for (const item of this.items) {
+      if (item.type === "message") {
+        const role = item.role === "user" ? "**You**" : "**Assistant**";
+        lines.push(`${role}: ${item.content}\n`);
+      } else if (item.type === "tool_call") {
+        lines.push(`> Tool: ${item.name} \u2192 ${item.result ?? "running"}\n`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  exportAsJson(): string { return JSON.stringify(this.items, null, 2); }
 }
