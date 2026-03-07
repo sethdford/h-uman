@@ -1550,6 +1550,25 @@ static sc_error_t cmd_gateway(sc_allocator_t *alloc, int argc, char **argv) {
 
 #ifdef SC_HAS_CRON
     sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
+    if (cron) {
+        char *cron_path = NULL;
+        size_t cron_path_len = 0;
+        if (sc_crontab_get_path(alloc, &cron_path, &cron_path_len) == SC_OK) {
+            sc_crontab_entry_t *entries = NULL;
+            size_t entry_count = 0;
+            if (sc_crontab_load(alloc, cron_path, &entries, &entry_count) == SC_OK) {
+                for (size_t ci = 0; ci < entry_count; ci++) {
+                    if (entries[ci].enabled && entries[ci].schedule && entries[ci].command) {
+                        uint64_t unused_id = 0;
+                        sc_cron_add_job(cron, alloc, entries[ci].schedule, entries[ci].command,
+                                        entries[ci].id, &unused_id);
+                    }
+                }
+                sc_crontab_entries_free(alloc, entries, entry_count);
+            }
+            alloc->free(alloc->ctx, cron_path, cron_path_len + 1);
+        }
+    }
 #else
     sc_cron_scheduler_t *cron = NULL;
 #endif

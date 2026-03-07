@@ -4,18 +4,13 @@ import type { ContextMenuItem } from "../components/sc-context-menu.js";
 import type { GatewayStatus } from "../gateway.js";
 import { GatewayClient as GatewayClientClass } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
-import { formatTime } from "../utils.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
 import { ChatController, type ChatItem, type GatewayLike } from "../controllers/chat-controller.js";
 import "../components/sc-composer.js";
-import "../components/sc-thinking.js";
-import "../components/sc-tool-result.js";
-import "../components/sc-message-stream.js";
-import "../components/sc-reasoning-block.js";
+import "../components/sc-message-list.js";
 import "../components/sc-chat-search.js";
 import "../components/sc-context-menu.js";
-import "../components/sc-skeleton.js";
 
 @customElement("sc-chat-view")
 export class ScChatView extends GatewayAwareLitElement {
@@ -60,92 +55,6 @@ export class ScChatView extends GatewayAwareLitElement {
     .status-dot.disconnected {
       background: var(--sc-text-muted);
     }
-    .messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: var(--sc-space-md);
-      display: flex;
-      flex-direction: column;
-      gap: var(--sc-space-md);
-    }
-    .message {
-      max-width: 85%;
-      padding: var(--sc-space-md) var(--sc-space-md);
-      border-radius: var(--sc-radius);
-      font-size: var(--sc-text-base);
-      line-height: 1.5;
-      display: flex;
-      flex-direction: column;
-      gap: var(--sc-space-xs);
-      animation: sc-slide-up var(--sc-duration-normal)
-        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
-    }
-    .message.user {
-      align-self: flex-end;
-      background: var(--sc-accent);
-      color: var(--sc-bg);
-    }
-    .message.assistant {
-      align-self: flex-start;
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      color: var(--sc-text);
-    }
-    .message-meta {
-      font-size: var(--sc-text-xs);
-      opacity: var(--sc-opacity-muted, 0.8);
-    }
-    .message.user .message-meta {
-      align-self: flex-end;
-    }
-    .message.assistant .message-meta {
-      align-self: flex-start;
-    }
-    .message code {
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-sm);
-      background: var(--sc-bg-elevated);
-      padding: var(--sc-space-2xs) var(--sc-space-xs);
-      border-radius: var(--sc-radius-sm);
-    }
-    .scroll-bottom-pill {
-      position: absolute;
-      bottom: 90px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      box-shadow: var(--sc-shadow-md);
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      border-radius: var(--sc-radius-full);
-      font-size: var(--sc-text-xs);
-      font-family: var(--sc-font);
-      color: var(--sc-text);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: var(--sc-space-xs);
-      z-index: 5;
-      animation: sc-fade-up var(--sc-duration-fast) var(--sc-ease-out);
-    }
-    .scroll-bottom-pill:hover {
-      background: var(--sc-bg-elevated);
-    }
-    .pill-icon svg {
-      width: 14px;
-      height: 14px;
-      vertical-align: -2px;
-    }
-    @keyframes sc-fade-up {
-      from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(8px);
-      }
-      to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-      }
-    }
     .retry-btn {
       background: transparent;
       border: 1px solid var(--sc-border);
@@ -163,72 +72,6 @@ export class ScChatView extends GatewayAwareLitElement {
     .retry-btn:hover {
       color: var(--sc-text);
       border-color: var(--sc-text-muted);
-    }
-    .message a {
-      color: var(--sc-accent-text, var(--sc-accent));
-      text-decoration: underline;
-    }
-    .message a:hover {
-      color: var(--sc-accent-hover);
-    }
-    .thinking {
-      display: flex;
-      align-items: center;
-      gap: var(--sc-space-sm);
-      align-self: flex-start;
-      padding: var(--sc-space-sm) var(--sc-space-md);
-      font-size: var(--sc-text-base);
-      color: var(--sc-text-muted);
-      font-style: italic;
-    }
-    .stream-elapsed {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
-      font-variant-numeric: tabular-nums;
-    }
-    .abort-btn {
-      margin-left: var(--sc-space-md);
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      background: var(--sc-error-dim);
-      color: var(--sc-error);
-      border: 1px solid var(--sc-error);
-      border-radius: var(--sc-radius);
-      cursor: pointer;
-      font-size: var(--sc-text-xs);
-      font-style: normal;
-    }
-    .abort-btn:hover {
-      background: var(--sc-error-dim);
-      border-color: var(--sc-error);
-    }
-    .typing-dots {
-      display: inline-flex;
-      gap: var(--sc-space-xs);
-      align-items: center;
-      margin-left: var(--sc-space-xs);
-    }
-    .typing-dots span {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--sc-text-muted);
-      animation: sc-bounce-dot var(--sc-duration-slow) var(--sc-ease-in-out) infinite both;
-    }
-    .typing-dots span:nth-child(1) {
-      animation-delay: -0.32s;
-    }
-    .typing-dots span:nth-child(2) {
-      animation-delay: -0.16s;
-    }
-    @keyframes sc-bounce-dot {
-      0%,
-      80%,
-      100% {
-        transform: scale(0);
-      }
-      40% {
-        transform: scale(1);
-      }
     }
     .error-banner {
       display: flex;
@@ -255,22 +98,8 @@ export class ScChatView extends GatewayAwareLitElement {
       height: 16px;
       line-height: 1;
     }
-    @media (max-width: 640px) {
-      .message {
-        max-width: 95%;
-      }
-    }
-    .history-skeleton {
-      display: flex;
-      flex-direction: column;
-      gap: var(--sc-space-md);
-      padding: var(--sc-space-lg) 0;
-    }
     @media (prefers-reduced-motion: reduce) {
-      .status-dot.connecting,
-      .message,
-      .scroll-bottom-pill,
-      .typing-dots span {
+      .status-dot.connecting {
         animation: none !important;
       }
     }
@@ -282,7 +111,6 @@ export class ScChatView extends GatewayAwareLitElement {
 
   @state() private inputValue = "";
   @state() private connectionStatus: GatewayStatus = "disconnected";
-  @state() private showScrollPill = false;
   @state() private _searchOpen = false;
   @state() private _searchQuery = "";
   @state() private _searchCurrentMatch = 0;
@@ -292,18 +120,14 @@ export class ScChatView extends GatewayAwareLitElement {
     y: number;
     items: ContextMenuItem[];
   } = { open: false, x: 0, y: 0, items: [] };
-  @query("#message-list") private messageList!: HTMLElement;
+  @query("sc-message-list") private _messageList!: HTMLElement & {
+    scrollToBottom: () => void;
+    scrollToItem: (idx: number) => void;
+  };
 
   private messageHandler = (e: Event) => this.onGatewayMessage(e);
   private statusHandler = (e: Event) => {
     this.connectionStatus = (e as CustomEvent<GatewayStatus>).detail;
-  };
-
-  private _scrollHandler = () => {
-    const el = this.messageList;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (this.showScrollPill === atBottom) this.showScrollPill = !atBottom;
   };
 
   private _handleKeyDown = (e: KeyboardEvent): void => {
@@ -329,10 +153,7 @@ export class ScChatView extends GatewayAwareLitElement {
     const indices = this._getSearchMatchIndices();
     if (matchIndex < 0 || matchIndex >= indices.length) return;
     const itemIdx = indices[matchIndex];
-    this.updateComplete.then(() => {
-      const msgEl = this.messageList?.querySelector(`#msg-${itemIdx}`) as HTMLElement;
-      msgEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    });
+    this._messageList?.scrollToItem(itemIdx);
   }
 
   private _handleFiles(files: File[]): void {
@@ -349,7 +170,7 @@ export class ScChatView extends GatewayAwareLitElement {
     }
     this.chat.cacheMessages(this.sessionKey);
     this.requestUpdate();
-    this.scrollToBottom();
+    this._messageList?.scrollToBottom();
   }
 
   override firstUpdated(): void {
@@ -359,7 +180,6 @@ export class ScChatView extends GatewayAwareLitElement {
       gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
       gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
     }
-    this.messageList?.addEventListener("scroll", this._scrollHandler, { passive: true });
     document.addEventListener("keydown", this._handleKeyDown);
   }
 
@@ -376,7 +196,6 @@ export class ScChatView extends GatewayAwareLitElement {
     const gw = this.gateway;
     gw?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
     gw?.removeEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
-    this.messageList?.removeEventListener("scroll", this._scrollHandler);
     super.disconnectedCallback();
   }
 
@@ -392,26 +211,7 @@ export class ScChatView extends GatewayAwareLitElement {
     }
 
     this.chat.handleEvent(detail.event, payload, this.sessionKey);
-    this.scrollToBottom();
-  }
-
-  private _findLastAssistantIdx(): number {
-    for (let i = this.chat.items.length - 1; i >= 0; i--) {
-      if (
-        this.chat.items[i].type === "message" &&
-        (this.chat.items[i] as { role: string }).role === "assistant"
-      ) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  private scrollToBottom(): void {
-    this.updateComplete.then(() => {
-      const el = this.messageList;
-      if (el) el.scrollTop = el.scrollHeight;
-    });
+    this._messageList?.scrollToBottom();
   }
 
   private async _retry(): Promise<void> {
@@ -421,7 +221,7 @@ export class ScChatView extends GatewayAwareLitElement {
       const msg = err instanceof Error ? err.message : "Failed to send message";
       ScToast.show({ message: msg, variant: "error" });
     }
-    this.scrollToBottom();
+    this._messageList?.scrollToBottom();
   }
 
   private _copyMessage(item: Extract<ChatItem, { type: "message" }>): void {
@@ -466,24 +266,23 @@ export class ScChatView extends GatewayAwareLitElement {
       const msg = err instanceof Error ? err.message : "Failed to send message";
       ScToast.show({ message: msg, variant: "error" });
     }
-    this.scrollToBottom();
+    this._messageList?.scrollToBottom();
   }
 
   override render() {
     return html`
       <div class="container">
-        ${this._renderStatusBar()} ${this._renderErrorBanner()}
-        <div
-          id="message-list"
-          class="messages"
-          role="log"
-          aria-live="polite"
-          aria-label="Chat messages"
-        >
-          ${this._renderSearch()} ${this._renderMessages()}
-          ${this.chat.isWaiting ? this._renderThinking() : nothing}
-        </div>
-        ${this._renderScrollPill()} ${this._renderRetryButton()}
+        ${this._renderStatusBar()} ${this._renderErrorBanner()} ${this._renderSearch()}
+        <sc-message-list
+          .items=${this.chat.items}
+          .isWaiting=${this.chat.isWaiting}
+          .streamElapsed=${this.chat.streamElapsed}
+          .historyLoading=${this.chat.historyLoading}
+          @sc-context-menu=${(e: CustomEvent<{ event: MouseEvent; item: ChatItem }>) =>
+            this._onMessageContextMenu(e.detail.event, e.detail.item)}
+          @sc-abort=${() => this.handleAbort()}
+        ></sc-message-list>
+        ${this._renderRetryButton()}
         <sc-composer
           .value=${this.inputValue}
           .waiting=${this.chat.isWaiting}
@@ -578,90 +377,6 @@ export class ScChatView extends GatewayAwareLitElement {
           this._searchCurrentMatch = 0;
         }}
       ></sc-chat-search>
-    `;
-  }
-
-  private _renderMessages() {
-    if (this.chat.historyLoading) {
-      return html`
-        <div class="history-skeleton">
-          <sc-skeleton variant="line" width="60%"></sc-skeleton>
-          <sc-skeleton variant="line" width="80%"></sc-skeleton>
-          <sc-skeleton variant="line" width="45%"></sc-skeleton>
-        </div>
-      `;
-    }
-    const lastAssistantIdx = this._findLastAssistantIdx();
-    return this.chat.items.map((item, idx) => {
-      if (item.type === "message") {
-        const isStreaming =
-          this.chat.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
-        return html`
-          <div
-            id="msg-${idx}"
-            class="message ${item.role}"
-            style="--sc-stagger-index: ${idx}; animation-delay: min(calc(var(--sc-stagger-delay) * var(--sc-stagger-index)), var(--sc-stagger-max));"
-            @contextmenu=${(ev: MouseEvent) => this._onMessageContextMenu(ev, item)}
-          >
-            <sc-message-stream
-              .content=${item.content}
-              .streaming=${isStreaming}
-              .role=${item.role}
-            ></sc-message-stream>
-            ${item.ts != null
-              ? html`<span class="message-meta">${formatTime(item.ts)}</span>`
-              : nothing}
-          </div>
-        `;
-      }
-      if (item.type === "tool_call") {
-        return html`
-          <sc-tool-result
-            .tool=${item.name}
-            .status=${item.status === "completed"
-              ? item.result?.startsWith("Error")
-                ? "error"
-                : "success"
-              : "running"}
-            .content=${item.result ?? item.input ?? ""}
-          ></sc-tool-result>
-        `;
-      }
-      if (item.type === "thinking") {
-        return html`
-          <sc-reasoning-block
-            .content=${item.content}
-            .streaming=${item.streaming}
-            .duration=${item.duration ?? ""}
-          ></sc-reasoning-block>
-        `;
-      }
-      return nothing;
-    });
-  }
-
-  private _renderThinking() {
-    return html`
-      <div class="thinking">
-        <sc-thinking .active=${true} .steps=${[]}></sc-thinking>
-        <span class="stream-elapsed">${this.chat.streamElapsed}</span>
-        <button class="abort-btn" @click=${() => this.handleAbort()} aria-label="Stop generating">
-          Abort
-        </button>
-      </div>
-    `;
-  }
-
-  private _renderScrollPill() {
-    if (!this.showScrollPill) return nothing;
-    return html`
-      <button
-        class="scroll-bottom-pill"
-        @click=${() => this.scrollToBottom()}
-        aria-label="Scroll to latest messages"
-      >
-        <span class="pill-icon">${icons["arrow-down"]}</span> New messages
-      </button>
     `;
   }
 

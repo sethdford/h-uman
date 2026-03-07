@@ -36,8 +36,8 @@ jobs:
         run: |
           COUNT=$(./build/seaclaw_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
           echo "Test count: $COUNT"
-          if [ "$COUNT" -lt 3127 ]; then
-            echo "Test count regression: $COUNT < 3127 baseline"
+          if [ "$COUNT" -lt 3128 ]; then
+            echo "Test count regression: $COUNT < 3128 baseline"
             exit 1
           fi
       - name: Check for untested modules
@@ -318,6 +318,7 @@ jobs:
         with:
           name: coverage-report
           path: coverage.info
+        continue-on-error: true
 
   docker:
     runs-on: ubuntu-latest

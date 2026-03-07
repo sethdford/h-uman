@@ -368,10 +368,11 @@ static const char *openrouter_get_name(void *ctx) {
 static void openrouter_deinit(void *ctx, sc_allocator_t *alloc) {
     (void)alloc;
     sc_openrouter_ctx_t *orc = (sc_openrouter_ctx_t *)ctx;
-    if (orc && orc->api_key) {
+    if (!orc)
+        return;
+    if (orc->api_key)
         free(orc->api_key);
-        free(orc);
-    }
+    free(orc);
 }
 
 static const sc_provider_vtable_t openrouter_vtable;

@@ -770,14 +770,9 @@ export class ScSessionsView extends GatewayAwareLitElement {
             </button>
           </div>
 
-          <div
-            class="session-list"
-            role="list"
-            aria-label="Sessions"
-            @keydown=${this.onListKeyDown}
-          >
-            ${filtered.length === 0
-              ? html`
+          ${filtered.length === 0
+            ? html`
+                <div class="session-list" aria-label="Sessions">
                   <sc-empty-state
                     .icon=${icons["message-square"]}
                     heading=${this.searchQuery ? "No matching sessions" : "No conversations yet"}
@@ -785,21 +780,30 @@ export class ScSessionsView extends GatewayAwareLitElement {
                       ? "Try a different search term."
                       : "Start a chat to see your conversation history here."}
                   ></sc-empty-state>
-                `
-              : this.sortMode === "name"
-                ? filtered.map((s, i) => this._renderSessionCard(s, i))
-                : TIME_GROUP_ORDER.filter((g) => groups.has(g)).map(
-                    (g) => html`
-                      <div role="group" aria-label=${g}>
-                        <div class="group-label" role="presentation">${g}</div>
-                        ${groups.get(g)!.map((s) => {
-                          const idx = filtered.indexOf(s);
-                          return this._renderSessionCard(s, idx);
-                        })}
-                      </div>
-                    `,
-                  )}
-          </div>
+                </div>
+              `
+            : html`
+                <div
+                  class="session-list"
+                  role="list"
+                  aria-label="Sessions"
+                  @keydown=${this.onListKeyDown}
+                >
+                  ${this.sortMode === "name"
+                    ? filtered.map((s, i) => this._renderSessionCard(s, i))
+                    : TIME_GROUP_ORDER.filter((g) => groups.has(g)).map(
+                        (g) => html`
+                          <div role="group" aria-label=${g}>
+                            <div class="group-label" role="presentation">${g}</div>
+                            ${groups.get(g)!.map((s) => {
+                              const idx = filtered.indexOf(s);
+                              return this._renderSessionCard(s, idx);
+                            })}
+                          </div>
+                        `,
+                      )}
+                </div>
+              `}
         </div>
 
         <div class="detail">${this._renderDetail()}</div>

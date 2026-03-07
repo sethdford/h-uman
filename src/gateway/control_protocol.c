@@ -65,7 +65,8 @@ static sc_error_t build_connect_response(sc_allocator_t *alloc, const sc_app_con
         "chat.abort",      "config.set",      "config.apply",   "sessions.list",
         "sessions.patch",  "sessions.delete", "persona.set",    "tools.catalog",
         "channels.status", "cron.list",       "cron.add",       "cron.remove",
-        "cron.run",        "skills.list",     "skills.install", "skills.enable",
+        "cron.run",        "cron.update",     "cron.runs",      "skills.list",
+        "skills.install",  "skills.enable",
         "skills.disable",  "update.check",    "update.run",     "exec.approval.resolve",
         "usage.summary",   "models.list",     "nodes.list",     "push.register",
         "push.unregister"};
@@ -679,6 +680,14 @@ static sc_error_t handle_cron_list(sc_allocator_t *alloc, const sc_app_context_t
                                sc_json_number_new(alloc, (double)jobs[i].next_run_secs));
             sc_json_object_set(alloc, j, "last_run",
                                sc_json_number_new(alloc, (double)jobs[i].last_run_secs));
+            json_set_str(alloc, j, "type",
+                         jobs[i].type == SC_CRON_JOB_AGENT ? "agent" : "shell");
+            json_set_str(alloc, j, "channel", jobs[i].channel);
+            json_set_str(alloc, j, "last_status", jobs[i].last_status);
+            sc_json_object_set(alloc, j, "paused",
+                               sc_json_bool_new(alloc, jobs[i].paused));
+            sc_json_object_set(alloc, j, "created_at",
+                               sc_json_number_new(alloc, (double)jobs[i].created_at_s));
             sc_json_array_push(alloc, arr, j);
         }
     }
@@ -702,7 +711,14 @@ static sc_error_t handle_cron_add(sc_allocator_t *alloc, sc_app_context_t *app,
             const char *expr = sc_json_get_string(params, "expression");
             const char *cmd = sc_json_get_string(params, "command");
             const char *name = sc_json_get_string(params, "name");
-            if (expr && cmd) {
+            const char *type_str = sc_json_get_string(params, "type");
+            const char *prompt = sc_json_get_string(params, "prompt");
+            const char *channel = sc_json_get_string(params, "channel");
+            if (expr && type_str && strcmp(type_str, "agent") == 0 && prompt) {
+                sc_error_t e = sc_cron_add_agent_job(app->cron, app->alloc, expr, prompt,
+                                                     channel, name ? name : "Agent task", &new_id);
+                added = (e == SC_OK);
+            } else if (expr && cmd) {
                 sc_error_t e =
                     sc_cron_add_job(app->cron, app->alloc, expr, cmd, name ? name : cmd, &new_id);
                 added = (e == SC_OK);
@@ -747,6 +763,16 @@ static sc_error_t handle_cron_remove(sc_allocator_t *alloc, sc_app_context_t *ap
                 uint64_t job_id = (uint64_t)id_num;
                 sc_error_t e = sc_cron_remove_job(app->cron, job_id);
                 removed = (e == SC_OK);
+                if (removed && app->alloc) {
+                    char *cron_path = NULL;
+                    size_t cron_path_len = 0;
+                    if (sc_crontab_get_path(app->alloc, &cron_path, &cron_path_len) == SC_OK) {
+                        char id_str[32];
+                        snprintf(id_str, sizeof(id_str), "%llu", (unsigned long long)job_id);
+                        sc_crontab_remove(app->alloc, cron_path, id_str);
+                        app->alloc->free(app->alloc->ctx, cron_path, cron_path_len + 1);
+                    }
+                }
             }
         }
     }
@@ -778,14 +804,32 @@ static sc_error_t handle_cron_run(sc_allocator_t *alloc, sc_app_context_t *app,
                     sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL), "running",
                                     NULL);
 #if !SC_IS_TEST
-                    const char *argv[] = {"/bin/sh", "-c", job->command, NULL};
-                    sc_run_result_t run_result = {0};
-                    sc_error_t run_err = sc_process_run(app->alloc, argv, NULL, 65536, &run_result);
-                    started = (run_err == SC_OK);
-                    const char *run_output = run_result.stdout_buf;
-                    sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL),
-                                    started ? "completed" : "failed", run_output);
-                    sc_run_result_free(app->alloc, &run_result);
+                    if (job->type == SC_CRON_JOB_AGENT && app->agent) {
+                        char *reply = NULL;
+                        size_t reply_len = 0;
+                        app->agent->active_channel =
+                            job->channel ? job->channel : "gateway";
+                        app->agent->active_channel_len =
+                            strlen(app->agent->active_channel);
+                        sc_error_t run_err =
+                            sc_agent_turn(app->agent, job->command, strlen(job->command),
+                                          &reply, &reply_len);
+                        started = (run_err == SC_OK);
+                        sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL),
+                                        started ? "completed" : "failed", reply);
+                        if (reply)
+                            app->alloc->free(app->alloc->ctx, reply, reply_len + 1);
+                    } else {
+                        const char *argv[] = {"/bin/sh", "-c", job->command, NULL};
+                        sc_run_result_t run_result = {0};
+                        sc_error_t run_err =
+                            sc_process_run(app->alloc, argv, NULL, 65536, &run_result);
+                        started = (run_err == SC_OK);
+                        const char *run_output = run_result.stdout_buf;
+                        sc_cron_add_run(app->cron, app->alloc, job_id, (int64_t)time(NULL),
+                                        started ? "completed" : "failed", run_output);
+                        sc_run_result_free(app->alloc, &run_result);
+                    }
 #else
                     started = true;
 #endif
@@ -804,6 +848,80 @@ static sc_error_t handle_cron_run(sc_allocator_t *alloc, sc_app_context_t *app,
         return SC_ERR_OUT_OF_MEMORY;
     sc_json_object_set(alloc, obj, "started", sc_json_bool_new(alloc, started));
     json_set_str(alloc, obj, "status", status_msg);
+    sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
+    sc_json_free(alloc, obj);
+    return err;
+}
+
+/* ── cron.update ─────────────────────────────────────────────────────── */
+
+static sc_error_t handle_cron_update(sc_allocator_t *alloc, sc_app_context_t *app,
+                                     const sc_json_value_t *root, char **out, size_t *out_len) {
+    bool updated = false;
+
+    if (root && app && app->cron && app->alloc) {
+        sc_json_value_t *params = sc_json_object_get(root, "params");
+        if (params) {
+            double id_num = sc_json_get_number(params, "id", -1.0);
+            if (id_num >= 0) {
+                uint64_t job_id = (uint64_t)id_num;
+                const char *expr = sc_json_get_string(params, "expression");
+                const char *cmd = sc_json_get_string(params, "command");
+                sc_json_value_t *en_val = sc_json_object_get(params, "enabled");
+                bool en = true;
+                bool *en_ptr = NULL;
+                if (en_val && en_val->type == SC_JSON_BOOL) {
+                    en = en_val->data.boolean;
+                    en_ptr = &en;
+                }
+                sc_error_t e =
+                    sc_cron_update_job(app->cron, app->alloc, job_id, expr, cmd, en_ptr);
+                updated = (e == SC_OK);
+            }
+        }
+    }
+
+    sc_json_value_t *obj = sc_json_object_new(alloc);
+    if (!obj)
+        return SC_ERR_OUT_OF_MEMORY;
+    sc_json_object_set(alloc, obj, "updated", sc_json_bool_new(alloc, updated));
+    sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
+    sc_json_free(alloc, obj);
+    return err;
+}
+
+/* ── cron.runs ───────────────────────────────────────────────────────── */
+
+static sc_error_t handle_cron_runs(sc_allocator_t *alloc, const sc_app_context_t *app,
+                                   const sc_json_value_t *root, char **out, size_t *out_len) {
+    sc_json_value_t *obj = sc_json_object_new(alloc);
+    if (!obj)
+        return SC_ERR_OUT_OF_MEMORY;
+    sc_json_value_t *arr = sc_json_array_new(alloc);
+
+    if (root && app && app->cron) {
+        sc_json_value_t *params = sc_json_object_get(root, "params");
+        double id_num = params ? sc_json_get_number(params, "id", -1.0) : -1.0;
+        double limit_num = params ? sc_json_get_number(params, "limit", 10.0) : 10.0;
+        if (id_num >= 0) {
+            size_t count = 0;
+            const sc_cron_run_t *runs =
+                sc_cron_list_runs(app->cron, (uint64_t)id_num, (size_t)limit_num, &count);
+            for (size_t i = 0; i < count; i++) {
+                sc_json_value_t *r = sc_json_object_new(alloc);
+                sc_json_object_set(alloc, r, "id",
+                                   sc_json_number_new(alloc, (double)runs[i].id));
+                sc_json_object_set(alloc, r, "started_at",
+                                   sc_json_number_new(alloc, (double)runs[i].started_at_s));
+                sc_json_object_set(alloc, r, "finished_at",
+                                   sc_json_number_new(alloc, (double)runs[i].finished_at_s));
+                json_set_str(alloc, r, "status", runs[i].status);
+                sc_json_array_push(alloc, arr, r);
+            }
+        }
+    }
+
+    sc_json_object_set(alloc, obj, "runs", arr);
     sc_error_t err = sc_json_stringify(alloc, obj, out, out_len);
     sc_json_free(alloc, obj);
     return err;
@@ -1322,6 +1440,10 @@ static sc_error_t build_method_response(sc_allocator_t *alloc, const char *metho
         return handle_cron_remove(alloc, app, root, payload_out, payload_len_out);
     if (strcmp(method, "cron.run") == 0)
         return handle_cron_run(alloc, app, root, payload_out, payload_len_out);
+    if (strcmp(method, "cron.update") == 0)
+        return handle_cron_update(alloc, app, root, payload_out, payload_len_out);
+    if (strcmp(method, "cron.runs") == 0)
+        return handle_cron_runs(alloc, app, root, payload_out, payload_len_out);
 #endif
 #ifdef SC_HAS_SKILLS
     if (strcmp(method, "skills.list") == 0)

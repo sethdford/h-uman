@@ -73,7 +73,9 @@ static sc_error_t voice_send(void *ctx, const char *target, size_t target_len, c
     const size_t buf_bytes = buf_samples * sizeof(float);
     float *audio_buf = (float *)v->alloc->alloc(v->alloc->ctx, buf_bytes);
     if (!audio_buf) {
+#if !SC_IS_TEST
         fprintf(stderr, "voice_channel: failed to allocate audio buffer (%zu bytes)\n", buf_bytes);
+#endif
         return SC_ERR_OUT_OF_MEMORY;
     }
 
@@ -83,7 +85,9 @@ static sc_error_t voice_send(void *ctx, const char *target, size_t target_len, c
     int32_t err = sonata_tts((const uint8_t *)message, message_len,
                              (const uint8_t *)v->config.speaker_id, exag, audio_buf, &audio_len);
     if (err != 0) {
+#if !SC_IS_TEST
         fprintf(stderr, "voice_channel: sonata_tts failed (err=%d)\n", err);
+#endif
         v->alloc->free(v->alloc->ctx, audio_buf, buf_bytes);
         return SC_ERR_CHANNEL_SEND;
     }

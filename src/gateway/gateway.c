@@ -401,8 +401,10 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
                                 const char *path, const char *body, size_t body_len,
                                 const char *client_ip, const char *sig_header) {
 
-    fprintf(stderr, "[gateway] %s %s %s body=%zu\n", method ? method : "?", path ? path : "/",
-            client_ip ? client_ip : "unknown", body_len);
+    if (gw->config.test_mode) {
+        fprintf(stderr, "[gateway] %s %s %s body=%zu\n", method ? method : "?", path ? path : "/",
+                client_ip ? client_ip : "unknown", body_len);
+    }
 
     if (gw->rate_limiter && !sc_rate_limiter_allow(gw->rate_limiter, client_ip)) {
         send_json_rate_limited(fd, "{\"error\":\"rate limited\"}",

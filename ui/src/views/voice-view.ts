@@ -1,39 +1,131 @@
-import { html, css } from "lit";
+import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { GatewayClient } from "../gateway.js";
 import { GatewayClient as GatewayClientClass } from "../gateway.js";
+import type { GatewayStatus } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import { SESSION_KEY_VOICE, formatRelative } from "../utils.js";
 import { icons } from "../icons.js";
+import { ScToast } from "../components/sc-toast.js";
+import "../components/sc-button.js";
+import "../components/sc-skeleton.js";
+import "../components/sc-message-stream.js";
+import "../components/sc-thinking.js";
 
 type VoiceStatus = "idle" | "listening" | "processing" | "unsupported";
 
+interface VoiceMessage {
+  role: "user" | "assistant";
+  content: string;
+  ts: number;
+}
+
 @customElement("sc-voice-view")
 export class ScVoiceView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
+
   static override styles = css`
     :host {
       display: block;
       color: var(--sc-text);
-      max-width: 640px;
+      max-width: 720px;
       margin: 0 auto;
+      padding: var(--sc-space-lg) var(--sc-space-xl);
     }
-    .header {
-      margin-bottom: var(--sc-space-xl);
+
+    /* ── Hero zone ────────────────────────────────────── */
+
+    .hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: var(--sc-space-md);
+      padding: var(--sc-space-xl) var(--sc-space-2xl);
+      margin-bottom: var(--sc-space-2xl, 2rem);
+      background-image: var(--sc-hero-gradient);
+      border-radius: var(--sc-radius-xl, 16px);
+      border: 1px solid var(--sc-border-subtle, var(--sc-border));
     }
-    h2 {
+
+    .hero-left {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-lg);
+      min-width: 0;
+    }
+
+    .hero-title {
       margin: 0;
-      font-size: var(--sc-text-xl);
-      font-weight: var(--sc-weight-semibold);
+      font-size: clamp(1.5rem, 2.5vw, 2rem);
+      font-weight: var(--sc-weight-bold, 700);
+      letter-spacing: -0.03em;
       color: var(--sc-text);
+      line-height: 1.1;
     }
-    .mic-area {
+
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.connected {
+      background: var(--sc-success);
+      box-shadow: 0 0 6px var(--sc-success);
+    }
+
+    .status-dot.disconnected {
+      background: var(--sc-error);
+    }
+
+    .status-dot.connecting {
+      background: var(--sc-warning);
+      animation: sc-status-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes sc-status-pulse {
+      0%,
+      100% {
+        box-shadow: 0 0 4px var(--sc-warning);
+      }
+      50% {
+        box-shadow: 0 0 12px var(--sc-warning);
+      }
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+    }
+
+    .staleness {
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+    }
+
+    /* ── Voice zone ───────────────────────────────────── */
+
+    .voice-zone {
       display: flex;
       flex-direction: column;
       align-items: center;
-      margin-bottom: var(--sc-space-lg);
+      padding: var(--sc-space-2xl) 0 var(--sc-space-xl);
     }
+
     .mic-btn {
-      width: 80px;
-      height: 80px;
+      width: 96px;
+      height: 96px;
       border-radius: 50%;
       border: 2px solid var(--sc-border);
       background: var(--sc-bg-surface);
@@ -42,71 +134,107 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
       transition:
         background var(--sc-duration-fast) var(--sc-ease-out),
         border-color var(--sc-duration-fast) var(--sc-ease-out),
-        transform var(--sc-duration-fast) var(--sc-ease-out);
+        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
     }
+
     .mic-btn svg {
-      width: 2rem;
-      height: 2rem;
+      width: 2.5rem;
+      height: 2.5rem;
     }
-    .mic-btn:hover {
+
+    .mic-btn:hover:not(:disabled) {
       background: var(--sc-bg-elevated);
       border-color: var(--sc-accent);
       color: var(--sc-accent-text, var(--sc-accent));
     }
+
+    .mic-btn:focus-visible {
+      outline: 2px solid var(--sc-accent);
+      outline-offset: 4px;
+    }
+
+    .mic-btn:disabled {
+      opacity: var(--sc-opacity-disabled, 0.5);
+      cursor: not-allowed;
+    }
+
     .mic-btn.active {
       background: var(--sc-accent);
       border-color: var(--sc-accent);
-      color: var(--sc-on-accent);
-      animation: sc-pulse-mic var(--sc-duration-slow) ease-in-out infinite;
+      color: var(--sc-on-accent, #fff);
+      box-shadow: 0 0 0 0 var(--sc-accent-subtle);
+      animation: sc-pulse-ring var(--sc-duration-slow) ease-in-out infinite;
     }
-    @keyframes sc-pulse-mic {
-      0%,
-      100% {
-        transform: scale(1);
+
+    @keyframes sc-pulse-ring {
+      0% {
         box-shadow: 0 0 0 0 var(--sc-accent-subtle);
       }
       50% {
-        transform: scale(1.05);
-        box-shadow: 0 0 0 16px transparent;
+        box-shadow: 0 0 0 20px transparent;
+      }
+      100% {
+        box-shadow: 0 0 0 0 var(--sc-accent-subtle);
       }
     }
-    .transcript-area {
-      margin-bottom: var(--sc-space-md);
+
+    .voice-status {
+      margin-top: var(--sc-space-md);
+      font-size: var(--sc-text-sm);
+      color: var(--sc-text-muted);
     }
-    .transcript-area textarea {
-      width: 100%;
-      min-height: 80px;
-      padding: 0.75rem var(--sc-space-md);
+
+    .voice-status.listening,
+    .voice-status.processing {
+      color: var(--sc-accent-text, var(--sc-accent));
+    }
+
+    /* ── Input bar ────────────────────────────────────── */
+
+    .input-bar {
+      display: flex;
+      gap: var(--sc-space-sm);
+      align-items: flex-end;
+      padding: var(--sc-space-md);
       background: var(--sc-bg-surface);
+      border: 1px solid var(--sc-border);
+      border-radius: var(--sc-radius-lg);
+      margin-bottom: var(--sc-space-xl);
+    }
+
+    .input-bar textarea {
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
+      padding: var(--sc-space-sm) var(--sc-space-md);
+      background: var(--sc-bg);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius);
       color: var(--sc-text);
       font-family: var(--sc-font);
-      font-size: 0.875rem;
-      resize: vertical;
+      font-size: var(--sc-text-base);
+      resize: none;
+      line-height: 1.5;
       box-sizing: border-box;
-      transition:
-        border-color var(--sc-duration-fast) var(--sc-ease-out),
-        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
     }
-    .transcript-area textarea:focus {
+
+    .input-bar textarea:focus {
       outline: none;
       border-color: var(--sc-accent);
       box-shadow: 0 0 0 3px var(--sc-accent-subtle);
     }
-    .transcript-area textarea::placeholder {
+
+    .input-bar textarea::placeholder {
       color: var(--sc-text-muted);
     }
-    .send-row {
-      display: flex;
-      gap: var(--sc-space-sm);
-      margin-bottom: var(--sc-space-lg);
-    }
+
     .send-btn {
-      padding: var(--sc-space-sm) var(--sc-space-md);
+      padding: var(--sc-space-sm) var(--sc-space-lg);
+      min-height: 44px;
       background: var(--sc-accent);
       color: var(--sc-bg);
       border: none;
@@ -115,109 +243,223 @@ export class ScVoiceView extends GatewayAwareLitElement {
       cursor: pointer;
       font-size: var(--sc-text-base);
     }
+
     .send-btn:hover:not(:disabled) {
       background: var(--sc-accent-hover);
     }
+
     .send-btn:disabled {
-      opacity: 0.5;
+      opacity: var(--sc-opacity-disabled, 0.5);
       cursor: not-allowed;
     }
-    .response-area {
-      padding: var(--sc-space-md) var(--sc-space-lg);
-      background: var(--sc-bg-elevated);
+
+    .send-btn:focus-visible {
+      outline: 2px solid var(--sc-accent);
+      outline-offset: 2px;
+    }
+
+    /* ── Conversation zone ────────────────────────────── */
+
+    .conversation {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sc-space-md);
+      max-height: 400px;
+      overflow-y: auto;
+      padding: var(--sc-space-md);
       border: 1px solid var(--sc-border);
       border-radius: var(--sc-radius-lg);
-      border-top-left-radius: var(--sc-radius-sm);
-      min-height: 80px;
-      font-size: 0.875rem;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-word;
-      position: relative;
-      margin-left: var(--sc-space-md);
-      box-shadow: var(--sc-shadow-sm);
+      background: var(--sc-bg-surface);
     }
-    .response-area::before {
-      content: "";
-      position: absolute;
-      left: calc(-1 * var(--sc-space-sm));
-      top: 12px;
-      width: 0;
-      height: 0;
-      border-top: 6px solid transparent;
-      border-bottom: 6px solid transparent;
-      border-right: 8px solid var(--sc-bg-elevated);
+
+    .msg {
+      max-width: 85%;
+      padding: var(--sc-space-md);
+      border-radius: var(--sc-radius);
+      font-size: var(--sc-text-base);
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      gap: var(--sc-space-xs);
+      animation: sc-slide-up var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
-    .response-area.empty {
+
+    .msg.user {
+      align-self: flex-end;
+      background: var(--sc-accent);
+      color: var(--sc-bg);
+    }
+
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--sc-bg-elevated);
+      border: 1px solid var(--sc-border);
+      color: var(--sc-text);
+    }
+
+    .msg-meta {
+      font-size: var(--sc-text-xs);
+      opacity: var(--sc-opacity-muted, 0.8);
+    }
+
+    .msg.user .msg-meta {
+      align-self: flex-end;
+    }
+
+    .thinking-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      align-self: flex-start;
+      padding: var(--sc-space-sm) var(--sc-space-md);
+      font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
-      border-style: dashed;
+      font-style: italic;
     }
-    .status-line {
-      margin-top: var(--sc-space-md);
+
+    .empty-conversation {
+      text-align: center;
+      padding: var(--sc-space-xl) 0;
+      color: var(--sc-text-muted);
       font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
     }
-    .status-line.listening {
-      color: var(--sc-accent-text, var(--sc-accent));
+
+    /* ── Skeleton ─────────────────────────────────────── */
+
+    .skeleton-hero {
+      height: 90px;
+      margin-bottom: var(--sc-space-2xl, 2rem);
+      border-radius: var(--sc-radius-xl, 16px);
     }
-    .status-line.processing {
-      color: var(--sc-accent-text, var(--sc-accent));
+
+    .skeleton-mic {
+      display: flex;
+      justify-content: center;
+      margin-bottom: var(--sc-space-xl);
     }
-    @media (max-width: 768px) {
-      .send-row {
-        flex-wrap: wrap;
-      }
+
+    .skeleton-input {
+      margin-bottom: var(--sc-space-xl);
     }
+
+    /* ── Responsive ───────────────────────────────────── */
+
     @media (max-width: 480px) {
       :host {
         max-width: 100%;
+        padding: var(--sc-space-md);
       }
-      .response-area {
-        margin-left: 0;
+      .input-bar {
+        flex-direction: column;
+        align-items: stretch;
       }
-      .response-area::before {
-        display: none;
+      .send-btn {
+        min-height: 40px;
       }
     }
+
     @media (prefers-reduced-motion: reduce) {
+      .mic-btn.active,
+      .status-dot.connecting,
+      .msg {
+        animation: none !important;
+      }
       .mic-btn.active {
-        animation: none;
-        box-shadow: 0 0 0 4px var(--sc-accent-subtle);
+        box-shadow: 0 0 0 6px var(--sc-accent-subtle);
       }
     }
   `;
 
   @state() private transcript = "";
-  @state() private response = "";
   @state() private voiceStatus: VoiceStatus = "idle";
   @state() private speechSupported = true;
   @state() private recognition: SpeechRecognition | null = null;
+  @state() private _messages: VoiceMessage[] = [];
+  @state() private _connectionStatus: GatewayStatus = "disconnected";
+  @state() private _loading = true;
 
   private gatewayHandler = (e: Event): void => this.onGatewayEvent(e);
+  private statusHandler = (e: Event): void => {
+    this._connectionStatus = (e as CustomEvent<GatewayStatus>).detail;
+  };
   private _boundGateway: GatewayClient | null = null;
+
+  private get _cacheKey(): string {
+    return `sc-voice-messages`;
+  }
+
+  private _cacheMessages(): void {
+    try {
+      sessionStorage.setItem(this._cacheKey, JSON.stringify(this._messages));
+    } catch {
+      /* quota exceeded */
+    }
+  }
+
+  private _restoreFromCache(): void {
+    try {
+      const raw = sessionStorage.getItem(this._cacheKey);
+      if (!raw) return;
+      const cached = JSON.parse(raw) as unknown;
+      if (Array.isArray(cached)) {
+        this._messages = cached.filter(
+          (m: unknown) => typeof m === "object" && m !== null && "role" in m && "content" in m,
+        ) as VoiceMessage[];
+      }
+    } catch {
+      /* corrupt cache */
+    }
+  }
 
   override firstUpdated(): void {
     this.speechSupported = "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
-    if (!this.speechSupported) this.voiceStatus = "unsupported";
+    if (!this.speechSupported) {
+      this.voiceStatus = "unsupported";
+      ScToast.show({
+        message: "Speech recognition is not supported in this browser",
+        variant: "info",
+      });
+    }
+    this._restoreFromCache();
     const gw = this.gateway;
     if (gw) {
       this._boundGateway = gw;
+      this._connectionStatus = gw.status;
       gw.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.gatewayHandler);
+      gw.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
     }
+    this._loading = false;
   }
 
   protected override async load(): Promise<void> {
     if (!this._boundGateway && this.gateway) {
       this._boundGateway = this.gateway;
+      this._connectionStatus = this.gateway.status;
       this.gateway.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.gatewayHandler);
+      this.gateway.addEventListener(
+        GatewayClientClass.EVENT_STATUS,
+        this.statusHandler as EventListener,
+      );
     }
   }
 
   override disconnectedCallback(): void {
     this._boundGateway?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.gatewayHandler);
+    this._boundGateway?.removeEventListener(
+      GatewayClientClass.EVENT_STATUS,
+      this.statusHandler as EventListener,
+    );
     this._boundGateway = null;
     this.stopRecognition();
     super.disconnectedCallback();
+  }
+
+  private _findLastAssistantIdx(): number {
+    for (let i = this._messages.length - 1; i >= 0; i--) {
+      if (this._messages[i].role === "assistant") return i;
+    }
+    return -1;
   }
 
   private onGatewayEvent(e: Event): void {
@@ -229,21 +471,41 @@ export class ScVoiceView extends GatewayAwareLitElement {
     if (!detail?.event || detail.event !== "chat") return;
     const payload = detail.payload ?? {};
     const sessionKey = (payload.session_key as string) ?? (payload.sessionKey as string);
-    if (sessionKey !== "voice") return;
+    if (sessionKey !== SESSION_KEY_VOICE) return;
     const state = payload.state as string;
     const content = (payload.message as string) ?? "";
+
     if (state === "sent" && content) {
-      this.response = content;
+      this._messages = [...this._messages, { role: "assistant", content, ts: Date.now() }];
       this.voiceStatus = "idle";
     }
     if (state === "chunk" && content) {
-      this.response += content;
+      const lastIdx = this._findLastAssistantIdx();
+      if (lastIdx >= 0 && this._messages[lastIdx].role === "assistant") {
+        const last = this._messages[lastIdx];
+        this._messages = [
+          ...this._messages.slice(0, lastIdx),
+          { ...last, content: last.content + content },
+          ...this._messages.slice(lastIdx + 1),
+        ];
+      } else {
+        this._messages = [...this._messages, { role: "assistant", content, ts: Date.now() }];
+      }
       this.voiceStatus = "processing";
     }
     if (state === "received") {
       this.voiceStatus = "processing";
     }
+    this._cacheMessages();
     this.requestUpdate();
+    this._scrollConversation();
+  }
+
+  private _scrollConversation(): void {
+    this.updateComplete.then(() => {
+      const el = this.renderRoot.querySelector(".conversation");
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }
 
   private startRecognition(): void {
@@ -271,9 +533,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
       this.recognition = null;
       this.requestUpdate();
     };
-    rec.onerror = () => {
+    rec.onerror = (ev: Event) => {
       this.voiceStatus = "idle";
       this.recognition = null;
+      const errCode = (ev as Event & { error?: string }).error ?? "unknown";
+      if (errCode !== "aborted" && errCode !== "no-speech") {
+        ScToast.show({ message: `Speech recognition error: ${errCode}`, variant: "error" });
+      }
       this.requestUpdate();
     };
     rec.start();
@@ -305,72 +571,178 @@ export class ScVoiceView extends GatewayAwareLitElement {
     const text = this.transcript.trim();
     const gw = this.gateway;
     if (!text || !gw) return;
+    this._messages = [...this._messages, { role: "user", content: text, ts: Date.now() }];
+    this.transcript = "";
     this.voiceStatus = "processing";
+    this._cacheMessages();
+    this._scrollConversation();
     try {
       await gw.request<{ status?: string; sessionKey?: string }>("chat.send", {
         message: text,
-        sessionKey: "voice",
+        sessionKey: SESSION_KEY_VOICE,
       });
-    } catch {
+    } catch (err) {
       this.voiceStatus = "idle";
+      const msg = err instanceof Error ? err.message : "Failed to send message";
+      ScToast.show({ message: msg, variant: "error" });
+    }
+  }
+
+  private handleKeyDown(e: KeyboardEvent): void {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      this.send();
     }
   }
 
   private get statusText(): string {
     switch (this.voiceStatus) {
       case "listening":
-        return "Listening...";
+        return "Listening\u2026";
       case "processing":
-        return "Processing...";
+        return "Processing\u2026";
       case "unsupported":
-        return "Speech not supported";
+        return "Speech recognition not supported in this browser";
       default:
-        return "Click mic to start";
+        return "Click the microphone to start speaking";
     }
   }
 
   override render() {
+    if (this._loading) return this._renderSkeleton();
     return html`
-      <div class="header">
-        <h2>Voice & Speech</h2>
-      </div>
+      ${this._renderHero()} ${this._renderVoiceZone()} ${this._renderInputBar()}
+      ${this._renderConversation()}
+    `;
+  }
 
-      <div class="mic-area">
+  private _renderSkeleton() {
+    return html`
+      <sc-skeleton variant="card" class="skeleton-hero"></sc-skeleton>
+      <div class="skeleton-mic">
+        <sc-skeleton variant="circle" width="96px" height="96px"></sc-skeleton>
+      </div>
+      <sc-skeleton variant="card" height="60px" class="skeleton-input"></sc-skeleton>
+      <sc-skeleton variant="card" height="200px"></sc-skeleton>
+    `;
+  }
+
+  private _renderHero() {
+    const statusLabel =
+      this._connectionStatus === "connected"
+        ? "Connected"
+        : this._connectionStatus === "connecting"
+          ? "Reconnecting\u2026"
+          : "Disconnected";
+    return html`
+      <div class="hero">
+        <div class="hero-left">
+          <span class="status-dot ${this._connectionStatus}" aria-hidden="true"></span>
+          <div>
+            <h2 class="hero-title">Voice Assistant</h2>
+            <div class="hero-meta">
+              <span>${statusLabel}</span>
+            </div>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <span class="staleness">${this.stalenessLabel}</span>
+          <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data">
+            Refresh
+          </sc-button>
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderVoiceZone() {
+    return html`
+      <div class="voice-zone">
         <button
           class="mic-btn ${this.voiceStatus === "listening" ? "active" : ""}"
-          ?disabled=${!this.speechSupported}
+          ?disabled=${!this.speechSupported || this._connectionStatus === "disconnected"}
           @click=${this.toggleMic}
           aria-label=${this.voiceStatus === "listening" ? "Stop listening" : "Start listening"}
         >
           ${icons.mic}
         </button>
+        <div class="voice-status ${this.voiceStatus}" aria-live="polite">${this.statusText}</div>
       </div>
+    `;
+  }
 
-      <div class="transcript-area">
+  private _renderInputBar() {
+    return html`
+      <div class="input-bar">
         <textarea
-          placeholder="Recognized speech will appear here..."
+          placeholder="Speech transcript appears here, or type manually…"
           .value=${this.transcript}
+          ?disabled=${this._connectionStatus === "disconnected"}
           @input=${(e: Event) => {
             this.transcript = (e.target as HTMLTextAreaElement).value;
           }}
+          @keydown=${this.handleKeyDown}
+          aria-label="Speech transcript"
         ></textarea>
-      </div>
-
-      <div class="send-row">
         <button
           class="send-btn"
-          ?disabled=${!this.transcript.trim() || this.voiceStatus === "processing"}
+          ?disabled=${!this.transcript.trim() ||
+          this.voiceStatus === "processing" ||
+          this._connectionStatus === "disconnected"}
           @click=${() => this.send()}
+          aria-label="Send voice message"
         >
           Send
         </button>
       </div>
+    `;
+  }
 
-      <div class="response-area ${this.response ? "" : "empty"}">
-        ${this.response || "Assistant response will appear here."}
+  private _renderConversation() {
+    if (this._messages.length === 0 && this.voiceStatus !== "processing") {
+      return html`
+        <div class="conversation">
+          <div class="empty-conversation">
+            Your voice conversation will appear here. Speak or type a message to begin.
+          </div>
+        </div>
+      `;
+    }
+
+    const lastAssistantIdx = this._findLastAssistantIdx();
+
+    return html`
+      <div class="conversation" role="log" aria-live="polite" aria-label="Voice conversation">
+        ${this._messages.map((msg, idx) => {
+          if (msg.role === "user") {
+            return html`
+              <div class="msg user">
+                <span>${msg.content}</span>
+                <span class="msg-meta">${formatRelative(msg.ts)}</span>
+              </div>
+            `;
+          }
+          const isStreaming = this.voiceStatus === "processing" && idx === lastAssistantIdx;
+          return html`
+            <div class="msg assistant">
+              <sc-message-stream
+                .content=${msg.content}
+                .streaming=${isStreaming}
+                .role=${"assistant"}
+              ></sc-message-stream>
+              <span class="msg-meta">${formatRelative(msg.ts)}</span>
+            </div>
+          `;
+        })}
+        ${this.voiceStatus === "processing" &&
+        (this._messages.length === 0 || this._messages[this._messages.length - 1]?.role === "user")
+          ? html`
+              <div class="thinking-row">
+                <sc-thinking .active=${true} .steps=${[]}></sc-thinking>
+              </div>
+            `
+          : nothing}
       </div>
-
-      <div class="status-line ${this.voiceStatus}">${this.statusText}</div>
     `;
   }
 }

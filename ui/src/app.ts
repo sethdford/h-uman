@@ -22,7 +22,7 @@ type TabId =
   | "config"
   | "tools"
   | "channels"
-  | "cron"
+  | "automations"
   | "skills"
   | "voice"
   | "nodes"
@@ -39,7 +39,7 @@ const VALID_TABS: TabId[] = [
   "config",
   "tools",
   "channels",
-  "cron",
+  "automations",
   "skills",
   "voice",
   "nodes",
@@ -59,7 +59,7 @@ const VIEW_IMPORTS: Record<TabId, () => Promise<unknown>> = {
   config: () => import("./views/config-view.js"),
   tools: () => import("./views/tools-view.js"),
   channels: () => import("./views/channels-view.js"),
-  cron: () => import("./views/cron-view.js"),
+  automations: () => import("./views/automations-view.js"),
   skills: () => import("./views/skills-view.js"),
   voice: () => import("./views/voice-view.js"),
   nodes: () => import("./views/nodes-view.js"),
@@ -82,7 +82,7 @@ const MORE_TABS: { id: TabId; label: string; icon: ReturnType<typeof html> }[] =
   { id: "sessions", label: "Sessions", icon: icons.clock },
   { id: "models", label: "Models", icon: icons.cpu },
   { id: "channels", label: "Channels", icon: icons["message-square"] },
-  { id: "cron", label: "Cron", icon: icons.clock },
+  { id: "automations", label: "Automations", icon: icons.timer },
   { id: "skills", label: "Skills", icon: icons.zap },
   { id: "voice", label: "Voice", icon: icons.mic },
   { id: "nodes", label: "Nodes", icon: icons.server },
@@ -648,7 +648,7 @@ export class ScApp extends LitElement {
         return html`<sc-tools-view></sc-tools-view>`;
       case "channels":
         return html`<sc-channels-view></sc-channels-view>`;
-      case "cron":
+      case "automations":
         return html`<sc-cron-view></sc-cron-view>`;
       case "skills":
         return html`<sc-skills-view></sc-skills-view>`;

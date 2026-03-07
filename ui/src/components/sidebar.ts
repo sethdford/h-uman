@@ -38,7 +38,7 @@ const SECTIONS: NavSection[] = [
       { id: "tools", label: "Tools", icon: icons.wrench },
       { id: "channels", label: "Channels", icon: icons.radio },
       { id: "skills", label: "Skills", icon: icons.puzzle },
-      { id: "cron", label: "Cron", icon: icons.timer },
+      { id: "automations", label: "Automations", icon: icons.timer },
     ],
   },
   {

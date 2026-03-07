@@ -226,9 +226,6 @@ static void test_agent_plan_free_null_safe(void) {
     sc_plan_free(&alloc, NULL);
 }
 
-/* Tool-call round trip: agent with tools gets tool_call from mock, executes, feeds back, gets
- * final. Disabled: triggers SEGV in provider on some builds (see run_agent_extended_tests). */
-#if 0
 static void test_agent_tool_call_round_trip(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_provider_t prov;
@@ -252,11 +249,9 @@ static void test_agent_tool_call_round_trip(void) {
     SC_ASSERT_NOT_NULL(response);
     SC_ASSERT_TRUE(response_len > 0);
     if (response) alloc.free(alloc.ctx, response, response_len + 1);
-    sc_agent_deinit(&agent);
     if (shell_tool.vtable->deinit) shell_tool.vtable->deinit(shell_tool.ctx, &alloc);
-    if (prov.vtable->deinit) prov.vtable->deinit(prov.ctx, &alloc);
+    sc_agent_deinit(&agent);
 }
-#endif
 
 static void test_agent_planner_mark_step_out_of_range(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -849,8 +844,7 @@ void run_agent_extended_tests(void) {
     SC_RUN_TEST(test_dispatcher_dispatch_result_free_null_safe);
     SC_RUN_TEST(test_dispatcher_max_parallel_config_stored);
     SC_RUN_TEST(test_dispatcher_invalid_json_args_propagates_failure);
-    /* test_agent_tool_call_round_trip disabled: triggers SEGV in provider serialization on some
-     * builds */
+    SC_RUN_TEST(test_agent_tool_call_round_trip);
 
 #ifdef SC_ENABLE_TUI
     SC_TEST_SUITE("TUI");

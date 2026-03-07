@@ -3,10 +3,8 @@
 #include "seaclaw/memory/vector_math.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
-/* Simplified in-memory semantic cache.
- * Stores (key, response, embedding) in a simple array.
- * For full parity would use SQLite; this provides the interface. */
 typedef struct cache_entry {
     char *key;
     char *response;
@@ -14,6 +12,7 @@ typedef struct cache_entry {
     size_t embedding_dims;
     char *model;
     unsigned token_count;
+    time_t created_at;
 } cache_entry_t;
 
 struct sc_semantic_cache {
@@ -21,15 +20,65 @@ struct sc_semantic_cache {
     cache_entry_t *entries;
     size_t count;
     size_t capacity;
+    size_t max_entries;
+    int ttl_seconds;
     float similarity_threshold;
     sc_embedding_provider_t embedding_provider;
 };
 
+static void free_entry(sc_allocator_t *alloc, cache_entry_t *e) {
+    if (e->key)
+        alloc->free(alloc->ctx, e->key, strlen(e->key) + 1);
+    if (e->response)
+        alloc->free(alloc->ctx, e->response, strlen(e->response) + 1);
+    if (e->embedding)
+        alloc->free(alloc->ctx, e->embedding, e->embedding_dims * sizeof(float));
+    if (e->model)
+        alloc->free(alloc->ctx, e->model, strlen(e->model) + 1);
+    memset(e, 0, sizeof(*e));
+}
+
+static bool entry_expired(const cache_entry_t *e, int ttl_seconds) {
+    if (ttl_seconds <= 0)
+        return false;
+    return (time(NULL) - e->created_at) > ttl_seconds;
+}
+
+static void evict_expired(sc_semantic_cache_t *cache) {
+    if (cache->ttl_seconds <= 0)
+        return;
+    size_t dst = 0;
+    for (size_t src = 0; src < cache->count; src++) {
+        if (entry_expired(&cache->entries[src], cache->ttl_seconds)) {
+            free_entry(cache->alloc, &cache->entries[src]);
+        } else {
+            if (dst != src)
+                cache->entries[dst] = cache->entries[src];
+            dst++;
+        }
+    }
+    cache->count = dst;
+}
+
+static void evict_oldest(sc_semantic_cache_t *cache) {
+    if (cache->count == 0)
+        return;
+    size_t oldest = 0;
+    for (size_t i = 1; i < cache->count; i++) {
+        if (cache->entries[i].created_at < cache->entries[oldest].created_at)
+            oldest = i;
+    }
+    free_entry(cache->alloc, &cache->entries[oldest]);
+    if (oldest < cache->count - 1) {
+        memmove(&cache->entries[oldest], &cache->entries[oldest + 1],
+                (cache->count - 1 - oldest) * sizeof(cache_entry_t));
+    }
+    cache->count--;
+}
+
 sc_semantic_cache_t *sc_semantic_cache_create(sc_allocator_t *alloc, int ttl_minutes,
                                               size_t max_entries, float similarity_threshold,
                                               sc_embedding_provider_t *embedding_provider) {
-    (void)ttl_minutes;
-    (void)max_entries;
     if (!alloc)
         return NULL;
     sc_semantic_cache_t *c =
@@ -39,6 +88,8 @@ sc_semantic_cache_t *sc_semantic_cache_create(sc_allocator_t *alloc, int ttl_min
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->similarity_threshold = similarity_threshold;
+    c->ttl_seconds = ttl_minutes > 0 ? ttl_minutes * 60 : 0;
+    c->max_entries = max_entries > 0 ? max_entries : 1024;
     if (embedding_provider)
         c->embedding_provider = *embedding_provider;
     return c;
@@ -47,17 +98,8 @@ sc_semantic_cache_t *sc_semantic_cache_create(sc_allocator_t *alloc, int ttl_min
 void sc_semantic_cache_destroy(sc_allocator_t *alloc, sc_semantic_cache_t *cache) {
     if (!cache || !alloc)
         return;
-    for (size_t i = 0; i < cache->count; i++) {
-        cache_entry_t *e = &cache->entries[i];
-        if (e->key)
-            alloc->free(alloc->ctx, e->key, strlen(e->key) + 1);
-        if (e->response)
-            alloc->free(alloc->ctx, e->response, strlen(e->response) + 1);
-        if (e->embedding)
-            alloc->free(alloc->ctx, e->embedding, e->embedding_dims * sizeof(float));
-        if (e->model)
-            alloc->free(alloc->ctx, e->model, strlen(e->model) + 1);
-    }
+    for (size_t i = 0; i < cache->count; i++)
+        free_entry(alloc, &cache->entries[i]);
     if (cache->entries)
         alloc->free(alloc->ctx, cache->entries, cache->capacity * sizeof(cache_entry_t));
     alloc->free(alloc->ctx, cache, sizeof(sc_semantic_cache_t));
@@ -70,7 +112,8 @@ sc_error_t sc_semantic_cache_get(sc_semantic_cache_t *cache, sc_allocator_t *all
         return SC_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
-    /* Try semantic match if we have embedding provider and query */
+    evict_expired(cache);
+
     if (cache->embedding_provider.ctx && cache->embedding_provider.vtable &&
         cache->embedding_provider.vtable->embed && query_text && query_len > 0) {
         sc_embedding_provider_result_t qemb = {0};
@@ -97,14 +140,11 @@ sc_error_t sc_semantic_cache_get(sc_semantic_cache_t *cache, sc_allocator_t *all
                 out->response = sc_strdup(alloc, best->response);
                 out->similarity = best_sim;
                 out->semantic = 1;
-                sc_embedding_provider_free(alloc, &qemb);
                 return SC_OK;
             }
-            sc_embedding_provider_free(alloc, &qemb);
         }
     }
 
-    /* Exact hash match */
     for (size_t i = 0; i < cache->count; i++) {
         cache_entry_t *e = &cache->entries[i];
         if (e->key && key_len == strlen(e->key) && memcmp(e->key, key_hex, key_len) == 0) {
@@ -122,31 +162,24 @@ sc_error_t sc_semantic_cache_put(sc_semantic_cache_t *cache, sc_allocator_t *all
                                  const char *key_hex, size_t key_len, const char *model,
                                  size_t model_len, const char *response, size_t response_len,
                                  unsigned token_count, const char *query_text, size_t query_len) {
-    (void)model;
-    (void)model_len;
-    (void)token_count;
     if (!cache || !alloc || !key_hex)
         return SC_ERR_INVALID_ARGUMENT;
 
-    /* Remove existing entry for same key */
+    evict_expired(cache);
+
     for (size_t i = 0; i < cache->count; i++) {
         if (cache->entries[i].key && key_len == strlen(cache->entries[i].key) &&
             memcmp(cache->entries[i].key, key_hex, key_len) == 0) {
-            cache_entry_t *e = &cache->entries[i];
-            if (e->key)
-                alloc->free(alloc->ctx, e->key, strlen(e->key) + 1);
-            if (e->response)
-                alloc->free(alloc->ctx, e->response, strlen(e->response) + 1);
-            if (e->embedding)
-                alloc->free(alloc->ctx, e->embedding, e->embedding_dims * sizeof(float));
-            if (e->model)
-                alloc->free(alloc->ctx, e->model, strlen(e->model) + 1);
+            free_entry(alloc, &cache->entries[i]);
             memmove(&cache->entries[i], &cache->entries[i + 1],
                     (cache->count - 1 - i) * sizeof(cache_entry_t));
             cache->count--;
             break;
         }
     }
+
+    while (cache->max_entries > 0 && cache->count >= cache->max_entries)
+        evict_oldest(cache);
 
     if (cache->count >= cache->capacity) {
         size_t new_cap = cache->capacity == 0 ? 16 : cache->capacity * 2;
@@ -166,6 +199,7 @@ sc_error_t sc_semantic_cache_put(sc_semantic_cache_t *cache, sc_allocator_t *all
     e->response = sc_strndup(alloc, response, response_len);
     e->model = model && model_len > 0 ? sc_strndup(alloc, model, model_len) : NULL;
     e->token_count = token_count;
+    e->created_at = time(NULL);
 
     if (query_text && query_len > 0 && cache->embedding_provider.ctx &&
         cache->embedding_provider.vtable && cache->embedding_provider.vtable->embed) {

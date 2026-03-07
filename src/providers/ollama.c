@@ -352,10 +352,11 @@ static const char *ollama_get_name(void *ctx) {
 static void ollama_deinit(void *ctx, sc_allocator_t *alloc) {
     (void)alloc;
     sc_ollama_ctx_t *oc = (sc_ollama_ctx_t *)ctx;
-    if (oc && oc->base_url) {
+    if (!oc)
+        return;
+    if (oc->base_url)
         free(oc->base_url);
-        free(oc);
-    }
+    free(oc);
 }
 
 static const sc_provider_vtable_t ollama_vtable;

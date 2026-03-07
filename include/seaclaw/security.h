@@ -135,7 +135,8 @@ sc_error_t sc_secret_store_decrypt(sc_secret_store_t *store, sc_allocator_t *all
 
 bool sc_secret_store_is_encrypted(const char *value);
 
-/* Hex encode/decode helpers (exposed for tests) */
+/* Hex encode/decode helpers (exposed for tests).
+   out_hex must be at least len*2+1 bytes. Output is null-terminated. */
 void sc_hex_encode(const uint8_t *data, size_t len, char *out_hex);
 sc_error_t sc_hex_decode(const char *hex, size_t hex_len, uint8_t *out_data, size_t out_cap,
                          size_t *out_len);

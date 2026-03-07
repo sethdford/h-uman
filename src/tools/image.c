@@ -115,10 +115,11 @@ static const char *image_parameters_json(void *ctx) {
 static void image_deinit(void *ctx, sc_allocator_t *alloc) {
     (void)alloc;
     sc_image_ctx_t *c = (sc_image_ctx_t *)ctx;
-    if (c && c->api_key) {
+    if (!c)
+        return;
+    if (c->api_key)
         free(c->api_key);
-        free(c);
-    }
+    free(c);
 }
 
 static const sc_tool_vtable_t image_vtable = {
