@@ -272,12 +272,14 @@ function handleRequest(method: string, _params?: Record<string, unknown>): unkno
             description: "Deep web research with source citations and fact-checking",
             enabled: true,
             parameters: '{"query": "string", "depth": "number"}',
+            tags: "research, web",
           },
           {
             name: "code-review",
             description: "Automated code review with inline suggestions and severity ratings",
             enabled: true,
             parameters: '{"files": "string[]", "strictness": "string"}',
+            tags: "development, review",
           },
           {
             name: "data-analysis",

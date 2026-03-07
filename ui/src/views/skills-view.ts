@@ -14,11 +14,13 @@ import "../components/sc-input.js";
 import "../components/sc-stat-card.js";
 import "../components/sc-sheet.js";
 import "../components/sc-switch.js";
+import "../components/sc-json-viewer.js";
 
 interface InstalledSkill {
   name: string;
   description?: string;
   parameters?: string;
+  tags?: string;
   enabled: boolean;
 }
 
@@ -308,7 +310,21 @@ export class ScSkillsView extends GatewayAwareLitElement {
   @state() private activeTag = "";
   @state() private actionLoading = false;
   @state() private installUrl = "";
+  @state() private installUrlError = "";
   private _searchTimer = 0;
+
+  private _validateInstallUrl(url: string): string {
+    const trimmed = url.trim();
+    if (!trimmed) return "";
+    try {
+      const u = new URL(trimmed);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return "URL must use http or https";
+      if (!u.hostname) return "Invalid URL";
+      return "";
+    } catch {
+      return "Enter a valid URL";
+    }
+  }
 
   private get filteredSkills(): InstalledSkill[] {
     let list = this.skills;
@@ -319,10 +335,8 @@ export class ScSkillsView extends GatewayAwareLitElement {
       );
     }
     if (this.activeTag) {
-      const tag = this.activeTag;
-      list = list.filter(
-        (s) => s.name.includes(tag) || (s.description ?? "").toLowerCase().includes(tag),
-      );
+      const tag = this.activeTag.toLowerCase();
+      list = list.filter((s) => parseTags(s.tags).includes(tag));
     }
     return list;
   }
@@ -336,11 +350,18 @@ export class ScSkillsView extends GatewayAwareLitElement {
   private get allTags(): string[] {
     const tagSet = new Set<string>();
     for (const entry of this.registryResults) for (const t of parseTags(entry.tags)) tagSet.add(t);
+    for (const skill of this.skills) for (const t of parseTags(skill.tags)) tagSet.add(t);
     return Array.from(tagSet).sort();
   }
 
   private get installedNames(): Set<string> {
     return new Set(this.skills.map((s) => s.name));
+  }
+
+  private get filteredRegistryResults(): RegistrySkill[] {
+    if (!this.activeTag) return this.registryResults;
+    const tag = this.activeTag.toLowerCase();
+    return this.registryResults.filter((r) => parseTags(r.tags).includes(tag));
   }
 
   protected override async load(): Promise<void> {
@@ -433,6 +454,11 @@ export class ScSkillsView extends GatewayAwareLitElement {
   private async _installFromUrl(): Promise<void> {
     const gw = this.gateway;
     const raw = this.installUrl.trim();
+    const err = this._validateInstallUrl(raw);
+    if (err) {
+      this.installUrlError = err;
+      return;
+    }
     if (!gw || !raw) return;
     const name =
       raw
@@ -443,6 +469,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
     try {
       await gw.request("skills.install", { name, url: raw });
       this.installUrl = "";
+      this.installUrlError = "";
       ScToast.show({ message: "Skill installed", variant: "success" });
       await this._fetchInstalled();
     } catch (e) {
@@ -486,11 +513,15 @@ export class ScSkillsView extends GatewayAwareLitElement {
             placeholder="Install from URL..."
             aria-label="Skill URL to install"
             .value=${this.installUrl}
-            @sc-input=${(e: CustomEvent<{ value: string }>) => (this.installUrl = e.detail.value)}
+            .error=${this.installUrlError}
+            @sc-input=${(e: CustomEvent<{ value: string }>) => {
+              this.installUrl = e.detail.value;
+              this.installUrlError = this._validateInstallUrl(e.detail.value);
+            }}
           ></sc-input>
           <sc-button
             variant="primary"
-            ?disabled=${!this.installUrl.trim() || this.actionLoading}
+            ?disabled=${!this.installUrl.trim() || !!this.installUrlError || this.actionLoading}
             @click=${this._installFromUrl}
             >Install</sc-button
           >
@@ -685,16 +716,36 @@ export class ScSkillsView extends GatewayAwareLitElement {
             ><sc-skeleton variant="card" height="140px"></sc-skeleton
             ><sc-skeleton variant="card" height="140px"></sc-skeleton>
           </div>`
-        : this.registryResults.length === 0
+        : this.filteredRegistryResults.length === 0
           ? html`<sc-empty-state
               .icon=${icons.compass}
-              heading="No results"
-              description="Try a different search query."
+              heading=${this.activeTag ? "No registry skills with this tag" : "No results"}
+              description=${this.activeTag
+                ? "Try a different tag or search query."
+                : "Try a different search query."}
             ></sc-empty-state>`
           : html`<div class="skills-grid sc-stagger">
-              ${this.registryResults.map((e) => this._renderRegistryCard(e))}
+              ${this.filteredRegistryResults.map((e) => this._renderRegistryCard(e))}
             </div>`}
     </div>`;
+  }
+
+  private _parseParametersJson(raw: string): unknown {
+    try {
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      return JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  private _renderParametersViewer(params: string): TemplateResult {
+    const parsed = this._parseParametersJson(params);
+    if (parsed !== null && typeof parsed === "object") {
+      return html`<sc-json-viewer .data=${parsed} root-label="Parameters"></sc-json-viewer>`;
+    }
+    return html`<div class="detail-params-code">${params}</div>`;
   }
 
   private _renderDetailSheet(): TemplateResult | typeof nothing {
@@ -742,7 +793,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
       ${isInstalled && (sel.skill as InstalledSkill).parameters
         ? html`<div class="detail-params">
             <div class="detail-params-title">Parameters</div>
-            <div class="detail-params-code">${(sel.skill as InstalledSkill).parameters}</div>
+            ${this._renderParametersViewer((sel.skill as InstalledSkill).parameters!)}
           </div>`
         : nothing}
       <div class="detail-actions">
