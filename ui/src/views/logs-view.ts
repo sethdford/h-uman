@@ -3,7 +3,13 @@ import { customElement, state } from "lit/decorators.js";
 import { GatewayClient } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { EVENT_NAMES } from "../utils.js";
+import { icons } from "../icons.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
 import "../components/sc-input.js";
+import "../components/sc-button.js";
+import "../components/sc-empty-state.js";
+import "../components/sc-card.js";
 
 interface LogEntry {
   ts: string;
@@ -26,12 +32,6 @@ export class ScLogsView extends GatewayAwareLitElement {
       margin-bottom: var(--sc-space-xl);
       flex-wrap: wrap;
       gap: var(--sc-space-sm);
-    }
-    h2 {
-      margin: 0;
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
     }
     .controls {
       display: flex;
@@ -59,19 +59,17 @@ export class ScLogsView extends GatewayAwareLitElement {
     .filter-input::placeholder {
       color: var(--sc-text-muted);
     }
-    .btn {
-      padding: var(--sc-space-sm) var(--sc-space-md);
-      background: var(--sc-bg-elevated);
-      color: var(--sc-text);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      cursor: pointer;
-      font-size: var(--sc-text-sm);
-      font-weight: var(--sc-weight-medium);
-      transition: background var(--sc-duration-fast) var(--sc-ease-out);
+    .event.chat {
+      color: var(--sc-success);
     }
-    .btn:hover {
-      background: var(--sc-border);
+    .event.tool-call {
+      color: var(--sc-info);
+    }
+    .event.error {
+      color: var(--sc-error);
+    }
+    .event.health {
+      color: var(--sc-warning);
     }
     .log-area-wrapper {
       position: relative;
@@ -148,6 +146,12 @@ export class ScLogsView extends GatewayAwareLitElement {
         width: 100%;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .filter-input,
+      .log-area {
+        transition: none !important;
+      }
+    }
   `;
 
   @state() private logs: LogEntry[] = [];
@@ -188,18 +192,18 @@ export class ScLogsView extends GatewayAwareLitElement {
     this.scrollToBottom();
   };
 
-  private eventColor(event: string): string {
+  private eventClass(event: string): string {
     switch (event) {
       case EVENT_NAMES.CHAT:
-        return "var(--sc-success)";
+        return "chat";
       case EVENT_NAMES.TOOL_CALL:
-        return "var(--sc-info)";
+        return "tool-call";
       case EVENT_NAMES.ERROR:
-        return "var(--sc-error)";
+        return "error";
       case EVENT_NAMES.HEALTH:
-        return "var(--sc-warning)";
+        return "health";
       default:
-        return "var(--sc-text)";
+        return "";
     }
   }
 
@@ -223,12 +227,15 @@ export class ScLogsView extends GatewayAwareLitElement {
     );
   }
 
-  override render() {
-    const entries = this.filteredLogs;
-
+  private _renderHeader(): ReturnType<typeof html> {
     return html`
+      <sc-page-hero>
+        <sc-section-header
+          heading="Logs"
+          description="System event log and debugging output"
+        ></sc-section-header>
+      </sc-page-hero>
       <div class="header">
-        <h2>Logs</h2>
         <div class="controls">
           <sc-input
             type="text"
@@ -237,22 +244,44 @@ export class ScLogsView extends GatewayAwareLitElement {
             .value=${this.filter}
             @sc-input=${(e: CustomEvent<{ value: string }>) => (this.filter = e.detail.value)}
           ></sc-input>
-          <button class="btn" aria-label="Clear all logs" @click=${this.clearLogs}>Clear</button>
+          <sc-button variant="ghost" size="sm" @click=${this.clearLogs} aria-label="Clear all logs">
+            Clear
+          </sc-button>
         </div>
       </div>
-      <div class="log-area sc-stagger" role="log">
-        ${entries.length === 0
-          ? html`<span style="color: var(--sc-text-muted)">Listening for gateway events...</span>`
-          : entries.map(
-              (l) => html`
-                <div class="log-line">
-                  <span class="log-ts">${l.ts}</span>
-                  <span class="event" style="color: ${this.eventColor(l.event)}">[${l.event}]</span>
-                  ${JSON.stringify(l.payload)}
-                </div>
-              `,
-            )}
-      </div>
     `;
+  }
+
+  private _renderLogArea(): ReturnType<typeof html> {
+    const entries = this.filteredLogs;
+    return html`
+      <sc-card class="log-card">
+        <div class="log-area-wrapper">
+          <div class="log-area sc-stagger" role="log" aria-live="polite">
+            ${entries.length === 0
+              ? html`
+                  <sc-empty-state
+                    .icon=${icons["file-text"]}
+                    heading="No logs yet"
+                    description="Logs will appear here when the system starts processing."
+                  ></sc-empty-state>
+                `
+              : entries.map(
+                  (l) => html`
+                    <div class="log-line">
+                      <span class="log-ts">${l.ts}</span>
+                      <span class="event ${this.eventClass(l.event)}">[${l.event}]</span>
+                      ${JSON.stringify(l.payload)}
+                    </div>
+                  `,
+                )}
+          </div>
+        </div>
+      </sc-card>
+    `;
+  }
+
+  override render() {
+    return html` ${this._renderHeader()} ${this._renderLogArea()} `;
   }
 }

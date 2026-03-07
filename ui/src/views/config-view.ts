@@ -3,6 +3,10 @@ import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { ScToast } from "../components/sc-toast.js";
 import { icons } from "../icons.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
+import "../components/sc-card.js";
+import "../components/sc-badge.js";
 import "../components/sc-input.js";
 import "../components/sc-button.js";
 import "../components/sc-skeleton.js";
@@ -45,37 +49,6 @@ export class ScConfigView extends GatewayAwareLitElement {
       display: block;
       max-width: 640px;
       margin: 0 auto;
-    }
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--sc-space-xl);
-      gap: var(--sc-space-md);
-      flex-wrap: wrap;
-    }
-    .status {
-      font-size: var(--sc-text-base);
-      color: var(--sc-text-muted);
-    }
-    .status.saved {
-      color: var(--sc-success);
-    }
-    .status.error {
-      color: var(--sc-error);
-    }
-    .status.unsaved {
-      color: var(--sc-accent-text, var(--sc-accent));
-    }
-    .status.unsaved::before {
-      content: "";
-      display: inline-block;
-      width: var(--sc-space-2xs);
-      height: var(--sc-space-2xs);
-      border-radius: 50%;
-      background: var(--sc-accent);
-      margin-right: var(--sc-space-xs);
-      vertical-align: middle;
     }
     .header-actions {
       display: flex;
@@ -202,11 +175,6 @@ export class ScConfigView extends GatewayAwareLitElement {
       border-color: var(--sc-accent);
       box-shadow: 0 0 0 3px var(--sc-accent-subtle);
     }
-    @media (max-width: 768px) {
-      .header {
-        flex-wrap: wrap;
-      }
-    }
     @media (max-width: 480px) {
       :host {
         max-width: 100%;
@@ -234,6 +202,7 @@ export class ScConfigView extends GatewayAwareLitElement {
   @state() private sectionCollapsed = false;
   @state() private saveStatus: SaveStatus = "idle";
   @state() private errorMessage = "";
+  @state() private saving = false;
   private _beforeUnloadHandler?: (e: BeforeUnloadEvent) => void;
 
   override connectedCallback(): void {
@@ -332,6 +301,7 @@ export class ScConfigView extends GatewayAwareLitElement {
 
   private async save(): Promise<void> {
     if (!this.gateway) return;
+    this.saving = true;
     this.saveStatus = "idle";
     this.errorMessage = "";
     try {
@@ -384,6 +354,8 @@ export class ScConfigView extends GatewayAwareLitElement {
       this.saveStatus = "error";
       this.errorMessage = e instanceof Error ? e.message : "Save failed";
       ScToast.show({ message: this.errorMessage, variant: "error" });
+    } finally {
+      this.saving = false;
     }
   }
 
@@ -416,74 +388,71 @@ export class ScConfigView extends GatewayAwareLitElement {
 
   private _renderSkeleton(): TemplateResult {
     return html`
-      <div class="header">
-        <sc-skeleton variant="line" width="120px" height="var(--sc-text-base)"></sc-skeleton>
-        <div class="header-actions">
-          <sc-skeleton variant="line" width="80px" height="32px"></sc-skeleton>
-          <sc-skeleton variant="line" width="60px" height="32px"></sc-skeleton>
-        </div>
-      </div>
-      <div class="form">
-        <sc-skeleton variant="card" height="280px"></sc-skeleton>
-      </div>
+      <sc-page-hero>
+        <sc-section-header
+          heading="Configuration"
+          description="Manage your SeaClaw instance settings"
+        ></sc-section-header>
+      </sc-page-hero>
+      <sc-skeleton variant="card" height="200px"></sc-skeleton>
+      <sc-skeleton variant="card" height="200px"></sc-skeleton>
     `;
   }
 
+  private _renderSaveStatusBadge(): TemplateResult | typeof nothing {
+    if (this.saving) return html`<sc-badge variant="warning">Saving...</sc-badge>`;
+    if (this.saveStatus === "saved") return html`<sc-badge variant="success">Saved</sc-badge>`;
+    if (this.hasChanges()) return html`<sc-badge variant="warning">Unsaved</sc-badge>`;
+    if (this.saveStatus === "error")
+      return html`<sc-badge variant="error">${this.errorMessage || "Error"}</sc-badge>`;
+    return nothing;
+  }
+
   private _renderRaw(): TemplateResult {
-    const statusText =
-      this.saveStatus === "saved"
-        ? "Saved"
-        : this.saveStatus === "error"
-          ? this.errorMessage || "Error"
-          : this.hasChanges()
-            ? "Unsaved changes"
-            : "";
     return html`
-      <div class="header">
-        <span class="status ${this.saveStatus}">${statusText}</span>
-        <div class="header-actions">
-          <sc-button
-            variant="ghost"
-            size="sm"
-            @click=${this.toggleRawMode}
-            aria-label=${this.rawMode ? "Switch to form editor" : "Switch to raw JSON editor"}
-          >
-            ${this.rawMode ? "Form" : "Raw JSON"}
-          </sc-button>
-          <sc-button
-            variant="primary"
-            ?disabled=${!this.hasChanges()}
-            @click=${() => this.save()}
-            aria-label="Save configuration"
-          >
-            Save
-          </sc-button>
+      <sc-page-hero>
+        <sc-section-header
+          heading="Configuration"
+          description="Manage your SeaClaw instance settings"
+        >
+          ${this._renderSaveStatusBadge()}
+          <div class="header-actions">
+            <sc-button
+              variant="ghost"
+              size="sm"
+              @click=${this.toggleRawMode}
+              aria-label=${this.rawMode ? "Switch to form editor" : "Switch to raw JSON editor"}
+            >
+              ${this.rawMode ? "Form" : "Raw JSON"}
+            </sc-button>
+            <sc-button
+              variant="primary"
+              ?disabled=${!this.hasChanges()}
+              @click=${() => this.save()}
+              aria-label="Save configuration"
+            >
+              Save
+            </sc-button>
+          </div>
+        </sc-section-header>
+      </sc-page-hero>
+      <sc-card glass>
+        <div class="form">
+          <textarea
+            class="raw-area"
+            .value=${this.rawText}
+            @input=${(e: Event) => {
+              this.rawText = (e.target as HTMLTextAreaElement).value;
+              if (this.saveStatus === "saved") this.saveStatus = "idle";
+            }}
+            spellcheck="false"
+          ></textarea>
         </div>
-      </div>
-      <div class="form">
-        <textarea
-          class="raw-area"
-          .value=${this.rawText}
-          @input=${(e: Event) => {
-            this.rawText = (e.target as HTMLTextAreaElement).value;
-            if (this.saveStatus === "saved") this.saveStatus = "idle";
-          }}
-          spellcheck="false"
-        ></textarea>
-      </div>
+      </sc-card>
     `;
   }
 
   private _renderForm(): TemplateResult {
-    const statusText =
-      this.saveStatus === "saved"
-        ? "Saved"
-        : this.saveStatus === "error"
-          ? this.errorMessage || "Error"
-          : this.hasChanges()
-            ? "Unsaved changes"
-            : "";
-
     const props = this.schema?.properties ?? {};
     const order = [
       "workspace_dir",
@@ -497,104 +466,111 @@ export class ScConfigView extends GatewayAwareLitElement {
     const fieldKeys = [...orderedKeys, ...extraKeys];
 
     return html`
-      <div class="header">
-        <span class="status ${this.saveStatus}">${statusText}</span>
-        <div class="header-actions">
-          <sc-button
-            variant="ghost"
-            size="sm"
-            @click=${this.toggleRawMode}
-            aria-label=${this.rawMode ? "Switch to form editor" : "Switch to raw JSON editor"}
-          >
-            ${this.rawMode ? "Form" : "Raw JSON"}
-          </sc-button>
-          <sc-button
-            variant="primary"
-            ?disabled=${!this.hasChanges()}
-            @click=${() => this.save()}
-            aria-label="Save configuration"
-          >
-            Save
-          </sc-button>
-        </div>
-      </div>
-      <div class="form">
-        <div class="section ${this.sectionCollapsed ? "collapsed" : ""}">
-          <div
-            class="section-header ${this.sectionCollapsed ? "collapsed" : ""}"
-            role="button"
-            tabindex="0"
-            aria-expanded=${!this.sectionCollapsed}
-            aria-label="General configuration"
-            @click=${() => (this.sectionCollapsed = !this.sectionCollapsed)}
-            @keydown=${(e: KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                this.sectionCollapsed = !this.sectionCollapsed;
-              }
-            }}
-          >
-            <span>General</span>
-            <span class="chevron">${icons["caret-down"]}</span>
+      <sc-page-hero>
+        <sc-section-header
+          heading="Configuration"
+          description="Manage your SeaClaw instance settings"
+        >
+          ${this._renderSaveStatusBadge()}
+          <div class="header-actions">
+            <sc-button
+              variant="ghost"
+              size="sm"
+              @click=${this.toggleRawMode}
+              aria-label=${this.rawMode ? "Switch to form editor" : "Switch to raw JSON editor"}
+            >
+              ${this.rawMode ? "Form" : "Raw JSON"}
+            </sc-button>
+            <sc-button
+              variant="primary"
+              ?disabled=${!this.hasChanges()}
+              @click=${() => this.save()}
+              aria-label="Save configuration"
+            >
+              Save
+            </sc-button>
           </div>
-          <div class="section-content">
-            ${fieldKeys.map((key) => {
-              const prop = props[key] as SchemaProperty | undefined;
-              const desc = prop?.description ?? "";
-              const val = this.edited[key as keyof ConfigData];
-              const inputType =
-                prop?.type === "integer" || prop?.type === "number" ? "number" : "text";
+        </sc-section-header>
+      </sc-page-hero>
+      <sc-card glass>
+        <div class="form">
+          <div class="section ${this.sectionCollapsed ? "collapsed" : ""}">
+            <div
+              class="section-header ${this.sectionCollapsed ? "collapsed" : ""}"
+              role="button"
+              tabindex="0"
+              aria-expanded=${!this.sectionCollapsed}
+              aria-label="General configuration"
+              @click=${() => (this.sectionCollapsed = !this.sectionCollapsed)}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  this.sectionCollapsed = !this.sectionCollapsed;
+                }
+              }}
+            >
+              <span>General</span>
+              <span class="chevron">${icons["caret-down"]}</span>
+            </div>
+            <div class="section-content">
+              ${fieldKeys.map((key) => {
+                const prop = props[key] as SchemaProperty | undefined;
+                const desc = prop?.description ?? "";
+                const val = this.edited[key as keyof ConfigData];
+                const inputType =
+                  prop?.type === "integer" || prop?.type === "number" ? "number" : "text";
 
-              const ariaLabels: Record<string, string> = {
-                workspace_dir: "Workspace directory",
-                default_provider: "Provider",
-                default_model: "Model",
-                max_tokens: "Max tokens",
-                temperature: "Temperature",
-              };
-              const ariaLabel = ariaLabels[key] ?? key.replace(/_/g, " ");
-              return html`
-                <div class="field">
-                  <label for="${key}">${key.replace(/_/g, " ")}</label>
-                  ${desc ? html`<div class="description">${desc}</div>` : nothing}
-                  <sc-input
-                    aria-label=${ariaLabel}
-                    type="${inputType}"
-                    .min=${inputType === "number" ? 0 : undefined}
-                    .max=${key === "temperature" ? 2 : undefined}
-                    .step=${key === "temperature" ? 0.1 : inputType === "number" ? 1 : undefined}
-                    .value=${String(val ?? "")}
-                    @sc-input=${(e: CustomEvent<{ value: string }>) => {
-                      const raw = e.detail.value;
-                      const v =
-                        inputType === "number"
-                          ? key === "temperature"
-                            ? parseFloat(raw)
-                            : parseInt(raw, 10)
-                          : raw;
-                      const parsed =
-                        inputType === "number"
-                          ? isNaN(v as number)
+                const ariaLabels: Record<string, string> = {
+                  workspace_dir: "Workspace directory",
+                  default_provider: "Provider",
+                  default_model: "Model",
+                  max_tokens: "Max tokens",
+                  temperature: "Temperature",
+                };
+                const ariaLabel = ariaLabels[key] ?? key.replace(/_/g, " ");
+                return html`
+                  <div class="field">
+                    <label for="${key}">${key.replace(/_/g, " ")}</label>
+                    ${desc ? html`<div class="description">${desc}</div>` : nothing}
+                    <sc-input
+                      aria-label=${ariaLabel}
+                      type="${inputType}"
+                      .min=${inputType === "number" ? 0 : undefined}
+                      .max=${key === "temperature" ? 2 : undefined}
+                      .step=${key === "temperature" ? 0.1 : inputType === "number" ? 1 : undefined}
+                      .value=${String(val ?? "")}
+                      @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                        const raw = e.detail.value;
+                        const v =
+                          inputType === "number"
                             ? key === "temperature"
-                              ? 0.7
-                              : 0
-                            : key === "temperature"
-                              ? Math.max(0, Math.min(2, v as number))
-                              : v
-                          : v;
-                      this.edited = {
-                        ...this.edited,
-                        [key]: parsed,
-                      };
-                      if (this.saveStatus === "saved") this.saveStatus = "idle";
-                    }}
-                  ></sc-input>
-                </div>
-              `;
-            })}
+                              ? parseFloat(raw)
+                              : parseInt(raw, 10)
+                            : raw;
+                        const parsed =
+                          inputType === "number"
+                            ? isNaN(v as number)
+                              ? key === "temperature"
+                                ? 0.7
+                                : 0
+                              : key === "temperature"
+                                ? Math.max(0, Math.min(2, v as number))
+                                : v
+                            : v;
+                        this.edited = {
+                          ...this.edited,
+                          [key]: parsed,
+                        };
+                        if (this.saveStatus === "saved") this.saveStatus = "idle";
+                      }}
+                    ></sc-input>
+                  </div>
+                `;
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      </sc-card>
     `;
   }
 }

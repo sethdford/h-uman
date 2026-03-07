@@ -2,9 +2,13 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
+import "../components/sc-stat-card.js";
 import "../components/sc-card.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
+import "../components/sc-animated-number.js";
 
 interface UsageSummary {
   session_cost_usd?: number;
@@ -22,11 +26,16 @@ export class ScUsageView extends GatewayAwareLitElement {
       color: var(--sc-text);
       max-width: 960px;
     }
-    h2 {
-      margin: 0 0 var(--sc-space-xl);
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-xl);
+    }
+    @media (max-width: 640px) {
+      .stats-row {
+        grid-template-columns: 1fr;
+      }
     }
     .cards {
       display: grid;
@@ -64,7 +73,7 @@ export class ScUsageView extends GatewayAwareLitElement {
       gap: var(--sc-space-sm);
     }
     .bar-label {
-      width: 120px;
+      width: 7.5rem;
       font-size: var(--sc-text-base);
       color: var(--sc-text-muted);
       flex-shrink: 0;
@@ -77,13 +86,14 @@ export class ScUsageView extends GatewayAwareLitElement {
     }
     .bar-track {
       flex: 1;
-      height: 20px;
+      height: var(--sc-space-lg, 1.25rem);
       background: var(--sc-bg-elevated);
       border-radius: var(--sc-radius-sm);
       overflow: hidden;
     }
     .bar-fill {
       height: 100%;
+      width: var(--bar-pct, 0%);
       background: var(--sc-accent);
       border-radius: var(--sc-radius-sm);
       transition: width var(--sc-duration-normal) var(--sc-ease-out);
@@ -102,6 +112,11 @@ export class ScUsageView extends GatewayAwareLitElement {
     @media (max-width: 480px) {
       .cards {
         grid-template-columns: 1fr;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .bar-fill {
+        transition: none;
       }
     }
   `;
@@ -154,6 +169,95 @@ export class ScUsageView extends GatewayAwareLitElement {
     return Math.min(100, (value / max) * 100);
   }
 
+  private _renderSkeleton() {
+    return html`
+      <div class="cards sc-stagger">
+        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+      </div>
+    `;
+  }
+
+  private _renderStats(
+    sessionCost: number,
+    dailyCost: number,
+    monthlyCost: number,
+    totalTokens: number,
+    requestCount: number,
+  ) {
+    return html`
+      <div class="cards sc-stagger" aria-live="polite">
+        <sc-card>
+          <div class="card-label">Session Cost</div>
+          <div class="card-value">
+            <sc-animated-number .value=${sessionCost} prefix="$"></sc-animated-number>
+          </div>
+        </sc-card>
+        <sc-card>
+          <div class="card-label">Daily Cost</div>
+          <div class="card-value">
+            <sc-animated-number .value=${dailyCost} prefix="$"></sc-animated-number>
+          </div>
+        </sc-card>
+        <sc-card>
+          <div class="card-label">Monthly Cost</div>
+          <div class="card-value">
+            <sc-animated-number .value=${monthlyCost} prefix="$"></sc-animated-number>
+          </div>
+        </sc-card>
+        <sc-card>
+          <div class="card-label">Total Tokens</div>
+          <div class="card-value">
+            <sc-animated-number .value=${totalTokens}></sc-animated-number>
+          </div>
+        </sc-card>
+        <sc-card>
+          <div class="card-label">Request Count</div>
+          <div class="card-value">
+            <sc-animated-number .value=${requestCount}></sc-animated-number>
+          </div>
+        </sc-card>
+      </div>
+    `;
+  }
+
+  private _renderChart(
+    sessionCost: number,
+    dailyCost: number,
+    monthlyCost: number,
+    maxCost: number,
+  ) {
+    return html`
+      <div class="chart-section">
+        <div class="chart-title">Cost comparison (bar chart)</div>
+        <div class="bar-chart">
+          <div class="bar-row">
+            <span class="bar-label">Session</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-pct: ${this.barPct(sessionCost, maxCost)}%"></div>
+            </div>
+            <span class="bar-value">${this.formatCurrency(sessionCost)}</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Daily</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-pct: ${this.barPct(dailyCost, maxCost)}%"></div>
+            </div>
+            <span class="bar-value">${this.formatCurrency(dailyCost)}</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Monthly</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="--bar-pct: ${this.barPct(monthlyCost, maxCost)}%"></div>
+            </div>
+            <span class="bar-value">${this.formatCurrency(monthlyCost)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   override render() {
     const s = this.summary;
     const sessionCost = s.session_cost_usd ?? 0;
@@ -164,7 +268,31 @@ export class ScUsageView extends GatewayAwareLitElement {
     const maxCost = Math.max(sessionCost, dailyCost, monthlyCost, 0.01);
 
     return html`
-      <h2>Usage</h2>
+      <sc-page-hero>
+        <sc-section-header
+          heading="Usage"
+          description="Token consumption, cost tracking, and request metrics"
+        >
+        </sc-section-header>
+      </sc-page-hero>
+      <div class="stats-row">
+        <sc-stat-card
+          .value=${totalTokens}
+          label="Tokens Today"
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${dailyCost}
+          label="Cost Today"
+          prefix="$"
+          style="--sc-stagger-delay: 80ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${requestCount}
+          label="Requests"
+          style="--sc-stagger-delay: 160ms"
+        ></sc-stat-card>
+      </div>
       ${this.error
         ? html`<sc-empty-state
             .icon=${icons.warning}
@@ -173,13 +301,7 @@ export class ScUsageView extends GatewayAwareLitElement {
           ></sc-empty-state>`
         : nothing}
       ${this.loading
-        ? html`
-            <div class="cards sc-stagger">
-              <sc-skeleton variant="card" height="80px"></sc-skeleton>
-              <sc-skeleton variant="card" height="80px"></sc-skeleton>
-              <sc-skeleton variant="card" height="80px"></sc-skeleton>
-            </div>
-          `
+        ? this._renderSkeleton()
         : sessionCost === 0 &&
             dailyCost === 0 &&
             monthlyCost === 0 &&
@@ -193,64 +315,8 @@ export class ScUsageView extends GatewayAwareLitElement {
               ></sc-empty-state>
             `
           : html`
-              <div class="cards sc-stagger">
-                <sc-card>
-                  <div class="card-label">Session Cost</div>
-                  <div class="card-value">${this.formatCurrency(sessionCost)}</div>
-                </sc-card>
-                <sc-card>
-                  <div class="card-label">Daily Cost</div>
-                  <div class="card-value">${this.formatCurrency(dailyCost)}</div>
-                </sc-card>
-                <sc-card>
-                  <div class="card-label">Monthly Cost</div>
-                  <div class="card-value">${this.formatCurrency(monthlyCost)}</div>
-                </sc-card>
-                <sc-card>
-                  <div class="card-label">Total Tokens</div>
-                  <div class="card-value">${this.formatNumber(totalTokens)}</div>
-                </sc-card>
-                <sc-card>
-                  <div class="card-label">Request Count</div>
-                  <div class="card-value">${this.formatNumber(requestCount)}</div>
-                </sc-card>
-              </div>
-
-              <div class="chart-section">
-                <div class="chart-title">Cost comparison (bar chart)</div>
-                <div class="bar-chart">
-                  <div class="bar-row">
-                    <span class="bar-label">Session</span>
-                    <div class="bar-track">
-                      <div
-                        class="bar-fill"
-                        style="width: ${this.barPct(sessionCost, maxCost)}%"
-                      ></div>
-                    </div>
-                    <span class="bar-value">${this.formatCurrency(sessionCost)}</span>
-                  </div>
-                  <div class="bar-row">
-                    <span class="bar-label">Daily</span>
-                    <div class="bar-track">
-                      <div
-                        class="bar-fill"
-                        style="width: ${this.barPct(dailyCost, maxCost)}%"
-                      ></div>
-                    </div>
-                    <span class="bar-value">${this.formatCurrency(dailyCost)}</span>
-                  </div>
-                  <div class="bar-row">
-                    <span class="bar-label">Monthly</span>
-                    <div class="bar-track">
-                      <div
-                        class="bar-fill"
-                        style="width: ${this.barPct(monthlyCost, maxCost)}%"
-                      ></div>
-                    </div>
-                    <span class="bar-value">${this.formatCurrency(monthlyCost)}</span>
-                  </div>
-                </div>
-              </div>
+              ${this._renderStats(sessionCost, dailyCost, monthlyCost, totalTokens, requestCount)}
+              ${this._renderChart(sessionCost, dailyCost, monthlyCost, maxCost)}
             `}
     `;
   }

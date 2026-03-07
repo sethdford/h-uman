@@ -5,8 +5,11 @@ import { icons } from "../icons.js";
 import "../components/sc-button.js";
 import "../components/sc-card.js";
 import "../components/sc-input.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
+import "../components/sc-stat-card.js";
 
 interface ToolDef {
   name?: string;
@@ -20,6 +23,12 @@ export class ScToolsView extends GatewayAwareLitElement {
     :host {
       display: block;
       max-width: 1200px;
+    }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-xl);
     }
     .search {
       margin-bottom: var(--sc-space-xl);
@@ -70,6 +79,11 @@ export class ScToolsView extends GatewayAwareLitElement {
       border-radius: var(--sc-radius-sm);
       max-height: 6rem;
       overflow: auto;
+    }
+    @media (max-width: 640px) {
+      .stats-row {
+        grid-template-columns: 1fr;
+      }
     }
     @media (max-width: 768px) {
       .grid {
@@ -150,7 +164,27 @@ export class ScToolsView extends GatewayAwareLitElement {
 
   private _renderContent() {
     const filtered = this.filteredTools;
+    const totalTools = this.tools.length;
+    const enabledTools = this.tools.length;
     return html`
+      <sc-page-hero>
+        <sc-section-header
+          heading="Tools"
+          description="Available capabilities and tool integrations"
+        ></sc-section-header>
+      </sc-page-hero>
+      <div class="stats-row">
+        <sc-stat-card
+          .value=${totalTools}
+          label="Total Tools"
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${enabledTools}
+          label="Enabled"
+          style="--sc-stagger-delay: 80ms"
+        ></sc-stat-card>
+      </div>
       ${this.error
         ? html`<sc-empty-state
             .icon=${icons.warning}
@@ -182,7 +216,7 @@ export class ScToolsView extends GatewayAwareLitElement {
             `
           : filtered.map(
               (t) => html`
-                <sc-card>
+                <sc-card glass>
                   <div class="card-name">${t.name ?? "unnamed"}</div>
                   <div class="card-desc">${t.description ?? ""}</div>
                   ${t.parameters != null

@@ -5,6 +5,9 @@ import { formatRelative } from "../utils.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
 import type { ContextMenuItem } from "../components/sc-context-menu.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
+import "../components/sc-stat-card.js";
 import "../components/sc-card.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
@@ -13,7 +16,7 @@ import "../components/sc-search.js";
 import "../components/sc-context-menu.js";
 import "../components/sc-dialog.js";
 import "../components/sc-badge.js";
-import "../components/sc-input.js";
+import "../components/sc-message-stream.js";
 
 interface SessionItem {
   key?: string;
@@ -69,6 +72,8 @@ function sortSessions(sessions: SessionItem[], mode: SortMode): SessionItem[] {
 
 @customElement("sc-sessions-view")
 export class ScSessionsView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
+
   static override styles = css`
     :host {
       display: block;
@@ -76,23 +81,16 @@ export class ScSessionsView extends GatewayAwareLitElement {
       max-width: 960px;
     }
 
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--sc-space-lg);
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-xl);
     }
-
-    h2 {
-      margin: 0;
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: var(--sc-space-sm);
+    @media (max-width: 640px) {
+      .stats-row {
+        grid-template-columns: 1fr;
+      }
     }
 
     .toolbar {
@@ -146,7 +144,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
     }
 
     .session-list-panel {
-      width: 18rem;
+      width: var(--sc-session-list-width, 18rem);
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
@@ -166,7 +164,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
       font-weight: var(--sc-weight-semibold);
       color: var(--sc-text-faint);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: var(--sc-tracking-wide, 0.05em);
       padding: var(--sc-space-sm) var(--sc-space-xs);
       position: sticky;
       top: 0;
@@ -335,7 +333,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
     }
 
     .msg {
-      max-width: 85%;
+      max-width: var(--sc-msg-max-width, 85%);
       padding: var(--sc-space-sm) var(--sc-space-md);
       border-radius: var(--sc-radius);
       font-size: var(--sc-text-base);
@@ -687,14 +685,28 @@ export class ScSessionsView extends GatewayAwareLitElement {
   }
 
   override render() {
-    return html`
-      <div class="header">
-        <h2>Sessions</h2>
-        <div class="header-actions">
-          <sc-button variant="secondary" @click=${() => this.loadSessions()}> Refresh </sc-button>
-        </div>
-      </div>
+    const totalSessions = this.sessions.length;
+    const totalMessages = this.sessions.reduce((sum, s) => sum + (s.turn_count ?? 0), 0);
+    const now = Date.now();
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+    const activeSessions = this.sessions.filter((s) => {
+      const ts = s.last_active ?? 0;
+      const tsMs = ts < 1e12 ? ts * 1000 : ts;
+      return tsMs >= todayStartMs;
+    }).length;
 
+    return html`
+      <sc-page-hero>
+        <sc-section-header heading="Sessions" description="Active conversations and their history">
+          <sc-button variant="primary" @click=${() => this.dispatchNavigate("chat:default")}>
+            New Session
+          </sc-button>
+          <sc-button variant="secondary" @click=${() => this.loadSessions()}> Refresh </sc-button>
+        </sc-section-header>
+      </sc-page-hero>
+      ${this._renderStats(totalSessions, totalMessages, activeSessions)}
       ${this.error
         ? html`<sc-empty-state
             .icon=${icons.warning}
@@ -722,6 +734,28 @@ export class ScSessionsView extends GatewayAwareLitElement {
         @sc-confirm=${() => this.deleteSession()}
         @sc-cancel=${() => (this.confirmDeleteOpen = false)}
       ></sc-dialog>
+    `;
+  }
+
+  private _renderStats(totalSessions: number, totalMessages: number, activeSessions: number) {
+    return html`
+      <div class="stats-row">
+        <sc-stat-card
+          .value=${totalSessions}
+          label="Total Sessions"
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${totalMessages}
+          label="Messages"
+          style="--sc-stagger-delay: 80ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${activeSessions}
+          label="Active Today"
+          style="--sc-stagger-delay: 160ms"
+        ></sc-stat-card>
+      </div>
     `;
   }
 
@@ -901,7 +935,16 @@ export class ScSessionsView extends GatewayAwareLitElement {
       <div class="history" role="log" aria-live="polite" aria-label="Conversation history">
         ${this.messages.length === 0
           ? html`<div class="empty">No messages</div>`
-          : this.messages.map((m) => html`<div class="msg ${m.role}">${m.content}</div>`)}
+          : this.messages.map((m) =>
+              m.role === "assistant"
+                ? html`<div class="msg assistant">
+                    <sc-message-stream
+                      .content=${m.content}
+                      .role=${"assistant"}
+                    ></sc-message-stream>
+                  </div>`
+                : html`<div class="msg user">${m.content}</div>`,
+            )}
       </div>
 
       <div class="resume-bar">

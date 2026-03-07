@@ -9,6 +9,9 @@ import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-button.js";
 import "../components/sc-switch.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
+import "../components/sc-badge.js";
 
 interface Skill {
   name: string;
@@ -23,20 +26,6 @@ export class ScSkillsView extends GatewayAwareLitElement {
       display: block;
       color: var(--sc-text);
       max-width: 1200px;
-    }
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: var(--sc-space-xl);
-      flex-wrap: wrap;
-      gap: var(--sc-space-md);
-    }
-    h2 {
-      margin: 0;
-      font-size: var(--sc-text-xl);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
     }
     .install-row {
       display: flex;
@@ -60,6 +49,12 @@ export class ScSkillsView extends GatewayAwareLitElement {
     .skill-card-inner {
       display: flex;
       flex-direction: column;
+      gap: var(--sc-space-sm);
+    }
+    .skill-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       gap: var(--sc-space-sm);
     }
     .skill-name {
@@ -175,19 +170,23 @@ export class ScSkillsView extends GatewayAwareLitElement {
 
   private _renderHeader() {
     return html`
-      <div class="header">
-        <h2>Skills</h2>
-        <div class="install-row">
-          <sc-input
-            type="url"
-            placeholder="https://..."
-            aria-label="Skill URL to install"
-            .value=${this.installUrl}
-            @sc-input=${(e: CustomEvent<{ value: string }>) => (this.installUrl = e.detail.value)}
-          ></sc-input>
-          <sc-button variant="primary" @click=${this.installSkill}>Install</sc-button>
-        </div>
-      </div>
+      <sc-page-hero>
+        <sc-section-header
+          heading="Skills"
+          description="Installed and available agent skill packages"
+        >
+          <div class="install-row">
+            <sc-input
+              type="url"
+              placeholder="https://..."
+              aria-label="Skill URL to install"
+              .value=${this.installUrl}
+              @sc-input=${(e: CustomEvent<{ value: string }>) => (this.installUrl = e.detail.value)}
+            ></sc-input>
+            <sc-button variant="primary" @click=${this.installSkill}>Install</sc-button>
+          </div>
+        </sc-section-header>
+      </sc-page-hero>
     `;
   }
 
@@ -219,12 +218,15 @@ export class ScSkillsView extends GatewayAwareLitElement {
       <div class="skills-grid sc-stagger">
         ${this.skills.map(
           (skill) => html`
-            <sc-card>
+            <sc-card glass>
               <div class="skill-card-inner">
-                <div class="skill-name">${skill.name}</div>
+                <div class="skill-header">
+                  <span class="skill-name">${skill.name}</span>
+                  <sc-badge variant="success">Installed</sc-badge>
+                </div>
                 <div class="skill-desc">${skill.description ?? "No description"}</div>
                 <div class="skill-footer">
-                  <span class="status"> ${skill.enabled !== false ? "Enabled" : "Disabled"} </span>
+                  <span class="status">${skill.enabled !== false ? "Enabled" : "Disabled"}</span>
                   <sc-switch
                     .checked=${skill.enabled !== false}
                     @sc-change=${() => this.toggleSkill(skill)}

@@ -2,6 +2,9 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
+import "../components/sc-stat-card.js";
 import "../components/sc-card.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-skeleton.js";
@@ -47,10 +50,16 @@ export class ScSecurityView extends GatewayAwareLitElement {
       display: block;
       color: var(--sc-text);
     }
-    h2 {
-      margin: 0 0 var(--sc-space-xl);
-      font-size: var(--sc-text-xl);
-      font-weight: var(--sc-weight-semibold);
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-xl);
+    }
+    @media (max-width: 640px) {
+      .stats-row {
+        grid-template-columns: 1fr;
+      }
     }
     .grid {
       display: grid;
@@ -67,22 +76,11 @@ export class ScSecurityView extends GatewayAwareLitElement {
       color: var(--sc-text);
       margin-bottom: var(--sc-space-sm);
     }
-    .autonomy-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    .autonomy-dot.level-0 {
-      background: var(--sc-success);
-    }
-    .autonomy-dot.level-1 {
-      background: var(--sc-warning);
-    }
-    .autonomy-dot.level-2 {
-      background: var(--sc-error);
-    }
     .domains-label {
       margin-top: var(--sc-space-xs);
+    }
+    .autonomy-badge-wrap {
+      margin-bottom: var(--sc-space-sm);
     }
     .description {
       font-size: var(--sc-text-sm);
@@ -177,9 +175,16 @@ export class ScSecurityView extends GatewayAwareLitElement {
         grid-template-columns: 1fr;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      :host * {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
   `;
 
   @state() private config: SecurityConfig | null = null;
+  @state() private rawConfig: Record<string, unknown> | null = null;
   @state() private loading = false;
   @state() private error = "";
 
@@ -190,6 +195,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
     this.error = "";
     try {
       const res = await gw.request<Record<string, unknown>>("config.get", {});
+      this.rawConfig = res ?? null;
       if (res && typeof res === "object" && "security" in res) {
         this.config = res.security as SecurityConfig;
       } else {
@@ -200,6 +206,19 @@ export class ScSecurityView extends GatewayAwareLitElement {
     } finally {
       this.loading = false;
     }
+  }
+
+  private get pairingEnabled(): boolean {
+    const gw = this.rawConfig?.gateway as { require_pairing?: boolean } | undefined;
+    return gw?.require_pairing === true;
+  }
+
+  private get httpsOnly(): boolean {
+    return true;
+  }
+
+  private get sandboxEnabled(): boolean {
+    return this.config?.sandbox_config?.enabled === true;
   }
 
   private get autonomyLevel(): number {
@@ -214,109 +233,102 @@ export class ScSecurityView extends GatewayAwareLitElement {
     return this.config?.sandbox_config?.backend ?? this.config?.sandbox ?? "auto";
   }
 
-  override render() {
-    if (this.loading) {
-      return html`<h2>Security</h2>
-        <p class="description">Loading...</p>`;
-    }
+  private _renderSkeleton() {
+    return html`<sc-skeleton variant="card" height="200px"></sc-skeleton>`;
+  }
 
-    if (this.error) {
-      return html`
-        <h2>Security</h2>
-        <sc-empty-state heading="Error" description=${this.error}></sc-empty-state>
-      `;
-    }
-
-    if (!this.config) {
-      return html`
-        <h2>Security</h2>
-        <sc-empty-state
-          heading="Security Policy"
-          description="Connect to a SeaClaw gateway to view security settings."
-        ></sc-empty-state>
-      `;
-    }
-
+  private _renderAutonomy() {
     const info = this.autonomyInfo;
-    const proxy = this.config.sandbox_config?.net_proxy;
-
+    const variant =
+      this.autonomyLevel === 0 ? "success" : this.autonomyLevel === 1 ? "warning" : "error";
     return html`
-      <h2>Security</h2>
-
-      <div class="grid">
-        <sc-card>
-          <div class="card-inner">
-            <div class="card-title">Autonomy Level</div>
-            <div class="autonomy-badge">
-              <span class="autonomy-dot" style="background: ${info.color}"></span>
-              Level ${this.autonomyLevel} &mdash; ${info.label}
-            </div>
-            <div class="description">${info.description}</div>
+      <sc-card>
+        <div class="card-inner">
+          <div class="card-title">Autonomy Level</div>
+          <div class="autonomy-badge-wrap">
+            <sc-badge variant=${variant}
+              >Level ${this.autonomyLevel} &mdash; ${info.label}</sc-badge
+            >
           </div>
-        </sc-card>
+          <div class="description">${info.description}</div>
+        </div>
+      </sc-card>
+    `;
+  }
 
-        <sc-card>
-          <div class="card-inner">
-            <div class="card-title">Sandbox</div>
-            <div class="policy-row">
-              <span class="policy-label">Backend</span>
-              <span class="policy-value">${this.sandboxBackend}</span>
-            </div>
-            <div class="policy-row">
-              <span class="policy-label">Enabled</span>
-              <span
-                class="policy-value ${this.config.sandbox_config?.enabled ? "enabled" : "disabled"}"
-              >
-                ${this.config.sandbox_config?.enabled ? "yes" : "auto-detect"}
-              </span>
-            </div>
+  private _renderSandbox() {
+    if (!this.config) return nothing;
+    return html`
+      <sc-card>
+        <div class="card-inner">
+          <div class="card-title">Sandbox</div>
+          <div class="policy-row">
+            <span class="policy-label">Backend</span>
+            <span class="policy-value">${this.sandboxBackend}</span>
           </div>
-        </sc-card>
+          <div class="policy-row">
+            <span class="policy-label">Enabled</span>
+            <span
+              class="policy-value ${this.config.sandbox_config?.enabled ? "enabled" : "disabled"}"
+            >
+              ${this.config.sandbox_config?.enabled ? "yes" : "auto-detect"}
+            </span>
+          </div>
+        </div>
+      </sc-card>
+    `;
+  }
 
-        <sc-card>
-          <div class="card-inner">
-            <div class="card-title">Network Proxy</div>
-            ${proxy?.enabled
-              ? html`
-                  <div class="policy-row">
-                    <span class="policy-label">Status</span>
-                    <span class="policy-value enabled">active</span>
-                  </div>
-                  <div class="policy-row">
-                    <span class="policy-label">Deny all</span>
-                    <span class="policy-value ${proxy.deny_all ? "warning" : "disabled"}">
-                      ${proxy.deny_all ? "yes" : "no"}
-                    </span>
-                  </div>
-                  ${proxy.proxy_addr
-                    ? html`<div class="policy-row">
+  private _renderNetwork() {
+    const proxy = this.config?.sandbox_config?.net_proxy;
+    return html`
+      <sc-card>
+        <div class="card-inner">
+          <div class="card-title">Network Proxy</div>
+          ${proxy?.enabled
+            ? html`
+                <div class="policy-row">
+                  <span class="policy-label">Status</span>
+                  <span class="policy-value enabled">active</span>
+                </div>
+                <div class="policy-row">
+                  <span class="policy-label">Deny all</span>
+                  <span class="policy-value ${proxy.deny_all ? "warning" : "disabled"}">
+                    ${proxy.deny_all ? "yes" : "no"}
+                  </span>
+                </div>
+                ${proxy.proxy_addr
+                  ? html`
+                      <div class="policy-row">
                         <span class="policy-label">Proxy</span>
                         <span class="policy-value">${proxy.proxy_addr}</span>
-                      </div>`
-                    : nothing}
-                  ${proxy.allowed_domains && proxy.allowed_domains.length > 0
-                    ? html`
-                        <div class="policy-label" style="margin-top: var(--sc-space-xs)">
-                          Allowed domains
-                        </div>
-                        <div class="domain-list">
-                          ${proxy.allowed_domains.map(
-                            (d) => html`<span class="domain-tag">${d}</span>`,
-                          )}
-                        </div>
-                      `
-                    : nothing}
-                `
-              : html`
-                  <div class="policy-row">
-                    <span class="policy-label">Status</span>
-                    <span class="policy-value disabled">not configured</span>
-                  </div>
-                `}
-          </div>
-        </sc-card>
-      </div>
+                      </div>
+                    `
+                  : nothing}
+                ${proxy.allowed_domains && proxy.allowed_domains.length > 0
+                  ? html`
+                      <div class="policy-label domains-label">Allowed domains</div>
+                      <div class="domain-list">
+                        ${proxy.allowed_domains.map(
+                          (d) => html`<span class="domain-tag">${d}</span>`,
+                        )}
+                      </div>
+                    `
+                  : nothing}
+              `
+            : html`
+                <div class="policy-row">
+                  <span class="policy-label">Status</span>
+                  <span class="policy-value disabled">not configured</span>
+                </div>
+              `}
+        </div>
+      </sc-card>
+    `;
+  }
 
+  private _renderDefaults() {
+    return html`
       <div class="section-title">Security Defaults</div>
       <sc-card>
         <div class="card-inner">
@@ -348,6 +360,62 @@ export class ScSecurityView extends GatewayAwareLitElement {
           </div>
         </div>
       </sc-card>
+    `;
+  }
+
+  override render() {
+    const hero = html`
+      <sc-page-hero>
+        <sc-section-header
+          heading="Security"
+          description="Access control, pairing, and security policies"
+        ></sc-section-header>
+      </sc-page-hero>
+    `;
+
+    if (this.loading) {
+      return html`${hero} ${this._renderSkeleton()}`;
+    }
+
+    if (this.error) {
+      return html`${hero}
+        <sc-empty-state heading="Error" description=${this.error}></sc-empty-state>`;
+    }
+
+    if (!this.config) {
+      return html`${hero}
+        <sc-empty-state
+          heading="Security Policy"
+          description="Connect to a SeaClaw gateway to view security settings."
+        ></sc-empty-state>`;
+    }
+
+    return html`
+      ${hero}
+      <div class="stats-row">
+        <sc-stat-card
+          .value=${this.pairingEnabled ? 1 : 0}
+          label="Pairing"
+          accent=${this.pairingEnabled ? "primary" : "error"}
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${this.httpsOnly ? 1 : 0}
+          label="HTTPS Only"
+          accent=${this.httpsOnly ? "primary" : "error"}
+          style="--sc-stagger-delay: 80ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${this.sandboxEnabled ? 1 : 0}
+          label="Sandbox"
+          accent=${this.sandboxEnabled ? "primary" : "error"}
+          style="--sc-stagger-delay: 160ms"
+        ></sc-stat-card>
+      </div>
+      <div class="grid">
+        ${this._renderAutonomy()} ${this._renderSandbox()} ${this._renderNetwork()}
+      </div>
+      ${this._renderDefaults()}
     `;
   }
 }

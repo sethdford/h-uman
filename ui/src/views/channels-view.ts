@@ -7,6 +7,9 @@ import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-badge.js";
 import "../components/sc-search.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
+import "../components/sc-stat-card.js";
 
 interface ChannelStatus {
   key?: string;
@@ -25,6 +28,12 @@ export class ScChannelsView extends GatewayAwareLitElement {
     :host {
       display: block;
       max-width: 1200px;
+    }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-xl);
     }
     .channel-card {
       position: relative;
@@ -190,7 +199,37 @@ export class ScChannelsView extends GatewayAwareLitElement {
   }
 
   private _renderContent(): TemplateResult {
+    const totalChannels = this.channels.length;
+    const configuredChannels = this.channels.filter((ch) => ch.configured === true).length;
+    const activeChannels = this.channels.filter(
+      (ch) => ch.healthy === true || ch.status === "active" || ch.status === "ok",
+    ).length;
     return html`
+      <sc-page-hero>
+        <sc-section-header
+          heading="Channels"
+          description="Messaging integrations and their connection status"
+        ></sc-section-header>
+      </sc-page-hero>
+      <div class="stats-row">
+        <sc-stat-card
+          .value=${totalChannels}
+          label="Total"
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${configuredChannels}
+          label="Configured"
+          accent="primary"
+          style="--sc-stagger-delay: 80ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${activeChannels}
+          label="Active"
+          accent="secondary"
+          style="--sc-stagger-delay: 160ms"
+        ></sc-stat-card>
+      </div>
       ${this.error
         ? html`<sc-empty-state
             .icon=${icons.warning}
@@ -213,20 +252,25 @@ export class ScChannelsView extends GatewayAwareLitElement {
             `
           : this.filteredChannels.map(
               (ch) => html`
-                <sc-card hoverable class="channel-card">
+                <sc-card glass hoverable class="channel-card">
                   ${this.dotClass(ch) !== "unconfigured"
                     ? html`<div class="card-accent ${this.dotClass(ch)}" aria-hidden="true"></div>`
                     : nothing}
                   <div class="card-header">
                     <span class="card-name">${ch.label || ch.key || ch.name || "unnamed"}</span>
-                    <span class="status-indicator ${this.dotClass(ch)}">
-                      <span class="dot" aria-hidden="true"></span>
+                    <sc-badge
+                      variant=${this.dotClass(ch) === "healthy"
+                        ? "success"
+                        : this.dotClass(ch) === "error"
+                          ? "error"
+                          : "neutral"}
+                    >
                       ${this.dotClass(ch) === "healthy"
                         ? "Active"
                         : this.dotClass(ch) === "error"
                           ? "Error"
                           : "Inactive"}
-                    </span>
+                    </sc-badge>
                   </div>
                   <div class="card-info">
                     ${ch.error

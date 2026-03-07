@@ -2,6 +2,8 @@ import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-section-header.js";
 import "../components/sc-badge.js";
 import "../components/sc-button.js";
 import "../components/sc-card.js";
@@ -31,12 +33,6 @@ export class ScNodesView extends GatewayAwareLitElement {
       margin-bottom: var(--sc-space-xl);
       flex-wrap: wrap;
       gap: var(--sc-space-sm);
-    }
-    h2 {
-      margin: 0;
-      font-size: var(--sc-text-xl);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
     }
     .nodes-grid {
       display: grid;
@@ -169,9 +165,8 @@ export class ScNodesView extends GatewayAwareLitElement {
 
   private _renderSkeleton(): TemplateResult {
     return html`
-      <div class="nodes-grid">
-        <sc-skeleton variant="card" height="100px"></sc-skeleton>
-      </div>
+      <sc-skeleton variant="card" height="160px"></sc-skeleton>
+      <sc-skeleton variant="card" height="160px"></sc-skeleton>
     `;
   }
 
@@ -221,8 +216,13 @@ export class ScNodesView extends GatewayAwareLitElement {
 
   override render() {
     return html`
+      <sc-page-hero>
+        <sc-section-header
+          heading="Nodes"
+          description="Connected node instances and their status"
+        ></sc-section-header>
+      </sc-page-hero>
       <div class="header">
-        <h2>Nodes & Devices</h2>
         <div class="header-actions">
           ${this.lastLoadedAt
             ? html`<span class="staleness">Updated ${this.stalenessLabel}</span>`

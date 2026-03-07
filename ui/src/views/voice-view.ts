@@ -7,6 +7,8 @@ import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { SESSION_KEY_VOICE, formatRelative } from "../utils.js";
 import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
+import "../components/sc-page-hero.js";
+import "../components/sc-stat-card.js";
 import "../components/sc-button.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-message-stream.js";
@@ -107,6 +109,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       gap: var(--sc-space-sm);
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--sc-space-md);
+      margin-bottom: var(--sc-space-xl);
     }
 
     .staleness {
@@ -818,23 +827,39 @@ export class ScVoiceView extends GatewayAwareLitElement {
         : this._connectionStatus === "connecting"
           ? "Reconnecting\u2026"
           : "Disconnected";
+    const sessionCount = this._messages.filter((m) => m.role === "user").length;
     return html`
-      <div class="hero">
-        <div class="hero-left">
-          <span class="status-dot ${this._connectionStatus}" aria-hidden="true"></span>
-          <div>
-            <h2 class="hero-title">Voice Assistant</h2>
-            <div class="hero-meta">
-              <span>${statusLabel}</span>
+      <sc-page-hero>
+        <div class="hero">
+          <div class="hero-left">
+            <span class="status-dot ${this._connectionStatus}" aria-hidden="true"></span>
+            <div>
+              <h2 class="hero-title">Voice Assistant</h2>
+              <div class="hero-meta">
+                <span>${statusLabel}</span>
+              </div>
             </div>
           </div>
+          <div class="hero-actions">
+            <span class="staleness">${this.stalenessLabel}</span>
+            <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data">
+              Refresh
+            </sc-button>
+          </div>
         </div>
-        <div class="hero-actions">
-          <span class="staleness">${this.stalenessLabel}</span>
-          <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data">
-            Refresh
-          </sc-button>
-        </div>
+      </sc-page-hero>
+      <div class="stats-row">
+        <sc-stat-card
+          .value=${sessionCount}
+          label="Sessions"
+          style="--sc-stagger-delay: 0ms"
+        ></sc-stat-card>
+        <sc-stat-card
+          .value=${0}
+          label="Duration"
+          suffix="s"
+          style="--sc-stagger-delay: 80ms"
+        ></sc-stat-card>
       </div>
     `;
   }

@@ -16,6 +16,7 @@ import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
 import "../components/sc-automation-card.js";
 import "../components/sc-schedule-builder.js";
+import "../components/sc-badge.js";
 
 interface CronJob {
   id: number;
@@ -237,7 +238,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
     .mono-input :host(sc-input) input,
     .mono-input input {
-      font-family: var(--sc-font-mono) !important;
+      font-family: var(--sc-font-mono);
     }
 
     .mode-toggle {
@@ -603,17 +604,8 @@ export class ScAutomationsView extends GatewayAwareLitElement {
     }
   }
 
-  override render() {
+  private _renderStats() {
     return html`
-      <sc-page-hero>
-        <sc-section-header
-          heading="Automations"
-          description="AI-driven tasks and shell jobs running on schedule"
-        >
-          <sc-button variant="primary" @click=${this._openNewAutomation}>New Automation</sc-button>
-        </sc-section-header>
-      </sc-page-hero>
-
       <div class="stats-row">
         <sc-stat-card
           .value=${this.totalCount}
@@ -639,7 +631,6 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           style="--sc-stagger-delay: 240ms"
         ></sc-stat-card>
       </div>
-
       <sc-metric-row
         .items=${[
           {
@@ -659,71 +650,71 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           },
         ]}
       ></sc-metric-row>
+    `;
+  }
 
-      <sc-tabs
-        .tabs=${[
-          { id: "agent", label: "Agent Tasks" },
-          { id: "shell", label: "Shell Jobs" },
-        ]}
-        .value=${this.activeTab}
-        @tab-change=${(e: CustomEvent<string>) => (this.activeTab = e.detail)}
-      ></sc-tabs>
+  private _renderSkeleton() {
+    return html`
+      <div class="job-list">
+        <sc-skeleton variant="card" height="160px"></sc-skeleton>
+        <sc-skeleton variant="card" height="160px"></sc-skeleton>
+        <sc-skeleton variant="card" height="160px"></sc-skeleton>
+      </div>
+    `;
+  }
 
-      ${this.loading
-        ? html`
-            <div class="job-list">
-              <sc-skeleton variant="card" height="160px"></sc-skeleton>
-              <sc-skeleton variant="card" height="160px"></sc-skeleton>
-              <sc-skeleton variant="card" height="160px"></sc-skeleton>
-            </div>
-          `
-        : this.filteredJobs.length === 0
-          ? html`
-              <div class="templates-section">
-                <h3>Quick Start Templates</h3>
-                <div class="templates-grid">
-                  ${TEMPLATES.filter((t) => t.type === this.activeTab).map(
-                    (t) => html`
-                      <sc-card clickable @click=${() => this._useTemplate(t)}>
-                        <div class="template-card">
-                          <div class="template-name">${t.name}</div>
-                          <div class="template-desc">${t.description}</div>
-                          <div class="template-schedule">${cronToHuman(t.expression)}</div>
-                        </div>
-                      </sc-card>
-                    `,
-                  )}
-                </div>
-              </div>
-              <sc-empty-state
-                .icon=${icons.timer}
-                heading=${this.activeTab === "agent" ? "No agent tasks" : "No shell jobs"}
-                description=${this.activeTab === "agent"
-                  ? "Create an agent automation to run AI tasks on a schedule."
-                  : "Create a shell job to run commands on a schedule."}
-              >
-                <sc-button variant="primary" @click=${this._openNewAutomation}>
-                  New Automation
-                </sc-button>
-              </sc-empty-state>
-            `
-          : html`
-              <div class="job-list">
-                ${this.filteredJobs.map(
-                  (job) => html`
-                    <sc-automation-card
-                      .job=${job}
-                      .runs=${this.runsMap.get(job.id) ?? []}
-                      @automation-toggle=${this._handleToggle}
-                      @automation-edit=${this._handleEdit}
-                      @automation-run=${this._handleRun}
-                      @automation-delete=${this._handleDelete}
-                    ></sc-automation-card>
-                  `,
-                )}
-              </div>
-            `}
+  private _renderJobList() {
+    if (this.filteredJobs.length === 0) {
+      return html`
+        <div class="templates-section">
+          <h3>Quick Start Templates</h3>
+          <div class="templates-grid">
+            ${TEMPLATES.filter((t) => t.type === this.activeTab).map(
+              (t) => html`
+                <sc-card clickable @click=${() => this._useTemplate(t)}>
+                  <div class="template-card">
+                    <div class="template-name">${t.name}</div>
+                    <div class="template-desc">${t.description}</div>
+                    <div class="template-schedule">${cronToHuman(t.expression)}</div>
+                  </div>
+                </sc-card>
+              `,
+            )}
+          </div>
+        </div>
+        <sc-empty-state
+          .icon=${icons.timer}
+          heading=${this.activeTab === "agent" ? "No agent tasks" : "No shell jobs"}
+          description=${this.activeTab === "agent"
+            ? "Create an agent automation to run AI tasks on a schedule."
+            : "Create a shell job to run commands on a schedule."}
+        >
+          <sc-button variant="primary" @click=${this._openNewAutomation}>
+            New Automation
+          </sc-button>
+        </sc-empty-state>
+      `;
+    }
+    return html`
+      <div class="job-list">
+        ${this.filteredJobs.map(
+          (job) => html`
+            <sc-automation-card
+              .job=${job}
+              .runs=${this.runsMap.get(job.id) ?? []}
+              @automation-toggle=${this._handleToggle}
+              @automation-edit=${this._handleEdit}
+              @automation-run=${this._handleRun}
+              @automation-delete=${this._handleDelete}
+            ></sc-automation-card>
+          `,
+        )}
+      </div>
+    `;
+  }
 
+  private _renderAgentModal() {
+    return html`
       <sc-modal
         heading=${this.editingJob ? "Edit Automation" : "New Agent Automation"}
         ?open=${this.showAgentModal}
@@ -800,7 +791,11 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           <sc-button variant="primary" @click=${this._saveAgent}>Save</sc-button>
         </div>
       </sc-modal>
+    `;
+  }
 
+  private _renderShellModal() {
+    return html`
       <sc-modal
         heading=${this.editingJob ? "Edit Shell Job" : "New Shell Job"}
         ?open=${this.showShellModal}
@@ -861,7 +856,11 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           <sc-button variant="primary" @click=${this._saveShell}>Save</sc-button>
         </div>
       </sc-modal>
+    `;
+  }
 
+  private _renderDeleteModal() {
+    return html`
       <sc-modal
         heading="Delete Automation?"
         ?open=${!!this.pendingDelete}
@@ -881,6 +880,33 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           <sc-button variant="destructive" @click=${this._confirmDelete}> Delete </sc-button>
         </div>
       </sc-modal>
+    `;
+  }
+
+  override render() {
+    return html`
+      <sc-page-hero>
+        <sc-section-header
+          heading="Automations"
+          description="AI-driven tasks and shell jobs running on schedule"
+        >
+          <sc-button variant="primary" @click=${this._openNewAutomation}>New Automation</sc-button>
+        </sc-section-header>
+      </sc-page-hero>
+
+      ${this._renderStats()}
+
+      <sc-tabs
+        .tabs=${[
+          { id: "agent", label: "Agent Tasks" },
+          { id: "shell", label: "Shell Jobs" },
+        ]}
+        .value=${this.activeTab}
+        @tab-change=${(e: CustomEvent<string>) => (this.activeTab = e.detail)}
+      ></sc-tabs>
+
+      ${this.loading ? this._renderSkeleton() : this._renderJobList()} ${this._renderAgentModal()}
+      ${this._renderShellModal()} ${this._renderDeleteModal()}
     `;
   }
 }
