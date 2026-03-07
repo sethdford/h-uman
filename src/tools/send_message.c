@@ -3,7 +3,6 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/tool.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
