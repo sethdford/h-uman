@@ -13,3 +13,13 @@ globs:
 - E2E tests: include axe-core accessibility checks for every page/view
 - Never assert `SC_ASSERT_TRUE(1)` or tautological conditions — use meaningful assertions
 - Free all allocations in C tests — ASan catches leaks
+
+## Shadow DOM E2E Selectors (Playwright)
+
+LitElement components render inside Shadow DOM. Direct CSS selectors don't pierce shadow roots.
+
+- Use `page.locator("sc-component-name")` then `.locator(":scope .inner-class")` for shadow piercing
+- **Never** use bare class selectors (`.message`) — always scope to the host component first
+- Prefer `data-testid` attributes for E2E anchors when class names are unreliable
+- Example: `page.locator("sc-message-list").locator(".message.assistant")` (correct)
+- Wrong: `page.locator(".message.assistant")` (won't pierce shadow root)

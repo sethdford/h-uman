@@ -13,3 +13,5 @@ globs:
 - Every animation/transition must work with `prefers-reduced-motion: reduce`
 - Keyframe names: `sc-` prefix (e.g. `sc-fade-in`, `sc-slide-up`)
 - Never use `setTimeout` for animation timing — use CSS transitions or `requestAnimationFrame`
+- Animate only compositor properties: `transform`, `opacity`, `filter` — never animate `width`, `height`, `top`, `left`, `margin`, `padding` (causes layout thrashing)
+- For layout changes, use `transform: translateX/Y/scale()` instead of position/size properties

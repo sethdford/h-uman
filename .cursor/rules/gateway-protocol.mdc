@@ -1,0 +1,49 @@
+---
+description: Gateway wire protocol contract for UI-to-C communication
+globs:
+  - "ui/src/demo-gateway.ts"
+  - "src/gateway/**"
+  - "ui/src/views/**"
+  - "ui/src/controllers/**"
+---
+
+# Gateway Wire Protocol
+
+The UI communicates with the C gateway over WebSocket using a JSON-RPC style protocol.
+
+## Envelope Format
+
+Request: `{ "method": "noun.verb", "id": "uuid", ...params }`
+Response: `{ "id": "uuid", ...result }` or `{ "id": "uuid", "error": "message" }`
+
+## Method Naming
+
+All methods follow `noun.verb` convention (e.g., `chat.send`, `sessions.list`).
+
+## Method Catalog (35 methods)
+
+| Namespace    | Methods |
+|-------------|---------|
+| `chat`      | `send`, `history` |
+| `sessions`  | `list`, `delete`, `patch` |
+| `channels`  | `status` |
+| `tools`     | `list`, `catalog` |
+| `models`    | `list` |
+| `config`    | `get`, `set`, `schema` |
+| `skills`    | `list`, `search`, `install`, `uninstall`, `enable`, `disable`, `update` |
+| `nodes`     | `list`, `action` |
+| `agents`    | `list` |
+| `cron`      | `list`, `add`, `remove`, `update`, `run`, `runs` |
+| `usage`     | `summary` |
+| `activity`  | `recent` |
+| `persona`   | `set` |
+| `update`    | `check` |
+| Singletons  | `connect`, `health`, `capabilities` |
+
+## Demo Gateway Rules
+
+- `ui/src/demo-gateway.ts` is the mock client for offline UI development.
+- When adding a new gateway method in C, **also** add the mock response in `demo-gateway.ts`.
+- Mock response shapes must **exactly** mirror the real gateway's JSON structure.
+- Every mock method needs realistic sample data — not empty arrays or minimal stubs.
+- Demo mode must exercise all view states: populated data, empty collections, error paths.

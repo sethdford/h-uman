@@ -1,0 +1,45 @@
+---
+description: View layout archetype enforcement — maps each view to its canonical archetype
+globs:
+  - "ui/src/views/*-view.ts"
+---
+
+# View Archetypes
+
+Every view must conform to one of these canonical layout archetypes.
+Read `docs/ux-patterns.md` before creating or modifying any view.
+
+## Archetype Map
+
+| View File | Archetype | Key Structural Rule |
+|-----------|-----------|-------------------|
+| `overview-view.ts` | Dashboard (Feed) | Compact hero -> scrollable card/bento grid |
+| `usage-view.ts` | Dashboard (Feed) | Compact hero -> scrollable card grid |
+| `security-view.ts` | Dashboard (Feed) | Compact hero -> scrollable card grid |
+| `chat-view.ts` | Conversational | Content area `flex: 1`, controls anchored bottom |
+| `voice-view.ts` | Conversational | Content area `flex: 1`, controls anchored bottom |
+| `sessions-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+| `channels-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+| `tools-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+| `nodes-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+| `agents-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+| `models-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+| `config-view.ts` | Settings | Single-column, max-width 640px, section-grouped |
+| `skills-view.ts` | Marketplace | Sticky search -> responsive card grid |
+| `logs-view.ts` | Log/Terminal | Controls top -> monospace output fills remaining space |
+| `automations-view.ts` | List-Detail | Dual-pane expanded; single-pane compact |
+
+## Required States (All Views)
+
+Every view must handle all three states — never show a blank screen:
+
+1. **Loading**: skeleton placeholders matching final layout shape
+2. **Populated**: full content with realistic data
+3. **Error**: inline error banner with retry action + `<sc-toast>` for transient errors
+
+## Rules
+
+- Conversation views: conversation area MUST be primary (`flex: 1`), controls MUST anchor to bottom
+- All views: content occupies minimum 60% of viewport; controls defer to content
+- Responsive: verify behavior at all 4 breakpoints (480px sm, 640px md, 768px lg, 1024px xl)
+- Consult `docs/visual-standards.md` quality checklist (section 10) before shipping

@@ -232,6 +232,17 @@ Apply these naming rules consistently:
 - Include threat/risk notes in the commit or PR.
 - Add/update tests for failure modes and boundaries.
 - Keep observability useful but non-sensitive (no secrets in logs or errors).
+- When adding a new gateway method in C, also add the mock response in `ui/src/demo-gateway.ts`.
+
+### 7.6 Adding or Modifying a Persona
+
+- Persona profiles are JSON files in `~/.seaclaw/personas/`.
+- Core struct: `sc_persona_t` in `include/seaclaw/persona.h` — identity, traits, preferred/avoided vocab, communication rules, values, decision style.
+- Per-channel overrides: `sc_persona_overlay_t` — formality, avg_length, emoji_usage, style_notes per channel.
+- Example banks: `sc_persona_example_bank_t` — example conversations (context + incoming + response) grouped by channel.
+- Implementation: `src/persona/persona.c` (loading/parsing), `creator.c` (generation), `analyzer.c` (analysis), `sampler.c` (sampling), `examples.c` (example selection), `feedback.c` (feedback loop), `cli.c` (CLI subcommands).
+- Prompt builder composes system prompts from persona identity + traits + channel overlay + selected examples.
+- Add tests for JSON parsing, overlay lookup, prompt composition, and edge cases (missing fields, empty arrays).
 
 ## 8) Validation Matrix
 
@@ -272,6 +283,17 @@ Hooks:
 | `pre-push`   | Runs `cmake --build build-check && ./build-check/seaclaw_tests` — blocks push if any test fails |
 
 To bypass a hook in an emergency: `git commit --no-verify` / `git push --no-verify`.
+
+### 8.2 Branch Naming and Git Workflow
+
+Required:
+
+- Branch naming: `feat/<name>`, `fix/<name>`, `refactor/<name>`, `docs/<name>`, `test/<name>`, `chore/<name>`.
+- Commit format: `<type>[(<scope>)]: <description>` (enforced by `.githooks/commit-msg`).
+- Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `ci`, `build`, `style`.
+- Pre-push hook runs the full test suite — use `git push --no-verify` only in emergencies.
+- Pre-commit hook runs format check — use `git commit --no-verify` only in emergencies.
+- Keep each commit to a single concern. Don't mix feature + refactor + infra in one commit.
 
 ## 9) Privacy and Sensitive Data (Required)
 
@@ -466,6 +488,17 @@ Required:
 - Implement empty state, loading skeleton, and error state (all three required).
 - Verify responsive behavior at all four breakpoints (compact, medium, expanded, wide).
 - Apply the **quality checklist** from `docs/visual-standards.md` §10.
+
+### 12.12 UI Performance Budgets (Required)
+
+Required:
+
+- Lighthouse targets: Performance >90, Accessibility >95, Best Practices >95.
+- Animate only compositor properties (`transform`, `opacity`, `filter`). Never animate `width`, `height`, `top`, `left`, `margin`, `padding` — these cause layout thrashing.
+- Lazy-load views not in the initial viewport.
+- Breakpoint annotations: every `@media (max-width: Xpx)` must include `/* --sc-breakpoint-* */`.
+- Alpha transparency: use `color-mix(in srgb, var(--sc-token) XX%, transparent)` — never `rgba()`.
+- Run `npm run lint:tokens` and `bash scripts/lint-raw-colors.sh --all` before UI commits.
 
 ## 13) Vibe Coding Guardrails
 

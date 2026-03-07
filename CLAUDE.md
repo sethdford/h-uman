@@ -62,6 +62,28 @@ Conventional commits enforced by `.githooks/commit-msg`:
 
 Types: `feat fix refactor test docs chore perf ci build style`
 
+## CI Pipeline
+
+| Workflow        | What it checks                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`        | C build + 3207 tests (Linux + macOS), UI tsc + vitest + build, website build, clang-tidy, E2E, visual regression, axe accessibility, Lighthouse |
+| `benchmark.yml` | Performance regression (binary size, startup time, RSS)                                                                                         |
+| `codeql.yml`    | Static analysis security scanning                                                                                                               |
+| `security.yml`  | Dependency audit, SBOM generation                                                                                                               |
+| `release.yml`   | Build release artifacts, .deb packages, cross-ARM64                                                                                             |
+
+Rule: if CI will catch it, run the equivalent locally first.
+
+## Persona System
+
+Persona profiles live in `~/.seaclaw/personas/` (JSON). Key structs in `include/seaclaw/persona.h`:
+
+- `sc_persona_t` — identity, traits, vocab, communication rules, values, decision style
+- `sc_persona_overlay_t` — per-channel formality/length/emoji overrides
+- `sc_persona_example_bank_t` — example conversations per channel
+
+Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, examples.c, feedback.c, cli.c).
+
 ## Key Paths
 
 | Path               | What                                           |

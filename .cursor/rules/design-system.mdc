@@ -73,6 +73,25 @@ globs:
 - Slots for composition; properties for data; events for communication upward.
 - New components must have corresponding test files in `ui/src/` or `ui/tests/`.
 
+## Responsive Breakpoints
+
+- Standard breakpoint values: 480px (sm), 640px (md), 768px (lg), 1024px (xl)
+- Every `@media (max-width: Xpx)` MUST include an annotation comment: `@media (max-width: 480px) /* --sc-breakpoint-sm */ {`
+- Never add new magic-number breakpoints — use only the 4 standard values above
+- Breakpoint tokens: `--sc-breakpoint-sm` (480px), `--sc-breakpoint-md` (640px), `--sc-breakpoint-lg` (768px), `--sc-breakpoint-xl` (1024px)
+
+## Alpha Transparency (color-mix)
+
+- **Never** use `rgba()` for transparency — use `color-mix(in srgb, var(--sc-token) XX%, transparent)`
+- Fallback pattern: `var(--sc-shadow-sm, 0 2px 8px color-mix(in srgb, var(--sc-shadow-color) 10%, transparent))`
+- Exception: print stylesheets may use raw values with web-specific tokens (e.g., `var(--sc-web-surface, #fff)`)
+
+## Token Lint Enforcement
+
+- Run `npm run lint:tokens` (in `ui/`) before any UI commit — flags raw hex, rgba, hardcoded durations, raw breakpoints
+- Run `bash scripts/lint-raw-colors.sh --all` from repo root — flags raw hex colors across all `.ts` and `.css` files
+- Both lints are wired into `npm run check` via `npm run lint:tokens`
+
 ## File Organization
 
 - Shared components: `ui/src/components/`
