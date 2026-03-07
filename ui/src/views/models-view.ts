@@ -170,15 +170,13 @@ export class ScModelsView extends GatewayAwareLitElement {
 
     return html`
       <h2>Models & Providers</h2>
-      ${
-        this.error
-          ? html`<sc-empty-state
-              .icon=${icons.warning}
-              heading="Error"
-              description=${this.error}
-            ></sc-empty-state>`
-          : nothing
-      }
+      ${this.error
+        ? html`<sc-empty-state
+            .icon=${icons.warning}
+            heading="Error"
+            description=${this.error}
+          ></sc-empty-state>`
+        : nothing}
       <sc-card class="info-card">
         <div class="info-bar">
           <span class="info-item"
@@ -188,43 +186,37 @@ export class ScModelsView extends GatewayAwareLitElement {
         </div>
       </sc-card>
       <div class="grid sc-stagger">
-        ${
-          this.providers.length === 0
-            ? html`
-                <sc-empty-state
-                  .icon=${icons.cpu}
-                  heading="No providers configured"
-                  description="Configure an AI provider in your config to get started."
-                ></sc-empty-state>
-              `
-            : this.providers.map(
-                (p) => html`
-                  <sc-card>
-                    <div class="card-header">
-                      <span class="card-name ${p.is_default ? "default" : ""}"
-                        >${p.name ?? "unnamed"}</span
-                      >
-                      ${p.is_default ? html`<sc-badge variant="info">default</sc-badge>` : nothing}
-                      ${p.native_tools
-                        ? html`<sc-badge variant="neutral">native tools</sc-badge>`
-                        : nothing}
-                    </div>
-                    <div class="key-status ${p.has_key ? "has" : "missing"}">
-                      <span
-                        style="width:14px;height:14px;display:inline-block;vertical-align:middle"
-                        >${p.has_key ? icons.check : icons["x-circle"]}</span
-                      >
-                      ${p.has_key ? " API key" : " No API key"}
-                    </div>
-                    <div class="card-url" title=${p.base_url ?? ""}>
-                      ${this.truncateUrl(p.base_url)}
-                    </div>
-                  </sc-card>
-                `,
-              )
-        }
-        </div>
-      </sc-card>
+        ${this.providers.length === 0
+          ? html`
+              <sc-empty-state
+                .icon=${icons.cpu}
+                heading="No providers configured"
+                description="Configure an AI provider in your config to get started."
+              ></sc-empty-state>
+            `
+          : this.providers.map(
+              (p) => html`
+                <sc-card>
+                  <div class="card-header">
+                    <span class="card-name ${p.is_default ? "default" : ""}"
+                      >${p.name ?? "unnamed"}</span
+                    >
+                    ${p.is_default ? html`<sc-badge variant="info">default</sc-badge>` : nothing}
+                    ${p.native_tools
+                      ? html`<sc-badge variant="neutral">native tools</sc-badge>`
+                      : nothing}
+                  </div>
+                  <div class="key-status ${p.has_key ? "has" : "missing"}">
+                    <span class="key-icon">${p.has_key ? icons.check : icons["x-circle"]}</span>
+                    ${p.has_key ? " API key" : " No API key"}
+                  </div>
+                  <div class="card-url" title=${p.base_url ?? ""}>
+                    ${this.truncateUrl(p.base_url)}
+                  </div>
+                </sc-card>
+              `,
+            )}
+      </div>
     `;
   }
 }
