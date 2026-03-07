@@ -55,7 +55,7 @@ async function generateOgImage() {
     <text x="200" y="230" fill="#f5f5f7" font-family="system-ui,-apple-system,sans-serif" font-size="56" font-weight="700" letter-spacing="-2">Bring AI to every</text>
     <text x="200" y="295" fill="#f5f5f7" font-family="system-ui,-apple-system,sans-serif" font-size="56" font-weight="700" letter-spacing="-2">device on Earth.</text>
 
-    <text x="200" y="360" fill="#a1a1a6" font-family="system-ui,-apple-system,sans-serif" font-size="22">430 KB binary · 50+ providers · 26 channels · 53 tools</text>
+    <text x="200" y="360" fill="#a1a1a6" font-family="system-ui,-apple-system,sans-serif" font-size="22">528 KB binary · 50+ providers · 33 channels · 65+ tools</text>
 
     <text x="200" y="420" fill="#7AB648" font-family="system-ui,-apple-system,sans-serif" font-size="20" font-weight="600">SeaClaw</text>
     <text x="310" y="420" fill="#6e6e73" font-family="system-ui,-apple-system,sans-serif" font-size="18">Pure C11 · Zero dependencies · MIT licensed</text>

@@ -1,7 +1,7 @@
 {
   "name": "SeaClaw",
   "short_name": "SeaClaw",
-  "description": "Autonomous AI agent runtime in 430 KB of pure C",
+  "description": "Autonomous AI agent runtime in 528 KB of pure C",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#7AB648",

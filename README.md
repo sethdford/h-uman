@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
-  <strong>~511 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
+  <strong>~528 KB binary. < 6 MB RAM. Boots in <30 ms. Runs on anything with a CPU.</strong>
 </p>
 
 <p align="center">
@@ -54,10 +54,10 @@ Similar projects in the autonomous AI assistant space (data sourced from each pr
 SeaClaw's verified numbers (measured on macOS arm64, March 2026):
 
 ```
-Binary size:   ~511 KB (MinSizeRel + LTO, all channels)
+Binary size:   ~528 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
-Tests:         3119 passing, 0 ASan errors
+Tests:         3,127 passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?

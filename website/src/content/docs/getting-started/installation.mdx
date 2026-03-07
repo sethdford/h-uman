@@ -63,7 +63,7 @@ cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNE
 cmake --build .
 ```
 
-This produces a small binary (~430 KB with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
+This produces a small binary (~528 KB with LTO) and enables all messaging channels (Telegram, Discord, Slack, etc.).
 
 ### Basic development build
 
@@ -139,4 +139,4 @@ If config is missing, run the onboard wizard first (see [Quick Start](/getting-s
 ./build/seaclaw_tests
 ```
 
-All 3,087+ tests must pass with zero ASan errors.
+All 3,127+ tests must pass with zero ASan errors.

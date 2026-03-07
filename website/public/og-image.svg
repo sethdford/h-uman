@@ -10,7 +10,7 @@
   <!-- Tagline -->
   <text x="600" y="310" text-anchor="middle" fill="#6E6E73" font-family="system-ui, -apple-system, sans-serif" font-size="26" font-weight="400">Intelligence infrastructure that disappears.</text>
   <!-- Stats row -->
-  <text x="300" y="520" text-anchor="middle" fill="#1D1D1F" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">430 KB</text>
+  <text x="300" y="520" text-anchor="middle" fill="#1D1D1F" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">528 KB</text>
   <text x="600" y="520" text-anchor="middle" fill="#1D1D1F" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">&lt;30 ms</text>
   <text x="900" y="520" text-anchor="middle" fill="#1D1D1F" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">50+ providers</text>
 </svg>

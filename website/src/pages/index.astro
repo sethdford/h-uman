@@ -147,7 +147,7 @@ const tools = [
         "@type": "SoftwareApplication",
         name: "SeaClaw",
         description:
-          "A complete autonomous AI agent runtime in 430 kilobytes of pure C.",
+          "A complete autonomous AI agent runtime in 528 kilobytes of pure C.",
         applicationCategory: "DeveloperApplication",
         operatingSystem: "Cross-platform",
         url: "https://seaclaw.ai/",
@@ -1014,7 +1014,7 @@ const tools = [
             '<div><span style="color:#6ee7b7">$ </span><span style="color:#e2e8f0">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build .</span></div>',
             '<div><span style="color:rgba(255,255,255,0.45)">[100%] Built target seaclaw</span></div>',
             '<div><span style="color:#6ee7b7">$ </span><span style="color:#e2e8f0">ls -lh seaclaw</span></div>',
-            '<div><span style="color:rgba(255,255,255,0.45)">-rwxr-xr-x  1 user  staff  </span><span style="color:var(--color-accent)">430K</span><span style="color:rgba(255,255,255,0.45)">  seaclaw</span></div>',
+            '<div><span style="color:rgba(255,255,255,0.45)">-rwxr-xr-x  1 user  staff  </span><span style="color:var(--color-accent)">528K</span><span style="color:rgba(255,255,255,0.45)">  seaclaw</span></div>',
           ].join("");
         }
 
@@ -1359,12 +1359,12 @@ const tools = [
               { prompt: true, text: "ls -lh seaclaw" },
               {
                 prompt: false,
-                text: "-rwxr-xr-x  1 user  staff  430K  seaclaw",
-                highlights: [{ text: "430K", cls: accentColor }],
+                text: "-rwxr-xr-x  1 user  staff  528K  seaclaw",
+                highlights: [{ text: "528K", cls: accentColor }],
               },
               {
                 prompt: true,
-                text: './seaclaw agent -m "Hello from a ~530 KB binary."',
+                text: './seaclaw agent -m "Hello from a ~528 KB binary."',
               },
               {
                 prompt: false,
@@ -1373,7 +1373,7 @@ const tools = [
               },
               {
                 prompt: false,
-                text: "running in 430 kilobytes. How can I help?",
+                text: "running in 528 kilobytes. How can I help?",
               },
             ];
 
