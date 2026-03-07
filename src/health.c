@@ -10,6 +10,7 @@
 #include <process.h>
 #define sc_getpid() (uint32_t)getpid()
 #else
+#include <pthread.h>
 #include <unistd.h>
 #define sc_getpid() (uint32_t)getpid()
 #endif
@@ -26,6 +27,15 @@ static health_entry_t s_components[SC_MAX_COMPONENTS];
 static size_t s_component_count = 0;
 static time_t s_start_time = 0;
 static bool s_started = false;
+
+#ifndef _WIN32
+static pthread_mutex_t s_health_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define HEALTH_LOCK()   pthread_mutex_lock(&s_health_mutex)
+#define HEALTH_UNLOCK() pthread_mutex_unlock(&s_health_mutex)
+#else
+#define HEALTH_LOCK()   ((void)0)
+#define HEALTH_UNLOCK() ((void)0)
+#endif
 
 static void ensure_started(void) {
     if (!s_started) {
@@ -68,43 +78,56 @@ static void timestamp_str(char *buf, size_t buf_size) {
 void sc_health_mark_ok(const char *component) {
     if (!component)
         return;
+    HEALTH_LOCK();
     ensure_started();
     health_entry_t *e = get_or_create(component);
-    if (!e)
+    if (!e) {
+        HEALTH_UNLOCK();
         return;
-    strcpy(e->health.status, "ok");
+    }
+    snprintf(e->health.status, sizeof(e->health.status), "%s", "ok");
     timestamp_str(e->health.updated_at, sizeof(e->health.updated_at));
     timestamp_str(e->health.last_ok, sizeof(e->health.last_ok));
     e->health.last_error[0] = '\0';
+    HEALTH_UNLOCK();
 }
 
 void sc_health_mark_error(const char *component, const char *message) {
     if (!component)
         return;
+    HEALTH_LOCK();
     ensure_started();
     health_entry_t *e = get_or_create(component);
-    if (!e)
+    if (!e) {
+        HEALTH_UNLOCK();
         return;
-    strcpy(e->health.status, "error");
+    }
+    snprintf(e->health.status, sizeof(e->health.status), "%s", "error");
     timestamp_str(e->health.updated_at, sizeof(e->health.updated_at));
     if (message)
         strncpy(e->health.last_error, message, sizeof(e->health.last_error) - 1);
     e->health.last_error[sizeof(e->health.last_error) - 1] = '\0';
+    HEALTH_UNLOCK();
 }
 
 void sc_health_bump_restart(const char *component) {
     if (!component)
         return;
+    HEALTH_LOCK();
     ensure_started();
     health_entry_t *e = get_or_create(component);
-    if (!e)
+    if (!e) {
+        HEALTH_UNLOCK();
         return;
+    }
     e->health.restart_count++;
+    HEALTH_UNLOCK();
 }
 
 void sc_health_snapshot(sc_health_snapshot_t *out) {
     if (!out)
         return;
+    HEALTH_LOCK();
     ensure_started();
     memset(out, 0, sizeof(*out));
     out->pid = sc_getpid();
@@ -119,23 +142,28 @@ void sc_health_snapshot(sc_health_snapshot_t *out) {
                 memcpy(&out->components[i], &s_components[i].health, sizeof(sc_component_health_t));
         }
     }
+    HEALTH_UNLOCK();
 }
 
 sc_readiness_result_t sc_health_check_readiness(sc_allocator_t *alloc) {
     sc_readiness_result_t out = {SC_READINESS_NOT_READY, NULL, 0};
     if (!alloc)
         return out;
+    HEALTH_LOCK();
     ensure_started();
 
     if (s_component_count == 0) {
         out.status = SC_READINESS_READY;
+        HEALTH_UNLOCK();
         return out;
     }
 
     sc_component_check_t *checks = (sc_component_check_t *)alloc->alloc(
         alloc->ctx, s_component_count * sizeof(sc_component_check_t));
-    if (!checks)
+    if (!checks) {
+        HEALTH_UNLOCK();
         return out;
+    }
 
     bool all_ok = true;
     for (size_t i = 0; i < s_component_count; i++) {
@@ -149,11 +177,14 @@ sc_readiness_result_t sc_health_check_readiness(sc_allocator_t *alloc) {
     out.checks = checks;
     out.check_count = s_component_count;
     out.status = all_ok ? SC_READINESS_READY : SC_READINESS_NOT_READY;
+    HEALTH_UNLOCK();
     return out;
 }
 
 void sc_health_reset(void) {
+    HEALTH_LOCK();
     s_component_count = 0;
     s_started = false;
     s_start_time = 0;
+    HEALTH_UNLOCK();
 }
