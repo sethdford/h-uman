@@ -7,29 +7,29 @@
   "$description": "Responsive breakpoint tokens",
   "breakpoint": {
     "sm": {
-      "$value": "640px",
+      "$value": "480px",
       "$type": "dimension",
-      "$description": "Small — mobile landscape"
+      "$description": "Small \u2014 compact mobile"
     },
     "md": {
-      "$value": "768px",
+      "$value": "640px",
       "$type": "dimension",
-      "$description": "Medium — tablets"
+      "$description": "Medium \u2014 mobile landscape"
     },
     "lg": {
-      "$value": "1024px",
+      "$value": "768px",
       "$type": "dimension",
-      "$description": "Large — desktop"
+      "$description": "Large \u2014 tablets"
     },
     "xl": {
-      "$value": "1280px",
+      "$value": "1024px",
       "$type": "dimension",
-      "$description": "Extra-large — wide desktop"
+      "$description": "Extra-large \u2014 desktop"
     },
     "2xl": {
       "$value": "1536px",
       "$type": "dimension",
-      "$description": "2x extra-large — ultrawide"
+      "$description": "2x extra-large \u2014 ultrawide"
     }
   }
 }

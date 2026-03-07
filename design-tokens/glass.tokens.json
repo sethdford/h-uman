@@ -4,7 +4,7 @@
     "com.seaclaw.platform": "all",
     "com.seaclaw.version": "0.3.0"
   },
-  "$description": "Liquid Glass tokens — three tiers of glass depth inspired by Apple visionOS Liquid Glass, adapted for web/native",
+  "$description": "Liquid Glass tokens \u2014 three tiers of glass depth inspired by Apple visionOS Liquid Glass, adapted for web/native",
   "glass": {
     "subtle": {
       "blur": {
@@ -42,7 +42,7 @@
         "$type": "number",
         "$description": "No refraction at subtle tier"
       },
-      "$description": "Backgrounds, nav chrome, ambient panels — z.raised (100)"
+      "$description": "Backgrounds, nav chrome, ambient panels \u2014 z.raised (100)"
     },
     "standard": {
       "blur": {
@@ -80,7 +80,7 @@
         "$type": "number",
         "$description": "Light refraction distortion"
       },
-      "$description": "Cards, panels, interactive surfaces — z.dropdown (1000)"
+      "$description": "Cards, panels, interactive surfaces \u2014 z.dropdown (1000)"
     },
     "prominent": {
       "blur": {
@@ -118,28 +118,45 @@
         "$type": "number",
         "$description": "Visible refraction distortion"
       },
-      "$description": "Modals, sheets, hero elements, overlays — z.modal (1300)"
+      "$description": "Modals, sheets, hero elements, overlays \u2014 z.modal (1300)"
     },
     "chat": {
-      "$description": "Chat-specific glass — blue-tinted for sessions panel and message actions",
-      "blur": { "$value": "24px", "$type": "dimension" },
-      "saturate": { "$value": "180%", "$type": "string" },
+      "$description": "Chat-specific glass \u2014 blue-tinted for sessions panel and message actions",
+      "blur": {
+        "$value": "24px",
+        "$type": "dimension"
+      },
+      "saturate": {
+        "$value": "180%",
+        "$type": "string"
+      },
       "bg-opacity": {
         "$value": 0.85,
         "$type": "number",
         "$description": "Higher opacity for readability"
       },
-      "border-opacity": { "$value": 0.08, "$type": "number" },
+      "border-opacity": {
+        "$value": 0.08,
+        "$type": "number"
+      },
       "actions-bg-opacity": {
         "$value": 0.9,
         "$type": "number",
         "$description": "Message actions toolbar"
       },
-      "actions-blur": { "$value": "16px", "$type": "dimension" }
+      "actions-blur": {
+        "$value": "16px",
+        "$type": "dimension"
+      }
+    },
+    "border-color": {
+      "$value": "rgba(255, 255, 255, 0.08)",
+      "$type": "color",
+      "$description": "Default glass surface border color \u2014 emitted as --sc-glass-border-color"
     }
   },
   "dynamic-light": {
-    "$description": "Light source simulation for glass surfaces — cursor/gyroscope-driven",
+    "$description": "Light source simulation for glass surfaces \u2014 cursor/gyroscope-driven",
     "angle": {
       "$value": "225deg",
       "$type": "string",
@@ -168,7 +185,7 @@
     "ambient": {
       "$value": 0.04,
       "$type": "number",
-      "$description": "Ambient light floor — minimum specular even without interaction"
+      "$description": "Ambient light floor \u2014 minimum specular even without interaction"
     }
   },
   "vibrancy": {
@@ -195,7 +212,7 @@
     }
   },
   "interactive": {
-    "$description": "Glass-specific interaction feedback — complements micro-physics",
+    "$description": "Glass-specific interaction feedback \u2014 complements micro-physics",
     "press-blur-delta": {
       "$value": "-4px",
       "$type": "string",

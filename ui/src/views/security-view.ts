@@ -60,6 +60,7 @@ const AUTONOMY_LABELS: Record<number, { label: string; color: string; descriptio
 
 @customElement("sc-security-view")
 export class ScSecurityView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-security;
@@ -68,23 +69,23 @@ export class ScSecurityView extends GatewayAwareLitElement {
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
       gap: var(--sc-space-xl);
       margin-bottom: var(--sc-space-2xl);
     }
@@ -204,8 +205,8 @@ export class ScSecurityView extends GatewayAwareLitElement {
     }
     .check-icon {
       flex-shrink: 0;
-      width: 16px;
-      height: 16px;
+      width: 1rem;
+      height: 1rem;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -225,12 +226,12 @@ export class ScSecurityView extends GatewayAwareLitElement {
       color: var(--sc-text-muted);
       margin-top: var(--sc-space-xs);
     }
-    @media (max-width: 768px) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
       .grid {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .grid {
         grid-template-columns: 1fr;
       }

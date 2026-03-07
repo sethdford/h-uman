@@ -70,11 +70,12 @@ function toRawConfig(edited: ConfigData): Record<string, unknown> {
 
 @customElement("sc-config-view")
 export class ScConfigView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-config;
       display: block;
-      max-width: 640px;
+      max-width: 40rem;
       margin: 0 auto;
     }
     .header-actions {
@@ -115,8 +116,8 @@ export class ScConfigView extends GatewayAwareLitElement {
       display: flex;
     }
     .section-header .chevron svg {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
     }
     .section-header.collapsed .chevron {
       transform: rotate(-90deg);
@@ -126,7 +127,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: var(--sc-space-md);
-      max-height: 600px;
+      max-height: 37.5rem;
       overflow: hidden;
       transition:
         max-height var(--sc-duration-slow) var(--sc-ease-out),
@@ -155,7 +156,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       margin-top: var(--sc-space-2xs);
     }
     .raw-area {
-      min-height: 280px;
+      min-height: 17.5rem;
       padding: var(--sc-space-md) var(--sc-space-md);
       background: var(--sc-bg-inset);
       border: 1px solid var(--sc-border);
@@ -174,7 +175,7 @@ export class ScConfigView extends GatewayAwareLitElement {
     .raw-area:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+      box-shadow: 0 0 0 var(--sc-radius-sm) var(--sc-accent-subtle);
     }
     .unsaved-banner {
       position: sticky;
@@ -187,14 +188,14 @@ export class ScConfigView extends GatewayAwareLitElement {
       padding: var(--sc-space-md) var(--sc-space-lg);
       background: var(--sc-bg-surface);
       border-top: 1px solid var(--sc-border);
-      box-shadow: 0 -4px 12px var(--sc-shadow-lg);
+      box-shadow: 0 calc(-1 * var(--sc-space-xs)) var(--sc-space-md) var(--sc-shadow-lg);
       z-index: 10;
     }
     .unsaved-banner-actions {
       display: flex;
       gap: var(--sc-space-sm);
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       :host {
         max-width: 100%;
       }

@@ -112,10 +112,10 @@
   --sc-physics-toggle-squash-scaleY: 0.85;
   /* Breakpoints */
   --sc-breakpoint-2xl: 1536px;
-  --sc-breakpoint-lg: 1024px;
-  --sc-breakpoint-md: 768px;
-  --sc-breakpoint-sm: 640px;
-  --sc-breakpoint-xl: 1280px;
+  --sc-breakpoint-lg: 768px;
+  --sc-breakpoint-md: 640px;
+  --sc-breakpoint-sm: 480px;
+  --sc-breakpoint-xl: 1024px;
   /* Typography */
   --sc-font: "Avenir", "Avenir Next", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --sc-font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;

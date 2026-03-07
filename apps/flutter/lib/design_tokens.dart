@@ -17,10 +17,10 @@ abstract final class SCTokens {
   static const blur_sm = 4;
   static const blur_xl = 40;
   static const breakpoint_2xl = 1536;
-  static const breakpoint_lg = 1024;
-  static const breakpoint_md = 768;
-  static const breakpoint_sm = 640;
-  static const breakpoint_xl = 1280;
+  static const breakpoint_lg = 768;
+  static const breakpoint_md = 640;
+  static const breakpoint_sm = 480;
+  static const breakpoint_xl = 1024;
   static const button_font_size = 13;
   static const button_font_weight = 500;
   static const button_min_height = 36;

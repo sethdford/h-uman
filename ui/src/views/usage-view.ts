@@ -58,25 +58,26 @@ const TIME_RANGE_OPTIONS = [
 
 @customElement("sc-usage-view")
 export class ScUsageView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-usage;
       display: block;
       color: var(--sc-text);
-      max-width: 960px;
+      max-width: 60rem;
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -113,8 +114,8 @@ export class ScUsageView extends GatewayAwareLitElement {
       gap: var(--sc-space-sm);
     }
     .provider-dot {
-      width: 10px;
-      height: 10px;
+      width: 0.625rem;
+      height: 0.625rem;
       border-radius: var(--sc-radius-full);
       flex-shrink: 0;
     }
@@ -127,7 +128,7 @@ export class ScUsageView extends GatewayAwareLitElement {
     }
     .provider-bar-track {
       flex: 1;
-      height: var(--sc-space-md, 12px);
+      height: var(--sc-space-md);
       background: var(--sc-bg-inset);
       border-radius: var(--sc-radius-sm);
       overflow: hidden;
@@ -151,7 +152,7 @@ export class ScUsageView extends GatewayAwareLitElement {
       min-width: 2.5rem;
       text-align: right;
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .provider-name {
         width: 5rem;
       }

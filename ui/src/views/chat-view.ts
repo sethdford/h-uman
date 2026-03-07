@@ -17,13 +17,14 @@ import "../components/sc-context-menu.js";
 
 @customElement("sc-chat-view")
 export class ScChatView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-chat;
       display: flex;
       flex-direction: column;
       height: 100%;
-      max-height: calc(100vh - 120px);
+      max-height: calc(100vh - var(--sc-space-5xl));
     }
     .main-wrap {
       display: flex;
@@ -38,7 +39,7 @@ export class ScChatView extends GatewayAwareLitElement {
       flex-direction: column;
       flex: 1;
       height: 100%;
-      max-width: 720px;
+      max-width: 45rem;
       margin: 0 auto;
       position: relative;
       width: 100%;
@@ -70,7 +71,7 @@ export class ScChatView extends GatewayAwareLitElement {
       display: inline-flex;
       align-items: center;
       padding: var(--sc-space-2xs) var(--sc-space-xs);
-      font-size: var(--sc-text-2xs, 10px);
+      font-size: var(--sc-text-2xs);
       font-family: var(--sc-font);
       background: var(--sc-bg-elevated);
       border: 1px solid var(--sc-border);
@@ -79,8 +80,8 @@ export class ScChatView extends GatewayAwareLitElement {
       line-height: 1;
     }
     .status-dot {
-      width: var(--sc-space-sm, 8px);
-      height: var(--sc-space-sm, 8px);
+      width: var(--sc-space-sm);
+      height: var(--sc-space-sm);
       border-radius: 50%;
     }
     .status-dot.connected {
@@ -129,11 +130,11 @@ export class ScChatView extends GatewayAwareLitElement {
       cursor: pointer;
       display: flex;
       align-items: center;
-      padding: var(--sc-space-2xs, 4px);
+      padding: var(--sc-space-2xs, var(--sc-space-xs));
     }
     .error-banner button svg {
-      width: var(--sc-icon-sm, 16px);
-      height: var(--sc-icon-sm, 16px);
+      width: 1rem;
+      height: 1rem;
       line-height: 1;
     }
     .sessions-toggle {
@@ -155,8 +156,8 @@ export class ScChatView extends GatewayAwareLitElement {
       border-color: var(--sc-text-muted);
     }
     .sessions-toggle svg {
-      width: var(--sc-icon-sm, 18px);
-      height: var(--sc-icon-sm, 18px);
+      width: 1.125rem;
+      height: 1.125rem;
     }
     @media (prefers-reduced-motion: reduce) {
       .status-dot.connecting {

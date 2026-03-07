@@ -46,24 +46,25 @@ interface UsageSummary {
 
 @customElement("sc-models-view")
 export class ScModelsView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-models;
       display: block;
-      max-width: 1200px;
+      max-width: 75rem;
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -96,7 +97,7 @@ export class ScModelsView extends GatewayAwareLitElement {
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
       gap: var(--sc-space-xl);
     }
     .card-header {
@@ -137,8 +138,8 @@ export class ScModelsView extends GatewayAwareLitElement {
       color: var(--sc-error);
     }
     .key-icon {
-      width: 14px;
-      height: 14px;
+      width: 0.875rem;
+      height: 0.875rem;
       display: inline-block;
       vertical-align: middle;
     }
@@ -147,7 +148,7 @@ export class ScModelsView extends GatewayAwareLitElement {
       display: flex;
       justify-content: flex-end;
     }
-    @media (max-width: 768px) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
       .info-section {
         grid-template-columns: 1fr;
       }
@@ -155,7 +156,7 @@ export class ScModelsView extends GatewayAwareLitElement {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .grid {
         grid-template-columns: 1fr;
       }
@@ -163,7 +164,7 @@ export class ScModelsView extends GatewayAwareLitElement {
     .search-wrap {
       margin-bottom: var(--sc-space-xl);
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .grid {
         grid-template-columns: 1fr;
       }

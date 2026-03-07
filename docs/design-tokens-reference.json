@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-07T21:14:02.364Z",
+  "generated": "2026-03-07T22:04:08.378Z",
   "groups": {
     "color.neutral": [
       {
@@ -2648,19 +2648,19 @@
     "breakpoint": [
       {
         "name": "sm",
-        "value": "640px"
+        "value": "480px"
       },
       {
         "name": "md",
-        "value": "768px"
+        "value": "640px"
       },
       {
         "name": "lg",
-        "value": "1024px"
+        "value": "768px"
       },
       {
         "name": "xl",
-        "value": "1280px"
+        "value": "1024px"
       },
       {
         "name": "2xl",
@@ -2781,6 +2781,12 @@
       {
         "name": "actions-blur",
         "value": "16px"
+      }
+    ],
+    "glass": [
+      {
+        "name": "border-color",
+        "value": "rgba(255, 255, 255, 0.08)"
       }
     ],
     "dynamic-light": [

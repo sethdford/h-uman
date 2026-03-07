@@ -160,6 +160,26 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         message_len = out_i;
     }
 
+    /* Hard length cap for iMessage: truncate at sentence boundary near 300 chars */
+    if (message_len > 300) {
+        size_t cut = 300;
+        while (cut > 100 && message[cut] != '.' && message[cut] != '!' && message[cut] != '?')
+            cut--;
+        if (cut > 100) {
+            message_len = cut + 1;
+            clean[message_len] = '\0';
+        } else {
+            size_t space_cut = 300;
+            while (space_cut > 100 && message[space_cut] != ' ')
+                space_cut--;
+            if (space_cut > 100)
+                message_len = space_cut;
+            else
+                message_len = 300;
+            clean[message_len] = '\0';
+        }
+    }
+
     sc_error_t send_err = SC_OK;
 
     /* Escaped strings: worst case 2x length */
@@ -448,8 +468,9 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
 
         c->last_rowid = rowid;
         count++;
-        fprintf(stderr, "[imessage] received from %s: %.*s\n", handle,
-                (int)(text_len > 80 ? 80 : text_len), text);
+        if (getenv("SC_DEBUG"))
+            fprintf(stderr, "[imessage] received from %.20s: [message]\n", handle,
+                    (int)(text_len > 80 ? 80 : text_len), text);
     }
 
     sqlite3_finalize(stmt);

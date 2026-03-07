@@ -23,10 +23,10 @@ export const tokens = {
   },
   breakpoint: {
     2xl: "1536px",
-    lg: "1024px",
-    md: "768px",
-    sm: "640px",
-    xl: "1280px",
+    lg: "768px",
+    md: "640px",
+    sm: "480px",
+    xl: "1024px",
   },
   button: {
     fontSize: "0.8125rem",
@@ -359,6 +359,7 @@ export const tokens = {
     semibold: 600,
   },
   glass: {
+    borderColor: "rgba(255, 255, 255, 0.08)",
     chatActionsBgOpacity: 0.9,
     chatActionsBlur: "16px",
     chatBgOpacity: 0.85,

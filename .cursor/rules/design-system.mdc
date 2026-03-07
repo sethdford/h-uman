@@ -75,7 +75,7 @@ globs:
 
 ## Responsive Breakpoints
 
-- Standard breakpoint values: 480px (sm), 640px (md), 768px (lg), 1024px (xl)
+- Standard breakpoint values: 480px (sm), 640px (md), 768px (lg), 1024px (xl) — matches `breakpoints.tokens.json`
 - Every `@media (max-width: Xpx)` MUST include an annotation comment: `@media (max-width: 480px) /* --sc-breakpoint-sm */ {`
 - Never add new magic-number breakpoints — use only the 4 standard values above
 - Breakpoint tokens: `--sc-breakpoint-sm` (480px), `--sc-breakpoint-md` (640px), `--sc-breakpoint-lg` (768px), `--sc-breakpoint-xl` (1024px)

@@ -125,11 +125,12 @@ interface ChannelStatus {
 
 @customElement("sc-automations-view")
 export class ScAutomationsView extends GatewayAwareLitElement {
+  override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-automations;
       display: block;
-      max-width: 960px;
+      max-width: 60rem;
       margin: 0 auto;
       font-family: var(--sc-font);
       color: var(--sc-text);
@@ -137,7 +138,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
       gap: var(--sc-space-md);
       margin-bottom: var(--sc-space-2xl);
     }
@@ -163,7 +164,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
     .form-textarea {
       width: 100%;
       box-sizing: border-box;
-      min-height: 100px;
+      min-height: 6.25rem;
       padding: var(--sc-space-sm) var(--sc-space-md);
       font-family: var(--sc-font);
       font-size: var(--sc-text-base);
@@ -184,7 +185,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
     .form-textarea:focus {
       outline: none;
       border-color: var(--sc-accent);
-      box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+      box-shadow: 0 0 0 0.1875rem var(--sc-accent-subtle);
     }
 
     .form-textarea:focus-visible {
@@ -266,7 +267,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
     .templates-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
       gap: var(--sc-space-md);
     }
 
@@ -296,12 +297,12 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       border-radius: var(--sc-radius);
     }
 
-    @media (max-width: 640px) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
       .stats-row {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
       .stats-row {
         grid-template-columns: 1fr;
       }
@@ -949,10 +950,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
   override render() {
     return html`
       <sc-page-hero>
-        <sc-section-header
-          heading="Automations"
-          description="AI-driven tasks and shell jobs running on schedule"
-        >
+        <sc-section-header heading="Automations" description="Scheduled agent tasks and shell jobs">
           <sc-button variant="primary" @click=${this._openNewAutomation}>New Automation</sc-button>
         </sc-section-header>
       </sc-page-hero>
