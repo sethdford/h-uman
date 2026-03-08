@@ -69,6 +69,7 @@ export class ScChart extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this._chartLoadPromise = import("https://esm.sh/chart.js@4").catch((err) => {
+      // eslint-disable-next-line no-console -- CDN load failure must be visible for debugging
       console.warn("[sc-chart] Chart.js failed to load:", err);
       this._chartUnavailable = true;
       this.requestUpdate();

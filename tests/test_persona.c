@@ -7,6 +7,7 @@
 #include "seaclaw/core/arena.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/persona.h"
+#include "seaclaw/persona/auto_profile.h"
 #include "seaclaw/providers/factory.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/tools/persona.h"
@@ -2630,6 +2631,58 @@ static void test_analyzer_prompt_includes_research_fields(void) {
     SC_ASSERT_NOT_NULL(strstr(buf, "nvc_style"));
 }
 
+static void test_auto_profile_returns_mock_overlay(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_overlay_t overlay;
+    memset(&overlay, 0, sizeof(overlay));
+    sc_error_t err = sc_persona_auto_profile(&alloc, "+18001234567", 12, &overlay);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(overlay.formality);
+    SC_ASSERT_NOT_NULL(overlay.avg_length);
+    SC_ASSERT_NOT_NULL(overlay.emoji_usage);
+    if (overlay.formality)
+        alloc.free(alloc.ctx, (char *)overlay.formality, strlen(overlay.formality) + 1);
+    if (overlay.avg_length)
+        alloc.free(alloc.ctx, (char *)overlay.avg_length, strlen(overlay.avg_length) + 1);
+    if (overlay.emoji_usage)
+        alloc.free(alloc.ctx, (char *)overlay.emoji_usage, strlen(overlay.emoji_usage) + 1);
+}
+
+static void test_auto_profile_null_args(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_overlay_t overlay;
+    SC_ASSERT_EQ(sc_persona_auto_profile(NULL, "+1", 2, &overlay), SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_persona_auto_profile(&alloc, NULL, 0, &overlay), SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_persona_auto_profile(&alloc, "+1", 2, NULL), SC_ERR_INVALID_ARGUMENT);
+}
+
+static void test_profile_describe_style_formats(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_sampler_contact_stats_t stats = {0};
+    stats.their_msg_count = 100;
+    stats.avg_their_len = 25;
+    stats.uses_emoji = true;
+    stats.sends_links = false;
+    stats.texts_in_bursts = true;
+    stats.prefers_short = true;
+    size_t out_len = 0;
+    char *desc = sc_persona_profile_describe_style(&alloc, &stats, "+1800", 5, &out_len);
+    SC_ASSERT_NOT_NULL(desc);
+    SC_ASSERT_TRUE(out_len > 0);
+    SC_ASSERT_TRUE(strstr(desc, "short") != NULL);
+    SC_ASSERT_TRUE(strstr(desc, "emoji") != NULL);
+    SC_ASSERT_TRUE(strstr(desc, "bursts") != NULL);
+    SC_ASSERT_TRUE(strstr(desc, "Mirror") != NULL);
+    alloc.free(alloc.ctx, desc, out_len + 1);
+}
+
+static void test_profile_describe_style_null_args(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    size_t out_len = 0;
+    SC_ASSERT_NULL(sc_persona_profile_describe_style(NULL, NULL, NULL, 0, &out_len));
+    SC_ASSERT_NULL(sc_persona_profile_describe_style(&alloc, NULL, NULL, 0, &out_len));
+}
+
 void run_persona_tests(void) {
     SC_TEST_SUITE("Persona");
 
@@ -2792,4 +2845,10 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_creator_synthesize_merges_research_fields);
     SC_RUN_TEST(test_contact_profile_attachment_and_dunbar);
     SC_RUN_TEST(test_analyzer_prompt_includes_research_fields);
+
+    /* Auto-profile tests */
+    SC_RUN_TEST(test_auto_profile_returns_mock_overlay);
+    SC_RUN_TEST(test_auto_profile_null_args);
+    SC_RUN_TEST(test_profile_describe_style_formats);
+    SC_RUN_TEST(test_profile_describe_style_null_args);
 }

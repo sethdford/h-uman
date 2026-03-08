@@ -21,6 +21,8 @@
 #include "seaclaw/observability/bth_metrics.h"
 #ifdef SC_HAS_PERSONA
 #include "seaclaw/persona.h"
+#include "seaclaw/persona/auto_profile.h"
+#include "seaclaw/persona/auto_tune.h"
 #include "seaclaw/persona/replay.h"
 #endif
 #ifdef SC_HAS_CRON
@@ -968,6 +970,38 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                 }
+#ifdef SC_HAS_PERSONA
+                {
+                    static bool tuned_today = false;
+                    struct tm tm_tune;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                    struct tm *lt_tune = (localtime_s(&tm_tune, &t) == 0) ? &tm_tune : NULL;
+#else
+                    struct tm *lt_tune = localtime_r(&t, &tm_tune);
+#endif
+                    if (lt_tune && lt_tune->tm_hour == 5)
+                        tuned_today = false;
+                    if (lt_tune && lt_tune->tm_hour == 4 && lt_tune->tm_min == 0 && agent &&
+                        agent->memory && !tuned_today) {
+                        char *tune_summary = NULL;
+                        size_t tune_len = 0;
+                        if (sc_replay_auto_tune(alloc, agent->memory, NULL, 0, &tune_summary,
+                                                &tune_len) == SC_OK &&
+                            tune_summary && tune_len > 0) {
+                            size_t copy_len = tune_len < sizeof(replay_insights) - 1
+                                                  ? tune_len
+                                                  : sizeof(replay_insights) - 1;
+                            memcpy(replay_insights, tune_summary, copy_len);
+                            replay_insights[copy_len] = '\0';
+                            replay_insights_len = copy_len;
+                            fprintf(stderr, "[seaclaw] daily replay auto-tune completed\n");
+                        }
+                        if (tune_summary)
+                            alloc->free(alloc->ctx, tune_summary, tune_len + 1);
+                        tuned_today = true;
+                    }
+                }
+#endif
                 /* Weekly GraphRAG community detection at Sunday 2 AM */
 #ifdef SC_ENABLE_SQLITE
                 {
@@ -1408,6 +1442,85 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
+#if defined(SC_HAS_PERSONA) && !defined(SC_IS_TEST)
+                {
+                    static char profiled_contacts[16][64];
+                    static size_t profiled_count = 0;
+                    bool already_profiled = false;
+                    for (size_t pc = 0; pc < profiled_count; pc++) {
+                        if (strncmp(profiled_contacts[pc], batch_key, key_len) == 0 &&
+                            profiled_contacts[pc][key_len] == '\0') {
+                            already_profiled = true;
+                            break;
+                        }
+                    }
+                    if (!already_profiled && profiled_count < 16 && key_len < 64) {
+                        sc_persona_overlay_t auto_ov;
+                        memset(&auto_ov, 0, sizeof(auto_ov));
+                        if (sc_persona_auto_profile(alloc, batch_key, key_len, &auto_ov) == SC_OK) {
+                            if (auto_ov.style_notes && auto_ov.style_notes_count > 0 &&
+                                auto_ov.style_notes[0]) {
+                                size_t note_len = strlen(auto_ov.style_notes[0]);
+                                if (note_len > 0) {
+                                    char *note = sc_strndup(alloc, auto_ov.style_notes[0], note_len);
+                                    if (note) {
+                                        if (contact_ctx) {
+                                            size_t total = contact_ctx_len + note_len + 2;
+                                            char *merged =
+                                                (char *)alloc->alloc(alloc->ctx, total + 1);
+                                            if (merged) {
+                                                memcpy(merged, contact_ctx, contact_ctx_len);
+                                                merged[contact_ctx_len] = '\n';
+                                                memcpy(merged + contact_ctx_len + 1, note, note_len);
+                                                merged[total] = '\0';
+                                                alloc->free(alloc->ctx, contact_ctx,
+                                                            contact_ctx_len + 1);
+                                                contact_ctx = merged;
+                                                contact_ctx_len = total;
+                                            }
+                                            alloc->free(alloc->ctx, note, note_len + 1);
+                                        } else {
+                                            contact_ctx = note;
+                                            contact_ctx_len = note_len;
+                                        }
+                                    }
+                                }
+                            }
+                            if (auto_ov.formality)
+                                alloc->free(alloc->ctx, (char *)auto_ov.formality,
+                                            strlen(auto_ov.formality) + 1);
+                            if (auto_ov.avg_length)
+                                alloc->free(alloc->ctx, (char *)auto_ov.avg_length,
+                                            strlen(auto_ov.avg_length) + 1);
+                            if (auto_ov.emoji_usage)
+                                alloc->free(alloc->ctx, (char *)auto_ov.emoji_usage,
+                                            strlen(auto_ov.emoji_usage) + 1);
+                            if (auto_ov.style_notes) {
+                                for (size_t sn = 0; sn < auto_ov.style_notes_count; sn++) {
+                                    if (auto_ov.style_notes[sn])
+                                        alloc->free(alloc->ctx, auto_ov.style_notes[sn],
+                                                    strlen(auto_ov.style_notes[sn]) + 1);
+                                }
+                                alloc->free(alloc->ctx, auto_ov.style_notes,
+                                            auto_ov.style_notes_count * sizeof(char *));
+                            }
+                            if (auto_ov.typing_quirks) {
+                                for (size_t tq = 0; tq < auto_ov.typing_quirks_count; tq++) {
+                                    if (auto_ov.typing_quirks[tq])
+                                        alloc->free(alloc->ctx, (char *)auto_ov.typing_quirks[tq],
+                                                    strlen(auto_ov.typing_quirks[tq]) + 1);
+                                }
+                                alloc->free(alloc->ctx, auto_ov.typing_quirks,
+                                            auto_ov.typing_quirks_count * sizeof(char *));
+                            }
+                        }
+                        memcpy(profiled_contacts[profiled_count], batch_key, key_len);
+                        profiled_contacts[profiled_count][key_len] = '\0';
+                        profiled_count++;
+                    }
+                }
+#endif
+
                 /* 2. Conversation history via channel vtable */
                 if (ch->channel->vtable->load_conversation_history) {
                     ch->channel->vtable->load_conversation_history(
@@ -1521,6 +1634,98 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
                 if (style_ctx)
                     alloc->free(alloc->ctx, style_ctx, style_ctx_len + 1);
+
+                /* Narrative, engagement, emotion: inject when meaningful */
+                if (history_entries && history_count > 0) {
+                    sc_narrative_phase_t narr =
+                        sc_conversation_detect_narrative(history_entries, history_count);
+                    sc_engagement_level_t eng =
+                        sc_conversation_detect_engagement(history_entries, history_count);
+                    sc_emotional_state_t emo =
+                        sc_conversation_detect_emotion(history_entries, history_count);
+
+                    bool narr_meaningful =
+                        (narr != SC_NARRATIVE_OPENING && narr != SC_NARRATIVE_BUILDING);
+                    bool eng_meaningful = (eng != SC_ENGAGEMENT_MODERATE);
+                    bool emo_meaningful =
+                        (emo.dominant_emotion && strcmp(emo.dominant_emotion, "neutral") != 0) ||
+                        emo.concerning;
+
+                    if (narr_meaningful || eng_meaningful || emo_meaningful) {
+                        char insights_buf[512];
+                        size_t insights_pos = 0;
+                        int w = snprintf(insights_buf, sizeof(insights_buf),
+                                         "\n--- Narrative/engagement/emotion ---\n");
+                        if (w > 0 && (size_t)w < sizeof(insights_buf))
+                            insights_pos = (size_t)w;
+
+                        if (narr_meaningful) {
+                            const char *phase_name =
+                                (narr == SC_NARRATIVE_CLOSING)   ? "closing"
+                                : (narr == SC_NARRATIVE_PEAK)     ? "peak"
+                                : (narr == SC_NARRATIVE_RELEASE)  ? "release"
+                                : (narr == SC_NARRATIVE_APPROACHING_CLIMAX) ? "approaching climax"
+                                                     : "building";
+                            w = snprintf(insights_buf + insights_pos,
+                                         sizeof(insights_buf) - insights_pos,
+                                         "- Narrative phase: %s\n", phase_name);
+                            if (w > 0 && (size_t)w < sizeof(insights_buf) - insights_pos)
+                                insights_pos += (size_t)w;
+                        }
+                        if (eng_meaningful) {
+                            const char *eng_name = (eng == SC_ENGAGEMENT_HIGH)      ? "high"
+                                                    : (eng == SC_ENGAGEMENT_LOW)     ? "low"
+                                                    : (eng == SC_ENGAGEMENT_DISTRACTED)
+                                                        ? "distracted"
+                                                        : "moderate";
+                            w = snprintf(insights_buf + insights_pos,
+                                         sizeof(insights_buf) - insights_pos,
+                                         "- Engagement: %s\n", eng_name);
+                            if (w > 0 && (size_t)w < sizeof(insights_buf) - insights_pos)
+                                insights_pos += (size_t)w;
+                        }
+                        if (emo_meaningful) {
+                            if (emo.dominant_emotion && strcmp(emo.dominant_emotion, "neutral") != 0) {
+                                w = snprintf(insights_buf + insights_pos,
+                                             sizeof(insights_buf) - insights_pos,
+                                             "- Emotional tone: %s%s\n", emo.dominant_emotion,
+                                             emo.concerning ? " (concerning)" : "");
+                            } else {
+                                w = snprintf(insights_buf + insights_pos,
+                                             sizeof(insights_buf) - insights_pos,
+                                             "- Emotional tone: concerning\n");
+                            }
+                            if (w > 0 && (size_t)w < sizeof(insights_buf) - insights_pos)
+                                insights_pos += (size_t)w;
+                        }
+
+                        w = snprintf(insights_buf + insights_pos,
+                                     sizeof(insights_buf) - insights_pos,
+                                     "--- End narrative/engagement/emotion ---\n");
+                        if (w > 0 && (size_t)w < sizeof(insights_buf) - insights_pos)
+                            insights_pos += (size_t)w;
+
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + insights_pos + 1;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                memcpy(merged + convo_ctx_len, insights_buf, insights_pos);
+                                merged[total - 1] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total - 1;
+                            }
+                        } else {
+                            convo_ctx = (char *)alloc->alloc(alloc->ctx, insights_pos + 1);
+                            if (convo_ctx) {
+                                memcpy(convo_ctx, insights_buf, insights_pos);
+                                convo_ctx[insights_pos] = '\0';
+                                convo_ctx_len = insights_pos;
+                            }
+                        }
+                    }
+                }
 
                 /* GraphRAG: inject knowledge graph context (cross-contact synthesis via batch_key)
                  */

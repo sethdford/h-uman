@@ -597,6 +597,8 @@ if(SC_ENABLE_PERSONA)
         src/persona/replay.c
         src/persona/circadian.c
         src/persona/relationship.c
+        src/persona/auto_profile.c
+        src/persona/auto_tune.c
         src/tools/persona.c
     )
 endif()
@@ -1159,7 +1161,8 @@ if(NOT SC_ENABLE_PERSONA)
     list(APPEND SC_TEST_EXTRA_MODULES
         src/persona/persona.c src/persona/examples.c src/persona/sampler.c
         src/persona/analyzer.c src/persona/creator.c         src/persona/cli.c src/persona/feedback.c
-        src/persona/replay.c src/persona/circadian.c src/persona/relationship.c src/tools/persona.c)
+        src/persona/replay.c src/persona/circadian.c src/persona/relationship.c
+        src/persona/auto_profile.c src/persona/auto_tune.c src/tools/persona.c)
 endif()
 add_library(seaclaw_core_test STATIC ${SC_CORE_SOURCES} ${SC_TEST_EXTRA_CHANNELS} ${SC_TEST_EXTRA_MODULES} ${SC_CRYPTO_SOURCES} ${SC_ASM_SOURCES})
 target_include_directories(seaclaw_core_test PUBLIC ${SC_ROOT}/include)

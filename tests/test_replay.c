@@ -1,4 +1,7 @@
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/memory.h"
+#include "seaclaw/memory/engines.h"
+#include "seaclaw/persona/auto_tune.h"
 #include "seaclaw/persona/replay.h"
 #include "test_framework.h"
 #include <string.h>
@@ -123,6 +126,92 @@ static void replay_build_context_empty_returns_null(void) {
     SC_ASSERT_EQ(len, 0u);
 }
 
+static void auto_tune_no_memory_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *summary = NULL;
+    size_t summary_len = 0;
+    sc_error_t err = sc_replay_auto_tune(&alloc, NULL, "contact_a", 9, &summary, &summary_len);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
+static void auto_tune_null_args(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *summary = NULL;
+    size_t summary_len = 0;
+    SC_ASSERT_EQ(sc_replay_auto_tune(NULL, NULL, NULL, 0, &summary, &summary_len),
+                 SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_replay_auto_tune(&alloc, NULL, NULL, 0, NULL, &summary_len),
+                 SC_ERR_INVALID_ARGUMENT);
+}
+
+static void auto_tune_empty_memory(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    SC_ASSERT_NOT_NULL(mem.ctx);
+
+    char *summary = NULL;
+    size_t summary_len = 0;
+    sc_error_t err = sc_replay_auto_tune(&alloc, &mem, "contact_a", 9, &summary, &summary_len);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    if (summary)
+        alloc.free(alloc.ctx, summary, summary_len + 1);
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
+static void auto_tune_with_stored_insights(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    SC_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char cat_name[] = "replay_insights";
+    sc_memory_category_t cat = {
+        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = cat_name, .name_len = sizeof(cat_name) - 1},
+    };
+
+    const char *insight1 = "POSITIVE: enthusiastic reply after casual joke\nNEGATIVE: robotic tell in greeting";
+    const char *insight2 = "POSITIVE: enthusiastic reply after music recommendation\nPOSITIVE: fast response to question";
+    const char *insight3 = "NEGATIVE: robotic tell in opening\nNEGATIVE: formulaic response";
+
+    mem.vtable->store(mem.ctx, "replay:1", 8, insight1, strlen(insight1), &cat, "contact_a", 9);
+    mem.vtable->store(mem.ctx, "replay:2", 8, insight2, strlen(insight2), &cat, "contact_a", 9);
+    mem.vtable->store(mem.ctx, "replay:3", 8, insight3, strlen(insight3), &cat, "contact_a", 9);
+
+    char *summary = NULL;
+    size_t summary_len = 0;
+    sc_error_t err = sc_replay_auto_tune(&alloc, &mem, NULL, 0, &summary, &summary_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(summary);
+    SC_ASSERT_TRUE(summary_len > 0);
+    SC_ASSERT_TRUE(strstr(summary, "enthusiastic") != NULL);
+    SC_ASSERT_TRUE(strstr(summary, "robotic") != NULL);
+
+    alloc.free(alloc.ctx, summary, summary_len + 1);
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
+static void tune_build_context_formats(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *summary = "WHAT'S WORKING: casual humor\nWHAT TO AVOID: robotic greetings";
+    size_t out_len = 0;
+    char *ctx = sc_replay_tune_build_context(&alloc, summary, strlen(summary), &out_len);
+    SC_ASSERT_NOT_NULL(ctx);
+    SC_ASSERT_TRUE(out_len > 0);
+    SC_ASSERT_TRUE(strstr(ctx, "Tone Calibration") != NULL);
+    SC_ASSERT_TRUE(strstr(ctx, "casual humor") != NULL);
+    alloc.free(alloc.ctx, ctx, out_len + 1);
+}
+
+static void tune_build_context_null(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    size_t out_len = 0;
+    char *ctx = sc_replay_tune_build_context(&alloc, NULL, 0, &out_len);
+    SC_ASSERT_NULL(ctx);
+}
+
 void run_replay_tests(void) {
     SC_TEST_SUITE("replay");
     SC_RUN_TEST(replay_detects_positive_signal);
@@ -131,4 +220,12 @@ void run_replay_tests(void) {
     SC_RUN_TEST(replay_null_args);
     SC_RUN_TEST(replay_build_context_with_insights);
     SC_RUN_TEST(replay_build_context_empty_returns_null);
+
+    SC_TEST_SUITE("replay — auto-tune");
+    SC_RUN_TEST(auto_tune_no_memory_returns_error);
+    SC_RUN_TEST(auto_tune_null_args);
+    SC_RUN_TEST(auto_tune_empty_memory);
+    SC_RUN_TEST(auto_tune_with_stored_insights);
+    SC_RUN_TEST(tune_build_context_formats);
+    SC_RUN_TEST(tune_build_context_null);
 }

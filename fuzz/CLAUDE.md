@@ -20,13 +20,16 @@ cmake --build build-fuzz -j$(nproc)
 
 ## Existing Harnesses
 
-| Harness | Target |
-|---------|--------|
-| `fuzz_json_parse` | JSON parser |
-| `fuzz_config_load` | Config loader |
-| `fuzz_base64` | Base64 codec |
-| `fuzz_url_encode` | URL encoder |
-| `fuzz_persona_json` | Persona JSON parser |
-| `fuzz_sse` | SSE stream parser |
-| `fuzz_http_parse` | HTTP request parser |
-| `fuzz_tool_params` | Tool parameter parser |
+| Harness              | Target                                       |
+| -------------------- | -------------------------------------------- |
+| `fuzz_json_parse`    | JSON parser                                  |
+| `fuzz_config_load`   | Config loader                                |
+| `fuzz_base64`        | Base64 codec                                 |
+| `fuzz_url_encode`    | URL encoder                                  |
+| `fuzz_persona_json`  | Persona JSON parser                          |
+| `fuzz_persona_parse` | Persona JSON parsing (alias)                 |
+| `fuzz_graph`         | Graph entity/relation upsert                 |
+| `fuzz_fast_capture`  | Fast capture entity/emotion/topic extraction |
+| `fuzz_sse`           | SSE stream parser                            |
+| `fuzz_http_parse`    | HTTP request parser                          |
+| `fuzz_tool_params`   | Tool parameter parser                        |

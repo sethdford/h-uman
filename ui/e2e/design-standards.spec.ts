@@ -62,16 +62,16 @@ test.describe("Wave 1: Layout Archetypes", () => {
     test("conversation area appears before controls in DOM", async ({ page }) => {
       await expect(async () => {
         const order = await page.evaluate(
-          shadowDomOrder("sc-voice-view", "sc-voice-conversation", "sc-voice-orb"),
+          shadowDomOrder("sc-voice-view", "sc-voice-conversation", ".controls-zone"),
         );
         expect(order).toBe(true);
       }).toPass({ timeout: POLL });
     });
 
-    test("conversation area appears before input bar in DOM", async ({ page }) => {
+    test("status bar appears before conversation in DOM", async ({ page }) => {
       await expect(async () => {
         const order = await page.evaluate(
-          shadowDomOrder("sc-voice-view", "sc-voice-conversation", ".input-bar"),
+          shadowDomOrder("sc-voice-view", ".status-bar", "sc-voice-conversation"),
         );
         expect(order).toBe(true);
       }).toPass({ timeout: POLL });

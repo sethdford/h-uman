@@ -172,6 +172,81 @@ static void promotion_emotions_skips_low_intensity(void) {
     sc_stm_deinit(&buf);
 }
 
+static void promotion_run_null_args_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess", 4);
+    sc_stm_record_turn(&buf, "user", 4, "Hi", 2, 1000);
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    sc_promotion_config_t config = SC_PROMOTION_DEFAULTS;
+
+    SC_ASSERT_EQ(sc_promotion_run(NULL, &buf, &mem, &config), SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_promotion_run(&alloc, NULL, &mem, &config), SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_promotion_run(&alloc, &buf, NULL, &config), SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_promotion_run(&alloc, &buf, &mem, NULL), SC_ERR_INVALID_ARGUMENT);
+
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+    sc_stm_deinit(&buf);
+}
+
+static void promotion_run_empty_memory_succeeds(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess", 4);
+    /* No turns recorded — buffer is empty */
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    sc_promotion_config_t config = SC_PROMOTION_DEFAULTS;
+
+    sc_error_t err = sc_promotion_run(&alloc, &buf, &mem, &config);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+    sc_stm_deinit(&buf);
+}
+
+static void promotion_run_emotions_null_args_returns_error(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess", 4);
+    sc_stm_record_turn(&buf, "user", 4, "Hi", 2, 1000);
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+
+    SC_ASSERT_EQ(sc_promotion_run_emotions(NULL, &buf, &mem, "user_a", 5),
+                 SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_promotion_run_emotions(&alloc, NULL, &mem, "user_a", 5),
+                 SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_promotion_run_emotions(&alloc, &buf, NULL, "user_a", 5),
+                 SC_ERR_INVALID_ARGUMENT);
+
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+    sc_stm_deinit(&buf);
+}
+
+static void promotion_entity_importance_basic(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess", 4);
+
+    sc_stm_record_turn(&buf, "user", 4, "Alice", 5, 1000);
+    sc_stm_turn_add_entity(&buf, 0, "Alice", 5, "person", 6, 3);
+
+    sc_stm_entity_t alice = {.name = "Alice",
+                             .name_len = 5,
+                             .type = "person",
+                             .type_len = 6,
+                             .mention_count = 3,
+                             .importance = 0.0};
+
+    double imp = sc_promotion_entity_importance(&alice, &buf);
+    SC_ASSERT_TRUE(imp >= 0.0 && imp <= 1.0);
+    SC_ASSERT_TRUE(imp > 0.0);
+
+    sc_stm_deinit(&buf);
+}
+
 static void promotion_emotions_null_args(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_stm_buffer_t buf;
@@ -221,6 +296,10 @@ void run_promotion_tests(void) {
     SC_RUN_TEST(promotion_skips_low_importance);
     SC_RUN_TEST(promotion_promotes_qualifying_entities);
     SC_RUN_TEST(promotion_respects_max_cap);
+    SC_RUN_TEST(promotion_run_null_args_returns_error);
+    SC_RUN_TEST(promotion_run_empty_memory_succeeds);
+    SC_RUN_TEST(promotion_run_emotions_null_args_returns_error);
+    SC_RUN_TEST(promotion_entity_importance_basic);
     SC_RUN_TEST(promotion_emotions_stores_high_intensity);
     SC_RUN_TEST(promotion_emotions_skips_low_intensity);
     SC_RUN_TEST(promotion_emotions_null_args);

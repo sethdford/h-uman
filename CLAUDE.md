@@ -88,19 +88,20 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 ## Key Paths
 
-| Path                           | What                                           |
-| ------------------------------ | ---------------------------------------------- |
-| `src/`                         | All C source (~679 files, ~128K lines)         |
-| `include/seaclaw/`             | Public headers                                 |
-| `tests/`                       | 125 test files, 3629+ tests                    |
-| `fuzz/`                        | libFuzzer harnesses                            |
-| `ui/`                          | LitElement web dashboard                       |
-| `website/`                     | Astro marketing site                           |
-| `apps/`                        | iOS, macOS, Android, Flutter native apps       |
-| `design-tokens/`               | W3C design tokens (source of truth for all UI) |
-| `docs/`                        | Guides, plans, design docs                     |
-| `docs/design-system-demo.html` | Interactive design system demo                 |
-| `scripts/`                     | Build, release, benchmark, check scripts       |
+| Path                                  | What                                                        |
+| ------------------------------------- | ----------------------------------------------------------- |
+| `src/`                                | All C source (~679 files, ~128K lines)                      |
+| `include/seaclaw/`                    | Public headers                                              |
+| `docs/cross-platform-ci-readiness.md` | Platform support, build flags, known platform-specific code |
+| `tests/`                              | 125 test files, 3629+ tests                                 |
+| `fuzz/`                               | libFuzzer harnesses                                         |
+| `ui/`                                 | LitElement web dashboard                                    |
+| `website/`                            | Astro marketing site                                        |
+| `apps/`                               | iOS, macOS, Android, Flutter native apps                    |
+| `design-tokens/`                      | W3C design tokens (source of truth for all UI)              |
+| `docs/`                               | Guides, plans, design docs                                  |
+| `docs/design-system-demo.html`        | Interactive design system demo                              |
+| `scripts/`                            | Build, release, benchmark, check scripts                    |
 
 ## Risk Tiers
 

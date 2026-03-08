@@ -518,11 +518,10 @@ test.describe("Voice (Demo)", () => {
     await waitForViewReady(page, "sc-voice-view");
   });
 
-  test("shows Voice hero section", async ({ page }) => {
+  test("shows Voice status bar", async ({ page }) => {
     await expect(async () => {
-      const hasHero = await page.evaluate(shadowExists("sc-voice-view", "sc-page-hero"));
-      const hasCompactHero = await page.evaluate(shadowExists("sc-voice-view", ".hero"));
-      expect(hasHero || hasCompactHero).toBe(true);
+      const hasStatusBar = await page.evaluate(shadowExists("sc-voice-view", ".status-bar"));
+      expect(hasStatusBar).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
@@ -534,7 +533,7 @@ test.describe("Voice (Demo)", () => {
 
   test("has text input area", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-voice-view", ".input-bar sc-textarea"))).toBe(
+      expect(await page.evaluate(shadowExists("sc-voice-view", ".input-row sc-textarea"))).toBe(
         true,
       );
     }).toPass({ timeout: POLL });
@@ -542,7 +541,7 @@ test.describe("Voice (Demo)", () => {
 
   test("has send button", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-voice-view", ".input-bar sc-button"))).toBe(true);
+      expect(await page.evaluate(shadowExists("sc-voice-view", ".input-row sc-button"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 

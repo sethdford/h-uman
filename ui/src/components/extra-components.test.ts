@@ -79,7 +79,9 @@ describe("sc-checkbox", () => {
     const el = document.createElement("sc-checkbox") as ScCheckbox;
     document.body.appendChild(el);
     await el.updateComplete;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     el.addEventListener("sc-change", (e: any) => events.push(e.detail));
     (el.shadowRoot?.querySelector('[role="checkbox"]') as HTMLElement)?.click();
     expect(events.length).toBe(1);
@@ -92,7 +94,9 @@ describe("sc-checkbox", () => {
     el.disabled = true;
     document.body.appendChild(el);
     await el.updateComplete;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     el.addEventListener("sc-change", (e: any) => events.push(e.detail));
     (el.shadowRoot?.querySelector('[role="checkbox"]') as HTMLElement)?.click();
     expect(events.length).toBe(0);
@@ -209,8 +213,9 @@ describe("sc-pagination", () => {
     document.body.appendChild(el);
     await el.updateComplete;
 
-    const events: any[] = [];
-    el.addEventListener("sc-page-change", (e: any) => events.push(e.detail));
+    const events: Array<{ page?: number }> = [];
+    el.addEventListener("sc-page-change", ((e: CustomEvent<{ page?: number }>) =>
+      events.push(e.detail)) as EventListener);
 
     const nextBtn = el.shadowRoot?.querySelector('[aria-label="Next page"]') as HTMLButtonElement;
     nextBtn?.click();
@@ -264,8 +269,9 @@ describe("sc-data-table-v2", () => {
     document.body.appendChild(el);
     await el.updateComplete;
 
-    const events: any[] = [];
-    el.addEventListener("sc-row-click", (e: any) => events.push(e.detail));
+    const events: Array<{ row?: { name: string } }> = [];
+    el.addEventListener("sc-row-click", ((e: CustomEvent<{ row?: { name: string } }>) =>
+      events.push(e.detail)) as EventListener);
 
     const row = el.shadowRoot?.querySelector("tbody tr") as HTMLElement;
     row?.click();

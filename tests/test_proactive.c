@@ -389,6 +389,161 @@ static void proactive_event_low_confidence_skipped(void) {
     sc_proactive_result_deinit(&result, &alloc);
 }
 
+static void proactive_silence_five_days_with_guidance(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    uint64_t now_ms = 1000000000000ULL;
+    uint64_t last_contact_ms = now_ms - (5 * 24 * MS_PER_HOUR);
+    sc_silence_config_t config = {.threshold_hours = 72, .enabled = true};
+
+    SC_ASSERT_EQ(sc_proactive_check_silence(&alloc, last_contact_ms, now_ms, &config, &result),
+                 SC_OK);
+    SC_ASSERT_EQ(result.count, 1u);
+    SC_ASSERT_NOT_NULL(result.actions[0].message);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "days ago") != NULL ||
+                   strstr(result.actions[0].message, "day ago") != NULL);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "check-in") != NULL ||
+                   strstr(result.actions[0].message, "CHECK-IN") != NULL ||
+                   strstr(result.actions[0].message, "natural") != NULL);
+
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_milestone_50_reflects_deep_familiarity(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    SC_ASSERT_EQ(sc_proactive_check(&alloc, 50, 14, &result), SC_OK);
+    SC_ASSERT_TRUE(result.count > 0);
+
+    bool has_milestone = false;
+    for (size_t i = 0; i < result.count; i++) {
+        if (result.actions[i].type == SC_PROACTIVE_MILESTONE) {
+            has_milestone = true;
+            SC_ASSERT_NOT_NULL(result.actions[i].message);
+            SC_ASSERT_TRUE(strstr(result.actions[i].message, "50") != NULL);
+            SC_ASSERT_TRUE(strstr(result.actions[i].message, "familiarity") != NULL ||
+                           strstr(result.actions[i].message, "know them") != NULL ||
+                           strstr(result.actions[i].message, "specificity") != NULL);
+            break;
+        }
+    }
+    SC_ASSERT_TRUE(has_milestone);
+
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_morning_briefing_lists_active_commitments(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    sc_commitment_t commitments[3];
+    memset(commitments, 0, sizeof(commitments));
+    commitments[0].status = SC_COMMITMENT_ACTIVE;
+    commitments[0].summary = "finish the quarterly report";
+    commitments[0].summary_len = strlen(commitments[0].summary);
+    commitments[1].status = SC_COMMITMENT_ACTIVE;
+    commitments[1].summary = "call mom this weekend";
+    commitments[1].summary_len = strlen(commitments[1].summary);
+    commitments[2].status = SC_COMMITMENT_ACTIVE;
+    commitments[2].summary = "gym three times";
+    commitments[2].summary_len = strlen(commitments[2].summary);
+
+    SC_ASSERT_EQ(sc_proactive_check_extended(&alloc, 5, 9, commitments, 3, NULL, NULL, 0, &result),
+                 SC_OK);
+    SC_ASSERT_TRUE(result.count > 0);
+
+    bool has_briefing = false;
+    for (size_t i = 0; i < result.count; i++) {
+        if (result.actions[i].type == SC_PROACTIVE_MORNING_BRIEFING) {
+            has_briefing = true;
+            SC_ASSERT_NOT_NULL(result.actions[i].message);
+            SC_ASSERT_TRUE(strstr(result.actions[i].message, "quarterly report") != NULL ||
+                           strstr(result.actions[i].message, "call mom") != NULL ||
+                           strstr(result.actions[i].message, "gym") != NULL ||
+                           strstr(result.actions[i].message, "commitments") != NULL);
+            break;
+        }
+    }
+    SC_ASSERT_TRUE(has_briefing);
+
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_event_yesterday_referenced_naturally(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    sc_extracted_event_t event;
+    memset(&event, 0, sizeof(event));
+    event.description = sc_strndup(&alloc, "dentist appointment", 19);
+    event.description_len = 19;
+    event.temporal_ref = sc_strndup(&alloc, "yesterday", 9);
+    event.temporal_ref_len = 9;
+    event.confidence = 0.9;
+
+    SC_ASSERT_EQ(sc_proactive_check_events(&alloc, &event, 1, &result), SC_OK);
+    SC_ASSERT_EQ(result.count, 1u);
+    SC_ASSERT_NOT_NULL(result.actions[0].message);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "dentist") != NULL);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "yesterday") != NULL);
+
+    alloc.free(alloc.ctx, event.description, event.description_len + 1);
+    alloc.free(alloc.ctx, event.temporal_ref, event.temporal_ref_len + 1);
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_starter_diverse_memories_produce_context(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    SC_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char topic_cat[] = "conversation";
+    sc_memory_category_t cat = {
+        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+        .data.custom = {.name = topic_cat, .name_len = sizeof(topic_cat) - 1},
+    };
+    static const char CONTACT[] = "contact_diverse";
+
+    const char *keys[] = {"topic:contact_diverse:1", "topic:contact_diverse:2",
+                         "topic:contact_diverse:3", "topic:contact_diverse:4",
+                         "topic:contact_diverse:5", "topic:contact_diverse:6"};
+    const char *contents[] = {
+        "recent topics activities interests: planning a trip to Japan",
+        "recent topics activities interests: new job at Acme Corp",
+        "recent topics activities interests: training for a marathon",
+        "recent topics activities interests: adopting a rescue dog",
+        "recent topics activities interests: learning to cook Thai food",
+        "recent topics activities interests: house renovation project",
+    };
+    for (int i = 0; i < 6; i++) {
+        mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i], strlen(contents[i]),
+                          &cat, CONTACT, sizeof(CONTACT) - 1);
+    }
+
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err =
+        sc_proactive_build_starter(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, &out, &out_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(out);
+    SC_ASSERT_TRUE(out_len > 0);
+    bool has_context = strstr(out, "Japan") != NULL || strstr(out, "marathon") != NULL ||
+                       strstr(out, "dog") != NULL || strstr(out, "Thai") != NULL ||
+                       strstr(out, "renovation") != NULL || strstr(out, "Acme") != NULL ||
+                       strstr(out, "trip") != NULL || strstr(out, "job") != NULL;
+    SC_ASSERT_TRUE(has_context);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+}
+
 static void proactive_event_cap_at_three(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_proactive_result_t result;
@@ -419,7 +574,9 @@ static void proactive_event_cap_at_three(void) {
 void run_proactive_tests(void) {
     SC_TEST_SUITE("proactive");
     SC_RUN_TEST(proactive_milestone_at_10_sessions);
+    SC_RUN_TEST(proactive_milestone_50_reflects_deep_familiarity);
     SC_RUN_TEST(proactive_morning_briefing_at_9am);
+    SC_RUN_TEST(proactive_morning_briefing_lists_active_commitments);
     SC_RUN_TEST(proactive_no_milestone_at_7_sessions);
     SC_RUN_TEST(proactive_commitment_follow_up);
     SC_RUN_TEST(proactive_pattern_insight);
@@ -431,11 +588,14 @@ void run_proactive_tests(void) {
     SC_RUN_TEST(proactive_silence_triggers_after_threshold);
     SC_RUN_TEST(proactive_silence_no_trigger_within_threshold);
     SC_RUN_TEST(proactive_silence_week_message);
+    SC_RUN_TEST(proactive_silence_five_days_with_guidance);
     SC_RUN_TEST(proactive_silence_disabled);
     SC_RUN_TEST(proactive_starter_with_memory);
+    SC_RUN_TEST(proactive_starter_diverse_memories_produce_context);
     SC_RUN_TEST(proactive_starter_empty_memory);
     SC_RUN_TEST(proactive_starter_null_memory);
     SC_RUN_TEST(proactive_event_follow_up);
+    SC_RUN_TEST(proactive_event_yesterday_referenced_naturally);
     SC_RUN_TEST(proactive_event_low_confidence_skipped);
     SC_RUN_TEST(proactive_event_cap_at_three);
 }

@@ -41,7 +41,8 @@ export class ScVoiceConversation extends LitElement {
     }
 
     .conversation-thread {
-      overflow: hidden;
+      overflow-y: auto;
+      scroll-behavior: smooth;
       padding: 0;
     }
   `;

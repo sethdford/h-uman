@@ -4,6 +4,7 @@
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/memory.h"
+#include "seaclaw/platform.h"
 #include <math.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -50,7 +51,8 @@ static const char *const schema_parts[] = {
 
 static void get_timestamp(char *buf, size_t buf_size) {
     time_t t = time(NULL);
-    struct tm *tm = gmtime(&t);
+    struct tm tm_buf;
+    struct tm *tm = sc_platform_gmtime_r(&t, &tm_buf);
     if (tm) {
         strftime(buf, buf_size, "%Y-%m-%dT%H:%M:%SZ", tm);
     } else {
@@ -59,9 +61,10 @@ static void get_timestamp(char *buf, size_t buf_size) {
 }
 
 static char *generate_id(sc_allocator_t *alloc) {
+    static unsigned long counter = 0;
     char ts[32];
     get_timestamp(ts, sizeof(ts));
-    return sc_sprintf(alloc, "mem_%ld_%s", (long)time(NULL), ts);
+    return sc_sprintf(alloc, "mem_%ld_%lu_%s", (long)time(NULL), ++counter, ts);
 }
 
 static const char *category_to_string(const sc_memory_category_t *cat) {

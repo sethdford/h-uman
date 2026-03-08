@@ -6,15 +6,11 @@ import type { GatewayStatus } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { SESSION_KEY_VOICE } from "../utils.js";
 import type { ChatItem } from "../controllers/chat-controller.js";
-import { icons } from "../icons.js";
 import { ScToast } from "../components/sc-toast.js";
 import "../components/sc-button.js";
 import "../components/sc-skeleton.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
 import "../components/sc-empty-state.js";
+import "../components/sc-status-dot.js";
 import "../components/sc-voice-orb.js";
 import "../components/sc-voice-conversation.js";
 
@@ -35,30 +31,87 @@ export class ScVoiceView extends GatewayAwareLitElement {
       view-transition-name: view-voice;
       display: flex;
       flex-direction: column;
-      flex: 1;
-      min-height: 0;
-      color: var(--sc-text);
-      max-width: 45rem;
-      width: 100%;
-      margin: 0 auto;
-      padding: var(--sc-space-lg) var(--sc-space-xl);
-      box-sizing: border-box;
-      overflow: hidden;
+      height: 100%;
+      max-height: calc(100vh - var(--sc-space-5xl));
     }
 
-    /* ── Stats row ────────────────────────────────────── */
+    .container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      height: 100%;
+      max-width: 45rem;
+      margin: 0 auto;
+      position: relative;
+      width: 100%;
+      min-height: 0;
+    }
 
-    .staleness {
+    /* ── Status bar ─────────────────────────────────── */
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sc-space-xs) var(--sc-space-md);
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text-muted);
+      background: color-mix(in srgb, var(--sc-bg-surface) 60%, transparent);
+      backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
+      -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
+      border-bottom: 1px solid var(--sc-border-subtle);
+      flex-shrink: 0;
+    }
+
+    .status-left,
+    .status-right {
+      display: flex;
+      align-items: center;
+      gap: var(--sc-space-sm);
+    }
+
+    .status-title {
+      font-weight: var(--sc-weight-medium);
+      color: var(--sc-text);
+      font-size: var(--sc-text-sm);
+    }
+
+    .status-meta {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
     }
 
-    /* ── Input bar ────────────────────────────────────── */
+    /* ── Error banner ───────────────────────────────── */
 
-    .input-bar {
+    .error-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--sc-space-md);
+      background: var(--sc-error-dim);
+      border: 1px solid var(--sc-error);
+      border-radius: var(--sc-radius);
+      color: var(--sc-error);
+      font-size: var(--sc-text-base);
+      flex-shrink: 0;
+    }
+
+    /* ── Controls zone (orb + input bar) ────────────── */
+
+    .controls-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      padding: var(--sc-space-sm) var(--sc-space-md) var(--sc-space-md);
+      flex-shrink: 0;
+    }
+
+    .input-row {
       display: flex;
       gap: var(--sc-space-sm);
       align-items: flex-end;
+      width: 100%;
       padding: var(--sc-space-md);
       background: var(--sc-bg-surface);
       background-image: var(--sc-surface-gradient);
@@ -67,48 +120,41 @@ export class ScVoiceView extends GatewayAwareLitElement {
       box-shadow: var(--sc-shadow-card);
       backdrop-filter: blur(var(--sc-glass-subtle-blur));
       -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur));
-      flex-shrink: 0;
+      box-sizing: border-box;
     }
 
-    .input-bar sc-textarea {
+    .input-row sc-textarea {
       flex: 1;
       --sc-bg-elevated: var(--sc-bg);
     }
 
-    .input-bar sc-button {
+    .input-row sc-button {
       min-height: 2.75rem;
     }
 
-    /* ── Skeleton ─────────────────────────────────────── */
+    /* ── Skeleton ────────────────────────────────────── */
 
-    .skeleton-hero {
-      height: 5.625rem;
-      margin-bottom: var(--sc-space-2xl, 2rem);
-      border-radius: var(--sc-radius-xl, 16px);
+    .skeleton-bar {
+      height: 2.25rem;
+      margin-bottom: var(--sc-space-xs);
     }
 
-    .skeleton-mic {
+    .skeleton-controls {
       display: flex;
-      justify-content: center;
-      margin-bottom: var(--sc-space-xl);
+      flex-direction: column;
+      align-items: center;
+      gap: var(--sc-space-sm);
+      padding: var(--sc-space-md);
     }
 
-    .skeleton-input {
-      margin-bottom: var(--sc-space-xl);
-    }
+    /* ── Responsive ──────────────────────────────────── */
 
-    /* ── Responsive ───────────────────────────────────── */
-
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
-      :host {
-        max-width: 100%;
-        padding: var(--sc-space-sm) var(--sc-space-md);
-      }
-      .input-bar {
+    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+      .input-row {
         flex-direction: column;
         align-items: stretch;
       }
-      .input-bar sc-button {
+      .input-row sc-button {
         min-height: 2.5rem;
       }
     }
@@ -450,39 +496,57 @@ export class ScVoiceView extends GatewayAwareLitElement {
   override render() {
     if (this._loading) return this._renderSkeleton();
     return html`
-      ${this._renderHero()}
-      ${this.error
-        ? html`
-            <sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-              <sc-button variant="primary" @click=${this._retrySend} aria-label="Retry">
-                Retry
-              </sc-button>
-            </sc-empty-state>
-          `
-        : nothing}
-      ${this._renderConversation()} ${this._renderVoiceZone()} ${this._renderInputBar()}
+      <div class="container">
+        ${this._renderStatusBar()} ${this._renderErrorBanner()}
+        <sc-voice-conversation
+          .items=${this._chatItems}
+          .isWaiting=${this.voiceStatus === "processing"}
+        ></sc-voice-conversation>
+        ${this._renderControls()}
+      </div>
     `;
   }
 
   private _renderSkeleton() {
     return html`
-      <sc-skeleton variant="card" class="skeleton-hero"></sc-skeleton>
-      <sc-skeleton variant="card" style="flex:1"></sc-skeleton>
-      <div class="skeleton-mic">
-        <sc-skeleton variant="circle" width="96px" height="96px"></sc-skeleton>
+      <div class="container">
+        <sc-skeleton variant="card" class="skeleton-bar"></sc-skeleton>
+        <sc-skeleton variant="card" style="flex:1"></sc-skeleton>
+        <div class="skeleton-controls">
+          <sc-skeleton variant="circle" width="72px" height="72px"></sc-skeleton>
+          <sc-skeleton variant="card" height="60px" style="width:100%"></sc-skeleton>
+        </div>
       </div>
-      <sc-skeleton variant="card" height="60px" class="skeleton-input"></sc-skeleton>
     `;
   }
 
-  private _renderHero() {
+  private _renderStatusBar() {
+    const connLabel =
+      this._connectionStatus === "connected"
+        ? "Connected"
+        : this._connectionStatus === "connecting"
+          ? "Reconnecting\u2026"
+          : "Disconnected";
+
+    const durationLabel =
+      this._sessionDurationSec > 0 ? this._formatDuration(this._sessionDurationSec) : "";
+
     return html`
-      <sc-page-hero role="region" aria-label="Voice">
-        <sc-section-header
-          heading="Voice"
-          description="Voice assistant with speech recognition and real-time conversation"
-        >
-          <span class="staleness">${this.stalenessLabel}</span>
+      <div class="status-bar" role="region" aria-label="Voice status">
+        <div class="status-left">
+          <sc-status-dot
+            .status=${this._connectionStatus === "connected" ? "healthy" : "offline"}
+          ></sc-status-dot>
+          <span class="status-title">Voice</span>
+          <span class="status-meta">${connLabel}</span>
+          ${durationLabel ? html`<span class="status-meta">· ${durationLabel}</span>` : nothing}
+          ${this._messages.length > 0
+            ? html`<span class="status-meta"
+                >· ${this._messages.length} message${this._messages.length !== 1 ? "s" : ""}</span
+              >`
+            : nothing}
+        </div>
+        <div class="status-right">
           <sc-button
             variant="ghost"
             size="sm"
@@ -500,77 +564,56 @@ export class ScVoiceView extends GatewayAwareLitElement {
           >
             New Session
           </sc-button>
-          <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data">
-            Refresh
-          </sc-button>
-        </sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-stat-card
-          .value=${this._messages.length}
-          label="Messages"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
-          .value=${this._sessionDurationSec}
-          label="Duration"
-          suffix="s"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
-          .value=${this._sessionCount}
-          label="Sessions"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+        </div>
+      </div>
     `;
   }
 
-  private _renderVoiceZone() {
+  private _renderErrorBanner() {
+    if (!this.error) return nothing;
     return html`
-      <sc-voice-orb
-        .state=${this.voiceStatus}
-        ?disabled=${!this.speechSupported || this._connectionStatus === "disconnected"}
-        @sc-voice-mic-toggle=${this.toggleMic}
-      ></sc-voice-orb>
-    `;
-  }
-
-  private _renderInputBar() {
-    return html`
-      <div class="input-bar">
-        <sc-textarea
-          placeholder="Speech transcript appears here, or type manually…"
-          .value=${this.transcript}
-          ?disabled=${this._connectionStatus === "disconnected"}
-          @sc-input=${(e: CustomEvent<{ value: string }>) => {
-            this.transcript = e.detail.value;
-          }}
-          @keydown=${this.handleKeyDown}
-          resize="none"
-          rows="2"
-          .accessibleLabel=${"Speech transcript"}
-        ></sc-textarea>
-        <sc-button
-          variant="primary"
-          ?disabled=${!this.transcript.trim() ||
-          this.voiceStatus === "processing" ||
-          this._connectionStatus === "disconnected"}
-          @click=${() => this.send()}
-          aria-label="Send voice message"
-        >
-          Send
+      <div class="error-banner" role="alert">
+        <span>${this.error}</span>
+        <sc-button variant="ghost" size="sm" @click=${this._retrySend} aria-label="Retry">
+          Retry
         </sc-button>
       </div>
     `;
   }
 
-  private _renderConversation() {
+  private _renderControls() {
     return html`
-      <sc-voice-conversation
-        .items=${this._chatItems}
-        .isWaiting=${this.voiceStatus === "processing"}
-      ></sc-voice-conversation>
+      <div class="controls-zone">
+        <sc-voice-orb
+          .state=${this.voiceStatus}
+          ?disabled=${!this.speechSupported || this._connectionStatus === "disconnected"}
+          @sc-voice-mic-toggle=${this.toggleMic}
+        ></sc-voice-orb>
+        <div class="input-row">
+          <sc-textarea
+            placeholder="Speak or type a message…"
+            .value=${this.transcript}
+            ?disabled=${this._connectionStatus === "disconnected"}
+            @sc-input=${(e: CustomEvent<{ value: string }>) => {
+              this.transcript = e.detail.value;
+            }}
+            @keydown=${this.handleKeyDown}
+            resize="none"
+            rows="2"
+            .accessibleLabel=${"Voice message input"}
+          ></sc-textarea>
+          <sc-button
+            variant="primary"
+            ?disabled=${!this.transcript.trim() ||
+            this.voiceStatus === "processing" ||
+            this._connectionStatus === "disconnected"}
+            @click=${() => this.send()}
+            aria-label="Send voice message"
+          >
+            Send
+          </sc-button>
+        </div>
+      </div>
     `;
   }
 }

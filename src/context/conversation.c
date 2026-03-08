@@ -1573,6 +1573,8 @@ size_t sc_conversation_apply_typing_quirks(char *buf, size_t len, const char *co
     bool do_no_periods = quirk_enabled(quirks, quirks_count, "no_periods");
     bool do_no_commas = quirk_enabled(quirks, quirks_count, "no_commas");
     bool do_no_apostrophes = quirk_enabled(quirks, quirks_count, "no_apostrophes");
+    bool do_double_space_to_newline =
+        quirk_enabled(quirks, quirks_count, "double_space_to_newline");
 
     if (do_lowercase) {
         for (size_t i = 0; i < len; i++) {
@@ -1599,6 +1601,20 @@ size_t sc_conversation_apply_typing_quirks(char *buf, size_t len, const char *co
                 strip = true;
             if (!strip)
                 buf[out++] = buf[i];
+        }
+        buf[out] = '\0';
+        len = out;
+    }
+
+    if (do_double_space_to_newline) {
+        size_t out = 0;
+        for (size_t i = 0; i < len; i++) {
+            if (i + 1 < len && buf[i] == ' ' && buf[i + 1] == ' ') {
+                buf[out++] = '\n';
+                i++; /* skip second space */
+            } else {
+                buf[out++] = buf[i];
+            }
         }
         buf[out] = '\0';
         len = out;
@@ -2065,6 +2081,8 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
 
 /* ── URL extraction ──────────────────────────────────────────────────── */
 
+/* Utility for future use. Not currently wired into production; link-sharing
+ * logic uses sc_conversation_should_share_link with pattern matching instead. */
 size_t sc_conversation_extract_urls(const char *text, size_t text_len, sc_url_extract_t *urls,
                                     size_t max_urls) {
     if (!text || !urls || max_urls == 0)

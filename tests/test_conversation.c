@@ -811,6 +811,14 @@ static void quirks_empty_quirks_noop(void) {
     SC_ASSERT_EQ(len, 12u);
 }
 
+static void apply_typing_quirks_double_space_to_newline(void) {
+    char buf[] = "hello  world  foo";
+    const char *quirks[] = {"double_space_to_newline"};
+    size_t len = sc_conversation_apply_typing_quirks(buf, strlen(buf), quirks, 1);
+    SC_ASSERT_STR_EQ(buf, "hello\nworld\nfoo");
+    SC_ASSERT_EQ(len, 15u);
+}
+
 /* ── Typo simulation tests ────────────────────────────────────────────── */
 
 static void typo_applies_with_right_seed(void) {
@@ -1255,6 +1263,7 @@ void run_conversation_tests(void) {
     SC_RUN_TEST(quirks_multiple_combined);
     SC_RUN_TEST(quirks_null_input_noop);
     SC_RUN_TEST(quirks_empty_quirks_noop);
+    SC_RUN_TEST(apply_typing_quirks_double_space_to_newline);
 
     /* Anti-repetition */
     SC_RUN_TEST(repetition_detects_repeated_opener);

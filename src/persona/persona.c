@@ -320,8 +320,13 @@ void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
 
 const sc_contact_profile_t *sc_persona_find_contact(const sc_persona_t *persona,
                                                     const char *contact_id, size_t contact_id_len) {
-    if (!persona || !contact_id || !persona->contacts)
+    if (!persona || !contact_id || !persona->contacts) {
+        if (getenv("SC_DEBUG"))
+            fprintf(stderr, "[persona] find_contact: early NULL (persona=%p contact_id=%p contacts=%p)\n",
+                    (const void *)persona, (const void *)contact_id,
+                    persona ? (const void *)persona->contacts : NULL);
         return NULL;
+    }
     for (size_t i = 0; i < persona->contacts_count; i++) {
         const sc_contact_profile_t *cp = &persona->contacts[i];
         if (!cp->contact_id)
@@ -330,6 +335,10 @@ const sc_contact_profile_t *sc_persona_find_contact(const sc_persona_t *persona,
         if (cp_len == contact_id_len && memcmp(cp->contact_id, contact_id, contact_id_len) == 0)
             return cp;
     }
+    if (getenv("SC_DEBUG"))
+        fprintf(stderr, "[persona] find_contact: no match for '%.*s' among %zu contacts\n",
+                (int)(contact_id_len > 30 ? 30 : contact_id_len), contact_id,
+                persona->contacts_count);
     return NULL;
 }
 
