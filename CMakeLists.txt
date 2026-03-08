@@ -1452,8 +1452,10 @@ if(SC_ENABLE_PERSONA)
     list(APPEND SC_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c)
 endif()
 
-# Paperclip tests
-list(APPEND SC_TEST_SOURCES tests/test_paperclip.c)
+# Paperclip tests (requires libcurl)
+if(SC_ENABLE_CURL)
+    list(APPEND SC_TEST_SOURCES tests/test_paperclip.c)
+endif()
 
 add_executable(seaclaw_tests ${SC_TEST_SOURCES} wasm/wasm_alloc.c)
 target_link_libraries(seaclaw_tests seaclaw_core_test)

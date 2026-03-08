@@ -54,8 +54,10 @@
 #ifdef SC_HAS_PERSONA
 #include "seaclaw/persona.h"
 #endif
+#ifdef SC_ENABLE_CURL
 #include "seaclaw/paperclip/client.h"
 #include "seaclaw/paperclip/heartbeat.h"
+#endif
 #include "seaclaw/plugin_loader.h"
 #include "seaclaw/tool.h"
 #include "seaclaw/tools/factory.h"
@@ -179,12 +181,14 @@ static bool svc_agent_on_message_locked(sc_bus_event_type_t type, const sc_bus_e
     return result;
 }
 
+#ifdef SC_ENABLE_CURL
 static sc_error_t cmd_paperclip(sc_allocator_t *alloc, int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[2], "heartbeat") == 0)
         return sc_paperclip_heartbeat(alloc, argc - 2, argv + 2);
     fprintf(stderr, "Usage: seaclaw paperclip heartbeat\n");
     return SC_ERR_INVALID_ARGUMENT;
 }
+#endif
 
 static const sc_command_t commands[] = {
     {"agent", "Start interactive agent (--demo: use local Ollama)", cmd_agent},
@@ -213,7 +217,9 @@ static const sc_command_t commands[] = {
     {"models", "List available models", cmd_models},
     {"auth", "Authentication management", cmd_auth},
     {"update", "Check for updates", cmd_update},
+#ifdef SC_ENABLE_CURL
     {"paperclip", "Paperclip agent integration", cmd_paperclip},
+#endif
     {"version", "Show version information", cmd_version},
     {"help", "Show help information", cmd_help},
 };

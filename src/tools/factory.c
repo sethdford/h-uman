@@ -74,7 +74,9 @@
 #ifdef SC_HAS_PERSONA
 #include "seaclaw/tools/persona.h"
 #endif
+#ifdef SC_ENABLE_CURL
 #include "seaclaw/tools/paperclip.h"
+#endif
 #include "seaclaw/tools/schema.h"
 #include "seaclaw/tools/send_message.h"
 #include "seaclaw/tools/shell.h"
@@ -113,7 +115,11 @@
 #else
 #define SC_TOOLS_HW_COUNT 0
 #endif
+#ifdef SC_ENABLE_CURL
 #define SC_TOOLS_PAPERCLIP_COUNT 1
+#else
+#define SC_TOOLS_PAPERCLIP_COUNT 0
+#endif
 #define SC_TOOLS_COUNT                                                                             \
     (SC_TOOLS_COUNT_BASE + SC_TOOLS_BROWSER_COUNT + SC_TOOLS_ADVANCED_COUNT + SC_TOOLS_HW_COUNT +  \
      SC_TOOLS_PAPERCLIP_COUNT)
@@ -480,10 +486,12 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc, const char *workspace_
         goto fail;
     idx++;
 
+#ifdef SC_ENABLE_CURL
     err = sc_paperclip_tool_create(alloc, &tools[idx]);
     if (err != SC_OK)
         goto fail;
     idx++;
+#endif
 
     /* Load MCP server tools from config when available */
     sc_tool_t *mcp_tools = NULL;
