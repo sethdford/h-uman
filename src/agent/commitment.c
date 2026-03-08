@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static size_t sc_commitment_id_counter;
+
 static const char *PROMISE_PATTERNS[] = {"I will ", "I'll ", "I promise ", NULL};
 static const char *INTENTION_PATTERNS[] = {"I'm going to ", "I am going to ", "I plan to ", NULL};
 static const char *REMINDER_PATTERNS[] = {"remind me ", "don't let me forget ", "don't forget to ",
@@ -37,7 +39,7 @@ static size_t extract_clause_end(const char *text, size_t text_len, size_t start
 static sc_error_t add_commitment(sc_allocator_t *alloc, sc_commitment_detect_result_t *result,
                                  const char *text, size_t text_len, size_t pattern_start,
                                  size_t pattern_len, sc_commitment_type_t type,
-                                 const char *role, size_t role_len, size_t *counter) {
+                                 const char *role, size_t role_len) {
     if (result->count >= SC_COMMITMENT_DETECT_MAX)
         return SC_OK;
 
@@ -56,7 +58,8 @@ static sc_error_t add_commitment(sc_allocator_t *alloc, sc_commitment_detect_res
         return SC_ERR_OUT_OF_MEMORY;
 
     char id_buf[64];
-    int n = snprintf(id_buf, sizeof(id_buf), "commit-%zu", ++(*counter));
+    size_t id_val = ++sc_commitment_id_counter;
+    int n = snprintf(id_buf, sizeof(id_buf), "commit-%zu", id_val);
     if (n <= 0 || (size_t)n >= sizeof(id_buf)) {
         alloc->free(alloc->ctx, summary, summary_len + 1);
         return SC_ERR_INVALID_ARGUMENT;
@@ -110,7 +113,7 @@ static sc_error_t add_commitment(sc_allocator_t *alloc, sc_commitment_detect_res
 
 static sc_error_t scan_patterns(sc_allocator_t *alloc, const char *text, size_t text_len,
                                const char *role, size_t role_len,
-                               sc_commitment_detect_result_t *result, size_t *counter,
+                               sc_commitment_detect_result_t *result,
                                const char *const *patterns, sc_commitment_type_t type) {
     for (size_t p = 0; patterns[p]; p++) {
         size_t plen = strlen(patterns[p]);
@@ -124,7 +127,7 @@ static sc_error_t scan_patterns(sc_allocator_t *alloc, const char *text, size_t 
             if (!word_boundary)
                 continue;
             sc_error_t err = add_commitment(alloc, result, text, text_len, i, plen, type, role,
-                                            role_len, counter);
+                                            role_len);
             if (err != SC_OK)
                 return err;
             if (result->count >= SC_COMMITMENT_DETECT_MAX)
@@ -144,21 +147,20 @@ sc_error_t sc_commitment_detect(sc_allocator_t *alloc, const char *text, size_t 
     if (!text || text_len == 0)
         return SC_OK;
 
-    size_t counter = 0;
     sc_error_t err;
-    err = scan_patterns(alloc, text, text_len, role, role_len, result, &counter, PROMISE_PATTERNS,
+    err = scan_patterns(alloc, text, text_len, role, role_len, result, PROMISE_PATTERNS,
                        SC_COMMITMENT_PROMISE);
     if (err != SC_OK)
         return err;
-    err = scan_patterns(alloc, text, text_len, role, role_len, result, &counter,
-                        INTENTION_PATTERNS, SC_COMMITMENT_INTENTION);
+    err = scan_patterns(alloc, text, text_len, role, role_len, result, INTENTION_PATTERNS,
+                        SC_COMMITMENT_INTENTION);
     if (err != SC_OK)
         return err;
-    err = scan_patterns(alloc, text, text_len, role, role_len, result, &counter, REMINDER_PATTERNS,
+    err = scan_patterns(alloc, text, text_len, role, role_len, result, REMINDER_PATTERNS,
                        SC_COMMITMENT_REMINDER);
     if (err != SC_OK)
         return err;
-    err = scan_patterns(alloc, text, text_len, role, role_len, result, &counter, GOAL_PATTERNS,
+    err = scan_patterns(alloc, text, text_len, role, role_len, result, GOAL_PATTERNS,
                        SC_COMMITMENT_GOAL);
     if (err != SC_OK)
         return err;

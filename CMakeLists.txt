@@ -370,6 +370,7 @@ set(SC_CORE_SOURCES
     src/agent/reflection.c
     src/agent/input_guard.c
     src/agent/commitment.c
+    src/agent/commitment_store.c
     src/providers/error_classify.c
     src/providers/api_key.c
     src/providers/helpers.c
