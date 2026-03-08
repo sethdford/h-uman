@@ -1,4 +1,5 @@
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/memory.h"
 #include "seaclaw/memory/engines.h"
 #include "seaclaw/memory/promotion.h"
 #include "seaclaw/memory/stm.h"
@@ -107,6 +108,82 @@ static void promotion_promotes_qualifying_entities(void) {
     sc_stm_deinit(&buf);
 }
 
+static void promotion_emotions_stores_high_intensity(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess_emotions", 14);
+
+    sc_stm_record_turn(&buf, "user", 4, "I'm so happy!", 13, 1234567890);
+    sc_stm_turn_add_emotion(&buf, 0, SC_EMOTION_JOY, 0.8);
+
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    sc_error_t err = sc_promotion_run_emotions(&alloc, &buf, &mem, "user_a", 5);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    size_t count = 0;
+    err = mem.vtable->count(mem.ctx, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(count >= 1);
+
+    sc_memory_entry_t *recall_out = NULL;
+    size_t recall_count = 0;
+    err = mem.vtable->recall(mem.ctx, &alloc, "joy", 3, 10, NULL, 0, &recall_out, &recall_count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_TRUE(recall_count >= 1);
+
+    bool found_joy = false;
+    for (size_t i = 0; i < recall_count; i++) {
+        if (recall_out[i].content && strstr(recall_out[i].content, "0.80") != NULL) {
+            found_joy = true;
+            break;
+        }
+    }
+    SC_ASSERT_TRUE(found_joy);
+
+    for (size_t i = 0; i < recall_count; i++)
+        sc_memory_entry_free_fields(&alloc, &recall_out[i]);
+    alloc.free(alloc.ctx, recall_out, recall_count * sizeof(sc_memory_entry_t));
+
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+    sc_stm_deinit(&buf);
+}
+
+static void promotion_emotions_skips_low_intensity(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess_low", 8);
+
+    sc_stm_record_turn(&buf, "user", 4, "Meh", 3, 1000);
+    sc_stm_turn_add_emotion(&buf, 0, SC_EMOTION_JOY, 0.2);
+
+    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
+    sc_error_t err = sc_promotion_run_emotions(&alloc, &buf, &mem, "user_a", 5);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_memory_entry_t entry;
+    bool found = false;
+    err = mem.vtable->get(mem.ctx, &alloc, "emotion:user_a:1000:joy", 22, &entry, &found);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_FALSE(found);
+
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+    sc_stm_deinit(&buf);
+}
+
+static void promotion_emotions_null_args(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_stm_buffer_t buf;
+    sc_stm_init(&buf, alloc, "sess", 4);
+    sc_stm_record_turn(&buf, "user", 4, "Hi", 2, 1000);
+
+    sc_error_t err = sc_promotion_run_emotions(&alloc, &buf, NULL, "user_a", 5);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+
+    sc_stm_deinit(&buf);
+}
+
 static void promotion_respects_max_cap(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_stm_buffer_t buf;
@@ -144,4 +221,7 @@ void run_promotion_tests(void) {
     SC_RUN_TEST(promotion_skips_low_importance);
     SC_RUN_TEST(promotion_promotes_qualifying_entities);
     SC_RUN_TEST(promotion_respects_max_cap);
+    SC_RUN_TEST(promotion_emotions_stores_high_intensity);
+    SC_RUN_TEST(promotion_emotions_skips_low_intensity);
+    SC_RUN_TEST(promotion_emotions_null_args);
 }

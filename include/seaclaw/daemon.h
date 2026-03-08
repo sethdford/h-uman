@@ -53,6 +53,13 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 sc_error_t sc_service_run_agent_cron(sc_allocator_t *alloc, struct sc_agent *agent,
                                      sc_service_channel_t *channels, size_t channel_count);
 
+#ifdef SC_HAS_PERSONA
+/* Proactive check-ins: iterate contacts with proactive_checkin=true,
+ * check last interaction time, and initiate natural conversations. */
+void sc_service_run_proactive_checkins(sc_allocator_t *alloc, struct sc_agent *agent,
+                                       sc_service_channel_t *channels, size_t channel_count);
+#endif
+
 sc_error_t sc_daemon_install(sc_allocator_t *alloc);
 sc_error_t sc_daemon_uninstall(void);
 sc_error_t sc_daemon_logs(void);

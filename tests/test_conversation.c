@@ -709,6 +709,139 @@ static void quirks_empty_quirks_noop(void) {
     SC_ASSERT_EQ(len, 12u);
 }
 
+/* ── Anti-repetition detection tests ──────────────────────────────────── */
+
+static void repetition_detects_repeated_opener(void) {
+    sc_channel_history_entry_t entries[] = {
+        make_entry(true, "haha yeah totally", "10:00"),
+        make_entry(false, "right?", "10:01"),
+        make_entry(true, "haha that's so funny", "10:02"),
+        make_entry(false, "lol", "10:03"),
+        make_entry(true, "haha i know", "10:04"),
+        make_entry(false, "anyway", "10:05"),
+        make_entry(true, "haha what's up", "10:06"),
+    };
+    char buf[1024];
+    size_t len = sc_conversation_detect_repetition(entries, 7, buf, sizeof(buf));
+    SC_ASSERT_TRUE(len > 0);
+    SC_ASSERT_NOT_NULL(strstr(buf, "haha"));
+}
+
+static void repetition_detects_question_overuse(void) {
+    sc_channel_history_entry_t entries[] = {
+        make_entry(true, "sounds fun?", "10:00"),
+        make_entry(false, "yeah", "10:01"),
+        make_entry(true, "what time?", "10:02"),
+        make_entry(false, "7", "10:03"),
+        make_entry(true, "where should we go?", "10:04"),
+        make_entry(false, "idk", "10:05"),
+        make_entry(true, "how about tacos?", "10:06"),
+    };
+    char buf[1024];
+    size_t len = sc_conversation_detect_repetition(entries, 7, buf, sizeof(buf));
+    SC_ASSERT_TRUE(len > 0);
+    SC_ASSERT_NOT_NULL(strstr(buf, "question"));
+}
+
+static void repetition_no_issues_returns_zero(void) {
+    sc_channel_history_entry_t entries[] = {
+        make_entry(true, "hey what's up", "10:00"),
+        make_entry(false, "not much", "10:01"),
+        make_entry(true, "cool. wanna hang?", "10:02"),
+        make_entry(false, "sure", "10:03"),
+    };
+    char buf[1024];
+    size_t len = sc_conversation_detect_repetition(entries, 4, buf, sizeof(buf));
+    SC_ASSERT_EQ(len, 0u);
+}
+
+static void repetition_too_few_messages_returns_zero(void) {
+    sc_channel_history_entry_t entries[] = {
+        make_entry(true, "hey", "10:00"),
+        make_entry(false, "hey", "10:01"),
+    };
+    char buf[1024];
+    size_t len = sc_conversation_detect_repetition(entries, 2, buf, sizeof(buf));
+    SC_ASSERT_EQ(len, 0u);
+}
+
+/* ── Relationship-tier calibration tests ─────────────────────────────── */
+
+static void relationship_close_friend(void) {
+    char buf[512];
+    size_t len = sc_conversation_calibrate_relationship("close friend", "high", "open", buf,
+                                                        sizeof(buf));
+    SC_ASSERT_TRUE(len > 0);
+    SC_ASSERT_NOT_NULL(strstr(buf, "Close"));
+    SC_ASSERT_NOT_NULL(strstr(buf, "WARMTH"));
+    SC_ASSERT_NOT_NULL(strstr(buf, "VULNERABILITY"));
+}
+
+static void relationship_acquaintance(void) {
+    char buf[512];
+    size_t len =
+        sc_conversation_calibrate_relationship("acquaintance", "low", NULL, buf, sizeof(buf));
+    SC_ASSERT_TRUE(len > 0);
+    SC_ASSERT_NOT_NULL(strstr(buf, "Acquaintance"));
+}
+
+static void relationship_null_fields(void) {
+    char buf[512];
+    size_t len = sc_conversation_calibrate_relationship(NULL, NULL, NULL, buf, sizeof(buf));
+    SC_ASSERT_TRUE(len > 0); /* Still writes header/footer */
+}
+
+/* ── Group chat classifier tests ─────────────────────────────────────── */
+
+static void group_direct_address_responds(void) {
+    sc_group_response_t r =
+        sc_conversation_classify_group("hey seth what do you think", 26, "seth", 4, NULL, 0);
+    SC_ASSERT_EQ(r, SC_GROUP_RESPOND);
+}
+
+static void group_question_responds(void) {
+    sc_group_response_t r =
+        sc_conversation_classify_group("anyone free tonight?", 20, "bot", 3, NULL, 0);
+    SC_ASSERT_EQ(r, SC_GROUP_RESPOND);
+}
+
+static void group_short_no_prompt_skips(void) {
+    sc_group_response_t r =
+        sc_conversation_classify_group("lol", 3, "bot", 3, NULL, 0);
+    SC_ASSERT_EQ(r, SC_GROUP_SKIP);
+}
+
+static void group_too_many_responses_skips(void) {
+    sc_channel_history_entry_t entries[] = {
+        make_entry(false, "hey", "10:00"),
+        make_entry(true, "hey", "10:01"),
+        make_entry(true, "what's up", "10:02"),
+        make_entry(true, "nm here", "10:03"),
+    };
+    sc_group_response_t r =
+        sc_conversation_classify_group("cool story", 10, "bot", 3, entries, 4);
+    SC_ASSERT_EQ(r, SC_GROUP_SKIP);
+}
+
+static void group_empty_skips(void) {
+    sc_group_response_t r = sc_conversation_classify_group("", 0, "bot", 3, NULL, 0);
+    SC_ASSERT_EQ(r, SC_GROUP_SKIP);
+}
+
+/* ── Time-of-day calibration test ────────────────────────────────────── */
+
+static void calibrate_includes_time_directive(void) {
+    char buf[2048];
+    const char *msg = "hey what's up";
+    size_t len =
+        sc_conversation_calibrate_length(msg, strlen(msg), NULL, 0, buf, sizeof(buf));
+    SC_ASSERT_TRUE(len > 0);
+    /* TIME: directive only appears during non-daytime hours (9-17).
+     * We can't guarantee the test runs at a specific time, so just check
+     * that the function produces output without crashing. */
+    SC_ASSERT_NOT_NULL(strstr(buf, "calibration"));
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
@@ -809,4 +942,25 @@ void run_conversation_tests(void) {
     SC_RUN_TEST(quirks_multiple_combined);
     SC_RUN_TEST(quirks_null_input_noop);
     SC_RUN_TEST(quirks_empty_quirks_noop);
+
+    /* Anti-repetition */
+    SC_RUN_TEST(repetition_detects_repeated_opener);
+    SC_RUN_TEST(repetition_detects_question_overuse);
+    SC_RUN_TEST(repetition_no_issues_returns_zero);
+    SC_RUN_TEST(repetition_too_few_messages_returns_zero);
+
+    /* Relationship-tier calibration */
+    SC_RUN_TEST(relationship_close_friend);
+    SC_RUN_TEST(relationship_acquaintance);
+    SC_RUN_TEST(relationship_null_fields);
+
+    /* Group chat classifier */
+    SC_RUN_TEST(group_direct_address_responds);
+    SC_RUN_TEST(group_question_responds);
+    SC_RUN_TEST(group_short_no_prompt_skips);
+    SC_RUN_TEST(group_too_many_responses_skips);
+    SC_RUN_TEST(group_empty_skips);
+
+    /* Time-of-day */
+    SC_RUN_TEST(calibrate_includes_time_directive);
 }

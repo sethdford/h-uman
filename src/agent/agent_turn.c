@@ -758,25 +758,38 @@ sc_error_t sc_agent_turn(sc_agent_t *agent, const char *msg, size_t msg_len, cha
 #ifdef SC_HAS_PERSONA
             sc_relationship_update(&agent->relationship, 1);
 #endif
-            /* Deep extraction: periodically extract facts to long-term memory */
-            if (agent->memory && agent->memory->vtable &&
-                (agent->stm.turn_count % 10 == 0) && agent->stm.turn_count > 0) {
-#ifndef SC_IS_TEST
-                char *stm_text = NULL;
-                size_t stm_text_len = 0;
-                if (sc_stm_build_context(&agent->stm, agent->alloc, &stm_text, &stm_text_len) ==
-                        SC_OK &&
-                    stm_text) {
-                    char *de_prompt = NULL;
-                    size_t de_prompt_len = 0;
-                    if (sc_deep_extract_build_prompt(agent->alloc, stm_text, stm_text_len,
-                                                     &de_prompt, &de_prompt_len) == SC_OK &&
-                        de_prompt) {
-                        agent->alloc->free(agent->alloc->ctx, de_prompt, de_prompt_len + 1);
+            /* Deep extraction: lightweight pattern-based fact extraction from user message */
+            if (agent->memory && agent->memory->vtable && agent->memory->vtable->store) {
+                sc_deep_extract_result_t de_result;
+                memset(&de_result, 0, sizeof(de_result));
+                if (sc_deep_extract_lightweight(agent->alloc, msg, msg_len, &de_result) == SC_OK &&
+                    de_result.fact_count > 0) {
+                    static const char facts_cat[] = "facts";
+                    sc_memory_category_t cat = {
+                        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+                        .data.custom = {.name = facts_cat, .name_len = sizeof(facts_cat) - 1},
+                    };
+                    const char *sid = agent->memory->current_session_id;
+                    size_t sid_len = agent->memory->current_session_id_len;
+                    for (size_t fi = 0; fi < de_result.fact_count; fi++) {
+                        const sc_extracted_fact_t *f = &de_result.facts[fi];
+                        if (!f->subject || !f->predicate || !f->object)
+                            continue;
+                        size_t key_len = strlen(f->subject) + 1 + strlen(f->predicate) + 1 +
+                                        strlen(f->object);
+                        char key_buf[256];
+                        if (key_len < sizeof(key_buf)) {
+                            int n = snprintf(key_buf, sizeof(key_buf), "%s:%s:%s", f->subject,
+                                             f->predicate, f->object);
+                            if (n > 0 && (size_t)n < sizeof(key_buf)) {
+                                (void)agent->memory->vtable->store(
+                                    agent->memory->ctx, key_buf, (size_t)n,
+                                    f->object, strlen(f->object), &cat, sid ? sid : "", sid_len);
+                            }
+                        }
                     }
-                    agent->alloc->free(agent->alloc->ctx, stm_text, stm_text_len + 1);
                 }
-#endif
+                sc_deep_extract_result_deinit(&de_result, agent->alloc);
             }
             if (system_prompt)
                 agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);

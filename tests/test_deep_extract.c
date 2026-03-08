@@ -70,6 +70,77 @@ static void deep_extract_parse_handles_malformed_json(void) {
     sc_deep_extract_result_deinit(&out, &alloc);
 }
 
+static void lightweight_extracts_work_at(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *text = "I work at Google";
+    sc_deep_extract_result_t out;
+    sc_error_t err = sc_deep_extract_lightweight(&alloc, text, strlen(text), &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.fact_count, 1);
+    SC_ASSERT_STR_EQ(out.facts[0].subject, "user");
+    SC_ASSERT_STR_EQ(out.facts[0].predicate, "works_at");
+    SC_ASSERT_STR_EQ(out.facts[0].object, "Google");
+    sc_deep_extract_result_deinit(&out, &alloc);
+}
+
+static void lightweight_extracts_like(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *text = "I like hiking";
+    sc_deep_extract_result_t out;
+    sc_error_t err = sc_deep_extract_lightweight(&alloc, text, strlen(text), &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.fact_count, 1);
+    SC_ASSERT_STR_EQ(out.facts[0].subject, "user");
+    SC_ASSERT_STR_EQ(out.facts[0].predicate, "likes");
+    SC_ASSERT_STR_EQ(out.facts[0].object, "hiking");
+    sc_deep_extract_result_deinit(&out, &alloc);
+}
+
+static void lightweight_extracts_live_in(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *text = "I live in Austin";
+    sc_deep_extract_result_t out;
+    sc_error_t err = sc_deep_extract_lightweight(&alloc, text, strlen(text), &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.fact_count, 1);
+    SC_ASSERT_STR_EQ(out.facts[0].subject, "user");
+    SC_ASSERT_STR_EQ(out.facts[0].predicate, "lives_in");
+    SC_ASSERT_STR_EQ(out.facts[0].object, "Austin");
+    sc_deep_extract_result_deinit(&out, &alloc);
+}
+
+static void lightweight_null_input(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_deep_extract_result_t out;
+    sc_error_t err = sc_deep_extract_lightweight(&alloc, NULL, 0, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.fact_count, 0);
+    sc_deep_extract_result_deinit(&out, &alloc);
+}
+
+static void lightweight_extracts_case_insensitive(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *text = "I WORK AT Acme Corp";
+    sc_deep_extract_result_t out;
+    sc_error_t err = sc_deep_extract_lightweight(&alloc, text, strlen(text), &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.fact_count, 1);
+    SC_ASSERT_STR_EQ(out.facts[0].subject, "user");
+    SC_ASSERT_STR_EQ(out.facts[0].predicate, "works_at");
+    SC_ASSERT_STR_EQ(out.facts[0].object, "Acme Corp");
+    sc_deep_extract_result_deinit(&out, &alloc);
+}
+
+static void lightweight_no_match(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *text = "hello how are you";
+    sc_deep_extract_result_t out;
+    sc_error_t err = sc_deep_extract_lightweight(&alloc, text, strlen(text), &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out.fact_count, 0);
+    sc_deep_extract_result_deinit(&out, &alloc);
+}
+
 void run_deep_extract_tests(void) {
     SC_TEST_SUITE("deep_extract");
     SC_RUN_TEST(deep_extract_build_prompt_includes_conversation);
@@ -77,4 +148,10 @@ void run_deep_extract_tests(void) {
     SC_RUN_TEST(deep_extract_parse_extracts_relations);
     SC_RUN_TEST(deep_extract_parse_handles_empty_response);
     SC_RUN_TEST(deep_extract_parse_handles_malformed_json);
+    SC_RUN_TEST(lightweight_extracts_work_at);
+    SC_RUN_TEST(lightweight_extracts_like);
+    SC_RUN_TEST(lightweight_extracts_live_in);
+    SC_RUN_TEST(lightweight_extracts_case_insensitive);
+    SC_RUN_TEST(lightweight_null_input);
+    SC_RUN_TEST(lightweight_no_match);
 }

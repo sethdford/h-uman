@@ -1488,6 +1488,32 @@ size_t sc_conversation_calibrate_length(const char *last_msg, size_t last_msg_le
         }
     }
 
+    /* Time-of-day energy modifier */
+    {
+        time_t now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+        int hour = tm_now.tm_hour;
+
+        int tw = 0;
+        if (hour >= 0 && hour < 6) {
+            tw = snprintf(buf + pos, cap - pos,
+                          "TIME: Late night. Low energy, introspective. "
+                          "Shorter messages. Don't be peppy.\n");
+        } else if (hour >= 6 && hour < 9) {
+            tw = snprintf(buf + pos, cap - pos,
+                          "TIME: Morning. Brief, functional. Don't overload.\n");
+        } else if (hour >= 17 && hour < 21) {
+            tw = snprintf(buf + pos, cap - pos,
+                          "TIME: Evening. Social time. More playful, higher energy.\n");
+        } else if (hour >= 21) {
+            tw = snprintf(buf + pos, cap - pos,
+                          "TIME: Late evening. Winding down. Chill, reflective. "
+                          "Don't start heavy new topics.\n");
+        }
+        POS_ADVANCE(tw, pos, cap);
+    }
+
     w = snprintf(buf + pos, cap - pos, "--- End calibration ---\n");
     POS_ADVANCE(w, pos, cap);
 
@@ -1613,7 +1639,7 @@ char *sc_conversation_analyze_style(sc_allocator_t *alloc,
         w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
                      "SLANG: They use texting abbreviations (lol, omg, ngl, tbh, idk). "
                      "Use these naturally.\n");
-        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+        POS_ADVANCE(w, pos, STYLE_BUF_CAP);
     }
 
     /* Average message length */
@@ -1635,7 +1661,7 @@ char *sc_conversation_analyze_style(sc_allocator_t *alloc,
                          "You can write a bit more but stay concise.\n",
                          avg);
         }
-        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+        POS_ADVANCE(w, pos, STYLE_BUF_CAP);
     }
 
     /* Anti-AI warnings */
@@ -1904,4 +1930,277 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
     }
 
     return SC_RESPONSE_FULL;
+}
+
+/* ── Anti-repetition detection ────────────────────────────────────────── */
+
+size_t sc_conversation_detect_repetition(const sc_channel_history_entry_t *entries, size_t count,
+                                         char *buf, size_t cap) {
+    if (!entries || count < 4 || !buf || cap < 64)
+        return 0;
+
+    /* Collect last N "from_me" messages */
+    const char *my_msgs[8];
+    size_t my_count = 0;
+    for (size_t i = count; i > 0 && my_count < 8; i--) {
+        if (entries[i - 1].from_me) {
+            my_msgs[my_count++] = entries[i - 1].text;
+        }
+    }
+    if (my_count < 3)
+        return 0;
+
+    size_t pos = 0;
+    int w;
+    bool found = false;
+
+    /* Detect repeated openers (first word of each message) */
+    char openers[8][16];
+    for (size_t i = 0; i < my_count; i++) {
+        size_t j = 0;
+        const char *m = my_msgs[i];
+        while (m[j] && m[j] != ' ' && j < 15)
+            j++;
+        if (j > 0 && j < 15) {
+            for (size_t k = 0; k < j; k++) {
+                char c = m[k];
+                if (c >= 'A' && c <= 'Z')
+                    c += 32;
+                openers[i][k] = c;
+            }
+            openers[i][j] = '\0';
+        } else {
+            openers[i][0] = '\0';
+        }
+    }
+
+    /* Check if same opener used 3+ times in last 5 messages */
+    for (size_t i = 0; i < my_count && i < 5; i++) {
+        if (openers[i][0] == '\0')
+            continue;
+        size_t matches = 0;
+        for (size_t j = 0; j < my_count && j < 5; j++) {
+            if (strcmp(openers[i], openers[j]) == 0)
+                matches++;
+        }
+        if (matches >= 3) {
+            if (!found) {
+                w = snprintf(buf + pos, cap - pos, "\n--- Anti-repetition ---\n");
+                POS_ADVANCE(w, pos, cap);
+                found = true;
+            }
+            w = snprintf(buf + pos, cap - pos,
+                         "WARNING: You've started %zu of your last messages with '%s'. "
+                         "Vary your openers. Start differently this time.\n",
+                         matches, openers[i]);
+            POS_ADVANCE(w, pos, cap);
+            break;
+        }
+    }
+
+    /* Check if always ending with a question */
+    size_t questions = 0;
+    size_t check = my_count < 5 ? my_count : 5;
+    for (size_t i = 0; i < check; i++) {
+        const char *m = my_msgs[i];
+        size_t ml = strlen(m);
+        if (ml > 0 && m[ml - 1] == '?')
+            questions++;
+    }
+    if (questions >= 3) {
+        if (!found) {
+            w = snprintf(buf + pos, cap - pos, "\n--- Anti-repetition ---\n");
+            POS_ADVANCE(w, pos, cap);
+            found = true;
+        }
+        w = snprintf(buf + pos, cap - pos,
+                     "WARNING: You've ended %zu of your last %zu messages with a question. "
+                     "Not every message needs a follow-up question. "
+                     "Make a statement, react, or just let it sit.\n",
+                     questions, check);
+        POS_ADVANCE(w, pos, cap);
+    }
+
+    /* Check if always using "haha"/"lol" as filler */
+    size_t laughs = 0;
+    for (size_t i = 0; i < check; i++) {
+        if (str_contains_ci(my_msgs[i], strlen(my_msgs[i]), "haha") ||
+            str_contains_ci(my_msgs[i], strlen(my_msgs[i]), "lol"))
+            laughs++;
+    }
+    if (laughs >= 3) {
+        if (!found) {
+            w = snprintf(buf + pos, cap - pos, "\n--- Anti-repetition ---\n");
+            POS_ADVANCE(w, pos, cap);
+            found = true;
+        }
+        w = snprintf(buf + pos, cap - pos,
+                     "WARNING: You've used 'haha'/'lol' in %zu of your last %zu messages. "
+                     "Drop the nervous laughter. Not everything needs softening.\n",
+                     laughs, check);
+        POS_ADVANCE(w, pos, cap);
+    }
+
+    if (found) {
+        w = snprintf(buf + pos, cap - pos, "--- End anti-repetition ---\n");
+        POS_ADVANCE(w, pos, cap);
+    }
+
+    return pos;
+}
+
+/* ── Relationship-tier calibration ────────────────────────────────────── */
+
+size_t sc_conversation_calibrate_relationship(const char *relationship_stage,
+                                              const char *warmth_level,
+                                              const char *vulnerability_level, char *buf,
+                                              size_t cap) {
+    if (!buf || cap < 64)
+        return 0;
+
+    size_t pos = 0;
+    int w = snprintf(buf, cap, "\n--- Relationship context ---\n");
+    POS_ADVANCE(w, pos, cap);
+
+    /* Relationship stage → engagement depth */
+    if (relationship_stage) {
+        if (str_contains_ci(relationship_stage, strlen(relationship_stage), "close") ||
+            str_contains_ci(relationship_stage, strlen(relationship_stage), "best") ||
+            str_contains_ci(relationship_stage, strlen(relationship_stage), "partner") ||
+            str_contains_ci(relationship_stage, strlen(relationship_stage), "intimate")) {
+            w = snprintf(buf + pos, cap - pos,
+                         "RELATIONSHIP: Close. You can be fully yourself — inside jokes, "
+                         "mild roasting, deep honesty, comfortable silence. "
+                         "Don't over-explain or be overly polite.\n");
+        } else if (str_contains_ci(relationship_stage, strlen(relationship_stage), "friend")) {
+            w = snprintf(buf + pos, cap - pos,
+                         "RELATIONSHIP: Friend. Warm and genuine but with some boundaries. "
+                         "Banter is fine. Personal topics ok if they bring them up first.\n");
+        } else if (str_contains_ci(relationship_stage, strlen(relationship_stage), "acquaint") ||
+                   str_contains_ci(relationship_stage, strlen(relationship_stage), "new")) {
+            w = snprintf(buf + pos, cap - pos,
+                         "RELATIONSHIP: Acquaintance/new. Keep it lighter. "
+                         "Don't assume familiarity. Match their formality level. "
+                         "No inside jokes. No unsolicited deep topics.\n");
+        } else if (str_contains_ci(relationship_stage, strlen(relationship_stage), "professional") ||
+                   str_contains_ci(relationship_stage, strlen(relationship_stage), "work")) {
+            w = snprintf(buf + pos, cap - pos,
+                         "RELATIONSHIP: Professional. Stay on topic. "
+                         "Friendly but not casual. No slang, minimal emoji.\n");
+        } else {
+            w = snprintf(buf + pos, cap - pos,
+                         "RELATIONSHIP: %s. Calibrate formality to match.\n", relationship_stage);
+        }
+        POS_ADVANCE(w, pos, cap);
+    }
+
+    /* Warmth level → emotional expression */
+    if (warmth_level) {
+        int ww = 0;
+        if (str_contains_ci(warmth_level, strlen(warmth_level), "high")) {
+            ww = snprintf(buf + pos, cap - pos,
+                          "WARMTH: High. Affectionate language is natural with this person.\n");
+        } else if (str_contains_ci(warmth_level, strlen(warmth_level), "low")) {
+            ww = snprintf(buf + pos, cap - pos,
+                          "WARMTH: Low. Keep it cool and understated. No gushing.\n");
+        }
+        POS_ADVANCE(ww, pos, cap);
+    }
+
+    /* Vulnerability level → depth permission */
+    if (vulnerability_level) {
+        int vw = 0;
+        if (str_contains_ci(vulnerability_level, strlen(vulnerability_level), "high") ||
+            str_contains_ci(vulnerability_level, strlen(vulnerability_level), "open")) {
+            vw = snprintf(buf + pos, cap - pos,
+                          "VULNERABILITY: Open. You can share real feelings and be honest "
+                          "about struggles. This person can handle depth.\n");
+        } else if (str_contains_ci(vulnerability_level, strlen(vulnerability_level), "low") ||
+                   str_contains_ci(vulnerability_level, strlen(vulnerability_level), "guarded")) {
+            vw = snprintf(buf + pos, cap - pos,
+                          "VULNERABILITY: Guarded. Keep emotional sharing surface-level. "
+                          "Don't dump feelings. Stay light.\n");
+        }
+        POS_ADVANCE(vw, pos, cap);
+    }
+
+    w = snprintf(buf + pos, cap - pos, "--- End relationship ---\n");
+    POS_ADVANCE(w, pos, cap);
+
+    return pos;
+}
+
+/* ── Group chat classifier ────────────────────────────────────────────── */
+
+sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_len,
+                                                   const char *bot_name, size_t bot_name_len,
+                                                   const sc_channel_history_entry_t *entries,
+                                                   size_t count) {
+    if (!msg || msg_len == 0)
+        return SC_GROUP_SKIP;
+
+    /* Always respond if directly addressed */
+    if (bot_name && bot_name_len > 0 && str_contains_ci(msg, msg_len, bot_name))
+        return SC_GROUP_RESPOND;
+
+    /* Always respond to direct questions (contains "?" and is short) */
+    bool has_question = false;
+    for (size_t i = 0; i < msg_len; i++) {
+        if (msg[i] == '?') {
+            has_question = true;
+            break;
+        }
+    }
+    if (has_question && msg_len < 100)
+        return SC_GROUP_RESPOND;
+
+    /* Skip tapbacks and reactions */
+    if (msg_len <= 3)
+        return SC_GROUP_SKIP;
+
+    /* Skip if we responded to the last 2 messages already (don't dominate) */
+    if (entries && count >= 3) {
+        size_t consecutive_mine = 0;
+        for (size_t i = count; i > 0 && consecutive_mine < 3; i--) {
+            if (entries[i - 1].from_me)
+                consecutive_mine++;
+            else
+                break;
+        }
+        if (consecutive_mine >= 2)
+            return SC_GROUP_SKIP;
+    }
+
+    /* Count how much of the recent conversation we've participated in.
+     * If we've responded to >40% of the last 10 messages, dial back. */
+    if (entries && count >= 6) {
+        size_t window = count < 10 ? count : 10;
+        size_t my_msgs = 0;
+        for (size_t i = count - window; i < count; i++) {
+            if (entries[i].from_me)
+                my_msgs++;
+        }
+        if (my_msgs * 100 / window > 40)
+            return SC_GROUP_SKIP;
+    }
+
+    /* Emotional content or someone asking for help → respond */
+    static const char *engage_words[] = {
+        "help", "anyone", "thoughts?", "what do you", "need", "advice", "opinion", NULL,
+    };
+    for (int i = 0; engage_words[i]; i++) {
+        if (str_contains_ci(msg, msg_len, engage_words[i]))
+            return SC_GROUP_RESPOND;
+    }
+
+    /* Short message with no clear prompt → skip */
+    if (msg_len < 30 && !has_question)
+        return SC_GROUP_SKIP;
+
+    /* Default: brief acknowledgment for medium messages, skip for long ones
+     * (long messages in group chats are usually directed at specific people) */
+    if (msg_len > 100)
+        return SC_GROUP_SKIP;
+
+    return SC_GROUP_BRIEF;
 }

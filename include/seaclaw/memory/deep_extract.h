@@ -37,4 +37,7 @@ sc_error_t sc_deep_extract_parse(sc_allocator_t *alloc, const char *response, si
                                  sc_deep_extract_result_t *out);
 void sc_deep_extract_result_deinit(sc_deep_extract_result_t *result, sc_allocator_t *alloc);
 
+sc_error_t sc_deep_extract_lightweight(sc_allocator_t *alloc, const char *text, size_t text_len,
+                                       sc_deep_extract_result_t *out);
+
 #endif

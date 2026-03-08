@@ -1,7 +1,13 @@
 #include "seaclaw/memory/stm.h"
 #include "seaclaw/core/string.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+
+static const char *EMOTION_NAMES[] = {
+    "neutral", "joy", "sadness", "anger", "fear",
+    "surprise", "frustration", "excitement", "anxiety",
+};
 
 sc_error_t sc_stm_init(sc_stm_buffer_t *buf, sc_allocator_t alloc, const char *session_id,
                        size_t session_id_len) {
@@ -215,6 +221,87 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
         len += content_len;
         result[len++] = '\n';
         result[len++] = '\n';
+    }
+
+    size_t user_start = 0;
+    size_t user_count = 0;
+    for (size_t i = n; i > 0; i--) {
+        const sc_stm_turn_t *t = sc_stm_get(buf, i - 1);
+        if (t && t->role && strcmp(t->role, "user") == 0) {
+            user_start = i - 1;
+            user_count++;
+            if (user_count >= 5)
+                break;
+        }
+    }
+
+    double max_intensity[9];
+    for (size_t i = 0; i < 9; i++)
+        max_intensity[i] = 0.0;
+    double pos_sum = 0.0, neg_sum = 0.0;
+
+    for (size_t i = user_start; i < n; i++) {
+        const sc_stm_turn_t *t = sc_stm_get(buf, i);
+        if (!t || !t->role || strcmp(t->role, "user") != 0)
+            continue;
+        for (size_t j = 0; j < t->emotion_count; j++) {
+            double intensity = t->emotions[j].intensity;
+            if (intensity < 0.3)
+                continue;
+            sc_emotion_tag_t tag = t->emotions[j].tag;
+            size_t tag_idx = (size_t)tag;
+            if (tag_idx >= sizeof(EMOTION_NAMES) / sizeof(EMOTION_NAMES[0]))
+                continue;
+            if (intensity > max_intensity[tag_idx])
+                max_intensity[tag_idx] = intensity;
+            if (tag == SC_EMOTION_JOY || tag == SC_EMOTION_EXCITEMENT || tag == SC_EMOTION_SURPRISE)
+                pos_sum += intensity;
+            else if (tag != SC_EMOTION_NEUTRAL)
+                neg_sum += intensity;
+        }
+    }
+
+    char emotion_buf[256];
+    size_t emotion_buf_len = 0;
+    size_t emotion_entries = 0;
+    for (size_t tag_idx = 0; tag_idx < 9; tag_idx++) {
+        if (max_intensity[tag_idx] < 0.3)
+            continue;
+        const char *label = max_intensity[tag_idx] >= 0.7 ? "high"
+            : (max_intensity[tag_idx] >= 0.4 ? "moderate" : "low");
+        int written = snprintf(emotion_buf + emotion_buf_len,
+                              sizeof(emotion_buf) - emotion_buf_len,
+                              "%s%s (%s)",
+                              emotion_buf_len > 0 ? ", " : "",
+                              EMOTION_NAMES[tag_idx],
+                              label);
+        if (written > 0 && (size_t)written < sizeof(emotion_buf) - emotion_buf_len) {
+            emotion_buf_len += (size_t)written;
+            emotion_entries++;
+        }
+    }
+
+    if (emotion_entries > 0) {
+        const char *trend = pos_sum > neg_sum ? "mostly positive" : (neg_sum > pos_sum ? "mostly negative" : "mixed");
+        char traj[512];
+        int traj_len = snprintf(traj, sizeof(traj),
+                                "\n### Emotional Trajectory\nRecent user emotions: %s\nTrend: %s\n",
+                                emotion_buf, trend);
+        if (traj_len > 0 && (size_t)traj_len < sizeof(traj)) {
+            size_t need = (size_t)traj_len;
+            while (len + need + 1 > cap) {
+                size_t new_cap = cap * 2;
+                char *nb = (char *)alloc->realloc(alloc->ctx, result, cap, new_cap);
+                if (!nb) {
+                    alloc->free(alloc->ctx, result, cap);
+                    return SC_ERR_OUT_OF_MEMORY;
+                }
+                result = nb;
+                cap = new_cap;
+            }
+            memcpy(result + len, traj, (size_t)traj_len);
+            len += (size_t)traj_len;
+        }
     }
 
     result[len] = '\0';

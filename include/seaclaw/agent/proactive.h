@@ -1,6 +1,7 @@
 #ifndef SC_PROACTIVE_H
 #define SC_PROACTIVE_H
 
+#include "seaclaw/agent/commitment.h"
 #include "seaclaw/core/allocator.h"
 #include "seaclaw/core/error.h"
 #include <stddef.h>
@@ -30,6 +31,11 @@ typedef struct sc_proactive_result {
 
 sc_error_t sc_proactive_check(sc_allocator_t *alloc, uint32_t session_count, uint8_t hour,
                                sc_proactive_result_t *out);
+sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_count, uint8_t hour,
+                                        const sc_commitment_t *commitments, size_t commitment_count,
+                                        const char *const *pattern_subjects,
+                                        const uint32_t *pattern_counts, size_t pattern_count,
+                                        sc_proactive_result_t *out);
 sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result,
                                        sc_allocator_t *alloc, size_t max_actions,
                                        char **out, size_t *out_len);

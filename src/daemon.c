@@ -2,6 +2,7 @@
 #include "seaclaw/agent.h"
 #include "seaclaw/config.h"
 #include "seaclaw/context/conversation.h"
+#include "seaclaw/context/mood.h"
 #include "seaclaw/core/error.h"
 #include "seaclaw/core/process_util.h"
 #include "seaclaw/core/string.h"
@@ -372,6 +373,174 @@ sc_error_t sc_service_run_agent_cron(sc_allocator_t *alloc, sc_agent_t *agent,
 
 #endif /* SC_HAS_CRON */
 
+/* ── Proactive check-in ──────────────────────────────────────────────── */
+
+#ifdef SC_HAS_PERSONA
+
+static char *proactive_prompt_for_contact(sc_allocator_t *alloc, sc_memory_t *memory,
+                                          const sc_contact_profile_t *cp, size_t *out_len) {
+    char buf[1024];
+    size_t pos = 0;
+    int w = snprintf(buf, sizeof(buf),
+                     "You're initiating a casual check-in text to %s. ",
+                     cp->name ? cp->name : "this person");
+    if (w > 0)
+        pos = (size_t)w;
+
+    /* Pull relevant memory for context */
+    if (memory && memory->vtable && memory->vtable->recall && cp->contact_id) {
+        sc_memory_entry_t *entries = NULL;
+        size_t count = 0;
+        size_t cid_len = strlen(cp->contact_id);
+        sc_error_t err = memory->vtable->recall(memory->ctx, alloc, "recent conversation topics",
+                                                26, 2, cp->contact_id, cid_len, &entries, &count);
+        if (err == SC_OK && entries && count > 0) {
+            w = snprintf(buf + pos, sizeof(buf) - pos, "Recent topics: ");
+            if (w > 0)
+                pos += (size_t)w;
+            for (size_t i = 0; i < count && i < 2; i++) {
+                if (entries[i].content && entries[i].content_len > 0) {
+                    size_t show = entries[i].content_len;
+                    if (show > 80)
+                        show = 80;
+                    w = snprintf(buf + pos, sizeof(buf) - pos, "'%.*s' ", (int)show,
+                                 entries[i].content);
+                    if (w > 0 && pos + (size_t)w < sizeof(buf))
+                        pos += (size_t)w;
+                }
+            }
+            for (size_t i = 0; i < count; i++)
+                sc_memory_entry_free_fields(alloc, &entries[i]);
+            alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        }
+    }
+
+    w = snprintf(buf + pos, sizeof(buf) - pos,
+                 "\nRules: "
+                 "1. One short natural message (not 'hey how are you' — too generic). "
+                 "2. Reference something specific you know about them or ask about "
+                 "something from a previous conversation. "
+                 "3. Keep it under 10 words. "
+                 "4. If you have nothing specific, share something you saw/did "
+                 "that made you think of them. "
+                 "5. Reply SKIP if you genuinely have nothing natural to say.");
+    if (w > 0 && pos + (size_t)w < sizeof(buf))
+        pos += (size_t)w;
+
+    char *result = sc_strndup(alloc, buf, pos);
+    *out_len = pos;
+    return result;
+}
+
+void sc_service_run_proactive_checkins(sc_allocator_t *alloc, sc_agent_t *agent,
+                                       sc_service_channel_t *channels, size_t channel_count) {
+    if (!alloc || !agent || !agent->persona)
+        return;
+
+    time_t now = time(NULL);
+    struct tm tm_now;
+    localtime_r(&now, &tm_now);
+    int hour = tm_now.tm_hour;
+
+    /* Only check in during social hours (9am-9pm) */
+    if (hour < 9 || hour > 21)
+        return;
+
+    for (size_t i = 0; i < agent->persona->contacts_count; i++) {
+        const sc_contact_profile_t *cp = &agent->persona->contacts[i];
+        if (!cp->proactive_checkin || !cp->proactive_channel || !cp->contact_id)
+            continue;
+
+        /* Parse channel:target format */
+        const char *ch_part = cp->proactive_channel;
+        const char *target_part = cp->contact_id;
+        size_t target_len = strlen(target_part);
+        const char *colon = strchr(cp->proactive_channel, ':');
+        char ch_buf[64] = {0};
+        if (colon) {
+            size_t ch_len = (size_t)(colon - cp->proactive_channel);
+            if (ch_len < sizeof(ch_buf)) {
+                memcpy(ch_buf, cp->proactive_channel, ch_len);
+                ch_buf[ch_len] = '\0';
+                ch_part = ch_buf;
+                target_part = colon + 1;
+                target_len = strlen(target_part);
+            }
+        }
+
+        /* Check last interaction time via conversation history */
+        for (size_t c = 0; c < channel_count; c++) {
+            if (!channels[c].channel || !channels[c].channel->vtable ||
+                !channels[c].channel->vtable->name)
+                continue;
+            const char *ch_name = channels[c].channel->vtable->name(channels[c].channel->ctx);
+            if (!ch_name || strcmp(ch_name, ch_part) != 0)
+                continue;
+
+            if (!channels[c].channel->vtable->load_conversation_history)
+                break;
+
+            sc_channel_history_entry_t *entries = NULL;
+            size_t entry_count = 0;
+            channels[c].channel->vtable->load_conversation_history(
+                channels[c].channel->ctx, alloc, cp->contact_id, strlen(cp->contact_id), 1,
+                &entries, &entry_count);
+
+            bool should_checkin = true;
+            if (entries && entry_count > 0) {
+                /* Parse last message timestamp to check if recent */
+                struct tm last_tm = {0};
+                if (strptime(entries[0].timestamp, "%Y-%m-%d %H:%M", &last_tm)) {
+                    time_t last_time = mktime(&last_tm);
+                    double hours_since = difftime(now, last_time) / 3600.0;
+                    if (hours_since < 24.0)
+                        should_checkin = false;
+                }
+            }
+            if (entries)
+                alloc->free(alloc->ctx, entries, entry_count * sizeof(*entries));
+
+            if (!should_checkin)
+                break;
+
+#ifndef SC_IS_TEST
+            /* Build and send the check-in */
+            size_t prompt_len = 0;
+            char *prompt =
+                proactive_prompt_for_contact(alloc, agent->memory, cp, &prompt_len);
+            if (prompt) {
+                sc_agent_clear_history(agent);
+                agent->active_channel = ch_part;
+                agent->active_channel_len = strlen(ch_part);
+
+                char *response = NULL;
+                size_t response_len = 0;
+                sc_error_t err =
+                    sc_agent_turn(agent, prompt, prompt_len, &response, &response_len);
+
+                if (err == SC_OK && response && response_len > 0) {
+                    bool skip = (response_len == 4 && memcmp(response, "SKIP", 4) == 0);
+                    if (!skip && channels[c].channel->vtable->send) {
+                        channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
+                                                          target_len, response, response_len,
+                                                          NULL, 0);
+                        fprintf(stderr, "[seaclaw] proactive check-in sent to %s: %.*s\n",
+                                cp->name ? cp->name : cp->contact_id, (int)response_len, response);
+                    }
+                }
+                if (response)
+                    alloc->free(alloc->ctx, response, response_len + 1);
+                alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                sc_agent_clear_history(agent);
+            }
+#endif
+            break;
+        }
+    }
+}
+
+#endif /* SC_HAS_PERSONA */
+
 /* ── Signal handling (non-test only) ─────────────────────────────────── */
 
 #if !defined(SC_IS_TEST) && !defined(_WIN32) && !defined(__CYGWIN__)
@@ -441,6 +610,12 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
             if (current_minute > last_cron_minute) {
                 run_cron_tick(alloc);
                 sc_service_run_agent_cron(alloc, agent, channels, channel_count);
+#ifdef SC_HAS_PERSONA
+                /* Run proactive check-ins at the top of each hour */
+                if (current_minute % 60 == 0) {
+                    sc_service_run_proactive_checkins(alloc, agent, channels, channel_count);
+                }
+#endif
                 last_cron_minute = current_minute;
             }
         }
@@ -459,8 +634,10 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 
             sc_channel_loop_msg_t msgs[16];
             size_t count = 0;
-            ch->poll_fn(ch->channel_ctx, alloc, msgs, 16, &count);
+            sc_error_t poll_err = ch->poll_fn(ch->channel_ctx, alloc, msgs, 16, &count);
             ch->last_poll_ms = tick_now;
+            if (poll_err != SC_OK && getenv("SC_DEBUG"))
+                fprintf(stderr, "[seaclaw] poll error on channel %zu: %d\n", i, (int)poll_err);
 
             if (!agent || !ch->channel || !ch->channel->vtable || !ch->channel->vtable->send ||
                 count == 0)
@@ -507,6 +684,38 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue;
 
 #ifndef SC_IS_TEST
+                /* Only respond to contacts explicitly listed in persona_contacts */
+#ifdef SC_HAS_PERSONA
+                if (agent->persona && agent->persona->contacts_count > 0) {
+                    const sc_contact_profile_t *cp_gate =
+                        sc_persona_find_contact(agent->persona, batch_key, key_len);
+                    if (!cp_gate) {
+                        if (getenv("SC_DEBUG"))
+                            fprintf(stderr,
+                                    "[seaclaw] ignoring message from unknown contact: %.*s\n",
+                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                        continue;
+                    }
+                }
+#endif
+
+                /* Group chat gating: use group classifier to decide engagement */
+                if (msgs[batch_start].is_group) {
+                    const char *persona_name = NULL;
+#ifdef SC_HAS_PERSONA
+                    if (agent->persona && agent->persona->identity)
+                        persona_name = agent->persona->identity;
+#endif
+                    sc_group_response_t gr = sc_conversation_classify_group(
+                        combined, combined_len, persona_name,
+                        persona_name ? strlen(persona_name) : 0, NULL, 0);
+                    if (gr == SC_GROUP_SKIP) {
+                        fprintf(stderr, "[seaclaw] group: skipping (not addressed): %.*s\n",
+                                (int)(combined_len > 40 ? 40 : combined_len), combined);
+                        continue;
+                    }
+                }
+
                 /* Response decision using conversation-aware classifier */
                 uint32_t extra_delay_ms = 0;
 
@@ -906,6 +1115,68 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* 5. Anti-repetition: detect patterns in our recent messages */
+                if (history_entries && history_count >= 4) {
+                    char rep_buf[1024];
+                    size_t rep_len = sc_conversation_detect_repetition(
+                        history_entries, history_count, rep_buf, sizeof(rep_buf));
+                    if (rep_len > 0 && convo_ctx) {
+                        size_t total = convo_ctx_len + rep_len + 1;
+                        char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                        if (merged) {
+                            memcpy(merged, convo_ctx, convo_ctx_len);
+                            merged[convo_ctx_len] = '\n';
+                            memcpy(merged + convo_ctx_len + 1, rep_buf, rep_len);
+                            merged[total] = '\0';
+                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                            convo_ctx = merged;
+                            convo_ctx_len = total;
+                        }
+                    } else if (rep_len > 0 && !convo_ctx) {
+                        convo_ctx = (char *)alloc->alloc(alloc->ctx, rep_len + 1);
+                        if (convo_ctx) {
+                            memcpy(convo_ctx, rep_buf, rep_len);
+                            convo_ctx[rep_len] = '\0';
+                            convo_ctx_len = rep_len;
+                        }
+                    }
+                }
+
+                /* 6. Relationship-tier calibration from contact profile */
+#ifdef SC_HAS_PERSONA
+                if (agent->persona) {
+                    const sc_contact_profile_t *cp_rel =
+                        sc_persona_find_contact(agent->persona, batch_key, key_len);
+                    if (cp_rel && (cp_rel->relationship_stage || cp_rel->warmth_level ||
+                                   cp_rel->vulnerability_level)) {
+                        char rel_buf[512];
+                        size_t rel_len = sc_conversation_calibrate_relationship(
+                            cp_rel->relationship_stage, cp_rel->warmth_level,
+                            cp_rel->vulnerability_level, rel_buf, sizeof(rel_buf));
+                        if (rel_len > 0 && convo_ctx) {
+                            size_t total = convo_ctx_len + rel_len + 1;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                merged[convo_ctx_len] = '\n';
+                                memcpy(merged + convo_ctx_len + 1, rel_buf, rel_len);
+                                merged[total] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total;
+                            }
+                        } else if (rel_len > 0 && !convo_ctx) {
+                            convo_ctx = (char *)alloc->alloc(alloc->ctx, rel_len + 1);
+                            if (convo_ctx) {
+                                memcpy(convo_ctx, rel_buf, rel_len);
+                                convo_ctx[rel_len] = '\0';
+                                convo_ctx_len = rel_len;
+                            }
+                        }
+                    }
+                }
+#endif
+
                 /* Set agent per-turn context fields (prompt builder reads these) */
                 agent->contact_context = contact_ctx;
                 agent->contact_context_len = contact_ctx_len;
@@ -920,12 +1191,22 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     agent->memory->current_session_id = batch_key;
                     agent->memory->current_session_id_len = key_len;
                 }
+
+                /* Start typing indicator before LLM call */
+                if (ch->channel->vtable->start_typing) {
+                    ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                }
 #endif
 
                 sc_error_t err =
                     sc_agent_turn(agent, combined, combined_len, &response, &response_len);
 
 #ifndef SC_IS_TEST
+                /* Stop typing indicator after LLM call */
+                if (ch->channel->vtable->stop_typing) {
+                    ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                }
+
                 /* Quality gate: check response for unnatural patterns.
                  * Run before freeing history so the evaluator has full context.
                  * If needs_revision, log it — the reflection system inside
@@ -987,10 +1268,12 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                size_t response_alloc_len = response_len;
                 if (err == SC_OK && response && response_len > 0) {
 #ifndef SC_IS_TEST
 #ifdef SC_HAS_PERSONA
-                    /* Apply typing quirks from persona overlay as post-processing */
+                    /* Apply typing quirks from persona overlay as post-processing.
+                     * This shrinks the buffer in-place; keep original size for free. */
                     if (agent->persona && agent->active_channel) {
                         const sc_persona_overlay_t *ov = sc_persona_find_overlay(
                             agent->persona, agent->active_channel, agent->active_channel_len);
@@ -1028,7 +1311,7 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                 }
                 if (response) {
-                    alloc->free(alloc->ctx, response, response_len + 1);
+                    alloc->free(alloc->ctx, response, response_alloc_len + 1);
                 }
             }
         }

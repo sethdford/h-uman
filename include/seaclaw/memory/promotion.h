@@ -15,5 +15,8 @@ typedef struct sc_promotion_config {
 double sc_promotion_entity_importance(const sc_stm_entity_t *entity, const sc_stm_buffer_t *buf);
 sc_error_t sc_promotion_run(sc_allocator_t *alloc, const sc_stm_buffer_t *buf, sc_memory_t *memory,
                             const sc_promotion_config_t *config);
+sc_error_t sc_promotion_run_emotions(sc_allocator_t *alloc, const sc_stm_buffer_t *buf,
+                                      sc_memory_t *memory, const char *contact_id,
+                                      size_t contact_id_len);
 
 #endif

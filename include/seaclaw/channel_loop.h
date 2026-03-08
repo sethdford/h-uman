@@ -42,6 +42,7 @@ typedef size_t (*sc_channel_loop_evict_fn)(void *ctx, uint64_t max_idle_secs);
 typedef struct sc_channel_loop_msg {
     char session_key[128];
     char content[4096];
+    bool is_group;
 } sc_channel_loop_msg_t;
 
 typedef sc_error_t (*sc_channel_loop_poll_fn)(void *channel_ctx, sc_allocator_t *alloc,

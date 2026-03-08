@@ -136,4 +136,36 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                                                        size_t entry_count,
                                                        uint32_t *delay_extra_ms);
 
+/* ── Anti-repetition detection ───────────────────────────────────────── */
+
+/* Analyze recent "from_me" messages for repetitive patterns (openers,
+ * always ending with questions, filler words). Writes guidance into buf.
+ * Returns bytes written (0 if no patterns detected). */
+size_t sc_conversation_detect_repetition(const sc_channel_history_entry_t *entries, size_t count,
+                                         char *buf, size_t cap);
+
+/* ── Relationship-tier calibration ───────────────────────────────────── */
+
+/* Map relationship metadata to calibration modifiers for the prompt.
+ * Pass NULL for any field not available. Returns bytes written. */
+size_t sc_conversation_calibrate_relationship(const char *relationship_stage,
+                                              const char *warmth_level,
+                                              const char *vulnerability_level, char *buf,
+                                              size_t cap);
+
+/* ── Group chat classifier ───────────────────────────────────────────── */
+
+typedef enum sc_group_response {
+    SC_GROUP_RESPOND = 0, /* full response */
+    SC_GROUP_BRIEF = 1,   /* short acknowledgment */
+    SC_GROUP_SKIP = 2,    /* don't respond */
+} sc_group_response_t;
+
+/* Classify whether to respond in a group chat context.
+ * bot_name is used to detect direct addressing. */
+sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_len,
+                                                   const char *bot_name, size_t bot_name_len,
+                                                   const sc_channel_history_entry_t *entries,
+                                                   size_t count);
+
 #endif /* SC_CONTEXT_CONVERSATION_H */

@@ -1,6 +1,7 @@
 #include "seaclaw/memory/deep_extract.h"
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -139,6 +140,122 @@ sc_error_t sc_deep_extract_parse(sc_allocator_t *alloc, const char *response, si
     }
 
     sc_json_free(alloc, root);
+    return SC_OK;
+}
+
+static bool prefix_match_ci(const char *text, size_t text_len, const char *prefix,
+                            size_t prefix_len) {
+    if (text_len < prefix_len)
+        return false;
+    for (size_t i = 0; i < prefix_len; i++) {
+        char a = (unsigned char)text[i];
+        char b = (unsigned char)prefix[i];
+        if (a >= 'A' && a <= 'Z')
+            a += 32;
+        if (b >= 'A' && b <= 'Z')
+            b += 32;
+        if (a != b)
+            return false;
+    }
+    return true;
+}
+
+static size_t find_clause_end(const char *text, size_t text_len, size_t start) {
+    for (size_t i = start; i < text_len; i++) {
+        char c = text[i];
+        if (c == '.' || c == ',' || c == '\n' || c == '!' || c == '?')
+            return i;
+    }
+    return text_len;
+}
+
+static bool is_word_boundary(char c) {
+    return c == '\0' || (unsigned char)c <= 32 || c == '.' || c == ',' || c == '!' || c == '?';
+}
+
+typedef struct {
+    const char *pattern;
+    size_t pattern_len;
+    const char *predicate;
+    size_t predicate_len;
+} sc_de_lightweight_pattern_t;
+
+static const sc_de_lightweight_pattern_t LIGHTWEIGHT_PATTERNS[] = {
+    {"I work at ", 10, "works_at", 8},
+    {"I'm a ", 6, "is_a", 4},
+    {"I am a ", 7, "is_a", 4},
+    {"I'm an ", 7, "is_a", 4},
+    {"I am an ", 8, "is_a", 4},
+    {"I live in ", 10, "lives_in", 8},
+    {"I like ", 7, "likes", 5},
+    {"I love ", 7, "loves", 5},
+    {"I hate ", 7, "hates", 5},
+    {"my name is ", 11, "name", 4},
+    {"my job is ", 10, "job", 3},
+};
+
+#define LIGHTWEIGHT_PATTERN_COUNT \
+    (sizeof(LIGHTWEIGHT_PATTERNS) / sizeof(LIGHTWEIGHT_PATTERNS[0]))
+
+sc_error_t sc_deep_extract_lightweight(sc_allocator_t *alloc, const char *text, size_t text_len,
+                                       sc_deep_extract_result_t *out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
+    memset(out, 0, sizeof(*out));
+
+    if (!text) {
+        if (text_len > 0)
+            return SC_ERR_INVALID_ARGUMENT;
+        return SC_OK;
+    }
+
+    for (size_t i = 0; i < text_len && out->fact_count < SC_DE_MAX_FACTS; i++) {
+        while (i < text_len && (unsigned char)text[i] <= 32)
+            i++;
+        if (i >= text_len)
+            break;
+
+        for (size_t p = 0; p < LIGHTWEIGHT_PATTERN_COUNT; p++) {
+            const sc_de_lightweight_pattern_t *pat = &LIGHTWEIGHT_PATTERNS[p];
+            if (!prefix_match_ci(text + i, text_len - i, pat->pattern, pat->pattern_len))
+                continue;
+            if (i > 0 && !is_word_boundary(text[i - 1]))
+                continue;
+
+            size_t obj_start = i + pat->pattern_len;
+            while (obj_start < text_len && (unsigned char)text[obj_start] <= 32)
+                obj_start++;
+            if (obj_start >= text_len)
+                break;
+
+            size_t obj_end = find_clause_end(text, text_len, obj_start);
+            if (obj_end <= obj_start)
+                continue;
+
+            size_t obj_len = obj_end - obj_start;
+            while (obj_len > 0 && (unsigned char)text[obj_start + obj_len - 1] <= 32)
+                obj_len--;
+            if (obj_len == 0)
+                continue;
+
+            sc_extracted_fact_t *f = &out->facts[out->fact_count];
+            f->subject = sc_strndup(alloc, "user", 4);
+            f->predicate = sc_strndup(alloc, pat->predicate, pat->predicate_len);
+            f->object = sc_strndup(alloc, text + obj_start, obj_len);
+            f->confidence = 0.85;
+            if (f->subject && f->predicate && f->object) {
+                out->fact_count++;
+                i = obj_end - 1;
+                break;
+            }
+            if (f->subject)
+                alloc->free(alloc->ctx, f->subject, strlen(f->subject) + 1);
+            if (f->predicate)
+                alloc->free(alloc->ctx, f->predicate, strlen(f->predicate) + 1);
+            if (f->object)
+                alloc->free(alloc->ctx, f->object, strlen(f->object) + 1);
+        }
+    }
     return SC_OK;
 }
 

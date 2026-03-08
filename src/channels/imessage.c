@@ -539,9 +539,28 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
     sqlite3 *db = NULL;
     int rc = sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL);
     if (rc != SQLITE_OK) {
+        fprintf(stderr, "[imessage] cannot open chat.db: %s (rc=%d) — check Full Disk Access\n",
+                db ? sqlite3_errmsg(db) : "unknown", rc);
         if (db)
             sqlite3_close(db);
         return SC_ERR_IO;
+    }
+
+    /* If last_rowid was never seeded (e.g. FDA wasn't granted at startup),
+     * seed it now to current max so we only pick up truly new messages. */
+    if (c->last_rowid == 0) {
+        sqlite3_stmt *seed = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT MAX(ROWID) FROM message", -1, &seed, NULL) ==
+            SQLITE_OK) {
+            if (sqlite3_step(seed) == SQLITE_ROW)
+                c->last_rowid = sqlite3_column_int64(seed, 0);
+            sqlite3_finalize(seed);
+        }
+        fprintf(stderr, "[imessage] late-seeded last_rowid=%lld (only new messages will be processed)\n",
+                (long long)c->last_rowid);
+        sqlite3_close(db);
+        *out_count = 0;
+        return SC_OK;
     }
 
     const char *sql = "SELECT m.ROWID, m.text, h.id "
@@ -556,6 +575,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
     sqlite3_stmt *stmt = NULL;
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
+        fprintf(stderr, "[imessage] SQL prepare failed: %s\n", sqlite3_errmsg(db));
         sqlite3_close(db);
         return SC_ERR_IO;
     }
@@ -614,6 +634,10 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+
+    if (count == 0 && getenv("SC_DEBUG"))
+        fprintf(stderr, "[imessage] poll: 0 messages (last_rowid=%lld)\n",
+                (long long)c->last_rowid);
 
     *out_count = count;
     return SC_OK;

@@ -79,4 +79,12 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
 void sc_stm_clear(sc_stm_buffer_t *buf);
 void sc_stm_deinit(sc_stm_buffer_t *buf);
 
+typedef struct sc_mood_entry {
+    sc_emotion_tag_t tag;
+    double intensity;
+    uint64_t timestamp_ms;
+    char *contact_id;
+    size_t contact_id_len;
+} sc_mood_entry_t;
+
 #endif
