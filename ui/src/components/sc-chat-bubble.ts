@@ -10,41 +10,66 @@ export class ScChatBubble extends LitElement {
   @property({ type: String }) content = "";
   @property({ type: String }) role: "user" | "assistant" = "assistant";
   @property({ type: Boolean }) streaming = false;
+  @property({ type: Boolean }) completing = false;
   @property({ type: Boolean }) showTail = false;
   @property({ type: Boolean }) isLast = false;
   @property({ type: Boolean }) isFirst = false;
 
   static override styles = css`
-    @keyframes sc-blink {
-      0%,
-      50% {
-        opacity: 1;
-      }
-      51%,
-      100% {
-        opacity: 0;
-      }
-    }
-
     @keyframes sc-bubble-send {
       from {
         opacity: 0;
-        transform: translateY(var(--sc-space-sm));
+        transform: translateY(var(--sc-space-sm)) scale(0.97);
       }
       to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
       }
     }
 
     @keyframes sc-bubble-receive {
       from {
         opacity: 0;
-        transform: translateY(var(--sc-space-sm));
+        transform: translateY(var(--sc-space-xs)) scale(0.98);
       }
       to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes sc-cursor-glow {
+      0%,
+      100% {
+        opacity: 1;
+        box-shadow: 0 0 4px 1px color-mix(in srgb, var(--sc-accent) 40%, transparent);
+      }
+      50% {
+        opacity: 0.4;
+        box-shadow: 0 0 2px 0 color-mix(in srgb, var(--sc-accent) 15%, transparent);
+      }
+    }
+
+    @keyframes sc-cursor-fade-out {
+      from {
+        opacity: 1;
+        box-shadow: 0 0 8px 2px color-mix(in srgb, var(--sc-accent) 50%, transparent);
+      }
+      to {
+        opacity: 0;
+        box-shadow: 0 0 0 0 transparent;
+      }
+    }
+
+    @keyframes sc-bubble-settle {
+      0% {
+        transform: scale(1);
+      }
+      40% {
+        transform: scale(1.008);
+      }
+      100% {
+        transform: scale(1);
       }
     }
 
@@ -282,20 +307,34 @@ export class ScChatBubble extends LitElement {
 
     .cursor {
       display: inline-block;
-      width: var(--sc-focus-ring-width);
-      height: 1em;
+      width: 2px;
+      height: 1.1em;
       background: var(--sc-accent);
       margin-left: var(--sc-space-2xs);
       vertical-align: text-bottom;
-      animation: sc-pulse var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
+      border-radius: var(--sc-radius-xs);
+      animation: sc-cursor-glow var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
+    }
+
+    .cursor.completing {
+      animation: sc-cursor-fade-out var(--sc-duration-normal) var(--sc-ease-out) forwards;
     }
 
     .bubble.role-user .cursor {
       background: var(--sc-on-accent);
     }
 
+    .bubble.settling {
+      animation: sc-bubble-settle var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+    }
+
     @media (prefers-reduced-motion: reduce) {
-      .cursor {
+      .cursor,
+      .cursor.completing {
+        animation: none;
+      }
+      .bubble.settling {
         animation: none;
       }
     }
@@ -356,12 +395,20 @@ export class ScChatBubble extends LitElement {
   }
 
   override render() {
-    const bubbleClass = `bubble role-${this.role}${this.showTail ? " show-tail" : ""}`;
+    const classes = [
+      "bubble",
+      `role-${this.role}`,
+      this.showTail ? "show-tail" : "",
+      this.completing ? "settling" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     const isUser = this.role === "user";
+    const showCursor = this.streaming || this.completing;
 
     return html`
       <div
-        class=${bubbleClass}
+        class=${classes}
         role="article"
         aria-label=${isUser ? "Your message" : "Assistant message"}
         tabindex="0"
@@ -371,7 +418,12 @@ export class ScChatBubble extends LitElement {
             onCopyCode: (code) => this._copyCode(code),
             streaming: this.streaming,
           })}
-          ${this.streaming ? html`<span class="cursor" aria-hidden="true"></span>` : nothing}
+          ${showCursor
+            ? html`<span
+                class="cursor ${this.completing ? "completing" : ""}"
+                aria-hidden="true"
+              ></span>`
+            : nothing}
         </div>
         <div class="footer">
           <slot name="status"></slot>

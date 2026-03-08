@@ -9,22 +9,37 @@ export class ScTypingIndicator extends LitElement {
     @keyframes sc-indicator-enter {
       from {
         opacity: 0;
-        transform: translateY(var(--sc-space-sm));
+        transform: translateY(var(--sc-space-sm)) scale(0.92);
       }
       to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
       }
     }
 
-    @keyframes sc-dot-bounce {
+    @keyframes sc-glow-pulse {
       0%,
-      80%,
       100% {
-        transform: translateY(0);
+        box-shadow:
+          var(--sc-shadow-xs),
+          0 0 0 0 color-mix(in srgb, var(--sc-accent) 0%, transparent);
       }
-      40% {
-        transform: translateY(calc(-1 * var(--sc-space-xs)));
+      50% {
+        box-shadow:
+          var(--sc-shadow-xs),
+          0 0 12px 2px color-mix(in srgb, var(--sc-accent) 18%, transparent);
+      }
+    }
+
+    @keyframes sc-dot-wave {
+      0%,
+      100% {
+        opacity: 0.35;
+        transform: scale(0.85);
+      }
+      50% {
+        opacity: 1;
+        transform: scale(1);
       }
     }
 
@@ -38,16 +53,18 @@ export class ScTypingIndicator extends LitElement {
       gap: var(--sc-space-sm);
       position: relative;
       padding: var(--sc-space-sm) var(--sc-space-md);
-      background: var(--sc-bg-elevated);
-      border: 1px solid var(--sc-border-subtle);
+      background: color-mix(in srgb, var(--sc-surface-container) 65%, transparent);
+      backdrop-filter: blur(var(--sc-blur-md));
+      -webkit-backdrop-filter: blur(var(--sc-blur-md));
+      border: 1px solid color-mix(in srgb, var(--sc-accent) 12%, transparent);
       border-radius: var(--sc-radius-2xl) var(--sc-radius-2xl) var(--sc-radius-2xl)
         var(--sc-radius-xs);
-      box-shadow: var(--sc-shadow-xs);
-      animation: sc-indicator-enter var(--sc-duration-normal)
-        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
+      animation:
+        sc-indicator-enter var(--sc-duration-normal)
+          var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both,
+        sc-glow-pulse 2.4s var(--sc-ease-in-out) 0.3s infinite;
     }
 
-    /* Assistant bubble tail (same as sc-chat-bubble) */
     .indicator::after {
       content: "";
       position: absolute;
@@ -55,35 +72,30 @@ export class ScTypingIndicator extends LitElement {
       left: calc(-1 * var(--sc-space-sm));
       width: var(--sc-space-sm);
       height: calc(var(--sc-space-sm) + var(--sc-space-2xs));
-      background: var(--sc-bg-elevated);
+      background: color-mix(in srgb, var(--sc-surface-container) 65%, transparent);
       clip-path: polygon(100% 0, 100% 100%, 0 100%);
     }
 
     .dots {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-2xs);
+      gap: var(--sc-space-xs);
     }
 
     .dot {
-      width: var(--sc-space-xs);
-      height: var(--sc-space-xs);
+      width: 5px;
+      height: 5px;
       border-radius: var(--sc-radius-full);
-      background: var(--sc-text-muted);
-      animation: sc-dot-bounce var(--sc-duration-slowest)
-        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) infinite;
-    }
-
-    .dot:nth-child(1) {
-      animation-delay: 0ms;
+      background: var(--sc-accent);
+      animation: sc-dot-wave var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
     }
 
     .dot:nth-child(2) {
-      animation-delay: 150ms;
+      animation-delay: 0.2s;
     }
 
     .dot:nth-child(3) {
-      animation-delay: 300ms;
+      animation-delay: 0.4s;
     }
 
     .elapsed {
@@ -91,6 +103,20 @@ export class ScTypingIndicator extends LitElement {
       font-size: var(--sc-text-xs);
       color: var(--sc-text-muted);
       white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      opacity: 0;
+      animation: sc-indicator-enter var(--sc-duration-normal) var(--sc-ease-out) 3s both;
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .indicator {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--sc-surface-container);
+      }
+      .indicator::after {
+        background: var(--sc-surface-container);
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -100,13 +126,19 @@ export class ScTypingIndicator extends LitElement {
 
       .dot {
         animation: none;
+        opacity: 0.6;
+      }
+
+      .elapsed {
+        animation: none;
+        opacity: 1;
       }
     }
   `;
 
   override render() {
     return html`
-      <div class="indicator" role="status" aria-live="polite" aria-label="Assistant is typing">
+      <div class="indicator" role="status" aria-live="polite" aria-label="Assistant is thinking">
         <span class="dots" aria-hidden="true">
           <span class="dot"></span>
           <span class="dot"></span>

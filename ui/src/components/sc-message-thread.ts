@@ -15,6 +15,22 @@ import { formatTime, formatTimestampForDivider } from "../utils.js";
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 
+function getTimeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Late night session?";
+  if (hour < 12) return "Good morning.";
+  if (hour < 17) return "Good afternoon.";
+  if (hour < 21) return "Good evening.";
+  return "Burning the midnight oil?";
+}
+
+const HERO_SUGGESTIONS = [
+  { label: "Brainstorm ideas", icon: "zap" as const },
+  { label: "Write something", icon: "pencil" as const },
+  { label: "Debug a problem", icon: "wrench" as const },
+  { label: "Explain a concept", icon: "book-open" as const },
+];
+
 const VALUE_TO_ICON: Record<string, keyof typeof icons> = {
   like: "thumbs-up",
   dislike: "thumbs-down",
@@ -38,6 +54,7 @@ type Block =
 export class ScMessageThread extends LitElement {
   @property({ type: Array }) items: ChatItem[] = [];
   @property({ type: Boolean }) isWaiting = false;
+  @property({ type: Boolean }) isCompleting = false;
   @property({ type: String }) streamElapsed = "";
   @property({ type: Boolean }) historyLoading = false;
   @property({ type: Boolean }) hasEarlierMessages = false;
@@ -45,6 +62,7 @@ export class ScMessageThread extends LitElement {
 
   @state() private showScrollPill = false;
   @query("#scroll-container") private scrollContainer!: HTMLElement;
+  private _smoothScrollRaf = 0;
 
   private _scrollHandler = (): void => {
     const el = this.scrollContainer;

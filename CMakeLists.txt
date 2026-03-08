@@ -300,6 +300,9 @@ set(SC_CORE_SOURCES
     src/http_util.c
     src/mcp.c
     src/multimodal.c
+    src/multimodal/calendar.c
+    src/multimodal/document.c
+    src/multimodal/image.c
     src/rag.c
     src/service.c
     src/skill_registry.c
@@ -335,6 +338,7 @@ set(SC_CORE_SOURCES
     src/gateway/cp_chat.c
     src/gateway/cp_config.c
     src/gateway/cp_admin.c
+    src/gateway/cp_memory.c
     src/gateway/event_bridge.c
     src/gateway/tenant.c
     src/runtime/native.c
@@ -387,6 +391,10 @@ set(SC_CORE_SOURCES
     src/agent/superhuman_predictive.c
     src/agent/superhuman_emotional.c
     src/agent/superhuman_silence.c
+    src/agent/anticipatory.c
+    src/agent/conversation_plan.c
+    src/agent/info_asymmetry.c
+    src/agent/theory_of_mind.c
     src/agent/tool_router.c
     src/providers/error_classify.c
     src/providers/api_key.c
@@ -438,6 +446,9 @@ set(SC_CORE_SOURCES
     src/memory/retrieval/query_expansion.c
     src/memory/retrieval/llm_reranker.c
     src/memory/retrieval/engine.c
+    src/memory/connections.c
+    src/memory/ingest.c
+    src/memory/inbox.c
     src/memory/vector/circuit_breaker.c
     src/tools/validation.c
     src/tools/path_security.c
@@ -599,6 +610,7 @@ if(SC_ENABLE_PERSONA)
         src/persona/relationship.c
         src/persona/auto_profile.c
         src/persona/auto_tune.c
+        src/persona/voice_maturity.c
         src/tools/persona.c
     )
 endif()
@@ -1171,7 +1183,7 @@ if(NOT SC_ENABLE_PERSONA)
         src/persona/persona.c src/persona/examples.c src/persona/sampler.c
         src/persona/analyzer.c src/persona/creator.c         src/persona/cli.c src/persona/feedback.c
         src/persona/replay.c src/persona/circadian.c src/persona/relationship.c
-        src/persona/auto_profile.c src/persona/auto_tune.c src/tools/persona.c)
+        src/persona/auto_profile.c src/persona/auto_tune.c src/persona/voice_maturity.c src/tools/persona.c)
 endif()
 add_library(seaclaw_core_test STATIC ${SC_CORE_SOURCES} ${SC_TEST_EXTRA_CHANNELS} ${SC_TEST_EXTRA_MODULES} ${SC_CRYPTO_SOURCES} ${SC_ASM_SOURCES})
 target_include_directories(seaclaw_core_test PUBLIC ${SC_ROOT}/include)
@@ -1456,6 +1468,8 @@ endif()
 if(SC_ENABLE_CURL)
     list(APPEND SC_TEST_SOURCES tests/test_paperclip.c)
 endif()
+
+list(APPEND SC_TEST_SOURCES tests/test_memory_features.c)
 
 add_executable(seaclaw_tests ${SC_TEST_SOURCES} wasm/wasm_alloc.c)
 target_link_libraries(seaclaw_tests seaclaw_core_test)

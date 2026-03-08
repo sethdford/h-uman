@@ -6,10 +6,10 @@ Last updated: 2026-03-08
 
 | Metric                         | Value                |
 | ------------------------------ | -------------------- |
-| Source files (src/ + include/) | **689**              |
-| Lines of C/H/ASM code          | **~130K**            |
-| Test files                     | 127                  |
-| Tests passing                  | **3673/3673 (100%)** |
+| Source files (src/ + include/) | **712**              |
+| Lines of C/H/ASM code          | **~133K**            |
+| Test files                     | 128                  |
+| Tests passing                  | **3675/3675 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **~1506 KB**          |
 | Peak RSS (test suite)          | **~5.9 MB**          |
 

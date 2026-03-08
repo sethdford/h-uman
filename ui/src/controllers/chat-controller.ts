@@ -51,10 +51,14 @@ export interface GatewayLike {
 
 const MAX_VISIBLE_ITEMS = 500;
 
+/** Duration (ms) of the "completing" state after streaming ends. */
+const COMPLETING_DURATION_MS = 400;
+
 export class ChatController implements ReactiveController {
   items: ChatItem[] = [];
   trimmedCount = 0;
   isWaiting = false;
+  isCompleting = false;
   lastFailedMessage = "";
   errorBanner = "";
   streamElapsed = "";
@@ -65,6 +69,7 @@ export class ChatController implements ReactiveController {
   private _getGateway: () => GatewayLike | null;
   private _streamStartTime = 0;
   private _streamTimer = 0;
+  private _completingTimer = 0;
 
   constructor(
     private host: ReactiveControllerHost,
@@ -101,6 +106,10 @@ export class ChatController implements ReactiveController {
 
   hostDisconnected(): void {
     this._stopStreamTimer();
+    if (this._completingTimer) {
+      window.clearTimeout(this._completingTimer);
+      this._completingTimer = 0;
+    }
   }
 
   async send(
@@ -257,6 +266,20 @@ export class ChatController implements ReactiveController {
     return true;
   }
 
+  private _beginCompleting(sessionKey: string): void {
+    this.isWaiting = false;
+    this.isCompleting = true;
+    this._stopStreamTimer();
+    this._requestUpdate();
+
+    this._completingTimer = window.setTimeout(() => {
+      this._completingTimer = 0;
+      this.isCompleting = false;
+      this.cacheMessages(sessionKey);
+      this._requestUpdate();
+    }, COMPLETING_DURATION_MS);
+  }
+
   private _startStreamTimer(): void {
     this._streamStartTime = Date.now();
     this.streamElapsed = "0s";
@@ -335,19 +358,44 @@ export class ChatController implements ReactiveController {
       this.items = this.items.map((i) =>
         i.type === "thinking" && i.streaming ? { ...i, streaming: false } : i,
       );
-      this.items = [
-        ...this.items,
-        {
-          type: "message",
-          role: "assistant" as const,
-          content,
-          id: payload.id as string,
-          ts: Date.now(),
-        },
-      ];
-      this._trimIfNeeded();
-      this.isWaiting = false;
-      this._stopStreamTimer();
+      const lastMsgIdx = this._findLastAssistantIdx();
+      if (lastMsgIdx >= 0) {
+        const last = this.items[lastMsgIdx];
+        if (last.type === "message" && last.role === "assistant") {
+          this.items = [
+            ...this.items.slice(0, lastMsgIdx),
+            { ...last, content },
+            ...this.items.slice(lastMsgIdx + 1),
+          ];
+        } else {
+          this.items = [
+            ...this.items,
+            {
+              type: "message",
+              role: "assistant" as const,
+              content,
+              id: payload.id as string,
+              ts: Date.now(),
+            },
+          ];
+          this._trimIfNeeded();
+        }
+      } else {
+        this.items = [
+          ...this.items,
+          {
+            type: "message",
+            role: "assistant" as const,
+            content,
+            id: payload.id as string,
+            ts: Date.now(),
+          },
+        ];
+        this._trimIfNeeded();
+      }
+      this._beginCompleting(sessionKey);
+      this._requestUpdate();
+      return;
     }
 
     if (state === "chunk" && content) {
