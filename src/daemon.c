@@ -680,7 +680,24 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                                     total * sizeof(sc_channel_history_entry_t));
                 }
 
-                /* 2c. Style analysis: analyze their texting patterns for mirroring */
+                /* 2c. Length calibration fallback for channels without history.
+                 * When history exists, calibration runs inside build_awareness.
+                 * When it doesn't, we still want message-type guidance. */
+                if (!convo_ctx && combined_len > 0) {
+                    char cal_buf[1024];
+                    size_t cal_len = sc_conversation_calibrate_length(combined, combined_len, NULL, 0,
+                                                                      cal_buf, sizeof(cal_buf));
+                    if (cal_len > 0) {
+                        convo_ctx = (char *)alloc->alloc(alloc->ctx, cal_len + 1);
+                        if (convo_ctx) {
+                            memcpy(convo_ctx, cal_buf, cal_len);
+                            convo_ctx[cal_len] = '\0';
+                            convo_ctx_len = cal_len;
+                        }
+                    }
+                }
+
+                /* 2d. Style analysis: analyze their texting patterns for mirroring */
                 char *style_ctx = NULL;
                 size_t style_ctx_len = 0;
                 if (history_entries && history_count > 0) {
