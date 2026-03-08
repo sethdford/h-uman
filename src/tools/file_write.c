@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "seaclaw/tools/schema_common.h"
+#define SC_FILE_MAX_SIZE     (1024 * 1024)
 #define SC_FILE_WRITE_NAME   "file_write"
 #define SC_FILE_WRITE_DESC   "Write content to file"
 #define SC_FILE_WRITE_PARAMS SC_SCHEMA_PATH_CONTENT
@@ -80,7 +81,7 @@ static sc_error_t file_write_execute(void *ctx, sc_allocator_t *alloc, const sc_
         return SC_OK;
     }
     size_t len = strlen(content);
-    if (len > 1024 * 1024) {
+    if (len > SC_FILE_MAX_SIZE) {
         *out = sc_tool_result_fail("content too large", 16);
         return SC_OK;
     }

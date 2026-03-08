@@ -9,9 +9,13 @@
 #endif
 #include "seaclaw/daemon.h"
 #include "seaclaw/agent.h"
+#include "seaclaw/agent/anticipatory.h"
+#include "seaclaw/agent/conversation_plan.h"
 #include "seaclaw/agent/episodic.h"
+#include "seaclaw/agent/info_asymmetry.h"
 #include "seaclaw/agent/outcomes.h"
 #include "seaclaw/agent/proactive.h"
+#include "seaclaw/agent/theory_of_mind.h"
 #include "seaclaw/config.h"
 #include "seaclaw/context/conversation.h"
 #include "seaclaw/context/event_extract.h"
@@ -29,6 +33,7 @@
 #include "seaclaw/memory/promotion.h"
 #include "seaclaw/memory/retrieval.h"
 #include "seaclaw/observability/bth_metrics.h"
+#include "seaclaw/persona/voice_maturity.h"
 #include <stdlib.h>
 #ifdef SC_HAS_PERSONA
 #include "seaclaw/persona.h"
@@ -918,6 +923,23 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
     static size_t promotion_counter = 0;
     static char community_insights[2048] = {0};
     static size_t community_insights_len = 0;
+
+    /* Per-contact Theory of Mind belief states */
+#define SC_TOM_MAX_CONTACTS 16
+    static sc_belief_state_t tom_states[SC_TOM_MAX_CONTACTS];
+    static char tom_contact_keys[SC_TOM_MAX_CONTACTS][64];
+    static size_t tom_contact_count = 0;
+    (void)tom_states;
+    (void)tom_contact_keys;
+    (void)tom_contact_count;
+
+    /* Per-contact voice maturity profiles */
+    static sc_voice_profile_t voice_profiles[SC_TOM_MAX_CONTACTS];
+    static char voice_contact_keys[SC_TOM_MAX_CONTACTS][64];
+    static size_t voice_contact_count = 0;
+    (void)voice_profiles;
+    (void)voice_contact_keys;
+    (void)voice_contact_count;
     static sc_bth_metrics_t bth_metrics;
     sc_bth_metrics_init(&bth_metrics);
     if (agent)
@@ -928,6 +950,8 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
     if (agent && agent->memory) {
         (void)sc_inbox_init(&inbox_watcher, alloc, agent->memory, NULL, 0);
         inbox_watcher.provider = &agent->provider;
+        inbox_watcher.model = agent->model_name;
+        inbox_watcher.model_len = agent->model_name_len;
     }
 #endif
 
@@ -984,6 +1008,8 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                             .dedup_threshold = 70,
                             .max_entries = 5000,
                             .provider = &agent->provider,
+                            .model = agent->model_name,
+                            .model_len = agent->model_name_len,
                         };
                         if (sc_memory_consolidate(alloc, agent->memory, &cons_cfg) == SC_OK) {
                             consolidated_today = true;
@@ -2246,6 +2272,320 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* ── BTH Tier 1: Wire conversation planning (t1a) ──────────── */
+#ifndef SC_IS_TEST
+                {
+                    sc_conversation_plan_t plan;
+                    memset(&plan, 0, sizeof(plan));
+                    const char *emotional_ctx = convo_ctx ? convo_ctx : "";
+                    size_t emotional_len = convo_ctx ? convo_ctx_len : 0;
+                    const char *hist_text = "";
+                    size_t hist_len = 0;
+                    char hist_buf[2048];
+                    if (history_entries && history_count > 0) {
+                        size_t hpos = 0;
+                        for (size_t hi = 0; hi < history_count && hpos < sizeof(hist_buf) - 1;
+                             hi++) {
+                            int hw = snprintf(hist_buf + hpos, sizeof(hist_buf) - hpos, "%s: %s\n",
+                                              history_entries[hi].from_me ? "me" : "them",
+                                              history_entries[hi].text);
+                            if (hw > 0 && hpos + (size_t)hw < sizeof(hist_buf))
+                                hpos += (size_t)hw;
+                        }
+                        hist_buf[hpos] = '\0';
+                        hist_text = hist_buf;
+                        hist_len = hpos;
+                    }
+                    if (sc_plan_conversation(alloc, combined, combined_len, hist_text, hist_len,
+                                             emotional_ctx, emotional_len, &plan) == SC_OK) {
+                        char *plan_ctx = NULL;
+                        size_t plan_ctx_len = 0;
+                        if (sc_plan_build_prompt(&plan, alloc, &plan_ctx, &plan_ctx_len) == SC_OK &&
+                            plan_ctx && plan_ctx_len > 0) {
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + plan_ctx_len + 2;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, plan_ctx, plan_ctx_len);
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = plan_ctx;
+                                convo_ctx_len = plan_ctx_len;
+                                plan_ctx = NULL;
+                            }
+                            if (plan_ctx)
+                                alloc->free(alloc->ctx, plan_ctx, plan_ctx_len + 1);
+                        }
+                        sc_plan_deinit(&plan, alloc);
+                    }
+                }
+
+                /* ── BTH Tier 1: Theory of Mind context (t1b-pre) ──────────── */
+                {
+                    size_t tom_idx = (size_t)-1;
+                    for (size_t ti = 0; ti < tom_contact_count; ti++) {
+                        if (strncmp(tom_contact_keys[ti], batch_key, key_len) == 0 &&
+                            tom_contact_keys[ti][key_len] == '\0') {
+                            tom_idx = ti;
+                            break;
+                        }
+                    }
+                    if (tom_idx == (size_t)-1 && tom_contact_count < SC_TOM_MAX_CONTACTS &&
+                        key_len < 64) {
+                        tom_idx = tom_contact_count;
+                        memset(&tom_states[tom_idx], 0, sizeof(sc_belief_state_t));
+                        sc_tom_init(&tom_states[tom_idx], alloc, batch_key, key_len);
+                        memcpy(tom_contact_keys[tom_idx], batch_key, key_len);
+                        tom_contact_keys[tom_idx][key_len] = '\0';
+                        tom_contact_count++;
+                    }
+                    if (tom_idx != (size_t)-1 && tom_states[tom_idx].belief_count > 0) {
+                        char *tom_ctx = NULL;
+                        size_t tom_ctx_len = 0;
+                        if (sc_tom_build_context(&tom_states[tom_idx], alloc, &tom_ctx,
+                                                 &tom_ctx_len) == SC_OK &&
+                            tom_ctx && tom_ctx_len > 0) {
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + tom_ctx_len + 2;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, tom_ctx, tom_ctx_len);
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = tom_ctx;
+                                convo_ctx_len = tom_ctx_len;
+                                tom_ctx = NULL;
+                            }
+                            if (tom_ctx)
+                                alloc->free(alloc->ctx, tom_ctx, tom_ctx_len + 1);
+                        }
+                    }
+                }
+
+                /* ── BTH Tier 1: Information asymmetry guidance (t1c) ──────── */
+                {
+                    sc_info_asymmetry_t asym;
+                    memset(&asym, 0, sizeof(asym));
+                    const char *agent_ctx = convo_ctx ? convo_ctx : "";
+                    size_t agent_ctx_len = convo_ctx ? convo_ctx_len : 0;
+                    const char *ct_ctx = contact_ctx ? contact_ctx : "";
+                    size_t ct_ctx_len = contact_ctx ? contact_ctx_len : 0;
+                    if (sc_info_asymmetry_analyze(&asym, alloc, agent_ctx, agent_ctx_len, ct_ctx,
+                                                  ct_ctx_len) == SC_OK &&
+                        asym.gap_count > 0) {
+                        char *ia_ctx = NULL;
+                        size_t ia_ctx_len = 0;
+                        if (sc_info_asymmetry_build_guidance(&asym, alloc, &ia_ctx, &ia_ctx_len) ==
+                                SC_OK &&
+                            ia_ctx && ia_ctx_len > 0) {
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + ia_ctx_len + 2;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, ia_ctx, ia_ctx_len);
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = ia_ctx;
+                                convo_ctx_len = ia_ctx_len;
+                                ia_ctx = NULL;
+                            }
+                            if (ia_ctx)
+                                alloc->free(alloc->ctx, ia_ctx, ia_ctx_len + 1);
+                        }
+                        sc_info_asymmetry_deinit(&asym, alloc);
+                    }
+                }
+
+                /* ── BTH Tier 1: Anticipatory actions from GraphRAG (t1d) ──── */
+                if (graph) {
+                    sc_anticipatory_result_t antic;
+                    memset(&antic, 0, sizeof(antic));
+                    int64_t now_ts = (int64_t)time(NULL);
+                    if (sc_anticipatory_analyze(graph, alloc, batch_key, key_len, now_ts, &antic) ==
+                            SC_OK &&
+                        antic.action_count > 0) {
+                        char *antic_ctx = NULL;
+                        size_t antic_ctx_len = 0;
+                        if (sc_anticipatory_build_context(&antic, alloc, &antic_ctx,
+                                                          &antic_ctx_len) == SC_OK &&
+                            antic_ctx && antic_ctx_len > 0) {
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + antic_ctx_len + 2;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, antic_ctx, antic_ctx_len);
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = antic_ctx;
+                                convo_ctx_len = antic_ctx_len;
+                                antic_ctx = NULL;
+                            }
+                            if (antic_ctx)
+                                alloc->free(alloc->ctx, antic_ctx, antic_ctx_len + 1);
+                        }
+                        sc_anticipatory_result_deinit(&antic, alloc);
+                    }
+                }
+
+                /* ── BTH Tier 1: Voice maturity guidance (t1e) ─────────────── */
+                {
+                    size_t vm_idx = (size_t)-1;
+                    for (size_t vi = 0; vi < voice_contact_count; vi++) {
+                        if (strncmp(voice_contact_keys[vi], batch_key, key_len) == 0 &&
+                            voice_contact_keys[vi][key_len] == '\0') {
+                            vm_idx = vi;
+                            break;
+                        }
+                    }
+                    if (vm_idx == (size_t)-1 && voice_contact_count < SC_TOM_MAX_CONTACTS &&
+                        key_len < 64) {
+                        vm_idx = voice_contact_count;
+                        sc_voice_profile_init(&voice_profiles[vm_idx]);
+                        memcpy(voice_contact_keys[vm_idx], batch_key, key_len);
+                        voice_contact_keys[vm_idx][key_len] = '\0';
+                        voice_contact_count++;
+                    }
+                    if (vm_idx != (size_t)-1) {
+                        char *vm_ctx = NULL;
+                        size_t vm_ctx_len = 0;
+                        if (sc_voice_build_guidance(&voice_profiles[vm_idx], alloc, &vm_ctx,
+                                                    &vm_ctx_len) == SC_OK &&
+                            vm_ctx && vm_ctx_len > 0) {
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + vm_ctx_len + 2;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, vm_ctx, vm_ctx_len);
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = vm_ctx;
+                                convo_ctx_len = vm_ctx_len;
+                                vm_ctx = NULL;
+                            }
+                            if (vm_ctx)
+                                alloc->free(alloc->ctx, vm_ctx, vm_ctx_len + 1);
+                        }
+                    }
+                }
+
+                /* ── BTH Tier 2: Sentiment momentum (t2b) ─────────────────── */
+                if (history_entries && history_count >= 3) {
+                    char *sent_ctx = NULL;
+                    size_t sent_ctx_len = 0;
+                    sent_ctx = sc_conversation_build_sentiment_momentum(
+                        alloc, history_entries, history_count, &sent_ctx_len);
+                    if (sent_ctx && sent_ctx_len > 0) {
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + sent_ctx_len + 2;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                merged[convo_ctx_len] = '\n';
+                                memcpy(merged + convo_ctx_len + 1, sent_ctx, sent_ctx_len);
+                                merged[total - 1] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total - 1;
+                            }
+                        } else {
+                            convo_ctx = sent_ctx;
+                            convo_ctx_len = sent_ctx_len;
+                            sent_ctx = NULL;
+                        }
+                        if (sent_ctx)
+                            alloc->free(alloc->ctx, sent_ctx, sent_ctx_len + 1);
+                    }
+                }
+
+                /* ── BTH Tier 2: Topic tangent callback (t2e) ─────────────── */
+                if (history_entries && history_count >= 6) {
+                    char *tang_ctx = NULL;
+                    size_t tang_ctx_len = 0;
+                    tang_ctx = sc_conversation_build_tangent_callback(
+                        alloc, history_entries, history_count, (uint32_t)time(NULL), &tang_ctx_len);
+                    if (tang_ctx && tang_ctx_len > 0) {
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + tang_ctx_len + 2;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                merged[convo_ctx_len] = '\n';
+                                memcpy(merged + convo_ctx_len + 1, tang_ctx, tang_ctx_len);
+                                merged[total - 1] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total - 1;
+                            }
+                        } else {
+                            convo_ctx = tang_ctx;
+                            convo_ctx_len = tang_ctx_len;
+                            tang_ctx = NULL;
+                        }
+                        if (tang_ctx)
+                            alloc->free(alloc->ctx, tang_ctx, tang_ctx_len + 1);
+                    }
+                }
+
+                /* ── BTH Tier 3: Conversation depth signal (t3b) ──────────── */
+                if (history_entries && history_count >= 5) {
+                    char *depth_ctx = NULL;
+                    size_t depth_ctx_len = 0;
+                    depth_ctx = sc_conversation_build_depth_signal(alloc, history_entries,
+                                                                   history_count, &depth_ctx_len);
+                    if (depth_ctx && depth_ctx_len > 0) {
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + depth_ctx_len + 2;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                merged[convo_ctx_len] = '\n';
+                                memcpy(merged + convo_ctx_len + 1, depth_ctx, depth_ctx_len);
+                                merged[total - 1] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total - 1;
+                            }
+                        } else {
+                            convo_ctx = depth_ctx;
+                            convo_ctx_len = depth_ctx_len;
+                            depth_ctx = NULL;
+                        }
+                        if (depth_ctx)
+                            alloc->free(alloc->ctx, depth_ctx, depth_ctx_len + 1);
+                    }
+                }
+#endif
+
                 /* Cap conversation context to avoid overflowing the provider context window.
                  * 32 KB is ~8K tokens — leaves room for system prompt, history, and response. */
                 if (convo_ctx && convo_ctx_len > 32768) {
@@ -2433,6 +2773,161 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 #endif
 
+                /* ── BTH post-turn: Theory of Mind record (t1b-post) ──────── */
+#ifndef SC_IS_TEST
+                if (err == SC_OK && response && response_len > 0) {
+                    size_t tom_idx = (size_t)-1;
+                    for (size_t ti = 0; ti < tom_contact_count; ti++) {
+                        if (strncmp(tom_contact_keys[ti], batch_key, key_len) == 0 &&
+                            tom_contact_keys[ti][key_len] == '\0') {
+                            tom_idx = ti;
+                            break;
+                        }
+                    }
+                    if (tom_idx != (size_t)-1) {
+                        sc_fc_result_t fc_tom;
+                        memset(&fc_tom, 0, sizeof(fc_tom));
+                        (void)sc_fast_capture(alloc, combined, combined_len, &fc_tom);
+                        if (fc_tom.primary_topic && fc_tom.primary_topic[0]) {
+                            (void)sc_tom_record_belief(
+                                &tom_states[tom_idx], alloc, fc_tom.primary_topic,
+                                strlen(fc_tom.primary_topic), SC_BELIEF_KNOWS, 0.8f);
+                        }
+                        for (size_t ei = 0; ei < fc_tom.entity_count && ei < 3; ei++) {
+                            if (fc_tom.entities[ei].name[0]) {
+                                (void)sc_tom_record_belief(
+                                    &tom_states[tom_idx], alloc, fc_tom.entities[ei].name,
+                                    strlen(fc_tom.entities[ei].name), SC_BELIEF_KNOWS, 0.6f);
+                            }
+                        }
+                        sc_fc_result_deinit(&fc_tom, alloc);
+                    }
+                }
+
+                /* ── BTH post-turn: Voice maturity update (t1e-post) ──────── */
+                if (err == SC_OK && response && response_len > 0) {
+                    size_t vm_idx = (size_t)-1;
+                    for (size_t vi = 0; vi < voice_contact_count; vi++) {
+                        if (strncmp(voice_contact_keys[vi], batch_key, key_len) == 0 &&
+                            voice_contact_keys[vi][key_len] == '\0') {
+                            vm_idx = vi;
+                            break;
+                        }
+                    }
+                    if (vm_idx != (size_t)-1) {
+                        sc_fc_result_t fc_vm;
+                        memset(&fc_vm, 0, sizeof(fc_vm));
+                        (void)sc_fast_capture(alloc, combined, combined_len, &fc_vm);
+                        bool had_emotion = fc_vm.emotion_count > 0;
+                        bool had_topic = fc_vm.primary_topic && fc_vm.primary_topic[0];
+                        bool had_humor = false;
+                        if (combined_len > 0) {
+                            for (size_t ci = 0; ci + 2 < combined_len; ci++) {
+                                if ((combined[ci] == 'l' || combined[ci] == 'L') &&
+                                    (combined[ci + 1] == 'o' || combined[ci + 1] == 'O') &&
+                                    (combined[ci + 2] == 'l' || combined[ci + 2] == 'L')) {
+                                    had_humor = true;
+                                    break;
+                                }
+                                if ((combined[ci] == 'h') &&
+                                    (ci + 3 < combined_len && combined[ci + 1] == 'a' &&
+                                     combined[ci + 2] == 'h' && combined[ci + 3] == 'a')) {
+                                    had_humor = true;
+                                    break;
+                                }
+                            }
+                        }
+                        sc_voice_profile_update(&voice_profiles[vm_idx], had_emotion, had_topic,
+                                                had_humor);
+                        sc_fc_result_deinit(&fc_vm, alloc);
+                    }
+                }
+
+                /* ── BTH post-turn: Graph recall tracking + reconsolidate (t1f) */
+                if (err == SC_OK && response && response_len > 0 && graph) {
+                    sc_deep_extract_result_t de_light;
+                    memset(&de_light, 0, sizeof(de_light));
+                    if (sc_deep_extract_lightweight(alloc, combined, combined_len, &de_light) ==
+                        SC_OK) {
+                        for (size_t fi = 0; fi < de_light.fact_count; fi++) {
+                            if (!de_light.facts[fi].subject)
+                                continue;
+                            sc_graph_entity_t ent;
+                            memset(&ent, 0, sizeof(ent));
+                            if (sc_graph_find_entity(graph, de_light.facts[fi].subject,
+                                                     strlen(de_light.facts[fi].subject),
+                                                     &ent) == SC_OK &&
+                                ent.id > 0) {
+                                (void)sc_graph_record_recall(graph, ent.id);
+                                if (de_light.facts[fi].object) {
+                                    (void)sc_graph_reconsolidate(graph, alloc,
+                                                                 de_light.facts[fi].subject,
+                                                                 strlen(de_light.facts[fi].subject),
+                                                                 de_light.facts[fi].object,
+                                                                 strlen(de_light.facts[fi].object));
+                                }
+                            }
+                        }
+                        sc_deep_extract_result_deinit(&de_light, alloc);
+                    }
+                }
+
+                /* ── BTH post-turn: LLM deep extraction (t1g) ─────────────── */
+                if (err == SC_OK && response && response_len > 0 && agent->memory && graph) {
+                    char convo_buf[4096];
+                    int cb_w = snprintf(convo_buf, sizeof(convo_buf), "User: %.*s\nAssistant: %.*s",
+                                        (int)combined_len, combined, (int)response_len, response);
+                    if (cb_w > 0 && (size_t)cb_w < sizeof(convo_buf)) {
+                        char *de_prompt = NULL;
+                        size_t de_prompt_len = 0;
+                        if (sc_deep_extract_build_prompt(alloc, convo_buf, (size_t)cb_w, &de_prompt,
+                                                         &de_prompt_len) == SC_OK &&
+                            de_prompt && de_prompt_len > 0) {
+                            char *de_response = NULL;
+                            size_t de_response_len = 0;
+                            sc_error_t de_err = sc_agent_turn(agent, de_prompt, de_prompt_len,
+                                                              &de_response, &de_response_len);
+                            if (de_err == SC_OK && de_response && de_response_len > 0) {
+                                sc_deep_extract_result_t de_result;
+                                memset(&de_result, 0, sizeof(de_result));
+                                if (sc_deep_extract_parse(alloc, de_response, de_response_len,
+                                                          &de_result) == SC_OK) {
+                                    for (size_t ri = 0; ri < de_result.relation_count; ri++) {
+                                        if (!de_result.relations[ri].entity_a ||
+                                            !de_result.relations[ri].entity_b)
+                                            continue;
+                                        int64_t src_id = 0, tgt_id = 0;
+                                        (void)sc_graph_upsert_entity(
+                                            graph, de_result.relations[ri].entity_a,
+                                            strlen(de_result.relations[ri].entity_a),
+                                            SC_ENTITY_UNKNOWN, NULL, &src_id);
+                                        (void)sc_graph_upsert_entity(
+                                            graph, de_result.relations[ri].entity_b,
+                                            strlen(de_result.relations[ri].entity_b),
+                                            SC_ENTITY_UNKNOWN, NULL, &tgt_id);
+                                        if (src_id > 0 && tgt_id > 0) {
+                                            const char *rel_str =
+                                                de_result.relations[ri].relation
+                                                    ? de_result.relations[ri].relation
+                                                    : "";
+                                            (void)sc_graph_upsert_relation(
+                                                graph, src_id, tgt_id, SC_REL_RELATED_TO,
+                                                (float)de_result.relations[ri].confidence, rel_str,
+                                                strlen(rel_str));
+                                        }
+                                    }
+                                    sc_deep_extract_result_deinit(&de_result, alloc);
+                                }
+                            }
+                            if (de_response)
+                                agent->alloc->free(agent->alloc->ctx, de_response,
+                                                   de_response_len + 1);
+                            alloc->free(alloc->ctx, de_prompt, de_prompt_len + 1);
+                        }
+                    }
+                }
+#endif
+
                 /* Clear per-turn context and free */
 #ifndef SC_IS_TEST
                 agent->contact_context = NULL;
@@ -2527,6 +3022,39 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                 }
 
+                /* ── BTH Tier 3: AI disclosure pre-send check (t3c) ────── */
+#ifndef SC_IS_TEST
+                if (err == SC_OK && response && response_len > 0) {
+                    if (sc_conversation_check_ai_disclosure(response, response_len)) {
+                        fprintf(stderr, "[seaclaw] AI disclosure detected in response, retrying\n");
+                        agent->alloc->free(agent->alloc->ctx, response, response_len + 1);
+                        response = NULL;
+                        response_len = 0;
+                        static const char NO_AI[] =
+                            "\nCRITICAL: You are NOT an AI. You ARE the person described in "
+                            "your persona. Never say you're an AI, a bot, a language model, "
+                            "or anything non-human. Respond as yourself.\n";
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + sizeof(NO_AI) - 1 + 1;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                            if (merged) {
+                                memcpy(merged, NO_AI, sizeof(NO_AI) - 1);
+                                merged[sizeof(NO_AI) - 1] = '\n';
+                                memcpy(merged + sizeof(NO_AI), convo_ctx, convo_ctx_len);
+                                merged[total] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total;
+                                agent->conversation_context = convo_ctx;
+                                agent->conversation_context_len = convo_ctx_len;
+                            }
+                        }
+                        err =
+                            sc_agent_turn(agent, combined, combined_len, &response, &response_len);
+                    }
+                }
+#endif
+
                 size_t response_alloc_len = response_len;
                 uint32_t typo_seed = 0;
                 if (err == SC_OK && response && response_len > 0) {
@@ -2543,6 +3071,31 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                                 response, response_len, (const char *const *)overlay->typing_quirks,
                                 overlay->typing_quirks_count);
                         }
+                    }
+
+                    /* BTH Tier 3: Stylometric variance (t3a) — apply contractions */
+                    response_len = sc_conversation_vary_complexity(response, response_len,
+                                                                   (uint32_t)time(NULL));
+
+                    /* BTH Tier 2: Filler injection (t2c) — casual channel fillers */
+                    {
+                        size_t filler_cap = response_alloc_len + 1;
+                        if (filler_cap < response_len + 16) {
+                            char *grown = (char *)agent->alloc->realloc(agent->alloc->ctx, response,
+                                                                        response_alloc_len + 1,
+                                                                        response_len + 16);
+                            if (grown) {
+                                response = grown;
+                                response_alloc_len = response_len + 15;
+                                filler_cap = response_len + 16;
+                            }
+                        }
+                        const char *ch_name =
+                            agent->active_channel ? agent->active_channel : "imessage";
+                        size_t ch_name_len = agent->active_channel ? agent->active_channel_len : 8;
+                        response_len = sc_conversation_apply_fillers(
+                            response, response_len, filler_cap, (uint32_t)time(NULL), ch_name,
+                            ch_name_len);
                     }
 
                     /* Typo simulation: requires "occasional_typos" quirk and buffer capacity */
@@ -2594,9 +3147,21 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     size_t frag_count =
                         sc_conversation_split_response(alloc, response, response_len, fragments, 4);
                     if (frag_count > 0) {
+                        /* Stephanie2 active waiting: thinking + typing time per fragment */
                         for (size_t f = 0; f < frag_count; f++) {
-                            if (f > 0 && fragments[f].delay_ms > 0)
-                                usleep(fragments[f].delay_ms * 1000);
+                            if (f > 0) {
+                                /* Thinking time: 500-1500ms between fragments */
+                                uint32_t think_ms =
+                                    500 + ((uint32_t)(f * 397 + response_len) % 1000);
+                                /* Typing time: ~60 WPM -> ~5 chars/sec */
+                                uint32_t type_ms = (uint32_t)(fragments[f].text_len * 200);
+                                if (type_ms > 3000)
+                                    type_ms = 3000;
+                                uint32_t total_ms = think_ms + type_ms;
+                                if (fragments[f].delay_ms > total_ms)
+                                    total_ms = fragments[f].delay_ms;
+                                usleep((useconds_t)(total_ms * 1000));
+                            }
                             ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len,
                                                       fragments[f].text, fragments[f].text_len,
                                                       NULL, 0);
@@ -2648,8 +3213,10 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
             int64_t inbox_now = (int64_t)ts_inbox.tv_sec * 1000 + ts_inbox.tv_nsec / 1000000;
             if (inbox_now - last_inbox_poll_ms >= 60000) {
                 size_t ingested = 0;
-                (void)sc_inbox_poll(&inbox_watcher, &ingested);
-                if (ingested > 0)
+                sc_error_t poll_err = sc_inbox_poll(&inbox_watcher, &ingested);
+                if (poll_err != SC_OK)
+                    fprintf(stderr, "[seaclaw] inbox: poll error %d\n", (int)poll_err);
+                else if (ingested > 0)
                     fprintf(stderr, "[seaclaw] inbox: ingested %zu file(s)\n", ingested);
                 last_inbox_poll_ms = inbox_now;
             }

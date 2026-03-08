@@ -144,6 +144,7 @@ export class ScAutomationsView extends GatewayAwareLitElement {
   @state() private editingJob: CronJob | null = null;
   @state() private pendingDelete: CronJob | null = null;
   @state() private selectedTemplate: (typeof TEMPLATES)[number] | null = null;
+  @state() private _deleteInProgress = false;
 
   protected override async load(): Promise<void> {
     const gw = this.gateway;
@@ -365,9 +366,10 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   private async _confirmDelete(): Promise<void> {
     const job = this.pendingDelete;
-    if (!job) return;
+    if (!job || this._deleteInProgress) return;
     const gw = this.gateway;
     if (!gw || job.id == null) return;
+    this._deleteInProgress = true;
     try {
       await gw.request("cron.remove", { id: job.id });
       ScToast.show({ message: "Automation deleted", variant: "success" });
@@ -378,6 +380,8 @@ export class ScAutomationsView extends GatewayAwareLitElement {
         message: err instanceof Error ? err.message : "Failed to delete",
         variant: "error",
       });
+    } finally {
+      this._deleteInProgress = false;
     }
   }
 

@@ -43,7 +43,7 @@ export class ChatCache {
       const items = parseCached(raw);
       return items.length > 0 ? items : [];
     } catch {
-      /* corrupt cache — ignore */
+      console.warn("[chat-cache] failed to restore cache:", storageKey(key));
     }
     return [];
   }

@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { icons } from "../icons.js";
+import { AudioRecorder, blobToBase64 } from "../audio-recorder.js";
 
 @customElement("sc-floating-mic")
 export class ScFloatingMic extends LitElement {
@@ -35,6 +36,11 @@ export class ScFloatingMic extends LitElement {
     .btn.listening {
       background: var(--sc-error);
       animation: sc-pulse-red var(--sc-duration-slow) ease-in-out infinite;
+    }
+    .btn.transcribing {
+      background: var(--sc-accent-secondary);
+      opacity: 0.8;
+      cursor: wait;
     }
     @keyframes sc-pulse-red {
       0%,
@@ -74,27 +80,19 @@ export class ScFloatingMic extends LitElement {
   `;
 
   @state() private isListening = false;
-  @state() private liveTranscript = "";
-  @state() private speechSupported = true;
-  @state() private recognition: SpeechRecognition | null = null;
-
-  private get hasSpeechRecognition(): boolean {
-    const g =
-      typeof window !== "undefined" ? (window as unknown as { SpeechRecognition?: unknown }) : null;
-    const w = g ? (window as unknown as { webkitSpeechRecognition?: unknown }) : null;
-    return !!(g?.SpeechRecognition ?? w?.webkitSpeechRecognition);
-  }
+  @state() private isTranscribing = false;
+  @state() private overlayText = "";
+  private _recorder = new AudioRecorder();
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.speechSupported = this.hasSpeechRecognition;
     this._setupKeyboardShortcut();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._removeKeyboardShortcut();
-    this._stopRecognition();
+    this._recorder.dispose();
   }
 
   private _handleKeyDown = (e: KeyboardEvent): void => {
@@ -113,82 +111,64 @@ export class ScFloatingMic extends LitElement {
   }
 
   private toggleRecording(): void {
-    if (!this.speechSupported) return;
+    if (!this._recorder.isSupported || this.isTranscribing) return;
     if (this.isListening) {
-      this._stopRecognition();
+      this._stopAndTranscribe();
     } else {
-      this._startRecognition();
+      this._startRecording();
     }
   }
 
-  private _startRecognition(): void {
-    if (!this.hasSpeechRecognition) return;
-    const SR =
-      (window as unknown as { SpeechRecognition?: new () => SpeechRecognition })
-        .SpeechRecognition ??
-      (
-        window as unknown as {
-          webkitSpeechRecognition?: new () => SpeechRecognition;
-        }
-      ).webkitSpeechRecognition;
-    if (!SR) return;
-
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-
-    rec.onresult = (e: SpeechRecognitionEvent): void => {
-      let interim = "";
-      let final = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const res = e.results[i];
-        const text = res[0].transcript;
-        if (res.isFinal) {
-          final += text;
-        } else {
-          interim += text;
-        }
-      }
-      if (final) {
-        this._injectTranscript(final);
-        this.liveTranscript = "";
-      } else {
-        this.liveTranscript = interim;
-      }
-    };
-
-    rec.onend = (): void => {
-      this.isListening = false;
-      this.liveTranscript = "";
-    };
-
-    rec.onerror = (): void => {
-      this.isListening = false;
-      this.liveTranscript = "";
-    };
-
+  private async _startRecording(): Promise<void> {
     try {
-      rec.start();
-      this.recognition = rec;
+      await this._recorder.start();
       this.isListening = true;
+      this.overlayText = "Recording\u2026";
     } catch {
       this.isListening = false;
-      this.recognition = null;
+      this.overlayText = "";
     }
   }
 
-  private _stopRecognition(): void {
-    if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch {
-        /* ignore */
-      }
-      this.recognition = null;
-    }
+  private async _stopAndTranscribe(): Promise<void> {
     this.isListening = false;
-    this.liveTranscript = "";
+    this.isTranscribing = true;
+    this.overlayText = "Transcribing\u2026";
+
+    try {
+      const { blob, mimeType } = await this._recorder.stop();
+      const audio = await blobToBase64(blob);
+
+      const detail = { audio, mimeType };
+      const event = new CustomEvent<{ audio: string; mimeType: string }>("sc-voice-transcribe", {
+        bubbles: true,
+        composed: true,
+        detail,
+      });
+
+      const responded = new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Transcription timeout")), 30_000);
+        const handler = (e: Event) => {
+          clearTimeout(timeout);
+          window.removeEventListener("sc-voice-transcript-result", handler);
+          const text = (e as CustomEvent<{ text: string }>).detail.text;
+          resolve(text);
+        };
+        window.addEventListener("sc-voice-transcript-result", handler);
+      });
+
+      this.dispatchEvent(event);
+      const text = await responded;
+
+      if (text.trim()) {
+        this._injectTranscript(text);
+      }
+    } catch {
+      /* transcription failed silently */
+    }
+
+    this.isTranscribing = false;
+    this.overlayText = "";
   }
 
   private _findInput(
@@ -246,15 +226,18 @@ export class ScFloatingMic extends LitElement {
   }
 
   override render() {
+    const btnClass = this.isListening ? "listening" : this.isTranscribing ? "transcribing" : "";
     return html`
       <div>
-        ${this.isListening && this.liveTranscript
-          ? html`<div class="overlay">${this.liveTranscript}</div>`
+        ${this.isListening || this.isTranscribing
+          ? html`<div class="overlay">${this.overlayText}</div>`
           : ""}
         <button
-          class="btn ${this.isListening ? "listening" : ""}"
-          ?disabled=${!this.speechSupported}
-          title=${this.speechSupported ? "Start voice input (Cmd+Shift+M)" : "Speech not supported"}
+          class="btn ${btnClass}"
+          ?disabled=${!this._recorder.isSupported || this.isTranscribing}
+          title=${this._recorder.isSupported
+            ? "Start voice input (Cmd+Shift+M)"
+            : "Audio recording not supported"}
           @click=${this.toggleRecording}
           aria-label="Toggle voice input"
         >

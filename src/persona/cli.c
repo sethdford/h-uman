@@ -91,7 +91,7 @@ sc_error_t sc_persona_cli_parse(int argc, const char **argv, sc_persona_cli_args
                     out->facebook_export_path = argv[i + 1];
                     i++;
                 }
-            }             else if (strcmp(argv[i], "--from-response") == 0 && i + 1 < argc)
+            } else if (strcmp(argv[i], "--from-response") == 0 && i + 1 < argc)
                 out->response_file = argv[++i];
             else if (strcmp(argv[i], "--with-contact") == 0 && i + 1 < argc)
                 out->with_contact = argv[++i];
@@ -118,7 +118,7 @@ sc_error_t sc_persona_cli_parse(int argc, const char **argv, sc_persona_cli_args
                     out->facebook_export_path = argv[i + 1];
                     i++;
                 }
-            }             else if (strcmp(argv[i], "--from-response") == 0 && i + 1 < argc)
+            } else if (strcmp(argv[i], "--from-response") == 0 && i + 1 < argc)
                 out->response_file = argv[++i];
             else if (strcmp(argv[i], "--with-contact") == 0 && i + 1 < argc)
                 out->with_contact = argv[++i];
@@ -390,11 +390,11 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
         diff_scalar("core_anchor", a.core_anchor, b.core_anchor);
         diff_arr("character_invariants", a.character_invariants, a.character_invariants_count,
                  b.character_invariants, b.character_invariants_count);
-        diff_arr("directors_notes", a.directors_notes, a.directors_notes_count,
-                 b.directors_notes, b.directors_notes_count);
+        diff_arr("directors_notes", a.directors_notes, a.directors_notes_count, b.directors_notes,
+                 b.directors_notes_count);
 
         diff_scalar("motivation.primary_drive", a.motivation.primary_drive,
-                     b.motivation.primary_drive);
+                    b.motivation.primary_drive);
         diff_scalar("motivation.protecting", a.motivation.protecting, b.motivation.protecting);
         diff_scalar("motivation.avoiding", a.motivation.avoiding, b.motivation.avoiding);
         diff_scalar("motivation.wanting", a.motivation.wanting, b.motivation.wanting);
@@ -402,110 +402,103 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
         diff_scalar("humor.type", a.humor.type, b.humor.type);
         diff_scalar("humor.frequency", a.humor.frequency, b.humor.frequency);
         diff_scalar("humor.timing", a.humor.timing, b.humor.timing);
-        diff_arr("humor.targets", a.humor.targets, a.humor.targets_count,
-                 b.humor.targets, b.humor.targets_count);
+        diff_arr("humor.targets", a.humor.targets, a.humor.targets_count, b.humor.targets,
+                 b.humor.targets_count);
         diff_arr("humor.boundaries", a.humor.boundaries, a.humor.boundaries_count,
                  b.humor.boundaries, b.humor.boundaries_count);
 
         diff_scalar("conflict_style.pushback_response", a.conflict_style.pushback_response,
-                     b.conflict_style.pushback_response);
+                    b.conflict_style.pushback_response);
         diff_scalar("conflict_style.apology_style", a.conflict_style.apology_style,
-                     b.conflict_style.apology_style);
-        diff_scalar("conflict_style.confrontation_comfort",
-                     a.conflict_style.confrontation_comfort,
-                     b.conflict_style.confrontation_comfort);
+                    b.conflict_style.apology_style);
+        diff_scalar("conflict_style.confrontation_comfort", a.conflict_style.confrontation_comfort,
+                    b.conflict_style.confrontation_comfort);
         diff_scalar("conflict_style.boundary_assertion", a.conflict_style.boundary_assertion,
-                     b.conflict_style.boundary_assertion);
+                    b.conflict_style.boundary_assertion);
         diff_scalar("conflict_style.repair_behavior", a.conflict_style.repair_behavior,
-                     b.conflict_style.repair_behavior);
+                    b.conflict_style.repair_behavior);
 
         diff_scalar("emotional_range.ceiling", a.emotional_range.ceiling,
-                     b.emotional_range.ceiling);
+                    b.emotional_range.ceiling);
         diff_scalar("emotional_range.floor", a.emotional_range.floor, b.emotional_range.floor);
         diff_scalar("emotional_range.withdrawal_conditions",
-                     a.emotional_range.withdrawal_conditions,
-                     b.emotional_range.withdrawal_conditions);
+                    a.emotional_range.withdrawal_conditions,
+                    b.emotional_range.withdrawal_conditions);
         diff_scalar("emotional_range.recovery_style", a.emotional_range.recovery_style,
-                     b.emotional_range.recovery_style);
-        diff_arr("emotional_range.escalation_triggers",
-                 a.emotional_range.escalation_triggers,
-                 a.emotional_range.escalation_triggers_count,
-                 b.emotional_range.escalation_triggers,
+                    b.emotional_range.recovery_style);
+        diff_arr("emotional_range.escalation_triggers", a.emotional_range.escalation_triggers,
+                 a.emotional_range.escalation_triggers_count, b.emotional_range.escalation_triggers,
                  b.emotional_range.escalation_triggers_count);
         diff_arr("emotional_range.de_escalation", a.emotional_range.de_escalation,
                  a.emotional_range.de_escalation_count, b.emotional_range.de_escalation,
                  b.emotional_range.de_escalation_count);
 
         diff_scalar("voice_rhythm.sentence_pattern", a.voice_rhythm.sentence_pattern,
-                     b.voice_rhythm.sentence_pattern);
+                    b.voice_rhythm.sentence_pattern);
         diff_scalar("voice_rhythm.paragraph_cadence", a.voice_rhythm.paragraph_cadence,
-                     b.voice_rhythm.paragraph_cadence);
+                    b.voice_rhythm.paragraph_cadence);
         diff_scalar("voice_rhythm.response_tempo", a.voice_rhythm.response_tempo,
-                     b.voice_rhythm.response_tempo);
+                    b.voice_rhythm.response_tempo);
         diff_scalar("voice_rhythm.emphasis_style", a.voice_rhythm.emphasis_style,
-                     b.voice_rhythm.emphasis_style);
+                    b.voice_rhythm.emphasis_style);
         diff_scalar("voice_rhythm.pause_behavior", a.voice_rhythm.pause_behavior,
-                     b.voice_rhythm.pause_behavior);
+                    b.voice_rhythm.pause_behavior);
 
-        diff_scalar("sensory.dominant_sense", a.sensory.dominant_sense,
-                     b.sensory.dominant_sense);
+        diff_scalar("sensory.dominant_sense", a.sensory.dominant_sense, b.sensory.dominant_sense);
         diff_scalar("sensory.grounding_patterns", a.sensory.grounding_patterns,
-                     b.sensory.grounding_patterns);
+                    b.sensory.grounding_patterns);
         diff_arr("sensory.metaphor_vocabulary", a.sensory.metaphor_vocabulary,
                  a.sensory.metaphor_vocabulary_count, b.sensory.metaphor_vocabulary,
                  b.sensory.metaphor_vocabulary_count);
 
         diff_scalar("intellectual.thinking_style", a.intellectual.thinking_style,
-                     b.intellectual.thinking_style);
-        diff_arr("intellectual.expertise", a.intellectual.expertise,
-                 a.intellectual.expertise_count, b.intellectual.expertise,
-                 b.intellectual.expertise_count);
+                    b.intellectual.thinking_style);
+        diff_arr("intellectual.expertise", a.intellectual.expertise, a.intellectual.expertise_count,
+                 b.intellectual.expertise, b.intellectual.expertise_count);
         diff_arr("intellectual.curiosity_areas", a.intellectual.curiosity_areas,
                  a.intellectual.curiosity_areas_count, b.intellectual.curiosity_areas,
                  b.intellectual.curiosity_areas_count);
 
         diff_scalar("relational.bid_response_style", a.relational.bid_response_style,
-                     b.relational.bid_response_style);
+                    b.relational.bid_response_style);
         diff_scalar("relational.attachment_style", a.relational.attachment_style,
-                     b.relational.attachment_style);
+                    b.relational.attachment_style);
         diff_scalar("relational.attachment_awareness", a.relational.attachment_awareness,
-                     b.relational.attachment_awareness);
+                    b.relational.attachment_awareness);
         diff_scalar("relational.dunbar_awareness", a.relational.dunbar_awareness,
-                     b.relational.dunbar_awareness);
+                    b.relational.dunbar_awareness);
         diff_arr("relational.emotional_bids", a.relational.emotional_bids,
                  a.relational.emotional_bids_count, b.relational.emotional_bids,
                  b.relational.emotional_bids_count);
 
         diff_scalar("listening.default_response_type", a.listening.default_response_type,
-                     b.listening.default_response_type);
+                    b.listening.default_response_type);
         diff_scalar("listening.nvc_style", a.listening.nvc_style, b.listening.nvc_style);
         diff_scalar("listening.validation_style", a.listening.validation_style,
-                     b.listening.validation_style);
+                    b.listening.validation_style);
         diff_arr("listening.reflective_techniques", a.listening.reflective_techniques,
                  a.listening.reflective_techniques_count, b.listening.reflective_techniques,
                  b.listening.reflective_techniques_count);
 
         diff_scalar("repair.rupture_detection", a.repair.rupture_detection,
-                     b.repair.rupture_detection);
-        diff_scalar("repair.repair_approach", a.repair.repair_approach,
-                     b.repair.repair_approach);
+                    b.repair.rupture_detection);
+        diff_scalar("repair.repair_approach", a.repair.repair_approach, b.repair.repair_approach);
         diff_scalar("repair.face_saving_style", a.repair.face_saving_style,
-                     b.repair.face_saving_style);
-        diff_arr("repair.repair_phrases", a.repair.repair_phrases,
-                 a.repair.repair_phrases_count, b.repair.repair_phrases,
-                 b.repair.repair_phrases_count);
+                    b.repair.face_saving_style);
+        diff_arr("repair.repair_phrases", a.repair.repair_phrases, a.repair.repair_phrases_count,
+                 b.repair.repair_phrases, b.repair.repair_phrases_count);
 
         diff_scalar("mirroring.mirroring_level", a.mirroring.mirroring_level,
-                     b.mirroring.mirroring_level);
+                    b.mirroring.mirroring_level);
         diff_scalar("mirroring.convergence_speed", a.mirroring.convergence_speed,
-                     b.mirroring.convergence_speed);
+                    b.mirroring.convergence_speed);
         diff_scalar("mirroring.power_dynamic", a.mirroring.power_dynamic,
-                     b.mirroring.power_dynamic);
+                    b.mirroring.power_dynamic);
         diff_arr("mirroring.adapts_to", a.mirroring.adapts_to, a.mirroring.adapts_to_count,
                  b.mirroring.adapts_to, b.mirroring.adapts_to_count);
 
         diff_scalar("social.default_ego_state", a.social.default_ego_state,
-                     b.social.default_ego_state);
+                    b.social.default_ego_state);
         diff_scalar("social.phatic_style", a.social.phatic_style, b.social.phatic_style);
         diff_arr("social.bonding_behaviors", a.social.bonding_behaviors,
                  a.social.bonding_behaviors_count, b.social.bonding_behaviors,
@@ -963,9 +956,9 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
 
                 if (eerr == SC_OK && example_count > 0) {
                     char examples_path[SC_PERSONA_PATH_MAX];
-                    int en = snprintf(examples_path, sizeof(examples_path),
-                                      "%s/%s_examples_%s.json", pending_dir, args->name,
-                                      args->with_contact);
+                    int en =
+                        snprintf(examples_path, sizeof(examples_path), "%s/%s_examples_%s.json",
+                                 pending_dir, args->name, args->with_contact);
                     if (en > 0 && (size_t)en < sizeof(examples_path)) {
                         FILE *ef = fopen(examples_path, "wb");
                         if (ef) {
@@ -973,8 +966,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
                             for (size_t ei = 0; ei < example_count; ei++) {
                                 if (ei > 0)
                                     fputs(",\n", ef);
-                                fprintf(ef,
-                                        "  {\"context\": \"%s\", \"incoming\": \"",
+                                fprintf(ef, "  {\"context\": \"%s\", \"incoming\": \"",
                                         examples[ei].context ? examples[ei].context : "");
                                 for (const char *p = examples[ei].incoming; p && *p; p++) {
                                     if (*p == '"')
@@ -1018,13 +1010,14 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
                     }
                     alloc->free(alloc->ctx, examples, example_count * sizeof(*examples));
                 }
-                fprintf(stdout, "Contact stats: %zu their msgs, %zu my msgs, "
-                                "avg_their=%zu, avg_mine=%zu, emoji=%s, links=%s, "
-                                "bursts=%s, short=%s\n",
+                fprintf(stdout,
+                        "Contact stats: %zu their msgs, %zu my msgs, "
+                        "avg_their=%zu, avg_mine=%zu, emoji=%s, links=%s, "
+                        "bursts=%s, short=%s\n",
                         stats.their_msg_count, stats.my_msg_count, stats.avg_their_len,
                         stats.avg_my_len, stats.uses_emoji ? "yes" : "no",
-                        stats.sends_links ? "yes" : "no",
-                        stats.texts_in_bursts ? "yes" : "no", stats.prefers_short ? "yes" : "no");
+                        stats.sends_links ? "yes" : "no", stats.texts_in_bursts ? "yes" : "no",
+                        stats.prefers_short ? "yes" : "no");
                 wrote_prompt = true;
                 return SC_OK;
             }
@@ -1137,7 +1130,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
                 fprintf(stderr, "Facebook export file too large or empty\n");
                 return SC_ERR_INVALID_ARGUMENT;
             }
-            char *json = (char *)malloc((size_t)sz + 1);
+            char *json = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
             if (!json) {
                 fclose(f);
                 return SC_ERR_OUT_OF_MEMORY;
@@ -1149,7 +1142,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
             char **messages = NULL;
             size_t msg_count = 0;
             sc_error_t perr = sc_persona_sampler_facebook_parse(json, nr, &messages, &msg_count);
-            free(json);
+            alloc->free(alloc->ctx, json, (size_t)sz + 1);
             if (perr != SC_OK) {
                 fprintf(stderr, "Failed to parse Facebook export\n");
                 return perr;
@@ -1209,7 +1202,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
                 fprintf(stderr, "Gmail export file too large or empty\n");
                 return SC_ERR_INVALID_ARGUMENT;
             }
-            char *json = (char *)malloc((size_t)sz + 1);
+            char *json = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
             if (!json) {
                 fclose(f);
                 return SC_ERR_OUT_OF_MEMORY;
@@ -1221,7 +1214,7 @@ sc_error_t sc_persona_cli_run(sc_allocator_t *alloc, const sc_persona_cli_args_t
             char **messages = NULL;
             size_t msg_count = 0;
             sc_error_t perr = sc_persona_sampler_gmail_parse(json, nr, &messages, &msg_count);
-            free(json);
+            alloc->free(alloc->ctx, json, (size_t)sz + 1);
             if (perr != SC_OK) {
                 fprintf(stderr, "Failed to parse Gmail export\n");
                 return perr;

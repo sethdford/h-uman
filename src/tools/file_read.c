@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "seaclaw/tools/schema_common.h"
+#define SC_FILE_MAX_SIZE    (1024 * 1024)
 #define SC_FILE_READ_NAME   "file_read"
 #define SC_FILE_READ_DESC   "Read file contents from path"
 #define SC_FILE_READ_PARAMS SC_SCHEMA_PATH_ONLY
@@ -86,7 +87,7 @@ static sc_error_t file_read_execute(void *ctx, sc_allocator_t *alloc, const sc_j
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (sz <= 0 || sz > 1024 * 1024) {
+    if (sz <= 0 || sz > SC_FILE_MAX_SIZE) {
         fclose(f);
         *out = sc_tool_result_fail("file too large or empty", 23);
         return SC_OK;

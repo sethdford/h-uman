@@ -75,6 +75,10 @@ sc_error_t sc_inbox_poll(sc_inbox_watcher_t *watcher, size_t *processed_count) {
     while ((ent = readdir(dir)) != NULL && *processed_count < SC_INBOX_MAX_FILES) {
         if (ent->d_name[0] == '.')
             continue;
+        if (strstr(ent->d_name, "..") != NULL)
+            continue;
+        if (strchr(ent->d_name, '/') != NULL || strchr(ent->d_name, '\\') != NULL)
+            continue;
 
         char path[1024];
         int n = snprintf(path, sizeof(path), "%.*s/%s", (int)watcher->inbox_dir_len,
@@ -83,7 +87,9 @@ sc_error_t sc_inbox_poll(sc_inbox_watcher_t *watcher, size_t *processed_count) {
             continue;
 
         struct stat st;
-        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+        if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+        if (S_ISLNK(st.st_mode))
             continue;
         if (st.st_size > SC_INBOX_MAX_FILE_SIZE)
             continue;
@@ -91,7 +97,7 @@ sc_error_t sc_inbox_poll(sc_inbox_watcher_t *watcher, size_t *processed_count) {
         sc_error_t err;
         if (watcher->provider && watcher->provider->vtable)
             err = sc_ingest_file_with_provider(watcher->alloc, watcher->memory, watcher->provider,
-                                               path, (size_t)n);
+                                               path, (size_t)n, watcher->model, watcher->model_len);
         else
             err = sc_ingest_file(watcher->alloc, watcher->memory, path, (size_t)n);
         if (err != SC_OK)

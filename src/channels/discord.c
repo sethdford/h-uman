@@ -14,6 +14,12 @@
 #define DISCORD_MAX_CHANNELS    16
 #define DISCORD_SESSION_KEY_MAX 127
 #define DISCORD_CONTENT_MAX     4095
+#define DISCORD_QUEUE_MAX       32
+
+typedef struct sc_discord_queued_msg {
+    char session_key[128];
+    char content[4096];
+} sc_discord_queued_msg_t;
 
 typedef struct sc_discord_ctx {
     sc_allocator_t *alloc;
@@ -32,6 +38,11 @@ typedef struct sc_discord_ctx {
     char *stream_text;
     size_t stream_text_len;
     size_t stream_text_cap;
+    /* Webhook inbound queue */
+    sc_discord_queued_msg_t queue[DISCORD_QUEUE_MAX];
+    size_t queue_head;
+    size_t queue_tail;
+    size_t queue_count;
 #if SC_IS_TEST
     char last_message[4096];
     size_t last_message_len;
@@ -358,6 +369,73 @@ static const sc_channel_vtable_t discord_vtable = {
     .stop_typing = NULL,
 };
 
+/* ─── Webhook inbound queue ────────────────────────────────────────────── */
+
+static void discord_queue_push(sc_discord_ctx_t *c, const char *from, size_t from_len,
+                               const char *body, size_t body_len) {
+    if (c->queue_count >= DISCORD_QUEUE_MAX)
+        return;
+    sc_discord_queued_msg_t *slot = &c->queue[c->queue_tail];
+    size_t sk = from_len < DISCORD_SESSION_KEY_MAX ? from_len : DISCORD_SESSION_KEY_MAX;
+    memcpy(slot->session_key, from, sk);
+    slot->session_key[sk] = '\0';
+    size_t ct = body_len < DISCORD_CONTENT_MAX ? body_len : DISCORD_CONTENT_MAX;
+    memcpy(slot->content, body, ct);
+    slot->content[ct] = '\0';
+    c->queue_tail = (c->queue_tail + 1) % DISCORD_QUEUE_MAX;
+    c->queue_count++;
+}
+
+sc_error_t sc_discord_on_webhook(void *channel_ctx, sc_allocator_t *alloc, const char *body,
+                                 size_t body_len) {
+    sc_discord_ctx_t *c = (sc_discord_ctx_t *)channel_ctx;
+    if (!c || !body || body_len == 0)
+        return SC_ERR_INVALID_ARGUMENT;
+#if SC_IS_TEST
+    (void)alloc;
+    discord_queue_push(c, "test-sender", 11, body, body_len);
+    return SC_OK;
+#else
+    sc_json_value_t *parsed = NULL;
+    sc_error_t err = sc_json_parse(alloc, body, body_len, &parsed);
+    if (err != SC_OK || !parsed)
+        return SC_OK;
+
+    /*
+     * Discord Interactions webhook payload:
+     *   { "type": 0, "d": { "channel_id": "...", "author": { "id": "...", "bot": false },
+     *     "content": "..." } }
+     * Discord also sends via the gateway events forwarded as webhooks:
+     *   { "t": "MESSAGE_CREATE", "d": { ... } }
+     * Handle both: look for "d" envelope or flat structure.
+     */
+    sc_json_value_t *d_obj = sc_json_object_get(parsed, "d");
+    sc_json_value_t *msg = d_obj ? d_obj : parsed;
+
+    sc_json_value_t *author = sc_json_object_get(msg, "author");
+    if (author && author->type == SC_JSON_OBJECT) {
+        bool is_bot = sc_json_get_bool(author, "bot", false);
+        if (is_bot) {
+            sc_json_free(alloc, parsed);
+            return SC_OK;
+        }
+    }
+
+    const char *content = sc_json_get_string(msg, "content");
+    if (!content || strlen(content) == 0) {
+        sc_json_free(alloc, parsed);
+        return SC_OK;
+    }
+
+    const char *channel_id = sc_json_get_string(msg, "channel_id");
+    const char *session = channel_id ? channel_id : "unknown";
+
+    discord_queue_push(c, session, strlen(session), content, strlen(content));
+    sc_json_free(alloc, parsed);
+    return SC_OK;
+#endif
+}
+
 /* ─── REST polling (GET /channels/{id}/messages) ─────────────────────────── */
 
 sc_error_t sc_discord_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
@@ -379,8 +457,38 @@ sc_error_t sc_discord_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_
         ctx->mock_count = 0;
         return SC_OK;
     }
+    /* Drain webhook queue in test mode too */
+    {
+        size_t cnt = 0;
+        while (ctx->queue_count > 0 && cnt < max_msgs) {
+            sc_discord_queued_msg_t *slot = &ctx->queue[ctx->queue_head];
+            memcpy(msgs[cnt].session_key, slot->session_key, sizeof(slot->session_key));
+            memcpy(msgs[cnt].content, slot->content, sizeof(slot->content));
+            ctx->queue_head = (ctx->queue_head + 1) % DISCORD_QUEUE_MAX;
+            ctx->queue_count--;
+            cnt++;
+        }
+        *out_count = cnt;
+    }
     return SC_OK;
 #else
+    /* Drain webhook queue first */
+    {
+        size_t cnt = 0;
+        while (ctx->queue_count > 0 && cnt < max_msgs) {
+            sc_discord_queued_msg_t *slot = &ctx->queue[ctx->queue_head];
+            memcpy(msgs[cnt].session_key, slot->session_key, sizeof(slot->session_key));
+            memcpy(msgs[cnt].content, slot->content, sizeof(slot->content));
+            ctx->queue_head = (ctx->queue_head + 1) % DISCORD_QUEUE_MAX;
+            ctx->queue_count--;
+            cnt++;
+        }
+        if (cnt > 0) {
+            *out_count = cnt;
+            return SC_OK;
+        }
+    }
+
     if (!ctx->token || ctx->token_len == 0)
         return SC_OK;
     if (!ctx->channel_ids || ctx->channel_ids_count == 0)

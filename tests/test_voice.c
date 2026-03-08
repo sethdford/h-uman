@@ -242,6 +242,82 @@ static void test_voice_play_null_alloc_fails(void) {
     SC_ASSERT_NEQ(err, SC_OK);
 }
 
+/* ── Gemini STT tests ──────────────────────────────────────────────── */
+
+static void test_voice_stt_gemini_mock(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_voice_config_t cfg = {.api_key = "test-key", .api_key_len = 8};
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(&alloc, &cfg, "dGVzdA==", 8, "audio/webm", &text, &len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(text);
+    SC_ASSERT(len > 0);
+    SC_ASSERT_STR_EQ(text, "Mock Gemini transcription");
+    alloc.free(alloc.ctx, text, len + 1);
+}
+
+static void test_voice_stt_gemini_null_audio_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_voice_config_t cfg = {.api_key = "test-key", .api_key_len = 8};
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(&alloc, &cfg, NULL, 0, "audio/webm", &text, &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_voice_stt_gemini_empty_audio_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_voice_config_t cfg = {.api_key = "test-key", .api_key_len = 8};
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(&alloc, &cfg, "", 0, "audio/webm", &text, &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_voice_stt_gemini_no_api_key_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_voice_config_t cfg = {.api_key = NULL, .api_key_len = 0};
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(&alloc, &cfg, "dGVzdA==", 8, "audio/webm", &text, &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_voice_stt_gemini_null_config_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(&alloc, NULL, "dGVzdA==", 8, "audio/webm", &text, &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_voice_stt_gemini_null_alloc_fails(void) {
+    sc_voice_config_t cfg = {.api_key = "test-key", .api_key_len = 8};
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(NULL, &cfg, "dGVzdA==", 8, "audio/webm", &text, &len);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_voice_stt_gemini_null_output_ptrs_fails(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_voice_config_t cfg = {.api_key = "test-key", .api_key_len = 8};
+    sc_error_t err = sc_voice_stt_gemini(&alloc, &cfg, "dGVzdA==", 8, "audio/webm", NULL, NULL);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_voice_stt_gemini_null_mime_defaults_webm(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_voice_config_t cfg = {.api_key = "test-key", .api_key_len = 8};
+    char *text = NULL;
+    size_t len = 0;
+    sc_error_t err = sc_voice_stt_gemini(&alloc, &cfg, "dGVzdA==", 8, NULL, &text, &len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(text);
+    alloc.free(alloc.ctx, text, len + 1);
+}
+
 void run_voice_tests(void) {
     SC_TEST_SUITE("Voice");
     SC_RUN_TEST(test_voice_stt_file_mock);
@@ -268,4 +344,12 @@ void run_voice_tests(void) {
     SC_RUN_TEST(test_voice_tts_null_alloc_fails);
     SC_RUN_TEST(test_voice_stt_null_alloc_fails);
     SC_RUN_TEST(test_voice_play_null_alloc_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_mock);
+    SC_RUN_TEST(test_voice_stt_gemini_null_audio_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_empty_audio_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_no_api_key_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_null_config_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_null_alloc_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_null_output_ptrs_fails);
+    SC_RUN_TEST(test_voice_stt_gemini_null_mime_defaults_webm);
 }

@@ -33,6 +33,7 @@
 #include "seaclaw/tool.h"
 #include "seaclaw/tools/factory.h"
 #include "seaclaw/version.h"
+#include <errno.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -110,9 +111,11 @@ sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
             }
         } else if (strcmp(a, "--temperature") == 0) {
             if (i + 1 < argc) {
-                out->temperature_override = 0.0;
-                sscanf(argv[i + 1], "%lf", &out->temperature_override);
-                out->has_temperature = 1;
+                int parsed = sscanf(argv[i + 1], "%lf", &out->temperature_override);
+                if (parsed == 1 && out->temperature_override >= 0.0 &&
+                    out->temperature_override <= 2.0) {
+                    out->has_temperature = 1;
+                }
                 i++;
             }
         } else if (strcmp(a, "--tui") == 0) {
@@ -326,8 +329,11 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     const char *log_env = getenv("SEACLAW_LOG");
     if (log_env && log_env[0]) {
         log_fp = fopen(log_env, "a");
-        if (log_fp)
+        if (!log_fp) {
+            fprintf(stderr, "[warn] could not open log file '%s': %s\n", log_env, strerror(errno));
+        } else {
             observer = sc_log_observer_create(alloc, log_fp);
+        }
     }
 
     sc_bus_t cli_bus;
@@ -532,12 +538,16 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     /* Install SIGINT handler */
     g_active_agent = &agent;
-    struct sigaction sa;
+    struct sigaction sa, old_sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGINT, &sa, &old_sa);
+
+#if !defined(_WIN32)
+    signal(SIGPIPE, SIG_IGN);
+#endif
 
     print_banner(prov_name, model, tools_count);
 
@@ -632,6 +642,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     printf("\n" SC_COLOR_DIM "Goodbye." SC_COLOR_RESET "\n");
     g_active_agent = NULL;
+    sigaction(SIGINT, &old_sa, NULL);
     sc_agent_deinit(&agent);
     if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
         retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);

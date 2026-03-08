@@ -219,6 +219,8 @@ static sc_error_t redis_parse_hgetall(const char *reply, size_t reply_len,
             return SC_ERR_PARSE;
         p++;
         long flen = strtol(p, (char **)&p, 10);
+        if (flen < 0 || flen > (long)(end - p))
+            return SC_ERR_PARSE;
         while (p < end && (*p == '\r' || *p == '\n'))
             p++;
         const char *fstart = p;
@@ -229,6 +231,8 @@ static sc_error_t redis_parse_hgetall(const char *reply, size_t reply_len,
             return SC_ERR_PARSE;
         p++;
         long vlen = strtol(p, (char **)&p, 10);
+        if (vlen < 0 || vlen > (long)(end - p))
+            return SC_ERR_PARSE;
         while (p < end && (*p == '\r' || *p == '\n'))
             p++;
         const char *vstart = p;

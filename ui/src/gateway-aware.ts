@@ -1,6 +1,6 @@
 import { LitElement } from "lit";
 import type { GatewayClient } from "./gateway.js";
-import { getGateway } from "./gateway-provider.js";
+import { getGateway, GATEWAY_CHANGED, type GatewayChangedDetail } from "./gateway-provider.js";
 
 /**
  * Base class for views that depend on gateway connectivity.
@@ -9,10 +9,23 @@ import { getGateway } from "./gateway-provider.js";
  *
  * Subclasses can set `autoRefreshInterval` (ms) to enable periodic refresh.
  * `lastLoadedAt` tracks when data was last fetched for staleness indicators.
+ *
+ * Handles gateway hot-swap (e.g. fallback to demo): re-binds listeners
+ * and re-loads when the global gateway instance changes.
  */
 export class GatewayAwareLitElement extends LitElement {
   private _statusHandler = ((e: CustomEvent<string>) => {
     if (e.detail === "connected") this._doLoad();
+  }) as EventListener;
+
+  private _gatewayChangedHandler = ((e: CustomEvent<GatewayChangedDetail>) => {
+    const { previous, current } = e.detail;
+    previous?.removeEventListener("status", this._statusHandler);
+    current.addEventListener("status", this._statusHandler);
+    this.onGatewaySwapped(previous, current);
+    if (current.status === "connected") {
+      this._doLoad();
+    }
   }) as EventListener;
 
   private _refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -51,21 +64,30 @@ export class GatewayAwareLitElement extends LitElement {
         this._doLoad();
       }
     }
+    document.addEventListener(GATEWAY_CHANGED, this._gatewayChangedHandler);
     this._startAutoRefresh();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.gateway?.removeEventListener("status", this._statusHandler);
+    document.removeEventListener(GATEWAY_CHANGED, this._gatewayChangedHandler);
     this._stopAutoRefresh();
   }
+
+  /**
+   * Called when the global gateway is replaced (e.g. fallback to demo).
+   * Subclasses that hold their own gateway listeners should override this
+   * to unbind from `previous` and bind to `current`.
+   */
+  protected onGatewaySwapped(_previous: GatewayClient | null, _current: GatewayClient): void {}
 
   private async _doLoad(): Promise<void> {
     try {
       await this.load();
       this.lastLoadedAt = Date.now();
-    } catch {
-      /* leave lastLoadedAt unchanged on failure */
+    } catch (e) {
+      console.warn(`[${this.tagName.toLowerCase()}] load failed:`, e);
     }
   }
 

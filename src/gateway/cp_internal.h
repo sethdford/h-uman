@@ -169,6 +169,11 @@ sc_error_t cp_admin_push_unregister(sc_allocator_t *alloc, sc_app_context_t *app
                                     const sc_json_value_t *root, char **out, size_t *out_len);
 #endif
 
+/* Voice handlers */
+sc_error_t cp_voice_transcribe(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
+                               const sc_control_protocol_t *proto, const sc_json_value_t *root,
+                               char **out, size_t *out_len);
+
 /* Memory handlers */
 sc_error_t cp_memory_status(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
                             const sc_control_protocol_t *proto, const sc_json_value_t *root,

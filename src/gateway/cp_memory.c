@@ -151,7 +151,7 @@ sc_error_t cp_memory_recall(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_
         if (params) {
             query = sc_json_get_string(params, "query");
             limit = (size_t)sc_json_get_number(params, "limit", 10.0);
-            if (limit == 0)
+            if (limit == 0 || limit > 1000)
                 limit = 10;
         }
     }
@@ -243,6 +243,8 @@ sc_error_t cp_memory_store(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_c
 
     sc_memory_t *memory = app->agent->memory;
     size_t source_len = (source && source[0]) ? strlen(source) : 0;
+    if (source_len > 1024)
+        source_len = 1024;
 
     sc_error_t err = sc_memory_store_with_source(memory, key, strlen(key), content, strlen(content),
                                                  NULL, NULL, 0, source, source_len);
@@ -336,7 +338,11 @@ sc_error_t cp_memory_ingest(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_
         return e;
     }
 
-    char *key = sc_sprintf(alloc, "ingest:%s", source);
+    size_t source_len = strlen(source);
+    if (source_len > 1024)
+        source_len = 1024;
+
+    char *key = sc_sprintf(alloc, "api-ingest:%.*s", (int)source_len, source);
     if (!key)
         return SC_ERR_OUT_OF_MEMORY;
 
@@ -344,7 +350,6 @@ sc_error_t cp_memory_ingest(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_
     sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_DAILY};
     size_t key_len = strlen(key);
     size_t text_len = strlen(text);
-    size_t source_len = strlen(source);
 
     sc_error_t err = sc_memory_store_with_source(memory, key, key_len, text, text_len, &cat, NULL,
                                                  0, source, source_len);

@@ -270,6 +270,30 @@ export class ScLogsView extends GatewayAwareLitElement {
     super.disconnectedCallback();
   }
 
+  protected override onGatewaySwapped(
+    previous: GatewayClient | null,
+    current: GatewayClient,
+  ): void {
+    previous?.removeEventListener(GatewayClient.EVENT_STATUS, this._logsStatusHandler);
+    previous?.removeEventListener(
+      GatewayClient.EVENT_GATEWAY,
+      this.handleGatewayEvent as EventListener,
+    );
+    current.addEventListener(GatewayClient.EVENT_STATUS, this._logsStatusHandler);
+    current.addEventListener(GatewayClient.EVENT_GATEWAY, this.handleGatewayEvent as EventListener);
+    const status = current.status;
+    if (status === "connected") {
+      this.loading = false;
+      this.error = "";
+    } else if (status === "disconnected") {
+      this.loading = false;
+      this.error = "Not connected";
+    } else {
+      this.loading = true;
+      this.error = "";
+    }
+  }
+
   private setupListener(): void {
     const gw = this.gateway;
     if (!gw) return;

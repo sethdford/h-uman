@@ -27,4 +27,15 @@ sc_error_t sc_voice_tts(sc_allocator_t *alloc, const sc_voice_config_t *config, 
 
 sc_error_t sc_voice_play(sc_allocator_t *alloc, const void *audio_data, size_t audio_len);
 
+/*
+ * Gemini STT — transcribe audio via Gemini generateContent with inline_data.
+ * Takes base64-encoded audio directly (no decode needed).
+ * config->api_key is used as the Gemini API key.
+ * config->stt_model defaults to "gemini-2.0-flash" if NULL.
+ * config->stt_endpoint defaults to Gemini API URL if NULL.
+ */
+sc_error_t sc_voice_stt_gemini(sc_allocator_t *alloc, const sc_voice_config_t *config,
+                               const char *audio_base64, size_t audio_base64_len,
+                               const char *mime_type, char **out_text, size_t *out_len);
+
 #endif /* SC_VOICE_H */

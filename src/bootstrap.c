@@ -725,6 +725,7 @@ sc_error_t sc_app_bootstrap(sc_app_ctx_t *ctx, sc_allocator_t *alloc, const char
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
                 bi->channels[ch_count].poll_fn = sc_discord_poll;
+                bi->channels[ch_count].webhook_fn = sc_discord_on_webhook;
                 bi->channels[ch_count].interval_ms = 2000;
                 bi->channels[ch_count].last_poll_ms = 0;
                 bi->channel_destroys[ch_count] = destroy_discord_wrap;
@@ -744,6 +745,7 @@ sc_error_t sc_app_bootstrap(sc_app_ctx_t *ctx, sc_allocator_t *alloc, const char
                 bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
                 bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
                 bi->channels[ch_count].poll_fn = sc_slack_poll;
+                bi->channels[ch_count].webhook_fn = sc_slack_on_webhook;
                 bi->channels[ch_count].interval_ms = 3000;
                 bi->channels[ch_count].last_poll_ms = 0;
                 bi->channel_destroys[ch_count] = destroy_slack_wrap;

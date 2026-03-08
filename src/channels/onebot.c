@@ -288,7 +288,7 @@ sc_error_t sc_onebot_create_ex(sc_allocator_t *alloc, const char *api_base, size
                 free(c->access_token);
             if (c->api_base)
                 free(c->api_base);
-            free(c);
+            alloc->free(alloc->ctx, c, sizeof(*c));
             return SC_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->user_id, user_id, user_id_len);

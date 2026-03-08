@@ -157,8 +157,8 @@ export class ChatController implements ReactiveController {
     if (gw) {
       try {
         await gw.abort();
-      } catch {
-        /* abort is best-effort */
+      } catch (e) {
+        console.warn("[chat-controller] abort failed:", e);
       }
     }
     this.isWaiting = false;

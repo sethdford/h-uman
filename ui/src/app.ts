@@ -471,6 +471,31 @@ export class ScApp extends LitElement {
         }
       }
     }) as EventListener);
+
+    this.addEventListener("sc-voice-transcribe", ((
+      e: CustomEvent<{ audio: string; mimeType: string }>,
+    ) => {
+      if (!this.gateway) return;
+      this.gateway
+        .request<{ text?: string }>("voice.transcribe", {
+          audio: e.detail.audio,
+          mimeType: e.detail.mimeType,
+        })
+        .then((result) => {
+          window.dispatchEvent(
+            new CustomEvent("sc-voice-transcript-result", {
+              detail: { text: result.text ?? "" },
+            }),
+          );
+        })
+        .catch(() => {
+          window.dispatchEvent(
+            new CustomEvent("sc-voice-transcript-result", {
+              detail: { text: "" },
+            }),
+          );
+        });
+    }) as EventListener);
   }
 
   override updated(changedProperties: PropertyValues): void {

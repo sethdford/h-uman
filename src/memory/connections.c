@@ -6,8 +6,38 @@
 #include <string.h>
 #include <time.h>
 
-#define SC_CONN_PROMPT_CAP    4096
 #define SC_CONN_CONTENT_TRUNC 200
+
+/* Strip markdown code fences (```json ... ```) from LLM responses */
+static void strip_markdown_json(const char *in, size_t in_len, const char **out, size_t *out_len) {
+    *out = in;
+    *out_len = in_len;
+    if (!in || in_len < 7)
+        return;
+    const char *p = in;
+    const char *end = in + in_len;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+        p++;
+    if (end - p < 3 || p[0] != '`' || p[1] != '`' || p[2] != '`')
+        return;
+    p += 3;
+    while (p < end && *p != '\n' && *p != '\r')
+        p++;
+    while (p < end && (*p == '\n' || *p == '\r'))
+        p++;
+    const char *close = end;
+    for (const char *s = end - 1; s >= p; s--) {
+        if (*s == '`' && s >= p + 2 && s[-1] == '`' && s[-2] == '`') {
+            close = s - 2;
+            break;
+        }
+    }
+    while (close > p &&
+           (close[-1] == ' ' || close[-1] == '\t' || close[-1] == '\n' || close[-1] == '\r'))
+        close--;
+    *out = p;
+    *out_len = (size_t)(close - p);
+}
 
 sc_error_t sc_connections_build_prompt(sc_allocator_t *alloc, const sc_memory_entry_t *entries,
                                        size_t entry_count, char **out, size_t *out_len) {
@@ -66,8 +96,12 @@ sc_error_t sc_connections_parse(sc_allocator_t *alloc, const char *response, siz
     if (!response || response_len == 0)
         return SC_OK;
 
+    const char *json_str = NULL;
+    size_t json_len = 0;
+    strip_markdown_json(response, response_len, &json_str, &json_len);
+
     sc_json_value_t *root = NULL;
-    sc_error_t err = sc_json_parse(alloc, response, response_len, &root);
+    sc_error_t err = sc_json_parse(alloc, json_str, json_len, &root);
     if (err != SC_OK || !root || root->type != SC_JSON_OBJECT) {
         if (root)
             sc_json_free(alloc, root);
@@ -131,9 +165,10 @@ sc_error_t sc_connections_parse(sc_allocator_t *alloc, const char *response, siz
 
             sc_json_value_t *vrel = sc_json_object_get(item, "related");
             if (vrel && vrel->type == SC_JSON_ARRAY && vrel->data.array.len > 0) {
-                ins->related_indices =
-                    (size_t *)alloc->alloc(alloc->ctx, vrel->data.array.len * sizeof(size_t));
+                size_t alloc_bytes = vrel->data.array.len * sizeof(size_t);
+                ins->related_indices = (size_t *)alloc->alloc(alloc->ctx, alloc_bytes);
                 if (ins->related_indices) {
+                    ins->related_alloc_bytes = alloc_bytes;
                     for (size_t j = 0; j < vrel->data.array.len; j++) {
                         sc_json_value_t *idx = vrel->data.array.items[j];
                         if (idx && idx->type == SC_JSON_NUMBER) {
@@ -195,7 +230,7 @@ void sc_connection_result_deinit(sc_connection_result_t *result, sc_allocator_t 
             alloc->free(alloc->ctx, result->insights[i].text, result->insights[i].text_len + 1);
         if (result->insights[i].related_indices)
             alloc->free(alloc->ctx, result->insights[i].related_indices,
-                        result->insights[i].related_count * sizeof(size_t));
+                        result->insights[i].related_alloc_bytes);
     }
     result->insight_count = 0;
 }

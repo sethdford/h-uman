@@ -106,6 +106,31 @@ sc_error_t sc_graph_query_causal(sc_graph_t *g, sc_allocator_t *alloc, int64_t e
 void sc_graph_entities_free(sc_allocator_t *alloc, sc_graph_entity_t *entities, size_t count);
 void sc_graph_relations_free(sc_allocator_t *alloc, sc_graph_relation_t *relations, size_t count);
 
+/* Ebbinghaus recall tracking: record that an entity was recalled */
+sc_error_t sc_graph_record_recall(sc_graph_t *g, int64_t entity_id);
+
+/* Ebbinghaus retention score: compute recall probability (0.0-1.0) */
+double sc_graph_retention_score(int64_t last_recalled_ts, int32_t recall_count, int64_t now_ts);
+
+/* Conflict-aware reconsolidation: detect and resolve contradictions */
+bool sc_graph_detect_conflict(sc_graph_t *g, sc_allocator_t *alloc, const char *entity_name,
+                              size_t name_len, const char *new_context, size_t new_context_len);
+sc_error_t sc_graph_reconsolidate(sc_graph_t *g, sc_allocator_t *alloc, const char *entity_name,
+                                  size_t name_len, const char *new_context, size_t new_context_len);
+
+/* Leiden-style hierarchical community detection */
+sc_error_t sc_graph_leiden_communities(sc_graph_t *g, sc_allocator_t *alloc, size_t max_communities,
+                                       size_t max_iterations, char **out, size_t *out_len);
+
+/* Temporal event management */
+sc_error_t sc_graph_add_temporal_event(sc_graph_t *g, int64_t entity_id, const char *description,
+                                       size_t desc_len, int64_t occurred_at, int64_t duration_sec);
+
+/* Causal link management */
+sc_error_t sc_graph_add_causal_link(sc_graph_t *g, int64_t action_entity_id,
+                                    int64_t outcome_entity_id, const char *context,
+                                    size_t context_len, float confidence);
+
 /* Helper: parse entity type from string */
 sc_entity_type_t sc_entity_type_from_string(const char *s, size_t len);
 const char *sc_entity_type_to_string(sc_entity_type_t t);

@@ -38,7 +38,8 @@ sc_error_t sc_ingest_build_extract_prompt(sc_allocator_t *alloc, const char *fil
                                           char **out, size_t *out_len);
 
 sc_error_t sc_ingest_file_with_provider(sc_allocator_t *alloc, sc_memory_t *memory,
-                                        sc_provider_t *provider, const char *path, size_t path_len);
+                                        sc_provider_t *provider, const char *path, size_t path_len,
+                                        const char *model, size_t model_len);
 
 void sc_ingest_result_deinit(sc_ingest_result_t *result, sc_allocator_t *alloc);
 

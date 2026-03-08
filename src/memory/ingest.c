@@ -275,11 +275,46 @@ static void extract_filename(const char *path, size_t path_len, const char **fna
     *fname_len = (size_t)((path + path_len) - *fname);
 }
 
+/* Strip markdown code fences (```json ... ```) from LLM responses */
+static void strip_md_json(const char *in, size_t in_len, const char **out, size_t *out_len) {
+    *out = in;
+    *out_len = in_len;
+    if (!in || in_len < 7)
+        return;
+    const char *p = in;
+    const char *end = in + in_len;
+    while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+        p++;
+    if (end - p < 3 || p[0] != '`' || p[1] != '`' || p[2] != '`')
+        return;
+    p += 3;
+    while (p < end && *p != '\n' && *p != '\r')
+        p++;
+    while (p < end && (*p == '\n' || *p == '\r'))
+        p++;
+    const char *close = end;
+    for (const char *s = end - 1; s >= p; s--) {
+        if (*s == '`' && s >= p + 2 && s[-1] == '`' && s[-2] == '`') {
+            close = s - 2;
+            break;
+        }
+    }
+    while (close > p &&
+           (close[-1] == ' ' || close[-1] == '\t' || close[-1] == '\n' || close[-1] == '\r'))
+        close--;
+    *out = p;
+    *out_len = (size_t)(close - p);
+}
+
 static sc_error_t store_extracted(sc_allocator_t *alloc, sc_memory_t *memory, const char *response,
                                   size_t response_len, const char *path, size_t path_len,
                                   const char *fname, size_t fname_len) {
+    const char *json_str = NULL;
+    size_t json_len = 0;
+    strip_md_json(response, response_len, &json_str, &json_len);
+
     sc_json_value_t *json = NULL;
-    sc_error_t err = sc_json_parse(alloc, response, response_len, &json);
+    sc_error_t err = sc_json_parse(alloc, json_str, json_len, &json);
     if (err != SC_OK || !json)
         return SC_ERR_PARSE;
 
@@ -312,8 +347,8 @@ static sc_error_t store_extracted(sc_allocator_t *alloc, sc_memory_t *memory, co
 }
 
 sc_error_t sc_ingest_file_with_provider(sc_allocator_t *alloc, sc_memory_t *memory,
-                                        sc_provider_t *provider, const char *path,
-                                        size_t path_len) {
+                                        sc_provider_t *provider, const char *path, size_t path_len,
+                                        const char *model, size_t model_len) {
     if (!alloc || !memory || !memory->vtable || !path || path_len == 0)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -329,7 +364,9 @@ sc_error_t sc_ingest_file_with_provider(sc_allocator_t *alloc, sc_memory_t *memo
     size_t fname_len = 0;
     extract_filename(path, path_len, &fname, &fname_len);
 
-    if (type == SC_INGEST_IMAGE && provider->vtable->chat) {
+    if (type == SC_INGEST_IMAGE) {
+        if (!provider->vtable->chat)
+            return SC_ERR_NOT_SUPPORTED;
         void *raw = NULL;
         size_t raw_len = 0;
         sc_error_t err = read_binary_file(alloc, path, path_len, &raw, &raw_len);
@@ -401,7 +438,7 @@ sc_error_t sc_ingest_file_with_provider(sc_allocator_t *alloc, sc_memory_t *memo
         size_t response_len = 0;
         const char *sys = "Extract content and return JSON only.";
         err = provider->vtable->chat_with_system(provider->ctx, alloc, sys, 37, prompt, prompt_len,
-                                                 NULL, 0, 0.2, &response, &response_len);
+                                                 model, model_len, 0.2, &response, &response_len);
         sc_str_free(alloc, prompt);
 
         if (err != SC_OK)

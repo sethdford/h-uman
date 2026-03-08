@@ -87,6 +87,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SC_WEB_FETCH_MAX_CHARS 100000
+
 #ifdef SC_HAS_CRON
 #define SC_TOOLS_CRON_COUNT 7
 #else
@@ -120,8 +122,8 @@
 #else
 #define SC_TOOLS_PAPERCLIP_COUNT 0
 #endif
-#define SC_TOOLS_COUNT                                                                             \
-    (SC_TOOLS_COUNT_BASE + SC_TOOLS_BROWSER_COUNT + SC_TOOLS_ADVANCED_COUNT + SC_TOOLS_HW_COUNT +  \
+#define SC_TOOLS_COUNT                                                                            \
+    (SC_TOOLS_COUNT_BASE + SC_TOOLS_BROWSER_COUNT + SC_TOOLS_ADVANCED_COUNT + SC_TOOLS_HW_COUNT + \
      SC_TOOLS_PAPERCLIP_COUNT)
 
 static sc_error_t add_tool_ws(sc_allocator_t *alloc, sc_tool_t *tools, size_t *idx, const char *ws,
@@ -190,7 +192,7 @@ sc_error_t sc_tools_create_default(sc_allocator_t *alloc, const char *workspace_
         goto fail;
     idx++;
 
-    err = sc_web_fetch_create(alloc, 100000, &tools[idx]);
+    err = sc_web_fetch_create(alloc, SC_WEB_FETCH_MAX_CHARS, &tools[idx]);
     if (err != SC_OK)
         goto fail;
     idx++;

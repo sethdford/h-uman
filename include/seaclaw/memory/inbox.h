@@ -17,6 +17,8 @@ typedef struct sc_inbox_watcher {
     sc_allocator_t *alloc;
     sc_memory_t *memory;
     sc_provider_t *provider; /* optional; enables binary file ingestion via LLM */
+    const char *model;       /* model name for provider LLM calls; NULL uses provider default */
+    size_t model_len;
     char *inbox_dir;
     size_t inbox_dir_len;
     char *processed_dir;

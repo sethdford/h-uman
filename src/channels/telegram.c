@@ -794,7 +794,7 @@ sc_error_t sc_telegram_create_ex(sc_allocator_t *alloc, const char *token, size_
     c->allow_from = allow_from;
     c->allow_from_count = allow_from_count;
     if (token && token_len > 0) {
-        c->token = (char *)malloc(token_len + 1);
+        c->token = (char *)alloc->alloc(alloc->ctx, token_len + 1);
         if (!c->token) {
             alloc->free(alloc->ctx, c, sizeof(*c));
             return SC_ERR_OUT_OF_MEMORY;
@@ -815,7 +815,7 @@ void sc_telegram_destroy(sc_channel_t *ch) {
         if (c->stream_text && a)
             a->free(a->ctx, c->stream_text, c->stream_text_cap + 1);
         if (c->token)
-            free(c->token);
+            a->free(a->ctx, c->token, c->token_len + 1);
         a->free(a->ctx, c, sizeof(*c));
         ch->ctx = NULL;
         ch->vtable = NULL;

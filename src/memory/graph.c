@@ -1465,7 +1465,9 @@ sc_error_t sc_graph_reconsolidate(sc_graph_t *g, sc_allocator_t *alloc, const ch
                 sqlite3_bind_int64(stmt, 3, entity.first_seen);
                 sqlite3_bind_int64(stmt, 4, now);
                 sqlite3_bind_int64(stmt, 5, entity.id);
-                sqlite3_step(stmt);
+                if (sqlite3_step(stmt) != SQLITE_DONE)
+                    fprintf(stderr, "[graph] supersede entity %lld: step failed\n",
+                            (long long)entity.id);
             }
             sqlite3_finalize(stmt);
         }
@@ -1479,7 +1481,9 @@ sc_error_t sc_graph_reconsolidate(sc_graph_t *g, sc_allocator_t *alloc, const ch
         sqlite3_bind_int64(up_stmt, 2, (int64_t)time(NULL) * 1000);
         sqlite3_bind_int64(up_stmt, 3, entity.id);
         sqlite3_bind_int64(up_stmt, 4, entity.id);
-        sqlite3_step(up_stmt);
+        if (sqlite3_step(up_stmt) != SQLITE_DONE)
+            fprintf(stderr, "[graph] update relations for entity %lld: step failed\n",
+                    (long long)entity.id);
         sqlite3_finalize(up_stmt);
     }
     if (entity.name)

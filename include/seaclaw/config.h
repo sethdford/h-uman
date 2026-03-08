@@ -231,6 +231,12 @@ typedef struct sc_twitter_channel_config {
     char *bearer_token;
 } sc_twitter_channel_config_t;
 
+typedef struct sc_tiktok_channel_config {
+    char *client_key;
+    char *client_secret;
+    char *access_token;
+} sc_tiktok_channel_config_t;
+
 typedef struct sc_google_rcs_channel_config {
     char *agent_id;
     char *token;
@@ -319,6 +325,7 @@ typedef struct sc_channels_config {
     sc_facebook_channel_config_t facebook;
     sc_instagram_channel_config_t instagram;
     sc_twitter_channel_config_t twitter;
+    sc_tiktok_channel_config_t tiktok;
     sc_google_rcs_channel_config_t google_rcs;
     sc_mqtt_channel_config_t mqtt;
     sc_matrix_channel_config_t matrix;

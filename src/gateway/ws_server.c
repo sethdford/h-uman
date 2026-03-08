@@ -349,6 +349,13 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
     if (flags >= 0)
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
+    /* Set send timeout to 5 seconds to prevent indefinite blocking */
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+        (void)fprintf(stderr, "[ws] failed to set SO_SNDTIMEO: %s\n", strerror(errno));
+
     *out = slot;
     return SC_OK;
 #endif

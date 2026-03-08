@@ -269,7 +269,8 @@ export class ScConfigView extends GatewayAwareLitElement {
       }>("config.schema", {});
       const s = res?.schema;
       this.schema = s ?? { type: "object", properties: {} };
-    } catch {
+    } catch (e) {
+      console.warn("[config-view] failed to load schema, using defaults:", e);
       this.schema = {
         type: "object",
         properties: {
@@ -305,8 +306,8 @@ export class ScConfigView extends GatewayAwareLitElement {
           }))
           .filter((o) => o.value);
       }
-    } catch {
-      /* keep defaults */
+    } catch (e) {
+      console.warn("[config-view] failed to load provider options, using defaults:", e);
     }
   }
 
@@ -316,7 +317,8 @@ export class ScConfigView extends GatewayAwareLitElement {
         const parsed = JSON.parse(this.rawText) as Record<string, unknown>;
         const current = toRawConfig(this.config);
         return JSON.stringify(parsed) !== JSON.stringify(current);
-      } catch {
+      } catch (e) {
+        console.warn("[config-view] malformed JSON in raw mode:", e);
         return this.rawText.trim().length > 0;
       }
     }

@@ -1575,6 +1575,7 @@ size_t sc_conversation_apply_typing_quirks(char *buf, size_t len, const char *co
     bool do_no_apostrophes = quirk_enabled(quirks, quirks_count, "no_apostrophes");
     bool do_double_space_to_newline =
         quirk_enabled(quirks, quirks_count, "double_space_to_newline");
+    bool do_variable_punctuation = quirk_enabled(quirks, quirks_count, "variable_punctuation");
 
     if (do_lowercase) {
         for (size_t i = 0; i < len; i++) {
@@ -1618,6 +1619,25 @@ size_t sc_conversation_apply_typing_quirks(char *buf, size_t len, const char *co
         }
         buf[out] = '\0';
         len = out;
+    }
+
+    /* Variable punctuation pass: randomly drop/modify sentence-ending periods */
+    if (do_variable_punctuation) {
+        uint32_t vp_seed = (uint32_t)len;
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] == '.' &&
+                (i + 1 >= len || buf[i + 1] == ' ' || buf[i + 1] == '\n' || buf[i + 1] == '\0')) {
+                vp_seed = vp_seed * 1103515245u + 12345u;
+                uint32_t r = (vp_seed >> 16) & 0x7fff;
+                if (r % 100 < 40) {
+                    /* Drop the period entirely */
+                    memmove(buf + i, buf + i + 1, len - i);
+                    len--;
+                    i--;
+                }
+            }
+        }
+        buf[len] = '\0';
     }
 
     /* Strip trailing whitespace that may result from punctuation removal */
@@ -2609,4 +2629,380 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         return SC_REACTION_NONE;
 
     return SC_REACTION_NONE;
+}
+
+/* ── Filler word injection ────────────────────────────────────────────── */
+
+static uint32_t filler_lcg(uint32_t *s) {
+    *s = *s * 1103515245u + 12345u;
+    return (*s >> 16) & 0x7fff;
+}
+
+size_t sc_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t seed,
+                                     const char *channel_type, size_t channel_type_len) {
+    if (!buf || len == 0 || cap <= len)
+        return len;
+
+    /* Skip fillers for formal channels */
+    if (channel_type && channel_type_len > 0) {
+        if ((channel_type_len == 5 && memcmp(channel_type, "email", 5) == 0) ||
+            (channel_type_len == 5 && memcmp(channel_type, "slack", 5) == 0))
+            return len;
+    }
+
+    /* ~20% chance of injecting a filler per response */
+    uint32_t s = seed;
+    if (filler_lcg(&s) % 5 != 0)
+        return len;
+
+    static const char *fillers[] = {"haha ", "lol ", "yeah ", "honestly ", "tbh ",
+                                    "ngl ",  "hmm ", "oh ",   "ah ",       "like "};
+    static const size_t filler_count = 10;
+    static const size_t filler_lens[] = {5, 4, 5, 9, 4, 4, 4, 3, 3, 5};
+
+    size_t pick = filler_lcg(&s) % filler_count;
+    const char *filler = fillers[pick];
+    size_t filler_len = filler_lens[pick];
+
+    if (len + filler_len >= cap)
+        return len;
+
+    /* Placement: start of response (most natural for casual messaging) */
+    memmove(buf + filler_len, buf, len);
+    memcpy(buf, filler, filler_len);
+    /* Lowercase the first char of original text after filler */
+    if (filler_len < len + filler_len && buf[filler_len] >= 'A' && buf[filler_len] <= 'Z')
+        buf[filler_len] += 32;
+    len += filler_len;
+    buf[len] = '\0';
+    return len;
+}
+
+/* ── Stylometric variance ─────────────────────────────────────────────── */
+
+size_t sc_conversation_vary_complexity(char *buf, size_t len, uint32_t seed) {
+    if (!buf || len == 0)
+        return len;
+
+    /* Apply common contractions with ~40% probability each */
+    uint32_t s = seed;
+    struct {
+        const char *from;
+        size_t from_len;
+        const char *to;
+        size_t to_len;
+    } contractions[] = {
+        {"I am ", 5, "I'm ", 4},
+        {"it is ", 6, "it's ", 5},
+        {"do not ", 7, "don't ", 6},
+        {"does not ", 9, "doesn't ", 8},
+        {"did not ", 8, "didn't ", 7},
+        {"is not ", 7, "isn't ", 6},
+        {"are not ", 8, "aren't ", 7},
+        {"would not ", 10, "wouldn't ", 9},
+        {"could not ", 10, "couldn't ", 9},
+        {"I will ", 7, "I'll ", 5},
+        {"I would ", 8, "I'd ", 4},
+        {"that is ", 8, "that's ", 7},
+        {"there is ", 9, "there's ", 8},
+        {"I have ", 7, "I've ", 5},
+        {"you are ", 8, "you're ", 7},
+        {"they are ", 9, "they're ", 8},
+        {"we are ", 7, "we're ", 6},
+        {"cannot ", 7, "can't ", 6},
+    };
+    size_t n_contractions = sizeof(contractions) / sizeof(contractions[0]);
+
+    for (size_t c = 0; c < n_contractions && len > 0; c++) {
+        s = s * 1103515245u + 12345u;
+        if (((s >> 16) & 0x7fff) % 100 >= 40)
+            continue;
+
+        /* Case-insensitive search for the contraction source */
+        for (size_t i = 0; i + contractions[c].from_len <= len; i++) {
+            bool match = true;
+            for (size_t j = 0; j < contractions[c].from_len; j++) {
+                char a = buf[i + j];
+                char b = contractions[c].from[j];
+                if (a >= 'A' && a <= 'Z')
+                    a += 32;
+                if (a != b) {
+                    match = false;
+                    break;
+                }
+            }
+            if (!match)
+                continue;
+
+            /* Preserve original case of first char */
+            bool was_upper = (buf[i] >= 'A' && buf[i] <= 'Z');
+            size_t diff = contractions[c].from_len - contractions[c].to_len;
+            memcpy(buf + i, contractions[c].to, contractions[c].to_len);
+            if (was_upper && buf[i] >= 'a' && buf[i] <= 'z')
+                buf[i] -= 32;
+            if (diff > 0) {
+                memmove(buf + i + contractions[c].to_len, buf + i + contractions[c].from_len,
+                        len - (i + contractions[c].from_len));
+                len -= diff;
+                buf[len] = '\0';
+            }
+            break;
+        }
+    }
+    return len;
+}
+
+/* ── Bidirectional sentiment momentum ─────────────────────────────────── */
+
+char *sc_conversation_build_sentiment_momentum(sc_allocator_t *alloc,
+                                               const sc_channel_history_entry_t *entries,
+                                               size_t count, size_t *out_len) {
+    *out_len = 0;
+    if (!alloc || !out_len || !entries || count < 3)
+        return NULL;
+
+    static const char *pos_words[] = {"happy",   "great", "awesome", "love",      "good", "nice",
+                                      "excited", "glad",  "amazing", "wonderful", "lol",  "haha",
+                                      "yay",     "sweet", "perfect", "thanks"};
+    static const char *neg_words[] = {
+        "sad",      "angry", "frustrated",   "annoyed", "terrible", "awful", "hate", "worried",
+        "stressed", "upset", "disappointed", "ugh",     "sucks",    "rough", "hard", "sorry"};
+    size_t n_pos = 16, n_neg = 16;
+
+    float momentum = 0.0f;
+    size_t user_msgs = 0;
+    size_t window = count > 6 ? 6 : count;
+
+    for (size_t i = count - window; i < count; i++) {
+        if (entries[i].from_me)
+            continue;
+        const char *text = entries[i].text;
+        size_t tl = strlen(text);
+        if (tl == 0)
+            continue;
+        user_msgs++;
+        int score = 0;
+        for (size_t w = 0; w < n_pos; w++) {
+            if (str_contains_ci(text, tl, pos_words[w]))
+                score++;
+        }
+        for (size_t w = 0; w < n_neg; w++) {
+            if (str_contains_ci(text, tl, neg_words[w]))
+                score--;
+        }
+        float weight = (float)(i - (count - window) + 1) / (float)window;
+        momentum += (float)score * weight;
+    }
+
+    if (user_msgs < 2)
+        return NULL;
+
+    momentum /= (float)user_msgs;
+
+    char buf[256];
+    int w;
+    if (momentum > 1.0f) {
+        w = snprintf(buf, sizeof(buf),
+                     "\nSENTIMENT: The conversation mood is trending positive and upbeat. "
+                     "Match their energy — be warm, enthusiastic, and engaged.\n");
+    } else if (momentum < -1.0f) {
+        w = snprintf(buf, sizeof(buf),
+                     "\nSENTIMENT: The conversation mood is trending heavy or negative. "
+                     "Match their energy — be empathetic, gentle, and present. Don't try to "
+                     "force positivity.\n");
+    } else if (momentum < -0.3f) {
+        w = snprintf(buf, sizeof(buf),
+                     "\nSENTIMENT: The conversation mood is slightly low. Be supportive and "
+                     "attentive without being overly cheerful.\n");
+    } else if (momentum > 0.3f) {
+        w = snprintf(buf, sizeof(buf),
+                     "\nSENTIMENT: The conversation mood is light and positive. Keep the vibe "
+                     "going naturally.\n");
+    } else {
+        return NULL;
+    }
+
+    if (w <= 0 || (size_t)w >= sizeof(buf))
+        return NULL;
+
+    char *result = (char *)alloc->alloc(alloc->ctx, (size_t)w + 1);
+    if (!result)
+        return NULL;
+    memcpy(result, buf, (size_t)w + 1);
+    *out_len = (size_t)w;
+    return result;
+}
+
+/* ── Conversation depth signal ────────────────────────────────────────── */
+
+char *sc_conversation_build_depth_signal(sc_allocator_t *alloc,
+                                         const sc_channel_history_entry_t *entries, size_t count,
+                                         size_t *out_len) {
+    *out_len = 0;
+    if (!alloc || !out_len || !entries || count < 5)
+        return NULL;
+
+    size_t user_turns = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (!entries[i].from_me)
+            user_turns++;
+    }
+
+    if (user_turns < 5)
+        return NULL;
+
+    char buf[512];
+    int w;
+    if (user_turns >= 15) {
+        w = snprintf(buf, sizeof(buf),
+                     "\nDEPTH: This is a deep conversation (%zu exchanges). Stay deeply in "
+                     "character. Reference earlier parts of THIS conversation naturally. Your "
+                     "consistency matters more than ever — any break in persona will be noticed. "
+                     "Vary your sentence structure and vocabulary to avoid repetitive patterns.\n",
+                     user_turns);
+    } else if (user_turns >= 10) {
+        w = snprintf(buf, sizeof(buf),
+                     "\nDEPTH: This is a sustained conversation (%zu exchanges). Maintain strong "
+                     "persona consistency. Mix up your response patterns — vary openers, vary "
+                     "length, reference earlier context.\n",
+                     user_turns);
+    } else {
+        w = snprintf(buf, sizeof(buf),
+                     "\nDEPTH: Conversation is building (%zu exchanges). Keep your voice steady "
+                     "and natural. Avoid falling into a pattern.\n",
+                     user_turns);
+    }
+
+    if (w <= 0 || (size_t)w >= sizeof(buf))
+        return NULL;
+
+    char *result = (char *)alloc->alloc(alloc->ctx, (size_t)w + 1);
+    if (!result)
+        return NULL;
+    memcpy(result, buf, (size_t)w + 1);
+    *out_len = (size_t)w;
+    return result;
+}
+
+/* ── Topic tangent/callback engine ────────────────────────────────────── */
+
+char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
+                                             const sc_channel_history_entry_t *entries,
+                                             size_t count, uint32_t seed, size_t *out_len) {
+    *out_len = 0;
+    if (!alloc || !out_len || !entries || count < 6)
+        return NULL;
+
+    /* ~6% probability per turn */
+    uint32_t s = seed * 1103515245u + 12345u;
+    if (((s >> 16) & 0x7fff) % 100 >= 6)
+        return NULL;
+
+    /* Find topics from the EARLIER part of conversation (not last 3 messages) */
+    sc_callback_topic_t topics[SC_CALLBACK_MAX_TOPICS];
+    size_t topic_count = 0;
+    memset(topics, 0, sizeof(topics));
+
+    for (size_t i = 0; i + 3 < count; i++) {
+        const char *text = entries[i].text;
+        size_t tl = strlen(text);
+        if (tl == 0)
+            continue;
+        extract_topics_from_text(text, tl, topics, &topic_count);
+    }
+
+    if (topic_count == 0)
+        return NULL;
+
+    /* Pick a random earlier topic */
+    s = s * 1103515245u + 12345u;
+    size_t pick = ((s >> 16) & 0x7fff) % topic_count;
+    sc_callback_topic_t *t = &topics[pick];
+
+    /* Skip if topic is too short or too generic */
+    if (t->phrase_len < 3)
+        return NULL;
+
+    char buf[256];
+    static const char *intros[] = {
+        "oh btw, about ", "that reminds me of when we talked about ",
+        "going back to ", "hey also re: ",
+        "oh and about ",
+    };
+    s = s * 1103515245u + 12345u;
+    size_t intro_pick = ((s >> 16) & 0x7fff) % 5;
+
+    int w =
+        snprintf(buf, sizeof(buf),
+                 "\nTANGENT: Consider naturally circling back to \"%.*s\" from earlier. "
+                 "You could use something like: \"%s%.*s...\" — only if it fits naturally. "
+                 "Don't force it.\n",
+                 (int)t->phrase_len, t->phrase, intros[intro_pick], (int)t->phrase_len, t->phrase);
+    if (w <= 0 || (size_t)w >= sizeof(buf))
+        return NULL;
+
+    char *result = (char *)alloc->alloc(alloc->ctx, (size_t)w + 1);
+    if (!result)
+        return NULL;
+    memcpy(result, buf, (size_t)w + 1);
+    *out_len = (size_t)w;
+    return result;
+}
+
+/* ── AI disclosure detection ──────────────────────────────────────────── */
+
+bool sc_conversation_check_ai_disclosure(const char *response, size_t response_len) {
+    if (!response || response_len == 0)
+        return false;
+
+    static const char *patterns[] = {
+        "i'm an ai",
+        "i am an ai",
+        "as an ai",
+        "i'm a language",
+        "i am a language",
+        "language model",
+        "as a chatbot",
+        "i'm a chatbot",
+        "i am a chatbot",
+        "i'm not human",
+        "i am not human",
+        "i don't have feelings",
+        "i do not have feelings",
+        "i can't feel",
+        "as an assistant",
+        "i'm an assistant",
+        "i am an assistant",
+        "i was programmed",
+        "my training data",
+        "i don't have personal",
+        "i do not have personal",
+        "i'm not a real person",
+        "i am not a real person",
+        "i'm just a bot",
+        "i am just a bot",
+    };
+    size_t n = sizeof(patterns) / sizeof(patterns[0]);
+
+    for (size_t p = 0; p < n; p++) {
+        size_t plen = strlen(patterns[p]);
+        if (plen > response_len)
+            continue;
+        for (size_t i = 0; i + plen <= response_len; i++) {
+            bool match = true;
+            for (size_t j = 0; j < plen; j++) {
+                char a = response[i + j];
+                char b = patterns[p][j];
+                if (a >= 'A' && a <= 'Z')
+                    a += 32;
+                if (a != b) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+                return true;
+        }
+    }
+    return false;
 }

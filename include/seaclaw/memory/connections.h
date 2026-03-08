@@ -8,6 +8,7 @@
 
 #define SC_CONN_MAX_CONNECTIONS 20
 #define SC_CONN_MAX_INSIGHTS    10
+#define SC_CONN_PROMPT_CAP      4096
 
 typedef struct sc_memory_connection {
     size_t memory_a_idx;
@@ -22,6 +23,7 @@ typedef struct sc_memory_insight {
     size_t text_len;
     size_t *related_indices;
     size_t related_count;
+    size_t related_alloc_bytes;
 } sc_memory_insight_t;
 
 typedef struct sc_connection_result {

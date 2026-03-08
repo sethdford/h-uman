@@ -139,7 +139,7 @@ char *sc_conversation_analyze_style(sc_allocator_t *alloc,
 
 /* Apply typing quirks to a response as deterministic post-processing.
  * Supported quirks: "lowercase", "no_periods", "no_commas",
- * "no_apostrophes", "double_space_to_newline".
+ * "no_apostrophes", "double_space_to_newline", "variable_punctuation".
  * Modifies the buffer in-place. Returns the new length (may shrink). */
 size_t sc_conversation_apply_typing_quirks(char *buf, size_t len, const char *const *quirks,
                                            size_t quirks_count);
@@ -252,5 +252,52 @@ sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_l
 sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg_len, bool from_me,
                                                      const sc_channel_history_entry_t *entries,
                                                      size_t entry_count, uint32_t seed);
+
+/* ── Filler word injection (Rime-research placement) ──────────────────── */
+
+/* Probabilistically inject context-appropriate fillers into a response.
+ * Placement: utterance start, after first word, before complex words.
+ * Channel type controls filler intensity (messaging=high, email=none).
+ * Modifies buf in-place. cap is buffer capacity. Returns new length. */
+size_t sc_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t seed,
+                                     const char *channel_type, size_t channel_type_len);
+
+/* ── Stylometric variance ─────────────────────────────────────────────── */
+
+/* Post-process response to vary sentence structure and vocabulary complexity.
+ * Occasionally shortens long sentences, contracts "it is" -> "it's" etc.
+ * Modifies buf in-place. Returns new length. */
+size_t sc_conversation_vary_complexity(char *buf, size_t len, uint32_t seed);
+
+/* ── Bidirectional sentiment momentum ─────────────────────────────────── */
+
+/* Analyze recent message sentiment trend and build a mood-matching directive.
+ * Returns allocated string or NULL. Caller frees. */
+char *sc_conversation_build_sentiment_momentum(sc_allocator_t *alloc,
+                                               const sc_channel_history_entry_t *entries,
+                                               size_t count, size_t *out_len);
+
+/* ── Conversation depth signal ────────────────────────────────────────── */
+
+/* Build depth-based persona reinforcement for long conversations.
+ * Returns allocated string or NULL. Caller frees. */
+char *sc_conversation_build_depth_signal(sc_allocator_t *alloc,
+                                         const sc_channel_history_entry_t *entries, size_t count,
+                                         size_t *out_len);
+
+/* ── Topic tangent/callback engine ────────────────────────────────────── */
+
+/* With ~6% probability per turn, inject a callback to an earlier topic.
+ * Uses STM-style topic tracking from conversation history.
+ * Returns allocated string or NULL. Caller frees. */
+char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
+                                             const sc_channel_history_entry_t *entries,
+                                             size_t count, uint32_t seed, size_t *out_len);
+
+/* ── AI disclosure detection (pre-send guardrail) ─────────────────────── */
+
+/* Check if a response accidentally reveals AI identity.
+ * Returns true if the response contains AI self-identification patterns. */
+bool sc_conversation_check_ai_disclosure(const char *response, size_t response_len);
 
 #endif /* SC_CONTEXT_CONVERSATION_H */

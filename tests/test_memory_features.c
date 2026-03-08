@@ -2,6 +2,7 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/memory.h"
 #include "seaclaw/memory/connections.h"
+#include "seaclaw/memory/consolidation.h"
 #include "seaclaw/memory/inbox.h"
 #include "seaclaw/memory/ingest.h"
 #include "test_framework.h"
@@ -136,7 +137,7 @@ static void test_connections_build_prompt(void) {
     SC_ASSERT_TRUE(strstr(prompt, "Memory 0") != NULL);
     SC_ASSERT_TRUE(strstr(prompt, "AI agents") != NULL);
     SC_ASSERT_TRUE(strstr(prompt, "Memory 1") != NULL);
-    alloc.free(alloc.ctx, prompt, prompt_len + 1);
+    alloc.free(alloc.ctx, prompt, SC_CONN_PROMPT_CAP);
 }
 
 static void test_connections_parse_valid(void) {
@@ -256,7 +257,7 @@ static void test_ingest_build_extract_prompt(void) {
 static void test_ingest_with_provider_text_fallback(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_memory_t mem = sc_none_memory_create(&alloc);
-    sc_error_t err = sc_ingest_file_with_provider(&alloc, &mem, NULL, "notes.txt", 9);
+    sc_error_t err = sc_ingest_file_with_provider(&alloc, &mem, NULL, "notes.txt", 9, NULL, 0);
     SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
     mem.vtable->deinit(mem.ctx);
 }
@@ -264,13 +265,14 @@ static void test_ingest_with_provider_text_fallback(void) {
 static void test_ingest_with_provider_binary_no_provider(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_memory_t mem = sc_none_memory_create(&alloc);
-    sc_error_t err = sc_ingest_file_with_provider(&alloc, &mem, NULL, "photo.png", 9);
+    sc_error_t err = sc_ingest_file_with_provider(&alloc, &mem, NULL, "photo.png", 9, NULL, 0);
     SC_ASSERT_EQ(err, SC_ERR_NOT_SUPPORTED);
     mem.vtable->deinit(mem.ctx);
 }
 
 static void test_ingest_with_provider_null_args(void) {
-    SC_ASSERT_EQ(sc_ingest_file_with_provider(NULL, NULL, NULL, NULL, 0), SC_ERR_INVALID_ARGUMENT);
+    SC_ASSERT_EQ(sc_ingest_file_with_provider(NULL, NULL, NULL, NULL, 0, NULL, 0),
+                 SC_ERR_INVALID_ARGUMENT);
 }
 
 /* ── Feature 4: Inbox watcher ────────────────────────────────────────── */
@@ -335,6 +337,83 @@ static void test_insight_category_store_recall(void) {
 }
 #endif
 
+/* ── Audit fix regression tests ──────────────────────────────────────── */
+
+static void test_connections_parse_markdown_wrapped(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "```json\n{\"connections\":[],\"insights\":[{\"text\":\"wrapped insight\","
+                       "\"related\":[]}]}\n```";
+    size_t json_len = strlen(json);
+
+    sc_connection_result_t result;
+    sc_error_t err = sc_connections_parse(&alloc, json, json_len, 0, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(result.insight_count, 1);
+    SC_ASSERT_NOT_NULL(result.insights[0].text);
+    SC_ASSERT_TRUE(strstr(result.insights[0].text, "wrapped") != NULL);
+    sc_connection_result_deinit(&result, &alloc);
+}
+
+static void test_connections_parse_out_of_bounds_indices(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{\"connections\":[{\"a\":5,\"b\":10,\"relationship\":\"oob\","
+                       "\"strength\":0.5}],\"insights\":[]}";
+    size_t json_len = strlen(json);
+
+    sc_connection_result_t result;
+    sc_error_t err = sc_connections_parse(&alloc, json, json_len, 3, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(result.connection_count, 0);
+    sc_connection_result_deinit(&result, &alloc);
+}
+
+static void test_consolidation_timestamp_compare(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+
+    sc_consolidation_config_t config = SC_CONSOLIDATION_DEFAULTS;
+    config.decay_days = 0;
+    sc_error_t err = sc_memory_consolidate(&alloc, &mem, &config);
+    SC_ASSERT_EQ(err, SC_OK);
+    mem.vtable->deinit(mem.ctx);
+}
+
+#ifdef SC_ENABLE_SQLITE
+static void test_consolidation_iso_decay(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_sqlite_memory_create(&alloc, ":memory:");
+
+    mem.vtable->store(mem.ctx, "recent", 6, "recent data", 11, NULL, NULL, 0);
+    mem.vtable->store(mem.ctx, "old", 3, "old data", 8, NULL, NULL, 0);
+
+    size_t before = 0;
+    mem.vtable->count(mem.ctx, &before);
+    SC_ASSERT_TRUE(before >= 2);
+
+    sc_consolidation_config_t config = SC_CONSOLIDATION_DEFAULTS;
+    config.decay_days = 1;
+    sc_error_t err = sc_memory_consolidate(&alloc, &mem, &config);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    size_t after = 0;
+    mem.vtable->count(mem.ctx, &after);
+    SC_ASSERT_TRUE(after <= before);
+
+    mem.vtable->deinit(mem.ctx);
+}
+#endif
+
+static void test_inbox_rejects_dotdot(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_memory_t mem = sc_none_memory_create(&alloc);
+    sc_inbox_watcher_t watcher;
+    memset(&watcher, 0, sizeof(watcher));
+    sc_error_t err = sc_inbox_init(&watcher, &alloc, &mem, "/tmp/sc-test-inbox", 18);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_inbox_deinit(&watcher);
+    mem.vtable->deinit(mem.ctx);
+}
+
 /* ── Test runner ─────────────────────────────────────────────────────── */
 
 void run_memory_features_tests(void) {
@@ -377,4 +456,13 @@ void run_memory_features_tests(void) {
 #ifdef SC_ENABLE_SQLITE
     SC_RUN_TEST(test_insight_category_store_recall);
 #endif
+
+    SC_TEST_SUITE("memory_features — audit fixes");
+    SC_RUN_TEST(test_connections_parse_markdown_wrapped);
+    SC_RUN_TEST(test_connections_parse_out_of_bounds_indices);
+    SC_RUN_TEST(test_consolidation_timestamp_compare);
+#ifdef SC_ENABLE_SQLITE
+    SC_RUN_TEST(test_consolidation_iso_decay);
+#endif
+    SC_RUN_TEST(test_inbox_rejects_dotdot);
 }

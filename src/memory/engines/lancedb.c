@@ -580,7 +580,11 @@ static sc_error_t impl_forget_prod(void *ctx, const char *key, size_t key_len, b
     if (rc != SQLITE_OK)
         return SC_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
-    sqlite3_step(stmt);
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+        return SC_ERR_MEMORY_BACKEND;
+    }
     *deleted = sqlite3_changes(self->db) > 0;
     sqlite3_finalize(stmt);
     return SC_OK;

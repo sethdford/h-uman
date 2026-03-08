@@ -70,17 +70,36 @@ uint32_t sc_similarity_score(const char *a, size_t a_len, const char *b, size_t 
     return (uint32_t)((shared * 100) / total_unique);
 }
 
+static time_t parse_iso_timestamp(const char *ts, size_t ts_len) {
+    if (!ts || ts_len == 0)
+        return 0;
+    struct tm tm_buf;
+    memset(&tm_buf, 0, sizeof(tm_buf));
+    if (ts_len >= 19 && ts[4] == '-' && ts[7] == '-' && ts[10] == 'T') {
+        tm_buf.tm_year = (int)strtol(ts, NULL, 10) - 1900;
+        tm_buf.tm_mon = (int)strtol(ts + 5, NULL, 10) - 1;
+        tm_buf.tm_mday = (int)strtol(ts + 8, NULL, 10);
+        tm_buf.tm_hour = (int)strtol(ts + 11, NULL, 10);
+        tm_buf.tm_min = (int)strtol(ts + 14, NULL, 10);
+        tm_buf.tm_sec = (int)strtol(ts + 17, NULL, 10);
+        return mktime(&tm_buf);
+    }
+    long raw = strtol(ts, NULL, 10);
+    return raw > 0 ? (time_t)raw : 0;
+}
+
 static int compare_timestamp(const char *ts_a, size_t ts_a_len, const char *ts_b, size_t ts_b_len) {
     if (!ts_a || ts_a_len == 0)
         return 1;
     if (!ts_b || ts_b_len == 0)
         return -1;
-    long la = strtol(ts_a, NULL, 10);
-    long lb = strtol(ts_b, NULL, 10);
-    if (la < lb)
-        return -1;
-    if (la > lb)
-        return 1;
+    /* ISO 8601 timestamps (YYYY-MM-DDThh:mm:ssZ) sort lexicographically */
+    size_t cmp_len = ts_a_len < ts_b_len ? ts_a_len : ts_b_len;
+    int cmp = memcmp(ts_a, ts_b, cmp_len);
+    if (cmp != 0)
+        return cmp < 0 ? -1 : 1;
+    if (ts_a_len != ts_b_len)
+        return ts_a_len < ts_b_len ? -1 : 1;
     return 0;
 }
 
@@ -135,7 +154,7 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
             if (to_forget[i])
                 continue;
             if (entries[i].timestamp && entries[i].timestamp_len > 0) {
-                long ts = strtol(entries[i].timestamp, NULL, 10);
+                time_t ts = parse_iso_timestamp(entries[i].timestamp, entries[i].timestamp_len);
                 if (ts > 0 && ts < threshold) {
                     to_forget[i] = true;
                 }
@@ -169,9 +188,9 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
                     size_t response_len = 0;
                     const char *sys = "Return JSON only.";
                     sc_error_t chat_err = config->provider->vtable->chat_with_system(
-                        config->provider->ctx, alloc, sys, 17, prompt, prompt_len, NULL, 0, 0.2,
-                        &response, &response_len);
-                    alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                        config->provider->ctx, alloc, sys, 17, prompt, prompt_len, config->model,
+                        config->model_len, 0.2, &response, &response_len);
+                    alloc->free(alloc->ctx, prompt, SC_CONN_PROMPT_CAP);
 
                     if (chat_err == SC_OK && response) {
                         sc_connection_result_t conn_result = {0};

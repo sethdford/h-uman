@@ -950,6 +950,9 @@ export class DemoGatewayClient extends EventTarget {
       case "chat.abort":
         return { aborted: true };
 
+      case "voice.transcribe":
+        return { text: "Demo transcription of your audio" };
+
       case "persona.set":
         return { ok: true };
 

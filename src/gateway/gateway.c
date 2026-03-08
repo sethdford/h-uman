@@ -112,6 +112,8 @@ static void oauth_pending_store(void *ctx, const char *state, const char *verifi
         return;
     pthread_mutex_lock(&gw->oauth_mutex);
     if (gw->oauth_pending_count >= SC_OAUTH_PENDING_MAX) {
+        (void)fprintf(stderr, "[oauth] pending store buffer full, state dropped (max: %d)\n",
+                      SC_OAUTH_PENDING_MAX);
         pthread_mutex_unlock(&gw->oauth_mutex);
         return;
     }
@@ -274,7 +276,8 @@ bool sc_gateway_is_webhook_path(const char *path) {
            path_is(path, "/discord") || path_is(path, "/facebook") || path_is(path, "/instagram") ||
            path_is(path, "/twitter") || path_is(path, "/google_rcs") ||
            path_is(path, "/google_chat") || path_is(path, "/dingtalk") || path_is(path, "/teams") ||
-           path_is(path, "/twilio") || path_is(path, "/onebot") || path_is(path, "/qq");
+           path_is(path, "/twilio") || path_is(path, "/onebot") || path_is(path, "/qq") ||
+           path_is(path, "/tiktok");
 }
 
 bool sc_gateway_is_allowed_origin(const char *origin, const char *const *allowed, size_t n) {
@@ -437,7 +440,8 @@ static void send_response(int fd, int status, const char *content_type, const ch
         return;
     if ((size_t)n >= sizeof(hdr))
         n = (int)(sizeof(hdr) - 1);
-    send_all(fd, hdr, (size_t)n);
+    if (!send_all(fd, hdr, (size_t)n))
+        return;
     if (body && body_len > 0)
         send_all(fd, body, body_len);
 }
@@ -459,10 +463,14 @@ static void send_json_with_cookie(int fd, int status, const char *body, const ch
     char hdr[768];
     const char *cors_origin = get_cors_origin_for_response();
     char cors_line[256] = "";
-    char cookie_line[384];
-    snprintf(cookie_line, sizeof(cookie_line),
-             "Set-Cookie: %s=%s; HttpOnly; Path=/api/auth/oauth; SameSite=Lax\r\n", cookie_name,
-             cookie_value);
+    char cookie_line[512];
+    int ck = snprintf(cookie_line, sizeof(cookie_line),
+                      "Set-Cookie: %s=%s; HttpOnly; Secure; Path=/api/auth/oauth; SameSite=Lax\r\n",
+                      cookie_name, cookie_value);
+    if (ck < 0 || (size_t)ck >= sizeof(cookie_line)) {
+        send_json(fd, 500, "{\"error\":\"cookie too large\"}");
+        return;
+    }
     if (cors_origin[0] != '\0')
         snprintf(cors_line, sizeof(cors_line), "Access-Control-Allow-Origin: %s\r\n", cors_origin);
     size_t body_len = body ? strlen(body) : 0;
@@ -478,7 +486,8 @@ static void send_json_with_cookie(int fd, int status, const char *body, const ch
                      "\r\n",
                      status_str, body_len, cors_line, cookie_line);
     if (n > 0 && (size_t)n < sizeof(hdr)) {
-        send_all(fd, hdr, (size_t)n);
+        if (!send_all(fd, hdr, (size_t)n))
+            return;
         if (body && body_len > 0)
             send_all(fd, body, body_len);
     }

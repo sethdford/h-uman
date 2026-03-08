@@ -65,6 +65,7 @@ static const sc_rpc_entry_t s_rpc_table[] = {
     {"update.run", cp_admin_update_run},
 #endif
     {"exec.approval.resolve", cp_admin_exec_approval},
+    {"voice.transcribe", cp_voice_transcribe},
     {"usage.summary", cp_admin_usage_summary},
     {"metrics.snapshot", cp_admin_metrics_snapshot},
     {"activity.recent", cp_admin_activity_recent},
@@ -240,8 +241,10 @@ void sc_control_on_message(sc_ws_conn_t *conn, const char *data, size_t data_len
             sc_json_stringify(proto->alloc, empty, &payload, &payload_len);
             sc_json_free(proto->alloc, empty);
         }
-        if (!payload)
+        if (!payload) {
             payload = (char *)proto->alloc->alloc(proto->alloc->ctx, 3);
+            payload_len = 0;
+        }
         if (payload && !payload_len) {
             memcpy(payload, "{}", 3);
             payload_len = 2;
@@ -300,7 +303,11 @@ void sc_control_on_message(sc_ws_conn_t *conn, const char *data, size_t data_len
             pos += payload_len;
             res_buf[pos++] = '}';
             res_buf[pos] = '\0';
-            sc_ws_server_send(conn, res_buf, pos);
+            sc_error_t send_err = sc_ws_server_send(conn, res_buf, pos);
+            if (send_err != SC_OK) {
+                (void)fprintf(stderr, "[control] send response failed: %s\n",
+                              sc_error_string(send_err));
+            }
             proto->alloc->free(proto->alloc->ctx, res_buf, res_cap);
         }
         if (err == SC_OK && payload) {
@@ -376,6 +383,9 @@ sc_error_t sc_control_send_response(sc_ws_conn_t *conn, const char *id, bool ok,
                             ok ? "true" : "false", payload);
 
     sc_error_t err = sc_ws_server_send(conn, buf, pos);
+    if (err != SC_OK) {
+        (void)fprintf(stderr, "[control] send_response failed: %s\n", sc_error_string(err));
+    }
     alloc.free(alloc.ctx, buf, cap);
     return err;
 #else

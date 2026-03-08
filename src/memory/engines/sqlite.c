@@ -460,7 +460,11 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
     if (rc != SQLITE_OK)
         return SC_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
-    sqlite3_step(stmt);
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_DONE) {
+        sqlite3_finalize(stmt);
+        return SC_ERR_MEMORY_BACKEND;
+    }
     *deleted = sqlite3_changes(self->db) > 0;
     sqlite3_finalize(stmt);
     return SC_OK;
@@ -584,9 +588,9 @@ static sc_error_t impl_session_clear_messages(void *ctx, const char *session_id,
     if (rc != SQLITE_OK)
         return SC_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, session_id, (int)session_id_len, SQLITE_STATIC);
-    sqlite3_step(stmt);
+    int step_rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return (step_rc == SQLITE_DONE) ? SC_OK : SC_ERR_MEMORY_BACKEND;
 }
 
 static sc_error_t impl_session_clear_auto_saved(void *ctx, const char *session_id,
@@ -603,9 +607,9 @@ static sc_error_t impl_session_clear_auto_saved(void *ctx, const char *session_i
         return SC_ERR_MEMORY_BACKEND;
     if (session_id && session_id_len > 0)
         sqlite3_bind_text(stmt, 1, session_id, (int)session_id_len, SQLITE_STATIC);
-    sqlite3_step(stmt);
+    int step_rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return (step_rc == SQLITE_DONE) ? SC_OK : SC_ERR_MEMORY_BACKEND;
 }
 
 static const sc_session_store_vtable_t sqlite_session_vtable = {

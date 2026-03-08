@@ -830,6 +830,10 @@ sc_error_t parse_channels(sc_allocator_t *a, sc_config_t *cfg, const sc_json_val
     if (twitter_obj)
         parse_twitter_channel(a, cfg, twitter_obj);
 
+    sc_json_value_t *tiktok_obj = sc_json_object_get(obj, "tiktok");
+    if (tiktok_obj)
+        parse_tiktok_channel(a, cfg, tiktok_obj);
+
     sc_json_value_t *google_rcs_obj = sc_json_object_get(obj, "google_rcs");
     if (google_rcs_obj)
         parse_google_rcs_channel(a, cfg, google_rcs_obj);

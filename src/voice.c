@@ -376,6 +376,185 @@ tts_fail:
 #endif
 }
 
+#define SC_VOICE_GEMINI_DEFAULT_ENDPOINT "https://generativelanguage.googleapis.com/v1beta/models/"
+#define SC_VOICE_GEMINI_DEFAULT_MODEL    "gemini-2.0-flash"
+#define SC_VOICE_GEMINI_PROMPT                                \
+    "Transcribe the following audio exactly, word for word. " \
+    "Output only the spoken words, nothing else. "            \
+    "If the audio is silent or unintelligible, output an empty string."
+
+sc_error_t sc_voice_stt_gemini(sc_allocator_t *alloc, const sc_voice_config_t *config,
+                               const char *audio_base64, size_t audio_base64_len,
+                               const char *mime_type, char **out_text, size_t *out_len) {
+    if (!alloc || !config || !out_text || !out_len)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out_text = NULL;
+    *out_len = 0;
+
+    if (!config->api_key || config->api_key_len == 0)
+        return SC_ERR_PROVIDER_AUTH;
+    if (!audio_base64 || audio_base64_len == 0)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (!mime_type)
+        mime_type = "audio/webm";
+
+#if SC_IS_TEST
+    {
+        (void)audio_base64;
+        (void)audio_base64_len;
+        (void)mime_type;
+        const char *mock = "Mock Gemini transcription";
+        char *dup = sc_strndup(alloc, mock, strlen(mock));
+        if (!dup)
+            return SC_ERR_OUT_OF_MEMORY;
+        *out_text = dup;
+        *out_len = strlen(mock);
+        return SC_OK;
+    }
+#else
+    const char *model = config->stt_model && config->stt_model[0] ? config->stt_model
+                                                                  : SC_VOICE_GEMINI_DEFAULT_MODEL;
+    const char *base_url = config->stt_endpoint && config->stt_endpoint[0]
+                               ? config->stt_endpoint
+                               : SC_VOICE_GEMINI_DEFAULT_ENDPOINT;
+
+    /* Build URL: {base_url}{model}:generateContent?key={api_key} */
+    size_t url_cap = strlen(base_url) + strlen(model) + 64 + config->api_key_len;
+    char *url = (char *)alloc->alloc(alloc->ctx, url_cap);
+    if (!url)
+        return SC_ERR_OUT_OF_MEMORY;
+    int n = snprintf(url, url_cap, "%s%s:generateContent?key=%.*s", base_url, model,
+                     (int)config->api_key_len, config->api_key);
+    if (n < 0 || (size_t)n >= url_cap) {
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+
+    /*
+     * Build JSON body:
+     * {"contents":[{"parts":[
+     *   {"text":"<prompt>"},
+     *   {"inline_data":{"mime_type":"<mt>","data":"<b64>"}}
+     * ]}]}
+     */
+    size_t json_cap = 512 + audio_base64_len + strlen(mime_type);
+    char *json = (char *)alloc->alloc(alloc->ctx, json_cap);
+    if (!json) {
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    n = snprintf(json, json_cap,
+                 "{\"contents\":[{\"parts\":["
+                 "{\"text\":\"%s\"},"
+                 "{\"inline_data\":{\"mime_type\":\"%s\",\"data\":\"%.*s\"}}"
+                 "]}]}",
+                 SC_VOICE_GEMINI_PROMPT, mime_type, (int)audio_base64_len, audio_base64);
+    if (n < 0 || (size_t)n >= json_cap) {
+        alloc->free(alloc->ctx, json, json_cap);
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+    size_t json_len = (size_t)n;
+
+    /* Write JSON to temp file (too large for argv) */
+    char *tmp_dir = sc_platform_get_temp_dir(alloc);
+    if (!tmp_dir) {
+        alloc->free(alloc->ctx, json, json_cap);
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_IO;
+    }
+    char tmp_path[256];
+    n = snprintf(tmp_path, sizeof(tmp_path), "%s/seaclaw_gemini_stt_%d.json", tmp_dir, get_pid());
+    alloc->free(alloc->ctx, tmp_dir, strlen(tmp_dir) + 1);
+    if (n < 0 || (size_t)n >= sizeof(tmp_path)) {
+        alloc->free(alloc->ctx, json, json_cap);
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_IO;
+    }
+
+    FILE *f = fopen(tmp_path, "wb");
+    if (!f) {
+        alloc->free(alloc->ctx, json, json_cap);
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_IO;
+    }
+    if (fwrite(json, 1, json_len, f) != json_len) {
+        fclose(f);
+        unlink(tmp_path);
+        alloc->free(alloc->ctx, json, json_cap);
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_IO;
+    }
+    fclose(f);
+    alloc->free(alloc->ctx, json, json_cap);
+
+    /* Build curl data-file arg: @/tmp/seaclaw_gemini_stt_XXX.json */
+    char data_arg[280];
+    n = snprintf(data_arg, sizeof(data_arg), "@%s", tmp_path);
+    if (n < 0 || (size_t)n >= sizeof(data_arg)) {
+        unlink(tmp_path);
+        alloc->free(alloc->ctx, url, url_cap);
+        return SC_ERR_IO;
+    }
+
+    const char *argv[] = {"curl", "-s",     "-X", "POST", "-H", "Content-Type: application/json",
+                          "-d",   data_arg, url,  NULL};
+
+    sc_run_result_t result = {0};
+    sc_error_t err = sc_process_run(alloc, argv, NULL, 4 * 1024 * 1024, &result);
+    unlink(tmp_path);
+    alloc->free(alloc->ctx, url, url_cap);
+
+    if (err != SC_OK) {
+        sc_run_result_free(alloc, &result);
+        return err;
+    }
+    if (!result.success || !result.stdout_buf) {
+        sc_run_result_free(alloc, &result);
+        return SC_ERR_PROVIDER_RESPONSE;
+    }
+
+    /* Parse: candidates[0].content.parts[0].text */
+    sc_json_value_t *parsed = NULL;
+    err = sc_json_parse(alloc, result.stdout_buf, result.stdout_len, &parsed);
+    sc_run_result_free(alloc, &result);
+    if (err != SC_OK)
+        return SC_ERR_PARSE;
+
+    sc_json_value_t *candidates = sc_json_object_get(parsed, "candidates");
+    if (!candidates || candidates->type != SC_JSON_ARRAY || candidates->data.array.len == 0) {
+        sc_json_free(alloc, parsed);
+        return SC_ERR_PARSE;
+    }
+    sc_json_value_t *first = candidates->data.array.items[0];
+    sc_json_value_t *content = sc_json_object_get(first, "content");
+    if (!content) {
+        sc_json_free(alloc, parsed);
+        return SC_ERR_PARSE;
+    }
+    sc_json_value_t *parts = sc_json_object_get(content, "parts");
+    if (!parts || parts->type != SC_JSON_ARRAY || parts->data.array.len == 0) {
+        sc_json_free(alloc, parsed);
+        return SC_ERR_PARSE;
+    }
+    sc_json_value_t *text_val = sc_json_object_get(parts->data.array.items[0], "text");
+    if (!text_val || text_val->type != SC_JSON_STRING) {
+        sc_json_free(alloc, parsed);
+        return SC_ERR_PARSE;
+    }
+
+    size_t text_len = text_val->data.string.len;
+    char *text = sc_strndup(alloc, text_val->data.string.ptr, text_len);
+    sc_json_free(alloc, parsed);
+    if (!text)
+        return SC_ERR_OUT_OF_MEMORY;
+
+    *out_text = text;
+    *out_len = text_len;
+    return SC_OK;
+#endif
+}
+
 sc_error_t sc_voice_play(sc_allocator_t *alloc, const void *audio_data, size_t audio_len) {
     if (!alloc)
         return SC_ERR_INVALID_ARGUMENT;

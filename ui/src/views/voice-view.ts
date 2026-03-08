@@ -7,6 +7,7 @@ import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { SESSION_KEY_VOICE } from "../utils.js";
 import type { ChatItem } from "../controllers/chat-controller.js";
 import { ScToast } from "../components/sc-toast.js";
+import { AudioRecorder, blobToBase64 } from "../audio-recorder.js";
 import "../components/sc-button.js";
 import "../components/sc-skeleton.js";
 import "../components/sc-empty-state.js";
@@ -162,16 +163,15 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
   @state() private transcript = "";
   @state() private voiceStatus: VoiceStatus = "idle";
-  @state() private speechSupported = true;
   @state() private error = "";
   @state() private _lastFailedMessage = "";
-  @state() private recognition: SpeechRecognition | null = null;
   @state() private _messages: VoiceMessage[] = [];
   @state() private _connectionStatus: GatewayStatus = "disconnected";
   @state() private _loading = true;
   @state() private _sessionStartTs: number | null = null;
   @state() private _sessionDurationSec = 0;
   private _durationTimer: ReturnType<typeof setInterval> | null = null;
+  private _recorder = new AudioRecorder();
 
   private gatewayHandler = (e: Event): void => this.onGatewayEvent(e);
   private statusHandler = (e: Event): void => {
@@ -239,11 +239,10 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
   override firstUpdated(): void {
     requestAnimationFrame(() => {
-      this.speechSupported = "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
-      if (!this.speechSupported) {
+      if (!this._recorder.isSupported) {
         this.voiceStatus = "unsupported";
         ScToast.show({
-          message: "Speech recognition is not supported in this browser",
+          message: "Audio recording is not supported in this browser",
           variant: "info",
         });
       }
@@ -271,6 +270,21 @@ export class ScVoiceView extends GatewayAwareLitElement {
     }
   }
 
+  protected override onGatewaySwapped(
+    previous: GatewayClientClass | null,
+    current: GatewayClientClass,
+  ): void {
+    previous?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.gatewayHandler);
+    previous?.removeEventListener(
+      GatewayClientClass.EVENT_STATUS,
+      this.statusHandler as EventListener,
+    );
+    this._boundGateway = current;
+    this._connectionStatus = current.status;
+    current.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.gatewayHandler);
+    current.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
+  }
+
   override disconnectedCallback(): void {
     this._stopDurationTimer();
     this._boundGateway?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.gatewayHandler);
@@ -279,7 +293,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
       this.statusHandler as EventListener,
     );
     this._boundGateway = null;
-    this.stopRecognition();
+    this._recorder.dispose();
     super.disconnectedCallback();
   }
 
@@ -390,63 +404,50 @@ export class ScVoiceView extends GatewayAwareLitElement {
     requestAnimationFrame(() => this.requestUpdate());
   }
 
-  private startRecognition(): void {
-    if (!this.speechSupported) return;
-    const Ctor =
-      (
-        window as unknown as {
-          webkitSpeechRecognition?: new () => SpeechRecognition;
-        }
-      ).webkitSpeechRecognition ??
-      (window as unknown as { SpeechRecognition?: new () => SpeechRecognition }).SpeechRecognition;
-    if (!Ctor) return;
-    const rec = new Ctor();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-    rec.onresult = (event: SpeechRecognitionEvent) => {
-      const r = event.results[event.results.length - 1];
-      if (!r) return;
-      this.transcript = r[0]?.transcript ?? "";
-      requestAnimationFrame(() => this.requestUpdate());
-    };
-    rec.onend = () => {
-      if (this.voiceStatus === "listening") this.voiceStatus = "idle";
-      this.recognition = null;
-      requestAnimationFrame(() => this.requestUpdate());
-    };
-    rec.onerror = (ev: Event) => {
-      this.voiceStatus = "idle";
-      this.recognition = null;
-      const errCode = (ev as Event & { error?: string }).error ?? "unknown";
-      if (errCode !== "aborted" && errCode !== "no-speech") {
-        ScToast.show({ message: `Speech recognition error: ${errCode}`, variant: "error" });
-      }
-      requestAnimationFrame(() => this.requestUpdate());
-    };
-    rec.start();
-    this.recognition = rec;
-    this.voiceStatus = "listening";
-  }
-
-  private stopRecognition(): void {
-    if (this.recognition) {
-      try {
-        this.recognition.stop();
-      } catch {
-        /* ignore */
-      }
-      this.recognition = null;
-    }
-    if (this.voiceStatus === "listening") this.voiceStatus = "idle";
-  }
-
-  private toggleMic(): void {
+  private async toggleMic(): Promise<void> {
     if (this.voiceStatus === "listening") {
-      this.stopRecognition();
+      await this._stopAndTranscribe();
     } else {
-      this.startRecognition();
+      await this._startRecording();
     }
+  }
+
+  private async _startRecording(): Promise<void> {
+    try {
+      await this._recorder.start();
+      this.voiceStatus = "listening";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Microphone access denied";
+      ScToast.show({ message: msg, variant: "error" });
+      this.voiceStatus = "idle";
+    }
+  }
+
+  private async _stopAndTranscribe(): Promise<void> {
+    const gw = this.gateway;
+    if (!gw) {
+      this._recorder.dispose();
+      this.voiceStatus = "idle";
+      return;
+    }
+
+    this.voiceStatus = "processing";
+    try {
+      const { blob, mimeType } = await this._recorder.stop();
+      const audio = await blobToBase64(blob);
+      const result = await gw.request<{ text?: string }>("voice.transcribe", {
+        audio,
+        mimeType,
+      });
+      if (result.text) {
+        this.transcript = result.text;
+        this.requestUpdate();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Transcription failed";
+      ScToast.show({ message: msg, variant: "error" });
+    }
+    this.voiceStatus = "idle";
   }
 
   private async send(): Promise<void> {
@@ -582,11 +583,12 @@ export class ScVoiceView extends GatewayAwareLitElement {
   }
 
   private _renderControls() {
+    const micDisabled = !this._recorder.isSupported || this._connectionStatus === "disconnected";
     return html`
       <div class="controls-zone">
         <sc-voice-orb
           .state=${this.voiceStatus}
-          ?disabled=${!this.speechSupported || this._connectionStatus === "disconnected"}
+          ?disabled=${micDisabled}
           @sc-voice-mic-toggle=${this.toggleMic}
         ></sc-voice-orb>
         <div class="input-row">

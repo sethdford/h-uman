@@ -526,6 +526,8 @@ sc_error_t sc_agent_consolidate_memory(sc_agent_t *agent) {
         return SC_ERR_INVALID_ARGUMENT;
     sc_consolidation_config_t config = SC_CONSOLIDATION_DEFAULTS;
     config.provider = &agent->provider;
+    config.model = agent->model_name;
+    config.model_len = agent->model_name_len;
     return sc_memory_consolidate(agent->alloc, agent->memory, &config);
 }
 
