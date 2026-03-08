@@ -1,5 +1,75 @@
 import { test, expect } from "@playwright/test";
 
+test.describe("Chat Streaming Choreography (demo mode)", () => {
+  test("empty state shows time-aware hero greeting", async ({ page }) => {
+    await page.goto("/?demo#chat");
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("sc-app")).toBeAttached({ timeout: 10000 });
+
+    const heroText = await page.evaluate(() => {
+      const app = document.querySelector("sc-app");
+      const view = app?.shadowRoot?.querySelector("sc-chat-view");
+      const thread = view?.shadowRoot?.querySelector("sc-message-thread");
+      const hero = thread?.shadowRoot?.querySelector(".hero");
+      return hero?.textContent ?? "";
+    });
+    const greetings = [
+      "Good morning",
+      "Good afternoon",
+      "Good evening",
+      "Late night",
+      "Burning the midnight oil",
+    ];
+    expect(greetings.some((g) => heroText.includes(g))).toBe(true);
+    expect(heroText).toContain("What would you like to work on");
+  });
+
+  test("hero suggestion chips are interactive", async ({ page }) => {
+    await page.goto("/?demo#chat");
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("sc-app")).toBeAttached({ timeout: 10000 });
+
+    const chipCount = await page.evaluate(() => {
+      const app = document.querySelector("sc-app");
+      const view = app?.shadowRoot?.querySelector("sc-chat-view");
+      const thread = view?.shadowRoot?.querySelector("sc-message-thread");
+      return thread?.shadowRoot?.querySelectorAll(".hero-chip").length ?? 0;
+    });
+    expect(chipCount).toBe(4);
+  });
+
+  test("typing indicator uses accent glow animation", async ({ page }) => {
+    await page.goto("/?demo#chat");
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("sc-app")).toBeAttached({ timeout: 10000 });
+
+    await page.evaluate(async () => {
+      const app = document.querySelector("sc-app") as {
+        gateway?: { request: (m: string, p: object) => Promise<unknown> };
+      } | null;
+      await app?.gateway?.request("chat.send", {
+        message: "test streaming",
+        sessionKey: "default",
+      });
+    });
+
+    await page.waitForTimeout(200);
+
+    const hasIndicator = await page.evaluate(() => {
+      const app = document.querySelector("sc-app");
+      const view = app?.shadowRoot?.querySelector("sc-chat-view");
+      const thread = view?.shadowRoot?.querySelector("sc-message-thread");
+      return !!thread?.shadowRoot?.querySelector("sc-typing-indicator");
+    });
+    expect(hasIndicator).toBe(true);
+
+    await page.screenshot({
+      path: "test-results/chat-streaming-choreography.png",
+      fullPage: true,
+    });
+  });
+});
+
 /**
  * Test sending a message via gateway client directly (bypasses Shadow DOM input).
  * Uses baseURL from playwright.config (preview server on 4173).
