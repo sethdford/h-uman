@@ -1585,6 +1585,26 @@ static void test_skill_write_invalid_name_chars(void) {
     if (result.error_msg_owned && result.error_msg)
         alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
 }
+static void test_skill_write_rejects_path_traversal(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_tool_t tool;
+    sc_skill_write_create(&alloc, &tool);
+    sc_json_value_t *args = sc_json_object_new(&alloc);
+    biz_set_str(&alloc, args, "name", "../evil");
+    biz_set_str(&alloc, args, "description", "A test skill");
+    biz_set_str(&alloc, args, "command", "echo hello");
+    sc_tool_result_t result = {0};
+    tool.vtable->execute(tool.ctx, &alloc, args, &result);
+    SC_ASSERT_FALSE(result.success);
+    SC_ASSERT(result.error_msg != NULL);
+    SC_ASSERT(strstr(result.error_msg, "path traversal") != NULL ||
+              strstr(result.error_msg, "invalid characters") != NULL);
+    sc_json_free(&alloc, args);
+    if (result.output_owned && result.output)
+        alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
+    if (result.error_msg_owned && result.error_msg)
+        alloc.free(alloc.ctx, (void *)result.error_msg, result.error_msg_len + 1);
+}
 static void test_skill_write_valid(void) {
     sc_allocator_t alloc = sc_system_allocator();
     sc_tool_t tool;
@@ -2751,6 +2771,7 @@ void run_tools_all_tests(void) {
     SC_RUN_TEST(test_skill_write_missing_description);
     SC_RUN_TEST(test_skill_write_missing_command);
     SC_RUN_TEST(test_skill_write_invalid_name_chars);
+    SC_RUN_TEST(test_skill_write_rejects_path_traversal);
     SC_RUN_TEST(test_skill_write_valid);
     SC_RUN_TEST(test_skill_write_name_too_long);
     SC_RUN_TEST(test_jira_create);

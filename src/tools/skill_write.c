@@ -8,6 +8,7 @@
 #include "seaclaw/core/json.h"
 #include "seaclaw/core/string.h"
 #include "seaclaw/tool.h"
+#include "seaclaw/tools/path_security.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +76,10 @@ static sc_error_t skill_write_execute(void *ctx, sc_allocator_t *alloc, const sc
         return SC_OK;
     }
 
+    if (!sc_path_is_safe(name)) {
+        *out = sc_tool_result_fail("name contains path traversal or invalid characters", 48);
+        return SC_OK;
+    }
     size_t name_len = strlen(name);
     if (!validate_name(name, name_len)) {
         if (name_len > SC_SKILL_WRITE_NAME_MAX) {
