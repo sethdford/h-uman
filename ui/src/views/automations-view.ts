@@ -566,10 +566,20 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           </p>
         </div>
         <div class="modal-footer">
-          <sc-button variant="secondary" @click=${() => (this.pendingDelete = null)}>
+          <sc-button
+            variant="secondary"
+            ?disabled=${this._deleteInProgress}
+            @click=${() => (this.pendingDelete = null)}
+          >
             Cancel
           </sc-button>
-          <sc-button variant="destructive" @click=${this._confirmDelete}> Delete </sc-button>
+          <sc-button
+            variant="destructive"
+            ?disabled=${this._deleteInProgress}
+            @click=${this._confirmDelete}
+          >
+            Delete
+          </sc-button>
         </div>
       </sc-modal>
     `;

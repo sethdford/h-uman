@@ -429,8 +429,8 @@ export class ScConfigView extends GatewayAwareLitElement {
           max_tokens: Number(parsed.max_tokens ?? 0),
           temperature: Number(parsed.default_temperature ?? parsed.temperature ?? 0.7),
         };
-      } catch {
-        /* invalid JSON, keep edited */
+      } catch (e) {
+        console.warn("[config-view] failed to parse raw JSON, keeping previous state:", e);
       }
     } else {
       this.rawText = JSON.stringify(toRawConfig(this.edited), null, 2);
