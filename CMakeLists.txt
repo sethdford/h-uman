@@ -378,6 +378,7 @@ set(SC_CORE_SOURCES
     src/agent/proactive.c
     src/agent/superhuman.c
     src/agent/superhuman_commitment.c
+    src/agent/superhuman_predictive.c
     src/providers/error_classify.c
     src/providers/api_key.c
     src/providers/helpers.c
