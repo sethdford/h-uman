@@ -15,3 +15,9 @@ globs:
 - Never use `setTimeout` for animation timing — use CSS transitions or `requestAnimationFrame`
 - Animate only compositor properties: `transform`, `opacity`, `filter` — never animate `width`, `height`, `top`, `left`, `margin`, `padding` (causes layout thrashing)
 - For layout changes, use `transform: translateX/Y/scale()` instead of position/size properties
+- Glass choreography: use `.sc-glass-enter` / `.sc-glass-exit` classes for blur/saturation reveal animations
+- Glass state transitions: all glass classes have `backdrop-filter` in their CSS transition property — blur/saturation animate between states
+- Glass choreography tokens: `--sc-glass-choreography-enter-duration` (350ms), `--sc-glass-choreography-exit-duration` (200ms), `--sc-glass-choreography-state-duration` (200ms)
+- Glass choreography easing: `--sc-glass-choreography-enter-easing` (M3 emphasize), `--sc-glass-choreography-state-easing` (M3 emphasize)
+- `prefers-reduced-motion: reduce` disables all glass choreography animations
+- `prefers-reduced-transparency: reduce` replaces glass with solid `--sc-bg-surface` backgrounds

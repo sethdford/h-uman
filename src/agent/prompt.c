@@ -66,6 +66,14 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             if (err != SC_OK)
                 goto fail;
         }
+        if (config->stm_context && config->stm_context_len > 0) {
+            err = append(alloc, &buf, &len, &cap, "\n\n### Session Context\n", 22);
+            if (err != SC_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, config->stm_context, config->stm_context_len);
+            if (err != SC_OK)
+                goto fail;
+        }
         if (config->custom_instructions && config->custom_instructions_len > 0) {
             err = append(alloc, &buf, &len, &cap, config->custom_instructions,
                          config->custom_instructions_len);
@@ -267,6 +275,16 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             goto fail;
     } else {
         err = append(alloc, &buf, &len, &cap, "(none)\n\n", 8);
+        if (err != SC_OK)
+            goto fail;
+    }
+
+    /* Session context (STM) */
+    if (config->stm_context && config->stm_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap, "\n\n### Session Context\n", 22);
+        if (err != SC_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, config->stm_context, config->stm_context_len);
         if (err != SC_OK)
             goto fail;
     }

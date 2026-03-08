@@ -1133,13 +1133,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
         }
     }
     if (persona->identity && persona->identity[0]) {
-        n = snprintf(header, sizeof(header), " %s", persona->identity);
-        if (n > 0) {
-            sc_error_t err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
-            if (err != SC_OK) {
-                alloc->free(alloc->ctx, buf, cap);
-                return err;
-            }
+        sc_error_t e2 = append_prompt(alloc, &buf, &len, &cap, " ", 1);
+        if (e2 == SC_OK)
+            e2 = append_prompt(alloc, &buf, &len, &cap, persona->identity,
+                               strlen(persona->identity));
+        if (e2 != SC_OK) {
+            alloc->free(alloc->ctx, buf, cap);
+            return e2;
         }
     }
     sc_error_t err = append_prompt(alloc, &buf, &len, &cap, "\n\n", 2);
@@ -1304,8 +1304,8 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Director's Notes */
     if (persona->directors_notes_count > 0) {
-        err = append_prompt(alloc, &buf, &len, &cap,
-                            "\n--- Director's Notes (performance direction) ---\n", 50);
+        static const char dn_hdr[] = "\n--- Director's Notes (performance direction) ---\n";
+        err = append_prompt(alloc, &buf, &len, &cap, dn_hdr, sizeof(dn_hdr) - 1);
         if (err != SC_OK)
             goto fail;
         for (size_t i = 0; i < persona->directors_notes_count; i++) {
@@ -1322,11 +1322,11 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Mood states */
     if (persona->mood_states_count > 0) {
-        err = append_prompt(alloc, &buf, &len, &cap,
-                            "\n--- Available mood states ---\n"
-                            "You have moods that shift naturally. Current mood is chosen "
-                            "by the context of the conversation. Available moods:\n",
-                            130);
+        static const char mood_hdr[] =
+            "\n--- Available mood states ---\n"
+            "You have moods that shift naturally. Current mood is chosen "
+            "by the context of the conversation. Available moods:\n";
+        err = append_prompt(alloc, &buf, &len, &cap, mood_hdr, sizeof(mood_hdr) - 1);
         if (err != SC_OK)
             goto fail;
         for (size_t i = 0; i < persona->mood_states_count; i++) {

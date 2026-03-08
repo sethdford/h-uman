@@ -1,0 +1,125 @@
+/* Dynamic color palette generated from #7AB648 */
+/* oklch(0.712, 0.155, 133.1) */
+
+:root {
+  /* primary */
+  --sc-dynamic-primary-50: #000100;
+  --sc-dynamic-primary-100: #000700;
+  --sc-dynamic-primary-200: #001f00;
+  --sc-dynamic-primary-300: #063a00;
+  --sc-dynamic-primary-400: #225600;
+  --sc-dynamic-primary-500: #3c7400;
+  --sc-dynamic-primary-600: #5b9226;
+  --sc-dynamic-primary-700: #7ab14e;
+  --sc-dynamic-primary-800: #9ad172;
+  --sc-dynamic-primary-900: #bcf196;
+  --sc-dynamic-primary-950: #cdffa8;
+  /* secondary */
+  --sc-dynamic-secondary-50: #000102;
+  --sc-dynamic-secondary-100: #000809;
+  --sc-dynamic-secondary-200: #002020;
+  --sc-dynamic-secondary-300: #003a3a;
+  --sc-dynamic-secondary-400: #005655;
+  --sc-dynamic-secondary-500: #007372;
+  --sc-dynamic-secondary-600: #2d918f;
+  --sc-dynamic-secondary-700: #56afad;
+  --sc-dynamic-secondary-800: #7bcfcc;
+  --sc-dynamic-secondary-900: #9fefec;
+  --sc-dynamic-secondary-950: #b1fffd;
+  /* tertiary */
+  --sc-dynamic-tertiary-50: #020006;
+  --sc-dynamic-tertiary-100: #090012;
+  --sc-dynamic-tertiary-200: #210a2b;
+  --sc-dynamic-tertiary-300: #3a2247;
+  --sc-dynamic-tertiary-400: #563b64;
+  --sc-dynamic-tertiary-500: #735683;
+  --sc-dynamic-tertiary-600: #9073a0;
+  --sc-dynamic-tertiary-700: #ae92be;
+  --sc-dynamic-tertiary-800: #cdb1de;
+  --sc-dynamic-tertiary-900: #edd2fd;
+  --sc-dynamic-tertiary-950: #fee3ff;
+  /* neutral */
+  --sc-dynamic-neutral-50: #000000;
+  --sc-dynamic-neutral-100: #030402;
+  --sc-dynamic-neutral-200: #151714;
+  --sc-dynamic-neutral-300: #2c2f2b;
+  --sc-dynamic-neutral-400: #464944;
+  --sc-dynamic-neutral-500: #616460;
+  --sc-dynamic-neutral-600: #7e817d;
+  --sc-dynamic-neutral-700: #9d9f9b;
+  --sc-dynamic-neutral-800: #bcbfba;
+  --sc-dynamic-neutral-900: #dcdfdb;
+  --sc-dynamic-neutral-950: #edefeb;
+  /* error */
+  --sc-dynamic-error-50: #150000;
+  --sc-dynamic-error-100: #270000;
+  --sc-dynamic-error-200: #4b0000;
+  --sc-dynamic-error-300: #6f0000;
+  --sc-dynamic-error-400: #940000;
+  --sc-dynamic-error-500: #bb061e;
+  --sc-dynamic-error-600: #db4041;
+  --sc-dynamic-error-700: #fc6761;
+  --sc-dynamic-error-800: #ff8b83;
+  --sc-dynamic-error-900: #ffaea5;
+  --sc-dynamic-error-950: #ffc0b6;
+}
+
+@media (color-gamut: p3) {
+  :root {
+    --sc-dynamic-primary-50: color(display-p3 0 0.005 0);
+    --sc-dynamic-primary-100: color(display-p3 0 0.027 0);
+    --sc-dynamic-primary-200: color(display-p3 0 0.122 0);
+    --sc-dynamic-primary-300: color(display-p3 0.023 0.227 0);
+    --sc-dynamic-primary-400: color(display-p3 0.133 0.339 0);
+    --sc-dynamic-primary-500: color(display-p3 0.236 0.456 0);
+    --sc-dynamic-primary-600: color(display-p3 0.356 0.573 0.151);
+    --sc-dynamic-primary-700: color(display-p3 0.479 0.694 0.306);
+    --sc-dynamic-primary-800: color(display-p3 0.605 0.818 0.447);
+    --sc-dynamic-primary-900: color(display-p3 0.736 0.945 0.588);
+    --sc-dynamic-primary-950: color(display-p3 0.803 1 0.658);
+    --sc-dynamic-secondary-50: color(display-p3 0 0.005 0.009);
+    --sc-dynamic-secondary-100: color(display-p3 0 0.03 0.036);
+    --sc-dynamic-secondary-200: color(display-p3 0 0.124 0.126);
+    --sc-dynamic-secondary-300: color(display-p3 0 0.227 0.226);
+    --sc-dynamic-secondary-400: color(display-p3 0 0.337 0.333);
+    --sc-dynamic-secondary-500: color(display-p3 0 0.453 0.447);
+    --sc-dynamic-secondary-600: color(display-p3 0.176 0.568 0.561);
+    --sc-dynamic-secondary-700: color(display-p3 0.337 0.688 0.679);
+    --sc-dynamic-secondary-800: color(display-p3 0.482 0.811 0.801);
+    --sc-dynamic-secondary-900: color(display-p3 0.624 0.937 0.927);
+    --sc-dynamic-secondary-950: color(display-p3 0.695 1 0.991);
+    --sc-dynamic-tertiary-50: color(display-p3 0.009 0 0.025);
+    --sc-dynamic-tertiary-100: color(display-p3 0.036 0 0.07);
+    --sc-dynamic-tertiary-200: color(display-p3 0.128 0.038 0.17);
+    --sc-dynamic-tertiary-300: color(display-p3 0.228 0.132 0.278);
+    --sc-dynamic-tertiary-400: color(display-p3 0.336 0.231 0.393);
+    --sc-dynamic-tertiary-500: color(display-p3 0.45 0.336 0.513);
+    --sc-dynamic-tertiary-600: color(display-p3 0.565 0.452 0.628);
+    --sc-dynamic-tertiary-700: color(display-p3 0.683 0.571 0.747);
+    --sc-dynamic-tertiary-800: color(display-p3 0.805 0.696 0.869);
+    --sc-dynamic-tertiary-900: color(display-p3 0.931 0.824 0.994);
+    --sc-dynamic-tertiary-950: color(display-p3 0.995 0.889 1);
+    --sc-dynamic-neutral-50: color(display-p3 0.001 0.002 0.001);
+    --sc-dynamic-neutral-100: color(display-p3 0.011 0.014 0.009);
+    --sc-dynamic-neutral-200: color(display-p3 0.082 0.089 0.077);
+    --sc-dynamic-neutral-300: color(display-p3 0.174 0.183 0.168);
+    --sc-dynamic-neutral-400: color(display-p3 0.275 0.285 0.269);
+    --sc-dynamic-neutral-500: color(display-p3 0.382 0.393 0.375);
+    --sc-dynamic-neutral-600: color(display-p3 0.496 0.506 0.489);
+    --sc-dynamic-neutral-700: color(display-p3 0.614 0.625 0.607);
+    --sc-dynamic-neutral-800: color(display-p3 0.737 0.748 0.73);
+    --sc-dynamic-neutral-900: color(display-p3 0.864 0.874 0.857);
+    --sc-dynamic-neutral-950: color(display-p3 0.928 0.939 0.922);
+    --sc-dynamic-error-50: color(display-p3 0.083 0 0);
+    --sc-dynamic-error-100: color(display-p3 0.154 0 0);
+    --sc-dynamic-error-200: color(display-p3 0.294 0 0);
+    --sc-dynamic-error-300: color(display-p3 0.436 0 0);
+    --sc-dynamic-error-400: color(display-p3 0.582 0 0);
+    --sc-dynamic-error-500: color(display-p3 0.732 0.025 0.119);
+    --sc-dynamic-error-600: color(display-p3 0.86 0.253 0.254);
+    --sc-dynamic-error-700: color(display-p3 0.988 0.402 0.382);
+    --sc-dynamic-error-800: color(display-p3 1 0.544 0.512);
+    --sc-dynamic-error-900: color(display-p3 1 0.684 0.646);
+    --sc-dynamic-error-950: color(display-p3 1 0.754 0.714);
+  }
+}

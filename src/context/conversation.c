@@ -6,6 +6,18 @@
 
 #define CTX_BUF_CAP 16384
 
+/* Safe pos advance: snprintf returns the would-be length even when truncated.
+ * Clamp to remaining buffer capacity to prevent out-of-bounds writes. */
+#define POS_ADVANCE(w, pos, cap)       \
+    do {                               \
+        if ((w) > 0) {                 \
+            size_t _add = (size_t)(w); \
+            if (_add > (cap) - (pos))  \
+                _add = (cap) - (pos);  \
+            (pos) += _add;             \
+        }                              \
+    } while (0)
+
 static bool str_contains_ci(const char *haystack, size_t hlen, const char *needle)
     __attribute__((unused));
 static bool str_contains_ci(const char *haystack, size_t hlen, const char *needle) {
@@ -50,20 +62,17 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
 
     /* ── Conversation thread ─────────────────────────────────────────── */
     w = snprintf(buf + pos, CTX_BUF_CAP - pos, "\n--- Recent conversation thread ---\n");
-    if (w > 0)
-        pos += (size_t)w;
+    POS_ADVANCE(w, pos, CTX_BUF_CAP);
 
     for (size_t i = 0; i < count; i++) {
         const char *who = entries[i].from_me ? "You" : "Them";
         w = snprintf(buf + pos, CTX_BUF_CAP - pos, "[%s] %s: %s\n", entries[i].timestamp, who,
                      entries[i].text);
-        if (w > 0 && pos + (size_t)w < CTX_BUF_CAP)
-            pos += (size_t)w;
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
     }
 
     w = snprintf(buf + pos, CTX_BUF_CAP - pos, "--- End of recent thread ---\n\n");
-    if (w > 0)
-        pos += (size_t)w;
+    POS_ADVANCE(w, pos, CTX_BUF_CAP);
 
     /* ── Emotional / situational analysis ────────────────────────────── */
     {
@@ -118,8 +127,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
         }
 
         w = snprintf(buf + pos, CTX_BUF_CAP - pos, "--- Conversation awareness ---\n");
-        if (w > 0)
-            pos += (size_t)w;
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
 
         /* Time-of-day context triggers */
         {
@@ -141,8 +149,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 } else {
                     w = 0;
                 }
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
 
                 if (wday == 1) {
                     w = snprintf(buf + pos, CTX_BUF_CAP - pos,
@@ -157,46 +164,39 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 } else {
                     w = 0;
                 }
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             }
         }
 
         if (they_seem_frustrated) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "They seem frustrated. Be calm, acknowledge it.\n");
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
         if (they_seem_excited) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "They seem excited. Be genuinely happy for them.\n");
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
         if (they_seem_sad) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "They seem sad or down. Be present and gentle.\n");
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
         if (open_question) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "They asked a question. Make sure you answer it.\n");
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
         if (they_sent_link) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "They shared a link. Acknowledge or comment on it.\n");
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
         if (logistics_thread) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "Active logistics/travel thread. Stay on topic.\n");
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
 
         /* Detected state analysis */
@@ -227,14 +227,12 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
             if (seems_rushed) {
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "STATE: They seem rushed. Get to the point.\n");
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             }
             if (seems_tired) {
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "STATE: They might be tired. Be brief and gentle.\n");
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             }
         }
 
@@ -266,8 +264,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                                  "2-3 sentences max, under 250 chars.\n",
                                  avg_len);
                 }
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             }
         }
 
@@ -290,8 +287,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "PHASE: Deep/winding. Been texting a while. Ok to be briefer.\n");
             }
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
 
         /* Real-time noticing (VoiceAI realtime-noticing) */
@@ -320,8 +316,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                         w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                                      "NOTICE: Their messages are getting shorter "
                                      "(energy dropping). Be gentler, check in.\n");
-                        if (w > 0)
-                            pos += (size_t)w;
+                        POS_ADVANCE(w, pos, CTX_BUF_CAP);
                     }
                 }
             }
@@ -385,8 +380,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                                      "NOTICE: They keep mentioning '%s' "
                                      "(%d times). This matters to them.\n",
                                      freq[f].word, freq[f].hits);
-                        if (w > 0)
-                            pos += (size_t)w;
+                        POS_ADVANCE(w, pos, CTX_BUF_CAP);
                         break;
                     }
                 }
@@ -437,8 +431,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                                              "NOTICE: They may have deflected from a topic. "
                                              "Don't force it — follow their lead.\n");
-                                if (w > 0)
-                                    pos += (size_t)w;
+                                POS_ADVANCE(w, pos, CTX_BUF_CAP);
                                 break;
                             }
                         }
@@ -463,8 +456,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 "Don't start new topics.",
             };
             w = snprintf(buf + pos, CTX_BUF_CAP - pos, "ARC: %s\n", arc_labels[arc]);
-            if (w > 0)
-                pos += (size_t)w;
+            POS_ADVANCE(w, pos, CTX_BUF_CAP);
         }
 
         /* Engagement scoring */
@@ -474,19 +466,16 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "ENGAGEMENT: Low. Try changing topic, share something "
                              "surprising, or ask a genuine question.\n");
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             } else if (eng == SC_ENGAGEMENT_DISTRACTED) {
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "ENGAGEMENT: Distracted. They may be busy. "
                              "Keep responses ultra-short or let them re-engage.\n");
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             } else if (eng == SC_ENGAGEMENT_HIGH) {
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "ENGAGEMENT: High. They're invested. Match depth.\n");
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             }
         }
 
@@ -497,8 +486,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                              "EMOTION: They seem %s (intensity: %.1f). ", emo.dominant_emotion,
                              (double)emo.intensity);
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
                 if (emo.concerning) {
                     w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                                  "This is concerning. Be gentle and present. "
@@ -511,16 +499,14 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
                 } else {
                     w = snprintf(buf + pos, CTX_BUF_CAP - pos, "\n");
                 }
-                if (w > 0)
-                    pos += (size_t)w;
+                POS_ADVANCE(w, pos, CTX_BUF_CAP);
             }
         }
 
         w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                      "\nUse this context naturally. Reference specific details they mentioned. "
                      "Do NOT summarize or acknowledge this context aloud.\n");
-        if (w > 0)
-            pos += (size_t)w;
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
     }
 
     buf[pos] = '\0';
@@ -637,11 +623,44 @@ sc_quality_score_t sc_conversation_evaluate_quality(const char *response, size_t
             nat -= 3;
         if (str_contains_ci(response, response_len, "1. "))
             nat -= 3;
+        /* Semicolons and em-dashes are AI tells in casual text */
+        if (str_contains_ci(response, response_len, ";"))
+            nat -= 5;
+        if (str_contains_ci(response, response_len, " — ") ||
+            str_contains_ci(response, response_len, " - "))
+            nat -= 3;
+        /* Starting with their name is unnatural between close contacts */
+        if (entries && count > 0) {
+            /* Check if response starts with a capitalized word followed by comma or ! */
+            if (response_len > 3 && response[0] >= 'A' && response[0] <= 'Z') {
+                for (size_t k = 1; k < response_len && k < 20; k++) {
+                    if (response[k] == ',' || response[k] == '!') {
+                        nat -= 5;
+                        break;
+                    }
+                    if (response[k] == ' ')
+                        break;
+                }
+            }
+        }
+        /* Count exclamation marks: more than 2 in a short message is over-enthusiastic */
+        {
+            int excl_count = 0;
+            for (size_t k = 0; k < response_len; k++) {
+                if (response[k] == '!')
+                    excl_count++;
+            }
+            if (excl_count > 2 && response_len < 200)
+                nat -= 5;
+        }
         /* Bonus for contractions (human-like) */
         if (str_contains_ci(response, response_len, "don't") ||
             str_contains_ci(response, response_len, "can't") ||
             str_contains_ci(response, response_len, "I'm") ||
-            str_contains_ci(response, response_len, "it's"))
+            str_contains_ci(response, response_len, "it's") ||
+            str_contains_ci(response, response_len, "that's") ||
+            str_contains_ci(response, response_len, "won't") ||
+            str_contains_ci(response, response_len, "didn't"))
             nat += 5;
         if (nat < 0)
             nat = 0;
@@ -913,4 +932,479 @@ sc_emotional_state_t sc_conversation_detect_emotion(const sc_channel_history_ent
     }
 
     return state;
+}
+
+/* ── Multi-message splitting ──────────────────────────────────────────── */
+
+/*
+ * Split at natural breakpoints that mimic how humans fragment thoughts
+ * across multiple iMessage bubbles. Priorities:
+ * 1. Explicit newlines in the response
+ * 2. Sentence boundaries followed by conjunctions/interjections
+ * 3. Sentence boundaries when response is long enough
+ */
+
+static bool is_split_starter(const char *s, size_t len) {
+    if (len < 2)
+        return false;
+    /* Starters that signal a new thought bubble */
+    static const char *starters[] = {
+        "oh ",  "but ", "and ", "like ",   "also ", "wait ", "haha", "lol", "omg",
+        "ngl ", "tbh ", "btw ", "anyway ", "ok ",   "so ",   "yeah", "nah", NULL,
+    };
+    for (int i = 0; starters[i]; i++) {
+        size_t sl = strlen(starters[i]);
+        if (len >= sl) {
+            bool match = true;
+            for (size_t j = 0; j < sl; j++) {
+                char a = s[j];
+                char b = starters[i][j];
+                if (a >= 'A' && a <= 'Z')
+                    a += 32;
+                if (a != b) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+                return true;
+        }
+    }
+    return false;
+}
+
+size_t sc_conversation_split_response(sc_allocator_t *alloc, const char *response,
+                                      size_t response_len, sc_message_fragment_t *fragments,
+                                      size_t max_fragments) {
+    if (!alloc || !response || response_len == 0 || !fragments || max_fragments == 0)
+        return 0;
+
+    /* Short responses stay as one message */
+    if (response_len < 40 || max_fragments == 1) {
+        char *copy = (char *)alloc->alloc(alloc->ctx, response_len + 1);
+        if (!copy)
+            return 0;
+        memcpy(copy, response, response_len);
+        copy[response_len] = '\0';
+        fragments[0].text = copy;
+        fragments[0].text_len = response_len;
+        fragments[0].delay_ms = 0;
+        return 1;
+    }
+
+    /* First pass: find split points */
+    size_t split_points[8];
+    size_t split_count = 0;
+
+    /* Check for explicit newlines first */
+    for (size_t i = 1; i < response_len - 1 && split_count < 7; i++) {
+        if (response[i] == '\n') {
+            /* Skip consecutive newlines */
+            size_t next = i + 1;
+            while (next < response_len && response[next] == '\n')
+                next++;
+            if (next < response_len && next - i > 0) {
+                split_points[split_count++] = next;
+                i = next - 1;
+            }
+        }
+    }
+
+    /* If no newlines, split at sentence boundaries before conjunctions */
+    if (split_count == 0) {
+        for (size_t i = 2; i < response_len - 2 && split_count < 7; i++) {
+            char prev = response[i - 1];
+            if ((prev == '.' || prev == '!' || prev == '?') && response[i] == ' ') {
+                size_t remaining = response_len - (i + 1);
+                if (remaining > 10 && is_split_starter(response + i + 1, remaining)) {
+                    split_points[split_count++] = i + 1;
+                }
+            }
+        }
+    }
+
+    /* If still nothing, split at sentence boundaries for long responses */
+    if (split_count == 0 && response_len > 80) {
+        for (size_t i = 30; i < response_len - 15 && split_count < 3; i++) {
+            char prev = response[i - 1];
+            if ((prev == '.' || prev == '!' || prev == '?') && response[i] == ' ') {
+                split_points[split_count++] = i + 1;
+            }
+        }
+    }
+
+    if (split_count == 0) {
+        char *copy = (char *)alloc->alloc(alloc->ctx, response_len + 1);
+        if (!copy)
+            return 0;
+        memcpy(copy, response, response_len);
+        copy[response_len] = '\0';
+        fragments[0].text = copy;
+        fragments[0].text_len = response_len;
+        fragments[0].delay_ms = 0;
+        return 1;
+    }
+
+    /* Cap at max_fragments - 1 split points */
+    if (split_count >= max_fragments)
+        split_count = max_fragments - 1;
+
+    /* Build fragments */
+    size_t frag_count = 0;
+    size_t start = 0;
+    for (size_t s = 0; s < split_count && frag_count < max_fragments - 1; s++) {
+        size_t end = split_points[s];
+        /* Trim trailing whitespace/newlines */
+        size_t trim_end = end;
+        while (trim_end > start &&
+               (response[trim_end - 1] == ' ' || response[trim_end - 1] == '\n'))
+            trim_end--;
+        size_t flen = trim_end - start;
+        if (flen < 2) {
+            start = end;
+            continue;
+        }
+        char *frag = (char *)alloc->alloc(alloc->ctx, flen + 1);
+        if (!frag) {
+            for (size_t k = 0; k < frag_count; k++)
+                alloc->free(alloc->ctx, fragments[k].text, fragments[k].text_len + 1);
+            return 0;
+        }
+        memcpy(frag, response + start, flen);
+        frag[flen] = '\0';
+        fragments[frag_count].text = frag;
+        fragments[frag_count].text_len = flen;
+        fragments[frag_count].delay_ms = frag_count == 0 ? 0 : (uint32_t)(500 + flen * 15);
+        if (fragments[frag_count].delay_ms > 3000)
+            fragments[frag_count].delay_ms = 3000;
+        frag_count++;
+        start = end;
+    }
+
+    /* Final fragment */
+    if (start < response_len) {
+        /* Trim leading whitespace */
+        while (start < response_len && response[start] == ' ')
+            start++;
+        size_t flen = response_len - start;
+        if (flen > 0) {
+            char *frag = (char *)alloc->alloc(alloc->ctx, flen + 1);
+            if (!frag) {
+                for (size_t k = 0; k < frag_count; k++)
+                    alloc->free(alloc->ctx, fragments[k].text, fragments[k].text_len + 1);
+                return 0;
+            }
+            memcpy(frag, response + start, flen);
+            frag[flen] = '\0';
+            fragments[frag_count].text = frag;
+            fragments[frag_count].text_len = flen;
+            fragments[frag_count].delay_ms = frag_count == 0 ? 0 : (uint32_t)(500 + flen * 15);
+            if (fragments[frag_count].delay_ms > 3000)
+                fragments[frag_count].delay_ms = 3000;
+            frag_count++;
+        }
+    }
+
+    return frag_count;
+}
+
+/* ── Texting style analysis ───────────────────────────────────────────── */
+
+char *sc_conversation_analyze_style(sc_allocator_t *alloc,
+                                    const sc_channel_history_entry_t *entries, size_t count,
+                                    size_t *out_len) {
+    if (!alloc || !entries || count == 0 || !out_len)
+        return NULL;
+    *out_len = 0;
+
+    /* Analyze their (non-self) messages */
+    size_t their_count = 0;
+    size_t total_chars = 0;
+    size_t msgs_with_caps_start = 0;
+    size_t msgs_no_period_end = 0;
+    size_t msgs_all_lower = 0;
+    size_t msgs_with_abbrev = 0;
+    size_t fragment_count = 0; /* messages under 25 chars (rapid-fire fragments) */
+
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].from_me)
+            continue;
+        const char *t = entries[i].text;
+        size_t tl = strlen(t);
+        if (tl < 2)
+            continue;
+        their_count++;
+        total_chars += tl;
+
+        if (tl < 25)
+            fragment_count++;
+
+        bool has_upper = false;
+        bool has_lower = false;
+        bool starts_cap = (t[0] >= 'A' && t[0] <= 'Z');
+        if (starts_cap)
+            msgs_with_caps_start++;
+
+        char last_alpha = 0;
+        for (size_t j = 0; j < tl; j++) {
+            if (t[j] >= 'A' && t[j] <= 'Z')
+                has_upper = true;
+            else if (t[j] >= 'a' && t[j] <= 'z')
+                has_lower = true;
+            if ((t[j] >= 'a' && t[j] <= 'z') || (t[j] >= 'A' && t[j] <= 'Z'))
+                last_alpha = t[j];
+        }
+
+        if (has_lower && !has_upper)
+            msgs_all_lower++;
+        if (last_alpha && last_alpha != '.' && t[tl - 1] != '.' && t[tl - 1] != '!' &&
+            t[tl - 1] != '?')
+            msgs_no_period_end++;
+
+        /* Abbreviation detection */
+        if (str_contains_ci(t, tl, "lol") || str_contains_ci(t, tl, "omg") ||
+            str_contains_ci(t, tl, "ngl") || str_contains_ci(t, tl, "tbh") ||
+            str_contains_ci(t, tl, "rn") || str_contains_ci(t, tl, "idk") ||
+            str_contains_ci(t, tl, "imo") || str_contains_ci(t, tl, "nvm") ||
+            str_contains_ci(t, tl, "btw") || str_contains_ci(t, tl, "wya") ||
+            str_contains_ci(t, tl, "hbu"))
+            msgs_with_abbrev++;
+    }
+
+    if (their_count < 3) {
+        return NULL;
+    }
+
+#define STYLE_BUF_CAP 2048
+    char *buf = (char *)alloc->alloc(alloc->ctx, STYLE_BUF_CAP);
+    if (!buf)
+        return NULL;
+    size_t pos = 0;
+    int w;
+
+    w = snprintf(buf + pos, STYLE_BUF_CAP - pos, "--- Their texting style (mirror this) ---\n");
+    POS_ADVANCE(w, pos, STYLE_BUF_CAP);
+
+    /* Capitalization pattern */
+    if (msgs_all_lower > their_count * 2 / 3) {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "CAPS: They almost never capitalize. Write in all lowercase. "
+                     "No capital letters at start of sentences.\n");
+    } else if (msgs_with_caps_start < their_count / 3) {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "CAPS: They rarely capitalize sentence starts. "
+                     "Skip capital letters most of the time.\n");
+    } else {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "CAPS: They use normal capitalization. Match that.\n");
+    }
+    POS_ADVANCE(w, pos, STYLE_BUF_CAP);
+
+    /* Punctuation pattern */
+    if (msgs_no_period_end > their_count * 2 / 3) {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "PUNCTUATION: They almost never end with periods. "
+                     "Drop periods at end of messages. Questions marks are ok.\n");
+    } else {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "PUNCTUATION: They use normal punctuation. Match that.\n");
+    }
+    POS_ADVANCE(w, pos, STYLE_BUF_CAP);
+
+    /* Fragmentation pattern */
+    if (fragment_count > their_count / 2) {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "STYLE: They send short rapid-fire messages. Keep yours very short too. "
+                     "One thought per message.\n");
+    } else {
+        w = 0;
+    }
+    POS_ADVANCE(w, pos, STYLE_BUF_CAP);
+
+    /* Abbreviation pattern */
+    if (msgs_with_abbrev > their_count / 3) {
+        w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                     "SLANG: They use texting abbreviations (lol, omg, ngl, tbh, idk). "
+                     "Use these naturally.\n");
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+    }
+
+    /* Average message length */
+    if (their_count > 0) {
+        size_t avg = total_chars / their_count;
+        if (avg < 25) {
+            w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                         "LENGTH: Their average message is ~%zu chars. "
+                         "Keep yours under 30 chars per message.\n",
+                         avg);
+        } else if (avg < 60) {
+            w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                         "LENGTH: Their average message is ~%zu chars. "
+                         "Keep yours around that length.\n",
+                         avg);
+        } else {
+            w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
+                         "LENGTH: Their average message is ~%zu chars. "
+                         "You can write a bit more but stay concise.\n",
+                         avg);
+        }
+        POS_ADVANCE(w, pos, CTX_BUF_CAP);
+    }
+
+    /* Anti-AI warnings */
+    w = snprintf(
+        buf + pos, STYLE_BUF_CAP - pos,
+        "\n--- Anti-patterns (NEVER do these in texts) ---\n"
+        "- Never use semicolons or em-dashes in texts\n"
+        "- Never use \"certainly\", \"absolutely\", \"I'd be happy to\", "
+        "\"let me know if\", \"feel free\"\n"
+        "- Never start with their name (siblings don't address each other by name)\n"
+        "- Never use perfect grammar if they don't\n"
+        "- Never write more than 2x their average message length\n"
+        "- Never use numbered lists or bullet points\n"
+        "- Never use \"!\" on every message — save it for when you mean it\n"
+        "- Never give unsolicited advice unless they explicitly ask\n"
+        "- It's ok to be blunt, sarcastic, or tease — that's how siblings talk\n"
+        "- It's ok to just say \"lol\" or \"yeah\" — not everything needs a real response\n");
+    POS_ADVANCE(w, pos, STYLE_BUF_CAP);
+
+    buf[pos] = '\0';
+    *out_len = pos;
+    return buf;
+}
+
+/* ── Enhanced response action classification ──────────────────────────── */
+
+sc_response_action_t sc_conversation_classify_response(const char *msg, size_t msg_len,
+                                                       const sc_channel_history_entry_t *entries,
+                                                       size_t entry_count,
+                                                       uint32_t *delay_extra_ms) {
+    if (!delay_extra_ms)
+        return SC_RESPONSE_FULL;
+    *delay_extra_ms = 0;
+
+    if (!msg || msg_len == 0)
+        return SC_RESPONSE_SKIP;
+
+    /* Normalize for comparison */
+    char norm[128];
+    size_t ni = 0;
+    for (size_t i = 0; i < msg_len && ni < sizeof(norm) - 1; i++) {
+        char c = msg[i];
+        if (c >= 'A' && c <= 'Z')
+            c += 32;
+        if (c != ' ' && c != '\n' && c != '\r')
+            norm[ni++] = c;
+    }
+    norm[ni] = '\0';
+
+    /* Hard skip: tapbacks, reactions */
+    static const char *skip_exact[] = {
+        "liked",      "loved",   "laughed", "emphasized", "disliked",
+        "questioned", "likedan", "lovedan", "laughedat",  NULL,
+    };
+    for (int i = 0; skip_exact[i]; i++) {
+        size_t sl = strlen(skip_exact[i]);
+        if (ni >= sl && memcmp(norm, skip_exact[i], sl) == 0)
+            return SC_RESPONSE_SKIP;
+    }
+
+    /* Hard skip: very short non-text */
+    if (msg_len <= 2)
+        return SC_RESPONSE_SKIP;
+
+    /* Brief response candidates: acknowledgments that might warrant a quick "lol" back
+     * but don't need a full response */
+    static const char *brief_patterns[] = {
+        "lol", "haha", "hahaha", "lmao", "nice",  "cool",     "ya",   "yep", "yup",  "mhm",
+        "hmm", "true", "facts",  "same", "right", "for real", "mood", "bet", "word", NULL,
+    };
+    for (int i = 0; brief_patterns[i]; i++) {
+        if (strcmp(norm, brief_patterns[i]) == 0)
+            return SC_RESPONSE_BRIEF;
+    }
+
+    /* Single "ok"/"okay"/"k" — skip unless it's answering something we asked.
+     * Check the last 3 from_me messages (not just the most recent) since
+     * there may be intervening exchanges between the question and the "ok". */
+    if (strcmp(norm, "ok") == 0 || strcmp(norm, "okay") == 0 || strcmp(norm, "k") == 0) {
+        if (entries && entry_count > 0) {
+            size_t checked = 0;
+            for (size_t i = entry_count; i > 0 && checked < 3; i--) {
+                if (entries[i - 1].from_me) {
+                    checked++;
+                    const char *t = entries[i - 1].text;
+                    size_t tl = strlen(t);
+                    for (size_t j = 0; j < tl; j++) {
+                        if (t[j] == '?')
+                            return SC_RESPONSE_SKIP;
+                    }
+                }
+            }
+        }
+        return SC_RESPONSE_SKIP;
+    }
+
+    /* Emotional/heavy messages: full response but delayed (showing you're thinking) */
+    static const char *emotional[] = {
+        "miss",    "love",     "hurt",   "stress",    "depress",   "lonely",     "scared",
+        "worried", "sorry",    "afraid", "giving up", "feel like", "don't know", "can't",
+        "help me", "need you", "cry",    "sad",       NULL,
+    };
+    for (int i = 0; emotional[i]; i++) {
+        size_t elen = strlen(emotional[i]);
+        for (size_t j = 0; j + elen <= msg_len; j++) {
+            bool match = true;
+            for (size_t k = 0; k < elen; k++) {
+                char a = msg[j + k];
+                if (a >= 'A' && a <= 'Z')
+                    a += 32;
+                if (a != emotional[i][k]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                *delay_extra_ms = 8000;
+                return SC_RESPONSE_DELAY;
+            }
+        }
+    }
+
+    /* Statement without question: consider if the conversation is winding down.
+     * If their last 3 messages were getting shorter and this one has no question,
+     * they may not expect a response. Respond BRIEF. */
+    bool has_question = false;
+    for (size_t i = 0; i < msg_len; i++) {
+        if (msg[i] == '?') {
+            has_question = true;
+            break;
+        }
+    }
+
+    if (!has_question && entries && entry_count >= 3) {
+        size_t their_recent = 0;
+        size_t getting_shorter = 0;
+        size_t prev_len = 999;
+        for (size_t i = entry_count; i > 0 && their_recent < 3; i--) {
+            if (!entries[i - 1].from_me) {
+                size_t tl = strlen(entries[i - 1].text);
+                if (tl < prev_len && prev_len != 999)
+                    getting_shorter++;
+                prev_len = tl;
+                their_recent++;
+            }
+        }
+        if (getting_shorter >= 2 && msg_len < 30) {
+            return SC_RESPONSE_BRIEF;
+        }
+    }
+
+    /* Question: normal response, moderate thinking delay */
+    if (has_question) {
+        *delay_extra_ms = 2000;
+        return SC_RESPONSE_FULL;
+    }
+
+    return SC_RESPONSE_FULL;
 }

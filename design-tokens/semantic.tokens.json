@@ -34,6 +34,32 @@
     "bg-elevated": { "$value": "{color.neutral.200}", "$type": "color" },
     "bg-overlay": { "$value": "{color.neutral.250}", "$type": "color" },
 
+    "surface-container": {
+      "$value": "{color.tonal.dark-container}",
+      "$type": "color",
+      "$description": "M3 tonal surface — primary-tinted card/panel background"
+    },
+    "surface-container-high": {
+      "$value": "{color.tonal.dark-container-high}",
+      "$type": "color",
+      "$description": "M3 tonal surface — elevated interactive surfaces"
+    },
+    "surface-container-highest": {
+      "$value": "{color.tonal.dark-container-highest}",
+      "$type": "color",
+      "$description": "M3 tonal surface — highest emphasis, active states"
+    },
+    "surface-dim": {
+      "$value": "{color.tonal.dark-dim}",
+      "$type": "color",
+      "$description": "Recessed surface below bg — wells, inset panels"
+    },
+    "surface-bright": {
+      "$value": "{color.tonal.dark-bright}",
+      "$type": "color",
+      "$description": "Prominent surface above elevated — hero sections, featured cards"
+    },
+
     "text": { "$value": "{color.neutral.750}", "$type": "color" },
     "text-muted": { "$value": "{color.neutral.500}", "$type": "color" },
     "text-faint": { "$value": "{color.neutral.400}", "$type": "color" },
@@ -114,12 +140,24 @@
     "link-visited": { "$value": "{color.fidelity.600}", "$type": "color" },
 
     "hover-overlay": {
-      "$value": "rgba(255, 255, 255, 0.06)",
-      "$type": "color"
+      "$value": "rgba(122, 182, 72, 0.08)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — primary green tint on hover"
     },
     "pressed-overlay": {
-      "$value": "rgba(255, 255, 255, 0.10)",
-      "$type": "color"
+      "$value": "rgba(122, 182, 72, 0.12)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — primary green tint on press"
+    },
+    "focus-overlay": {
+      "$value": "rgba(122, 182, 72, 0.12)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — primary green tint on focus"
+    },
+    "dragged-overlay": {
+      "$value": "rgba(122, 182, 72, 0.16)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — primary green tint while dragging"
     },
     "disabled-overlay": {
       "$value": "rgba(255, 255, 255, 0.04)",
@@ -199,6 +237,32 @@
     "bg-warm": { "$value": "#FAFAFA", "$type": "color" },
     "bg-elevated": { "$value": "#F8F8F8", "$type": "color" },
     "bg-overlay": { "$value": "#ffffff", "$type": "color" },
+
+    "surface-container": {
+      "$value": "{color.tonal.light-container}",
+      "$type": "color",
+      "$description": "M3 tonal surface — green-tinted card/panel background"
+    },
+    "surface-container-high": {
+      "$value": "{color.tonal.light-container-high}",
+      "$type": "color",
+      "$description": "M3 tonal surface — elevated interactive surfaces"
+    },
+    "surface-container-highest": {
+      "$value": "{color.tonal.light-container-highest}",
+      "$type": "color",
+      "$description": "M3 tonal surface — highest emphasis surfaces"
+    },
+    "surface-dim": {
+      "$value": "{color.tonal.light-dim}",
+      "$type": "color",
+      "$description": "Recessed surface — light theme wells/inset panels"
+    },
+    "surface-bright": {
+      "$value": "{color.tonal.light-bright}",
+      "$type": "color",
+      "$description": "Prominent surface — brightest level for hero/featured"
+    },
 
     "text": { "$value": "#333333", "$type": "color" },
     "text-muted": { "$value": "#666666", "$type": "color" },
@@ -286,8 +350,26 @@
       "$type": "color"
     },
 
-    "hover-overlay": { "$value": "rgba(0, 0, 0, 0.04)", "$type": "color" },
-    "pressed-overlay": { "$value": "rgba(0, 0, 0, 0.08)", "$type": "color" },
+    "hover-overlay": {
+      "$value": "rgba(90, 154, 48, 0.06)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — fidelity green tint on hover"
+    },
+    "pressed-overlay": {
+      "$value": "rgba(90, 154, 48, 0.10)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — fidelity green tint on press"
+    },
+    "focus-overlay": {
+      "$value": "rgba(90, 154, 48, 0.10)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — fidelity green tint on focus"
+    },
+    "dragged-overlay": {
+      "$value": "rgba(90, 154, 48, 0.14)",
+      "$type": "color",
+      "$description": "M3 tinted state layer — fidelity green tint while dragging"
+    },
     "disabled-overlay": { "$value": "rgba(0, 0, 0, 0.04)", "$type": "color" },
     "backdrop-overlay": {
       "$value": "rgba(0, 0, 0, 0.3)",

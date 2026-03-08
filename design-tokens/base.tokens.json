@@ -7,14 +7,14 @@
   "color": {
     "$description": "Ocean-inspired primitive color palette",
     "neutral": {
-      "$description": "Tonal ocean scale — deep midnight blues to coastal whites",
+      "$description": "Tonal ocean scale — deep midnight blues to coastal whites. Dark surface steps widened for M3-level contrast between elevation levels.",
       "0": { "$value": "#000000", "$type": "color" },
       "50": { "$value": "#060b12", "$type": "color" },
-      "100": { "$value": "#0b1219", "$type": "color" },
-      "150": { "$value": "#101a24", "$type": "color" },
-      "200": { "$value": "#162230", "$type": "color" },
-      "250": { "$value": "#1c2a3a", "$type": "color" },
-      "300": { "$value": "#233345", "$type": "color" },
+      "100": { "$value": "#0d1520", "$type": "color" },
+      "150": { "$value": "#152333", "$type": "color" },
+      "200": { "$value": "#1e3044", "$type": "color" },
+      "250": { "$value": "#273d55", "$type": "color" },
+      "300": { "$value": "#2f4a64", "$type": "color" },
       "400": { "$value": "#3d5468", "$type": "color" },
       "500": { "$value": "#5e7a94", "$type": "color" },
       "600": { "$value": "#8aa0b8", "$type": "color" },
@@ -26,6 +26,59 @@
       "900": { "$value": "#f7f9fc", "$type": "color" },
       "925": { "$value": "#fafcfe", "$type": "color" },
       "1000": { "$value": "#ffffff", "$type": "color" }
+    },
+    "tonal": {
+      "$description": "M3-style tonal surface primitives — neutrals tinted with fidelity green for surface-container hierarchy",
+      "dark-container": {
+        "$value": "#172631",
+        "$type": "color",
+        "$description": "neutral.150 + 4% fidelity.500 — default card/panel surface"
+      },
+      "dark-container-high": {
+        "$value": "#223540",
+        "$type": "color",
+        "$description": "neutral.200 + 6% fidelity.500 — elevated interactive surfaces"
+      },
+      "dark-container-highest": {
+        "$value": "#2c4451",
+        "$type": "color",
+        "$description": "neutral.250 + 8% fidelity.500 — highest emphasis surfaces, active states"
+      },
+      "dark-dim": {
+        "$value": "#030710",
+        "$type": "color",
+        "$description": "Recessed surface — darker than bg for inset/well areas"
+      },
+      "dark-bright": {
+        "$value": "#34506a",
+        "$type": "color",
+        "$description": "Prominent surface — lighter than elevated for hero/featured areas"
+      },
+      "light-container": {
+        "$value": "#f7f8f5",
+        "$type": "color",
+        "$description": "white + 6% fidelity.100 — default card/panel surface"
+      },
+      "light-container-high": {
+        "$value": "#eeefec",
+        "$type": "color",
+        "$description": "gray + 8% fidelity.100 — elevated interactive surfaces"
+      },
+      "light-container-highest": {
+        "$value": "#e7e9e5",
+        "$type": "color",
+        "$description": "gray + 10% fidelity.100 — highest emphasis surfaces"
+      },
+      "light-dim": {
+        "$value": "#e8e8e8",
+        "$type": "color",
+        "$description": "Recessed surface — light theme inset/well areas"
+      },
+      "light-bright": {
+        "$value": "#ffffff",
+        "$type": "color",
+        "$description": "Prominent surface — brightest level for hero/featured areas"
+      }
     },
     "teal": {
       "$description": "Legacy ocean teal/aqua — retained for reference",

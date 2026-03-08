@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-08T00:23:55.097Z",
+  "generated": "2026-03-08T01:19:48.246Z",
   "groups": {
     "color.neutral": [
       {
@@ -14,28 +14,28 @@
       },
       {
         "name": "100",
-        "value": "#0b1219",
-        "hex": "#0b1219"
+        "value": "#0d1520",
+        "hex": "#0d1520"
       },
       {
         "name": "150",
-        "value": "#101a24",
-        "hex": "#101a24"
+        "value": "#152333",
+        "hex": "#152333"
       },
       {
         "name": "200",
-        "value": "#162230",
-        "hex": "#162230"
+        "value": "#1e3044",
+        "hex": "#1e3044"
       },
       {
         "name": "250",
-        "value": "#1c2a3a",
-        "hex": "#1c2a3a"
+        "value": "#273d55",
+        "hex": "#273d55"
       },
       {
         "name": "300",
-        "value": "#233345",
-        "hex": "#233345"
+        "value": "#2f4a64",
+        "hex": "#2f4a64"
       },
       {
         "name": "400",
@@ -89,6 +89,58 @@
       },
       {
         "name": "1000",
+        "value": "#ffffff",
+        "hex": "#ffffff"
+      }
+    ],
+    "color.tonal": [
+      {
+        "name": "dark-container",
+        "value": "#172631",
+        "hex": "#172631"
+      },
+      {
+        "name": "dark-container-high",
+        "value": "#223540",
+        "hex": "#223540"
+      },
+      {
+        "name": "dark-container-highest",
+        "value": "#2c4451",
+        "hex": "#2c4451"
+      },
+      {
+        "name": "dark-dim",
+        "value": "#030710",
+        "hex": "#030710"
+      },
+      {
+        "name": "dark-bright",
+        "value": "#34506a",
+        "hex": "#34506a"
+      },
+      {
+        "name": "light-container",
+        "value": "#f7f8f5",
+        "hex": "#f7f8f5"
+      },
+      {
+        "name": "light-container-high",
+        "value": "#eeefec",
+        "hex": "#eeefec"
+      },
+      {
+        "name": "light-container-highest",
+        "value": "#e7e9e5",
+        "hex": "#e7e9e5"
+      },
+      {
+        "name": "light-dim",
+        "value": "#e8e8e8",
+        "hex": "#e8e8e8"
+      },
+      {
+        "name": "light-bright",
         "value": "#ffffff",
         "hex": "#ffffff"
       }
@@ -1383,6 +1435,38 @@
       {
         "name": "cascade-max",
         "value": "200ms"
+      },
+      {
+        "name": "enter-duration",
+        "value": "350ms"
+      },
+      {
+        "name": "enter-easing",
+        "value": "cubic-bezier(0.2, 0, 0, 1)"
+      },
+      {
+        "name": "exit-duration",
+        "value": "200ms"
+      },
+      {
+        "name": "exit-easing",
+        "value": "cubic-bezier(0.55, 0, 1, 0.45)"
+      },
+      {
+        "name": "blur-from",
+        "value": "0px"
+      },
+      {
+        "name": "saturate-from",
+        "value": "100%"
+      },
+      {
+        "name": "state-duration",
+        "value": "200ms"
+      },
+      {
+        "name": "state-easing",
+        "value": "cubic-bezier(0.2, 0, 0, 1)"
       }
     ],
     "reduced-motion": [
@@ -1555,23 +1639,48 @@
       },
       {
         "name": "bg-inset",
-        "value": "#0b1219",
-        "hex": "#0b1219"
+        "value": "#0d1520",
+        "hex": "#0d1520"
       },
       {
         "name": "bg-surface",
-        "value": "#101a24",
-        "hex": "#101a24"
+        "value": "#152333",
+        "hex": "#152333"
       },
       {
         "name": "bg-elevated",
-        "value": "#162230",
-        "hex": "#162230"
+        "value": "#1e3044",
+        "hex": "#1e3044"
       },
       {
         "name": "bg-overlay",
-        "value": "#1c2a3a",
-        "hex": "#1c2a3a"
+        "value": "#273d55",
+        "hex": "#273d55"
+      },
+      {
+        "name": "surface-container",
+        "value": "#172631",
+        "hex": "#172631"
+      },
+      {
+        "name": "surface-container-high",
+        "value": "#223540",
+        "hex": "#223540"
+      },
+      {
+        "name": "surface-container-highest",
+        "value": "#2c4451",
+        "hex": "#2c4451"
+      },
+      {
+        "name": "surface-dim",
+        "value": "#030710",
+        "hex": "#030710"
+      },
+      {
+        "name": "surface-bright",
+        "value": "#34506a",
+        "hex": "#34506a"
       },
       {
         "name": "text",
@@ -1677,13 +1786,13 @@
       },
       {
         "name": "border",
-        "value": "#233345",
-        "hex": "#233345"
+        "value": "#2f4a64",
+        "hex": "#2f4a64"
       },
       {
         "name": "border-subtle",
-        "value": "#162230",
-        "hex": "#162230"
+        "value": "#1e3044",
+        "hex": "#1e3044"
       },
       {
         "name": "success",
@@ -1756,11 +1865,19 @@
       },
       {
         "name": "hover-overlay",
-        "value": "rgba(255, 255, 255, 0.06)"
+        "value": "rgba(122, 182, 72, 0.08)"
       },
       {
         "name": "pressed-overlay",
-        "value": "rgba(255, 255, 255, 0.10)"
+        "value": "rgba(122, 182, 72, 0.12)"
+      },
+      {
+        "name": "focus-overlay",
+        "value": "rgba(122, 182, 72, 0.12)"
+      },
+      {
+        "name": "dragged-overlay",
+        "value": "rgba(122, 182, 72, 0.16)"
       },
       {
         "name": "disabled-overlay",
@@ -1855,6 +1972,31 @@
       },
       {
         "name": "bg-overlay",
+        "value": "#ffffff",
+        "hex": "#ffffff"
+      },
+      {
+        "name": "surface-container",
+        "value": "#f7f8f5",
+        "hex": "#f7f8f5"
+      },
+      {
+        "name": "surface-container-high",
+        "value": "#eeefec",
+        "hex": "#eeefec"
+      },
+      {
+        "name": "surface-container-highest",
+        "value": "#e7e9e5",
+        "hex": "#e7e9e5"
+      },
+      {
+        "name": "surface-dim",
+        "value": "#e8e8e8",
+        "hex": "#e8e8e8"
+      },
+      {
+        "name": "surface-bright",
         "value": "#ffffff",
         "hex": "#ffffff"
       },
@@ -2046,11 +2188,19 @@
       },
       {
         "name": "hover-overlay",
-        "value": "rgba(0, 0, 0, 0.04)"
+        "value": "rgba(90, 154, 48, 0.06)"
       },
       {
         "name": "pressed-overlay",
-        "value": "rgba(0, 0, 0, 0.08)"
+        "value": "rgba(90, 154, 48, 0.10)"
+      },
+      {
+        "name": "focus-overlay",
+        "value": "rgba(90, 154, 48, 0.10)"
+      },
+      {
+        "name": "dragged-overlay",
+        "value": "rgba(90, 154, 48, 0.14)"
       },
       {
         "name": "disabled-overlay",
@@ -2130,18 +2280,18 @@
       },
       {
         "name": "bg-surface",
-        "value": "#0b1219",
-        "hex": "#0b1219"
+        "value": "#0d1520",
+        "hex": "#0d1520"
       },
       {
         "name": "bg-elevated",
-        "value": "#101a24",
-        "hex": "#101a24"
+        "value": "#152333",
+        "hex": "#152333"
       },
       {
         "name": "bg-overlay",
-        "value": "#162230",
-        "hex": "#162230"
+        "value": "#1e3044",
+        "hex": "#1e3044"
       },
       {
         "name": "text",
@@ -2899,6 +3049,62 @@
       {
         "name": "transition-duration",
         "value": "200ms"
+      }
+    ],
+    "material.ultra-thin": [
+      {
+        "name": "bg-opacity",
+        "value": "0.02"
+      },
+      {
+        "name": "blur",
+        "value": "8px"
+      },
+      {
+        "name": "saturate",
+        "value": "110%"
+      }
+    ],
+    "material.thin": [
+      {
+        "name": "bg-opacity",
+        "value": "0.04"
+      },
+      {
+        "name": "blur",
+        "value": "16px"
+      },
+      {
+        "name": "saturate",
+        "value": "140%"
+      }
+    ],
+    "material.regular": [
+      {
+        "name": "bg-opacity",
+        "value": "0.06"
+      },
+      {
+        "name": "blur",
+        "value": "24px"
+      },
+      {
+        "name": "saturate",
+        "value": "180%"
+      }
+    ],
+    "material.thick": [
+      {
+        "name": "bg-opacity",
+        "value": "0.1"
+      },
+      {
+        "name": "blur",
+        "value": "32px"
+      },
+      {
+        "name": "saturate",
+        "value": "200%"
       }
     ],
     "chart.categorical": [

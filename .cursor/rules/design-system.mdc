@@ -38,6 +38,35 @@ globs:
 - Token namespace: `--sc-` prefix for all custom properties.
 - **Lint enforcement**: Run `ui/scripts/lint-raw-values.sh` to check for drift. Wired into `npm run check`.
 
+## Surfaces (M3 Tonal)
+
+- **Tonal surfaces** use `--sc-surface-container`, `--sc-surface-container-high`, `--sc-surface-container-highest` for branded card/panel backgrounds
+- Use tonal surfaces instead of `--sc-bg-surface` when the surface should carry brand identity
+- Use `--sc-surface-dim` for recessed wells, `--sc-surface-bright` for hero/featured areas
+- Plain `--sc-bg-surface` / `--sc-bg-elevated` remain available for neutral (non-tinted) surfaces
+- **State layers** are primary-tinted: `--sc-hover-overlay`, `--sc-pressed-overlay`, `--sc-focus-overlay`, `--sc-dragged-overlay` all use fidelity green
+- `--sc-disabled-overlay` remains neutral (no brand color on disabled states)
+
+## Glass
+
+- Three tiers: `.sc-glass-subtle` (nav/chrome), `.sc-glass-standard` (cards/panels), `.sc-glass-prominent` (modals/sheets)
+- Interactive glass: add `.sc-glass-interactive` for hover glow + press scale
+- Tinted glass: add `.sc-glass-tinted` for accent-colored tint
+- Enter/exit: use `.sc-glass-enter` / `.sc-glass-exit` for choreographed blur reveal
+- Material densities: `--sc-glass-material-{ultra-thin,thin,regular,thick}-*` tokens (Apple visionOS-style)
+- **Never** stack glass on glass without testing legibility
+- All glass respects `prefers-reduced-transparency: reduce` fallback in `theme.css`
+- Token source: `design-tokens/glass.tokens.json`
+
+## Dynamic Color
+
+- OKLCH palette auto-generated from brand hex `#7AB648` via `design-tokens/dynamic-color-lib.ts`
+- Tokens: `--sc-dynamic-{primary,secondary,tertiary,neutral,error}-{50..950}`
+- P3 wide-gamut overrides included automatically
+- Generated CSS: `ui/src/styles/_dynamic-color.css` (imported by `theme.css`)
+- To regenerate: `cd design-tokens && npm run build`
+- To preview standalone: `npx tsx design-tokens/dynamic-color.ts --hex "#7AB648" --format css`
+
 ## Data Visualization
 
 - Multi-series charts use `--sc-chart-categorical-{1..8}` in order. Never ad-hoc colors.

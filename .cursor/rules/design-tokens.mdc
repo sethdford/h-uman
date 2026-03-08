@@ -15,3 +15,18 @@ Source of truth: `design-tokens/` directory. W3C Design Tokens v2025.10 format.
 - After editing any `.tokens.json`, run `cd design-tokens && npm run build`.
 - Generated outputs: CSS, Kotlin, Swift, C, Dart. Never hand-edit generated files.
 - Reference `docs/design-strategy.md` for design philosophy.
+
+## Token Categories
+
+| File | Key tokens added |
+| --- | --- |
+| `base.tokens.json` | `color.tonal.*` (M3 tonal surface primitives) |
+| `semantic.tokens.json` | `surface-container`, `surface-container-high`, `surface-container-highest`, `surface-dim`, `surface-bright`, `hover-overlay` (tinted), `pressed-overlay` (tinted), `focus-overlay`, `dragged-overlay` |
+| `glass.tokens.json` | `choreography.*` (enter/exit/state motion), `material.*` (Apple visionOS densities) |
+| `_dynamic-color.css` | Auto-generated `--sc-dynamic-*` from OKLCH pipeline |
+
+## Build Outputs
+
+- `_tokens.css` — all static design tokens (CSS custom properties)
+- `_dynamic-color.css` — OKLCH-generated palette (auto-built alongside tokens)
+- Both are imported by `ui/src/styles/theme.css`

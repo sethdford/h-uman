@@ -321,122 +321,6 @@ static void service_signal_handler(int sig) {
 
 /* ── Streaming callback for channels with send_event ─────────────────────── */
 
-/* ---- Response Decision Engine ---- */
-
-/*
- * Classify a message and decide whether/how to respond.
- * Returns:
- *   0 = RESPOND normally (generate full response)
- *   1 = SKIP (don't respond at all — message doesn't warrant a reply)
- *   2 = DELAY (respond, but with extra delay — thoughtful/emotional content)
- *
- * Also sets *delay_extra_ms to additional delay beyond the base reading delay.
- */
-#if !defined(SC_IS_TEST)
-static int classify_response_action(const char *msg, size_t msg_len, unsigned int *delay_extra_ms) {
-    *delay_extra_ms = 0;
-
-    if (msg_len == 0)
-        return 1; /* skip empty */
-
-    /* Messages that don't warrant a response */
-    static const char *skip_patterns[] = {"lol",   "haha",    "hahaha",     "lmao",     "ok",
-                                          "okay",  "k",       "nice",       "cool",     "ya",
-                                          "yep",   "yup",     "mhm",        "hmm",      "Liked",
-                                          "Loved", "Laughed", "Emphasized", "Disliked", NULL};
-
-    /* Normalize: strip whitespace and compare lowercase */
-    char norm[64];
-    size_t ni = 0;
-    for (size_t i = 0; i < msg_len && ni < sizeof(norm) - 1; i++) {
-        char c = msg[i];
-        if (c >= 'A' && c <= 'Z')
-            c += 32;
-        if (c != ' ' && c != '\n' && c != '\r')
-            norm[ni++] = c;
-    }
-    norm[ni] = '\0';
-
-    for (int i = 0; skip_patterns[i]; i++) {
-        if (strcmp(norm, skip_patterns[i]) == 0)
-            return 1; /* skip */
-    }
-
-    /* Single emoji or very short non-text messages */
-    if (msg_len <= 2)
-        return 1; /* skip */
-
-    /* URL-only messages: respond briefly, quick timing */
-    {
-        bool has_url = false;
-        for (size_t i = 0; i + 4 < msg_len; i++) {
-            if (memcmp(msg + i, "http", 4) == 0) {
-                has_url = true;
-                break;
-            }
-        }
-        if (has_url) {
-            /* Check if there's meaningful text beyond the URL */
-            size_t non_url_chars = 0;
-            bool in_url = false;
-            for (size_t i = 0; i < msg_len; i++) {
-                if (!in_url && i + 4 < msg_len && memcmp(msg + i, "http", 4) == 0)
-                    in_url = true;
-                if (in_url && (msg[i] == ' ' || msg[i] == '\n'))
-                    in_url = false;
-                if (!in_url && msg[i] != ' ' && msg[i] != '\n')
-                    non_url_chars++;
-            }
-            if (non_url_chars < 5) {
-                /* URL with minimal text — brief acknowledgment, short delay */
-                *delay_extra_ms = 3000;
-                return 0;
-            }
-        }
-    }
-
-    /* Emotional/important messages deserve a thoughtful delay */
-    static const char *emotional_markers[] = {
-        "miss",    "love",     "hurt",   "stress",    "depress",   "lonely",     "scared",
-        "worried", "sorry",    "afraid", "giving up", "feel like", "don't know", "can't",
-        "help me", "need you", "cry",    "sad",       NULL};
-
-    for (int i = 0; emotional_markers[i]; i++) {
-        const char *marker = emotional_markers[i];
-        size_t mlen = strlen(marker);
-        for (size_t j = 0; j + mlen <= msg_len; j++) {
-            bool match = true;
-            for (size_t k = 0; k < mlen; k++) {
-                char a = msg[j + k];
-                char b = marker[k];
-                if (a >= 'A' && a <= 'Z')
-                    a += 32;
-                if (a != b) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) {
-                *delay_extra_ms = 8000; /* 8 extra seconds for emotional */
-                return 2;               /* delayed response */
-            }
-        }
-    }
-
-    /* Question messages: normal response, moderate delay */
-    for (size_t i = 0; i < msg_len; i++) {
-        if (msg[i] == '?') {
-            *delay_extra_ms = 2000;
-            return 0;
-        }
-    }
-
-    /* Default: respond normally */
-    *delay_extra_ms = 0;
-    return 0;
-}
-#endif
-
 /* ── Service loop ──────────────────────────────────────────────────────── */
 
 sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
@@ -559,14 +443,28 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue;
 
 #ifndef SC_IS_TEST
-                /* Response decision: should we respond? How long to wait? */
-                unsigned int extra_delay_ms = 0;
-                int action = classify_response_action(combined, combined_len, &extra_delay_ms);
-                if (action == 1) {
-                    /* SKIP: message doesn't warrant a response (lol, ok, tapback, etc.) */
+                /* Response decision using conversation-aware classifier */
+                uint32_t extra_delay_ms = 0;
+
+                /* Preload channel history early so the classifier can use it */
+                sc_channel_history_entry_t *early_history = NULL;
+                size_t early_history_count = 0;
+                if (ch->channel->vtable->load_conversation_history) {
+                    ch->channel->vtable->load_conversation_history(
+                        ch->channel->ctx, alloc, batch_key, key_len, 10, &early_history,
+                        &early_history_count);
+                }
+
+                sc_response_action_t action = sc_conversation_classify_response(
+                    combined, combined_len, early_history, early_history_count, &extra_delay_ms);
+
+                if (early_history)
+                    alloc->free(alloc->ctx, early_history,
+                                early_history_count * sizeof(sc_channel_history_entry_t));
+
+                if (action == SC_RESPONSE_SKIP) {
                     fprintf(stderr, "[seaclaw] skipping message (no response needed): %.*s\n",
                             (int)(combined_len > 40 ? 40 : combined_len), combined);
-                    /* Still persist the message for history */
                     if (agent->session_store && agent->session_store->vtable &&
                         agent->session_store->vtable->save_message) {
                         for (size_t b = batch_start; b <= batch_end; b++) {
@@ -579,6 +477,10 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     continue;
                 }
+
+                /* For BRIEF actions, override max_response_chars to force ultra-short */
+                bool brief_mode = (action == SC_RESPONSE_BRIEF);
+
                 /* Adaptive timing based on message type */
                 {
                     size_t msg_count = batch_end - batch_start + 1;
@@ -590,6 +492,8 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                         read_ms = 15000;
                     usleep(read_ms * 1000);
                 }
+#else
+                bool brief_mode = false;
 #endif
 
                 sc_agent_clear_history(agent);
@@ -776,6 +680,38 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                                     total * sizeof(sc_channel_history_entry_t));
                 }
 
+                /* 2c. Style analysis: analyze their texting patterns for mirroring */
+                char *style_ctx = NULL;
+                size_t style_ctx_len = 0;
+                if (history_entries && history_count > 0) {
+                    style_ctx = sc_conversation_analyze_style(alloc, history_entries, history_count,
+                                                              &style_ctx_len);
+                }
+
+                /* Merge style context into conversation context */
+                if (style_ctx && convo_ctx) {
+                    size_t merged_len = convo_ctx_len + style_ctx_len + 2;
+                    char *merged = (char *)alloc->alloc(alloc->ctx, merged_len + 1);
+                    if (merged) {
+                        memcpy(merged, convo_ctx, convo_ctx_len);
+                        merged[convo_ctx_len] = '\n';
+                        memcpy(merged + convo_ctx_len + 1, style_ctx, style_ctx_len);
+                        merged[merged_len - 1] = '\n';
+                        merged[merged_len] = '\0';
+                        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                        convo_ctx = merged;
+                        convo_ctx_len = merged_len;
+                    }
+                    alloc->free(alloc->ctx, style_ctx, style_ctx_len + 1);
+                    style_ctx = NULL;
+                } else if (style_ctx && !convo_ctx) {
+                    convo_ctx = style_ctx;
+                    convo_ctx_len = style_ctx_len;
+                    style_ctx = NULL;
+                }
+                if (style_ctx)
+                    alloc->free(alloc->ctx, style_ctx, style_ctx_len + 1);
+
                 /* 4. Response constraints via channel vtable */
                 uint32_t max_chars = 0;
                 if (ch->channel->vtable->get_response_constraints) {
@@ -785,6 +721,10 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                         max_chars = constraints.max_chars;
                     }
                 }
+
+                /* Brief mode: force ultra-short response */
+                if (brief_mode && max_chars > 50)
+                    max_chars = 50;
 
                 /* Set agent per-turn context fields (prompt builder reads these) */
                 agent->contact_context = contact_ctx;
@@ -849,8 +789,32 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 
                 if (err == SC_OK && response && response_len > 0) {
+#ifndef SC_IS_TEST
+                    /* Split response into natural multi-message fragments */
+                    sc_message_fragment_t fragments[4];
+                    size_t frag_count =
+                        sc_conversation_split_response(alloc, response, response_len, fragments, 4);
+                    if (frag_count > 0) {
+                        for (size_t f = 0; f < frag_count; f++) {
+                            if (f > 0 && fragments[f].delay_ms > 0)
+                                usleep(fragments[f].delay_ms * 1000);
+                            ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len,
+                                                      fragments[f].text, fragments[f].text_len,
+                                                      NULL, 0);
+                        }
+                        for (size_t f = 0; f < frag_count; f++) {
+                            if (fragments[f].text)
+                                alloc->free(alloc->ctx, fragments[f].text,
+                                            fragments[f].text_len + 1);
+                        }
+                    } else {
+                        ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len, response,
+                                                  response_len, NULL, 0);
+                    }
+#else
                     ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len, response,
                                               response_len, NULL, 0);
+#endif
                 }
                 if (response) {
                     alloc->free(alloc->ctx, response, response_len + 1);

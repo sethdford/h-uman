@@ -51,6 +51,8 @@ Vtable-driven and modular. Extend by implementing vtable structs + factory regis
 - Security: deny-by-default, HTTPS-only for outbound, never log secrets.
 - KISS/YAGNI: no speculative abstractions or config flags without a caller.
 - One concern per change. Don't mix feature + refactor + infra.
+- Use `--sc-surface-container*` for branded tonal surfaces, `--sc-bg-surface` for neutral.
+- Use tinted state overlays (`--sc-hover-overlay`, etc.) — they are primary-colored, not neutral.
 
 ## Commit Format
 
@@ -86,18 +88,19 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 
 ## Key Paths
 
-| Path               | What                                           |
-| ------------------ | ---------------------------------------------- |
-| `src/`             | All C source (~621 files, ~112K lines)         |
-| `include/seaclaw/` | Public headers                                 |
-| `tests/`           | 102 test files, 3219+ tests                    |
-| `fuzz/`            | libFuzzer harnesses                            |
-| `ui/`              | LitElement web dashboard                       |
-| `website/`         | Astro marketing site                           |
-| `apps/`            | iOS, macOS, Android, Flutter native apps       |
-| `design-tokens/`   | W3C design tokens (source of truth for all UI) |
-| `docs/`            | Guides, plans, design docs                     |
-| `scripts/`         | Build, release, benchmark, check scripts       |
+| Path                           | What                                           |
+| ------------------------------ | ---------------------------------------------- |
+| `src/`                         | All C source (~621 files, ~112K lines)         |
+| `include/seaclaw/`             | Public headers                                 |
+| `tests/`                       | 102 test files, 3219+ tests                    |
+| `fuzz/`                        | libFuzzer harnesses                            |
+| `ui/`                          | LitElement web dashboard                       |
+| `website/`                     | Astro marketing site                           |
+| `apps/`                        | iOS, macOS, Android, Flutter native apps       |
+| `design-tokens/`               | W3C design tokens (source of truth for all UI) |
+| `docs/`                        | Guides, plans, design docs                     |
+| `docs/design-system-demo.html` | Interactive design system demo                 |
+| `scripts/`                     | Build, release, benchmark, check scripts       |
 
 ## Risk Tiers
 

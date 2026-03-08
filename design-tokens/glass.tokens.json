@@ -253,5 +253,75 @@
       "$type": "duration",
       "$description": "Glass state transition duration"
     }
+  },
+  "choreography": {
+    "$description": "Glass-specific motion — blur and saturation animate on enter/exit/state transitions instead of snapping. Grounded in Apple Liquid Glass reveal patterns.",
+    "enter-duration": {
+      "$value": "350ms",
+      "$type": "duration",
+      "$description": "Glass surface appear — blur builds up gradually"
+    },
+    "enter-easing": {
+      "$value": "cubic-bezier(0.2, 0, 0, 1)",
+      "$type": "cubicBezier",
+      "$description": "M3 emphasize — dramatic deceleration for glass reveal"
+    },
+    "exit-duration": {
+      "$value": "200ms",
+      "$type": "duration",
+      "$description": "Glass surface dismiss — faster than enter"
+    },
+    "exit-easing": {
+      "$value": "cubic-bezier(0.55, 0, 1, 0.45)",
+      "$type": "cubicBezier",
+      "$description": "Ease-in for glass dismissal"
+    },
+    "blur-from": {
+      "$value": "0px",
+      "$type": "dimension",
+      "$description": "Blur starts at zero and builds to tier value on enter"
+    },
+    "saturate-from": {
+      "$value": "100%",
+      "$type": "string",
+      "$description": "Saturation starts at normal and builds to tier value on enter"
+    },
+    "state-duration": {
+      "$value": "200ms",
+      "$type": "duration",
+      "$description": "Blur/saturation transition between interactive states (hover, press)"
+    },
+    "state-easing": {
+      "$value": "cubic-bezier(0.2, 0, 0, 1)",
+      "$type": "cubicBezier",
+      "$description": "M3 emphasize for state transitions"
+    }
+  },
+  "material": {
+    "$description": "Apple-style material tiers — named after visionOS material densities",
+    "ultra-thin": {
+      "bg-opacity": { "$value": 0.02, "$type": "number" },
+      "blur": { "$value": "8px", "$type": "dimension" },
+      "saturate": { "$value": "110%", "$type": "string" },
+      "$description": "Ultra-thin material — barely perceptible, background chrome"
+    },
+    "thin": {
+      "bg-opacity": { "$value": 0.04, "$type": "number" },
+      "blur": { "$value": "16px", "$type": "dimension" },
+      "saturate": { "$value": "140%", "$type": "string" },
+      "$description": "Thin material — nav bars, toolbars"
+    },
+    "regular": {
+      "bg-opacity": { "$value": 0.06, "$type": "number" },
+      "blur": { "$value": "24px", "$type": "dimension" },
+      "saturate": { "$value": "180%", "$type": "string" },
+      "$description": "Regular material — cards, panels, sidebars"
+    },
+    "thick": {
+      "bg-opacity": { "$value": 0.1, "$type": "number" },
+      "blur": { "$value": "32px", "$type": "dimension" },
+      "saturate": { "$value": "200%", "$type": "string" },
+      "$description": "Thick material — modals, sheets, prominent overlays"
+    }
   }
 }

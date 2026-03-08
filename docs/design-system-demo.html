@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SeaClaw Design System — M3 + Apple Glass Upgrade</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,300&display=swap");
+
+      :root {
+        /* Old neutral steps (before) */
+        --old-50: #060b12;
+        --old-100: #0b1219;
+        --old-150: #101a24;
+        --old-200: #162230;
+        --old-250: #1c2a3a;
+        --old-300: #233345;
+
+        /* New neutral steps (after) */
+        --new-50: #060b12;
+        --new-100: #0d1520;
+        --new-150: #152333;
+        --new-200: #1e3044;
+        --new-250: #273d55;
+        --new-300: #2f4a64;
+
+        /* Tonal surfaces */
+        --tonal-container: #172631;
+        --tonal-container-high: #223540;
+        --tonal-container-highest: #2c4451;
+        --tonal-dim: #030710;
+        --tonal-bright: #34506a;
+
+        /* Accent */
+        --fidelity: #7ab648;
+        --fidelity-dim: rgba(122, 182, 72, 0.14);
+        --amber: #f59e0b;
+        --indigo: #6366f1;
+
+        /* Old overlays */
+        --old-hover: rgba(255, 255, 255, 0.06);
+        --old-pressed: rgba(255, 255, 255, 0.1);
+
+        /* New tinted overlays */
+        --new-hover: rgba(122, 182, 72, 0.08);
+        --new-pressed: rgba(122, 182, 72, 0.12);
+        --new-focus: rgba(122, 182, 72, 0.12);
+        --new-dragged: rgba(122, 182, 72, 0.16);
+
+        /* Dynamic palette */
+        --dp-50: #000100;
+        --dp-100: #000700;
+        --dp-200: #001f00;
+        --dp-300: #063a00;
+        --dp-400: #225600;
+        --dp-500: #3c7400;
+        --dp-600: #5b9226;
+        --dp-700: #7ab14e;
+        --dp-800: #9ad172;
+        --dp-900: #bcf196;
+        --dp-950: #cdffa8;
+
+        --ds-50: #000102;
+        --ds-100: #000809;
+        --ds-200: #002020;
+        --ds-300: #003a3a;
+        --ds-400: #005655;
+        --ds-500: #007372;
+        --ds-600: #2d918f;
+        --ds-700: #56afad;
+        --ds-800: #7bcfcc;
+        --ds-900: #9fefec;
+        --ds-950: #b1fffd;
+
+        --dt-50: #020006;
+        --dt-100: #090012;
+        --dt-200: #210a2b;
+        --dt-300: #3a2247;
+        --dt-400: #563b64;
+        --dt-500: #735683;
+        --dt-600: #9073a0;
+        --dt-700: #ae92be;
+        --dt-800: #cdb1de;
+        --dt-900: #edd2fd;
+        --dt-950: #fee3ff;
+
+        --dn-50: #000000;
+        --dn-100: #030402;
+        --dn-200: #151714;
+        --dn-300: #2c2f2b;
+        --dn-400: #464944;
+        --dn-500: #616460;
+        --dn-600: #7e817d;
+        --dn-700: #9d9f9b;
+        --dn-800: #bcbfba;
+        --dn-900: #dcdfdb;
+        --dn-950: #edefeb;
+
+        --de-50: #150000;
+        --de-200: #4b0000;
+        --de-400: #940000;
+        --de-600: #db4041;
+        --de-800: #ff8b83;
+        --de-950: #ffc0b6;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "DM Sans", system-ui, sans-serif;
+        background: #030710;
+        color: #c0d0e0;
+        overflow-x: hidden;
+        line-height: 1.5;
+      }
+
+      .hero {
+        position: relative;
+        padding: 60px 40px 40px;
+        text-align: center;
+        overflow: hidden;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(
+            ellipse at 50% 0%,
+            rgba(122, 182, 72, 0.12) 0%,
+            transparent 60%
+          ),
+          radial-gradient(
+            ellipse at 20% 80%,
+            rgba(99, 102, 241, 0.06) 0%,
+            transparent 40%
+          ),
+          radial-gradient(
+            ellipse at 80% 60%,
+            rgba(245, 158, 11, 0.04) 0%,
+            transparent 40%
+          );
+        pointer-events: none;
+      }
+
+      .hero h1 {
+        font-size: 2.4rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        color: #e6edf4;
+        margin-bottom: 8px;
+        position: relative;
+      }
+
+      .hero h1 span {
+        color: var(--fidelity);
+      }
+
+      .hero p {
+        font-size: 1rem;
+        color: #5e7a94;
+        max-width: 520px;
+        margin: 0 auto;
+        position: relative;
+      }
+
+      .sections {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 24px 60px;
+        display: flex;
+        flex-direction: column;
+        gap: 48px;
+      }
+
+      section {
+        background: var(--new-150);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 16px;
+        padding: 32px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      section::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(122, 182, 72, 0.3),
+          transparent
+        );
+      }
+
+      .section-badge {
+        display: inline-block;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--fidelity);
+        background: var(--fidelity-dim);
+        padding: 4px 12px;
+        border-radius: 100px;
+        margin-bottom: 12px;
+      }
+
+      section h2 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #e6edf4;
+        margin-bottom: 6px;
+      }
+
+      section > p {
+        color: #5e7a94;
+        font-size: 0.9rem;
+        margin-bottom: 24px;
+        max-width: 600px;
+      }
+
+      /* ── 1. Elevation Contrast ── */
+      .elevation-compare {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .elevation-compare > div > h3 {
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #5e7a94;
+        margin-bottom: 12px;
+      }
+
+      .swatch-row {
+        display: flex;
+        gap: 2px;
+        border-radius: 12px;
+        overflow: hidden;
+        height: 80px;
+      }
+
+      .swatch-row > div {
+        flex: 1;
+        display: flex;
+        align-items: flex-end;
+        padding: 8px;
+        position: relative;
+      }
+
+      .swatch-row > div span {
+        font-size: 0.6rem;
+        font-family: "DM Sans", monospace;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      /* ── 2. Tonal Surfaces ── */
+      .tonal-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+      }
+
+      .tonal-card {
+        border-radius: 12px;
+        padding: 20px 16px;
+        text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        transition:
+          transform 0.2s cubic-bezier(0.2, 0, 0, 1),
+          box-shadow 0.2s ease;
+      }
+
+      .tonal-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+
+      .tonal-card .label {
+        font-size: 0.65rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #5e7a94;
+        margin-bottom: 8px;
+      }
+
+      .tonal-card .hex {
+        font-size: 0.75rem;
+        font-family: "DM Sans", monospace;
+        color: rgba(255, 255, 255, 0.6);
+      }
+
+      /* ── 3. Tinted State Layers ── */
+      .state-demo {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+
+      .state-demo > div > h3 {
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #5e7a94;
+        margin-bottom: 12px;
+      }
+
+      .state-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .state-btn {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        border-radius: 10px;
+        font-size: 0.85rem;
+        font-family: "DM Sans", sans-serif;
+        color: #c0d0e0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .state-btn::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+
+      .state-btn.neutral {
+        background: var(--new-200);
+      }
+      .state-btn.neutral:hover::before {
+        background: var(--old-hover);
+        opacity: 1;
+      }
+      .state-btn.neutral:active::before {
+        background: var(--old-pressed);
+        opacity: 1;
+      }
+
+      .state-btn.tinted {
+        background: var(--new-200);
+      }
+      .state-btn.tinted:hover::before {
+        background: var(--new-hover);
+        opacity: 1;
+      }
+      .state-btn.tinted:active::before {
+        background: var(--new-pressed);
+        opacity: 1;
+      }
+
+      .state-btn .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      /* ── 4. Glass Choreography ── */
+      .glass-demo {
+        display: flex;
+        gap: 20px;
+        min-height: 200px;
+        position: relative;
+        background:
+          radial-gradient(
+            circle at 30% 50%,
+            rgba(122, 182, 72, 0.15),
+            transparent 50%
+          ),
+          radial-gradient(
+            circle at 70% 40%,
+            rgba(99, 102, 241, 0.12),
+            transparent 50%
+          ),
+          radial-gradient(
+            circle at 50% 80%,
+            rgba(245, 158, 11, 0.08),
+            transparent 40%
+          ),
+          var(--new-50);
+        border-radius: 12px;
+        padding: 24px;
+        overflow: hidden;
+      }
+
+      .glass-panel {
+        flex: 1;
+        border-radius: 12px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        position: relative;
+        transition:
+          backdrop-filter 0.35s cubic-bezier(0.2, 0, 0, 1),
+          -webkit-backdrop-filter 0.35s cubic-bezier(0.2, 0, 0, 1),
+          transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+          box-shadow 0.2s ease;
+        cursor: pointer;
+      }
+
+      .glass-panel::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: radial-gradient(
+          circle at var(--lx, 50%) var(--ly, 30%),
+          rgba(255, 255, 255, 0.06),
+          transparent 60%
+        );
+        pointer-events: none;
+        mix-blend-mode: overlay;
+      }
+
+      .glass-panel:hover {
+        transform: translateY(-2px);
+        box-shadow:
+          0 8px 24px rgba(0, 0, 0, 0.3),
+          0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .glass-subtle {
+        background: rgba(21, 35, 51, 0.3);
+        backdrop-filter: blur(12px) saturate(120%);
+        -webkit-backdrop-filter: blur(12px) saturate(120%);
+      }
+
+      .glass-standard {
+        background: rgba(30, 48, 68, 0.35);
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      }
+
+      .glass-prominent {
+        background: rgba(39, 61, 85, 0.4);
+        backdrop-filter: blur(32px) saturate(200%);
+        -webkit-backdrop-filter: blur(32px) saturate(200%);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.1),
+          inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+      }
+
+      .glass-panel .tier-label {
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--fidelity);
+      }
+
+      .glass-panel .tier-desc {
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.7);
+      }
+
+      .glass-panel .tier-specs {
+        font-size: 0.65rem;
+        font-family: "DM Sans", monospace;
+        color: rgba(255, 255, 255, 0.35);
+        margin-top: auto;
+      }
+
+      .glass-enter-demo {
+        margin-top: 16px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .glass-enter-btn {
+        padding: 10px 20px;
+        border-radius: 8px;
+        background: var(--fidelity);
+        color: #fff;
+        font-size: 0.8rem;
+        font-weight: 600;
+        font-family: "DM Sans", sans-serif;
+        border: none;
+        cursor: pointer;
+        transition:
+          transform 0.15s ease,
+          opacity 0.15s;
+      }
+
+      .glass-enter-btn:hover {
+        opacity: 0.9;
+      }
+      .glass-enter-btn:active {
+        transform: scale(0.97);
+      }
+
+      .glass-enter-hint {
+        font-size: 0.75rem;
+        color: #5e7a94;
+      }
+
+      /* Glass reveal animation */
+      @keyframes glass-reveal {
+        from {
+          backdrop-filter: blur(0px) saturate(100%);
+          -webkit-backdrop-filter: blur(0px) saturate(100%);
+          opacity: 0;
+          transform: scale(0.97);
+        }
+        to {
+          backdrop-filter: blur(var(--target-blur)) saturate(var(--target-sat));
+          -webkit-backdrop-filter: blur(var(--target-blur))
+            saturate(var(--target-sat));
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .glass-panel.animating {
+        animation: glass-reveal 0.35s cubic-bezier(0.2, 0, 0, 1) both;
+      }
+
+      /* ── 5. Dynamic Color ── */
+      .palette-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .palette-row {
+        display: flex;
+        gap: 2px;
+        border-radius: 8px;
+        overflow: hidden;
+        height: 48px;
+      }
+
+      .palette-row > div {
+        flex: 1;
+        display: flex;
+        align-items: flex-end;
+        padding: 4px 6px;
+        transition: transform 0.15s ease;
+      }
+
+      .palette-row > div:hover {
+        transform: scaleY(1.3);
+        z-index: 1;
+        border-radius: 4px;
+      }
+
+      .palette-row > div span {
+        font-size: 0.5rem;
+        font-family: "DM Sans", monospace;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+
+      .palette-row > div:hover span {
+        opacity: 0.8;
+      }
+
+      .palette-label {
+        font-size: 0.7rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #5e7a94;
+        width: 70px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+      }
+
+      .palette-row-wrap {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+      }
+
+      .palette-row-wrap .palette-row {
+        flex: 1;
+      }
+
+      /* ── Theme toggle ── */
+      .theme-toggle {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 100;
+        padding: 8px 16px;
+        border-radius: 100px;
+        background: rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #c0d0e0;
+        font-size: 0.75rem;
+        font-family: "DM Sans", sans-serif;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .theme-toggle:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      /* Light theme (minimal overrides for demo) */
+      [data-theme="light"] body {
+        background: #f5f5f5;
+        color: #333;
+      }
+
+      [data-theme="light"] .hero h1 {
+        color: #333;
+      }
+      [data-theme="light"] .hero p {
+        color: #666;
+      }
+      [data-theme="light"] section {
+        background: #fff;
+        border-color: #e0e0e0;
+      }
+      [data-theme="light"] section h2 {
+        color: #333;
+      }
+      [data-theme="light"] section > p {
+        color: #666;
+      }
+      [data-theme="light"] .section-badge {
+        color: #47802a;
+        background: rgba(90, 154, 48, 0.1);
+      }
+      [data-theme="light"] .tonal-card .label {
+        color: #666;
+      }
+      [data-theme="light"] .tonal-card .hex {
+        color: rgba(0, 0, 0, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <button class="theme-toggle" onclick="toggleTheme()">
+      Toggle Light/Dark
+    </button>
+
+    <div class="hero">
+      <h1>SeaClaw <span>Design System</span></h1>
+      <p>
+        M3 tonal surfaces, widened elevation contrast, dynamic color, glass
+        choreography, and tinted state layers.
+      </p>
+    </div>
+
+    <div class="sections">
+      <!-- 1. Widened Elevation Contrast -->
+      <section>
+        <div class="section-badge">Improvement 1</div>
+        <h2>Widened Elevation Contrast</h2>
+        <p>
+          Dark-mode surface levels pushed further apart. Each step is now
+          clearly distinguishable on real screens.
+        </p>
+        <div class="elevation-compare">
+          <div>
+            <h3>Before (narrow steps)</h3>
+            <div class="swatch-row">
+              <div style="background: var(--old-50)"><span>50</span></div>
+              <div style="background: var(--old-100)"><span>100</span></div>
+              <div style="background: var(--old-150)"><span>150</span></div>
+              <div style="background: var(--old-200)"><span>200</span></div>
+              <div style="background: var(--old-250)"><span>250</span></div>
+              <div style="background: var(--old-300)"><span>300</span></div>
+            </div>
+          </div>
+          <div>
+            <h3>After (widened steps)</h3>
+            <div class="swatch-row">
+              <div style="background: var(--new-50)"><span>50</span></div>
+              <div style="background: var(--new-100)"><span>100</span></div>
+              <div style="background: var(--new-150)"><span>150</span></div>
+              <div style="background: var(--new-200)"><span>200</span></div>
+              <div style="background: var(--new-250)"><span>250</span></div>
+              <div style="background: var(--new-300)"><span>300</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. M3 Tonal Surfaces -->
+      <section>
+        <div class="section-badge">Improvement 2</div>
+        <h2>M3 Tonal Surface Hierarchy</h2>
+        <p>
+          Surfaces tinted with 4-8% fidelity green. No more pure gray — surfaces
+          now have a warm, branded identity.
+        </p>
+        <div class="tonal-grid">
+          <div class="tonal-card" style="background: var(--tonal-dim)">
+            <div class="label">Dim</div>
+            <div class="hex">#030710</div>
+          </div>
+          <div class="tonal-card" style="background: var(--tonal-container)">
+            <div class="label">Container</div>
+            <div class="hex">#172631</div>
+          </div>
+          <div
+            class="tonal-card"
+            style="background: var(--tonal-container-high)"
+          >
+            <div class="label">Container High</div>
+            <div class="hex">#223540</div>
+          </div>
+          <div
+            class="tonal-card"
+            style="background: var(--tonal-container-highest)"
+          >
+            <div class="label">Container Highest</div>
+            <div class="hex">#2c4451</div>
+          </div>
+          <div class="tonal-card" style="background: var(--tonal-bright)">
+            <div class="label">Bright</div>
+            <div class="hex">#34506a</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Tinted State Layers -->
+      <section>
+        <div class="section-badge">Improvement 3</div>
+        <h2>Tinted State Layers</h2>
+        <p>
+          Hover and press overlays tinted with the primary accent. Interactions
+          feel connected to the brand.
+        </p>
+        <div class="state-demo">
+          <div>
+            <h3>Before (neutral white overlay)</h3>
+            <div class="state-buttons">
+              <div class="state-btn neutral">
+                <div
+                  class="dot"
+                  style="background: rgba(255, 255, 255, 0.3)"
+                ></div>
+                Hover me — white overlay
+              </div>
+              <div class="state-btn neutral">
+                <div
+                  class="dot"
+                  style="background: rgba(255, 255, 255, 0.3)"
+                ></div>
+                Press me — white overlay
+              </div>
+              <div class="state-btn neutral">
+                <div
+                  class="dot"
+                  style="background: rgba(255, 255, 255, 0.3)"
+                ></div>
+                Another neutral item
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3>After (fidelity green tint)</h3>
+            <div class="state-buttons">
+              <div class="state-btn tinted">
+                <div class="dot" style="background: var(--fidelity)"></div>
+                Hover me — green tint
+              </div>
+              <div class="state-btn tinted">
+                <div class="dot" style="background: var(--fidelity)"></div>
+                Press me — green tint
+              </div>
+              <div class="state-btn tinted">
+                <div class="dot" style="background: var(--fidelity)"></div>
+                Another tinted item
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Glass Choreography -->
+      <section>
+        <div class="section-badge">Improvement 4</div>
+        <h2>Glass Choreography</h2>
+        <p>
+          Blur and saturation animate on enter/exit. Glass reveals build
+          gradually instead of snapping.
+        </p>
+        <div class="glass-demo" id="glassDemo">
+          <div
+            class="glass-panel glass-subtle"
+            style="--target-blur: 12px; --target-sat: 120%"
+          >
+            <span class="tier-label">Subtle</span>
+            <span class="tier-desc">Nav, ambient panels</span>
+            <span class="tier-specs">blur: 12px · saturate: 120%</span>
+          </div>
+          <div
+            class="glass-panel glass-standard"
+            style="--target-blur: 24px; --target-sat: 180%"
+          >
+            <span class="tier-label">Standard</span>
+            <span class="tier-desc">Cards, panels, sidebars</span>
+            <span class="tier-specs">blur: 24px · saturate: 180%</span>
+          </div>
+          <div
+            class="glass-panel glass-prominent"
+            style="--target-blur: 32px; --target-sat: 200%"
+          >
+            <span class="tier-label">Prominent</span>
+            <span class="tier-desc">Modals, sheets, overlays</span>
+            <span class="tier-specs">blur: 32px · saturate: 200%</span>
+          </div>
+        </div>
+        <div class="glass-enter-demo">
+          <button class="glass-enter-btn" onclick="replayGlass()">
+            Replay Glass Reveal
+          </button>
+          <span class="glass-enter-hint"
+            >Watch the blur build from 0 to tier value</span
+          >
+        </div>
+      </section>
+
+      <!-- 5. Dynamic Color Palette -->
+      <section>
+        <div class="section-badge">Improvement 5</div>
+        <h2>Dynamic Color from Source</h2>
+        <p>
+          OKLCH palette generated from the brand hex #7AB648. Five harmonious
+          scales with P3 wide-gamut overrides.
+        </p>
+        <div class="palette-grid">
+          <div class="palette-row-wrap">
+            <div class="palette-label">Primary</div>
+            <div class="palette-row">
+              <div style="background: var(--dp-50)"><span>50</span></div>
+              <div style="background: var(--dp-100)"><span>100</span></div>
+              <div style="background: var(--dp-200)"><span>200</span></div>
+              <div style="background: var(--dp-300)"><span>300</span></div>
+              <div style="background: var(--dp-400)"><span>400</span></div>
+              <div style="background: var(--dp-500)"><span>500</span></div>
+              <div style="background: var(--dp-600)"><span>600</span></div>
+              <div style="background: var(--dp-700)"><span>700</span></div>
+              <div style="background: var(--dp-800)"><span>800</span></div>
+              <div style="background: var(--dp-900)"><span>900</span></div>
+              <div style="background: var(--dp-950)"><span>950</span></div>
+            </div>
+          </div>
+          <div class="palette-row-wrap">
+            <div class="palette-label">Secondary</div>
+            <div class="palette-row">
+              <div style="background: var(--ds-50)"><span>50</span></div>
+              <div style="background: var(--ds-100)"><span>100</span></div>
+              <div style="background: var(--ds-200)"><span>200</span></div>
+              <div style="background: var(--ds-300)"><span>300</span></div>
+              <div style="background: var(--ds-400)"><span>400</span></div>
+              <div style="background: var(--ds-500)"><span>500</span></div>
+              <div style="background: var(--ds-600)"><span>600</span></div>
+              <div style="background: var(--ds-700)"><span>700</span></div>
+              <div style="background: var(--ds-800)"><span>800</span></div>
+              <div style="background: var(--ds-900)"><span>900</span></div>
+              <div style="background: var(--ds-950)"><span>950</span></div>
+            </div>
+          </div>
+          <div class="palette-row-wrap">
+            <div class="palette-label">Tertiary</div>
+            <div class="palette-row">
+              <div style="background: var(--dt-50)"><span>50</span></div>
+              <div style="background: var(--dt-100)"><span>100</span></div>
+              <div style="background: var(--dt-200)"><span>200</span></div>
+              <div style="background: var(--dt-300)"><span>300</span></div>
+              <div style="background: var(--dt-400)"><span>400</span></div>
+              <div style="background: var(--dt-500)"><span>500</span></div>
+              <div style="background: var(--dt-600)"><span>600</span></div>
+              <div style="background: var(--dt-700)"><span>700</span></div>
+              <div style="background: var(--dt-800)"><span>800</span></div>
+              <div style="background: var(--dt-900)"><span>900</span></div>
+              <div style="background: var(--dt-950)"><span>950</span></div>
+            </div>
+          </div>
+          <div class="palette-row-wrap">
+            <div class="palette-label">Neutral</div>
+            <div class="palette-row">
+              <div style="background: var(--dn-50)"><span>50</span></div>
+              <div style="background: var(--dn-100)"><span>100</span></div>
+              <div style="background: var(--dn-200)"><span>200</span></div>
+              <div style="background: var(--dn-300)"><span>300</span></div>
+              <div style="background: var(--dn-400)"><span>400</span></div>
+              <div style="background: var(--dn-500)"><span>500</span></div>
+              <div style="background: var(--dn-600)"><span>600</span></div>
+              <div style="background: var(--dn-700)"><span>700</span></div>
+              <div style="background: var(--dn-800)"><span>800</span></div>
+              <div style="background: var(--dn-900)"><span>900</span></div>
+              <div style="background: var(--dn-950)"><span>950</span></div>
+            </div>
+          </div>
+          <div class="palette-row-wrap">
+            <div class="palette-label">Error</div>
+            <div class="palette-row">
+              <div style="background: var(--de-50)"><span>50</span></div>
+              <div style="background: var(--de-50)"><span></span></div>
+              <div style="background: var(--de-200)"><span>200</span></div>
+              <div style="background: var(--de-200)"><span></span></div>
+              <div style="background: var(--de-400)"><span>400</span></div>
+              <div style="background: var(--de-400)"><span></span></div>
+              <div style="background: var(--de-600)"><span>600</span></div>
+              <div style="background: var(--de-600)"><span></span></div>
+              <div style="background: var(--de-800)"><span>800</span></div>
+              <div style="background: var(--de-950)"><span>950</span></div>
+              <div style="background: var(--de-950)"><span></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      function toggleTheme() {
+        const html = document.documentElement;
+        html.dataset.theme = html.dataset.theme === "dark" ? "light" : "dark";
+      }
+
+      function replayGlass() {
+        const panels = document.querySelectorAll("#glassDemo .glass-panel");
+        panels.forEach((p, i) => {
+          p.classList.remove("animating");
+          p.style.opacity = "0";
+          p.style.backdropFilter = "blur(0px) saturate(100%)";
+          p.style.webkitBackdropFilter = "blur(0px) saturate(100%)";
+        });
+
+        panels.forEach((p, i) => {
+          setTimeout(() => {
+            p.style.opacity = "";
+            p.style.backdropFilter = "";
+            p.style.webkitBackdropFilter = "";
+            p.classList.add("animating");
+          }, i * 120);
+        });
+
+        setTimeout(() => {
+          panels.forEach((p) => p.classList.remove("animating"));
+        }, 1200);
+      }
+
+      // Dynamic light tracking on glass panels
+      document.querySelectorAll(".glass-panel").forEach((panel) => {
+        panel.addEventListener("mousemove", (e) => {
+          const rect = panel.getBoundingClientRect();
+          const x = (((e.clientX - rect.left) / rect.width) * 100).toFixed(1);
+          const y = (((e.clientY - rect.top) / rect.height) * 100).toFixed(1);
+          panel.style.setProperty("--lx", x + "%");
+          panel.style.setProperty("--ly", y + "%");
+        });
+      });
+
+      // Auto-play glass reveal on load
+      setTimeout(replayGlass, 800);
+    </script>
+  </body>
+</html>

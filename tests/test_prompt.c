@@ -116,6 +116,40 @@ static void test_prompt_build_with_memory(void) {
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
+static void test_prompt_build_with_stm_context(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *stm = "**user**: Hello\n\n**assistant**: Hi there!\n\n";
+    sc_prompt_config_t cfg = {
+        .provider_name = "ollama",
+        .provider_name_len = 6,
+        .model_name = "llama3",
+        .model_name_len = 6,
+        .workspace_dir = ".",
+        .workspace_dir_len = 1,
+        .tools = NULL,
+        .tools_count = 0,
+        .memory_context = NULL,
+        .memory_context_len = 0,
+        .stm_context = stm,
+        .stm_context_len = strlen(stm),
+        .autonomy_level = 1,
+        .custom_instructions = NULL,
+        .custom_instructions_len = 0,
+    };
+
+    char *out = NULL;
+    size_t out_len = 0;
+    sc_error_t err = sc_prompt_build_system(&alloc, &cfg, &out, &out_len);
+
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(out);
+    SC_ASSERT_TRUE(strstr(out, "Session Context") != NULL);
+    SC_ASSERT_TRUE(strstr(out, "Hello") != NULL);
+    SC_ASSERT_TRUE(strstr(out, "Hi there") != NULL);
+
+    alloc.free(alloc.ctx, out, out_len + 1);
+}
+
 static void test_prompt_build_with_custom_instructions(void) {
     sc_allocator_t alloc = sc_system_allocator();
     const char *custom = "Always respond in French.";
@@ -203,6 +237,7 @@ void run_prompt_tests(void) {
     SC_RUN_TEST(test_prompt_build_basic);
     SC_RUN_TEST(test_prompt_build_with_tools);
     SC_RUN_TEST(test_prompt_build_with_memory);
+    SC_RUN_TEST(test_prompt_build_with_stm_context);
     SC_RUN_TEST(test_prompt_build_with_custom_instructions);
     SC_RUN_TEST(test_memory_loader_empty_backend);
 #ifdef SC_ENABLE_SQLITE

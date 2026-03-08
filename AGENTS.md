@@ -412,6 +412,42 @@ Color accent hierarchy (60-30-10 rule — see `docs/visual-standards.md` §2.1):
 
 Each accent provides `-hover`, `-subtle`, `-strong`, `-text`, and `on-accent-*` variants for both dark and light themes.
 
+#### Tonal Surfaces (M3)
+
+Surfaces are tinted with the primary accent for branded depth hierarchy:
+
+- `--sc-surface-container` — default card/panel (4% fidelity green tint)
+- `--sc-surface-container-high` — elevated interactive (6% tint)
+- `--sc-surface-container-highest` — highest emphasis (8% tint)
+- `--sc-surface-dim` / `--sc-surface-bright` — recessed / prominent extremes
+- Use tonal surfaces instead of `--sc-bg-surface` when brand identity matters.
+- Token source: `base.tokens.json` (color.tonal.\*) + `semantic.tokens.json`
+
+#### Tinted State Layers (M3)
+
+Interactive overlays are tinted with fidelity green, not neutral white/black:
+
+- `--sc-hover-overlay` / `--sc-pressed-overlay` / `--sc-focus-overlay` / `--sc-dragged-overlay`
+- `--sc-disabled-overlay` remains neutral (no brand color on disabled states)
+
+#### Dynamic Color Pipeline
+
+OKLCH palette auto-generated from brand hex (#7AB648):
+
+- Tokens: `--sc-dynamic-{primary,secondary,tertiary,neutral,error}-{50..950}`
+- P3 wide-gamut overrides included automatically
+- Generated: `ui/src/styles/_dynamic-color.css` (built by `design-tokens/build.ts`)
+
+#### Glass System
+
+Three glass tiers + choreography + Apple visionOS material densities:
+
+- CSS classes: `.sc-glass-subtle`, `.sc-glass-standard`, `.sc-glass-prominent`
+- Choreography: `.sc-glass-enter` / `.sc-glass-exit` (blur reveals from 0)
+- Materials: `--sc-glass-material-{ultra-thin,thin,regular,thick}-*`
+- Token source: `design-tokens/glass.tokens.json`
+- Visual reference: `docs/design-system-demo.html`
+
 ### 12.5 Visual Hierarchy (Required — see `docs/visual-standards.md`)
 
 Required:

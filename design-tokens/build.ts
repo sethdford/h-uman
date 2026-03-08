@@ -9,6 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
+import { generateDynamicColorCSS } from "./dynamic-color-lib.js";
 
 const REM_PX = 16;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -472,6 +473,23 @@ function main() {
     tsTokens,
   );
 
+  const brandHex = "#7AB648";
+  const dynamicCSS = generateDynamicColorCSS(brandHex);
+  writeOutput(
+    outdir,
+    path.join(ROOT, "ui", "src", "styles", "_dynamic-color.css"),
+    "_dynamic-color.css",
+    dynamicCSS,
+  );
+  if (!outdir) {
+    writeOutput(
+      null,
+      path.join(ROOT, "website", "src", "styles", "_dynamic-color.css"),
+      "_dynamic-color.css",
+      dynamicCSS,
+    );
+  }
+
   console.log("Done.");
 }
 
@@ -609,17 +627,33 @@ function generateCSS(
     }
   }
 
-  // Glass: dynamic-light, vibrancy, interactive
-  lines.push("  /* Glass: dynamic-light, vibrancy, interactive */");
-  const glassExtraGroups = ["dynamic-light", "vibrancy", "interactive"];
+  // Glass: dynamic-light, vibrancy, interactive, choreography, material
+  lines.push(
+    "  /* Glass: dynamic-light, vibrancy, interactive, choreography, material */",
+  );
+  const glassExtraGroups = [
+    "dynamic-light",
+    "vibrancy",
+    "interactive",
+    "choreography",
+    "material",
+  ];
+  const motionChoreographyKeys = new Set([
+    "choreography.stagger-delay",
+    "choreography.stagger-max",
+    "choreography.cascade-delay",
+    "choreography.cascade-max",
+  ]);
   for (const group of glassExtraGroups) {
     const groupKeys = Object.keys(tokens)
-      .filter((k) => k.startsWith(`${group}.`))
+      .filter(
+        (k) => k.startsWith(`${group}.`) && !motionChoreographyKeys.has(k),
+      )
       .sort();
     for (const k of groupKeys) {
       const val = tokens[k];
       if (val != null) {
-        const prop = k.replace(`${group}.`, "");
+        const prop = k.replace(`${group}.`, "").replace(/\./g, "-");
         lines.push(`  --sc-glass-${group}-${prop}: ${val};`);
       }
     }

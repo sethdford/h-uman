@@ -86,7 +86,7 @@
   --sc-glass-chat-blur: 24px;
   --sc-glass-chat-border-opacity: 0.08;
   --sc-glass-chat-saturate: 180%;
-  /* Glass: dynamic-light, vibrancy, interactive */
+  /* Glass: dynamic-light, vibrancy, interactive, choreography, material */
   --sc-glass-dynamic-light-ambient: 0.04;
   --sc-glass-dynamic-light-angle: 225deg;
   --sc-glass-dynamic-light-color-dark: rgba(255, 255, 255, 0.12);
@@ -105,6 +105,26 @@
   --sc-glass-interactive-press-saturate-boost: 20%;
   --sc-glass-interactive-press-scale: 0.98;
   --sc-glass-interactive-transition-duration: 200ms;
+  --sc-glass-choreography-blur-from: 0px;
+  --sc-glass-choreography-enter-duration: 350ms;
+  --sc-glass-choreography-enter-easing: cubic-bezier(0.2, 0, 0, 1);
+  --sc-glass-choreography-exit-duration: 200ms;
+  --sc-glass-choreography-exit-easing: cubic-bezier(0.55, 0, 1, 0.45);
+  --sc-glass-choreography-saturate-from: 100%;
+  --sc-glass-choreography-state-duration: 200ms;
+  --sc-glass-choreography-state-easing: cubic-bezier(0.2, 0, 0, 1);
+  --sc-glass-material-regular-bg-opacity: 0.06;
+  --sc-glass-material-regular-blur: 24px;
+  --sc-glass-material-regular-saturate: 180%;
+  --sc-glass-material-thick-bg-opacity: 0.1;
+  --sc-glass-material-thick-blur: 32px;
+  --sc-glass-material-thick-saturate: 200%;
+  --sc-glass-material-thin-bg-opacity: 0.04;
+  --sc-glass-material-thin-blur: 16px;
+  --sc-glass-material-thin-saturate: 140%;
+  --sc-glass-material-ultra-thin-bg-opacity: 0.02;
+  --sc-glass-material-ultra-thin-blur: 8px;
+  --sc-glass-material-ultra-thin-saturate: 110%;
   /* Pixar micro-physics */
   --sc-physics-button-press-scaleX: 1.01;
   --sc-physics-button-press-scaleY: 0.97;
@@ -352,20 +372,22 @@
   --sc-accent-text: #8dc63f;
   --sc-backdrop-overlay: rgba(0, 0, 0, 0.6);
   --sc-bg: #060b12;
-  --sc-bg-elevated: #162230;
-  --sc-bg-inset: #0b1219;
-  --sc-bg-overlay: #1c2a3a;
-  --sc-bg-surface: #101a24;
-  --sc-border: #233345;
-  --sc-border-subtle: #162230;
+  --sc-bg-elevated: #1e3044;
+  --sc-bg-inset: #0d1520;
+  --sc-bg-overlay: #273d55;
+  --sc-bg-surface: #152333;
+  --sc-border: #2f4a64;
+  --sc-border-subtle: #1e3044;
   --sc-button-gradient-primary: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.12) 0%,
     rgba(0, 0, 0, 0.18) 100%
   );
   --sc-disabled-overlay: rgba(255, 255, 255, 0.04);
+  --sc-dragged-overlay: rgba(122, 182, 72, 0.16);
   --sc-error: #f97066;
   --sc-error-dim: rgba(249, 112, 102, 0.12);
+  --sc-focus-overlay: rgba(122, 182, 72, 0.12);
   --sc-focus-ring: #7ab648;
   --sc-focus-ring-offset: 2px;
   --sc-focus-ring-width: 2px;
@@ -376,7 +398,7 @@
     rgba(99, 102, 241, 0.03) 80%,
     transparent 100%
   );
-  --sc-hover-overlay: rgba(255, 255, 255, 0.06);
+  --sc-hover-overlay: rgba(122, 182, 72, 0.08);
   --sc-info: #3b82f6;
   --sc-info-dim: rgba(59, 130, 246, 0.15);
   --sc-link: #8dc63f;
@@ -386,7 +408,7 @@
   --sc-on-accent: #ffffff;
   --sc-on-accent-secondary: #060b12;
   --sc-on-accent-tertiary: #ffffff;
-  --sc-pressed-overlay: rgba(255, 255, 255, 0.1);
+  --sc-pressed-overlay: rgba(122, 182, 72, 0.12);
   --sc-shadow-card:
     0 1px 3px rgba(3, 8, 16, 0.3), 0 8px 24px rgba(3, 8, 16, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -408,6 +430,11 @@
   --sc-shadow-xs: 0 1px 2px rgba(3, 8, 16, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --sc-success: #10b981;
   --sc-success-dim: rgba(16, 185, 129, 0.15);
+  --sc-surface-bright: #34506a;
+  --sc-surface-container: #172631;
+  --sc-surface-container-high: #223540;
+  --sc-surface-container-highest: #2c4451;
+  --sc-surface-dim: #030710;
   --sc-surface-glow: radial-gradient(
     ellipse at 50% 0%,
     rgba(122, 182, 72, 0.08) 0%,
@@ -555,8 +582,10 @@
       rgba(0, 0, 0, 0.15) 100%
     );
     --sc-disabled-overlay: rgba(0, 0, 0, 0.04);
+    --sc-dragged-overlay: rgba(90, 154, 48, 0.14);
     --sc-error: #cc0000;
     --sc-error-dim: rgba(204, 0, 0, 0.08);
+    --sc-focus-overlay: rgba(90, 154, 48, 0.1);
     --sc-focus-ring: #5a9a30;
     --sc-focus-ring-offset: 2px;
     --sc-focus-ring-width: 2px;
@@ -566,7 +595,7 @@
       rgba(122, 182, 72, 0.03) 50%,
       transparent 100%
     );
-    --sc-hover-overlay: rgba(0, 0, 0, 0.04);
+    --sc-hover-overlay: rgba(90, 154, 48, 0.06);
     --sc-info: #2563eb;
     --sc-info-dim: rgba(37, 99, 235, 0.1);
     --sc-link: #5a9a30;
@@ -576,7 +605,7 @@
     --sc-on-accent: #ffffff;
     --sc-on-accent-secondary: #ffffff;
     --sc-on-accent-tertiary: #ffffff;
-    --sc-pressed-overlay: rgba(0, 0, 0, 0.08);
+    --sc-pressed-overlay: rgba(90, 154, 48, 0.1);
     --sc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.03);
     --sc-shadow-glow-accent: 0 0 0 1px rgba(90, 154, 48, 0.12), 0 4px 16px rgba(90, 154, 48, 0.15);
     --sc-shadow-glow-blue: 0 0 0 1px rgba(37, 99, 235, 0.12), 0 4px 12px rgba(37, 99, 235, 0.08);
@@ -594,6 +623,11 @@
     --sc-shadow-xs: 0 1px 2px rgba(6, 18, 36, 0.08);
     --sc-success: #008000;
     --sc-success-dim: rgba(0, 128, 0, 0.08);
+    --sc-surface-bright: #ffffff;
+    --sc-surface-container: #f7f8f5;
+    --sc-surface-container-high: #eeefec;
+    --sc-surface-container-highest: #e7e9e5;
+    --sc-surface-dim: #e8e8e8;
     --sc-surface-glow: radial-gradient(
       ellipse at 50% 0%,
       rgba(122, 182, 72, 0.06) 0%,
@@ -628,20 +662,22 @@
   --sc-accent-text: #8dc63f;
   --sc-backdrop-overlay: rgba(0, 0, 0, 0.6);
   --sc-bg: #060b12;
-  --sc-bg-elevated: #162230;
-  --sc-bg-inset: #0b1219;
-  --sc-bg-overlay: #1c2a3a;
-  --sc-bg-surface: #101a24;
-  --sc-border: #233345;
-  --sc-border-subtle: #162230;
+  --sc-bg-elevated: #1e3044;
+  --sc-bg-inset: #0d1520;
+  --sc-bg-overlay: #273d55;
+  --sc-bg-surface: #152333;
+  --sc-border: #2f4a64;
+  --sc-border-subtle: #1e3044;
   --sc-button-gradient-primary: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.12) 0%,
     rgba(0, 0, 0, 0.18) 100%
   );
   --sc-disabled-overlay: rgba(255, 255, 255, 0.04);
+  --sc-dragged-overlay: rgba(122, 182, 72, 0.16);
   --sc-error: #f97066;
   --sc-error-dim: rgba(249, 112, 102, 0.12);
+  --sc-focus-overlay: rgba(122, 182, 72, 0.12);
   --sc-focus-ring: #7ab648;
   --sc-focus-ring-offset: 2px;
   --sc-focus-ring-width: 2px;
@@ -652,7 +688,7 @@
     rgba(99, 102, 241, 0.03) 80%,
     transparent 100%
   );
-  --sc-hover-overlay: rgba(255, 255, 255, 0.06);
+  --sc-hover-overlay: rgba(122, 182, 72, 0.08);
   --sc-info: #3b82f6;
   --sc-info-dim: rgba(59, 130, 246, 0.15);
   --sc-link: #8dc63f;
@@ -662,7 +698,7 @@
   --sc-on-accent: #ffffff;
   --sc-on-accent-secondary: #060b12;
   --sc-on-accent-tertiary: #ffffff;
-  --sc-pressed-overlay: rgba(255, 255, 255, 0.1);
+  --sc-pressed-overlay: rgba(122, 182, 72, 0.12);
   --sc-shadow-card:
     0 1px 3px rgba(3, 8, 16, 0.3), 0 8px 24px rgba(3, 8, 16, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -684,6 +720,11 @@
   --sc-shadow-xs: 0 1px 2px rgba(3, 8, 16, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --sc-success: #10b981;
   --sc-success-dim: rgba(16, 185, 129, 0.15);
+  --sc-surface-bright: #34506a;
+  --sc-surface-container: #172631;
+  --sc-surface-container-high: #223540;
+  --sc-surface-container-highest: #2c4451;
+  --sc-surface-dim: #030710;
   --sc-surface-glow: radial-gradient(
     ellipse at 50% 0%,
     rgba(122, 182, 72, 0.08) 0%,
@@ -735,8 +776,10 @@
     rgba(0, 0, 0, 0.15) 100%
   );
   --sc-disabled-overlay: rgba(0, 0, 0, 0.04);
+  --sc-dragged-overlay: rgba(90, 154, 48, 0.14);
   --sc-error: #cc0000;
   --sc-error-dim: rgba(204, 0, 0, 0.08);
+  --sc-focus-overlay: rgba(90, 154, 48, 0.1);
   --sc-focus-ring: #5a9a30;
   --sc-focus-ring-offset: 2px;
   --sc-focus-ring-width: 2px;
@@ -746,7 +789,7 @@
     rgba(122, 182, 72, 0.03) 50%,
     transparent 100%
   );
-  --sc-hover-overlay: rgba(0, 0, 0, 0.04);
+  --sc-hover-overlay: rgba(90, 154, 48, 0.06);
   --sc-info: #2563eb;
   --sc-info-dim: rgba(37, 99, 235, 0.1);
   --sc-link: #5a9a30;
@@ -756,7 +799,7 @@
   --sc-on-accent: #ffffff;
   --sc-on-accent-secondary: #ffffff;
   --sc-on-accent-tertiary: #ffffff;
-  --sc-pressed-overlay: rgba(0, 0, 0, 0.08);
+  --sc-pressed-overlay: rgba(90, 154, 48, 0.1);
   --sc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.03);
   --sc-shadow-glow-accent: 0 0 0 1px rgba(90, 154, 48, 0.12), 0 4px 16px rgba(90, 154, 48, 0.15);
   --sc-shadow-glow-blue: 0 0 0 1px rgba(37, 99, 235, 0.12), 0 4px 12px rgba(37, 99, 235, 0.08);
@@ -774,6 +817,11 @@
   --sc-shadow-xs: 0 1px 2px rgba(6, 18, 36, 0.08);
   --sc-success: #008000;
   --sc-success-dim: rgba(0, 128, 0, 0.08);
+  --sc-surface-bright: #ffffff;
+  --sc-surface-container: #f7f8f5;
+  --sc-surface-container-high: #eeefec;
+  --sc-surface-container-highest: #e7e9e5;
+  --sc-surface-dim: #e8e8e8;
   --sc-surface-glow: radial-gradient(
     ellipse at 50% 0%,
     rgba(122, 182, 72, 0.06) 0%,
@@ -796,10 +844,10 @@
     --sc-accent-subtle: rgba(122, 182, 72, 0.2);
     --sc-accent-text: #47802a;
     --sc-bg: #000000;
-    --sc-bg-elevated: #101a24;
+    --sc-bg-elevated: #152333;
     --sc-bg-inset: #000000;
-    --sc-bg-overlay: #162230;
-    --sc-bg-surface: #0b1219;
+    --sc-bg-overlay: #1e3044;
+    --sc-bg-surface: #0d1520;
     --sc-border: #8aa0b8;
     --sc-border-subtle: #3d5468;
     --sc-error: #f87171;
