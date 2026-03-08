@@ -111,41 +111,41 @@
 /* Channel destroy callback: (ch, alloc). Most channels ignore alloc. */
 typedef void (*sc_bootstrap_channel_destroy_fn)(sc_channel_t *ch, sc_allocator_t *alloc);
 
+#if SC_HAS_EMAIL
 static void destroy_email_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_EMAIL
     sc_email_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
+#if SC_HAS_IMESSAGE
 static void destroy_imessage_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_IMESSAGE
     sc_imessage_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
+#if SC_HAS_GMAIL
 static void destroy_gmail_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_GMAIL
     sc_gmail_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
+#if SC_HAS_IMAP
 static void destroy_imap_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_IMAP
     sc_imap_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
+#if SC_HAS_TELEGRAM
 static void destroy_telegram_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_TELEGRAM
     sc_telegram_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
 #if SC_HAS_DISCORD
 static void destroy_discord_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
@@ -153,20 +153,20 @@ static void destroy_discord_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)ch;
 }
 #endif
+#if SC_HAS_SLACK
 static void destroy_slack_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_SLACK
     sc_slack_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
+#if SC_HAS_WHATSAPP
 static void destroy_whatsapp_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
-#if SC_HAS_WHATSAPP
     sc_whatsapp_destroy(ch);
-#endif
     (void)ch;
 }
+#endif
 #if SC_HAS_FACEBOOK
 static void destroy_facebook_wrap(sc_channel_t *ch, sc_allocator_t *a) {
     (void)a;
@@ -589,6 +589,7 @@ sc_error_t sc_app_bootstrap(sc_app_ctx_t *ctx, sc_allocator_t *alloc, const char
     if (with_channels) {
         size_t ch_count = 0;
         const sc_config_t *cfg = &bi->cfg;
+        (void)cfg;
 
 #if SC_HAS_EMAIL
         if (cfg->channels.email.smtp_host && cfg->channels.email.from_address) {
