@@ -675,7 +675,8 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     bool oom_on_optional = false;
 
-    /* Safe strdup for optional fields: sets target and flags OOM on failure */
+    /* Safe strdup for optional fields: sets target and flags OOM on failure.
+     * OOM on optional fields is non-fatal — we continue with NULL. */
 #define PERSONA_STRDUP_OPT(target, src) \
     do {                                \
         (target) = sc_strdup(alloc, (src)); \
@@ -684,6 +685,7 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
     } while (0)
 
     sc_json_value_t *root = NULL;
+    (void)oom_on_optional;
     sc_error_t err = sc_json_parse(alloc, json, json_len, &root);
     if (err != SC_OK || !root || root->type != SC_JSON_OBJECT)
         return err != SC_OK ? err : SC_ERR_JSON_PARSE;
@@ -992,10 +994,10 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
             const char *s;
             s = sc_json_get_string(ip, "thinking_style");
             if (s)
-                out->intellectual.thinking_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->intellectual.thinking_style, s);
             s = sc_json_get_string(ip, "metaphor_sources");
             if (s)
-                out->intellectual.metaphor_sources = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->intellectual.metaphor_sources, s);
         }
     }
 
@@ -1035,14 +1037,14 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
         if (sen && sen->type == SC_JSON_OBJECT) {
             const char *s = sc_json_get_string(sen, "dominant_sense");
             if (s)
-                out->sensory.dominant_sense = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->sensory.dominant_sense, s);
             sc_json_value_t *a = sc_json_object_get(sen, "metaphor_vocabulary");
             if (a)
                 parse_string_array(alloc, a, &out->sensory.metaphor_vocabulary,
                                    &out->sensory.metaphor_vocabulary_count);
             s = sc_json_get_string(sen, "grounding_patterns");
             if (s)
-                out->sensory.grounding_patterns = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->sensory.grounding_patterns, s);
         }
     }
 
@@ -1052,20 +1054,20 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
         if (rel && rel->type == SC_JSON_OBJECT) {
             const char *s = sc_json_get_string(rel, "bid_response_style");
             if (s)
-                out->relational.bid_response_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->relational.bid_response_style, s);
             sc_json_value_t *a = sc_json_object_get(rel, "emotional_bids");
             if (a)
                 parse_string_array(alloc, a, &out->relational.emotional_bids,
                                    &out->relational.emotional_bids_count);
             s = sc_json_get_string(rel, "attachment_style");
             if (s)
-                out->relational.attachment_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->relational.attachment_style, s);
             s = sc_json_get_string(rel, "attachment_awareness");
             if (s)
-                out->relational.attachment_awareness = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->relational.attachment_awareness, s);
             s = sc_json_get_string(rel, "dunbar_awareness");
             if (s)
-                out->relational.dunbar_awareness = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->relational.dunbar_awareness, s);
         }
     }
 
@@ -1075,17 +1077,17 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
         if (lis && lis->type == SC_JSON_OBJECT) {
             const char *s = sc_json_get_string(lis, "default_response_type");
             if (s)
-                out->listening.default_response_type = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->listening.default_response_type, s);
             sc_json_value_t *a = sc_json_object_get(lis, "reflective_techniques");
             if (a)
                 parse_string_array(alloc, a, &out->listening.reflective_techniques,
                                    &out->listening.reflective_techniques_count);
             s = sc_json_get_string(lis, "nvc_style");
             if (s)
-                out->listening.nvc_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->listening.nvc_style, s);
             s = sc_json_get_string(lis, "validation_style");
             if (s)
-                out->listening.validation_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->listening.validation_style, s);
         }
     }
 
@@ -1095,13 +1097,13 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
         if (rep && rep->type == SC_JSON_OBJECT) {
             const char *s = sc_json_get_string(rep, "rupture_detection");
             if (s)
-                out->repair.rupture_detection = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->repair.rupture_detection, s);
             s = sc_json_get_string(rep, "repair_approach");
             if (s)
-                out->repair.repair_approach = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->repair.repair_approach, s);
             s = sc_json_get_string(rep, "face_saving_style");
             if (s)
-                out->repair.face_saving_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->repair.face_saving_style, s);
             sc_json_value_t *a = sc_json_object_get(rep, "repair_phrases");
             if (a)
                 parse_string_array(alloc, a, &out->repair.repair_phrases,
