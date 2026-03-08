@@ -9,6 +9,8 @@ sc_error_t parse_agent(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_
         return SC_OK;
     cfg->agent.llm_compiler_enabled =
         sc_json_get_bool(obj, "llm_compiler", cfg->agent.llm_compiler_enabled);
+    cfg->agent.tool_routing_enabled =
+        sc_json_get_bool(obj, "tool_routing", cfg->agent.tool_routing_enabled);
     cfg->agent.compact_context =
         sc_json_get_bool(obj, "compact_context", cfg->agent.compact_context);
     double mti = sc_json_get_number(obj, "max_tool_iterations", cfg->agent.max_tool_iterations);

@@ -69,6 +69,7 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->diagnostics.log_message_payloads = false;
     cfg->diagnostics.log_llm_io = false;
     cfg->agent.llm_compiler_enabled = false;
+    cfg->agent.tool_routing_enabled = false;
     cfg->agent.compact_context = false;
     cfg->agent.max_tool_iterations = 1000;
     cfg->agent.max_history_messages = 100;
