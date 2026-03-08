@@ -371,6 +371,7 @@ set(SC_CORE_SOURCES
     src/agent/input_guard.c
     src/agent/commitment.c
     src/agent/commitment_store.c
+    src/agent/pattern_radar.c
     src/providers/error_classify.c
     src/providers/api_key.c
     src/providers/helpers.c
@@ -1393,6 +1394,7 @@ set(SC_TEST_SOURCES
     tests/test_consolidation.c
     tests/test_deep_extract.c
     tests/test_commitment.c
+    tests/test_pattern_radar.c
 )
 if(SC_ENABLE_PERSONA)
     list(APPEND SC_TEST_SOURCES tests/test_persona.c)
