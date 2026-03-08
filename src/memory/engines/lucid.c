@@ -416,11 +416,13 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     const char *category_p = (const char *)sqlite3_column_text(stmt, 3);
     const char *timestamp_p = (const char *)sqlite3_column_text(stmt, 4);
     const char *session_id_p = (const char *)sqlite3_column_text(stmt, 5);
+    const char *source_p = (const char *)sqlite3_column_text(stmt, 6);
     size_t id_len = id_p ? (size_t)sqlite3_column_bytes(stmt, 0) : 0;
     size_t key_len = key_p ? (size_t)sqlite3_column_bytes(stmt, 1) : 0;
     size_t content_len = content_p ? (size_t)sqlite3_column_bytes(stmt, 2) : 0;
     size_t timestamp_len = timestamp_p ? (size_t)sqlite3_column_bytes(stmt, 4) : 0;
     size_t session_id_len = session_id_p ? (size_t)sqlite3_column_bytes(stmt, 5) : 0;
+    size_t source_len = source_p ? (size_t)sqlite3_column_bytes(stmt, 6) : 0;
     out->id = id_p ? sc_strndup(alloc, id_p, id_len) : NULL;
     out->id_len = id_len;
     out->key = key_p ? sc_strndup(alloc, key_p, key_len) : NULL;
@@ -437,6 +439,8 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     out->timestamp_len = timestamp_len;
     out->session_id = session_id_p ? sc_strndup(alloc, session_id_p, session_id_len) : NULL;
     out->session_id_len = session_id_len;
+    out->source = source_p ? sc_strndup(alloc, source_p, source_len) : NULL;
+    out->source_len = source_len;
     out->score = NAN;
     return SC_OK;
 }
@@ -486,6 +490,55 @@ static sc_error_t impl_store_prod(void *ctx, const char *key, size_t key_len, co
     return SC_OK;
 }
 
+static sc_error_t impl_store_ex_prod(void *ctx, const char *key, size_t key_len,
+                                     const char *content, size_t content_len,
+                                     const sc_memory_category_t *category, const char *session_id,
+                                     size_t session_id_len, const sc_memory_store_opts_t *opts) {
+    sc_lucid_memory_t *self = (sc_lucid_memory_t *)ctx;
+    char ts[64];
+    get_timestamp(ts, sizeof(ts));
+    char *id = generate_id(self->alloc);
+    if (!id)
+        return SC_ERR_OUT_OF_MEMORY;
+    const char *source = (opts && opts->source && opts->source_len > 0) ? opts->source : NULL;
+    size_t source_len = source ? opts->source_len : 0;
+    const char *cat_str = category_to_string(category);
+    const char *sql =
+        "INSERT INTO memories (id, key, content, category, session_id, source, created_at, "
+        "updated_at) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
+        "ON CONFLICT(key) DO UPDATE SET "
+        "content = excluded.content, category = excluded.category, "
+        "session_id = excluded.session_id, source = excluded.source, updated_at = "
+        "excluded.updated_at";
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        sc_str_free(self->alloc, id);
+        return SC_ERR_MEMORY_STORE;
+    }
+    sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, key, (int)key_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, content, (int)content_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, cat_str, -1, SQLITE_STATIC);
+    if (session_id && session_id_len > 0)
+        sqlite3_bind_text(stmt, 5, session_id, (int)session_id_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 5);
+    if (source && source_len > 0)
+        sqlite3_bind_text(stmt, 6, source, (int)source_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 6);
+    sqlite3_bind_text(stmt, 7, ts, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 8, ts, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    sc_str_free(self->alloc, id);
+    if (rc != SQLITE_DONE)
+        return SC_ERR_MEMORY_STORE;
+    return SC_OK;
+}
+
 static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char *query,
                                    size_t query_len, size_t limit, const char *session_id,
                                    size_t session_id_len, sc_memory_entry_t **out,
@@ -503,7 +556,7 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
     like_pattern[query_len + 1] = '%';
     like_pattern[query_len + 2] = '\0';
     const char *sql =
-        "SELECT id, key, content, category, updated_at, session_id "
+        "SELECT id, key, content, category, updated_at, session_id, source "
         "FROM memories WHERE content LIKE ?1 OR key LIKE ?1 ORDER BY updated_at DESC LIMIT ?2";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
@@ -542,7 +595,7 @@ static sc_error_t impl_get_prod(void *ctx, sc_allocator_t *alloc, const char *ke
                                 sc_memory_entry_t *out, bool *found) {
     sc_lucid_memory_t *self = (sc_lucid_memory_t *)ctx;
     *found = false;
-    const char *sql = "SELECT id, key, content, category, updated_at, session_id "
+    const char *sql = "SELECT id, key, content, category, updated_at, session_id, source "
                       "FROM memories WHERE key = ?1";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
@@ -564,10 +617,10 @@ static sc_error_t impl_list_prod(void *ctx, sc_allocator_t *alloc,
     sc_lucid_memory_t *self = (sc_lucid_memory_t *)ctx;
     const char *sql;
     if (category)
-        sql = "SELECT id, key, content, category, updated_at, session_id "
+        sql = "SELECT id, key, content, category, updated_at, session_id, source "
               "FROM memories WHERE category = ?1 ORDER BY updated_at DESC";
     else
-        sql = "SELECT id, key, content, category, updated_at, session_id "
+        sql = "SELECT id, key, content, category, updated_at, session_id, source "
               "FROM memories ORDER BY updated_at DESC";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
@@ -661,6 +714,7 @@ static void impl_deinit_prod(void *ctx) {
 static const sc_memory_vtable_t lucid_vtable_prod = {
     .name = impl_name_prod,
     .store = impl_store_prod,
+    .store_ex = impl_store_ex_prod,
     .recall = impl_recall_prod,
     .get = impl_get_prod,
     .list = impl_list_prod,
@@ -690,6 +744,12 @@ sc_memory_t sc_lucid_memory_create(sc_allocator_t *alloc, const char *db_path,
             sqlite3_free(err);
         sqlite3_close(db);
         return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+    }
+    {
+        char *alter_err = NULL;
+        sqlite3_exec(db, "ALTER TABLE memories ADD COLUMN source TEXT", NULL, NULL, &alter_err);
+        if (alter_err)
+            sqlite3_free(alter_err);
     }
     sc_lucid_memory_t *self =
         (sc_lucid_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_lucid_memory_t));

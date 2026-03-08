@@ -161,7 +161,7 @@ sc_error_t cp_memory_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_co
             if (e_obj)
                 sc_json_array_push(alloc, arr, e_obj);
         }
-        sc_json_object_set(alloc, obj, "memories", arr);
+        sc_json_object_set(alloc, obj, "entries", arr);
     }
 
     if (entries) {
@@ -418,6 +418,8 @@ sc_error_t cp_memory_consolidate(sc_allocator_t *alloc, sc_app_context_t *app, s
     sc_memory_t *memory = app->agent->memory;
     sc_consolidation_config_t config = SC_CONSOLIDATION_DEFAULTS;
     config.provider = &app->agent->provider;
+    config.model = app->agent->model_name;
+    config.model_len = app->agent->model_name_len;
     sc_error_t err = sc_memory_consolidate(alloc, memory, &config);
     if (err != SC_OK)
         return err;

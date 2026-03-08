@@ -228,15 +228,18 @@ export class ScMemoryView extends GatewayAwareLitElement {
     return result;
   }
 
+  @state() private actionError = "";
+
   private async _consolidate(): Promise<void> {
     const gw = this.gateway;
     if (!gw) return;
     this.consolidating = true;
+    this.actionError = "";
     try {
       await gw.request("memory.consolidate");
       await this.load();
-    } catch {
-      /* toast would be nice here */
+    } catch (e) {
+      this.actionError = e instanceof Error ? e.message : "Consolidation failed";
     } finally {
       this.consolidating = false;
     }
@@ -245,11 +248,12 @@ export class ScMemoryView extends GatewayAwareLitElement {
   private async _forget(key: string): Promise<void> {
     const gw = this.gateway;
     if (!gw) return;
+    this.actionError = "";
     try {
       await gw.request("memory.forget", { key });
       this.entries = this.entries.filter((e) => e.key !== key);
-    } catch {
-      /* silent */
+    } catch (e) {
+      this.actionError = e instanceof Error ? e.message : "Failed to forget";
     }
   }
 
@@ -339,6 +343,10 @@ export class ScMemoryView extends GatewayAwareLitElement {
           ></sc-button>
         </div>
       </sc-section-header>
+
+      ${this.actionError
+        ? html`<div class="error-banner" role="alert">${this.actionError}</div>`
+        : nothing}
 
       <div class="controls">
         <sc-input

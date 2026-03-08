@@ -120,6 +120,43 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     return SC_OK;
 }
 
+static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, const char *content,
+                                size_t content_len, const sc_memory_category_t *category,
+                                const char *session_id, size_t session_id_len,
+                                const sc_memory_store_opts_t *opts) {
+    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+    const char *cat_str = category_to_string(category);
+
+    char *filename = key_to_filename(key, key_len, self->alloc);
+    if (!filename)
+        return SC_ERR_OUT_OF_MEMORY;
+
+    char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
+    self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
+    if (!fullpath)
+        return SC_ERR_OUT_OF_MEMORY;
+
+    ensure_dir(self->dir);
+
+    time_t t = time(NULL);
+    char ts[32];
+    snprintf(ts, sizeof(ts), "%ld", (long)t);
+
+    FILE *f = fopen(fullpath, "w");
+    self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
+    if (!f)
+        return SC_ERR_MEMORY_STORE;
+
+    fprintf(f, "---\nkey: %.*s\ncategory: %s\ntimestamp: %s\n", (int)key_len, key, cat_str, ts);
+    if (session_id && session_id_len > 0)
+        fprintf(f, "session_id: %.*s\n", (int)session_id_len, session_id);
+    if (opts && opts->source && opts->source_len > 0)
+        fprintf(f, "source: %.*s\n", (int)opts->source_len, opts->source);
+    fprintf(f, "---\n\n%.*s", (int)content_len, content);
+    fclose(f);
+    return SC_OK;
+}
+
 static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
                               sc_memory_entry_t **out, size_t *out_count) {
@@ -160,6 +197,7 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
         char category[64] = "core";
         char timestamp[64] = {0};
         char sess[256] = {0};
+        char source_buf[512] = {0};
         bool in_front = false;
         bool front_done = false;
         char content_buf[8192];
@@ -208,6 +246,14 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
                     while (*v && *v != '\n' && sv < sizeof(sess) - 1)
                         sess[sv++] = *v++;
                     sess[sv] = '\0';
+                } else if (strncmp(line, "source:", 7) == 0) {
+                    const char *v = line + 7;
+                    while (*v == ' ')
+                        v++;
+                    size_t sv = 0;
+                    while (*v && *v != '\n' && sv < sizeof(source_buf) - 1)
+                        source_buf[sv++] = *v++;
+                    source_buf[sv] = '\0';
                 }
             } else {
                 size_t linelen = strlen(line);
@@ -252,6 +298,8 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
         entries[count].timestamp_len = strlen(timestamp);
         entries[count].session_id = sess[0] ? sc_strdup(alloc, sess) : NULL;
         entries[count].session_id_len = sess[0] ? strlen(sess) : 0;
+        entries[count].source = source_buf[0] ? sc_strdup(alloc, source_buf) : NULL;
+        entries[count].source_len = source_buf[0] ? strlen(source_buf) : 0;
         entries[count].score = NAN;
         count++;
     }
@@ -291,6 +339,7 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     char line[4096];
     char category[64] = "core";
     char timestamp[64] = {0};
+    char get_source[512] = {0};
     bool front_done = false;
     char content_buf[8192];
     size_t content_len = 0;
@@ -319,6 +368,14 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
                 while (*v && *v != '\n' && tv < sizeof(timestamp) - 1)
                     timestamp[tv++] = *v++;
                 timestamp[tv] = '\0';
+            } else if (strncmp(line, "source:", 7) == 0) {
+                const char *v = line + 7;
+                while (*v == ' ')
+                    v++;
+                size_t sv = 0;
+                while (*v && *v != '\n' && sv < sizeof(get_source) - 1)
+                    get_source[sv++] = *v++;
+                get_source[sv] = '\0';
             }
         } else {
             size_t linelen = strlen(line);
@@ -343,6 +400,8 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     out->timestamp_len = strlen(timestamp);
     out->session_id = NULL;
     out->session_id_len = 0;
+    out->source = get_source[0] ? sc_strdup(alloc, get_source) : NULL;
+    out->source_len = get_source[0] ? strlen(get_source) : 0;
     out->score = NAN;
     *found = true;
     return SC_OK;
@@ -404,6 +463,7 @@ static void impl_deinit(void *ctx) {
 static const sc_memory_vtable_t markdown_vtable = {
     .name = impl_name,
     .store = impl_store,
+    .store_ex = impl_store_ex,
     .recall = impl_recall,
     .get = impl_get,
     .list = impl_list,

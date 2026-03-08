@@ -1587,11 +1587,7 @@ export class DemoGatewayClient extends EventTarget {
       case "memory.ingest":
         return { stored: true };
       case "memory.consolidate":
-        return {
-          ok: true,
-          consolidated: 3,
-          insights_generated: 1,
-        };
+        return { consolidated: true };
 
       default:
         return {};
