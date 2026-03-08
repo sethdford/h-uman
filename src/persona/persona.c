@@ -257,6 +257,43 @@ void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
                       persona->sensory.metaphor_vocabulary_count);
     free_contact_string(alloc, persona->sensory.grounding_patterns);
 
+    /* Relational intelligence */
+    free_contact_string(alloc, persona->relational.bid_response_style);
+    free_string_array(alloc, persona->relational.emotional_bids,
+                      persona->relational.emotional_bids_count);
+    free_contact_string(alloc, persona->relational.attachment_style);
+    free_contact_string(alloc, persona->relational.attachment_awareness);
+    free_contact_string(alloc, persona->relational.dunbar_awareness);
+
+    /* Listening protocol */
+    free_contact_string(alloc, persona->listening.default_response_type);
+    free_string_array(alloc, persona->listening.reflective_techniques,
+                      persona->listening.reflective_techniques_count);
+    free_contact_string(alloc, persona->listening.nvc_style);
+    free_contact_string(alloc, persona->listening.validation_style);
+
+    /* Repair protocol */
+    free_contact_string(alloc, persona->repair.rupture_detection);
+    free_contact_string(alloc, persona->repair.repair_approach);
+    free_contact_string(alloc, persona->repair.face_saving_style);
+    free_string_array(alloc, persona->repair.repair_phrases,
+                      persona->repair.repair_phrases_count);
+
+    /* Linguistic mirroring */
+    free_contact_string(alloc, persona->mirroring.mirroring_level);
+    free_string_array(alloc, persona->mirroring.adapts_to,
+                      persona->mirroring.adapts_to_count);
+    free_contact_string(alloc, persona->mirroring.convergence_speed);
+    free_contact_string(alloc, persona->mirroring.power_dynamic);
+
+    /* Social dynamics */
+    free_contact_string(alloc, persona->social.default_ego_state);
+    free_contact_string(alloc, persona->social.phatic_style);
+    free_string_array(alloc, persona->social.bonding_behaviors,
+                      persona->social.bonding_behaviors_count);
+    free_string_array(alloc, persona->social.anti_patterns,
+                      persona->social.anti_patterns_count);
+
     if (persona->overlays) {
         for (size_t i = 0; i < persona->overlays_count; i++)
             free_overlay(alloc, &persona->overlays[i]);
@@ -960,6 +997,89 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
         }
     }
 
+    /* Parse relational intelligence */
+    {
+        sc_json_value_t *rel = sc_json_object_get(root, "relational");
+        if (rel && rel->type == SC_JSON_OBJECT) {
+            const char *s = sc_json_get_string(rel, "bid_response_style");
+            if (s) out->relational.bid_response_style = sc_strdup(alloc, s);
+            sc_json_value_t *a = sc_json_object_get(rel, "emotional_bids");
+            if (a) parse_string_array(alloc, a, &out->relational.emotional_bids,
+                                      &out->relational.emotional_bids_count);
+            s = sc_json_get_string(rel, "attachment_style");
+            if (s) out->relational.attachment_style = sc_strdup(alloc, s);
+            s = sc_json_get_string(rel, "attachment_awareness");
+            if (s) out->relational.attachment_awareness = sc_strdup(alloc, s);
+            s = sc_json_get_string(rel, "dunbar_awareness");
+            if (s) out->relational.dunbar_awareness = sc_strdup(alloc, s);
+        }
+    }
+
+    /* Parse listening protocol */
+    {
+        sc_json_value_t *lis = sc_json_object_get(root, "listening");
+        if (lis && lis->type == SC_JSON_OBJECT) {
+            const char *s = sc_json_get_string(lis, "default_response_type");
+            if (s) out->listening.default_response_type = sc_strdup(alloc, s);
+            sc_json_value_t *a = sc_json_object_get(lis, "reflective_techniques");
+            if (a) parse_string_array(alloc, a, &out->listening.reflective_techniques,
+                                      &out->listening.reflective_techniques_count);
+            s = sc_json_get_string(lis, "nvc_style");
+            if (s) out->listening.nvc_style = sc_strdup(alloc, s);
+            s = sc_json_get_string(lis, "validation_style");
+            if (s) out->listening.validation_style = sc_strdup(alloc, s);
+        }
+    }
+
+    /* Parse repair protocol */
+    {
+        sc_json_value_t *rep = sc_json_object_get(root, "repair");
+        if (rep && rep->type == SC_JSON_OBJECT) {
+            const char *s = sc_json_get_string(rep, "rupture_detection");
+            if (s) out->repair.rupture_detection = sc_strdup(alloc, s);
+            s = sc_json_get_string(rep, "repair_approach");
+            if (s) out->repair.repair_approach = sc_strdup(alloc, s);
+            s = sc_json_get_string(rep, "face_saving_style");
+            if (s) out->repair.face_saving_style = sc_strdup(alloc, s);
+            sc_json_value_t *a = sc_json_object_get(rep, "repair_phrases");
+            if (a) parse_string_array(alloc, a, &out->repair.repair_phrases,
+                                      &out->repair.repair_phrases_count);
+        }
+    }
+
+    /* Parse linguistic mirroring */
+    {
+        sc_json_value_t *mir = sc_json_object_get(root, "mirroring");
+        if (mir && mir->type == SC_JSON_OBJECT) {
+            const char *s = sc_json_get_string(mir, "mirroring_level");
+            if (s) out->mirroring.mirroring_level = sc_strdup(alloc, s);
+            sc_json_value_t *a = sc_json_object_get(mir, "adapts_to");
+            if (a) parse_string_array(alloc, a, &out->mirroring.adapts_to,
+                                      &out->mirroring.adapts_to_count);
+            s = sc_json_get_string(mir, "convergence_speed");
+            if (s) out->mirroring.convergence_speed = sc_strdup(alloc, s);
+            s = sc_json_get_string(mir, "power_dynamic");
+            if (s) out->mirroring.power_dynamic = sc_strdup(alloc, s);
+        }
+    }
+
+    /* Parse social dynamics */
+    {
+        sc_json_value_t *soc = sc_json_object_get(root, "social");
+        if (soc && soc->type == SC_JSON_OBJECT) {
+            const char *s = sc_json_get_string(soc, "default_ego_state");
+            if (s) out->social.default_ego_state = sc_strdup(alloc, s);
+            s = sc_json_get_string(soc, "phatic_style");
+            if (s) out->social.phatic_style = sc_strdup(alloc, s);
+            sc_json_value_t *a = sc_json_object_get(soc, "bonding_behaviors");
+            if (a) parse_string_array(alloc, a, &out->social.bonding_behaviors,
+                                      &out->social.bonding_behaviors_count);
+            a = sc_json_object_get(soc, "anti_patterns");
+            if (a) parse_string_array(alloc, a, &out->social.anti_patterns,
+                                      &out->social.anti_patterns_count);
+        }
+    }
+
     /* Parse contacts */
     sc_json_value_t *contacts_obj = sc_json_object_get(root, "contacts");
     if (contacts_obj && contacts_obj->type == SC_JSON_OBJECT && contacts_obj->data.object.pairs) {
@@ -1315,6 +1435,41 @@ sc_error_t sc_persona_validate_json(sc_allocator_t *alloc, const char *json, siz
     if (snj && snj->type != SC_JSON_OBJECT) {
         sc_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "sensory must be object");
+    }
+
+    /* Optional: relational — object */
+    sc_json_value_t *rlj = sc_json_object_get(root, "relational");
+    if (rlj && rlj->type != SC_JSON_OBJECT) {
+        sc_json_free(alloc, root);
+        return set_err_msg(alloc, err_msg, err_msg_len, "relational must be object");
+    }
+
+    /* Optional: listening — object */
+    sc_json_value_t *lij = sc_json_object_get(root, "listening");
+    if (lij && lij->type != SC_JSON_OBJECT) {
+        sc_json_free(alloc, root);
+        return set_err_msg(alloc, err_msg, err_msg_len, "listening must be object");
+    }
+
+    /* Optional: repair — object */
+    sc_json_value_t *rpj = sc_json_object_get(root, "repair");
+    if (rpj && rpj->type != SC_JSON_OBJECT) {
+        sc_json_free(alloc, root);
+        return set_err_msg(alloc, err_msg, err_msg_len, "repair must be object");
+    }
+
+    /* Optional: mirroring — object */
+    sc_json_value_t *mrj = sc_json_object_get(root, "mirroring");
+    if (mrj && mrj->type != SC_JSON_OBJECT) {
+        sc_json_free(alloc, root);
+        return set_err_msg(alloc, err_msg, err_msg_len, "mirroring must be object");
+    }
+
+    /* Optional: social — object */
+    sc_json_value_t *scj = sc_json_object_get(root, "social");
+    if (scj && scj->type != SC_JSON_OBJECT) {
+        sc_json_free(alloc, root);
+        return set_err_msg(alloc, err_msg, err_msg_len, "social must be object");
     }
 
     sc_json_free(alloc, root);
