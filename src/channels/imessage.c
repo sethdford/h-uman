@@ -211,14 +211,7 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
                                 size_t media_count) {
     (void)media;
     (void)media_count;
-#if !defined(__APPLE__) || !defined(__MACH__)
-    (void)ctx;
-    (void)target;
-    (void)target_len;
-    (void)message;
-    (void)message_len;
-    return SC_ERR_NOT_SUPPORTED;
-#elif SC_IS_TEST
+#if SC_IS_TEST
     {
         sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
         size_t len = message_len > 4095 ? 4095 : message_len;
@@ -228,6 +221,13 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         c->last_message_len = len;
         return SC_OK;
     }
+#elif !defined(__APPLE__) || !defined(__MACH__)
+    (void)ctx;
+    (void)target;
+    (void)target_len;
+    (void)message;
+    (void)message_len;
+    return SC_ERR_NOT_SUPPORTED;
 #else
     sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
     /* Use target if provided, else default_target */

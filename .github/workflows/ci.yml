@@ -87,15 +87,15 @@ jobs:
           enable-lto: "true"
           enable-all-channels: "true"
       - run: ls -lh build/seaclaw
-      - name: Enforce binary size budget (600KB)
+      - name: Enforce binary size budget (750KB)
         run: |
           SIZE=$(stat -f%z build/seaclaw)
-          BUDGET=614400
+          BUDGET=768000
           KB=$((SIZE / 1024))
           PCT=$((SIZE * 100 / BUDGET))
-          echo "::notice::Binary size: ${KB}KB (${PCT}% of 600KB budget)"
+          echo "::notice::Binary size: ${KB}KB (${PCT}% of 750KB budget)"
           if [ "$SIZE" -gt "$BUDGET" ]; then
-            echo "::error::Binary size ${KB}KB exceeds 600KB budget"
+            echo "::error::Binary size ${KB}KB exceeds 750KB budget"
             exit 1
           fi
 

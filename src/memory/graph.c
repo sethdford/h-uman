@@ -26,11 +26,11 @@ struct sc_graph {
 #endif
 };
 
+#ifdef SC_ENABLE_SQLITE
+
 static int64_t now_ms(void) {
     return (int64_t)time(NULL) * 1000;
 }
-
-#ifdef SC_ENABLE_SQLITE
 
 #if !defined(SC_IS_TEST) || SC_IS_TEST == 0
 static sc_error_t ensure_parent_dir(sc_allocator_t *alloc, const char *path, size_t path_len) {
