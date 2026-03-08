@@ -282,7 +282,99 @@ export class ScMessageThread extends LitElement {
       outline: 2px solid var(--sc-accent);
       outline-offset: 2px;
     }
+
+    /* Empty state hero */
+    .hero {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--sc-space-xl);
+      padding: var(--sc-space-2xl) var(--sc-space-lg);
+      text-align: center;
+      animation: sc-hero-enter var(--sc-duration-slow) var(--sc-ease-out) both;
+    }
+    @keyframes sc-hero-enter {
+      from {
+        opacity: 0;
+        transform: translateY(var(--sc-space-md));
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    .hero-greeting {
+      font-family: var(--sc-font);
+      font-size: var(--sc-text-3xl, 1.875rem);
+      font-weight: var(--sc-weight-semibold);
+      color: var(--sc-text);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+    .hero-sub {
+      font-family: var(--sc-font);
+      font-size: var(--sc-text-base);
+      color: var(--sc-text-muted);
+      max-width: 24rem;
+    }
+    .hero-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: var(--sc-space-sm);
+    }
+    .hero-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sc-space-xs);
+      padding: var(--sc-space-sm) var(--sc-space-lg);
+      background: color-mix(in srgb, var(--sc-surface-container) 50%, transparent);
+      backdrop-filter: blur(var(--sc-blur-sm, 8px));
+      -webkit-backdrop-filter: blur(var(--sc-blur-sm, 8px));
+      border: 1px solid var(--sc-border-subtle);
+      border-radius: var(--sc-radius-full);
+      font-family: var(--sc-font);
+      font-size: var(--sc-text-sm);
+      color: var(--sc-text);
+      cursor: pointer;
+      transition:
+        border-color var(--sc-duration-fast),
+        background var(--sc-duration-fast),
+        transform var(--sc-duration-fast);
+    }
+    .hero-chip:hover {
+      border-color: var(--sc-accent);
+      background: color-mix(in srgb, var(--sc-accent) 8%, transparent);
+      transform: translateY(-1px);
+    }
+    .hero-chip:active {
+      transform: scale(0.97);
+    }
+    .hero-chip:focus-visible {
+      outline: 2px solid var(--sc-accent);
+      outline-offset: 2px;
+    }
+    .hero-chip svg {
+      width: var(--sc-icon-sm);
+      height: var(--sc-icon-sm);
+      color: var(--sc-accent);
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .hero-chip {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--sc-surface-container);
+      }
+    }
     @media (prefers-reduced-motion: reduce) {
+      .hero {
+        animation: none;
+      }
+      .hero-chip {
+        transition: none;
+      }
       .messages {
         scroll-behavior: auto;
       }
@@ -307,7 +399,29 @@ export class ScMessageThread extends LitElement {
   scrollToBottom(): void {
     this.updateComplete.then(() => {
       const el = this.scrollContainer;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      if (this._smoothScrollRaf) cancelAnimationFrame(this._smoothScrollRaf);
+      const target = el.scrollHeight - el.clientHeight;
+      const start = el.scrollTop;
+      const distance = target - start;
+      if (Math.abs(distance) < 2) {
+        el.scrollTop = target;
+        return;
+      }
+      const startTime = performance.now();
+      const duration = Math.min(300, Math.max(80, Math.abs(distance) * 0.8));
+      const step = (now: number): void => {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        const ease = 1 - Math.pow(1 - progress, 3);
+        el.scrollTop = start + distance * ease;
+        if (progress < 1) {
+          this._smoothScrollRaf = requestAnimationFrame(step);
+        } else {
+          this._smoothScrollRaf = 0;
+        }
+      };
+      this._smoothScrollRaf = requestAnimationFrame(step);
     });
   }
 
@@ -423,6 +537,8 @@ export class ScMessageThread extends LitElement {
         ${messages.map(({ item, idx }, i) => {
           const isStreaming =
             this.isWaiting && item.role === "assistant" && idx === lastAssistantIdx;
+          const isCompletingBubble =
+            this.isCompleting && item.role === "assistant" && idx === lastAssistantIdx;
           return html`
             <div class="bubble-wrapper" id="msg-${idx}">
               <sc-message-actions
@@ -434,6 +550,7 @@ export class ScMessageThread extends LitElement {
                 .content=${item.content}
                 .role=${item.role}
                 .streaming=${isStreaming}
+                .completing=${isCompletingBubble}
                 .showTail=${i === messages.length - 1}
                 .isFirst=${i === 0}
                 .isLast=${i === messages.length - 1}
@@ -503,8 +620,19 @@ export class ScMessageThread extends LitElement {
     `;
   }
 
+  private _onHeroChipClick(label: string): void {
+    this.dispatchEvent(
+      new CustomEvent("sc-hero-suggestion", {
+        bubbles: true,
+        composed: true,
+        detail: { text: label },
+      }),
+    );
+  }
+
   override render() {
     const blocks = this._buildBlocks();
+    const isEmpty = this.items.length === 0 && !this.historyLoading && !this.isWaiting;
     return html`
       <div
         id="scroll-container"
@@ -521,61 +649,73 @@ export class ScMessageThread extends LitElement {
                 <sc-skeleton variant="card" height="60px"></sc-skeleton>
               </div>
             `
-          : html`
-              ${this.hasEarlierMessages
-                ? html`
-                    <div class="load-earlier">
-                      ${this.loadingEarlier
-                        ? html`<sc-skeleton variant="card" height="40px"></sc-skeleton>`
-                        : html`<button
-                            class="load-earlier-btn"
-                            @click=${this._onLoadEarlier}
-                            aria-label="Load earlier messages"
-                          >
-                            Load earlier messages
-                          </button>`}
-                    </div>
-                  `
-                : nothing}
-              ${blocks.map((block) => {
-                if (block.type === "time-divider")
-                  return html`<div class="time-divider">
-                    <span>${formatTimestampForDivider(block.ts)}</span>
-                  </div>`;
-                if (block.type === "message-group") return this._renderMessageGroup(block);
-                if (block.type === "tool_call")
-                  return html`<sc-tool-result
-                    .tool=${block.item.name}
-                    .status=${block.item.status === "completed"
-                      ? block.item.result?.startsWith("Error")
-                        ? "error"
-                        : "success"
-                      : "running"}
-                    .content=${block.item.result ?? block.item.input ?? ""}
-                  ></sc-tool-result>`;
-                if (block.type === "thinking")
-                  return html`<sc-reasoning-block
-                    .content=${block.item.content}
-                    .streaming=${block.item.streaming}
-                    .duration=${block.item.duration ?? ""}
-                  ></sc-reasoning-block>`;
-                return nothing;
-              })}
-              ${this.isWaiting
-                ? html`
-                    <div class="waiting-row">
-                      <sc-typing-indicator .elapsed=${this.streamElapsed}></sc-typing-indicator>
-                      <button
-                        class="abort-btn"
-                        @click=${this._onAbort}
-                        aria-label="Stop generating"
-                      >
-                        Abort
-                      </button>
-                    </div>
-                  `
-                : nothing}
-            `}
+          : isEmpty
+            ? html`
+                <div class="hero">
+                  <div>
+                    <div class="hero-greeting">${getTimeGreeting()}</div>
+                    <div class="hero-sub">What would you like to work on?</div>
+                  </div>
+                  <div class="hero-suggestions">
+                    ${HERO_SUGGESTIONS.map(
+                      (s) => html`
+                        <button
+                          class="hero-chip"
+                          type="button"
+                          @click=${() => this._onHeroChipClick(s.label)}
+                        >
+                          ${icons[s.icon] ?? nothing}
+                          <span>${s.label}</span>
+                        </button>
+                      `,
+                    )}
+                  </div>
+                </div>
+              `
+            : html`
+                ${this.hasEarlierMessages
+                  ? html`
+                      <div class="load-earlier">
+                        ${this.loadingEarlier
+                          ? html`<sc-skeleton variant="card" height="40px"></sc-skeleton>`
+                          : html`<button
+                              class="load-earlier-btn"
+                              @click=${this._onLoadEarlier}
+                              aria-label="Load earlier messages"
+                            >
+                              Load earlier messages
+                            </button>`}
+                      </div>
+                    `
+                  : nothing}
+                ${blocks.map((block) => {
+                  if (block.type === "time-divider")
+                    return html`<div class="time-divider">
+                      <span>${formatTimestampForDivider(block.ts)}</span>
+                    </div>`;
+                  if (block.type === "message-group") return this._renderMessageGroup(block);
+                  if (block.type === "tool_call")
+                    return html`<sc-tool-result
+                      .tool=${block.item.name}
+                      .status=${block.item.status === "completed"
+                        ? block.item.result?.startsWith("Error")
+                          ? "error"
+                          : "success"
+                        : "running"}
+                      .content=${block.item.result ?? block.item.input ?? ""}
+                    ></sc-tool-result>`;
+                  if (block.type === "thinking")
+                    return html`<sc-reasoning-block
+                      .content=${block.item.content}
+                      .streaming=${block.item.streaming}
+                      .duration=${block.item.duration ?? ""}
+                    ></sc-reasoning-block>`;
+                  return nothing;
+                })}
+                ${this.isWaiting
+                  ? html`<sc-typing-indicator .elapsed=${this.streamElapsed}></sc-typing-indicator>`
+                  : nothing}
+              `}
       </div>
       ${this.showScrollPill
         ? html`
