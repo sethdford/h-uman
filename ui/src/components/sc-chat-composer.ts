@@ -178,6 +178,23 @@ export class ScChatComposer extends LitElement {
       background: var(--sc-accent-subtle);
       color: var(--sc-accent);
     }
+    @keyframes sc-send-spring {
+      0% {
+        transform: scale(1);
+      }
+      20% {
+        transform: scale(0.88);
+      }
+      50% {
+        transform: scale(1.08);
+      }
+      70% {
+        transform: scale(0.97);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
     .send-btn {
       display: flex;
       align-items: center;
@@ -192,7 +209,8 @@ export class ScChatComposer extends LitElement {
       font-family: var(--sc-font);
       transition:
         background var(--sc-duration-fast),
-        transform var(--sc-duration-fast);
+        transform var(--sc-duration-fast),
+        box-shadow var(--sc-duration-fast);
     }
     .send-btn.send {
       background: var(--sc-accent);
@@ -208,9 +226,11 @@ export class ScChatComposer extends LitElement {
     }
     .send-btn:hover:not(:disabled) {
       filter: brightness(1.1);
+      box-shadow: 0 0 8px 1px color-mix(in srgb, var(--sc-accent) 30%, transparent);
     }
     .send-btn:active:not(:disabled) {
-      transform: scale(var(--sc-glass-interactive-press-scale, 0.97));
+      animation: sc-send-spring var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
     }
     .send-btn:disabled {
       opacity: 0.4;
