@@ -1,5 +1,6 @@
 #include "seaclaw/memory/graph.h"
 #include "seaclaw/core/string.h"
+#include "seaclaw/memory/consolidation.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -166,8 +167,8 @@ void sc_graph_close(sc_graph_t *g, sc_allocator_t *alloc) {
 #ifdef SC_ENABLE_SQLITE
 
 sc_error_t sc_graph_upsert_entity(sc_graph_t *g, const char *name, size_t name_len,
-                                   sc_entity_type_t type, const char *metadata_json,
-                                   int64_t *out_id) {
+                                  sc_entity_type_t type, const char *metadata_json,
+                                  int64_t *out_id) {
     if (!g || !g->db || !name || name_len == 0 || !out_id)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -246,8 +247,8 @@ sc_error_t sc_graph_upsert_entity(sc_graph_t *g, const char *name, size_t name_l
 #else
 
 sc_error_t sc_graph_upsert_entity(sc_graph_t *g, const char *name, size_t name_len,
-                                   sc_entity_type_t type, const char *metadata_json,
-                                   int64_t *out_id) {
+                                  sc_entity_type_t type, const char *metadata_json,
+                                  int64_t *out_id) {
     (void)g;
     (void)name;
     (void)name_len;
@@ -262,7 +263,7 @@ sc_error_t sc_graph_upsert_entity(sc_graph_t *g, const char *name, size_t name_l
 #ifdef SC_ENABLE_SQLITE
 
 sc_error_t sc_graph_find_entity(sc_graph_t *g, const char *name, size_t name_len,
-                                 sc_graph_entity_t *out) {
+                                sc_graph_entity_t *out) {
     if (!g || !g->db || !name || !out)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -305,7 +306,7 @@ sc_error_t sc_graph_find_entity(sc_graph_t *g, const char *name, size_t name_len
 #else
 
 sc_error_t sc_graph_find_entity(sc_graph_t *g, const char *name, size_t name_len,
-                                 sc_graph_entity_t *out) {
+                                sc_graph_entity_t *out) {
     (void)g;
     (void)name;
     (void)name_len;
@@ -318,18 +319,18 @@ sc_error_t sc_graph_find_entity(sc_graph_t *g, const char *name, size_t name_len
 #ifdef SC_ENABLE_SQLITE
 
 sc_error_t sc_graph_upsert_relation(sc_graph_t *g, int64_t source_id, int64_t target_id,
-                                     sc_relation_type_t type, float weight, const char *context,
-                                     size_t context_len) {
+                                    sc_relation_type_t type, float weight, const char *context,
+                                    size_t context_len) {
     if (!g || !g->db)
         return SC_ERR_INVALID_ARGUMENT;
 
     int64_t ts = now_ms();
-    const char *sql =
-        "INSERT INTO relations (source_id, target_id, relation_type, weight, first_seen, last_seen, "
-        "context) VALUES (?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
-        "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
-        "context = excluded.context";
+    const char *sql = "INSERT INTO relations (source_id, target_id, relation_type, weight, "
+                      "first_seen, last_seen, "
+                      "context) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                      "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
+                      "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
+                      "context = excluded.context";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -354,8 +355,8 @@ sc_error_t sc_graph_upsert_relation(sc_graph_t *g, int64_t source_id, int64_t ta
 #else
 
 sc_error_t sc_graph_upsert_relation(sc_graph_t *g, int64_t source_id, int64_t target_id,
-                                     sc_relation_type_t type, float weight, const char *context,
-                                     size_t context_len) {
+                                    sc_relation_type_t type, float weight, const char *context,
+                                    size_t context_len) {
     (void)g;
     (void)source_id;
     (void)target_id;
@@ -373,9 +374,8 @@ sc_error_t sc_graph_upsert_relation(sc_graph_t *g, int64_t source_id, int64_t ta
 #define SC_GRAPH_MAX_NEIGHBORS 256
 
 sc_error_t sc_graph_neighbors(sc_graph_t *g, sc_allocator_t *alloc, int64_t entity_id,
-                               size_t max_hops, size_t max_results,
-                               sc_graph_entity_t **out_entities, sc_graph_relation_t **out_relations,
-                               size_t *out_count) {
+                              size_t max_hops, size_t max_results, sc_graph_entity_t **out_entities,
+                              sc_graph_relation_t **out_relations, size_t *out_count) {
     if (!g || !g->db || !alloc || !out_entities || !out_relations || !out_count)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -467,7 +467,8 @@ sc_error_t sc_graph_neighbors(sc_graph_t *g, sc_allocator_t *alloc, int64_t enti
                     ent->name = sc_strndup(alloc, n, n_len);
                 ent->name_len = n_len;
                 if (meta)
-                    ent->metadata_json = sc_strndup(alloc, meta, (size_t)sqlite3_column_bytes(stmt, 6));
+                    ent->metadata_json =
+                        sc_strndup(alloc, meta, (size_t)sqlite3_column_bytes(stmt, 6));
 
                 if (relation_count >= relation_cap) {
                     size_t new_cap = relation_cap == 0 ? 16 : relation_cap * 2;
@@ -534,9 +535,8 @@ fail:
 #else
 
 sc_error_t sc_graph_neighbors(sc_graph_t *g, sc_allocator_t *alloc, int64_t entity_id,
-                               size_t max_hops, size_t max_results,
-                               sc_graph_entity_t **out_entities, sc_graph_relation_t **out_relations,
-                               size_t *out_count) {
+                              size_t max_hops, size_t max_results, sc_graph_entity_t **out_entities,
+                              sc_graph_relation_t **out_relations, size_t *out_count) {
     (void)g;
     (void)alloc;
     (void)entity_id;
@@ -557,8 +557,8 @@ static bool is_word_char(char c) {
 }
 
 sc_error_t sc_graph_build_context(sc_graph_t *g, sc_allocator_t *alloc, const char *query,
-                                   size_t query_len, size_t max_hops, size_t max_chars,
-                                   char **out, size_t *out_len) {
+                                  size_t query_len, size_t max_hops, size_t max_chars, char **out,
+                                  size_t *out_len) {
     if (!g || !g->db || !alloc || !query || !out || !out_len)
         return SC_ERR_INVALID_ARGUMENT;
 
@@ -640,9 +640,9 @@ sc_error_t sc_graph_build_context(sc_graph_t *g, sc_allocator_t *alloc, const ch
                 }
             }
             const char *rel_str = sc_relation_type_to_string(relations[i].type);
-            int w = snprintf(buf + total_len, max_chars - total_len + 1,
-                             "- [%.*s] (%s) -> [%.*s]\n", (int)src_len, src_name, rel_str,
-                             (int)tgt_len, tgt_name);
+            int w =
+                snprintf(buf + total_len, max_chars - total_len + 1, "- [%.*s] (%s) -> [%.*s]\n",
+                         (int)src_len, src_name, rel_str, (int)tgt_len, tgt_name);
             if (w > 0 && total_len + (size_t)w <= max_chars)
                 total_len += (size_t)w;
         }
@@ -657,17 +657,16 @@ sc_error_t sc_graph_build_context(sc_graph_t *g, sc_allocator_t *alloc, const ch
 }
 
 sc_error_t sc_graph_build_communities(sc_graph_t *g, sc_allocator_t *alloc, size_t max_communities,
-                                       size_t max_chars, char **out, size_t *out_len) {
+                                      size_t max_chars, char **out, size_t *out_len) {
     if (!g || !g->db || !alloc || !out || !out_len)
         return SC_ERR_INVALID_ARGUMENT;
 
     *out = NULL;
     *out_len = 0;
 
-    const char *top_sql =
-        "SELECT e.id, e.name, e.type FROM entities e "
-        "JOIN relations r ON (r.source_id = e.id OR r.target_id = e.id) "
-        "GROUP BY e.id ORDER BY COUNT(r.id) DESC LIMIT ?";
+    const char *top_sql = "SELECT e.id, e.name, e.type FROM entities e "
+                          "JOIN relations r ON (r.source_id = e.id OR r.target_id = e.id) "
+                          "GROUP BY e.id ORDER BY COUNT(r.id) DESC LIMIT ?";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(g->db, top_sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
@@ -690,8 +689,8 @@ sc_error_t sc_graph_build_communities(sc_graph_t *g, sc_allocator_t *alloc, size
         total_len = (size_t)n;
 
     /* Group entities by type as we collect neighbors */
-    const char *type_labels[] = {"People", "Places", "Organizations", "Events", "Topics",
-                                "Emotions", "Other"};
+    const char *type_labels[] = {"People", "Places",   "Organizations", "Events",
+                                 "Topics", "Emotions", "Other"};
     char *type_names[7][32];
     size_t type_counts[7] = {0};
     memset(type_names, 0, sizeof(type_names));
@@ -780,14 +779,14 @@ done:
 }
 
 sc_error_t sc_graph_build_contact_context(sc_graph_t *g, sc_allocator_t *alloc, const char *query,
-                                           size_t query_len, const char *contact_id,
-                                           size_t contact_id_len, size_t max_hops, size_t max_chars,
-                                           char **out, size_t *out_len) {
+                                          size_t query_len, const char *contact_id,
+                                          size_t contact_id_len, size_t max_hops, size_t max_chars,
+                                          char **out, size_t *out_len) {
     if (!g || !alloc || !query || !out || !out_len)
         return SC_ERR_INVALID_ARGUMENT;
 
-    sc_error_t err = sc_graph_build_context(g, alloc, query, query_len, max_hops, max_chars, out,
-                                             out_len);
+    sc_error_t err =
+        sc_graph_build_context(g, alloc, query, query_len, max_hops, max_chars, out, out_len);
     if (err != SC_OK || !*out || *out_len == 0)
         return err;
 
@@ -829,8 +828,8 @@ sc_error_t sc_graph_build_contact_context(sc_graph_t *g, sc_allocator_t *alloc, 
 #else
 
 sc_error_t sc_graph_build_context(sc_graph_t *g, sc_allocator_t *alloc, const char *query,
-                                   size_t query_len, size_t max_hops, size_t max_chars,
-                                   char **out, size_t *out_len) {
+                                  size_t query_len, size_t max_hops, size_t max_chars, char **out,
+                                  size_t *out_len) {
     (void)g;
     (void)alloc;
     (void)query;
@@ -843,9 +842,9 @@ sc_error_t sc_graph_build_context(sc_graph_t *g, sc_allocator_t *alloc, const ch
 }
 
 sc_error_t sc_graph_build_contact_context(sc_graph_t *g, sc_allocator_t *alloc, const char *query,
-                                           size_t query_len, const char *contact_id,
-                                           size_t contact_id_len, size_t max_hops, size_t max_chars,
-                                           char **out, size_t *out_len) {
+                                          size_t query_len, const char *contact_id,
+                                          size_t contact_id_len, size_t max_hops, size_t max_chars,
+                                          char **out, size_t *out_len) {
     (void)g;
     (void)alloc;
     (void)query;
@@ -860,7 +859,7 @@ sc_error_t sc_graph_build_contact_context(sc_graph_t *g, sc_allocator_t *alloc, 
 }
 
 sc_error_t sc_graph_build_communities(sc_graph_t *g, sc_allocator_t *alloc, size_t max_communities,
-                                       size_t max_chars, char **out, size_t *out_len) {
+                                      size_t max_chars, char **out, size_t *out_len) {
     (void)g;
     (void)alloc;
     (void)max_communities;
@@ -990,3 +989,503 @@ const char *sc_relation_type_to_string(sc_relation_type_t t) {
         return "related_to";
     }
 }
+
+/* ── Phase 3a: Temporal events ──────────────────────────────────────── */
+
+#ifdef SC_ENABLE_SQLITE
+sc_error_t sc_graph_add_temporal_event(sc_graph_t *g, int64_t entity_id, const char *description,
+                                       size_t desc_len, int64_t occurred_at, int64_t duration_sec) {
+    if (!g || !g->db || !description || desc_len == 0)
+        return SC_ERR_INVALID_ARGUMENT;
+    const char *sql =
+        "INSERT INTO temporal_events(entity_id, description, occurred_at, duration_sec)"
+        " VALUES(?, ?, ?, ?)";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return SC_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, entity_id);
+    sqlite3_bind_text(stmt, 2, description, (int)desc_len, NULL);
+    sqlite3_bind_int64(stmt, 3, occurred_at);
+    sqlite3_bind_int64(stmt, 4, duration_sec);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? SC_OK : SC_ERR_IO;
+}
+
+sc_error_t sc_graph_query_temporal(sc_graph_t *g, sc_allocator_t *alloc, int64_t from_ts,
+                                   int64_t to_ts, size_t limit, char **out, size_t *out_len) {
+    if (!g || !g->db || !alloc || !out || !out_len)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    if (limit == 0)
+        limit = 50;
+    const char *sql = "SELECT e.name, t.description, t.occurred_at, t.duration_sec "
+                      "FROM temporal_events t JOIN entities e ON e.id = t.entity_id "
+                      "WHERE t.occurred_at BETWEEN ? AND ? ORDER BY t.occurred_at DESC LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return SC_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, from_ts);
+    sqlite3_bind_int64(stmt, 2, to_ts);
+    sqlite3_bind_int(stmt, 3, (int)limit);
+    size_t cap = 2048;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf) {
+        sqlite3_finalize(stmt);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    size_t pos = 0;
+    int w = snprintf(buf, cap, "### Timeline\n");
+    if (w > 0)
+        pos = (size_t)w;
+    while (sqlite3_step(stmt) == SQLITE_ROW && pos < cap - 128) {
+        const char *name = (const char *)sqlite3_column_text(stmt, 0);
+        const char *desc = (const char *)sqlite3_column_text(stmt, 1);
+        int64_t ts = sqlite3_column_int64(stmt, 2);
+        if (!name || !desc)
+            continue;
+        w = snprintf(buf + pos, cap - pos, "- [%lld] %s: %s\n", (long long)ts, name, desc);
+        if (w > 0)
+            pos += (size_t)w;
+    }
+    sqlite3_finalize(stmt);
+    buf[pos] = '\0';
+    *out = buf;
+    *out_len = pos;
+    return SC_OK;
+}
+
+sc_error_t sc_graph_add_causal_link(sc_graph_t *g, int64_t action_entity_id,
+                                    int64_t outcome_entity_id, const char *context,
+                                    size_t context_len, float confidence) {
+    if (!g || !g->db)
+        return SC_ERR_INVALID_ARGUMENT;
+    const char *sql =
+        "INSERT OR REPLACE INTO causal_links(action_entity_id, outcome_entity_id, context,"
+        " confidence, created_at) VALUES(?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return SC_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, action_entity_id);
+    sqlite3_bind_int64(stmt, 2, outcome_entity_id);
+    if (context && context_len > 0)
+        sqlite3_bind_text(stmt, 3, context, (int)context_len, NULL);
+    else
+        sqlite3_bind_null(stmt, 3);
+    sqlite3_bind_double(stmt, 4, (double)confidence);
+    sqlite3_bind_int64(stmt, 5, (int64_t)time(NULL));
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? SC_OK : SC_ERR_IO;
+}
+
+sc_error_t sc_graph_query_causal(sc_graph_t *g, sc_allocator_t *alloc, int64_t entity_id,
+                                 size_t max_results, char **out, size_t *out_len) {
+    if (!g || !g->db || !alloc || !out || !out_len)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    if (max_results == 0)
+        max_results = 20;
+    const char *sql = "SELECT a.name, o.name, c.context, c.confidence "
+                      "FROM causal_links c "
+                      "JOIN entities a ON a.id = c.action_entity_id "
+                      "JOIN entities o ON o.id = c.outcome_entity_id "
+                      "WHERE c.action_entity_id = ? OR c.outcome_entity_id = ? "
+                      "ORDER BY c.confidence DESC LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return SC_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, entity_id);
+    sqlite3_bind_int64(stmt, 2, entity_id);
+    sqlite3_bind_int(stmt, 3, (int)max_results);
+    size_t cap = 2048;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf) {
+        sqlite3_finalize(stmt);
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    size_t pos = 0;
+    int w = snprintf(buf, cap, "### Cause-Effect\n");
+    if (w > 0)
+        pos = (size_t)w;
+    while (sqlite3_step(stmt) == SQLITE_ROW && pos < cap - 128) {
+        const char *action = (const char *)sqlite3_column_text(stmt, 0);
+        const char *outcome = (const char *)sqlite3_column_text(stmt, 1);
+        const char *ctx = (const char *)sqlite3_column_text(stmt, 2);
+        double conf = sqlite3_column_double(stmt, 3);
+        if (!action || !outcome)
+            continue;
+        w = snprintf(buf + pos, cap - pos, "- %s -> %s (%.0f%%", action, outcome, conf * 100);
+        if (w > 0)
+            pos += (size_t)w;
+        if (ctx && pos < cap - 64) {
+            w = snprintf(buf + pos, cap - pos, ", %s", ctx);
+            if (w > 0)
+                pos += (size_t)w;
+        }
+        if (pos < cap - 4) {
+            w = snprintf(buf + pos, cap - pos, ")\n");
+            if (w > 0)
+                pos += (size_t)w;
+        }
+    }
+    sqlite3_finalize(stmt);
+    buf[pos] = '\0';
+    *out = buf;
+    *out_len = pos;
+    return SC_OK;
+}
+
+#else
+
+sc_error_t sc_graph_query_temporal(sc_graph_t *g, sc_allocator_t *alloc, int64_t from_ts,
+                                   int64_t to_ts, size_t limit, char **out, size_t *out_len) {
+    (void)g;
+    (void)alloc;
+    (void)from_ts;
+    (void)to_ts;
+    (void)limit;
+    (void)out;
+    (void)out_len;
+    return SC_ERR_NOT_SUPPORTED;
+}
+
+sc_error_t sc_graph_query_causal(sc_graph_t *g, sc_allocator_t *alloc, int64_t entity_id,
+                                 size_t max_results, char **out, size_t *out_len) {
+    (void)g;
+    (void)alloc;
+    (void)entity_id;
+    (void)max_results;
+    (void)out;
+    (void)out_len;
+    return SC_ERR_NOT_SUPPORTED;
+}
+
+#endif /* SC_ENABLE_SQLITE */
+
+/* ── Phase 3b: Leiden-inspired hierarchical community detection ─────── */
+
+#ifdef SC_ENABLE_SQLITE
+sc_error_t sc_graph_leiden_communities(sc_graph_t *g, sc_allocator_t *alloc, size_t max_communities,
+                                       size_t max_iterations, char **out, size_t *out_len) {
+    if (!g || !g->db || !alloc || !out || !out_len)
+        return SC_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    if (max_communities == 0)
+        max_communities = 20;
+    if (max_iterations == 0)
+        max_iterations = 10;
+
+    const char *count_sql = "SELECT COUNT(*) FROM entities";
+    sqlite3_stmt *cnt_stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, count_sql, -1, &cnt_stmt, NULL) != SQLITE_OK)
+        return SC_ERR_IO;
+    size_t entity_count = 0;
+    if (sqlite3_step(cnt_stmt) == SQLITE_ROW)
+        entity_count = (size_t)sqlite3_column_int64(cnt_stmt, 0);
+    sqlite3_finalize(cnt_stmt);
+
+    if (entity_count == 0)
+        return SC_OK;
+    if (entity_count > 4096)
+        entity_count = 4096;
+
+    int64_t *ids = (int64_t *)alloc->alloc(alloc->ctx, entity_count * sizeof(int64_t));
+    int32_t *labels = (int32_t *)alloc->alloc(alloc->ctx, entity_count * sizeof(int32_t));
+    if (!ids || !labels) {
+        if (ids)
+            alloc->free(alloc->ctx, ids, entity_count * sizeof(int64_t));
+        if (labels)
+            alloc->free(alloc->ctx, labels, entity_count * sizeof(int32_t));
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+
+    const char *id_sql = "SELECT id FROM entities ORDER BY mention_count DESC LIMIT ?";
+    sqlite3_stmt *id_stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, id_sql, -1, &id_stmt, NULL) != SQLITE_OK) {
+        alloc->free(alloc->ctx, ids, entity_count * sizeof(int64_t));
+        alloc->free(alloc->ctx, labels, entity_count * sizeof(int32_t));
+        return SC_ERR_IO;
+    }
+    sqlite3_bind_int(id_stmt, 1, (int)entity_count);
+    size_t n = 0;
+    while (sqlite3_step(id_stmt) == SQLITE_ROW && n < entity_count) {
+        ids[n] = sqlite3_column_int64(id_stmt, 0);
+        labels[n] = (int32_t)n;
+        n++;
+    }
+    sqlite3_finalize(id_stmt);
+    entity_count = n;
+
+    /* Label propagation: each entity adopts the most common label among neighbors */
+    for (size_t iter = 0; iter < max_iterations; iter++) {
+        bool changed = false;
+        for (size_t i = 0; i < entity_count; i++) {
+            const char *nbr_sql =
+                "SELECT CASE WHEN source_id = ? THEN target_id ELSE source_id END AS nbr_id "
+                "FROM relations WHERE source_id = ? OR target_id = ? "
+                "ORDER BY weight DESC LIMIT 50";
+            sqlite3_stmt *nbr_stmt = NULL;
+            if (sqlite3_prepare_v2(g->db, nbr_sql, -1, &nbr_stmt, NULL) != SQLITE_OK)
+                continue;
+            sqlite3_bind_int64(nbr_stmt, 1, ids[i]);
+            sqlite3_bind_int64(nbr_stmt, 2, ids[i]);
+            sqlite3_bind_int64(nbr_stmt, 3, ids[i]);
+
+            int32_t lbl_counts[64];
+            int32_t lbl_values[64];
+            size_t lc = 0;
+            memset(lbl_counts, 0, sizeof(lbl_counts));
+
+            while (sqlite3_step(nbr_stmt) == SQLITE_ROW) {
+                int64_t nbr_id = sqlite3_column_int64(nbr_stmt, 0);
+                int32_t nbr_label = -1;
+                for (size_t j = 0; j < entity_count; j++) {
+                    if (ids[j] == nbr_id) {
+                        nbr_label = labels[j];
+                        break;
+                    }
+                }
+                if (nbr_label < 0)
+                    continue;
+                bool found = false;
+                for (size_t k = 0; k < lc; k++) {
+                    if (lbl_values[k] == nbr_label) {
+                        lbl_counts[k]++;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && lc < 64) {
+                    lbl_values[lc] = nbr_label;
+                    lbl_counts[lc] = 1;
+                    lc++;
+                }
+            }
+            sqlite3_finalize(nbr_stmt);
+
+            if (lc > 0) {
+                int32_t best_label = labels[i];
+                int32_t best_count = 0;
+                for (size_t k = 0; k < lc; k++) {
+                    if (lbl_counts[k] > best_count) {
+                        best_count = lbl_counts[k];
+                        best_label = lbl_values[k];
+                    }
+                }
+                if (best_label != labels[i]) {
+                    labels[i] = best_label;
+                    changed = true;
+                }
+            }
+        }
+        if (!changed)
+            break;
+    }
+
+    /* Persist community assignments */
+    const char *up_sql = "UPDATE entities SET community_id = ? WHERE id = ?";
+    sqlite3_stmt *up_stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, up_sql, -1, &up_stmt, NULL) == SQLITE_OK) {
+        for (size_t i = 0; i < entity_count; i++) {
+            sqlite3_bind_int(up_stmt, 1, labels[i]);
+            sqlite3_bind_int64(up_stmt, 2, ids[i]);
+            sqlite3_step(up_stmt);
+            sqlite3_reset(up_stmt);
+        }
+        sqlite3_finalize(up_stmt);
+    }
+
+    /* Build hierarchical summary grouped by community */
+    int32_t unique_labels[64];
+    size_t unique_count = 0;
+    for (size_t i = 0; i < entity_count && unique_count < 64; i++) {
+        bool dup = false;
+        for (size_t j = 0; j < unique_count; j++) {
+            if (unique_labels[j] == labels[i]) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup)
+            unique_labels[unique_count++] = labels[i];
+    }
+    if (unique_count > max_communities)
+        unique_count = max_communities;
+
+    size_t cap = 4096;
+    char *buf = (char *)alloc->alloc(alloc->ctx, cap);
+    if (!buf) {
+        alloc->free(alloc->ctx, ids, entity_count * sizeof(int64_t));
+        alloc->free(alloc->ctx, labels, entity_count * sizeof(int32_t));
+        return SC_ERR_OUT_OF_MEMORY;
+    }
+    size_t pos = 0;
+    int w = snprintf(buf, cap, "### Knowledge Communities\n");
+    if (w > 0)
+        pos = (size_t)w;
+
+    for (size_t c = 0; c < unique_count && pos < cap - 128; c++) {
+        w = snprintf(buf + pos, cap - pos, "\n**Community %zu**: ", c + 1);
+        if (w > 0)
+            pos += (size_t)w;
+        bool first = true;
+        size_t members = 0;
+        for (size_t i = 0; i < entity_count && pos < cap - 64; i++) {
+            if (labels[i] != unique_labels[c])
+                continue;
+            const char *name_sql = "SELECT name FROM entities WHERE id = ?";
+            sqlite3_stmt *nm_stmt = NULL;
+            if (sqlite3_prepare_v2(g->db, name_sql, -1, &nm_stmt, NULL) != SQLITE_OK)
+                continue;
+            sqlite3_bind_int64(nm_stmt, 1, ids[i]);
+            if (sqlite3_step(nm_stmt) == SQLITE_ROW) {
+                const char *name = (const char *)sqlite3_column_text(nm_stmt, 0);
+                if (name && pos < cap - 64) {
+                    if (!first) {
+                        w = snprintf(buf + pos, cap - pos, ", ");
+                        if (w > 0)
+                            pos += (size_t)w;
+                    }
+                    w = snprintf(buf + pos, cap - pos, "%s", name);
+                    if (w > 0)
+                        pos += (size_t)w;
+                    first = false;
+                    members++;
+                }
+            }
+            sqlite3_finalize(nm_stmt);
+            if (members >= 10)
+                break;
+        }
+        if (pos < cap - 4) {
+            w = snprintf(buf + pos, cap - pos, "\n");
+            if (w > 0)
+                pos += (size_t)w;
+        }
+    }
+
+    alloc->free(alloc->ctx, ids, entity_count * sizeof(int64_t));
+    alloc->free(alloc->ctx, labels, entity_count * sizeof(int32_t));
+    buf[pos] = '\0';
+    *out = buf;
+    *out_len = pos;
+    return SC_OK;
+}
+#endif /* SC_ENABLE_SQLITE */
+
+/* ── Phase 3c: Ebbinghaus recall tracking ───────────────────────────── */
+
+#ifdef SC_ENABLE_SQLITE
+sc_error_t sc_graph_record_recall(sc_graph_t *g, int64_t entity_id) {
+    if (!g || !g->db)
+        return SC_ERR_INVALID_ARGUMENT;
+    const char *sql = "UPDATE entities SET recall_count = recall_count + 1,"
+                      " last_recalled = ? WHERE id = ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return SC_ERR_IO;
+    sqlite3_bind_int64(stmt, 1, (int64_t)time(NULL));
+    sqlite3_bind_int64(stmt, 2, entity_id);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? SC_OK : SC_ERR_IO;
+}
+#endif /* SC_ENABLE_SQLITE */
+
+#include <math.h>
+
+double sc_graph_retention_score(int64_t last_recalled_ts, int32_t recall_count, int64_t now_ts) {
+    if (recall_count <= 0 || last_recalled_ts <= 0)
+        return 0.0;
+    double elapsed_days = (double)(now_ts - last_recalled_ts) / 86400.0;
+    if (elapsed_days < 0.0)
+        elapsed_days = 0.0;
+    double stability = 1.0 + (double)recall_count * 0.5;
+    return exp(-elapsed_days / stability);
+}
+
+/* ── Phase 3d: Conflict-aware reconsolidation ───────────────────────── */
+
+#ifdef SC_ENABLE_SQLITE
+bool sc_graph_detect_conflict(sc_graph_t *g, sc_allocator_t *alloc, const char *entity_name,
+                              size_t name_len, const char *new_context, size_t new_context_len) {
+    if (!g || !g->db || !alloc || !entity_name || !new_context)
+        return false;
+    const char *sql = "SELECT r.context FROM relations r "
+                      "JOIN entities e ON (e.id = r.source_id OR e.id = r.target_id) "
+                      "WHERE e.name = ? AND r.context IS NOT NULL LIMIT 10";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return false;
+    sqlite3_bind_text(stmt, 1, entity_name, (int)name_len, NULL);
+    bool conflict = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW && !conflict) {
+        const char *old_ctx = (const char *)sqlite3_column_text(stmt, 0);
+        size_t old_len = (size_t)sqlite3_column_bytes(stmt, 0);
+        if (!old_ctx || old_len == 0)
+            continue;
+        uint32_t sim = sc_similarity_score(old_ctx, old_len, new_context, new_context_len);
+        if (sim < 30 && old_len > 10 && new_context_len > 10)
+            conflict = true;
+    }
+    sqlite3_finalize(stmt);
+    return conflict;
+}
+
+sc_error_t sc_graph_reconsolidate(sc_graph_t *g, sc_allocator_t *alloc, const char *entity_name,
+                                  size_t name_len, const char *new_context,
+                                  size_t new_context_len) {
+    if (!g || !g->db || !alloc || !entity_name || !new_context)
+        return SC_ERR_INVALID_ARGUMENT;
+
+    sc_graph_entity_t entity;
+    sc_error_t err = sc_graph_find_entity(g, entity_name, name_len, &entity);
+    if (err != SC_OK)
+        return err;
+
+    bool has_conflict =
+        sc_graph_detect_conflict(g, alloc, entity_name, name_len, new_context, new_context_len);
+    if (has_conflict) {
+        const char *dup_sql = "INSERT INTO entities(name, type, first_seen, last_seen,"
+                              " mention_count, supersedes_id) "
+                              "VALUES(?, ?, ?, ?, 1, ?)";
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(g->db, dup_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            char versioned[256];
+            int vn = snprintf(versioned, sizeof(versioned), "%.*s [superseded]", (int)name_len,
+                              entity_name);
+            if (vn > 0 && (size_t)vn < sizeof(versioned)) {
+                int64_t now = (int64_t)time(NULL) * 1000;
+                sqlite3_bind_text(stmt, 1, versioned, vn, NULL);
+                sqlite3_bind_int(stmt, 2, (int)entity.type);
+                sqlite3_bind_int64(stmt, 3, entity.first_seen);
+                sqlite3_bind_int64(stmt, 4, now);
+                sqlite3_bind_int64(stmt, 5, entity.id);
+                sqlite3_step(stmt);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    const char *up_sql = "UPDATE relations SET context = ?, last_seen = ? "
+                         "WHERE (source_id = ? OR target_id = ?) AND context IS NOT NULL";
+    sqlite3_stmt *up_stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, up_sql, -1, &up_stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(up_stmt, 1, new_context, (int)new_context_len, NULL);
+        sqlite3_bind_int64(up_stmt, 2, (int64_t)time(NULL) * 1000);
+        sqlite3_bind_int64(up_stmt, 3, entity.id);
+        sqlite3_bind_int64(up_stmt, 4, entity.id);
+        sqlite3_step(up_stmt);
+        sqlite3_finalize(up_stmt);
+    }
+    if (entity.name)
+        alloc->free(alloc->ctx, entity.name, entity.name_len + 1);
+    if (entity.metadata_json)
+        alloc->free(alloc->ctx, (void *)entity.metadata_json, strlen(entity.metadata_json) + 1);
+    return SC_OK;
+}
+#endif /* SC_ENABLE_SQLITE */

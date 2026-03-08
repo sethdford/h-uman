@@ -120,6 +120,14 @@ static sc_error_t entry_dup(sc_allocator_t *alloc, const sc_memory_entry_t *src,
         }
         dst->session_id_len = src->session_id_len;
     }
+    if (src->source && src->source_len > 0) {
+        dst->source = sc_strndup(alloc, src->source, src->source_len);
+        if (!dst->source) {
+            sc_memory_entry_free_fields(alloc, dst);
+            return SC_ERR_OUT_OF_MEMORY;
+        }
+        dst->source_len = src->source_len;
+    }
     dst->score = score;
     return SC_OK;
 }

@@ -97,6 +97,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
         return "daily";
     case SC_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
+    case SC_MEMORY_CATEGORY_INSIGHT:
+        return "insight";
     case SC_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
@@ -395,6 +397,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
         return "daily";
     case SC_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
+    case SC_MEMORY_CATEGORY_INSIGHT:
+        return "insight";
     case SC_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;

@@ -68,6 +68,13 @@ static const sc_rpc_entry_t s_rpc_table[] = {
     {"usage.summary", cp_admin_usage_summary},
     {"metrics.snapshot", cp_admin_metrics_snapshot},
     {"activity.recent", cp_admin_activity_recent},
+    {"memory.status", cp_memory_status},
+    {"memory.list", cp_memory_list},
+    {"memory.recall", cp_memory_recall},
+    {"memory.store", cp_memory_store},
+    {"memory.forget", cp_memory_forget},
+    {"memory.ingest", cp_memory_ingest},
+    {"memory.consolidate", cp_memory_consolidate},
 #ifdef SC_HAS_PUSH
     {"push.register", cp_admin_push_register},
     {"push.unregister", cp_admin_push_unregister},

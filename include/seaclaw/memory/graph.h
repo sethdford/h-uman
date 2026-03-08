@@ -64,36 +64,43 @@ void sc_graph_close(sc_graph_t *g, sc_allocator_t *alloc);
 
 /* Entity operations */
 sc_error_t sc_graph_upsert_entity(sc_graph_t *g, const char *name, size_t name_len,
-                                   sc_entity_type_t type, const char *metadata_json,
-                                   int64_t *out_id);
+                                  sc_entity_type_t type, const char *metadata_json,
+                                  int64_t *out_id);
 sc_error_t sc_graph_find_entity(sc_graph_t *g, const char *name, size_t name_len,
-                                 sc_graph_entity_t *out);
+                                sc_graph_entity_t *out);
 
 /* Relation operations */
 sc_error_t sc_graph_upsert_relation(sc_graph_t *g, int64_t source_id, int64_t target_id,
-                                     sc_relation_type_t type, float weight, const char *context,
-                                     size_t context_len);
+                                    sc_relation_type_t type, float weight, const char *context,
+                                    size_t context_len);
 
 /* Traversal */
 sc_error_t sc_graph_neighbors(sc_graph_t *g, sc_allocator_t *alloc, int64_t entity_id,
-                               size_t max_hops, size_t max_results,
-                               sc_graph_entity_t **out_entities, sc_graph_relation_t **out_relations,
-                               size_t *out_count);
+                              size_t max_hops, size_t max_results, sc_graph_entity_t **out_entities,
+                              sc_graph_relation_t **out_relations, size_t *out_count);
 
 /* Build context: traverse from query entities and format as prompt text */
 sc_error_t sc_graph_build_context(sc_graph_t *g, sc_allocator_t *alloc, const char *query,
-                                   size_t query_len, size_t max_hops, size_t max_chars,
-                                   char **out, size_t *out_len);
+                                  size_t query_len, size_t max_hops, size_t max_chars, char **out,
+                                  size_t *out_len);
 
 /* Build context with contact-aware header (cross-contact knowledge synthesis) */
 sc_error_t sc_graph_build_contact_context(sc_graph_t *g, sc_allocator_t *alloc, const char *query,
-                                           size_t query_len, const char *contact_id,
-                                           size_t contact_id_len, size_t max_hops, size_t max_chars,
-                                           char **out, size_t *out_len);
+                                          size_t query_len, const char *contact_id,
+                                          size_t contact_id_len, size_t max_hops, size_t max_chars,
+                                          char **out, size_t *out_len);
 
 /* Community detection: group entities by co-occurrence into topic clusters */
 sc_error_t sc_graph_build_communities(sc_graph_t *g, sc_allocator_t *alloc, size_t max_communities,
-                                       size_t max_chars, char **out, size_t *out_len);
+                                      size_t max_chars, char **out, size_t *out_len);
+
+/* Temporal events: query events in time range (returns markdown-formatted text) */
+sc_error_t sc_graph_query_temporal(sc_graph_t *g, sc_allocator_t *alloc, int64_t from_ts,
+                                   int64_t to_ts, size_t limit, char **out, size_t *out_len);
+
+/* Causal links: query cause-effect for an entity (returns markdown-formatted text) */
+sc_error_t sc_graph_query_causal(sc_graph_t *g, sc_allocator_t *alloc, int64_t entity_id,
+                                 size_t max_results, char **out, size_t *out_len);
 
 /* Free arrays returned by neighbors */
 void sc_graph_entities_free(sc_allocator_t *alloc, sc_graph_entity_t *entities, size_t count);

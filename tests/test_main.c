@@ -131,6 +131,7 @@ void run_dag_tests(void);
 void run_mood_tests(void);
 void run_bth_e2e_tests(void);
 void run_bth_metrics_tests(void);
+void run_memory_features_tests(void);
 #ifdef SC_ENABLE_CURL
 void run_paperclip_tests(void);
 #endif
@@ -266,6 +267,7 @@ int main(void) {
     run_mood_tests();
     run_bth_e2e_tests();
     run_bth_metrics_tests();
+    run_memory_features_tests();
 #ifdef SC_ENABLE_CURL
     run_paperclip_tests();
 #endif

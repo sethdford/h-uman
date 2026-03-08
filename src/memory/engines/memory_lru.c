@@ -308,6 +308,7 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     for (size_t i = 0; i < take; i++) {
         lru_entry_t *src = matches[i].e;
         sc_memory_entry_t *r = &results[i];
+        memset(r, 0, sizeof(*r));
         r->id = sc_strndup(alloc, src->key, strlen(src->key));
         r->id_len = strlen(src->key);
         r->key = sc_strndup(alloc, src->key, strlen(src->key));
@@ -346,6 +347,7 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     unlink_lru(self, e);
     link_mru(self, e);
 
+    memset(out, 0, sizeof(*out));
     out->id = sc_strndup(alloc, e->key, strlen(e->key));
     out->id_len = strlen(e->key);
     out->key = sc_strndup(alloc, e->key, strlen(e->key));
@@ -417,6 +419,7 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
             cap = new_cap;
         }
         sc_memory_entry_t *r = &results[n];
+        memset(r, 0, sizeof(*r));
         r->id = sc_strndup(alloc, e->key, strlen(e->key));
         r->id_len = strlen(e->key);
         r->key = sc_strndup(alloc, e->key, strlen(e->key));

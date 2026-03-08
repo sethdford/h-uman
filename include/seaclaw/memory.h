@@ -15,6 +15,7 @@ typedef enum sc_memory_category_tag {
     SC_MEMORY_CATEGORY_CORE,
     SC_MEMORY_CATEGORY_DAILY,
     SC_MEMORY_CATEGORY_CONVERSATION,
+    SC_MEMORY_CATEGORY_INSIGHT,
     SC_MEMORY_CATEGORY_CUSTOM,
 } sc_memory_category_tag_t;
 
@@ -40,6 +41,8 @@ typedef struct sc_memory_entry {
     size_t timestamp_len;
     const char *session_id; /* optional, NULL if none */
     size_t session_id_len;  /* 0 if session_id is NULL */
+    const char *source;     /* optional provenance URI, NULL if none */
+    size_t source_len;      /* 0 if source is NULL */
     double score;           /* optional, NAN if not set */
 } sc_memory_entry_t;
 
@@ -73,6 +76,16 @@ typedef struct sc_session_store_vtable {
 } sc_session_store_vtable_t;
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Extended store options (for store_ex)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+typedef struct sc_memory_store_opts {
+    const char *source;
+    size_t source_len;
+    double importance; /* <0 = unset */
+} sc_memory_store_opts_t;
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Memory vtable
  * ────────────────────────────────────────────────────────────────────────── */
 
@@ -90,6 +103,10 @@ typedef struct sc_memory_vtable {
     sc_error_t (*store)(void *ctx, const char *key, size_t key_len, const char *content,
                         size_t content_len, const sc_memory_category_t *category,
                         const char *session_id, size_t session_id_len);
+    sc_error_t (*store_ex)(void *ctx, const char *key, size_t key_len, const char *content,
+                           size_t content_len, const sc_memory_category_t *category,
+                           const char *session_id, size_t session_id_len,
+                           const sc_memory_store_opts_t *opts);
     sc_error_t (*recall)(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
                          size_t limit, const char *session_id, size_t session_id_len,
                          sc_memory_entry_t **out, size_t *out_count);
@@ -111,6 +128,13 @@ typedef struct sc_memory_vtable {
 
 /* Free heap-allocated fields of an entry (from list/recall). Does not free the struct. */
 void sc_memory_entry_free_fields(sc_allocator_t *alloc, sc_memory_entry_t *e);
+
+/* Store with source provenance: uses store_ex if available, else falls back to store. */
+sc_error_t sc_memory_store_with_source(sc_memory_t *mem, const char *key, size_t key_len,
+                                       const char *content, size_t content_len,
+                                       const sc_memory_category_t *category, const char *session_id,
+                                       size_t session_id_len, const char *source,
+                                       size_t source_len);
 
 sc_memory_t sc_none_memory_create(sc_allocator_t *alloc);
 sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path);

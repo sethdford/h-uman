@@ -951,6 +951,69 @@ export class DemoGatewayClient extends EventTarget {
       case "auth.oauth.refresh":
         return { access_token: "demo-refreshed-" + Date.now(), expires_in: 3600 };
 
+      case "memory.status":
+        return {
+          engine: "sqlite",
+          total_entries: 42,
+          categories: { core: 8, daily: 18, conversation: 12, insight: 4 },
+          last_consolidation: "2026-03-07T22:15:00Z",
+        };
+      case "memory.list":
+        return {
+          entries: [
+            {
+              id: "mem_1",
+              key: "user-prefers-dark-mode",
+              content: "User prefers dark mode and compact layouts",
+              category: "core",
+              source: "conversation:sess_abc",
+              timestamp: "2026-03-01T10:00:00Z",
+            },
+            {
+              id: "mem_2",
+              key: "project-deadline-march",
+              content: "Main project deadline is end of March 2026",
+              category: "daily",
+              source: "file://inbox/notes.txt",
+              timestamp: "2026-03-05T14:30:00Z",
+            },
+            {
+              id: "mem_3",
+              key: "insight-preference-productivity",
+              content: "User's preference for dark mode correlates with late-night work sessions",
+              category: "insight",
+              source: "connection_discovery",
+              timestamp: "2026-03-07T22:15:00Z",
+            },
+          ],
+        };
+      case "memory.recall":
+        return {
+          entries: [
+            {
+              id: "mem_1",
+              key: "user-prefers-dark-mode",
+              content: "User prefers dark mode and compact layouts",
+              category: "core",
+              source: "conversation:sess_abc",
+              timestamp: "2026-03-01T10:00:00Z",
+              score: 0.92,
+            },
+          ],
+        };
+      case "memory.store":
+        return { ok: true, id: "mem_new_" + Date.now() };
+      case "memory.forget":
+        return { ok: true, deleted: true };
+      case "memory.ingest":
+        return { ok: true, entries_created: 1 };
+      case "memory.consolidate":
+        return {
+          ok: true,
+          consolidated: 3,
+          insights_generated: 1,
+        };
+
       default:
         return {};
     }

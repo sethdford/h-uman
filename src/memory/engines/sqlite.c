@@ -25,7 +25,7 @@ static const char *const schema_parts[] = {
     "CREATE TABLE IF NOT EXISTS memories("
     "id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,"
     "content TEXT NOT NULL,category TEXT NOT NULL DEFAULT'core',"
-    "session_id TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
+    "session_id TEXT,source TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
     "CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key)",
     "CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id)",
@@ -77,6 +77,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
         return "daily";
     case SC_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
+    case SC_MEMORY_CATEGORY_INSIGHT:
+        return "insight";
     case SC_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
@@ -94,12 +96,14 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     const char *category_p = (const char *)sqlite3_column_text(stmt, 3);
     const char *timestamp_p = (const char *)sqlite3_column_text(stmt, 4);
     const char *session_id_p = (const char *)sqlite3_column_text(stmt, 5);
+    const char *source_p = (const char *)sqlite3_column_text(stmt, 6);
 
     size_t id_len = id_p ? (size_t)sqlite3_column_bytes(stmt, 0) : 0;
     size_t key_len = key_p ? (size_t)sqlite3_column_bytes(stmt, 1) : 0;
     size_t content_len = content_p ? (size_t)sqlite3_column_bytes(stmt, 2) : 0;
     size_t timestamp_len = timestamp_p ? (size_t)sqlite3_column_bytes(stmt, 4) : 0;
     size_t session_id_len = session_id_p ? (size_t)sqlite3_column_bytes(stmt, 5) : 0;
+    size_t source_len = source_p ? (size_t)sqlite3_column_bytes(stmt, 6) : 0;
 
     out->id = id_p ? sc_strndup(alloc, id_p, id_len) : NULL;
     out->id_len = id_len;
@@ -117,9 +121,11 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     out->timestamp_len = timestamp_len;
     out->session_id = session_id_p ? sc_strndup(alloc, session_id_p, session_id_len) : NULL;
     out->session_id_len = session_id_len;
+    out->source = source_p ? sc_strndup(alloc, source_p, source_len) : NULL;
+    out->source_len = source_len;
 
-    if (sqlite3_column_count(stmt) > 6) {
-        out->score = sqlite3_column_double(stmt, 6);
+    if (sqlite3_column_count(stmt) > 7) {
+        out->score = sqlite3_column_double(stmt, 7);
     } else {
         out->score = NAN;
     }
@@ -181,6 +187,52 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     return SC_OK;
 }
 
+static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, const char *content,
+                                size_t content_len, const sc_memory_category_t *category,
+                                const char *session_id, size_t session_id_len,
+                                const sc_memory_store_opts_t *opts) {
+    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    char ts[64];
+    get_timestamp(ts, sizeof(ts));
+    char *id = generate_id(self->alloc);
+    if (!id)
+        return SC_ERR_OUT_OF_MEMORY;
+    const char *cat_str = category_to_string(category);
+    const char *sql = "INSERT INTO memories (id, key, content, category, session_id, source, "
+                      "created_at, updated_at) "
+                      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
+                      "ON CONFLICT(key) DO UPDATE SET "
+                      "content = excluded.content, category = excluded.category, "
+                      "session_id = excluded.session_id, source = excluded.source, updated_at = "
+                      "excluded.updated_at";
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        sc_str_free(self->alloc, id);
+        return SC_ERR_MEMORY_STORE;
+    }
+    sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, key, (int)key_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, content, (int)content_len, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, cat_str, -1, SQLITE_STATIC);
+    if (session_id && session_id_len > 0)
+        sqlite3_bind_text(stmt, 5, session_id, (int)session_id_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 5);
+    if (opts && opts->source && opts->source_len > 0)
+        sqlite3_bind_text(stmt, 6, opts->source, (int)opts->source_len, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 6);
+    sqlite3_bind_text(stmt, 7, ts, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 8, ts, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    sc_str_free(self->alloc, id);
+    if (rc != SQLITE_DONE)
+        return SC_ERR_MEMORY_STORE;
+    return SC_OK;
+}
+
 static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
                               sc_memory_entry_t **out, size_t *out_count) {
@@ -233,11 +285,12 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
 
     /* Try FTS5 first; fall back to LIKE when FTS returns no rows */
     if (fts_len > 0) {
-        const char *sql = "SELECT m.id, m.key, m.content, m.category, m.created_at, m.session_id, "
-                          "bm25(memories_fts) as score FROM memories_fts f "
-                          "JOIN memories m ON m.rowid = f.rowid "
-                          "WHERE memories_fts MATCH ?1 "
-                          "ORDER BY score LIMIT ?2";
+        const char *sql =
+            "SELECT m.id, m.key, m.content, m.category, m.created_at, m.session_id, m.source, "
+            "bm25(memories_fts) as score FROM memories_fts f "
+            "JOIN memories m ON m.rowid = f.rowid "
+            "WHERE memories_fts MATCH ?1 "
+            "ORDER BY score LIMIT ?2";
         sqlite3_stmt *stmt = NULL;
         int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
         if (rc == SQLITE_OK) {
@@ -286,7 +339,7 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     like_pattern[query_len + 2] = '\0';
 
     const char *sql =
-        "SELECT id, key, content, category, created_at, session_id "
+        "SELECT id, key, content, category, created_at, session_id, source "
         "FROM memories WHERE content LIKE ?1 OR key LIKE ?1 ORDER BY updated_at DESC LIMIT ?2";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
@@ -328,7 +381,7 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
     *found = false;
 
-    const char *sql = "SELECT id, key, content, category, created_at, session_id "
+    const char *sql = "SELECT id, key, content, category, created_at, session_id, source "
                       "FROM memories WHERE key = ?1";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
@@ -350,10 +403,10 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
     const char *sql;
     if (category) {
-        sql = "SELECT id, key, content, category, created_at, session_id "
+        sql = "SELECT id, key, content, category, created_at, session_id, source "
               "FROM memories WHERE category = ?1 ORDER BY updated_at DESC";
     } else {
-        sql = "SELECT id, key, content, category, created_at, session_id "
+        sql = "SELECT id, key, content, category, created_at, session_id, source "
               "FROM memories ORDER BY updated_at DESC";
     }
 
@@ -447,6 +500,7 @@ static void impl_deinit(void *ctx) {
 static const sc_memory_vtable_t sqlite_vtable = {
     .name = impl_name,
     .store = impl_store,
+    .store_ex = impl_store_ex,
     .recall = impl_recall,
     .get = impl_get,
     .list = impl_list,
@@ -581,6 +635,13 @@ sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path) 
             sqlite3_close(db);
             return (sc_memory_t){.ctx = NULL, .vtable = NULL};
         }
+    }
+
+    {
+        char *err = NULL;
+        sqlite3_exec(db, "ALTER TABLE memories ADD COLUMN source TEXT", NULL, NULL, &err);
+        if (err)
+            sqlite3_free(err);
     }
 
     sc_sqlite_memory_t *self =
