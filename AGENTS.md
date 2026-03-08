@@ -26,7 +26,7 @@ Key extension points:
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 
-Current scale: **661 source + header files, ~117K lines of C, ~51K lines of tests, 3360 tests, 33 channels**.
+Current scale: **661 source + header files, ~117K lines of C, ~51K lines of tests, 3371 tests, 33 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
@@ -74,7 +74,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `SC_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 3360+ tests must pass at zero ASan errors**
+5. **All 3371+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `SC_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -156,7 +156,7 @@ src/
 
 include/seaclaw/       public C headers
 
-tests/                 116 test files, 3360+ tests
+tests/                 116 test files, 3371+ tests
 
 asm/                   platform-specific assembly (aarch64, x86_64, generic C)
 

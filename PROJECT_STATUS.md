@@ -1,6 +1,6 @@
 # SeaClaw — Project Status
 
-Last updated: 2026-03-07
+Last updated: 2026-03-08
 
 ## Summary
 
@@ -9,7 +9,7 @@ Last updated: 2026-03-07
 | Source files (src/ + include/) | **661**              |
 | Lines of C/H/ASM code          | **~117K**            |
 | Test files                     | 116                  |
-| Tests passing                  | **3360/3360 (100%)** |
+| Tests passing                  | **3371/3371 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **~561 KB**          |
 | Peak RSS (test suite)          | **~5.9 MB**          |
 
