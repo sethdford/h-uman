@@ -144,6 +144,8 @@ static void free_contact_profile(sc_allocator_t *alloc, sc_contact_profile_t *cp
     free_string_array(alloc, cp->allowed_behaviors, cp->allowed_behaviors_count);
     free_contact_string(alloc, cp->proactive_channel);
     free_contact_string(alloc, cp->proactive_schedule);
+    free_contact_string(alloc, cp->attachment_style);
+    free_contact_string(alloc, cp->dunbar_layer);
 }
 
 void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
@@ -948,19 +950,19 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
             const char *s;
             s = sc_json_get_string(vr, "sentence_pattern");
             if (s)
-                out->voice_rhythm.sentence_pattern = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->voice_rhythm.sentence_pattern, s);
             s = sc_json_get_string(vr, "paragraph_cadence");
             if (s)
-                out->voice_rhythm.paragraph_cadence = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->voice_rhythm.paragraph_cadence, s);
             s = sc_json_get_string(vr, "response_tempo");
             if (s)
-                out->voice_rhythm.response_tempo = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->voice_rhythm.response_tempo, s);
             s = sc_json_get_string(vr, "emphasis_style");
             if (s)
-                out->voice_rhythm.emphasis_style = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->voice_rhythm.emphasis_style, s);
             s = sc_json_get_string(vr, "pause_behavior");
             if (s)
-                out->voice_rhythm.pause_behavior = sc_strdup(alloc, s);
+                PERSONA_STRDUP_OPT(out->voice_rhythm.pause_behavior, s);
         }
     }
 
@@ -972,7 +974,7 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
                                &out->character_invariants_count);
         const char *anchor = sc_json_get_string(root, "core_anchor");
         if (anchor)
-            out->core_anchor = sc_strdup(alloc, anchor);
+            PERSONA_STRDUP_OPT(out->core_anchor, anchor);
     }
 
     /* Parse intellectual */

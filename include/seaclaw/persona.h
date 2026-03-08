@@ -64,6 +64,8 @@ typedef struct sc_contact_profile {
     bool proactive_checkin;
     char *proactive_channel;
     char *proactive_schedule;
+    char *attachment_style;
+    char *dunbar_layer;
 } sc_contact_profile_t;
 
 /* Motivation — the character's core drive (anti-drift anchor) */
