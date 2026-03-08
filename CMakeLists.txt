@@ -377,6 +377,7 @@ set(SC_CORE_SOURCES
     src/agent/pattern_radar.c
     src/agent/proactive.c
     src/agent/superhuman.c
+    src/agent/superhuman_commitment.c
     src/providers/error_classify.c
     src/providers/api_key.c
     src/providers/helpers.c
