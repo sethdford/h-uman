@@ -145,6 +145,9 @@ static void store_conversation_summary(sc_allocator_t *alloc, sc_memory_t *memor
         return;
     if (!user_msg || user_msg_len == 0)
         return;
+#ifndef SC_ENABLE_SQLITE
+    (void)graph;
+#endif
 
     /* Build "them: ... | me: ..." for richer extraction context */
     size_t total = user_msg_len + response_len + 16;

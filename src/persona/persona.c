@@ -343,33 +343,6 @@ const sc_contact_profile_t *sc_persona_find_contact(const sc_persona_t *persona,
     return NULL;
 }
 
-/* Grow context buffer if snprintf would truncate. Returns false on OOM. */
-static bool ctx_ensure(sc_allocator_t *alloc, char **buf, size_t *cap, size_t pos, size_t need) {
-    while (pos + need + 1 > *cap) {
-        size_t new_cap = *cap * 2;
-        char *nb = (char *)alloc->realloc(alloc->ctx, *buf, *cap, new_cap);
-        if (!nb)
-            return false;
-        *buf = nb;
-        *cap = new_cap;
-    }
-    return true;
-}
-
-#define CTX_SNPRINTF(buf, cap, pos, alloc, ...)                            \
-    do {                                                                   \
-        int _w = snprintf((buf) + (pos), (cap) - (pos), __VA_ARGS__);      \
-        if (_w > 0 && (size_t)_w >= (cap) - (pos)) {                       \
-            if (!ctx_ensure((alloc), &(buf), &(cap), (pos), (size_t)_w)) { \
-                (alloc)->free((alloc)->ctx, (buf), (cap));                 \
-                return SC_ERR_OUT_OF_MEMORY;                               \
-            }                                                              \
-            _w = snprintf((buf) + (pos), (cap) - (pos), __VA_ARGS__);      \
-        }                                                                  \
-        if (_w > 0)                                                        \
-            (pos) += (size_t)_w;                                           \
-    } while (0)
-
 sc_error_t sc_contact_profile_build_context(sc_allocator_t *alloc, const sc_contact_profile_t *cp,
                                             char **out, size_t *out_len) {
     if (!alloc || !cp || !out || !out_len)
@@ -380,6 +353,7 @@ sc_error_t sc_contact_profile_build_context(sc_allocator_t *alloc, const sc_cont
     if (!buf)
         return SC_ERR_OUT_OF_MEMORY;
     size_t pos = 0;
+    int w;
 
     w = snprintf(buf + pos, cap - pos, "\n--- Contact profile for %s ---\n",
                  cp->contact_id ? cp->contact_id : "?");
