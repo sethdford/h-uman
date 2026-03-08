@@ -119,6 +119,7 @@ void run_deep_extract_tests(void);
 void run_commitment_tests(void);
 void run_pattern_radar_tests(void);
 void run_proactive_tests(void);
+void run_superhuman_tests(void);
 void run_dag_tests(void);
 
 int main(void) {
@@ -240,6 +241,7 @@ int main(void) {
     run_commitment_tests();
     run_pattern_radar_tests();
     run_proactive_tests();
+    run_superhuman_tests();
     run_dag_tests();
 
     SC_TEST_REPORT();

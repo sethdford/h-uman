@@ -376,6 +376,7 @@ set(SC_CORE_SOURCES
     src/agent/commitment_store.c
     src/agent/pattern_radar.c
     src/agent/proactive.c
+    src/agent/superhuman.c
     src/providers/error_classify.c
     src/providers/api_key.c
     src/providers/helpers.c
@@ -1402,6 +1403,7 @@ set(SC_TEST_SOURCES
     tests/test_commitment.c
     tests/test_pattern_radar.c
     tests/test_proactive.c
+    tests/test_superhuman.c
     tests/test_dag.c
 )
 if(SC_ENABLE_PERSONA)
