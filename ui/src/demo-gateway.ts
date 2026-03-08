@@ -604,21 +604,37 @@ export class DemoGatewayClient extends EventTarget {
 
   #emitChatResponse(userMessage: string, sessionKey?: string): void {
     const id = "demo-" + Date.now();
+    const sk = sessionKey ?? "default";
+    const fullResponse = `That's a great question about "${userMessage}". Here's what I think — the key insight is that well-designed systems tend to be modular and composable. Each piece does one thing well, and the connections between them are clean and predictable.`;
+    const chunks = fullResponse.match(/.{1,12}/g) ?? [fullResponse];
+    let delay = 400;
+
+    const emitChunk = (content: string): void => {
+      this.dispatchEvent(
+        new CustomEvent(DemoGatewayClient.EVENT_GATEWAY, {
+          detail: {
+            event: "chat",
+            payload: { state: "chunk", message: content, id, session_key: sk },
+          },
+        }),
+      );
+    };
+
+    for (const chunk of chunks) {
+      setTimeout(() => emitChunk(chunk), delay);
+      delay += 30 + Math.random() * 60;
+    }
+
     setTimeout(() => {
       this.dispatchEvent(
         new CustomEvent(DemoGatewayClient.EVENT_GATEWAY, {
           detail: {
             event: "chat",
-            payload: {
-              state: "sent",
-              message: `Demo response to: ${userMessage}`,
-              id,
-              session_key: sessionKey ?? "default",
-            },
+            payload: { state: "sent", message: fullResponse, id, session_key: sk },
           },
         }),
       );
-    }, 600);
+    }, delay + 100);
   }
 
   #handleRequest(method: string, params?: Record<string, unknown>): unknown {
