@@ -150,6 +150,7 @@ export class ScChatView extends GatewayAwareLitElement {
   @state() private _sessionsPanelOpen = false;
   @state() private _sessions: ChatSession[] = [];
   @state() private _tapback = { open: false, x: 0, y: 0, index: -1, content: "" };
+  @state() private _sessionsLoading = false;
   @query("sc-chat-composer") private _composer!: HTMLElement & { focus?: () => void };
   @query("sc-message-thread") private _messageThread!: HTMLElement & {
     scrollToBottom: () => void;
@@ -194,6 +195,20 @@ export class ScChatView extends GatewayAwareLitElement {
     document.addEventListener("keydown", this._handleKeyDown);
   }
 
+  protected override onGatewaySwapped(
+    previous: GatewayClientClass | null,
+    current: GatewayClientClass,
+  ): void {
+    previous?.removeEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
+    previous?.removeEventListener(
+      GatewayClientClass.EVENT_STATUS,
+      this.statusHandler as EventListener,
+    );
+    current.addEventListener(GatewayClientClass.EVENT_GATEWAY, this.messageHandler);
+    current.addEventListener(GatewayClientClass.EVENT_STATUS, this.statusHandler as EventListener);
+    this.connectionStatus = current.status;
+  }
+
   protected override async load(): Promise<void> {
     await this.chat.loadHistory(this.sessionKey);
     await this._loadSessions();
@@ -202,6 +217,7 @@ export class ScChatView extends GatewayAwareLitElement {
   private async _loadSessions(): Promise<void> {
     const gw = this.gateway;
     if (!gw) return;
+    this._sessionsLoading = true;
     try {
       const res = await gw.request<{
         sessions?: Array<{
@@ -225,8 +241,11 @@ export class ScChatView extends GatewayAwareLitElement {
           };
         });
       }
-    } catch {
+    } catch (e) {
+      console.warn("Failed to load sessions:", e);
       this._sessions = [];
+    } finally {
+      this._sessionsLoading = false;
     }
   }
 
@@ -266,8 +285,14 @@ export class ScChatView extends GatewayAwareLitElement {
   }
 
   private _copyMessage(item: Extract<ChatItem, { type: "message" }>): void {
-    navigator.clipboard?.writeText(item.content).catch(() => {});
-    ScToast.show({ message: "Copied to clipboard", variant: "success" });
+    navigator.clipboard
+      ?.writeText(item.content)
+      .then(() => {
+        ScToast.show({ message: "Copied to clipboard", variant: "success" });
+      })
+      .catch(() => {
+        ScToast.show({ message: "Failed to copy", variant: "error" });
+      });
   }
 
   private _retryMessage(item: Extract<ChatItem, { type: "message" }>): void {
@@ -395,11 +420,22 @@ export class ScChatView extends GatewayAwareLitElement {
   private async _onSessionRename(e: CustomEvent<{ id: string; title: string }>): Promise<void> {
     const { id, title } = e.detail;
     const gw = this.gateway;
-    if (gw) {
-      try {
-        await gw.request("sessions.patch", { key: id, label: title });
-        this._sessions = this._sessions.map((s) => (s.id === id ? { ...s, title } : s));
-      } catch {}
+    if (!gw) return;
+    // Save original label for revert on failure
+    const session = this._sessions.find((s) => s.id === id);
+    const originalLabel = session?.title ?? "Untitled";
+    try {
+      // Call server first
+      await gw.request("sessions.patch", { key: id, label: title });
+      // Update UI on success
+      this._sessions = this._sessions.map((s) => (s.id === id ? { ...s, title } : s));
+    } catch (e) {
+      // Revert the UI update on failure
+      this._sessions = this._sessions.map((s) =>
+        s.id === id ? { ...s, title: originalLabel } : s,
+      );
+      this.requestUpdate();
+      ScToast.show({ message: "Failed to rename session", variant: "error" });
     }
   }
 
