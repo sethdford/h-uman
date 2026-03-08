@@ -397,6 +397,7 @@ export class ScApp extends LitElement {
   @state() private shortcutOverlayOpen = false;
   @state() private moreSheetOpen = false;
   @state() private _viewError: Error | null = null;
+  @state() private _inFallbackWindow = false;
 
   gateway: GatewayClient | null = null;
   private _keyHandler = this._onGlobalKey.bind(this);
@@ -408,6 +409,7 @@ export class ScApp extends LitElement {
   private _statusHandler = ((e: CustomEvent<GatewayStatus>) => {
     this.connectionStatus = e.detail;
   }) as EventListener;
+  private _fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
   private get _isDemo(): boolean {
     return new URLSearchParams(window.location.search).has("demo");
@@ -435,6 +437,25 @@ export class ScApp extends LitElement {
             const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
             return `${proto}//${window.location.host}/ws`;
           })();
+
+    // Auto-fallback: if real gateway doesn't connect within 2.5s, use demo
+    if (!this._isDemo) {
+      this._inFallbackWindow = true;
+      this._fallbackTimer = setTimeout(() => {
+        if (this.gateway?.status !== "connected") {
+          this._switchToDemo();
+        }
+      }, 2500);
+      // Cancel fallback if real gateway connects in time
+      this.gateway.addEventListener("status", ((e: CustomEvent<string>) => {
+        if (e.detail === "connected" && this._fallbackTimer) {
+          clearTimeout(this._fallbackTimer);
+          this._fallbackTimer = null;
+          this._inFallbackWindow = false;
+        }
+      }) as EventListener);
+    }
+
     this.gateway.connect(wsUrl);
 
     this.addEventListener("navigate", ((e: CustomEvent<string>) => {
@@ -471,6 +492,10 @@ export class ScApp extends LitElement {
     document.removeEventListener("keydown", this._keyHandler);
     window.removeEventListener("hashchange", this._hashHandler);
     dynamicLight.stop();
+    if (this._fallbackTimer) {
+      clearTimeout(this._fallbackTimer);
+      this._fallbackTimer = null;
+    }
     this.gateway?.removeEventListener("status", this._statusHandler);
     this.gateway?.disconnect();
   }
@@ -569,6 +594,20 @@ export class ScApp extends LitElement {
     localStorage.setItem(SIDEBAR_KEY, String(this.sidebarCollapsed));
   }
 
+  private _switchToDemo(): void {
+    this._fallbackTimer = null;
+    this._inFallbackWindow = false;
+    // Tear down real gateway
+    this.gateway?.removeEventListener("status", this._statusHandler);
+    this.gateway?.disconnect();
+    // Create and wire demo gateway
+    const demo = new DemoGatewayClient() as unknown as GatewayClient;
+    this.gateway = demo;
+    setGateway(demo);
+    demo.addEventListener("status", this._statusHandler);
+    demo.connect("demo://fallback");
+  }
+
   private async _ensureLoaded(tab: TabId): Promise<void> {
     if (loadedViews.has(tab)) return;
     try {
@@ -628,7 +667,7 @@ export class ScApp extends LitElement {
         }}
         >Skip to content</a
       >
-      ${this.connectionStatus === "disconnected"
+      ${this.connectionStatus === "disconnected" && !this._inFallbackWindow
         ? html`<div class="disconnect-banner" role="alert">
             Disconnected from server
             <button @click=${this._reconnect}>Reconnect</button>
