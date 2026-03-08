@@ -209,9 +209,9 @@ size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t 
 static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
+#if SC_IS_TEST
     (void)media;
     (void)media_count;
-#if SC_IS_TEST
     {
         sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
         size_t len = message_len > 4095 ? 4095 : message_len;
@@ -374,6 +374,58 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     if (send_err == SC_OK)
         imessage_record_sent(c, message, message_len);
 
+#if !SC_IS_TEST
+    /* Send media attachments (local file paths only) after text succeeds */
+    if (send_err == SC_OK && media && media_count > 0) {
+        size_t m_tgt_cap = tgt_len * 2 + 1;
+        if (m_tgt_cap <= 4096) {
+            char *m_tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, m_tgt_cap);
+            if (m_tgt_esc) {
+                escape_for_applescript(m_tgt_esc, m_tgt_cap, tgt, tgt_len);
+                for (size_t i = 0; i < media_count && send_err == SC_OK; i++) {
+                    const char *url = media[i];
+                    if (!url || url[0] != '/')
+                        continue; /* Skip URLs and non-file media */
+                    size_t path_len = strlen(url);
+                    size_t path_esc_cap = path_len * 2 + 1;
+                    if (path_esc_cap > 8192)
+                        continue;
+                    char *path_esc = (char *)c->alloc->alloc(c->alloc->ctx, path_esc_cap);
+                    if (!path_esc)
+                        continue;
+                    escape_for_applescript(path_esc, path_esc_cap, url, path_len);
+                    size_t m_script_cap = 256 + strlen(m_tgt_esc) + strlen(path_esc);
+                    char *m_script = (char *)c->alloc->alloc(c->alloc->ctx, m_script_cap);
+                    if (m_script) {
+                        int m_n = snprintf(
+                            m_script, m_script_cap,
+                            "tell application \"Messages\"\n"
+                            "  set targetService to 1st service whose service type = iMessage\n"
+                            "  set targetBuddy to buddy \"%s\" of targetService\n"
+                            "  send POSIX file \"%s\" to targetBuddy\n"
+                            "end tell",
+                            m_tgt_esc, path_esc);
+                        c->alloc->free(c->alloc->ctx, path_esc, path_esc_cap);
+                        if (m_n > 0 && (size_t)m_n < m_script_cap) {
+                            const char *argv[] = {"osascript", "-e", m_script, NULL};
+                            sc_run_result_t result = {0};
+                            sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
+                            bool ok = (err == SC_OK && result.success && result.exit_code == 0);
+                            sc_run_result_free(c->alloc, &result);
+                            if (!ok)
+                                send_err = SC_ERR_CHANNEL_SEND;
+                        }
+                        c->alloc->free(c->alloc->ctx, m_script, m_script_cap);
+                    } else {
+                        c->alloc->free(c->alloc->ctx, path_esc, path_esc_cap);
+                    }
+                }
+                c->alloc->free(c->alloc->ctx, m_tgt_esc, m_tgt_cap);
+            }
+        }
+    }
+#endif
+
 imsg_cleanup:
     c->alloc->free(c->alloc->ctx, clean, clean_cap);
     return send_err;
@@ -388,6 +440,8 @@ static bool imessage_health_check(void *ctx) {
     (void)ctx;
 #if !defined(__APPLE__) || !defined(__MACH__)
     return false;
+#elif SC_IS_TEST
+    return true;
 #else
     const char *home = getenv("HOME");
     if (!home)
