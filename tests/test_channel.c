@@ -27,6 +27,9 @@
 #if SC_HAS_IMAP
 #include "seaclaw/channels/imap.h"
 #endif
+#if SC_HAS_SONATA
+#include "seaclaw/channels/voice_channel.h"
+#endif
 
 static void test_cli_create_succeeds(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -443,6 +446,48 @@ static void test_imap_poll_returns_mock(void) {
 #endif
 #endif
 
+/* ── Voice channel vtable tests ──────────────────────────────── */
+#if SC_HAS_SONATA
+static void test_voice_channel_vtable_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_channel_voice_create(&alloc, NULL, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "voice");
+    sc_channel_voice_destroy(&ch);
+}
+
+static void test_voice_channel_start_stop(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_channel_voice_create(&alloc, NULL, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->start(ch.ctx);
+    SC_ASSERT_EQ(err, SC_OK);
+    ch.vtable->stop(ch.ctx);
+    sc_channel_voice_destroy(&ch);
+}
+
+static void test_voice_channel_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_channel_voice_create(&alloc, NULL, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "user1", 5, "hello", 5, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_voice_destroy(&ch);
+}
+
+static void test_voice_channel_health_check_before_start(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch = {0};
+    sc_error_t err = sc_channel_voice_create(&alloc, NULL, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_FALSE(ch.vtable->health_check(ch.ctx));
+    sc_channel_voice_destroy(&ch);
+}
+#endif
+
 void run_channel_tests(void) {
     SC_TEST_SUITE("Channel");
     SC_RUN_TEST(test_cli_create_succeeds);
@@ -494,5 +539,11 @@ void run_channel_tests(void) {
 #if SC_IS_TEST
     SC_RUN_TEST(test_imap_poll_returns_mock);
 #endif
+#endif
+#if SC_HAS_SONATA
+    SC_RUN_TEST(test_voice_channel_vtable_name);
+    SC_RUN_TEST(test_voice_channel_start_stop);
+    SC_RUN_TEST(test_voice_channel_send);
+    SC_RUN_TEST(test_voice_channel_health_check_before_start);
 #endif
 }

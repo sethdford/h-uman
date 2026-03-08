@@ -8,8 +8,9 @@
 #include <stdint.h>
 
 #define SC_WS_SERVER_MAX_CONNS 32
-#define SC_WS_SERVER_MAX_MSG   (64 * 1024)
+#define SC_WS_SERVER_MAX_MSG   (512 * 1024)
 #define SC_WS_SERVER_RECV_BUF  (8 * 1024)
+#define SC_WS_SERVER_RECV_MAX  (512 * 1024)
 
 typedef enum sc_rpc_auth_level {
     SC_RPC_AUTH_NONE = 0,
@@ -21,8 +22,10 @@ typedef struct sc_ws_conn {
     bool active;
     bool authenticated;
     uint64_t id;
-    char recv_buf[SC_WS_SERVER_RECV_BUF];
+    char inline_buf[SC_WS_SERVER_RECV_BUF];
+    char *recv_buf;
     size_t recv_len;
+    size_t recv_cap;
 } sc_ws_conn_t;
 
 typedef void (*sc_ws_server_on_message_fn)(sc_ws_conn_t *conn, const char *data, size_t data_len,

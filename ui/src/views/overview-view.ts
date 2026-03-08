@@ -345,6 +345,14 @@ export class ScOverviewView extends GatewayAwareLitElement {
     if (this.shadowRoot) unobserveAllCards(this.shadowRoot);
   }
 
+  protected override onGatewaySwapped(
+    previous: GatewayAwareLitElement["gateway"],
+    current: NonNullable<GatewayAwareLitElement["gateway"]>,
+  ): void {
+    previous?.removeEventListener("gateway", this._gwEventHandler);
+    current.addEventListener("gateway", this._gwEventHandler);
+  }
+
   protected override async load(): Promise<void> {
     const gw = this.gateway;
     if (!gw) {

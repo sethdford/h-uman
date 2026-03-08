@@ -42,6 +42,7 @@ typedef struct sc_contact_profile {
     char *email;
     char *relationship;
     char *relationship_stage;
+    char *relationship_type; /* "family", "friend", "coworker", "acquaintance", or NULL */
     char *warmth_level;
     char *vulnerability_level;
     char *identity;
@@ -323,9 +324,9 @@ sc_error_t sc_persona_feedback_apply(sc_allocator_t *alloc, const char *persona_
 /* Message sampler — builds SQL / parses exports for persona creation pipeline */
 sc_error_t sc_persona_sampler_imessage_query(char *buf, size_t cap, size_t *out_len, size_t limit);
 sc_error_t sc_persona_sampler_imessage_conversation_query(const char *handle_id,
-                                                         size_t handle_id_len, char *buf,
-                                                         size_t cap, size_t *out_len,
-                                                         size_t limit);
+                                                          size_t handle_id_len, char *buf,
+                                                          size_t cap, size_t *out_len,
+                                                          size_t limit);
 
 /* Raw message from a conversation sampler (used by example bank builder) */
 typedef struct sc_sampler_raw_msg {
@@ -400,8 +401,8 @@ typedef struct sc_persona_cli_args {
     bool interactive;
     const char *facebook_export_path;
     const char *gmail_export_path;
-    const char *response_file;    /* --from-response <path> */
-    const char *with_contact;     /* --with-contact <handle_id> for conversation extraction */
+    const char *response_file; /* --from-response <path> */
+    const char *with_contact;  /* --with-contact <handle_id> for conversation extraction */
     const char **merge_sources;
     size_t merge_sources_count;
     const char *import_file; /* --from-file <path> or NULL for --from-stdin */

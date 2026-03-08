@@ -61,12 +61,52 @@ sc_error_t cp_memory_status(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_
     const char *backend = memory->vtable->name ? memory->vtable->name(memory->ctx) : "unknown";
     bool healthy = memory->vtable->health_check ? memory->vtable->health_check(memory->ctx) : true;
 
+    /* Per-category counts */
+    size_t core_n = 0, daily_n = 0, conv_n = 0, insight_n = 0;
+    if (memory->vtable->list) {
+        sc_memory_entry_t *all = NULL;
+        size_t all_count = 0;
+        if (memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &all, &all_count) == SC_OK &&
+            all) {
+            for (size_t i = 0; i < all_count; i++) {
+                switch (all[i].category.tag) {
+                case SC_MEMORY_CATEGORY_CORE:
+                    core_n++;
+                    break;
+                case SC_MEMORY_CATEGORY_DAILY:
+                    daily_n++;
+                    break;
+                case SC_MEMORY_CATEGORY_CONVERSATION:
+                    conv_n++;
+                    break;
+                case SC_MEMORY_CATEGORY_INSIGHT:
+                    insight_n++;
+                    break;
+                default:
+                    daily_n++;
+                    break;
+                }
+                sc_memory_entry_free_fields(alloc, &all[i]);
+            }
+            alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
+        }
+    }
+
     sc_json_value_t *obj = sc_json_object_new(alloc);
     if (!obj)
         return SC_ERR_OUT_OF_MEMORY;
-    cp_json_set_str(alloc, obj, "backend", backend ? backend : "unknown");
-    sc_json_object_set(alloc, obj, "count", sc_json_number_new(alloc, (double)count));
+    cp_json_set_str(alloc, obj, "engine", backend ? backend : "unknown");
+    sc_json_object_set(alloc, obj, "total_entries", sc_json_number_new(alloc, (double)count));
     sc_json_object_set(alloc, obj, "healthy", sc_json_bool_new(alloc, healthy));
+
+    sc_json_value_t *cats = sc_json_object_new(alloc);
+    if (cats) {
+        sc_json_object_set(alloc, cats, "core", sc_json_number_new(alloc, (double)core_n));
+        sc_json_object_set(alloc, cats, "daily", sc_json_number_new(alloc, (double)daily_n));
+        sc_json_object_set(alloc, cats, "conversation", sc_json_number_new(alloc, (double)conv_n));
+        sc_json_object_set(alloc, cats, "insight", sc_json_number_new(alloc, (double)insight_n));
+        sc_json_object_set(alloc, obj, "categories", cats);
+    }
 
     err = sc_json_stringify(alloc, obj, out, out_len);
     sc_json_free(alloc, obj);

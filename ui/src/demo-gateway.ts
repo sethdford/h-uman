@@ -423,12 +423,538 @@ const CONFIG_SCHEMA = {
 };
 
 const DEMO_TOOLS = [
-  { name: "shell", description: "Execute shell commands", category: "system" },
-  { name: "file_read", description: "Read file contents", category: "filesystem" },
-  { name: "file_write", description: "Write file contents", category: "filesystem" },
-  { name: "git", description: "Git operations", category: "dev" },
-  { name: "web_search", description: "Search the web", category: "web" },
-  { name: "web_fetch", description: "Fetch URL contents", category: "web" },
+  {
+    name: "shell",
+    description: "Execute shell commands in a sandboxed environment",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Shell command to execute" },
+        timeout_ms: { type: "integer", description: "Timeout in milliseconds" },
+        working_dir: { type: "string", description: "Working directory" },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "file_read",
+    description: "Read file contents from the filesystem",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute file path" },
+        offset: { type: "integer", description: "Start offset in bytes" },
+        limit: { type: "integer", description: "Max bytes to read" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "file_write",
+    description: "Write contents to a file",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute file path" },
+        content: { type: "string", description: "Content to write" },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "file_edit",
+    description: "Edit a file with search and replace",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute file path" },
+        old_string: { type: "string", description: "Text to find" },
+        new_string: { type: "string", description: "Replacement text" },
+      },
+      required: ["path", "old_string", "new_string"],
+    },
+  },
+  {
+    name: "file_append",
+    description: "Append content to a file",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute file path" },
+        content: { type: "string", description: "Content to append" },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "git",
+    description: "Execute Git operations",
+    parameters: {
+      type: "object",
+      properties: {
+        subcommand: { type: "string", description: "Git subcommand (status, diff, log, etc.)" },
+        args: { type: "string", description: "Additional arguments" },
+        repo_path: { type: "string", description: "Repository path" },
+      },
+      required: ["subcommand"],
+    },
+  },
+  {
+    name: "web_search",
+    description: "Search the web using configured provider",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query" },
+        num_results: { type: "integer", description: "Number of results" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "web_fetch",
+    description: "Fetch and extract content from a URL",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL to fetch" },
+        max_chars: { type: "integer", description: "Max characters to return" },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "http_request",
+    description: "Make HTTP requests to APIs",
+    parameters: {
+      type: "object",
+      properties: {
+        method: { type: "string", description: "HTTP method (GET, POST, etc.)" },
+        url: { type: "string", description: "Request URL" },
+        body: { type: "string", description: "Request body" },
+        headers: { type: "string", description: "Headers as JSON" },
+      },
+      required: ["method", "url"],
+    },
+  },
+  {
+    name: "image",
+    description: "Generate images using AI models",
+    parameters: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Image generation prompt" },
+        size: { type: "string", description: "Image dimensions" },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    name: "memory_store",
+    description: "Store a memory entry",
+    parameters: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Memory key" },
+        content: { type: "string", description: "Content to store" },
+      },
+      required: ["key", "content"],
+    },
+  },
+  {
+    name: "memory_recall",
+    description: "Recall memories by query or key",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query" },
+        limit: { type: "integer", description: "Max results" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "memory_list",
+    description: "List stored memory entries",
+    parameters: {
+      type: "object",
+      properties: { limit: { type: "integer", description: "Max entries to list" } },
+    },
+  },
+  {
+    name: "memory_forget",
+    description: "Remove a memory entry",
+    parameters: {
+      type: "object",
+      properties: { key: { type: "string", description: "Memory key to forget" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "message",
+    description: "Send a message to a channel",
+    parameters: {
+      type: "object",
+      properties: {
+        channel: { type: "string", description: "Target channel" },
+        text: { type: "string", description: "Message text" },
+      },
+      required: ["channel", "text"],
+    },
+  },
+  {
+    name: "delegate",
+    description: "Delegate a task to another agent",
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "Task description" },
+        agent: { type: "string", description: "Target agent" },
+      },
+      required: ["task"],
+    },
+  },
+  {
+    name: "spawn",
+    description: "Spawn a child process",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Command to spawn" },
+        args: { type: "array", description: "Command arguments" },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "schema",
+    description: "Generate or validate JSON schemas",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: generate or validate" },
+        input: { type: "string", description: "Input data or schema" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "pushover",
+    description: "Send push notifications via Pushover",
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Notification message" },
+        title: { type: "string", description: "Notification title" },
+        priority: { type: "integer", description: "Priority level (-2 to 2)" },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "diff",
+    description: "Compare text or files and produce diffs",
+    parameters: {
+      type: "object",
+      properties: {
+        old_text: { type: "string", description: "Original text" },
+        new_text: { type: "string", description: "Modified text" },
+      },
+      required: ["old_text", "new_text"],
+    },
+  },
+  {
+    name: "apply_patch",
+    description: "Apply a unified diff patch to a file",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "File path to patch" },
+        patch: { type: "string", description: "Unified diff content" },
+      },
+      required: ["path", "patch"],
+    },
+  },
+  {
+    name: "agent_query",
+    description: "Query the agent system for status and capabilities",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string", description: "Query string" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "agent_spawn",
+    description: "Spawn a sub-agent for parallel task execution",
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "Task for the sub-agent" },
+        model: { type: "string", description: "Model to use" },
+      },
+      required: ["task"],
+    },
+  },
+  {
+    name: "send_message",
+    description: "Send a message to a specific user or channel",
+    parameters: {
+      type: "object",
+      properties: {
+        target: { type: "string", description: "Target user or channel" },
+        message: { type: "string", description: "Message content" },
+        channel: { type: "string", description: "Channel type" },
+      },
+      required: ["target", "message"],
+    },
+  },
+  {
+    name: "pdf",
+    description: "Extract text content from PDF files",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "PDF file path" },
+        pages: { type: "string", description: "Page range (e.g. 1-5)" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "spreadsheet",
+    description: "Read and manipulate spreadsheet files",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Spreadsheet file path" },
+        action: { type: "string", description: "Action: read, write, query" },
+        sheet: { type: "string", description: "Sheet name" },
+      },
+      required: ["path", "action"],
+    },
+  },
+  {
+    name: "report",
+    description: "Generate formatted reports from data",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Report title" },
+        content: { type: "string", description: "Report content (markdown)" },
+        format: { type: "string", description: "Output format: markdown, html, pdf" },
+      },
+      required: ["title", "content"],
+    },
+  },
+  {
+    name: "broadcast",
+    description: "Broadcast a message to multiple channels",
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "Broadcast message" },
+        channels: { type: "array", description: "Target channel list" },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "calendar",
+    description: "Manage calendar events and schedules",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: list, create, update, delete" },
+        title: { type: "string", description: "Event title" },
+        start: { type: "string", description: "Start time (ISO 8601)" },
+        end: { type: "string", description: "End time (ISO 8601)" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "homeassistant",
+    description: "Control Home Assistant devices and automations",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: call_service, get_state, list" },
+        entity_id: { type: "string", description: "Entity ID" },
+        service: { type: "string", description: "Service to call" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "skill_write",
+    description: "Create or update agent skill definitions",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Skill name" },
+        content: { type: "string", description: "Skill content (markdown)" },
+      },
+      required: ["name", "content"],
+    },
+  },
+  {
+    name: "jira",
+    description: "Manage Jira issues and projects",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: search, create, update, comment" },
+        project: { type: "string", description: "Project key" },
+        issue_key: { type: "string", description: "Issue key (e.g. PROJ-123)" },
+        summary: { type: "string", description: "Issue summary" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "social",
+    description: "Post to social media platforms",
+    parameters: {
+      type: "object",
+      properties: {
+        platform: { type: "string", description: "Platform: twitter, facebook, instagram" },
+        content: { type: "string", description: "Post content" },
+      },
+      required: ["platform", "content"],
+    },
+  },
+  {
+    name: "facebook",
+    description: "Manage Facebook pages and posts",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: post, comment, reply" },
+        page_id: { type: "string", description: "Facebook page ID" },
+        message: { type: "string", description: "Message content" },
+      },
+      required: ["action", "message"],
+    },
+  },
+  {
+    name: "instagram",
+    description: "Manage Instagram content and interactions",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: post, story, reply" },
+        caption: { type: "string", description: "Post caption" },
+        media_url: { type: "string", description: "Media URL" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "twitter",
+    description: "Post tweets and manage Twitter interactions",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: tweet, reply, search" },
+        text: { type: "string", description: "Tweet text" },
+        reply_to: { type: "string", description: "Tweet ID to reply to" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "gcloud",
+    description: "Execute Google Cloud CLI commands",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "gcloud command to run" },
+        project: { type: "string", description: "GCP project ID" },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "firebase",
+    description: "Manage Firebase projects and resources",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Firebase CLI command" },
+        project: { type: "string", description: "Firebase project ID" },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "crm",
+    description: "Manage contacts and deals in CRM",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          description: "Action: search, create, update, list_deals, add_note",
+        },
+        query: { type: "string", description: "Search query" },
+        contact_id: { type: "string", description: "Contact ID" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "analytics",
+    description: "Query analytics data and generate insights",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Analytics query" },
+        date_range: { type: "string", description: "Date range (e.g. last_7d, last_30d)" },
+        metrics: { type: "array", description: "Metrics to retrieve" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "invoice",
+    description: "Create and manage invoices",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: create, send, list, mark_paid" },
+        client: { type: "string", description: "Client name" },
+        amount: { type: "number", description: "Invoice amount" },
+        items: { type: "array", description: "Line items" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "workflow",
+    description: "Define and execute multi-step workflows",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: run, list, create, status" },
+        workflow_id: { type: "string", description: "Workflow ID" },
+        steps: { type: "array", description: "Workflow steps" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "persona",
+    description: "Manage persona profiles and overlays",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "Action: get, set, list, create" },
+        name: { type: "string", description: "Persona name" },
+      },
+      required: ["action"],
+    },
+  },
 ];
 
 const DEMO_CRON_RUNS = (() => {

@@ -300,4 +300,18 @@ char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
  * Returns true if the response contains AI self-identification patterns. */
 bool sc_conversation_check_ai_disclosure(const char *response, size_t response_len);
 
+/* ── Banned AI phrases post-processor ─────────────────────────────────── */
+
+/* Strip or replace common AI-giveaway phrases from a response.
+ * "Great question" -> removed, "crucial" -> "important", etc.
+ * Modifies buf in-place. Returns new length. */
+size_t sc_conversation_strip_ai_phrases(char *buf, size_t len);
+
+/* ── Media-type awareness ─────────────────────────────────────────────── */
+
+/* Detect if the last user message was a photo/attachment.
+ * Returns true if the message or recent history contains attachment markers. */
+bool sc_conversation_is_media_message(const char *msg, size_t msg_len,
+                                      const sc_channel_history_entry_t *entries, size_t count);
+
 #endif /* SC_CONTEXT_CONVERSATION_H */

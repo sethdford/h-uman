@@ -1,6 +1,6 @@
 # SeaClaw (Swift/SeaClawKit) — Project Status
 
-This file documents the **Swift/SeaClawKit** module — a Swift wrapper around the C core. Metrics below are for the Swift codebase; the main C codebase has different scale (~597 source files, ~104K lines of C, 3675 tests, ~1506 KB binary).
+This file documents the **Swift/SeaClawKit** module — a Swift wrapper around the C core. Metrics below are for the Swift codebase; the main C codebase has different scale (~597 source files, ~104K lines of C, 3,726 tests, ~1506 KB binary).
 
 Last updated: 2026-03-08
 
@@ -11,7 +11,7 @@ Last updated: 2026-03-08
 | Source files (src/ + include/) | **~594**             |
 | Lines of C/H code              | **~101,017**         |
 | Test files                     | 128                  |
-| Tests passing                  | **3675/3675 (100%)** |
+| Tests passing                  | **3,726/3,726 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **~528 KB (full)**   |
 | Core binary (no curl/channels) | **463 KB**           |
 | seaclaw module parity          | **100%**             |

@@ -140,8 +140,6 @@ export class ScApp extends LitElement {
       padding: var(--sc-space-2xl);
       background: var(--sc-bg);
       view-transition-name: main-content;
-      content-visibility: auto;
-      contain-intrinsic-size: auto 100vh;
       position: relative;
       outline: none;
     }

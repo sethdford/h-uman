@@ -3,6 +3,7 @@
 #include "seaclaw/websocket/websocket.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef SC_GATEWAY_POSIX
@@ -341,6 +342,8 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
     slot->active = true;
     slot->authenticated = false;
     slot->id = srv->next_id++;
+    slot->recv_buf = slot->inline_buf;
+    slot->recv_cap = SC_WS_SERVER_RECV_BUF;
     slot->recv_len = 0;
     srv->conn_count++;
 
@@ -392,18 +395,26 @@ sc_error_t sc_ws_server_send(sc_ws_conn_t *conn, const char *data, size_t data_l
     (void)data_len;
     return SC_ERR_NOT_SUPPORTED;
 #else
-    char buf[SC_WS_SERVER_MAX_MSG + 14];
-    size_t frame_len = build_server_frame(buf, sizeof(buf), data, data_len);
-    if (frame_len == 0)
+    size_t frame_cap = data_len + 14;
+    char *buf = (char *)malloc(frame_cap);
+    if (!buf)
+        return SC_ERR_OUT_OF_MEMORY;
+    size_t frame_len = build_server_frame(buf, frame_cap, data, data_len);
+    if (frame_len == 0) {
+        free(buf);
         return SC_ERR_INVALID_ARGUMENT;
+    }
 
     size_t sent = 0;
     while (sent < frame_len) {
         ssize_t w = send(conn->fd, buf + sent, frame_len - sent, MSG_NOSIGNAL);
-        if (w <= 0)
+        if (w <= 0) {
+            free(buf);
             return SC_ERR_IO;
+        }
         sent += (size_t)w;
     }
+    free(buf);
     return SC_OK;
 #endif
 }
@@ -437,9 +448,13 @@ void sc_ws_server_close_conn(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
 #endif
     if (srv && srv->on_close)
         srv->on_close(conn, srv->cb_ctx);
+    if (conn->recv_buf && conn->recv_buf != conn->inline_buf)
+        free(conn->recv_buf);
     conn->fd = -1;
     conn->active = false;
     conn->authenticated = false;
+    conn->recv_buf = conn->inline_buf;
+    conn->recv_cap = SC_WS_SERVER_RECV_BUF;
     conn->recv_len = 0;
     if (srv && srv->conn_count > 0)
         srv->conn_count--;
@@ -451,12 +466,26 @@ sc_error_t sc_ws_server_read_and_process(sc_ws_server_t *srv, sc_ws_conn_t *conn
 #ifndef SC_GATEWAY_POSIX
     return SC_ERR_NOT_SUPPORTED;
 #else
-    size_t space = SC_WS_SERVER_RECV_BUF - conn->recv_len;
+    size_t space = conn->recv_cap - conn->recv_len;
     if (space == 0) {
-        /* Buffer full with no complete frame — likely a malformed or oversized
-           message.  Close the connection instead of silently discarding data. */
-        sc_ws_server_close_conn(srv, conn);
-        return SC_ERR_IO;
+        if (conn->recv_cap >= SC_WS_SERVER_RECV_MAX) {
+            sc_ws_server_close_conn(srv, conn);
+            return SC_ERR_IO;
+        }
+        size_t new_cap = conn->recv_cap * 2;
+        if (new_cap > SC_WS_SERVER_RECV_MAX)
+            new_cap = SC_WS_SERVER_RECV_MAX;
+        char *new_buf = (char *)malloc(new_cap);
+        if (!new_buf) {
+            sc_ws_server_close_conn(srv, conn);
+            return SC_ERR_IO;
+        }
+        memcpy(new_buf, conn->recv_buf, conn->recv_len);
+        if (conn->recv_buf != conn->inline_buf)
+            free(conn->recv_buf);
+        conn->recv_buf = new_buf;
+        conn->recv_cap = new_cap;
+        space = new_cap - conn->recv_len;
     }
     ssize_t n = recv(conn->fd, conn->recv_buf + conn->recv_len, space, 0);
     if (n <= 0) {

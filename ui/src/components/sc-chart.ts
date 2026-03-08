@@ -43,12 +43,10 @@ export class ScChart extends LitElement {
     }
     .wrapper {
       width: 100%;
-      height: 100%;
-      min-height: var(--height, 200px);
+      position: relative;
     }
     .wrapper canvas {
-      width: 100% !important;
-      height: auto !important;
+      display: block;
     }
     .empty {
       display: flex;

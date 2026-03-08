@@ -34,6 +34,10 @@
 #include "seaclaw/channel_loop.h"
 #include "seaclaw/channels/twitter.h"
 #endif
+#if SC_HAS_TIKTOK
+#include "seaclaw/channel_loop.h"
+#include "seaclaw/channels/tiktok.h"
+#endif
 #if SC_HAS_GOOGLE_RCS
 #include "seaclaw/channel_loop.h"
 #include "seaclaw/channels/google_rcs.h"
@@ -1836,6 +1840,178 @@ static void test_web_send_empty_target(void) {
 
 /* ─── Webhook + Poll tests ───────────────────────────────────────── */
 
+#if SC_HAS_DISCORD
+static void test_discord_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, "token", 5, &ch);
+    sc_error_t err = sc_discord_on_webhook(ch.ctx, &alloc, "hello from discord webhook", 26);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t out = 0;
+    err = sc_discord_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 1);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "test-sender");
+    SC_ASSERT_STR_EQ(msgs[0].content, "hello from discord webhook");
+    err = sc_discord_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 0);
+    sc_discord_destroy(&ch);
+}
+
+static void test_discord_webhook_empty_body(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_discord_create(&alloc, "token", 5, &ch);
+    sc_error_t err = sc_discord_on_webhook(ch.ctx, &alloc, "", 0);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    sc_discord_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_SLACK
+static void test_slack_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_slack_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_slack_on_webhook(ch.ctx, &alloc, "hello from slack webhook", 24);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t out = 0;
+    err = sc_slack_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 1);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "test-sender");
+    SC_ASSERT_STR_EQ(msgs[0].content, "hello from slack webhook");
+    err = sc_slack_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 0);
+    sc_slack_destroy(&ch);
+}
+
+static void test_slack_webhook_empty_body(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_slack_create(&alloc, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_slack_on_webhook(ch.ctx, &alloc, "", 0);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    sc_slack_destroy(&ch);
+}
+#endif
+
+#if SC_HAS_TIKTOK
+static void test_tiktok_create(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_tiktok_create(&alloc, "key", 3, "secret", 6, "token", 5, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "tiktok");
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_name(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_tiktok_create(&alloc, NULL, 0, NULL, 0, NULL, 0, &ch);
+    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "tiktok");
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_health_check(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    SC_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_send(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    sc_error_t err = ch.vtable->send(ch.ctx, "video123", 8, "Hello TikTok!", 13, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_webhook_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    sc_error_t err = sc_tiktok_on_webhook(ch.ctx, &alloc, "hello from tiktok", 17);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t out = 0;
+    err = sc_tiktok_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 1);
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "test-sender");
+    SC_ASSERT_STR_EQ(msgs[0].content, "hello from tiktok");
+    err = sc_tiktok_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 0);
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_poll_empty(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    sc_channel_loop_msg_t msgs[4];
+    size_t out = 99;
+    sc_error_t err = sc_tiktok_poll(ch.ctx, &alloc, msgs, 4, &out);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(out, 0);
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_webhook_empty_body(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    sc_error_t err = sc_tiktok_on_webhook(ch.ctx, &alloc, "", 0);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    sc_tiktok_destroy(&ch);
+}
+
+#if SC_IS_TEST
+static void test_tiktok_inject_and_poll(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = sc_tiktok_test_inject_mock(&ch, "user1", 5, "Mock message", 12);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = sc_tiktok_poll(ch.ctx, &alloc, msgs, 4, &count);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(count, 1);
+    SC_ASSERT_STR_EQ(msgs[0].content, "Mock message");
+    SC_ASSERT_STR_EQ(msgs[0].session_key, "user1");
+    sc_tiktok_destroy(&ch);
+}
+
+static void test_tiktok_send_captures_last_message(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_t ch;
+    sc_error_t err = sc_tiktok_create(&alloc, "k", 1, "s", 1, "t", 1, &ch);
+    SC_ASSERT_EQ(err, SC_OK);
+    err = ch.vtable->send(ch.ctx, "video1", 6, "Reply text", 10, NULL, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    size_t len = 0;
+    const char *msg = sc_tiktok_test_get_last_message(&ch, &len);
+    SC_ASSERT(msg != NULL);
+    SC_ASSERT_EQ(len, 10);
+    SC_ASSERT_STR_EQ(msg, "Reply text");
+    sc_tiktok_destroy(&ch);
+}
+#endif
+#endif
+
 #if SC_HAS_LINE
 static void test_line_webhook_and_poll(void) {
     sc_allocator_t alloc = sc_system_allocator();
@@ -2183,6 +2359,8 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_discord_poll_test_mode);
     SC_RUN_TEST(test_discord_poll_empty);
     SC_RUN_TEST(test_discord_webhook_malformed);
+    SC_RUN_TEST(test_discord_webhook_and_poll);
+    SC_RUN_TEST(test_discord_webhook_empty_body);
 #if SC_IS_TEST
     SC_RUN_TEST(test_discord_inject_and_poll);
     SC_RUN_TEST(test_discord_send_captures_last_message);
@@ -2197,6 +2375,8 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_slack_create_ex);
     SC_RUN_TEST(test_slack_poll_test_mode);
     SC_RUN_TEST(test_slack_webhook_malformed);
+    SC_RUN_TEST(test_slack_webhook_and_poll);
+    SC_RUN_TEST(test_slack_webhook_empty_body);
 #if SC_IS_TEST
     SC_RUN_TEST(test_slack_inject_and_poll);
     SC_RUN_TEST(test_slack_send_captures_last_message);
@@ -2228,6 +2408,19 @@ void run_channel_all_tests(void) {
     SC_RUN_TEST(test_instagram_poll_empty);
     SC_RUN_TEST(test_instagram_webhook_malformed);
     SC_RUN_TEST(test_instagram_send_empty_message);
+#endif
+#if SC_HAS_TIKTOK
+    SC_RUN_TEST(test_tiktok_create);
+    SC_RUN_TEST(test_tiktok_name);
+    SC_RUN_TEST(test_tiktok_health_check);
+    SC_RUN_TEST(test_tiktok_send);
+    SC_RUN_TEST(test_tiktok_webhook_and_poll);
+    SC_RUN_TEST(test_tiktok_poll_empty);
+    SC_RUN_TEST(test_tiktok_webhook_empty_body);
+#if SC_IS_TEST
+    SC_RUN_TEST(test_tiktok_inject_and_poll);
+    SC_RUN_TEST(test_tiktok_send_captures_last_message);
+#endif
 #endif
 #if SC_HAS_TWITTER
     SC_RUN_TEST(test_twitter_create);

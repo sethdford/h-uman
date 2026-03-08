@@ -131,6 +131,7 @@ static void free_contact_profile(sc_allocator_t *alloc, sc_contact_profile_t *cp
     free_contact_string(alloc, cp->email);
     free_contact_string(alloc, cp->relationship);
     free_contact_string(alloc, cp->relationship_stage);
+    free_contact_string(alloc, cp->relationship_type);
     free_contact_string(alloc, cp->warmth_level);
     free_contact_string(alloc, cp->vulnerability_level);
     free_contact_string(alloc, cp->identity);
@@ -1210,6 +1211,9 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
             s = sc_json_get_string(cval, "relationship_stage");
             if (s)
                 PERSONA_STRDUP_OPT(cp->relationship_stage, s);
+            s = sc_json_get_string(cval, "relationship_type");
+            if (s)
+                PERSONA_STRDUP_OPT(cp->relationship_type, s);
             s = sc_json_get_string(cval, "warmth_level");
             if (s)
                 PERSONA_STRDUP_OPT(cp->warmth_level, s);

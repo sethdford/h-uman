@@ -110,6 +110,9 @@ static void test_webhook_path_valid_direct_channels(void) {
     SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/telegram"));
     SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/discord"));
     SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/slack/events"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/tiktok"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/whatsapp"));
+    SC_ASSERT_TRUE(sc_gateway_is_webhook_path("/facebook"));
 }
 
 static void test_webhook_path_rejects_traversal(void) {

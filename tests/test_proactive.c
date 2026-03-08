@@ -511,8 +511,8 @@ static void proactive_starter_diverse_memories_produce_context(void) {
     static const char CONTACT[] = "contact_diverse";
 
     const char *keys[] = {"topic:contact_diverse:1", "topic:contact_diverse:2",
-                         "topic:contact_diverse:3", "topic:contact_diverse:4",
-                         "topic:contact_diverse:5", "topic:contact_diverse:6"};
+                          "topic:contact_diverse:3", "topic:contact_diverse:4",
+                          "topic:contact_diverse:5", "topic:contact_diverse:6"};
     const char *contents[] = {
         "recent topics activities interests: planning a trip to Japan",
         "recent topics activities interests: new job at Acme Corp",
@@ -522,8 +522,8 @@ static void proactive_starter_diverse_memories_produce_context(void) {
         "recent topics activities interests: house renovation project",
     };
     for (int i = 0; i < 6; i++) {
-        mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i], strlen(contents[i]),
-                          &cat, CONTACT, sizeof(CONTACT) - 1);
+        mem.vtable->store(mem.ctx, keys[i], strlen(keys[i]), contents[i], strlen(contents[i]), &cat,
+                          CONTACT, sizeof(CONTACT) - 1);
     }
 
     char *out = NULL;
@@ -571,6 +571,68 @@ static void proactive_event_cap_at_three(void) {
     sc_proactive_result_deinit(&result, &alloc);
 }
 
+static void proactive_reminder_triggers_with_interests_and_cooldown(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    const char *contact = "alice";
+    const char *interests = "hiking, cooking, chess";
+    uint64_t now_ms = 48 * 3600 * 1000ULL;           /* 48 hours from epoch */
+    uint64_t last_reminder_ms = 24 * 3600 * 1000ULL; /* 24h ago */
+
+    sc_error_t err = sc_proactive_check_reminder(&alloc, contact, 5, interests, strlen(interests),
+                                                 now_ms, last_reminder_ms, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(result.count, 1u);
+    SC_ASSERT_EQ(result.actions[0].type, SC_PROACTIVE_REMINDER);
+    SC_ASSERT_EQ(result.actions[0].priority, 0.75);
+    SC_ASSERT_NOT_NULL(result.actions[0].message);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "PROACTIVE REMINDER") != NULL);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "alice") != NULL);
+    SC_ASSERT_TRUE(strstr(result.actions[0].message, "Reply SKIP") != NULL);
+
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_reminder_no_trigger_within_24h(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    const char *interests = "hiking";
+    uint64_t now_ms = 25 * 3600 * 1000ULL;
+    uint64_t last_reminder_ms = 24 * 3600 * 1000ULL; /* 1h ago */
+
+    sc_error_t err = sc_proactive_check_reminder(&alloc, "bob", 3, interests, 6, now_ms,
+                                                 last_reminder_ms, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(result.count, 0u);
+
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_reminder_no_trigger_without_interests(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_proactive_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    sc_error_t err =
+        sc_proactive_check_reminder(&alloc, "bob", 3, NULL, 0, 48 * 3600 * 1000ULL, 0, &result);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(result.count, 0u);
+
+    sc_proactive_result_deinit(&result, &alloc);
+}
+
+static void proactive_backoff_hours_returns_correct_thresholds(void) {
+    SC_ASSERT_EQ(sc_proactive_backoff_hours(0), 72u);
+    SC_ASSERT_EQ(sc_proactive_backoff_hours(1), 144u);
+    SC_ASSERT_EQ(sc_proactive_backoff_hours(2), 288u);
+    SC_ASSERT_EQ(sc_proactive_backoff_hours(3), UINT32_MAX);
+    SC_ASSERT_EQ(sc_proactive_backoff_hours(10), UINT32_MAX);
+}
+
 void run_proactive_tests(void) {
     SC_TEST_SUITE("proactive");
     SC_RUN_TEST(proactive_milestone_at_10_sessions);
@@ -598,4 +660,8 @@ void run_proactive_tests(void) {
     SC_RUN_TEST(proactive_event_yesterday_referenced_naturally);
     SC_RUN_TEST(proactive_event_low_confidence_skipped);
     SC_RUN_TEST(proactive_event_cap_at_three);
+    SC_RUN_TEST(proactive_reminder_triggers_with_interests_and_cooldown);
+    SC_RUN_TEST(proactive_reminder_no_trigger_within_24h);
+    SC_RUN_TEST(proactive_reminder_no_trigger_without_interests);
+    SC_RUN_TEST(proactive_backoff_hours_returns_correct_thresholds);
 }

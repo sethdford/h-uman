@@ -5,12 +5,14 @@
 #include "seaclaw/core/string.h"
 #include "seaclaw/memory.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define SC_PROACTIVE_EVENT_FOLLOW_UP_CAP 3
 #define MS_PER_HOUR                      (3600ULL * 1000ULL)
+#define MS_PER_DAY                       (24ULL * MS_PER_HOUR)
 #define HOURS_3_DAYS                     72u
 #define HOURS_7_DAYS                     168u
 #define HOURS_14_DAYS                    336u
@@ -66,6 +68,115 @@ sc_error_t sc_proactive_check_silence(sc_allocator_t *alloc, uint64_t last_conta
     act->priority = 0.85;
     out->count++;
     return SC_OK;
+}
+
+sc_error_t sc_proactive_check_reminder(sc_allocator_t *alloc, const char *contact_id,
+                                       size_t contact_id_len, const char *interests,
+                                       size_t interests_len, uint64_t now_ms,
+                                       uint64_t last_reminder_ms, sc_proactive_result_t *out) {
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
+    if (!interests || interests_len == 0)
+        return SC_OK;
+    if (last_reminder_ms > 0) {
+        if (now_ms <= last_reminder_ms)
+            return SC_OK;
+        uint64_t elapsed_ms = now_ms - last_reminder_ms;
+        if (elapsed_ms < MS_PER_DAY)
+            return SC_OK;
+    }
+    if (out->count >= SC_PROACTIVE_MAX_ACTIONS)
+        return SC_OK;
+
+    /* Count comma-separated interests */
+    size_t token_count = 0;
+    size_t i = 0;
+    while (i < interests_len) {
+        while (i < interests_len &&
+               (interests[i] == ',' || interests[i] == ' ' || interests[i] == '\t'))
+            i++;
+        if (i >= interests_len)
+            break;
+        token_count++;
+        while (i < interests_len && interests[i] != ',')
+            i++;
+    }
+    if (token_count == 0)
+        return SC_OK;
+
+    /* Pick one randomly using now_ms as seed (deterministic LCG) */
+    uint32_t seed = (uint32_t)(now_ms & 0xFFFFFFFFu);
+    if (seed == 0)
+        seed = 1;
+    seed = seed * 1103515245u + 12345u;
+    size_t idx = ((size_t)(seed >> 16) & 0x7FFFu) % token_count;
+
+    /* Extract the idx-th token */
+    const char *token_start = NULL;
+    size_t token_len = 0;
+    size_t t = 0;
+    i = 0;
+    while (i < interests_len && t <= idx) {
+        while (i < interests_len &&
+               (interests[i] == ',' || interests[i] == ' ' || interests[i] == '\t'))
+            i++;
+        if (i >= interests_len)
+            break;
+        if (t == idx) {
+            token_start = interests + i;
+            while (i < interests_len && interests[i] != ',')
+                i++;
+            token_len = (size_t)((interests + i) - token_start);
+            while (token_len > 0 &&
+                   (token_start[token_len - 1] == ' ' || token_start[token_len - 1] == '\t'))
+                token_len--;
+            break;
+        }
+        t++;
+        while (i < interests_len && interests[i] != ',')
+            i++;
+    }
+    if (!token_start || token_len == 0)
+        return SC_OK;
+
+    const char *contact_display = contact_id && contact_id_len > 0 ? contact_id : "this contact";
+    size_t contact_display_len = contact_id && contact_id_len > 0 ? contact_id_len : 14;
+
+    char msg[512];
+    int n = snprintf(
+        msg, sizeof(msg),
+        "PROACTIVE REMINDER: %.*s is interested in %.*s. Imagine you just saw "
+        "something related to %.*s. Write a SHORT, natural 'this reminded me of you' "
+        "message. Examples: 'oh btw did you see [thing about interest]?' or 'lol this "
+        "is so %.*s' or 'random but %.*s-related thought'. One sentence max. Reply SKIP "
+        "if nothing natural.",
+        (int)contact_display_len, contact_display, (int)token_len, token_start, (int)token_len,
+        token_start, (int)token_len, token_start, (int)token_len, token_start);
+    if (n <= 0 || (size_t)n >= sizeof(msg))
+        return SC_OK;
+
+    sc_proactive_action_t *act = &out->actions[out->count];
+    act->type = SC_PROACTIVE_REMINDER;
+    act->message = sc_strndup(alloc, msg, (size_t)n);
+    if (!act->message)
+        return SC_ERR_OUT_OF_MEMORY;
+    act->message_len = (size_t)n;
+    act->priority = 0.75;
+    out->count++;
+    return SC_OK;
+}
+
+uint32_t sc_proactive_backoff_hours(uint32_t consecutive_unanswered) {
+    switch (consecutive_unanswered) {
+    case 0:
+        return 72u;
+    case 1:
+        return 144u;
+    case 2:
+        return 288u;
+    default:
+        return UINT32_MAX;
+    }
 }
 
 static int compare_priority_desc(const void *a, const void *b) {

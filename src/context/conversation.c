@@ -1968,11 +1968,10 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
         return SC_RESPONSE_SKIP;
 
     /* Greetings: always respond even if short */
-    if (ni >= 2 &&
-        (memcmp(norm, "hi", 2) == 0 || (ni >= 3 && memcmp(norm, "hey", 3) == 0) ||
-         memcmp(norm, "yo", 2) == 0 || (ni >= 3 && memcmp(norm, "sup", 3) == 0) ||
-         (ni >= 5 && memcmp(norm, "hello", 5) == 0) ||
-         (ni >= 5 && memcmp(norm, "howdy", 5) == 0))) {
+    if (ni >= 2 && (memcmp(norm, "hi", 2) == 0 || (ni >= 3 && memcmp(norm, "hey", 3) == 0) ||
+                    memcmp(norm, "yo", 2) == 0 || (ni >= 3 && memcmp(norm, "sup", 3) == 0) ||
+                    (ni >= 5 && memcmp(norm, "hello", 5) == 0) ||
+                    (ni >= 5 && memcmp(norm, "howdy", 5) == 0))) {
         *delay_extra_ms = 2000;
         return SC_RESPONSE_BRIEF;
     }
@@ -2011,15 +2010,13 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
             str_contains_ci(msg, msg_len, "good night") ||
             str_contains_ci(msg, msg_len, "gotta go") || str_contains_ci(msg, msg_len, "ttyl") ||
             str_contains_ci(msg, msg_len, "heading out") ||
-            str_contains_ci(msg, msg_len, "peace out") ||
-            str_contains_ci(msg, msg_len, "see ya") ||
+            str_contains_ci(msg, msg_len, "peace out") || str_contains_ci(msg, msg_len, "see ya") ||
             str_contains_ci(msg, msg_len, "catch you later") ||
             str_contains_ci(msg, msg_len, "i'm out") ||
-            (msg_len <= 10 && (str_contains_ci(msg, msg_len, "bye") ||
-                               str_contains_ci(msg, msg_len, "night") ||
-                               str_contains_ci(msg, msg_len, "later") ||
-                               str_contains_ci(msg, msg_len, "gn") ||
-                               str_contains_ci(msg, msg_len, "cya")));
+            (msg_len <= 10 &&
+             (str_contains_ci(msg, msg_len, "bye") || str_contains_ci(msg, msg_len, "night") ||
+              str_contains_ci(msg, msg_len, "later") || str_contains_ci(msg, msg_len, "gn") ||
+              str_contains_ci(msg, msg_len, "cya")));
 
         if (incoming_is_farewell) {
             /* Check if our last message was also a farewell */
@@ -2086,8 +2083,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
             str_contains_ci(msg, msg_len, "good night") ||
             str_contains_ci(msg, msg_len, "gotta go") || str_contains_ci(msg, msg_len, "ttyl") ||
             str_contains_ci(msg, msg_len, "heading out") ||
-            str_contains_ci(msg, msg_len, "peace out") ||
-            str_contains_ci(msg, msg_len, "see ya") ||
+            str_contains_ci(msg, msg_len, "peace out") || str_contains_ci(msg, msg_len, "see ya") ||
             str_contains_ci(msg, msg_len, "catch you later") ||
             str_contains_ci(msg, msg_len, "i'm out")) {
             *delay_extra_ms = 1500;
@@ -3086,6 +3082,116 @@ bool sc_conversation_check_ai_disclosure(const char *response, size_t response_l
             }
             if (match)
                 return true;
+        }
+    }
+    return false;
+}
+
+/* ── Banned AI phrases post-processor ─────────────────────────────────── */
+
+size_t sc_conversation_strip_ai_phrases(char *buf, size_t len) {
+    if (!buf || len == 0)
+        return len;
+
+    struct {
+        const char *from;
+        size_t from_len;
+        const char *to;
+        size_t to_len;
+    } replacements[] = {
+        {"Great question! ", 16, "", 0},
+        {"Great question. ", 16, "", 0},
+        {"That's a great point! ", 22, "", 0},
+        {"That's a great point. ", 22, "", 0},
+        {"I appreciate you sharing that. ", 31, "", 0},
+        {"I appreciate you sharing that! ", 31, "", 0},
+        {"Let me break this down. ", 24, "", 0},
+        {"Let me break this down: ", 24, "", 0},
+        {"Here's the thing: ", 18, "", 0},
+        {"Here's the thing, ", 18, "", 0},
+        {"That's a fantastic ", 19, "That's a good ", 14},
+        {"crucial", 7, "important", 9},
+        {"comprehensive", 13, "thorough", 8},
+        {"pivotal", 7, "key", 3},
+        {"delve", 5, "dig", 3},
+        {"facilitate", 10, "help", 4},
+        {"leverage", 8, "use", 3},
+        {"utilize", 7, "use", 3},
+        {"I completely understand", 23, "I get it", 8},
+        {"Absolutely! ", 12, "", 0},
+        {"Certainly! ", 11, "", 0},
+    };
+    size_t n_rep = sizeof(replacements) / sizeof(replacements[0]);
+
+    for (size_t r = 0; r < n_rep; r++) {
+        for (size_t i = 0; i + replacements[r].from_len <= len; i++) {
+            bool ci_match = true;
+            for (size_t j = 0; j < replacements[r].from_len; j++) {
+                char a = buf[i + j];
+                char b = replacements[r].from[j];
+                if (a >= 'A' && a <= 'Z')
+                    a += 32;
+                if (b >= 'A' && b <= 'Z')
+                    b += 32;
+                if (a != b) {
+                    ci_match = false;
+                    break;
+                }
+            }
+            if (!ci_match)
+                continue;
+
+            if (replacements[r].to_len <= replacements[r].from_len) {
+                size_t diff = replacements[r].from_len - replacements[r].to_len;
+                if (replacements[r].to_len > 0)
+                    memcpy(buf + i, replacements[r].to, replacements[r].to_len);
+                memmove(buf + i + replacements[r].to_len, buf + i + replacements[r].from_len,
+                        len - (i + replacements[r].from_len));
+                len -= diff;
+                buf[len] = '\0';
+            }
+            break;
+        }
+    }
+
+    if (len > 0 && buf[0] >= 'a' && buf[0] <= 'z')
+        buf[0] -= 32;
+
+    return len;
+}
+
+/* ── Media-type awareness ─────────────────────────────────────────────── */
+
+bool sc_conversation_is_media_message(const char *msg, size_t msg_len,
+                                      const sc_channel_history_entry_t *entries, size_t count) {
+    static const char *markers[] = {
+        "[image or attachment]",
+        "[Photo shared]",
+        "[Attachment shared]",
+        "[image]",
+        "[photo]",
+        "[video]",
+        "[attachment]",
+        "[Voice Message]",
+    };
+    size_t n_markers = sizeof(markers) / sizeof(markers[0]);
+
+    if (msg && msg_len > 0) {
+        for (size_t m = 0; m < n_markers; m++) {
+            if (str_contains_ci(msg, msg_len, markers[m]))
+                return true;
+        }
+    }
+
+    if (entries && count > 0) {
+        const sc_channel_history_entry_t *last = &entries[count - 1];
+        if (!last->from_me) {
+            const char *t = last->text;
+            size_t tl = strlen(t);
+            for (size_t m = 0; m < n_markers; m++) {
+                if (str_contains_ci(t, tl, markers[m]))
+                    return true;
+            }
         }
     }
     return false;

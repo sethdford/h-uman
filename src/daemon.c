@@ -1252,6 +1252,44 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     continue;
                 }
 
+                /* ── BTH: Late-night mode (b1c) ────────────────────────────── */
+                int bth_hour = -1;
+#ifndef SC_IS_TEST
+                {
+                    time_t night_t = time(NULL);
+                    struct tm night_buf;
+                    struct tm *night_lt = localtime_r(&night_t, &night_buf);
+                    if (night_lt)
+                        bth_hour = night_lt->tm_hour;
+                }
+                if (bth_hour >= 0) {
+                    if (bth_hour >= 1 && bth_hour < 7) {
+                        /* 1AM-7AM: very high SKIP chance (sleeping) */
+                        uint32_t night_r = (uint32_t)time(NULL) * 1103515245u + 12345u;
+                        if (((night_r >> 16u) % 100u) < 85u) {
+                            fprintf(stderr, "[seaclaw] late-night skip (1AM-7AM, hour=%d)\n",
+                                    bth_hour);
+                            action = SC_RESPONSE_SKIP;
+                            continue;
+                        }
+                        /* If not skipped, force very delayed + brief */
+                        extra_delay_ms += 30000 + ((night_r >> 8u) % 60000u);
+                        action = SC_RESPONSE_BRIEF;
+                    } else if (bth_hour >= 7 && bth_hour < 9) {
+                        /* 7-9AM: brief "just woke up" energy */
+                        if (action == SC_RESPONSE_FULL)
+                            action = SC_RESPONSE_BRIEF;
+                    }
+                }
+#endif
+
+                /* ── BTH: Media-type awareness (b3c) ──────────────────────── */
+                if (action != SC_RESPONSE_SKIP &&
+                    sc_conversation_is_media_message(combined, combined_len, NULL, 0)) {
+                    action = SC_RESPONSE_BRIEF;
+                    fprintf(stderr, "[seaclaw] media message detected, forcing brief response\n");
+                }
+
                 /* For BRIEF actions, override max_response_chars to force ultra-short */
                 bool brief_mode = (action == SC_RESPONSE_BRIEF);
 
@@ -1291,11 +1329,14 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (adjusted < 1000)
                         adjusted = 1000;
 
-                    /* Time-of-day awareness: slower 9PM-7AM */
-                    time_t now_t = time(NULL);
-                    struct tm tod_buf;
-                    struct tm *lt = localtime_r(&now_t, &tod_buf);
-                    if (lt && (lt->tm_hour >= 21 || lt->tm_hour < 7))
+                    /* Late-night mode: graduated delay multiplier by time band */
+                    if (bth_hour >= 22 || (bth_hour >= 0 && bth_hour < 1))
+                        adjusted = adjusted * 2;
+                    else if (bth_hour >= 1 && bth_hour < 7)
+                        adjusted = adjusted * 3;
+                    else if (bth_hour >= 7 && bth_hour < 9)
+                        adjusted = adjusted * 3 / 2;
+                    else if (bth_hour >= 21)
                         adjusted = adjusted * 3 / 2;
 
                     /* Rare "busy" delay: 1% chance of 15-45 second delay */
@@ -1502,51 +1543,114 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
 #if defined(SC_HAS_PERSONA) && !defined(SC_IS_TEST)
+                /* BTH: Ongoing per-contact style learning (b2c) — re-run every 10 convos,
+                 * use all overlay fields, LRU eviction at cap */
                 {
-                    static char profiled_contacts[16][64];
-                    static size_t profiled_count = 0;
-                    bool already_profiled = false;
-                    for (size_t pc = 0; pc < profiled_count; pc++) {
-                        if (strncmp(profiled_contacts[pc], batch_key, key_len) == 0 &&
-                            profiled_contacts[pc][key_len] == '\0') {
-                            already_profiled = true;
+#define SC_STYLE_CACHE_CAP        16
+#define SC_STYLE_RELEARN_INTERVAL 10
+                    static struct {
+                        char key[64];
+                        uint32_t convo_count;
+                        uint64_t last_used;
+                    } style_cache[SC_STYLE_CACHE_CAP];
+                    static size_t style_cache_count = 0;
+                    static uint64_t style_seq = 0;
+                    style_seq++;
+
+                    size_t slot = (size_t)-1;
+                    for (size_t sc_i = 0; sc_i < style_cache_count; sc_i++) {
+                        if (strncmp(style_cache[sc_i].key, batch_key, key_len) == 0 &&
+                            style_cache[sc_i].key[key_len] == '\0') {
+                            slot = sc_i;
+                            style_cache[sc_i].convo_count++;
+                            style_cache[sc_i].last_used = style_seq;
                             break;
                         }
                     }
-                    if (!already_profiled && profiled_count < 16 && key_len < 64) {
+
+                    if (slot == (size_t)-1 && key_len < 64) {
+                        if (style_cache_count < SC_STYLE_CACHE_CAP) {
+                            slot = style_cache_count++;
+                        } else {
+                            size_t lru = 0;
+                            for (size_t sc_i = 1; sc_i < SC_STYLE_CACHE_CAP; sc_i++) {
+                                if (style_cache[sc_i].last_used < style_cache[lru].last_used)
+                                    lru = sc_i;
+                            }
+                            slot = lru;
+                        }
+                        memcpy(style_cache[slot].key, batch_key, key_len);
+                        style_cache[slot].key[key_len] = '\0';
+                        style_cache[slot].convo_count = 1;
+                        style_cache[slot].last_used = style_seq;
+                    }
+
+                    bool should_profile = false;
+                    if (slot != (size_t)-1) {
+                        uint32_t cc = style_cache[slot].convo_count;
+                        if (cc == 1 || (cc % SC_STYLE_RELEARN_INTERVAL) == 0)
+                            should_profile = true;
+                    }
+
+                    if (should_profile) {
                         sc_persona_overlay_t auto_ov;
                         memset(&auto_ov, 0, sizeof(auto_ov));
                         if (sc_persona_auto_profile(alloc, batch_key, key_len, &auto_ov) == SC_OK) {
-                            if (auto_ov.style_notes && auto_ov.style_notes_count > 0 &&
-                                auto_ov.style_notes[0]) {
-                                size_t note_len = strlen(auto_ov.style_notes[0]);
-                                if (note_len > 0) {
-                                    char *note =
-                                        sc_strndup(alloc, auto_ov.style_notes[0], note_len);
-                                    if (note) {
-                                        if (contact_ctx) {
-                                            size_t total = contact_ctx_len + note_len + 2;
-                                            char *merged =
-                                                (char *)alloc->alloc(alloc->ctx, total + 1);
-                                            if (merged) {
-                                                memcpy(merged, contact_ctx, contact_ctx_len);
-                                                merged[contact_ctx_len] = '\n';
-                                                memcpy(merged + contact_ctx_len + 1, note,
-                                                       note_len);
-                                                merged[total] = '\0';
-                                                alloc->free(alloc->ctx, contact_ctx,
-                                                            contact_ctx_len + 1);
-                                                contact_ctx = merged;
-                                                contact_ctx_len = total;
-                                            }
-                                            alloc->free(alloc->ctx, note, note_len + 1);
-                                        } else {
-                                            contact_ctx = note;
-                                            contact_ctx_len = note_len;
-                                        }
+                            char profile_buf[1024];
+                            int pb_n = 0;
+                            profile_buf[0] = '\0';
+
+                            if (auto_ov.formality) {
+                                pb_n +=
+                                    snprintf(profile_buf + pb_n, sizeof(profile_buf) - (size_t)pb_n,
+                                             "Contact formality: %s. ", auto_ov.formality);
+                            }
+                            if (auto_ov.avg_length) {
+                                pb_n +=
+                                    snprintf(profile_buf + pb_n, sizeof(profile_buf) - (size_t)pb_n,
+                                             "Avg message length: %s. ", auto_ov.avg_length);
+                            }
+                            if (auto_ov.emoji_usage) {
+                                pb_n +=
+                                    snprintf(profile_buf + pb_n, sizeof(profile_buf) - (size_t)pb_n,
+                                             "Emoji usage: %s. ", auto_ov.emoji_usage);
+                            }
+                            if (auto_ov.style_notes) {
+                                for (size_t sn = 0;
+                                     sn < auto_ov.style_notes_count && (size_t)pb_n < 900; sn++) {
+                                    if (auto_ov.style_notes[sn]) {
+                                        pb_n += snprintf(profile_buf + pb_n,
+                                                         sizeof(profile_buf) - (size_t)pb_n, "%s ",
+                                                         auto_ov.style_notes[sn]);
                                     }
                                 }
                             }
+
+                            if (pb_n > 0) {
+                                char *note = sc_strndup(alloc, profile_buf, (size_t)pb_n);
+                                if (note) {
+                                    if (contact_ctx) {
+                                        size_t total = contact_ctx_len + (size_t)pb_n + 2;
+                                        char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                                        if (merged) {
+                                            memcpy(merged, contact_ctx, contact_ctx_len);
+                                            merged[contact_ctx_len] = '\n';
+                                            memcpy(merged + contact_ctx_len + 1, note,
+                                                   (size_t)pb_n);
+                                            merged[total] = '\0';
+                                            alloc->free(alloc->ctx, contact_ctx,
+                                                        contact_ctx_len + 1);
+                                            contact_ctx = merged;
+                                            contact_ctx_len = total;
+                                        }
+                                        alloc->free(alloc->ctx, note, (size_t)pb_n + 1);
+                                    } else {
+                                        contact_ctx = note;
+                                        contact_ctx_len = (size_t)pb_n;
+                                    }
+                                }
+                            }
+
                             if (auto_ov.formality)
                                 alloc->free(alloc->ctx, (char *)auto_ov.formality,
                                             strlen(auto_ov.formality) + 1);
@@ -1575,9 +1679,6 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                                             auto_ov.typing_quirks_count * sizeof(char *));
                             }
                         }
-                        memcpy(profiled_contacts[profiled_count], batch_key, key_len);
-                        profiled_contacts[profiled_count][key_len] = '\0';
-                        profiled_count++;
                     }
                 }
 #endif
@@ -2498,6 +2599,49 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* ── BTH: Time-of-day persona overlay (b1c late-night + b3b vulnerability) */
+                {
+                    const char *tod_overlay = NULL;
+                    size_t tod_len = 0;
+                    static const char NIGHT_OV[] =
+                        "\nIt's late at night. You can be more relaxed, introspective, "
+                        "slightly more open than during the day. If it feels natural, share "
+                        "something personal or vulnerable. Late-night texts are more intimate.";
+                    static const char MORNING_OV[] =
+                        "\nIt's early morning — you just woke up. Keep responses brief, "
+                        "practical, slightly groggy. Short sentences. No deep philosophical "
+                        "conversations yet.";
+                    if (bth_hour >= 22 || (bth_hour >= 0 && bth_hour < 1)) {
+                        tod_overlay = NIGHT_OV;
+                        tod_len = sizeof(NIGHT_OV) - 1;
+                    } else if (bth_hour >= 7 && bth_hour < 9) {
+                        tod_overlay = MORNING_OV;
+                        tod_len = sizeof(MORNING_OV) - 1;
+                    }
+                    if (tod_overlay && tod_len > 0) {
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + tod_len + 2;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                merged[convo_ctx_len] = '\n';
+                                memcpy(merged + convo_ctx_len + 1, tod_overlay, tod_len);
+                                merged[total - 1] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total - 1;
+                            }
+                        } else {
+                            convo_ctx = (char *)alloc->alloc(alloc->ctx, tod_len + 1);
+                            if (convo_ctx) {
+                                memcpy(convo_ctx, tod_overlay, tod_len);
+                                convo_ctx[tod_len] = '\0';
+                                convo_ctx_len = tod_len;
+                            }
+                        }
+                    }
+                }
+
                 /* ── BTH Tier 2: Sentiment momentum (t2b) ─────────────────── */
                 if (history_entries && history_count >= 3) {
                     char *sent_ctx = NULL;
@@ -3060,6 +3204,9 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (err == SC_OK && response && response_len > 0) {
 #ifndef SC_IS_TEST
 #ifdef SC_HAS_PERSONA
+                    /* BTH: Banned AI phrases filter — strip giveaway language */
+                    response_len = sc_conversation_strip_ai_phrases(response, response_len);
+
                     /* Apply typing quirks from persona overlay as post-processing.
                      * This shrinks the buffer in-place; keep original size for free. */
                     const sc_persona_overlay_t *overlay = NULL;
