@@ -45,14 +45,10 @@ static void test_persona_find_overlay_found(void) {
 
     persona.overlays = (sc_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(sc_persona_overlay_t));
     SC_ASSERT_NOT_NULL(persona.overlays);
+    memset(persona.overlays, 0, sizeof(sc_persona_overlay_t));
     persona.overlays_count = 1;
 
     persona.overlays[0].channel = sc_strndup(&alloc, "telegram", 8);
-    persona.overlays[0].formality = NULL;
-    persona.overlays[0].avg_length = NULL;
-    persona.overlays[0].emoji_usage = NULL;
-    persona.overlays[0].style_notes = NULL;
-    persona.overlays[0].style_notes_count = 0;
 
     const sc_persona_overlay_t *found = sc_persona_find_overlay(&persona, "telegram", 8);
     SC_ASSERT_NOT_NULL(found);
@@ -68,13 +64,9 @@ static void test_persona_find_overlay_not_found(void) {
 
     persona.overlays = (sc_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(sc_persona_overlay_t));
     SC_ASSERT_NOT_NULL(persona.overlays);
+    memset(persona.overlays, 0, sizeof(sc_persona_overlay_t));
     persona.overlays_count = 1;
     persona.overlays[0].channel = sc_strndup(&alloc, "telegram", 8);
-    persona.overlays[0].formality = NULL;
-    persona.overlays[0].avg_length = NULL;
-    persona.overlays[0].emoji_usage = NULL;
-    persona.overlays[0].style_notes = NULL;
-    persona.overlays[0].style_notes_count = 0;
 
     const sc_persona_overlay_t *found = sc_persona_find_overlay(&persona, "discord", 7);
     SC_ASSERT_NULL(found);
