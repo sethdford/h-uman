@@ -176,4 +176,21 @@ test.describe("SeaClaw Control UI", () => {
       });
     }
   });
+
+  test("auto-fallback populates overview without live gateway", async ({ page }) => {
+    await page.goto("/");
+    // Wait for fallback timer (2.5s) + demo gateway connect (400ms) + view load
+    const overview = page.locator("sc-app >> sc-overview-view");
+    await expect(overview).toBeAttached({ timeout: 5000 });
+    // Verify actual content loaded (not just skeleton)
+    await expect(async () => {
+      const text = await page.evaluate(() => {
+        const app = document.querySelector("sc-app");
+        const view = app?.shadowRoot?.querySelector("sc-overview-view");
+        return view?.shadowRoot?.textContent ?? "";
+      });
+      // Overview should show capabilities data from demo gateway
+      expect(text.length).toBeGreaterThan(100);
+    }).toPass({ timeout: 8000 });
+  });
 });
