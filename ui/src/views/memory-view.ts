@@ -26,7 +26,6 @@ interface MemoryStatus {
   engine: string;
   total_entries: number;
   categories: Record<string, number>;
-  last_consolidation?: string;
 }
 
 interface GraphEntity {
@@ -215,6 +214,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
     if (!gw) return;
     this.loading = true;
     this.error = "";
+    this.actionError = "";
     try {
       const [statusRes, listRes, graphRes] = await Promise.all([
         gw.request<MemoryStatus>("memory.status"),
@@ -464,18 +464,13 @@ export class ScMemoryView extends GatewayAwareLitElement {
         description="${filtered.length} ${filtered.length === 1 ? "entry" : "entries"}"
       >
         <div slot="actions" class="consolidate-row">
-          ${s?.last_consolidation
-            ? html`<span class="last-run"
-                >Last consolidated ${formatTimestamp(s.last_consolidation)}</span
-              >`
-            : nothing}
           <sc-button
             size="sm"
             variant="ghost"
-            label=${this.consolidating ? "Running…" : "Consolidate"}
             ?disabled=${this.consolidating}
             @click=${() => this._consolidate()}
-          ></sc-button>
+            >${this.consolidating ? "Running…" : "Consolidate"}</sc-button
+          >
         </div>
       </sc-section-header>
 
