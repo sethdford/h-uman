@@ -111,6 +111,7 @@
       <a href="#sc-delivery-status">sc-delivery-status</a>
       <a href="#sc-link-preview">sc-link-preview</a>
       <a href="#sc-message-thread">sc-message-thread</a>
+      <a href="#sc-branch-tree">sc-branch-tree</a>
       <a href="#sc-message-group">sc-message-group</a>
       <a href="#sc-skill-card">sc-skill-card</a>
       <a href="#sc-skill-detail">sc-skill-detail</a>
@@ -1299,6 +1300,16 @@
         <div class="code-snippet"><pre><code>&lt;sc-message-thread .items=${items} .isWaiting=${false} .hasEarlierMessages=${false}&gt;&lt;/sc-message-thread&gt;</code></pre></div>
       </section>
 
+      <section class="component-section" id="sc-branch-tree">
+        <h2>sc-branch-tree</h2>
+        <p>Vertical timeline/tree for conversation branches with collapsible subtrees.</p>
+        <div class="playground">
+          <div class="preview">
+            <sc-branch-tree id="catalog-branch-tree"></sc-branch-tree>
+          </div>
+        </div>
+        <div class="code-snippet"><pre><code>&lt;sc-branch-tree .branches=${branches} activeId="1b"&gt;&lt;/sc-branch-tree&gt;</code></pre></div>
+      </section>
       <section class="component-section" id="sc-message-group">
         <h2>sc-message-group</h2>
         <p>Groups consecutive messages from the same role with avatar and optional timestamp slot.</p>
@@ -2066,6 +2077,37 @@
           { time: "15m ago", message: "Deployment started", status: "info" },
           { time: "1h ago", message: "Build failed", status: "error", detail: "Exit code 1" },
         ];
+      }
+
+      // sc-branch-tree — lazy-load when section scrolls into view
+      const branchTreeSection = document.getElementById("sc-branch-tree");
+      if (branchTreeSection) {
+        const branchTreeObserver = new IntersectionObserver(
+          (entries) => {
+            if (!entries[0].isIntersecting) return;
+            branchTreeObserver.disconnect();
+            import("/src/components/sc-branch-tree.js").then(() => {
+              const catalogBranchTree = document.getElementById("catalog-branch-tree");
+              if (catalogBranchTree) {
+                catalogBranchTree.branches = [
+                  {
+                    id: "1",
+                    label: "Main",
+                    children: [
+                      { id: "1a", label: "Reply A", children: [], messagePreview: "First response...", active: false },
+                      { id: "1b", label: "Reply B", children: [], messagePreview: "Alternative take...", active: true },
+                    ],
+                    messagePreview: "Original message",
+                    active: false,
+                  },
+                ];
+                catalogBranchTree.activeId = "1b";
+              }
+            });
+          },
+          { rootMargin: "200px" }
+        );
+        branchTreeObserver.observe(branchTreeSection);
       }
 
       // sc-message-thread

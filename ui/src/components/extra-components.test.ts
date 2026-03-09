@@ -19,6 +19,8 @@ import "./sc-activity-feed.js";
 import "./sc-thinking.js";
 import "./sc-tool-result.js";
 import "./sc-code-block.js";
+import "./sc-artifact-viewer.js";
+import "./sc-artifact-panel.js";
 import "./sc-latex.js";
 import "./sc-message-stream.js";
 import "./sc-message-branch.js";
@@ -50,6 +52,7 @@ import "./sc-model-selector.js";
 import "./sc-tapback-menu.js";
 import "./sc-chat-composer.js";
 import "./sc-message-thread.js";
+import "./sc-branch-tree.js";
 import "./sc-voice-orb.js";
 import "./sc-voice-conversation.js";
 import "./sc-chart.js";
@@ -706,6 +709,88 @@ describe("sc-code-block", () => {
     const content = el.shadowRoot?.querySelector(".content");
     expect(content?.textContent).toContain("function foo()");
     expect(content?.textContent).toContain("42");
+    el.remove();
+  });
+});
+
+describe("sc-artifact-viewer", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-artifact-viewer")).toBeDefined();
+  });
+
+  it("renders code type with sc-code-block", async () => {
+    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+      type: string;
+      content: string;
+      language: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.type = "code";
+    el.content = "const x = 1;";
+    el.language = "javascript";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const codeBlock = el.shadowRoot?.querySelector("sc-code-block");
+    expect(codeBlock).toBeTruthy();
+    el.remove();
+  });
+
+  it("shows type label in toolbar", async () => {
+    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+      type: string;
+      content: string;
+      updateComplete: Promise<boolean>;
+    };
+    el.type = "document";
+    el.content = "# Hello";
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const typeLabel = el.shadowRoot?.querySelector(".type-label");
+    expect(typeLabel?.textContent).toBe("Document");
+    el.remove();
+  });
+});
+
+describe("sc-artifact-panel", () => {
+  it("should be defined as a custom element", () => {
+    expect(customElements.get("sc-artifact-panel")).toBeDefined();
+  });
+
+  it("renders nothing when artifact is null", async () => {
+    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+      artifact: unknown;
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.artifact = null;
+    el.open = false;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const panelWrap = el.shadowRoot?.querySelector(".panel-wrap");
+    expect(panelWrap).toBeFalsy();
+    el.remove();
+  });
+
+  it("renders header and content when artifact is provided", async () => {
+    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+      artifact: { id: string; type: string; title: string; content: string; versions: unknown[] };
+      open: boolean;
+      updateComplete: Promise<boolean>;
+    };
+    el.artifact = {
+      id: "a1",
+      type: "code",
+      title: "Test Artifact",
+      content: "const x = 1;",
+      versions: [{ content: "const x = 1;", ts: Date.now() }],
+    };
+    el.open = true;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const headerTitle = el.shadowRoot?.querySelector(".header-title");
+    expect(headerTitle?.textContent).toBe("Test Artifact");
+    const viewer = el.shadowRoot?.querySelector("sc-artifact-viewer");
+    expect(viewer).toBeTruthy();
     el.remove();
   });
 });
@@ -2414,9 +2499,11 @@ describe("sc-link-preview", () => {
   it("extracts domain", async () => {
     const el = document.createElement("sc-link-preview") as HTMLElement & {
       url: string;
+      title: string;
       updateComplete: Promise<boolean>;
     };
     el.url = "https://www.github.com/repo";
+    el.title = "Example";
     document.body.appendChild(el);
     await el.updateComplete;
     expect(el.shadowRoot?.querySelector(".domain")?.textContent).toBe("github.com");
@@ -2706,6 +2793,45 @@ describe("sc-chat-composer", () => {
     el.addEventListener("sc-voice-stop", () => (eventName = "sc-voice-stop"));
     (el.shadowRoot?.querySelector('[aria-label="Voice input"]') as HTMLElement)?.click();
     expect(eventName).toBe("sc-voice-stop");
+    el.remove();
+  });
+});
+
+describe("sc-branch-tree", () => {
+  it("should be defined", () => {
+    expect(customElements.get("sc-branch-tree")).toBeDefined();
+  });
+  it("has default props", () => {
+    const el = document.createElement("sc-branch-tree") as HTMLElement & {
+      branches: unknown[];
+      activeId: string;
+    };
+    expect(el.branches).toEqual([]);
+    expect(el.activeId).toBe("");
+  });
+  it("dispatches sc-branch-select on node click", async () => {
+    const el = document.createElement("sc-branch-tree") as HTMLElement & {
+      branches: Array<{
+        id: string;
+        label: string;
+        children: unknown[];
+        messagePreview: string;
+        active: boolean;
+      }>;
+      updateComplete: Promise<boolean>;
+    };
+    el.branches = [
+      { id: "a", label: "Branch A", children: [], messagePreview: "Preview", active: false },
+    ];
+    document.body.appendChild(el);
+    await el.updateComplete;
+    let receivedId: string | null = null;
+    el.addEventListener("sc-branch-select", ((e: CustomEvent<{ id: string }>) => {
+      receivedId = e.detail.id;
+    }) as EventListener);
+    const node = el.shadowRoot?.querySelector(".node-label");
+    (node as HTMLElement)?.click();
+    expect(receivedId).toBe("a");
     el.remove();
   });
 });

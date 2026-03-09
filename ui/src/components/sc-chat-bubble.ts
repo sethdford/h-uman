@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import "./sc-code-block.js";
 import "./sc-toast.js";
@@ -14,25 +14,46 @@ export class ScChatBubble extends LitElement {
   @property({ type: Boolean }) showTail = false;
   @property({ type: Boolean }) isLast = false;
   @property({ type: Boolean }) isFirst = false;
+  @property({ type: Object })
+  replyTo: { id: string; content: string; role: string } | null = null;
+
+  @property({ type: Number }) ariaMessageOrdinal = 0;
+  @property({ type: Number }) ariaMessageTotal = 0;
+
+  @state() private _visibleContent = "";
+  private _wordQueue: string[] = [];
+  private _releaseTimer = 0;
+  private _lastContentLength = 0;
 
   static override styles = css`
     @keyframes sc-bubble-send {
-      from {
+      0% {
         opacity: 0;
-        transform: translateY(var(--sc-space-sm)) scale(0.97);
+        transform: translateY(var(--sc-space-xl)) scale(0.88);
       }
-      to {
+      50% {
+        opacity: 1;
+        transform: translateY(calc(-1 * var(--sc-space-xs))) scale(1.03);
+      }
+      70% {
+        transform: translateY(var(--sc-space-2xs)) scale(0.99);
+      }
+      100% {
         opacity: 1;
         transform: translateY(0) scale(1);
       }
     }
 
     @keyframes sc-bubble-receive {
-      from {
+      0% {
         opacity: 0;
-        transform: translateY(var(--sc-space-xs)) scale(0.98);
+        transform: translateY(var(--sc-space-md)) scale(0.96);
       }
-      to {
+      60% {
+        opacity: 1;
+        transform: translateY(calc(-1 * var(--sc-space-2xs))) scale(1.01);
+      }
+      100% {
         opacity: 1;
         transform: translateY(0) scale(1);
       }
@@ -96,7 +117,8 @@ export class ScChatBubble extends LitElement {
       );
       color: var(--sc-on-accent-text, var(--sc-on-accent));
       border-radius: var(--sc-radius-xl) var(--sc-radius-xl) var(--sc-radius-sm) var(--sc-radius-xl);
-      animation: sc-bubble-send var(--sc-duration-fast) var(--sc-ease-out) both;
+      animation: sc-bubble-send var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
 
     .bubble.role-user::after {
@@ -125,7 +147,8 @@ export class ScChatBubble extends LitElement {
       border: 1px solid color-mix(in srgb, var(--sc-color-white) 8%, transparent);
       border-radius: var(--sc-radius-xl) var(--sc-radius-xl) var(--sc-radius-xl) var(--sc-radius-sm);
       box-shadow: var(--sc-shadow-xs);
-      animation: sc-bubble-receive var(--sc-duration-fast) var(--sc-ease-out) both;
+      animation: sc-bubble-receive var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) both;
     }
 
     .bubble.role-assistant::after {
@@ -166,6 +189,7 @@ export class ScChatBubble extends LitElement {
     .content {
       position: relative;
       z-index: 1;
+      overflow: hidden;
     }
 
     /* Assistant markdown content */
@@ -263,10 +287,38 @@ export class ScChatBubble extends LitElement {
       margin-bottom: var(--sc-space-2xs);
     }
 
+    .md-table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin: var(--sc-space-sm) 0;
+      border-radius: var(--sc-radius-md);
+      border: 1px solid var(--sc-border-subtle);
+    }
+
+    .md-table-scroll .md-table {
+      margin: 0;
+      border: none;
+    }
+
     .md-table {
       border-collapse: collapse;
       width: 100%;
       margin: var(--sc-space-sm) 0;
+    }
+
+    .md-table tbody tr:nth-child(even) {
+      background: color-mix(in srgb, var(--sc-surface-container) 40%, transparent);
+    }
+
+    .md-table tbody tr:hover {
+      background: var(--sc-hover-overlay);
+    }
+
+    .md-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--sc-surface-container-high);
     }
 
     .md-table th,
@@ -281,13 +333,20 @@ export class ScChatBubble extends LitElement {
       border-color: color-mix(in srgb, var(--sc-on-accent) 30%, transparent);
     }
 
-    .md-table th {
-      background: var(--sc-bg-inset);
-      font-weight: var(--sc-weight-semibold);
+    .bubble.role-user .md-table tbody tr:nth-child(even) {
+      background: color-mix(in srgb, var(--sc-on-accent) 8%, transparent);
+    }
+
+    .bubble.role-user .md-table tbody tr:hover {
+      background: color-mix(in srgb, var(--sc-on-accent) 15%, transparent);
     }
 
     .bubble.role-user .md-table th {
-      background: color-mix(in srgb, var(--sc-on-accent) 20%, transparent);
+      background: color-mix(in srgb, var(--sc-on-accent) 25%, transparent);
+    }
+
+    .md-table th {
+      font-weight: var(--sc-weight-semibold);
     }
 
     .md-hr {
@@ -303,6 +362,16 @@ export class ScChatBubble extends LitElement {
     .md-content img {
       max-width: 100%;
       border-radius: var(--sc-radius-md);
+    }
+
+    .md-image-clickable {
+      cursor: pointer;
+      display: inline-block;
+    }
+
+    .md-image-clickable:focus-visible {
+      outline: var(--sc-focus-ring-width) solid var(--sc-accent);
+      outline-offset: var(--sc-focus-ring-offset);
     }
 
     .cursor {
@@ -381,7 +450,113 @@ export class ScChatBubble extends LitElement {
       outline: var(--sc-focus-ring-width) solid var(--sc-accent);
       outline-offset: var(--sc-focus-ring-offset);
     }
+
+    /* Threaded reply quote */
+    .reply-quote {
+      display: block;
+      padding: var(--sc-space-2xs) var(--sc-space-sm);
+      margin-bottom: var(--sc-space-xs);
+      border-left: 3px solid var(--sc-accent);
+      background: color-mix(in srgb, var(--sc-accent) 8%, transparent);
+      border-radius: 0 var(--sc-radius-sm) var(--sc-radius-sm) 0;
+      cursor: pointer;
+      font-family: var(--sc-font);
+      max-width: 100%;
+    }
+    .reply-quote:hover {
+      background: color-mix(in srgb, var(--sc-accent) 12%, transparent);
+    }
+    .reply-role {
+      display: block;
+      font-size: var(--sc-text-2xs, 0.625rem);
+      color: var(--sc-text-muted);
+      text-transform: capitalize;
+      margin-bottom: var(--sc-space-2xs);
+    }
+    .reply-preview {
+      display: block;
+      font-size: var(--sc-text-xs);
+      color: var(--sc-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bubble.role-user .reply-quote {
+      border-left-color: var(--sc-on-accent);
+      background: color-mix(in srgb, var(--sc-on-accent) 15%, transparent);
+    }
+    .bubble.role-user .reply-quote:hover {
+      background: color-mix(in srgb, var(--sc-on-accent) 20%, transparent);
+    }
+    .bubble.role-user .reply-role {
+      color: color-mix(in srgb, var(--sc-on-accent) 80%, transparent);
+    }
+    .bubble.role-user .reply-preview {
+      color: var(--sc-on-accent);
+    }
   `;
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._clearReleaseTimer();
+  }
+
+  override willUpdate(changed: Map<string, unknown>): void {
+    if (changed.has("content") || changed.has("streaming")) {
+      this._updateWordBuffer();
+    }
+  }
+
+  private _updateWordBuffer(): void {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!this.streaming || this.role === "user" || reducedMotion) {
+      this._visibleContent = this.content;
+      this._wordQueue = [];
+      this._clearReleaseTimer();
+      this._lastContentLength = this.content.length;
+      return;
+    }
+
+    const newChars = this.content.slice(this._lastContentLength);
+    this._lastContentLength = this.content.length;
+    if (!newChars) return;
+
+    const newWords = newChars.match(/\S+\s*/g) ?? [newChars];
+    this._wordQueue.push(...newWords);
+
+    if (!this._releaseTimer) {
+      this._releaseNextWord();
+    }
+  }
+
+  /** Batch size for word release — re-render markdown every ~100ms instead of per-word. */
+  private static readonly _STREAM_BATCH_SIZE = 5;
+  private static readonly _STREAM_BATCH_MS = 100;
+
+  private _releaseNextWord(): void {
+    if (this._wordQueue.length === 0) {
+      this._releaseTimer = 0;
+      return;
+    }
+    const batchSize = Math.min(ScChatBubble._STREAM_BATCH_SIZE, this._wordQueue.length);
+    for (let i = 0; i < batchSize; i++) {
+      const word = this._wordQueue.shift()!;
+      this._visibleContent += word;
+    }
+    this.requestUpdate();
+
+    this._releaseTimer = window.setTimeout(
+      () => this._releaseNextWord(),
+      ScChatBubble._STREAM_BATCH_MS,
+    );
+  }
+
+  private _clearReleaseTimer(): void {
+    if (this._releaseTimer) {
+      window.clearTimeout(this._releaseTimer);
+      this._releaseTimer = 0;
+    }
+  }
 
   private _copyCode(code: string): void {
     navigator.clipboard?.writeText(code).then(
@@ -400,6 +575,7 @@ export class ScChatBubble extends LitElement {
       `role-${this.role}`,
       this.showTail ? "show-tail" : "",
       this.completing ? "settling" : "",
+      this.streaming ? "streaming-active" : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -410,14 +586,62 @@ export class ScChatBubble extends LitElement {
       <div
         class=${classes}
         role="article"
-        aria-label=${isUser ? "Your message" : "Assistant message"}
+        aria-label=${this.ariaMessageOrdinal && this.ariaMessageTotal
+          ? `Message ${this.ariaMessageOrdinal} of ${this.ariaMessageTotal}, from ${isUser ? "user" : "assistant"}`
+          : isUser
+            ? "Your message"
+            : "Assistant message"}
+        aria-busy=${this.streaming}
         tabindex="0"
       >
         <div class="content">
-          ${renderMarkdown(this.content, {
-            onCopyCode: (code) => this._copyCode(code),
-            streaming: this.streaming,
-          })}
+          ${this.replyTo
+            ? html`
+                <div
+                  class="reply-quote"
+                  role="button"
+                  tabindex="0"
+                  @click=${() =>
+                    this.dispatchEvent(
+                      new CustomEvent("scroll-to-message", {
+                        bubbles: true,
+                        composed: true,
+                        detail: { id: this.replyTo!.id },
+                      }),
+                    )}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      this.dispatchEvent(
+                        new CustomEvent("scroll-to-message", {
+                          bubbles: true,
+                          composed: true,
+                          detail: { id: this.replyTo!.id },
+                        }),
+                      );
+                    }
+                  }}
+                >
+                  <span class="reply-role">${this.replyTo.role}</span>
+                  <span class="reply-preview"
+                    >${this.replyTo.content.length > 80
+                      ? this.replyTo.content.slice(0, 80) + "\u2026"
+                      : this.replyTo.content}</span
+                  >
+                </div>
+              `
+            : nothing}
+          ${renderMarkdown(
+            this.streaming && this.role === "assistant" ? this._visibleContent : this.content,
+            {
+              onCopyCode: (code) => this._copyCode(code),
+              onImageClick: (src) =>
+                this.dispatchEvent(
+                  new CustomEvent("open-image", { detail: { src }, bubbles: true, composed: true }),
+                ),
+              streaming: this.streaming,
+            },
+          )}
           ${showCursor
             ? html`<span
                 class="cursor ${this.completing ? "completing" : ""}"

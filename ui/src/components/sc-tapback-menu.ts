@@ -25,11 +25,14 @@ export class ScTapbackMenu extends LitElement {
 
   static override styles = css`
     @keyframes sc-tapback-enter {
-      from {
+      0% {
         opacity: 0;
         transform: scale(0.8);
       }
-      to {
+      50% {
+        transform: scale(1.05);
+      }
+      100% {
         opacity: 1;
         transform: scale(1);
       }
@@ -56,7 +59,8 @@ export class ScTapbackMenu extends LitElement {
       border-radius: var(--sc-radius-full);
       box-shadow: var(--sc-shadow-lg);
       z-index: 101;
-      animation: sc-tapback-enter var(--sc-duration-fast) var(--sc-spring-micro);
+      animation: sc-tapback-enter var(--sc-duration-normal)
+        var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
     }
     .reaction-btn {
       display: flex;

@@ -7,11 +7,15 @@ export class ScTypingIndicator extends LitElement {
 
   static override styles = css`
     @keyframes sc-indicator-enter {
-      from {
+      0% {
         opacity: 0;
-        transform: translateY(var(--sc-space-sm)) scale(0.92);
+        transform: translateY(var(--sc-space-md)) scale(0.9);
       }
-      to {
+      60% {
+        opacity: 1;
+        transform: translateY(calc(-1 * var(--sc-space-2xs))) scale(1.02);
+      }
+      100% {
         opacity: 1;
         transform: translateY(0) scale(1);
       }
@@ -34,12 +38,12 @@ export class ScTypingIndicator extends LitElement {
     @keyframes sc-dot-wave {
       0%,
       100% {
-        opacity: 0.35;
-        transform: scale(0.85);
+        opacity: 0.4;
+        transform: scale(0.5);
       }
       50% {
         opacity: 1;
-        transform: scale(1);
+        transform: scale(1.3);
       }
     }
 
@@ -83,19 +87,19 @@ export class ScTypingIndicator extends LitElement {
     }
 
     .dot {
-      width: 5px;
-      height: 5px;
+      width: var(--sc-space-xs);
+      height: var(--sc-space-xs);
       border-radius: var(--sc-radius-full);
       background: var(--sc-accent);
       animation: sc-dot-wave var(--sc-duration-slow) var(--sc-ease-in-out) infinite;
     }
 
     .dot:nth-child(2) {
-      animation-delay: 0.2s;
+      animation-delay: var(--sc-duration-normal);
     }
 
     .dot:nth-child(3) {
-      animation-delay: 0.4s;
+      animation-delay: var(--sc-duration-moderate);
     }
 
     .elapsed {

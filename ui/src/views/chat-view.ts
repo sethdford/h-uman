@@ -367,6 +367,7 @@ export class ScChatView extends GatewayAwareLitElement {
   private async _handleSend(
     message: string,
     files?: Array<{ name: string; size: number; type: string; dataUrl?: string }>,
+    mentionedFiles?: string[],
   ): Promise<void> {
     if (!message || !this.gateway) return;
     this.inputValue = "";
@@ -392,6 +393,7 @@ export class ScChatView extends GatewayAwareLitElement {
         message,
         this.sessionKey,
         attachments.length > 0 ? attachments : undefined,
+        mentionedFiles,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to send message";
@@ -505,6 +507,17 @@ export class ScChatView extends GatewayAwareLitElement {
             }}
             @sc-toggle-reaction=${(e: CustomEvent<{ index: number; value: string }>) =>
               this.chat.toggleReaction?.(e.detail.index, e.detail.value)}
+            @sc-swipe-reply=${(e: CustomEvent<{ index: number; content: string }>) => {
+              this.inputValue = e.detail.content;
+              this.requestUpdate();
+              this.updateComplete.then(() => this._composer?.focus?.());
+            }}
+            @sc-swipe-copy=${(e: CustomEvent<{ index: number; content: string }>) => {
+              navigator.clipboard?.writeText(e.detail.content).then(
+                () => ScToast.show({ message: "Copied to clipboard", variant: "success" }),
+                () => ScToast.show({ message: "Failed to copy", variant: "error" }),
+              );
+            }}
             @sc-retry=${(e: CustomEvent<{ content?: string; index?: number }>) => {
               if (e.detail?.content != null) {
                 const idx = e.detail.index ?? -1;
@@ -527,6 +540,20 @@ export class ScChatView extends GatewayAwareLitElement {
             @sc-edit=${(e: CustomEvent<{ content: string; index: number }>) => {
               this._handleEdit(e.detail.content, e.detail.index);
             }}
+            @sc-edit-message=${(e: CustomEvent<{ index: number }>) => {
+              const item = this.chat.items[e.detail.index];
+              if (item?.type === "message" && item.role === "user") {
+                this._handleEdit(item.content, e.detail.index);
+              }
+            }}
+            @sc-reply-message=${(e: CustomEvent<{ content: string }>) => {
+              this.inputValue = e.detail.content;
+              this.requestUpdate();
+              this.updateComplete.then(() => this._composer?.focus?.());
+            }}
+            @sc-copy-message=${() => {
+              ScToast.show({ message: "Copied to clipboard", variant: "success" });
+            }}
             @sc-tapback=${(
               e: CustomEvent<{ x: number; y: number; index: number; content: string }>,
             ) => {
@@ -538,6 +565,13 @@ export class ScChatView extends GatewayAwareLitElement {
                 content: e.detail.content,
               };
             }}
+            @sc-suggestion-click=${(e: CustomEvent<{ text: string }>) =>
+              this._handleSend(e.detail.text)}
+            @open-artifact=${async (e: CustomEvent<{ id: string }>) => {
+              await import("../components/sc-artifact-panel.js");
+              this.chat.openArtifact(e.detail.id);
+            }}
+            .artifacts=${Array.from(this.chat.artifacts.values())}
           ></sc-message-thread>
           ${this._renderRetryButton()}
           <sc-chat-composer
@@ -553,8 +587,9 @@ export class ScChatView extends GatewayAwareLitElement {
               e: CustomEvent<{
                 message: string;
                 files?: Array<{ name: string; size: number; type: string; dataUrl?: string }>;
+                mentionedFiles?: string[];
               }>,
-            ) => this._handleSend(e.detail.message, e.detail.files)}
+            ) => this._handleSend(e.detail.message, e.detail.files, e.detail.mentionedFiles)}
             @sc-use-suggestion=${(e: CustomEvent<{ text: string }>) =>
               this._handleSend(e.detail.text)}
             @sc-input-change=${(e: CustomEvent<{ value: string }>) => {
@@ -586,6 +621,13 @@ export class ScChatView extends GatewayAwareLitElement {
             @sc-tapback-close=${() => (this._tapback = { ...this._tapback, open: false })}
           ></sc-tapback-menu>
         </div>
+        ${this.chat.activeArtifact
+          ? html`<sc-artifact-panel
+              .artifact=${this.chat.activeArtifact}
+              .open=${true}
+              @sc-artifact-close=${() => this.chat.closeArtifact()}
+            ></sc-artifact-panel>`
+          : nothing}
       </div>
     `;
   }

@@ -1128,39 +1128,135 @@ export class DemoGatewayClient extends EventTarget {
     }, 5000);
   }
 
+  #shouldEmitArtifact(userMessage: string): boolean {
+    const lower = userMessage.toLowerCase();
+    const keywords = ["code", "write", "function", "script", "example", "implement", "create"];
+    return keywords.some((k) => lower.includes(k));
+  }
+
+  #makeDemoArtifact(userMessage: string, messageId: string): Record<string, unknown> {
+    const pool: Array<{ title: string; content: string; language: string }> = [
+      {
+        title: "Generated Code",
+        content:
+          '// Example code\nfunction hello() {\n  console.log("Hello from SeaClaw!");\n}\n\nhello();',
+        language: "javascript",
+      },
+      {
+        title: "Helper Function",
+        content:
+          "sc_error_t sc_thing_init(sc_thing_t *ctx) {\n  if (!ctx) return SC_ERR_INVALID;\n  memset(ctx, 0, sizeof(*ctx));\n  return SC_OK;\n}",
+        language: "c",
+      },
+      {
+        title: "Script Example",
+        content: '#!/usr/bin/env bash\nset -euo pipefail\necho "SeaClaw demo script"\nexit 0',
+        language: "bash",
+      },
+      {
+        title: "TypeScript Snippet",
+        content:
+          "interface ArtifactData {\n  id: string;\n  type: 'code' | 'document';\n  content: string;\n}",
+        language: "typescript",
+      },
+    ];
+    const pick = pool[Math.floor(Math.random() * pool.length)]!;
+    return {
+      id: `artifact-${Date.now()}`,
+      type: "code",
+      title: pick.title,
+      content: pick.content,
+      language: pick.language,
+      message_id: messageId,
+    };
+  }
+
   #emitChatResponse(userMessage: string, sessionKey?: string): void {
     const id = "demo-" + Date.now();
     const sk = sessionKey ?? "default";
-    const fullResponse = `That's a great question about "${userMessage}". Here's what I think — the key insight is that well-designed systems tend to be modular and composable. Each piece does one thing well, and the connections between them are clean and predictable.`;
-    const chunks = fullResponse.match(/.{1,12}/g) ?? [fullResponse];
-    let delay = 400;
 
-    const emitChunk = (content: string): void => {
+    const DEMO_RESPONSES = [
+      `That's a great question about "${userMessage}". Here's what I think — the key insight is that **well-designed systems** tend to be modular and composable. Each piece does one thing well, and the connections between them are clean and predictable.`,
+      `Interesting! For "${userMessage}", I'd suggest starting with a minimal implementation. For example:\n\n\`\`\`c\nsc_error_t rc = sc_thing_init(&ctx);\nif (rc != SC_OK) return rc;\n\`\`\`\n\nThen iterate from there. The vtable pattern works well for extensibility.`,
+      `Good question. The short answer: **yes**, with some caveats. See the [docs](https://docs.seaclaw.dev) for the full picture. The main gotcha is memory ownership — make sure you \`free()\` what you \`malloc()\`.`,
+      `Let me break that down. For "${userMessage}":\n\n1. **Modularity** — keep concerns separated.\n2. **Explicit errors** — no silent failures.\n3. **Testability** — \`SC_IS_TEST\` guards for side effects.\n\nThat's the seaclaw way.`,
+    ];
+    const fullResponse =
+      DEMO_RESPONSES[Math.floor(Math.random() * DEMO_RESPONSES.length)] ?? DEMO_RESPONSES[0]!;
+
+    const SHORT_WORDS = new Set(["the", "a", "is", "to", "in", "of", "and", "for", "it", "on"]);
+    const PUNCTUATION = /[.!?:]$/;
+
+    const words = fullResponse.match(/\S+\s*/g) ?? [fullResponse];
+    let delay = 0;
+
+    const emit = (event: string, payload: Record<string, unknown>): void => {
       this.dispatchEvent(
         new CustomEvent(DemoGatewayClient.EVENT_GATEWAY, {
-          detail: {
-            event: "chat",
-            payload: { state: "chunk", message: content, id, session_key: sk },
-          },
+          detail: { event, payload: { ...payload, session_key: sk } },
         }),
       );
     };
 
-    for (const chunk of chunks) {
-      setTimeout(() => emitChunk(chunk), delay);
-      delay += 30 + Math.random() * 60;
+    const emitThinking = (): void => {
+      emit("thinking", { message: "Let me think about this..." });
+    };
+
+    const emitChunk = (content: string): void => {
+      emit("chat", { state: "chunk", message: content, id });
+    };
+
+    const emitSent = (): void => {
+      emit("chat", { state: "sent", message: fullResponse, id });
+      if (this.#shouldEmitArtifact(userMessage)) {
+        const artifact = this.#makeDemoArtifact(userMessage, id);
+        this.dispatchEvent(
+          new CustomEvent(DemoGatewayClient.EVENT_GATEWAY, {
+            detail: {
+              event: "artifact.create",
+              payload: { ...artifact, session_key: sk },
+            },
+          }),
+        );
+      }
+    };
+
+    const wordDelay = (word: string): number => {
+      const trimmed = word.trim().toLowerCase();
+      if (SHORT_WORDS.has(trimmed)) return 20 + Math.random() * 15;
+      if (trimmed.length >= 8) return 50 + Math.random() * 30;
+      if (trimmed.length >= 4) return 35 + Math.random() * 20;
+      return 25 + Math.random() * 20;
+    };
+
+    const doToolCall = Math.random() < 0.3;
+    if (doToolCall) {
+      const toolId = "demo-tool-" + Date.now();
+      const toolName = Math.random() < 0.5 ? "web_search" : "code_interpreter";
+      emit("agent.tool", { id: toolId, message: toolName });
+      delay += 400;
+      setTimeout(() => {
+        emit("agent.tool", {
+          id: toolId,
+          message: toolName,
+          result: "Found relevant information",
+        });
+      }, delay);
     }
 
+    const thinkingDuration = 600 + Math.random() * 400;
+    delay += thinkingDuration;
+    setTimeout(emitThinking, doToolCall ? 400 : 0);
     setTimeout(() => {
-      this.dispatchEvent(
-        new CustomEvent(DemoGatewayClient.EVENT_GATEWAY, {
-          detail: {
-            event: "chat",
-            payload: { state: "sent", message: fullResponse, id, session_key: sk },
-          },
-        }),
-      );
-    }, delay + 100);
+      let totalDelay = 0;
+      for (const word of words) {
+        const ms = wordDelay(word);
+        totalDelay += ms;
+        if (PUNCTUATION.test(word.trim())) totalDelay += 80 + Math.random() * 70;
+        setTimeout(() => emitChunk(word), delay + totalDelay);
+      }
+      setTimeout(emitSent, delay + totalDelay + 100);
+    }, delay);
   }
 
   #handleRequest(method: string, params?: Record<string, unknown>): unknown {

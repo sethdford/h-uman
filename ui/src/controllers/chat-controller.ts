@@ -25,6 +25,7 @@ export type ChatItem =
       branchIndex?: number;
       branchCount?: number;
       reactions?: Reaction[];
+      replyTo?: { id: string; content: string; role: "user" | "assistant" };
     }
   | {
       type: "tool_call";
@@ -49,6 +50,16 @@ export interface GatewayLike {
   status: string;
 }
 
+export interface ArtifactData {
+  id: string;
+  type: "code" | "document" | "html" | "diagram";
+  title: string;
+  content: string;
+  language?: string;
+  messageId?: string;
+  versions: Array<{ content: string; ts: number }>;
+}
+
 const MAX_VISIBLE_ITEMS = 500;
 
 /** Duration (ms) of the "completing" state after streaming ends. */
@@ -65,6 +76,9 @@ export class ChatController implements ReactiveController {
   historyLoading = false;
   historyError = "";
   loadingEarlier = false;
+
+  artifacts: Map<string, ArtifactData> = new Map();
+  activeArtifactId: string | null = null;
 
   private _getGateway: () => GatewayLike | null;
   private _streamStartTime = 0;
@@ -116,6 +130,7 @@ export class ChatController implements ReactiveController {
     text: string,
     sessionKey: string,
     attachments?: Array<{ name: string; type: string; data: string }>,
+    mentionedFiles?: string[],
   ): Promise<void> {
     const gw = this._getGateway();
     if (!gw) return;
@@ -140,6 +155,7 @@ export class ChatController implements ReactiveController {
         message: text,
         sessionKey,
         ...(attachments?.length ? { attachments } : {}),
+        ...(mentionedFiles?.length ? { mentionedFiles } : {}),
       });
       this._setLastUserStatus("sent");
     } catch (err) {
@@ -251,7 +267,71 @@ export class ChatController implements ReactiveController {
 
     if (event === EVENT_NAMES.TOOL_CALL || event === "tool_call") {
       this._handleToolCall(payload, sessionKey);
+      return;
     }
+
+    if (event === "artifact.create" || event === "artifact.update") {
+      this._handleArtifact(payload, sessionKey);
+      return;
+    }
+  }
+
+  openArtifact(id: string): void {
+    if (this.artifacts.has(id)) {
+      this.activeArtifactId = id;
+      this._requestUpdate();
+    }
+  }
+
+  closeArtifact(): void {
+    this.activeArtifactId = null;
+    this._requestUpdate();
+  }
+
+  get activeArtifact(): ArtifactData | null {
+    if (!this.activeArtifactId) return null;
+    return this.artifacts.get(this.activeArtifactId) ?? null;
+  }
+
+  private _handleArtifact(payload: Record<string, unknown>, _sessionKey: string): void {
+    const id = (payload.id as string) ?? `artifact-${Date.now()}`;
+    const type = ((payload.type as string) ?? "code") as ArtifactData["type"];
+    const title = (payload.title as string) ?? "Untitled";
+    const content = (payload.content as string) ?? "";
+    const language = (payload.language as string) ?? "";
+    const messageId = payload.message_id as string | undefined;
+
+    const existing = this.artifacts.get(id);
+    if (existing) {
+      existing.versions.push({ content, ts: Date.now() });
+      existing.content = content;
+      existing.title = title;
+      if (messageId != null) existing.messageId = messageId;
+      this.artifacts.set(id, { ...existing });
+    } else {
+      const lastAssistantId = this._findLastAssistantMessageId();
+      this.artifacts.set(id, {
+        id,
+        type,
+        title,
+        content,
+        language,
+        messageId: messageId ?? lastAssistantId,
+        versions: [{ content, ts: Date.now() }],
+      });
+    }
+    this.activeArtifactId = id;
+    this._requestUpdate();
+  }
+
+  private _findLastAssistantMessageId(): string | undefined {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const item = this.items[i];
+      if (item.type === "message" && (item as { role: string }).role === "assistant" && item.id) {
+        return item.id;
+      }
+    }
+    return undefined;
   }
 
   cacheMessages(sessionKey: string): void {

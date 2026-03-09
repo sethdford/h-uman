@@ -9,6 +9,7 @@ import "../components/sc-latex.js";
 
 export interface RenderOptions {
   onCopyCode?: (code: string) => void;
+  onImageClick?: (src: string) => void;
   streaming?: boolean;
 }
 
@@ -99,14 +100,34 @@ export function renderInlineTokens(
       }
       case "image": {
         const img = t as Tokens.Image;
-        parts.push(
-          html`<img
-            src="${img.href}"
-            alt="${img.text}"
-            loading="lazy"
-            ${img.title ? html` title="${img.title}"` : nothing}
-          />`,
-        );
+        const imgEl = html`<img
+          src="${img.href}"
+          alt="${img.text}"
+          loading="lazy"
+          style="max-width: 100%; border-radius: var(--sc-radius-md);"
+          class="md-image-img"
+          ${img.title ? html` title="${img.title}"` : nothing}
+        />`;
+        if (options?.onImageClick) {
+          parts.push(
+            html`<span
+              class="md-image-clickable"
+              role="button"
+              tabindex="0"
+              @click=${() => options?.onImageClick?.(img.href)}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  options?.onImageClick?.(img.href);
+                }
+              }}
+            >
+              ${imgEl}
+            </span>`,
+          );
+        } else {
+          parts.push(imgEl);
+        }
         break;
       }
       case "html":
@@ -187,26 +208,28 @@ function renderToken(token: Token, options?: RenderOptions): TemplateResult | ty
     }
     case "table": {
       const table = token as Tokens.Table;
-      return html`<table class="md-table">
-        <thead>
-          <tr>
-            ${table.header.map(
-              (cell) => html`<th class="md-th">${renderInlineTokens(cell.tokens, options)}</th>`,
+      return html`<div class="md-table-scroll">
+        <table class="md-table">
+          <thead>
+            <tr>
+              ${table.header.map(
+                (cell) => html`<th class="md-th">${renderInlineTokens(cell.tokens, options)}</th>`,
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            ${table.rows.map(
+              (row) =>
+                html`<tr>
+                  ${row.map(
+                    (cell) =>
+                      html`<td class="md-td">${renderInlineTokens(cell.tokens, options)}</td>`,
+                  )}
+                </tr>`,
             )}
-          </tr>
-        </thead>
-        <tbody>
-          ${table.rows.map(
-            (row) =>
-              html`<tr>
-                ${row.map(
-                  (cell) =>
-                    html`<td class="md-td">${renderInlineTokens(cell.tokens, options)}</td>`,
-                )}
-              </tr>`,
-          )}
-        </tbody>
-      </table>`;
+          </tbody>
+        </table>
+      </div>`;
     }
     case "hr":
       return html`<hr class="md-hr" />`;
