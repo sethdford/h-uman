@@ -60,6 +60,24 @@ static void test_ollama_integration_chat_if_available(void) {
         prov.vtable->deinit(prov.ctx, &alloc);
 }
 
+static void test_ollama_create_null_alloc_fails(void) {
+    sc_provider_t prov;
+    sc_error_t err = sc_ollama_create(NULL, NULL, 0, NULL, 0, &prov);
+    SC_ASSERT_NEQ(err, SC_OK);
+}
+
+static void test_ollama_create_and_destroy(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_provider_t prov;
+    sc_error_t err = sc_ollama_create(&alloc, NULL, 0, NULL, 0, &prov);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(prov.ctx);
+    SC_ASSERT_NOT_NULL(prov.vtable);
+    SC_ASSERT_STR_EQ(prov.vtable->get_name(prov.ctx), "ollama");
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
 static void test_ollama_integration_not_running_graceful(void) {
     sc_allocator_t alloc = sc_system_allocator();
     /* In test builds, ollama_is_running always returns false */
@@ -67,6 +85,9 @@ static void test_ollama_integration_not_running_graceful(void) {
 }
 
 void run_ollama_integration_tests(void) {
+    SC_TEST_SUITE("Ollama integration");
     SC_RUN_TEST(test_ollama_integration_chat_if_available);
     SC_RUN_TEST(test_ollama_integration_not_running_graceful);
+    SC_RUN_TEST(test_ollama_create_null_alloc_fails);
+    SC_RUN_TEST(test_ollama_create_and_destroy);
 }

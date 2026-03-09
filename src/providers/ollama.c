@@ -441,6 +441,8 @@ sc_error_t sc_ollama_create(sc_allocator_t *alloc, const char *api_key, size_t a
                             const char *base_url, size_t base_url_len, sc_provider_t *out) {
     (void)api_key;
     (void)api_key_len;
+    if (!alloc || !out)
+        return SC_ERR_INVALID_ARGUMENT;
     sc_ollama_ctx_t *oc = (sc_ollama_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*oc));
     if (!oc)
         return SC_ERR_OUT_OF_MEMORY;

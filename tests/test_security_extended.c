@@ -400,6 +400,19 @@ static void test_security_path_allowed_with_allowlist(void) {
     SC_ASSERT_FALSE(sc_security_path_allowed(&p, "/etc/passwd", 11));
 }
 
+static void test_security_path_allowed_workspace_only(void) {
+    /* When allowed_paths is empty, paths under workspace_dir are allowed */
+    sc_security_policy_t p = {
+        .workspace_dir = "/tmp/seaclaw_deep_test",
+        .allowed_paths = NULL,
+        .allowed_paths_count = 0,
+    };
+    SC_ASSERT_TRUE(sc_security_path_allowed(&p, "/tmp/seaclaw_deep_test/test_input.txt", 32));
+    SC_ASSERT_TRUE(sc_security_path_allowed(&p, "/tmp/seaclaw_deep_test/sub/file.txt", 32));
+    SC_ASSERT_FALSE(sc_security_path_allowed(&p, "/etc/passwd", 11));
+    SC_ASSERT_FALSE(sc_security_path_allowed(&p, "/tmp/seaclaw_deep_test_evil/file", 31));
+}
+
 static void test_path_is_safe_null(void) {
     SC_ASSERT_FALSE(sc_path_is_safe(NULL));
 }
@@ -800,6 +813,7 @@ void run_security_extended_tests(void) {
     SC_RUN_TEST(test_policy_can_act_readonly);
     SC_RUN_TEST(test_security_shell_allowed);
     SC_RUN_TEST(test_security_path_allowed_with_allowlist);
+    SC_RUN_TEST(test_security_path_allowed_workspace_only);
     SC_RUN_TEST(test_path_is_safe_null);
     SC_RUN_TEST(test_path_is_safe_long);
     SC_RUN_TEST(test_hex_encode_empty);

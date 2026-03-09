@@ -5,8 +5,21 @@ bool sc_security_path_allowed(const sc_security_policy_t *policy, const char *pa
                               size_t path_len) {
     if (!policy || !path)
         return false;
-    if (!policy->allowed_paths || policy->allowed_paths_count == 0)
+
+    /* When allowed_paths is empty, allow paths under workspace_dir (workspace-only mode) */
+    if (!policy->allowed_paths || policy->allowed_paths_count == 0) {
+        if (policy->workspace_dir && policy->workspace_dir[0]) {
+            size_t wlen = strlen(policy->workspace_dir);
+            while (wlen > 0 && policy->workspace_dir[wlen - 1] == '/')
+                wlen--;
+            if (wlen > 0 && path_len >= wlen && memcmp(path, policy->workspace_dir, wlen) == 0) {
+                if (path_len == wlen || path[wlen] == '/' || path[wlen] == '\0')
+                    return true;
+            }
+        }
         return false;
+    }
+
     for (size_t i = 0; i < policy->allowed_paths_count; i++) {
         const char *p = policy->allowed_paths[i];
         if (!p)

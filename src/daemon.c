@@ -1185,6 +1185,11 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
+                fprintf(stderr, "[seaclaw] processing batch for %.*s: \"%.*s\" (group=%d)\n",
+                        (int)(key_len > 20 ? 20 : key_len), batch_key,
+                        (int)(combined_len > 60 ? 60 : combined_len), combined,
+                        (int)msgs[batch_start].is_group);
+
                 /* Group chat gating: use group classifier to decide engagement */
                 if (msgs[batch_start].is_group) {
                     const char *persona_name = NULL;
@@ -1216,6 +1221,10 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
 
                 sc_response_action_t action = sc_conversation_classify_response(
                     combined, combined_len, early_history, early_history_count, &extra_delay_ms);
+
+                fprintf(stderr, "[seaclaw] classify result: action=%d delay=%u for %.*s\n",
+                        (int)action, (unsigned)extra_delay_ms, (int)(key_len > 20 ? 20 : key_len),
+                        batch_key);
 
                 if (early_history)
                     alloc->free(alloc->ctx, early_history,

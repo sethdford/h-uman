@@ -551,16 +551,26 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     print_banner(prov_name, model, tools_count);
 
+    int one_shot = (parsed_args.message && parsed_args.message[0]);
     while (1) {
-        printf(SC_COLOR_BOLD SC_COLOR_SUCCESS "> " SC_COLOR_RESET);
-        fflush(stdout);
-
+        char *line = NULL;
         size_t line_len = 0;
-        char *line = sc_cli_readline(alloc, &line_len);
+        int line_owned = 1;
+
+        if (one_shot) {
+            line = (char *)parsed_args.message;
+            line_len = strlen(parsed_args.message);
+            line_owned = 0;
+            one_shot = 0;
+        } else {
+            printf(SC_COLOR_BOLD SC_COLOR_SUCCESS "> " SC_COLOR_RESET);
+            fflush(stdout);
+            line = sc_cli_readline(alloc, &line_len);
+        }
         if (!line)
             break;
 
-        if (sc_cli_is_quit_command(line, line_len)) {
+        if (line_owned && sc_cli_is_quit_command(line, line_len)) {
             alloc->free(alloc->ctx, line, line_len + 1);
             break;
         }
@@ -569,7 +579,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         if (slash) {
             printf("%s\n", slash);
             alloc->free(alloc->ctx, slash, strlen(slash) + 1);
-            alloc->free(alloc->ctx, line, line_len + 1);
+            if (line_owned)
+                alloc->free(alloc->ctx, line, line_len + 1);
             continue;
         }
 
@@ -587,7 +598,8 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         pthread_t tid;
         if (pthread_create(&tid, NULL, agent_turn_thread, &tctx) != 0) {
             fprintf(stderr, "[error] failed to start agent thread\n");
-            alloc->free(alloc->ctx, line, line_len + 1);
+            if (line_owned)
+                alloc->free(alloc->ctx, line, line_len + 1);
             continue;
         }
 
@@ -637,7 +649,10 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         }
 #endif
 
-        alloc->free(alloc->ctx, line, line_len + 1);
+        if (line_owned)
+            alloc->free(alloc->ctx, line, line_len + 1);
+        if (!line_owned)
+            break;
     }
 
     printf("\n" SC_COLOR_DIM "Goodbye." SC_COLOR_RESET "\n");

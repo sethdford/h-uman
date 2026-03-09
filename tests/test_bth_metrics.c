@@ -101,11 +101,10 @@ static void bth_metrics_all_counters_addressable(void) {
     uint32_t sum = m.emotions_surfaced + m.facts_extracted + m.commitment_followups +
                    m.pattern_insights + m.emotions_promoted + m.events_extracted +
                    m.mood_contexts_built + m.silence_checkins + m.event_followups +
-                   m.starters_built + m.typos_applied + m.corrections_sent +
-                   m.thinking_responses + m.callbacks_triggered + m.reactions_sent +
-                   m.link_contexts + m.attachment_contexts + m.ab_evaluations +
-                   m.ab_alternates_chosen + m.replay_analyses + m.egraph_contexts +
-                   m.vision_descriptions + m.total_turns;
+                   m.starters_built + m.typos_applied + m.corrections_sent + m.thinking_responses +
+                   m.callbacks_triggered + m.reactions_sent + m.link_contexts +
+                   m.attachment_contexts + m.ab_evaluations + m.ab_alternates_chosen +
+                   m.replay_analyses + m.egraph_contexts + m.vision_descriptions + m.total_turns;
     SC_ASSERT_EQ(sum, 276u);
 
     /* Summary should include all 23 non-zero counters */
@@ -120,10 +119,52 @@ static void bth_metrics_all_counters_addressable(void) {
     alloc.free(alloc.ctx, summary, out_len);
 }
 
+static void bth_metrics_log_does_not_crash_with_zeros(void) {
+    sc_bth_metrics_t m;
+    sc_bth_metrics_init(&m);
+    sc_bth_metrics_log(&m);
+}
+
+static void bth_metrics_summary_contains_counter_names(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_bth_metrics_t m;
+    sc_bth_metrics_init(&m);
+    m.commitment_followups = 5;
+    m.pattern_insights = 3;
+    m.reactions_sent = 7;
+
+    size_t len = 0;
+    char *summary = sc_bth_metrics_summary(&alloc, &m, &len);
+    SC_ASSERT_NOT_NULL(summary);
+    SC_ASSERT_TRUE(strstr(summary, "commitment_followups=5") != NULL);
+    SC_ASSERT_TRUE(strstr(summary, "pattern_insights=3") != NULL);
+    SC_ASSERT_TRUE(strstr(summary, "reactions_sent=7") != NULL);
+    alloc.free(alloc.ctx, summary, len);
+}
+
+static void bth_metrics_summary_null_alloc(void) {
+    sc_bth_metrics_t m;
+    sc_bth_metrics_init(&m);
+    size_t len = 0;
+    char *summary = sc_bth_metrics_summary(NULL, &m, &len);
+    SC_ASSERT_NULL(summary);
+}
+
+static void bth_metrics_summary_null_metrics(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    size_t len = 0;
+    char *summary = sc_bth_metrics_summary(&alloc, NULL, &len);
+    SC_ASSERT_NULL(summary);
+}
+
 void run_bth_metrics_tests(void) {
     SC_TEST_SUITE("bth_metrics");
     SC_RUN_TEST(bth_metrics_init_zeros);
     SC_RUN_TEST(bth_metrics_summary_with_data);
     SC_RUN_TEST(bth_metrics_summary_empty);
     SC_RUN_TEST(bth_metrics_all_counters_addressable);
+    SC_RUN_TEST(bth_metrics_log_does_not_crash_with_zeros);
+    SC_RUN_TEST(bth_metrics_summary_contains_counter_names);
+    SC_RUN_TEST(bth_metrics_summary_null_alloc);
+    SC_RUN_TEST(bth_metrics_summary_null_metrics);
 }

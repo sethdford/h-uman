@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  deepText,
   shadowCount,
   shadowCountIn,
   shadowExists,
@@ -584,6 +585,97 @@ test.describe("Skills (Demo) — extended", () => {
   test("shows registry cards", async ({ page }) => {
     await expect(async () => {
       expect(await page.evaluate(shadowExists("sc-skills-view", "sc-skill-registry"))).toBe(true);
+    }).toPass({ timeout: POLL });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Memory View
+// ─────────────────────────────────────────────────────────────
+test.describe("Memory (Demo)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/?demo#memory");
+    await waitForViewReady(page, "sc-memory-view");
+  });
+
+  test("shows stat cards row", async ({ page }) => {
+    await expect(async () => {
+      const count = await page.evaluate(
+        shadowCountIn("sc-memory-view", "sc-stats-row", "sc-stat-card"),
+      );
+      expect(count).toBe(4);
+    }).toPass({ timeout: POLL });
+  });
+
+  test("displays memory entries grid", async ({ page }) => {
+    await expect(async () => {
+      const count = await page.evaluate(shadowCount("sc-memory-view", ".memory-grid sc-card"));
+      expect(count).toBeGreaterThanOrEqual(3);
+    }).toPass({ timeout: POLL });
+  });
+
+  test("has search input", async ({ page }) => {
+    await expect(async () => {
+      expect(
+        await page.evaluate(
+          shadowExists("sc-memory-view", 'sc-input[aria-label="Search memories"]'),
+        ),
+      ).toBe(true);
+    }).toPass({ timeout: POLL });
+  });
+
+  test("has category segmented control", async ({ page }) => {
+    await expect(async () => {
+      expect(await page.evaluate(shadowExists("sc-memory-view", "sc-segmented-control"))).toBe(
+        true,
+      );
+    }).toPass({ timeout: POLL });
+  });
+
+  test("has consolidate button", async ({ page }) => {
+    await expect(async () => {
+      const text = await page.evaluate(deepText("sc-memory-view"));
+      expect(text).toContain("Consolidate");
+    }).toPass({ timeout: POLL });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Metrics View
+// ─────────────────────────────────────────────────────────────
+test.describe("Metrics (Demo)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/?demo#metrics");
+    await waitForViewReady(page, "sc-metrics-view");
+  });
+
+  test("shows page hero with Observability heading", async ({ page }) => {
+    await expect(async () => {
+      const text = await page.evaluate(deepText("sc-metrics-view"));
+      expect(text).toContain("Observability");
+    }).toPass({ timeout: POLL });
+  });
+
+  test("shows stat cards row", async ({ page }) => {
+    await expect(async () => {
+      const count = await page.evaluate(shadowCount("sc-metrics-view", "sc-stat-card"));
+      expect(count).toBeGreaterThanOrEqual(4);
+    }).toPass({ timeout: POLL });
+  });
+
+  test("displays system health section", async ({ page }) => {
+    await expect(async () => {
+      const text = await page.evaluate(deepText("sc-metrics-view"));
+      expect(text).toContain("System Health");
+    }).toPass({ timeout: POLL });
+  });
+
+  test("displays intelligence pipeline BTH metrics", async ({ page }) => {
+    await expect(async () => {
+      const text = await page.evaluate(deepText("sc-metrics-view"));
+      expect(text).toContain("Intelligence Pipeline");
+      expect(text).toContain("Memory");
+      expect(text).toContain("Engagement");
     }).toPass({ timeout: POLL });
   });
 });

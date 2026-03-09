@@ -4,10 +4,9 @@
 #include <string.h>
 
 sc_error_t sc_ab_evaluate(sc_allocator_t *alloc, sc_ab_result_t *result,
-                        const sc_channel_history_entry_t *entries, size_t entry_count,
-                        uint32_t max_chars) {
-    (void)alloc;
-    if (!result)
+                          const sc_channel_history_entry_t *entries, size_t entry_count,
+                          uint32_t max_chars) {
+    if (!alloc || !result)
         return SC_ERR_INVALID_ARGUMENT;
 
     result->best_idx = 0;

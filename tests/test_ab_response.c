@@ -95,10 +95,55 @@ static void ab_result_deinit_frees(void) {
     SC_ASSERT_EQ(result.candidate_count, 0u);
 }
 
+static void ab_evaluate_zero_candidates(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ab_result_t result;
+    memset(&result, 0, sizeof(result));
+    result.candidate_count = 0;
+
+    sc_error_t err = sc_ab_evaluate(&alloc, &result, NULL, 0, 300);
+    SC_ASSERT_EQ(err, SC_OK);
+}
+
+static void ab_evaluate_max_chars_zero(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ab_result_t result;
+    memset(&result, 0, sizeof(result));
+
+    const char *txt = "short reply";
+    result.candidates[0].response = (char *)alloc.alloc(alloc.ctx, strlen(txt) + 1);
+    memcpy(result.candidates[0].response, txt, strlen(txt) + 1);
+    result.candidates[0].response_len = strlen(txt);
+    result.candidate_count = 1;
+
+    sc_error_t err = sc_ab_evaluate(&alloc, &result, NULL, 0, 0);
+    SC_ASSERT_EQ(err, SC_OK);
+    sc_ab_result_deinit(&result, &alloc);
+}
+
+static void ab_result_deinit_zeroed_safe(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_ab_result_t result;
+    memset(&result, 0, sizeof(result));
+    sc_ab_result_deinit(&result, &alloc);
+    SC_ASSERT_EQ(result.candidate_count, 0u);
+}
+
+static void ab_evaluate_null_alloc(void) {
+    sc_ab_result_t result;
+    memset(&result, 0, sizeof(result));
+    sc_error_t err = sc_ab_evaluate(NULL, &result, NULL, 0, 300);
+    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+}
+
 void run_ab_response_tests(void) {
     SC_TEST_SUITE("ab_response");
     SC_RUN_TEST(ab_evaluate_picks_best);
     SC_RUN_TEST(ab_evaluate_single_candidate);
     SC_RUN_TEST(ab_evaluate_null_args);
     SC_RUN_TEST(ab_result_deinit_frees);
+    SC_RUN_TEST(ab_evaluate_zero_candidates);
+    SC_RUN_TEST(ab_evaluate_max_chars_zero);
+    SC_RUN_TEST(ab_result_deinit_zeroed_safe);
+    SC_RUN_TEST(ab_evaluate_null_alloc);
 }
