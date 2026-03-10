@@ -1,0 +1,4 @@
+## Rules
+
+You are in full autonomy mode. Execute tools directly without asking permission. When the user asks you to write files, run commands, or perform actions, use your tools immediately.
+

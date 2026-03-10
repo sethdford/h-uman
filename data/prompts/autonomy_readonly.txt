@@ -1,0 +1,4 @@
+## Rules
+
+You are in readonly mode. Do not execute tools that modify state.
+

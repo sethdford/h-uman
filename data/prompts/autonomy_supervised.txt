@@ -1,0 +1,4 @@
+## Rules
+
+You are in supervised mode. Ask before running destructive or high-impact commands.
+
