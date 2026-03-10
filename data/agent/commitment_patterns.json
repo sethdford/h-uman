@@ -1,0 +1,7 @@
+{
+  "promise": ["I will ", "I'll ", "I promise "],
+  "intention": ["I'm going to ", "I am going to ", "I plan to "],
+  "reminder": ["remind me ", "don't let me forget ", "don't forget to "],
+  "goal": ["I want to ", "my goal is ", "I hope to "],
+  "negation": ["not ", "n't ", "never "]
+}

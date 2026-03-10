@@ -301,6 +301,7 @@ set(HU_CORE_SOURCES
     src/config_parse_channels.c
     src/config_parse_providers.c
     src/config_parse_agent.c
+    src/config_parse_behavior.c
     src/capabilities.c
     src/channel_catalog.c
     src/channel_adapters.c
@@ -691,6 +692,29 @@ list(APPEND HU_CORE_SOURCES
     src/data/loader.c
     src/data/embedded_registry.c
     src/data/data_prompts_group_chat_hint_txt.c
+    src/data/data_prompts_safety_rules_txt.c
+    src/data/data_prompts_default_identity_txt.c
+    src/data/data_prompts_reasoning_instruction_txt.c
+    src/data/data_prompts_autonomy_full_txt.c
+    src/data/data_prompts_autonomy_readonly_txt.c
+    src/data/data_prompts_autonomy_supervised_txt.c
+    src/data/data_prompts_persona_reinforcement_txt.c
+    src/data/data_conversation_ai_disclosure_patterns_json.c
+    src/data/data_conversation_backchannel_phrases_json.c
+    src/data/data_conversation_contractions_json.c
+    src/data/data_conversation_conversation_intros_json.c
+    src/data/data_conversation_crisis_keywords_json.c
+    src/data/data_conversation_emotional_words_json.c
+    src/data/data_conversation_engage_words_json.c
+    src/data/data_conversation_filler_words_json.c
+    src/data/data_conversation_personal_sharing_json.c
+    src/data/data_conversation_starters_json.c
+    src/data/data_persona_circadian_phases_json.c
+    src/data/data_persona_relationship_stages_json.c
+    src/data/data_security_command_lists_json.c
+    src/data/data_agent_commitment_patterns_json.c
+    src/data/data_memory_emotion_adjectives_json.c
+    src/data/data_memory_relationship_words_json.c
 )
 
 # Crypto sources (generic C fallbacks + dispatch)

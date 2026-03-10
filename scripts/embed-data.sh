@@ -80,23 +80,28 @@ typedef struct {
     size_t len;
 } hu_embedded_data_entry_t;
 
-static const hu_embedded_data_entry_t hu_embedded_data_registry[] = {
+static hu_embedded_data_entry_t hu_embedded_data_registry[] = {
 REGISTRY_EOF
+
+# Count entries for the registry and store entry count
+ENTRY_COUNT=0
+while IFS= read -r -d '' file; do
+    ((ENTRY_COUNT++))
+done < <(find "$DATA_DIR" -type f -print0)
 
 # Add entries
 while IFS= read -r -d '' file; do
     rel_path="${file#$DATA_DIR/}"
     var_name="data_$(echo "$rel_path" | sed 's/[\/.]/_/g')"
-    echo "    { \"$rel_path\", ${var_name}, ${var_name}_len }," >> "$registry_file"
+    echo "    { .path = \"$rel_path\", .data = ${var_name}, .len = ${var_name}_len }," >> "$registry_file"
 done < <(find "$DATA_DIR" -type f -print0)
 
 # Close the registry
-cat >> "$registry_file" << 'REGISTRY_EOF'
-    { NULL, NULL, 0 }  /* Sentinel */
+cat >> "$registry_file" << REGISTRY_EOF
+    { .path = NULL, .data = NULL, .len = 0 }  /* Sentinel */
 };
 
-static const size_t hu_embedded_data_count =
-    sizeof(hu_embedded_data_registry) / sizeof(hu_embedded_data_entry_t) - 1;
+static const size_t hu_embedded_data_count = ${ENTRY_COUNT};  /* excluding sentinel */
 
 const hu_embedded_data_entry_t *hu_embedded_data_lookup(const char *path) {
     if (path == NULL)
@@ -104,6 +109,19 @@ const hu_embedded_data_entry_t *hu_embedded_data_lookup(const char *path) {
 
     for (size_t i = 0; i < hu_embedded_data_count; i++) {
         if (strcmp(hu_embedded_data_registry[i].path, path) == 0) {
+            /* Set the length from the associated extern variable */
+REGISTRY_EOF
+
+# Add the length-setting code for each entry
+while IFS= read -r -d '' file; do
+    rel_path="${file#$DATA_DIR/}"
+    var_name="data_$(echo "$rel_path" | sed 's/[\/.]/_/g')"
+    echo "            if (strcmp(path, \"$rel_path\") == 0) {" >> "$registry_file"
+    echo "                hu_embedded_data_registry[i].len = ${var_name}_len;" >> "$registry_file"
+    echo "            }" >> "$registry_file"
+done < <(find "$DATA_DIR" -type f -print0)
+
+cat >> "$registry_file" << 'REGISTRY_EOF'
             return &hu_embedded_data_registry[i];
         }
     }

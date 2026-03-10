@@ -1,0 +1,22 @@
+{
+  "contractions": [
+    { "from": "I am ", "to": "I'm " },
+    { "from": "it is ", "to": "it's " },
+    { "from": "do not ", "to": "don't " },
+    { "from": "does not ", "to": "doesn't " },
+    { "from": "did not ", "to": "didn't " },
+    { "from": "is not ", "to": "isn't " },
+    { "from": "are not ", "to": "aren't " },
+    { "from": "would not ", "to": "wouldn't " },
+    { "from": "could not ", "to": "couldn't " },
+    { "from": "I will ", "to": "I'll " },
+    { "from": "I would ", "to": "I'd " },
+    { "from": "that is ", "to": "that's " },
+    { "from": "there is ", "to": "there's " },
+    { "from": "I have ", "to": "I've " },
+    { "from": "you are ", "to": "you're " },
+    { "from": "they are ", "to": "they're " },
+    { "from": "we are ", "to": "we're " },
+    { "from": "cannot ", "to": "can't " }
+  ]
+}

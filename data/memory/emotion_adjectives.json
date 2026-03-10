@@ -1,0 +1,24 @@
+{
+  "adjectives": [
+    { "word": "great", "emotion": "joy" },
+    { "word": "happy", "emotion": "joy" },
+    { "word": "excited", "emotion": "excitement" },
+    { "word": "wonderful", "emotion": "joy" },
+    { "word": "amazing", "emotion": "joy" },
+    { "word": "sad", "emotion": "sadness" },
+    { "word": "depressed", "emotion": "sadness" },
+    { "word": "down", "emotion": "sadness" },
+    { "word": "heartbroken", "emotion": "sadness" },
+    { "word": "angry", "emotion": "anger" },
+    { "word": "furious", "emotion": "anger" },
+    { "word": "scared", "emotion": "fear" },
+    { "word": "afraid", "emotion": "fear" },
+    { "word": "terrified", "emotion": "fear" },
+    { "word": "frightened", "emotion": "fear" },
+    { "word": "frustrated", "emotion": "frustration" },
+    { "word": "frustrating", "emotion": "frustration" },
+    { "word": "anxious", "emotion": "anxiety" },
+    { "word": "worried", "emotion": "anxiety" },
+    { "word": "stressed", "emotion": "anxiety" }
+  ]
+}
