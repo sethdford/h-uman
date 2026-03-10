@@ -1240,6 +1240,37 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
         }
     }
 
+    /* Humanization config (defaults applied when block absent) */
+    out->humanization.disfluency_frequency = 0.15f;
+    out->humanization.backchannel_probability = 0.3f;
+    out->humanization.burst_message_probability = 0.03f;
+    hu_json_value_t *hum = hu_json_object_get(root, "humanization");
+    if (hum && hum->type == HU_JSON_OBJECT) {
+        out->humanization.disfluency_frequency =
+            (float)hu_json_get_number(hum, "disfluency_frequency", 0.15);
+        out->humanization.backchannel_probability =
+            (float)hu_json_get_number(hum, "backchannel_probability", 0.3);
+        out->humanization.burst_message_probability =
+            (float)hu_json_get_number(hum, "burst_message_probability", 0.03);
+    }
+
+    /* Context modifiers (defaults applied when block absent) */
+    out->context_modifiers.serious_topics_reduction = 0.4f;
+    out->context_modifiers.personal_sharing_warmth_boost = 1.6f;
+    out->context_modifiers.high_emotion_breathing_boost = 1.5f;
+    out->context_modifiers.early_turn_humanization_boost = 1.4f;
+    hu_json_value_t *ctx_mod = hu_json_object_get(root, "context_modifiers");
+    if (ctx_mod && ctx_mod->type == HU_JSON_OBJECT) {
+        out->context_modifiers.serious_topics_reduction =
+            (float)hu_json_get_number(ctx_mod, "serious_topics_reduction", 0.4);
+        out->context_modifiers.personal_sharing_warmth_boost =
+            (float)hu_json_get_number(ctx_mod, "personal_sharing_warmth_boost", 1.6);
+        out->context_modifiers.high_emotion_breathing_boost =
+            (float)hu_json_get_number(ctx_mod, "high_emotion_breathing_boost", 1.5);
+        out->context_modifiers.early_turn_humanization_boost =
+            (float)hu_json_get_number(ctx_mod, "early_turn_humanization_boost", 1.4);
+    }
+
     /* Parse contacts */
     hu_json_value_t *contacts_obj = hu_json_object_get(root, "contacts");
     if (contacts_obj && contacts_obj->type == HU_JSON_OBJECT && contacts_obj->data.object.pairs) {

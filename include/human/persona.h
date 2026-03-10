@@ -195,6 +195,21 @@ typedef struct hu_social_dynamics {
     size_t anti_patterns_count;
 } hu_social_dynamics_t;
 
+/* Humanization config — disfluency, backchannels, burst messages */
+typedef struct hu_humanization_config {
+    float disfluency_frequency;      /* default 0.15 */
+    float backchannel_probability;   /* default 0.3 */
+    float burst_message_probability; /* default 0.03 */
+} hu_humanization_config_t;
+
+/* Context modifiers — topic/emotion/turn-based boosts */
+typedef struct hu_context_modifiers {
+    float serious_topics_reduction;      /* default 0.4 */
+    float personal_sharing_warmth_boost; /* default 1.6 */
+    float high_emotion_breathing_boost;  /* default 1.5 */
+    float early_turn_humanization_boost; /* default 1.4 */
+} hu_context_modifiers_t;
+
 /* Inner world — deep personality content surfaced by relationship stage */
 typedef struct hu_inner_world {
     char **contradictions;
@@ -271,6 +286,8 @@ typedef struct hu_persona {
     char *time_overlay_early_morning;
     char *time_overlay_afternoon;
     char *time_overlay_evening;
+    hu_humanization_config_t humanization;
+    hu_context_modifiers_t context_modifiers;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).

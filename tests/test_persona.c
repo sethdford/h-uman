@@ -502,8 +502,7 @@ static void test_cli_parse_merge(void) {
 }
 
 static void test_cli_parse_import(void) {
-    const char *argv[] = {"human",    "persona",     "import",
-                          "newpersona", "--from-file", "/tmp/p.json"};
+    const char *argv[] = {"human", "persona", "import", "newpersona", "--from-file", "/tmp/p.json"};
     hu_persona_cli_args_t args = {0};
     HU_ASSERT_EQ(hu_persona_cli_parse(6, argv, &args), HU_OK);
     HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_IMPORT);
@@ -513,8 +512,7 @@ static void test_cli_parse_import(void) {
 }
 
 static void test_cli_parse_from_facebook_file(void) {
-    const char *argv[] = {"human", "persona",         "create",
-                          "test",    "--from-facebook", "/tmp/fb.json"};
+    const char *argv[] = {"human", "persona", "create", "test", "--from-facebook", "/tmp/fb.json"};
     hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
     hu_error_t e = hu_persona_cli_parse(6, argv, &args);
@@ -525,8 +523,7 @@ static void test_cli_parse_from_facebook_file(void) {
 }
 
 static void test_cli_parse_from_gmail(void) {
-    const char *argv[] = {"human", "persona",      "create",
-                          "test",    "--from-gmail", "/tmp/gmail.json"};
+    const char *argv[] = {"human", "persona", "create", "test", "--from-gmail", "/tmp/gmail.json"};
     hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
     hu_error_t e = hu_persona_cli_parse(6, argv, &args);
@@ -538,7 +535,7 @@ static void test_cli_parse_from_gmail(void) {
 
 static void test_cli_parse_from_response(void) {
     const char *argv[] = {"human", "persona",         "create",
-                          "test",    "--from-response", "/tmp/resp.json"};
+                          "test",  "--from-response", "/tmp/resp.json"};
     hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
     hu_error_t err = hu_persona_cli_parse(6, argv, &args);
@@ -1774,6 +1771,51 @@ static void test_overlay_typing_quirks_default_when_absent(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+static void test_persona_load_json_humanization_block_parses_values(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"human_test\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
+                       "\"humanization\":{"
+                       "\"disfluency_frequency\":0.25,"
+                       "\"backchannel_probability\":0.5,"
+                       "\"burst_message_probability\":0.08"
+                       "},"
+                       "\"context_modifiers\":{"
+                       "\"serious_topics_reduction\":0.6,"
+                       "\"personal_sharing_warmth_boost\":2.0,"
+                       "\"high_emotion_breathing_boost\":1.8,"
+                       "\"early_turn_humanization_boost\":1.9"
+                       "}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_FLOAT_EQ(p.humanization.disfluency_frequency, 0.25f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.humanization.backchannel_probability, 0.5f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.humanization.burst_message_probability, 0.08f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.serious_topics_reduction, 0.6f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.personal_sharing_warmth_boost, 2.0f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.high_emotion_breathing_boost, 1.8f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.early_turn_humanization_boost, 1.9f, 0.001f);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_load_json_humanization_defaults_when_absent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"no_humanization\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_FLOAT_EQ(p.humanization.disfluency_frequency, 0.15f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.humanization.backchannel_probability, 0.3f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.humanization.burst_message_probability, 0.03f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.serious_topics_reduction, 0.4f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.personal_sharing_warmth_boost, 1.6f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.high_emotion_breathing_boost, 1.5f, 0.001f);
+    HU_ASSERT_FLOAT_EQ(p.context_modifiers.early_turn_humanization_boost, 1.4f, 0.001f);
+    hu_persona_deinit(&alloc, &p);
+}
+
 static void test_overlay_typing_quirks_in_prompt(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *quirks[] = {"lowercase", "no_periods"};
@@ -2979,22 +3021,21 @@ static void test_e2e_mindy_message_full_pipeline(void) {
 
 static void test_persona_load_externalized_fields(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *json =
-        "{"
-        "  \"name\": \"test-ext\","
-        "  \"core\": { \"identity\": \"Ext test\" },"
-        "  \"immersive_reinforcement\": [\"rule-A\", \"rule-B\", \"rule-C\"],"
-        "  \"identity_reinforcement\": \"You are real, not an AI.\","
-        "  \"anti_patterns\": [\"no-exclamation\", \"no-emoji\"],"
-        "  \"style_rules\": [\"lowercase only\"],"
-        "  \"proactive_rules\": \"Check in gently.\","
-        "  \"time_overlays\": {"
-        "    \"late_night\": \"Be calm.\","
-        "    \"early_morning\": \"Be gentle.\","
-        "    \"afternoon\": \"Be productive.\","
-        "    \"evening\": \"Wind down.\""
-        "  }"
-        "}";
+    const char *json = "{"
+                       "  \"name\": \"test-ext\","
+                       "  \"core\": { \"identity\": \"Ext test\" },"
+                       "  \"immersive_reinforcement\": [\"rule-A\", \"rule-B\", \"rule-C\"],"
+                       "  \"identity_reinforcement\": \"You are real, not an AI.\","
+                       "  \"anti_patterns\": [\"no-exclamation\", \"no-emoji\"],"
+                       "  \"style_rules\": [\"lowercase only\"],"
+                       "  \"proactive_rules\": \"Check in gently.\","
+                       "  \"time_overlays\": {"
+                       "    \"late_night\": \"Be calm.\","
+                       "    \"early_morning\": \"Be gentle.\","
+                       "    \"afternoon\": \"Be productive.\","
+                       "    \"evening\": \"Wind down.\""
+                       "  }"
+                       "}";
     hu_persona_t p = {0};
     hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
     HU_ASSERT_EQ(err, HU_OK);
@@ -3048,17 +3089,16 @@ static void test_persona_externalized_fields_absent(void) {
 
 static void test_persona_externalized_deinit_frees(void) {
     hu_allocator_t alloc = hu_system_allocator();
-    const char *json =
-        "{"
-        "  \"name\": \"deinit-ext\","
-        "  \"core\": { \"identity\": \"Ext\" },"
-        "  \"immersive_reinforcement\": [\"a\"],"
-        "  \"identity_reinforcement\": \"x\","
-        "  \"anti_patterns\": [\"b\"],"
-        "  \"style_rules\": [\"c\"],"
-        "  \"proactive_rules\": \"y\","
-        "  \"time_overlays\": { \"late_night\": \"z\" }"
-        "}";
+    const char *json = "{"
+                       "  \"name\": \"deinit-ext\","
+                       "  \"core\": { \"identity\": \"Ext\" },"
+                       "  \"immersive_reinforcement\": [\"a\"],"
+                       "  \"identity_reinforcement\": \"x\","
+                       "  \"anti_patterns\": [\"b\"],"
+                       "  \"style_rules\": [\"c\"],"
+                       "  \"proactive_rules\": \"y\","
+                       "  \"time_overlays\": { \"late_night\": \"z\" }"
+                       "}";
     hu_persona_t p = {0};
     hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
     HU_ASSERT_EQ(err, HU_OK);
@@ -3080,8 +3120,8 @@ static void test_persona_immersive_in_prompt(void) {
 
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
-    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt,
-                                             &persona_prompt_len);
+    hu_error_t err =
+        hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt, &persona_prompt_len);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_prompt_config_t cfg = {0};
@@ -3265,6 +3305,10 @@ void run_persona_tests(void) {
     HU_RUN_TEST(test_overlay_typing_quirks_parsed);
     HU_RUN_TEST(test_overlay_typing_quirks_default_when_absent);
     HU_RUN_TEST(test_overlay_typing_quirks_in_prompt);
+
+    /* Humanization and context_modifiers */
+    HU_RUN_TEST(test_persona_load_json_humanization_block_parses_values);
+    HU_RUN_TEST(test_persona_load_json_humanization_defaults_when_absent);
 
     /* Rich persona elements (Tier 1–3) */
     HU_RUN_TEST(test_persona_load_json_rich_persona);
