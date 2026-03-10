@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: bash scripts/check-component.sh src/components/sc-button.ts
+# Usage: bash scripts/check-component.sh src/components/hu-button.ts
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -37,14 +37,14 @@ check "Extends LitElement" "extends LitElement"
 # 3. Must have static styles (static styles or static override styles)
 check "Has static styles" "static\s+(override\s+)?styles"
 
-# 4. Must use --sc- tokens (at least one)
-check "Uses --sc-* design tokens" "var\(--sc-"
+# 4. Must use --hu- tokens (at least one)
+check "Uses --hu-* design tokens" "var\(--sc-"
 
 # 5. Must NOT have hardcoded hex colors
 if grep -qE '#[0-9a-fA-F]{3,8}' "$FILE" 2>/dev/null; then
   # Filter out template literal backticks and common exceptions
   HEX_COUNT=$(grep -cE '#[0-9a-fA-F]{3,8}' "$FILE" 2>/dev/null || true)
-  echo "WARN: Found $HEX_COUNT possible hardcoded hex colors — use --sc-* tokens"
+  echo "WARN: Found $HEX_COUNT possible hardcoded hex colors — use --hu-* tokens"
 else
   echo "PASS: No hardcoded hex colors"
 fi

@@ -11,8 +11,8 @@ if [ ! -f "$TOKENS_FILE" ]; then
   exit 1
 fi
 
-# Extract all --sc-* custom property definitions from _tokens.css
-DEFINED=$(grep -oE '\-\-sc-[a-zA-Z0-9_-]+' "$TOKENS_FILE" | sort -u)
+# Extract all --hu-* custom property definitions from _tokens.css
+DEFINED=$(grep -oE '\-\-hu-[a-zA-Z0-9_-]+' "$TOKENS_FILE" | sort -u)
 TOTAL=$(echo "$DEFINED" | wc -l | tr -d ' ')
 
 echo "Checking $TOTAL defined tokens for usage in $SRC_DIR/..."
@@ -20,7 +20,7 @@ echo ""
 
 for token in $DEFINED; do
   # Search all TS, CSS files in src/ (excluding _tokens.css itself)
-  # Use -e to avoid tokens like --sc-* being parsed as grep options
+  # Use -e to avoid tokens like --hu-* being parsed as grep options
   REFS=$(find "$SRC_DIR" \( -name "*.ts" -o -name "*.css" \) ! -path "*_tokens.css" -print0 | xargs -0 grep -l -e "$token" 2>/dev/null | wc -l | tr -d ' ') || REFS=0
   if [ "$REFS" -eq 0 ]; then
     echo "  UNUSED: $token"

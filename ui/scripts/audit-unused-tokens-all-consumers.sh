@@ -11,8 +11,8 @@ if [ ! -f "$TOKENS_FILE" ]; then
   exit 1
 fi
 
-# Extract all --sc-* custom property definitions (unique, from LHS of : only)
-DEFINED=$(grep -oE '\-\-sc-[a-zA-Z0-9_-]+' "$TOKENS_FILE" | sort -u)
+# Extract all --hu-* custom property definitions (unique, from LHS of : only)
+DEFINED=$(grep -oE '\-\-hu-[a-zA-Z0-9_-]+' "$TOKENS_FILE" | sort -u)
 TOTAL=$(echo "$DEFINED" | wc -l | tr -d ' ')
 
 echo "=== Design Token Audit: $TOTAL tokens from _tokens.css ==="
@@ -22,7 +22,7 @@ echo ""
 echo "Building indirect-use map (tokens referenced in other token values)..."
 INDIRECT=""
 for token in $DEFINED; do
-  # Check if this token appears in any token VALUE (RHS) - e.g. var(--sc-accent-subtle)
+  # Check if this token appears in any token VALUE (RHS) - e.g. var(--hu-accent-subtle)
   if grep -q "$token" "$TOKENS_FILE" 2>/dev/null; then
     # Count occurrences: if it appears more than once, it's used (definition + reference)
     # Or if it appears in a line that's not a definition of itself
@@ -72,5 +72,5 @@ echo "=== Summary ==="
 echo "Total tokens: $TOTAL"
 echo "Truly unused (no refs in ui, website, docs, design-tokens): $UNUSED_COUNT"
 echo ""
-echo "Note: Tokens used as values in other tokens (e.g. var(--sc-x) in --sc-y) are excluded."
+echo "Note: Tokens used as values in other tokens (e.g. var(--hu-x) in --hu-y) are excluded."
 echo "Note: C (design_tokens.h) and apps (Flutter/Swift/Kotlin) use generated outputs, not CSS var names."

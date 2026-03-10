@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs check-component.sh against every sc-*.ts component.
+# Runs check-component.sh against every hu-*.ts component.
 # Exit code is non-zero if any component fails.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ SCRIPT="scripts/check-component.sh"
 FAILURES=0
 TOTAL=0
 
-for file in src/components/sc-*.ts; do
+for file in src/components/hu-*.ts; do
   # Skip test files and type definition files
   case "$file" in
     *.test.ts|*.d.ts) continue ;;

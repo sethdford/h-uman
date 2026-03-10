@@ -11,7 +11,7 @@ echo "" >> "$OUTPUT"
 echo "Auto-generated from \`ui/src/components/\`" >> "$OUTPUT"
 echo "" >> "$OUTPUT"
 
-for file in src/components/sc-*.ts; do
+for file in src/components/hu-*.ts; do
   [ -f "$file" ] || continue
 
   NAME=$(basename "$file" .ts)
@@ -65,7 +65,7 @@ for file in src/components/sc-*.ts; do
   echo "" >> "$OUTPUT"
 done
 
-TOTAL=$(ls src/components/sc-*.ts 2>/dev/null | wc -l | tr -d ' ') || TOTAL=0
+TOTAL=$(ls src/components/hu-*.ts 2>/dev/null | wc -l | tr -d ' ') || TOTAL=0
 echo "" >> "$OUTPUT"
 echo "_${TOTAL} components documented. Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)_" >> "$OUTPUT"
 

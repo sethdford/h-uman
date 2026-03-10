@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lint-raw-values.sh — flag design token drift in component code
 # Checks for: raw hex/rgba colors, raw breakpoints, raw pixel spacing/radii,
-# raw durations, and emoji-as-icons — all should use --sc-* design tokens.
+# raw durations, and emoji-as-icons — all should use --hu-* design tokens.
 
 set -euo pipefail
 
@@ -42,8 +42,8 @@ grep_ts() {
 echo "--- Raw hex colors ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
-  # Allow explicit lint overrides via /* sc-lint-ok */ comment
-  if echo "$match" | grep -qF 'sc-lint-ok'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ comment
+  if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
   # Skip SVG attributes, CSS content/quotes, import lines, and JS private fields (#identifier)
@@ -59,8 +59,8 @@ done < <(grep_ts '#[0-9a-fA-F]{3,8}')
 echo "--- Raw rgba() colors ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
-  # Allow explicit lint overrides via /* sc-lint-ok */ comment
-  if echo "$match" | grep -qF 'sc-lint-ok'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ comment
+  if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
   if echo "$match" | grep -qE '(color-mix|from |import )'; then
@@ -70,15 +70,15 @@ while IFS= read -r match; do
   ERRORS=$((ERRORS + 1))
 done < <(grep_ts 'rgba\(')
 
-# 3. Raw breakpoints in @media queries (skip lines with /* --sc-breakpoint-* */ comments)
+# 3. Raw breakpoints in @media queries (skip lines with /* --hu-breakpoint-* */ comments)
 echo "--- Raw breakpoints in @media ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
-  # Allow explicit lint overrides via /* sc-lint-ok */ comment
-  if echo "$match" | grep -qF 'sc-lint-ok'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ comment
+  if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
-  if echo "$match" | grep -qE '/\*.*--sc-breakpoint'; then
+  if echo "$match" | grep -qE '/\*.*--hu-breakpoint'; then
     continue
   fi
   echo "  $match"
@@ -89,15 +89,15 @@ done < <(grep_ts '@media.*[0-9]+px')
 echo "--- Raw pixel spacing ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
-  # Allow explicit lint overrides via /* sc-lint-ok */ comment
-  if echo "$match" | grep -qF 'sc-lint-ok'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ comment
+  if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
   # Skip 1px (hairline borders), border-width, outline-offset, box-shadow
   if echo "$match" | grep -qE '(1px|border-width|outline-offset|box-shadow)'; then
     continue
   fi
-  # Skip minmax(, @media, and var(--sc-*, Npx) fallbacks
+  # Skip minmax(, @media, and var(--hu-*, Npx) fallbacks
   if echo "$match" | grep -qE '(minmax\(|@media|, [0-9]+px\))'; then
     continue
   fi
@@ -113,11 +113,11 @@ done < <(grep_ts '(padding|margin|gap|top|bottom|left|right|inset):[^;]*[0-9]+px
 echo "--- Raw pixel radii ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
-  # Allow explicit lint overrides via /* sc-lint-ok */ comment
-  if echo "$match" | grep -qF 'sc-lint-ok'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ comment
+  if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
-  if echo "$match" | grep -qE 'var\(--sc-radius'; then
+  if echo "$match" | grep -qE 'var\(--hu-radius'; then
     continue
   fi
   echo "  $match"
@@ -131,7 +131,7 @@ while IFS= read -r match; do
   if echo "$match" | grep -qE 'prefers-reduced-motion'; then
     continue
   fi
-  if echo "$match" | grep -qE 'var\(--sc-duration-'; then
+  if echo "$match" | grep -qE 'var\(--hu-duration-'; then
     continue
   fi
   if echo "$match" | grep -qE '(0s|0ms)\s*[,;)]'; then
@@ -140,8 +140,8 @@ while IFS= read -r match; do
   if echo "$match" | grep -qE 'animation-delay'; then
     continue
   fi
-  # Allow explicit lint overrides via /* sc-lint-ok */ or /* sc-exempt */ comment
-  if echo "$match" | grep -qE 'sc-lint-ok|sc-exempt'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ or /* hu-exempt */ comment
+  if echo "$match" | grep -qE 'hu-lint-ok|hu-exempt'; then
     continue
   fi
   echo "  $match"
@@ -152,8 +152,8 @@ done < <(grep_ts '(transition|animation):[^;]*([1-9][0-9]*ms|[0-9]+\.[0-9]+s|[1-
 echo "--- Emoji as icons ---"
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
-  # Allow explicit lint overrides via /* sc-lint-ok */ comment
-  if echo "$match" | grep -qF 'sc-lint-ok'; then
+  # Allow explicit lint overrides via /* hu-lint-ok */ comment
+  if echo "$match" | grep -qF 'hu-lint-ok'; then
     continue
   fi
   # Skip comment-only lines
@@ -167,7 +167,7 @@ done < <(grep_ts '[👍👎❤️📋🔖⚠️💬🔧⚡⚙]')
 echo
 if [ "$ERRORS" -gt 0 ]; then
   echo "Found $ERRORS design token drift violations."
-  echo "Use --sc-* CSS custom properties instead of raw values."
+  echo "Use --hu-* CSS custom properties instead of raw values."
   echo "See docs/design-strategy.md for the full token reference."
   exit 1
 else
