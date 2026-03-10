@@ -1,17 +1,17 @@
 /*
- * Split-pane TUI for seaclaw agent sessions.
+ * Split-pane TUI for human agent sessions.
  * Uses termbox2 for terminal rendering and event handling.
- * Guarded by SC_ENABLE_TUI -- compiles to stubs otherwise.
+ * Guarded by HU_ENABLE_TUI -- compiles to stubs otherwise.
  */
-#include "seaclaw/agent/tui.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/design_tokens.h"
+#include "human/agent/tui.h"
+#include "human/core/string.h"
+#include "human/design_tokens.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(SC_ENABLE_TUI) && defined(SC_GATEWAY_POSIX) && !defined(SC_IS_TEST)
+#if defined(HU_ENABLE_TUI) && defined(HU_GATEWAY_POSIX) && !defined(HU_IS_TEST)
 
 #define TB_IMPL
 #include "termbox2.h"
@@ -260,7 +260,7 @@ static size_t md_advance(md_ctx_t *md, const char *buf, size_t pos, size_t len) 
 }
 
 /* ── Draw everything ─────────────────────────────────────────────────── */
-static void draw(sc_tui_state_t *state) {
+static void draw(hu_tui_state_t *state) {
     tb_clear();
     tui_layout_t l = calc_layout();
 
@@ -271,15 +271,15 @@ static void draw(sc_tui_state_t *state) {
         int n;
         int off = 0;
         off = snprintf(title, sizeof(title),
-                       " SeaClaw " SC_BOX_VERT " %s/%s " SC_BOX_VERT " %zu tools",
+                       " Human " HU_BOX_VERT " %s/%s " HU_BOX_VERT " %zu tools",
                        state->provider_name ? state->provider_name : "?",
                        state->model_name ? state->model_name : "?", state->tools_count);
         if (state->session_cost_usd > 0.001 && off > 0 && (size_t)off < sizeof(title) - 20) {
-            off += snprintf(title + off, sizeof(title) - (size_t)off, " " SC_BOX_VERT " $%.2f",
+            off += snprintf(title + off, sizeof(title) - (size_t)off, " " HU_BOX_VERT " $%.2f",
                             state->session_cost_usd);
         }
         if (state->tab_count > 1 && off > 0 && (size_t)off < sizeof(title) - 20) {
-            off += snprintf(title + off, sizeof(title) - (size_t)off, " " SC_BOX_VERT " tab %d/%d",
+            off += snprintf(title + off, sizeof(title) - (size_t)off, " " HU_BOX_VERT " tab %d/%d",
                             state->active_tab + 1, state->tab_count);
         }
         n = off;
@@ -352,7 +352,7 @@ static void draw(sc_tui_state_t *state) {
     /* Status bar */
     draw_hline(l.status_y, l.w, FG_STATUS, BG_STATUS);
 
-    if (state->approval == SC_TUI_APPROVAL_PENDING) {
+    if (state->approval == HU_TUI_APPROVAL_PENDING) {
         char status[256];
         int n = snprintf(status, sizeof(status), " \xe2\x9a\xa0 Allow %s? [y/n] args: %.80s",
                          state->approval_tool, state->approval_args);
@@ -364,10 +364,10 @@ static void draw(sc_tui_state_t *state) {
         int n = snprintf(status, sizeof(status), " %s Thinking...", frame);
 
         if (state->tool_log_count > 0) {
-            sc_tui_tool_entry_t *last = &state->tool_log[state->tool_log_count - 1];
+            hu_tui_tool_entry_t *last = &state->tool_log[state->tool_log_count - 1];
             if (last->done) {
                 n = snprintf(status, sizeof(status), " %s %s (%llums)",
-                             last->success ? SC_CHECK : SC_CROSS, last->name,
+                             last->success ? HU_CHECK : HU_CROSS, last->name,
                              (unsigned long long)last->duration_ms);
             } else {
                 n = snprintf(status, sizeof(status), " %s %s...", frame, last->name);
@@ -382,7 +382,7 @@ static void draw(sc_tui_state_t *state) {
             draw_text(l.w - hint_len - 1, l.status_y, hint, hint_len, FG_DIM, BG_STATUS);
     } else {
         char status[128];
-        int n = snprintf(status, sizeof(status), " Ready " SC_BOX_VERT " %zu messages",
+        int n = snprintf(status, sizeof(status), " Ready " HU_BOX_VERT " %zu messages",
                          state->agent ? state->agent->history_count : 0);
         if (n > 0)
             draw_text(0, l.status_y, status, l.w, FG_STATUS, BG_STATUS);
@@ -403,17 +403,17 @@ static void draw(sc_tui_state_t *state) {
 }
 
 /* ── Append text to output buffer ────────────────────────────────────── */
-static void output_append(sc_tui_state_t *state, const char *text, size_t len) {
+static void output_append(hu_tui_state_t *state, const char *text, size_t len) {
     if (!text || len == 0)
         return;
-    size_t avail = SC_TUI_OUTPUT_MAX - state->output_len;
+    size_t avail = HU_TUI_OUTPUT_MAX - state->output_len;
     if (len > avail) {
-        size_t shift = len - avail + SC_TUI_OUTPUT_MAX / 4;
+        size_t shift = len - avail + HU_TUI_OUTPUT_MAX / 4;
         if (shift > state->output_len)
             shift = state->output_len;
         memmove(state->output_buf, state->output_buf + shift, state->output_len - shift);
         state->output_len -= shift;
-        avail = SC_TUI_OUTPUT_MAX - state->output_len;
+        avail = HU_TUI_OUTPUT_MAX - state->output_len;
     }
     size_t copy = len < avail ? len : avail;
     memcpy(state->output_buf + state->output_len, text, copy);
@@ -422,14 +422,14 @@ static void output_append(sc_tui_state_t *state, const char *text, size_t len) {
 }
 
 /* ── TUI Observer (Tier 1.1) ─────────────────────────────────────────── */
-static void tui_obs_record_event(void *ctx, const sc_observer_event_t *event) {
-    sc_tui_state_t *state = (sc_tui_state_t *)ctx;
+static void tui_obs_record_event(void *ctx, const hu_observer_event_t *event) {
+    hu_tui_state_t *state = (hu_tui_state_t *)ctx;
     if (!state || !event)
         return;
 
-    if (event->tag == SC_OBSERVER_EVENT_TOOL_CALL_START) {
-        if (state->tool_log_count < SC_TUI_TOOL_MAX) {
-            sc_tui_tool_entry_t *entry = &state->tool_log[state->tool_log_count];
+    if (event->tag == HU_OBSERVER_EVENT_TOOL_CALL_START) {
+        if (state->tool_log_count < HU_TUI_TOOL_MAX) {
+            hu_tui_tool_entry_t *entry = &state->tool_log[state->tool_log_count];
             memset(entry, 0, sizeof(*entry));
             const char *name = event->data.tool_call_start.tool;
             if (name) {
@@ -442,10 +442,10 @@ static void tui_obs_record_event(void *ctx, const sc_observer_event_t *event) {
             entry->done = false;
             state->tool_log_count++;
         }
-    } else if (event->tag == SC_OBSERVER_EVENT_TOOL_CALL) {
+    } else if (event->tag == HU_OBSERVER_EVENT_TOOL_CALL) {
         const char *name = event->data.tool_call.tool;
         for (size_t i = state->tool_log_count; i > 0; i--) {
-            sc_tui_tool_entry_t *entry = &state->tool_log[i - 1];
+            hu_tui_tool_entry_t *entry = &state->tool_log[i - 1];
             if (!entry->done && name && strncmp(entry->name, name, sizeof(entry->name)) == 0) {
                 entry->done = true;
                 entry->success = event->data.tool_call.success;
@@ -463,7 +463,7 @@ static void tui_obs_record_event(void *ctx, const sc_observer_event_t *event) {
     }
 }
 
-static void tui_obs_record_metric(void *ctx, const sc_observer_metric_t *m) {
+static void tui_obs_record_metric(void *ctx, const hu_observer_metric_t *m) {
     (void)ctx;
     (void)m;
 }
@@ -478,7 +478,7 @@ static void tui_obs_deinit(void *ctx) {
     (void)ctx;
 }
 
-static const sc_observer_vtable_t tui_observer_vtable = {
+static const hu_observer_vtable_t tui_observer_vtable = {
     .record_event = tui_obs_record_event,
     .record_metric = tui_obs_record_metric,
     .flush = tui_obs_flush,
@@ -486,8 +486,8 @@ static const sc_observer_vtable_t tui_observer_vtable = {
     .deinit = tui_obs_deinit,
 };
 
-sc_observer_t sc_tui_observer_create(sc_tui_state_t *state) {
-    sc_observer_t obs = {.ctx = state, .vtable = &tui_observer_vtable};
+hu_observer_t hu_tui_observer_create(hu_tui_state_t *state) {
+    hu_observer_t obs = {.ctx = state, .vtable = &tui_observer_vtable};
     return obs;
 }
 
@@ -495,7 +495,7 @@ sc_observer_t sc_tui_observer_create(sc_tui_state_t *state) {
 static volatile sig_atomic_t tui_stream_started = 0;
 
 static void tui_stream_token(const char *delta, size_t len, void *ctx) {
-    sc_tui_state_t *state = (sc_tui_state_t *)ctx;
+    hu_tui_state_t *state = (hu_tui_state_t *)ctx;
     if (!delta || len == 0 || !state)
         return;
     tui_stream_started = 1;
@@ -504,33 +504,33 @@ static void tui_stream_token(const char *delta, size_t len, void *ctx) {
 
 /* ── Approval callback (called from agent thread, blocks until TUI answers) ── */
 static bool tui_approval_cb(void *ctx, const char *tool_name, const char *args) {
-    sc_tui_state_t *state = (sc_tui_state_t *)ctx;
+    hu_tui_state_t *state = (hu_tui_state_t *)ctx;
     if (!state)
         return false;
 
     snprintf(state->approval_tool, sizeof(state->approval_tool), "%s", tool_name ? tool_name : "?");
     snprintf(state->approval_args, sizeof(state->approval_args), "%s", args ? args : "");
-    state->approval = SC_TUI_APPROVAL_PENDING;
+    state->approval = HU_TUI_APPROVAL_PENDING;
 
     /* Spin-wait for the TUI event loop to set GRANTED or DENIED */
-    while (state->approval == SC_TUI_APPROVAL_PENDING && !state->quit_requested) {
+    while (state->approval == HU_TUI_APPROVAL_PENDING && !state->quit_requested) {
         struct timespec ts = {.tv_sec = 0, .tv_nsec = 50000000L};
         nanosleep(&ts, NULL);
     }
 
-    bool granted = (state->approval == SC_TUI_APPROVAL_GRANTED);
-    state->approval = SC_TUI_APPROVAL_NONE;
+    bool granted = (state->approval == HU_TUI_APPROVAL_GRANTED);
+    state->approval = HU_TUI_APPROVAL_NONE;
     return granted;
 }
 
 /* ── Agent turn thread ───────────────────────────────────────────────── */
 typedef struct tui_turn_ctx {
-    sc_tui_state_t *state;
+    hu_tui_state_t *state;
     char *msg;
     size_t msg_len;
     char *response;
     size_t response_len;
-    sc_error_t err;
+    hu_error_t err;
     volatile int done;
 } tui_turn_ctx_t;
 
@@ -538,15 +538,15 @@ static void *tui_turn_thread(void *arg) {
     tui_turn_ctx_t *ctx = (tui_turn_ctx_t *)arg;
     ctx->state->agent->active_channel = "tui";
     ctx->state->agent->active_channel_len = 3;
-    ctx->err = sc_agent_turn_stream(ctx->state->agent, ctx->msg, ctx->msg_len, tui_stream_token,
+    ctx->err = hu_agent_turn_stream(ctx->state->agent, ctx->msg, ctx->msg_len, tui_stream_token,
                                     ctx->state, &ctx->response, &ctx->response_len);
     ctx->done = 1;
     return NULL;
 }
 
 /* ── Input handling ──────────────────────────────────────────────────── */
-static void input_insert(sc_tui_state_t *state, uint32_t ch) {
-    if (state->input_len + 4 >= SC_TUI_INPUT_MAX)
+static void input_insert(hu_tui_state_t *state, uint32_t ch) {
+    if (state->input_len + 4 >= HU_TUI_INPUT_MAX)
         return;
     if (ch < 128) {
         memmove(state->input_buf + state->input_cursor + 1, state->input_buf + state->input_cursor,
@@ -558,7 +558,7 @@ static void input_insert(sc_tui_state_t *state, uint32_t ch) {
     }
 }
 
-static void input_backspace(sc_tui_state_t *state) {
+static void input_backspace(hu_tui_state_t *state) {
     if (state->input_cursor == 0)
         return;
     memmove(state->input_buf + state->input_cursor - 1, state->input_buf + state->input_cursor,
@@ -568,7 +568,7 @@ static void input_backspace(sc_tui_state_t *state) {
     state->input_buf[state->input_len] = '\0';
 }
 
-static void input_delete(sc_tui_state_t *state) {
+static void input_delete(hu_tui_state_t *state) {
     if (state->input_cursor >= state->input_len)
         return;
     memmove(state->input_buf + state->input_cursor, state->input_buf + state->input_cursor + 1,
@@ -577,20 +577,20 @@ static void input_delete(sc_tui_state_t *state) {
     state->input_buf[state->input_len] = '\0';
 }
 
-static void input_clear(sc_tui_state_t *state) {
+static void input_clear(hu_tui_state_t *state) {
     state->input_len = 0;
     state->input_cursor = 0;
     state->input_buf[0] = '\0';
 }
 
 /* ── Input history ───────────────────────────────────────────────────── */
-static void history_push(sc_tui_state_t *state, const char *msg, size_t len) {
+static void history_push(hu_tui_state_t *state, const char *msg, size_t len) {
     if (len == 0 || !msg)
         return;
-    if (state->input_history_count >= SC_TUI_HISTORY_MAX) {
+    if (state->input_history_count >= HU_TUI_HISTORY_MAX) {
         free(state->input_history[0]);
         memmove(state->input_history, state->input_history + 1,
-                (SC_TUI_HISTORY_MAX - 1) * sizeof(char *));
+                (HU_TUI_HISTORY_MAX - 1) * sizeof(char *));
         state->input_history_count--;
     }
     state->input_history[state->input_history_count] = strndup(msg, len);
@@ -599,7 +599,7 @@ static void history_push(sc_tui_state_t *state, const char *msg, size_t len) {
     state->input_history_pos = (int)state->input_history_count;
 }
 
-static void history_navigate(sc_tui_state_t *state, int direction) {
+static void history_navigate(hu_tui_state_t *state, int direction) {
     int new_pos = state->input_history_pos + direction;
     if (new_pos < 0)
         new_pos = 0;
@@ -609,8 +609,8 @@ static void history_navigate(sc_tui_state_t *state, int direction) {
 
     if (new_pos < (int)state->input_history_count && state->input_history[new_pos]) {
         size_t len = strlen(state->input_history[new_pos]);
-        if (len >= SC_TUI_INPUT_MAX)
-            len = SC_TUI_INPUT_MAX - 1;
+        if (len >= HU_TUI_INPUT_MAX)
+            len = HU_TUI_INPUT_MAX - 1;
         memcpy(state->input_buf, state->input_history[new_pos], len);
         state->input_buf[len] = '\0';
         state->input_len = len;
@@ -622,12 +622,12 @@ static void history_navigate(sc_tui_state_t *state, int direction) {
 
 /* ── Background task (Tier 3.4) ──────────────────────────────────────── */
 typedef struct tui_bg_task {
-    sc_tui_state_t *state;
+    hu_tui_state_t *state;
     char *msg;
     size_t msg_len;
     char *response;
     size_t response_len;
-    sc_error_t err;
+    hu_error_t err;
     volatile int done;
 } tui_bg_task_t;
 
@@ -638,14 +638,14 @@ static void *bg_task_thread(void *arg) {
     tui_bg_task_t *task = (tui_bg_task_t *)arg;
     task->state->agent->active_channel = "tui";
     task->state->agent->active_channel_len = 3;
-    task->err = sc_agent_turn(task->state->agent, task->msg, task->msg_len, &task->response,
+    task->err = hu_agent_turn(task->state->agent, task->msg, task->msg_len, &task->response,
                               &task->response_len);
     task->done = 1;
     return NULL;
 }
 
 /* ── Handle slash commands locally (Tier 1.2) ────────────────────────── */
-static bool handle_slash_command(sc_tui_state_t *state) {
+static bool handle_slash_command(hu_tui_state_t *state) {
     if (state->input_len == 0 || state->input_buf[0] != '/')
         return false;
 
@@ -661,7 +661,7 @@ static bool handle_slash_command(sc_tui_state_t *state) {
         if (g_bg_task) {
             memset(g_bg_task, 0, sizeof(tui_bg_task_t));
             g_bg_task->state = state;
-            g_bg_task->msg = sc_strndup(state->alloc, task_msg, task_len);
+            g_bg_task->msg = hu_strndup(state->alloc, task_msg, task_len);
             g_bg_task->msg_len = task_len;
             g_bg_task->done = 0;
             pthread_create(&g_bg_tid, NULL, bg_task_thread, g_bg_task);
@@ -674,7 +674,7 @@ static bool handle_slash_command(sc_tui_state_t *state) {
         return true;
     }
 
-    char *resp = sc_agent_handle_slash_command(state->agent, state->input_buf, state->input_len);
+    char *resp = hu_agent_handle_slash_command(state->agent, state->input_buf, state->input_len);
     if (!resp)
         return false;
 
@@ -696,14 +696,14 @@ static bool handle_slash_command(sc_tui_state_t *state) {
 }
 
 /* ── Tab save/restore helpers ────────────────────────────────────────── */
-static void tab_save_current(sc_tui_state_t *state) {
+static void tab_save_current(hu_tui_state_t *state) {
     if (!state->tabs || state->active_tab >= state->tab_count)
         return;
-    sc_tui_tab_snapshot_t *snap = &state->tabs[state->active_tab];
+    hu_tui_tab_snapshot_t *snap = &state->tabs[state->active_tab];
     memcpy(snap->output_buf, state->output_buf, state->output_len);
     snap->output_len = state->output_len;
     snap->output_scroll = state->output_scroll;
-    memcpy(snap->tool_log, state->tool_log, state->tool_log_count * sizeof(sc_tui_tool_entry_t));
+    memcpy(snap->tool_log, state->tool_log, state->tool_log_count * sizeof(hu_tui_tool_entry_t));
     snap->tool_log_count = state->tool_log_count;
     /* Save agent history by stealing the pointer */
     snap->history = state->agent->history;
@@ -715,14 +715,14 @@ static void tab_save_current(sc_tui_state_t *state) {
     state->agent->history_cap = 0;
 }
 
-static void tab_restore(sc_tui_state_t *state, int tab_idx) {
+static void tab_restore(hu_tui_state_t *state, int tab_idx) {
     if (!state->tabs || tab_idx >= state->tab_count)
         return;
-    sc_tui_tab_snapshot_t *snap = &state->tabs[tab_idx];
+    hu_tui_tab_snapshot_t *snap = &state->tabs[tab_idx];
     memcpy(state->output_buf, snap->output_buf, snap->output_len);
     state->output_len = snap->output_len;
     state->output_scroll = snap->output_scroll;
-    memcpy(state->tool_log, snap->tool_log, snap->tool_log_count * sizeof(sc_tui_tool_entry_t));
+    memcpy(state->tool_log, snap->tool_log, snap->tool_log_count * sizeof(hu_tui_tool_entry_t));
     state->tool_log_count = snap->tool_log_count;
     /* Restore agent history */
     state->agent->history = snap->history;
@@ -736,10 +736,10 @@ static void tab_restore(sc_tui_state_t *state, int tab_idx) {
 }
 
 /* ── Main TUI loop ───────────────────────────────────────────────────── */
-sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc, sc_agent_t *agent,
+hu_error_t hu_tui_init(hu_tui_state_t *state, hu_allocator_t *alloc, hu_agent_t *agent,
                        const char *provider_name, const char *model_name, size_t tools_count) {
     if (!state || !alloc || !agent)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(state, 0, sizeof(*state));
     state->alloc = alloc;
     state->agent = agent;
@@ -748,30 +748,30 @@ sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc, sc_agent_t 
     state->tools_count = tools_count;
     state->input_history_pos = 0;
     state->tab_count = 1;
-    state->tabs = (sc_tui_tab_snapshot_t *)alloc->alloc(
-        alloc->ctx, SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    state->tabs = (hu_tui_tab_snapshot_t *)alloc->alloc(
+        alloc->ctx, HU_TUI_TAB_MAX * sizeof(hu_tui_tab_snapshot_t));
     if (state->tabs)
-        memset(state->tabs, 0, SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
-    return SC_OK;
+        memset(state->tabs, 0, HU_TUI_TAB_MAX * sizeof(hu_tui_tab_snapshot_t));
+    return HU_OK;
 }
 
-sc_error_t sc_tui_run(sc_tui_state_t *state) {
+hu_error_t hu_tui_run(hu_tui_state_t *state) {
     if (!state)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     int rc = tb_init();
     if (rc != 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     /* Install TUI observer and approval callback on the agent */
-    sc_observer_t tui_obs = sc_tui_observer_create(state);
-    sc_observer_t *prev_observer = state->agent->observer;
+    hu_observer_t tui_obs = hu_tui_observer_create(state);
+    hu_observer_t *prev_observer = state->agent->observer;
     state->agent->observer = &tui_obs;
     state->agent->approval_cb = tui_approval_cb;
     state->agent->approval_ctx = state;
 
     {
-        const char *welcome = "Welcome to SeaClaw TUI. Type a message and press Enter.\n"
+        const char *welcome = "Welcome to Human TUI. Type a message and press Enter.\n"
                               "Ctrl+C cancels a running turn. Ctrl+D or /quit to exit.\n"
                               "Use /help for commands, arrow keys to scroll.\n\n";
         output_append(state, welcome, strlen(welcome));
@@ -791,12 +791,12 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
             if (ev.type == TB_EVENT_KEY) {
 
                 /* Approval prompt handling (Tier 2.3) */
-                if (state->approval == SC_TUI_APPROVAL_PENDING) {
+                if (state->approval == HU_TUI_APPROVAL_PENDING) {
                     if (ev.ch == 'y' || ev.ch == 'Y') {
-                        state->approval = SC_TUI_APPROVAL_GRANTED;
+                        state->approval = HU_TUI_APPROVAL_GRANTED;
                         output_append(state, "[Approved]\n", 11);
                     } else if (ev.ch == 'n' || ev.ch == 'N' || ev.key == TB_KEY_ESC) {
-                        state->approval = SC_TUI_APPROVAL_DENIED;
+                        state->approval = HU_TUI_APPROVAL_DENIED;
                         output_append(state, "[Denied]\n", 9);
                     }
                     continue;
@@ -820,7 +820,7 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
 
                 /* Ctrl+T: new tab (Tier 3.2) */
                 if (ev.key == TB_KEY_CTRL_T) {
-                    if (state->tabs && state->tab_count < SC_TUI_TAB_MAX && !state->agent_running) {
+                    if (state->tabs && state->tab_count < HU_TUI_TAB_MAX && !state->agent_running) {
                         tab_save_current(state);
                         state->tab_count++;
                         state->active_tab = state->tab_count - 1;
@@ -866,7 +866,7 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
                             continue;
                         }
 
-                        char prompt_line[SC_TUI_INPUT_MAX + 8];
+                        char prompt_line[HU_TUI_INPUT_MAX + 8];
                         int pn = snprintf(prompt_line, sizeof(prompt_line), "> %.*s\n",
                                           (int)state->input_len, state->input_buf);
                         if (pn > 0)
@@ -886,7 +886,7 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
                             memset(active_turn, 0, sizeof(*active_turn));
                             active_turn->state = state;
                             active_turn->msg =
-                                sc_strndup(state->alloc, state->input_buf, state->input_len);
+                                hu_strndup(state->alloc, state->input_buf, state->input_len);
                             active_turn->msg_len = state->input_len;
                             active_turn->done = 0;
                             state->agent_running = true;
@@ -962,10 +962,10 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
             state->agent_running = false;
             pthread_join(turn_tid, NULL);
 
-            if (active_turn->err == SC_ERR_CANCELLED) {
+            if (active_turn->err == HU_ERR_CANCELLED) {
                 output_append(state, "\n[Turn cancelled]\n\n", 19);
-            } else if (active_turn->err != SC_OK) {
-                const char *estr = sc_error_string(active_turn->err);
+            } else if (active_turn->err != HU_OK) {
+                const char *estr = hu_error_string(active_turn->err);
                 char ebuf[256];
                 int en = snprintf(ebuf, sizeof(ebuf), "\n[Error: %s]\n\n", estr);
                 if (en > 0)
@@ -989,14 +989,14 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
         /* Check if background task completed (Tier 3.4) */
         if (g_bg_task && g_bg_task->done) {
             pthread_join(g_bg_tid, NULL);
-            if (g_bg_task->err == SC_OK && g_bg_task->response) {
+            if (g_bg_task->err == HU_OK && g_bg_task->response) {
                 output_append(state, "\n[Background complete]\n", 22);
                 output_append(state, g_bg_task->response, g_bg_task->response_len);
                 output_append(state, "\n\n", 2);
                 state->alloc->free(state->alloc->ctx, g_bg_task->response,
                                    g_bg_task->response_len + 1);
             } else {
-                const char *estr = sc_error_string(g_bg_task->err);
+                const char *estr = hu_error_string(g_bg_task->err);
                 char ebuf[256];
                 int en = snprintf(ebuf, sizeof(ebuf), "\n[Background failed: %s]\n\n", estr);
                 if (en > 0)
@@ -1044,17 +1044,17 @@ sc_error_t sc_tui_run(sc_tui_state_t *state) {
     state->agent->observer = prev_observer;
 
     tb_shutdown();
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_tui_deinit(sc_tui_state_t *state) {
+void hu_tui_deinit(hu_tui_state_t *state) {
     if (!state)
         return;
     for (size_t i = 0; i < state->input_history_count; i++)
         free(state->input_history[i]);
     if (state->tabs) {
         for (int t = 0; t < state->tab_count; t++) {
-            sc_tui_tab_snapshot_t *snap = &state->tabs[t];
+            hu_tui_tab_snapshot_t *snap = &state->tabs[t];
             if (snap->history) {
                 for (size_t h = 0; h < snap->history_count; h++) {
                     if (snap->history[h].content)
@@ -1068,20 +1068,20 @@ void sc_tui_deinit(sc_tui_state_t *state) {
                                            snap->history[h].tool_call_id_len + 1);
                 }
                 state->alloc->free(state->alloc->ctx, snap->history,
-                                   snap->history_cap * sizeof(sc_owned_message_t));
+                                   snap->history_cap * sizeof(hu_owned_message_t));
             }
         }
         state->alloc->free(state->alloc->ctx, state->tabs,
-                           SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+                           HU_TUI_TAB_MAX * sizeof(hu_tui_tab_snapshot_t));
     }
 }
 
-#else /* !SC_ENABLE_TUI || !SC_GATEWAY_POSIX || SC_IS_TEST */
+#else /* !HU_ENABLE_TUI || !HU_GATEWAY_POSIX || HU_IS_TEST */
 
-sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc, sc_agent_t *agent,
+hu_error_t hu_tui_init(hu_tui_state_t *state, hu_allocator_t *alloc, hu_agent_t *agent,
                        const char *provider_name, const char *model_name, size_t tools_count) {
     if (!state || !alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(state, 0, sizeof(*state));
     state->alloc = alloc;
     state->agent = agent;
@@ -1089,22 +1089,22 @@ sc_error_t sc_tui_init(sc_tui_state_t *state, sc_allocator_t *alloc, sc_agent_t 
     state->model_name = model_name;
     state->tools_count = tools_count;
     state->tab_count = 1;
-    state->tabs = (sc_tui_tab_snapshot_t *)alloc->alloc(
-        alloc->ctx, SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+    state->tabs = (hu_tui_tab_snapshot_t *)alloc->alloc(
+        alloc->ctx, HU_TUI_TAB_MAX * sizeof(hu_tui_tab_snapshot_t));
     if (state->tabs)
-        memset(state->tabs, 0, SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
-    return SC_OK;
+        memset(state->tabs, 0, HU_TUI_TAB_MAX * sizeof(hu_tui_tab_snapshot_t));
+    return HU_OK;
 }
 
-sc_error_t sc_tui_run(sc_tui_state_t *state) {
+hu_error_t hu_tui_run(hu_tui_state_t *state) {
     (void)state;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
-void sc_tui_deinit(sc_tui_state_t *state) {
+void hu_tui_deinit(hu_tui_state_t *state) {
     if (!state || !state->alloc)
         return;
-    for (int i = 0; i < SC_TUI_HISTORY_MAX; i++) {
+    for (int i = 0; i < HU_TUI_HISTORY_MAX; i++) {
         if (state->input_history[i]) {
             state->alloc->free(state->alloc->ctx, state->input_history[i],
                                strlen(state->input_history[i]) + 1);
@@ -1112,18 +1112,18 @@ void sc_tui_deinit(sc_tui_state_t *state) {
     }
     if (state->tabs) {
         state->alloc->free(state->alloc->ctx, state->tabs,
-                           SC_TUI_TAB_MAX * sizeof(sc_tui_tab_snapshot_t));
+                           HU_TUI_TAB_MAX * sizeof(hu_tui_tab_snapshot_t));
     }
 }
 
-static const sc_observer_vtable_t tui_stub_observer_vtable = {
+static const hu_observer_vtable_t tui_stub_observer_vtable = {
     .record_event = NULL,
     .record_metric = NULL,
     .name = NULL,
 };
 
-sc_observer_t sc_tui_observer_create(sc_tui_state_t *state) {
-    sc_observer_t obs = {.ctx = state, .vtable = &tui_stub_observer_vtable};
+hu_observer_t hu_tui_observer_create(hu_tui_state_t *state) {
+    hu_observer_t obs = {.ctx = state, .vtable = &tui_stub_observer_vtable};
     return obs;
 }
 

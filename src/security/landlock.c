@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
@@ -33,7 +33,7 @@
 #endif
 
 static long landlock_abi_version(void) {
-#if SC_IS_TEST
+#if HU_IS_TEST
     return 0;
 #else
     long r =
@@ -54,20 +54,20 @@ static bool landlock_supported(void) {
  * /usr, /bin, /lib, /etc, /dev, /proc for tool execution. Everything else
  * is denied.
  */
-static sc_error_t landlock_apply(void *ctx) {
+static hu_error_t landlock_apply(void *ctx) {
 #ifndef __linux__
     (void)ctx;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_landlock_ctx_t *ll = (sc_landlock_ctx_t *)ctx;
+    hu_landlock_ctx_t *ll = (hu_landlock_ctx_t *)ctx;
     if (!ll->workspace_dir[0])
-        return SC_ERR_INVALID_ARGUMENT;
-#if SC_IS_TEST
-    return SC_OK;
+        return HU_ERR_INVALID_ARGUMENT;
+#if HU_IS_TEST
+    return HU_OK;
 #else
     long abi = landlock_abi_version();
     if (abi < 1)
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
 
     uint64_t fs_access =
         LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_WRITE_FILE |
@@ -86,7 +86,7 @@ static sc_error_t landlock_apply(void *ctx) {
     int ruleset_fd =
         (int)syscall(SYS_landlock_create_ruleset, &ruleset_attr, sizeof(ruleset_attr), 0);
     if (ruleset_fd < 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     /* Helper: add a path rule with given access mask */
     struct {
@@ -127,28 +127,28 @@ static sc_error_t landlock_apply(void *ctx) {
         close(path_fd);
         if (ret < 0 && i < 2) {
             close(ruleset_fd);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
     }
 
     /* Drop ambient privileges so Landlock can restrict us */
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) {
         close(ruleset_fd);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     if (syscall(SYS_landlock_restrict_self, ruleset_fd, 0) < 0) {
         close(ruleset_fd);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     close(ruleset_fd);
-    return SC_OK;
-#endif /* SC_IS_TEST */
+    return HU_OK;
+#endif /* HU_IS_TEST */
 #endif /* __linux__ */
 }
 
-static sc_error_t landlock_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+static hu_error_t landlock_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
                                 size_t buf_count, size_t *out_count) {
 #ifndef __linux__
     (void)ctx;
@@ -157,17 +157,17 @@ static sc_error_t landlock_wrap(void *ctx, const char *const *argv, size_t argc,
     (void)buf;
     (void)buf_count;
     (void)out_count;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
     (void)ctx;
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (buf_count < argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -194,7 +194,7 @@ static const char *landlock_desc(void *ctx) {
 #endif
 }
 
-static const sc_sandbox_vtable_t landlock_vtable = {
+static const hu_sandbox_vtable_t landlock_vtable = {
     .wrap_command = landlock_wrap,
     .apply = landlock_apply,
     .is_available = landlock_available,
@@ -202,15 +202,15 @@ static const sc_sandbox_vtable_t landlock_vtable = {
     .description = landlock_desc,
 };
 
-sc_sandbox_t sc_landlock_sandbox_get(sc_landlock_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_landlock_sandbox_get(hu_landlock_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &landlock_vtable,
     };
     return sb;
 }
 
-void sc_landlock_sandbox_init(sc_landlock_ctx_t *ctx, const char *workspace_dir) {
+void hu_landlock_sandbox_init(hu_landlock_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     if (workspace_dir) {
         size_t len = strlen(workspace_dir);

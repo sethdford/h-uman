@@ -1,136 +1,136 @@
-#include "seaclaw/context/event_extract.h"
-#include "seaclaw/core/allocator.h"
+#include "human/context/event_extract.h"
+#include "human/core/allocator.h"
 #include "test_framework.h"
 #include <string.h>
 
 static void event_extract_day_reference(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "my interview is on Tuesday";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 1);
-    SC_ASSERT_NOT_NULL(out.events[0].description);
-    SC_ASSERT_TRUE(strstr(out.events[0].description, "interview") != NULL);
-    SC_ASSERT_STR_EQ(out.events[0].temporal_ref, "Tuesday");
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 1);
+    HU_ASSERT_NOT_NULL(out.events[0].description);
+    HU_ASSERT_TRUE(strstr(out.events[0].description, "interview") != NULL);
+    HU_ASSERT_STR_EQ(out.events[0].temporal_ref, "Tuesday");
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_tomorrow(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "I have a meeting tomorrow";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 1);
-    SC_ASSERT_STR_EQ(out.events[0].description, "meeting");
-    SC_ASSERT_STR_EQ(out.events[0].temporal_ref, "tomorrow");
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 1);
+    HU_ASSERT_STR_EQ(out.events[0].description, "meeting");
+    HU_ASSERT_STR_EQ(out.events[0].temporal_ref, "tomorrow");
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_next_week(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "birthday party next week";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 1);
-    SC_ASSERT_STR_EQ(out.events[0].description, "birthday party");
-    SC_ASSERT_STR_EQ(out.events[0].temporal_ref, "next week");
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 1);
+    HU_ASSERT_STR_EQ(out.events[0].description, "birthday party");
+    HU_ASSERT_STR_EQ(out.events[0].temporal_ref, "next week");
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_date(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "doctor appointment on March 15th";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 1);
-    SC_ASSERT_STR_EQ(out.events[0].description, "doctor appointment");
-    SC_ASSERT_NOT_NULL(out.events[0].temporal_ref);
-    SC_ASSERT_TRUE(strstr(out.events[0].temporal_ref, "March 15th") != NULL);
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 1);
+    HU_ASSERT_STR_EQ(out.events[0].description, "doctor appointment");
+    HU_ASSERT_NOT_NULL(out.events[0].temporal_ref);
+    HU_ASSERT_TRUE(strstr(out.events[0].temporal_ref, "March 15th") != NULL);
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_no_events(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "hello how are you";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 0);
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 0);
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_null_input(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, NULL, 0, &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 0);
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, NULL, 0, &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 0);
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_null_alloc(void) {
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(NULL, "text", 4, &out);
-    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(NULL, "text", 4, &out);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
 static void event_extract_null_out(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_error_t err = sc_event_extract(&alloc, "text", 4, NULL);
-    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_event_extract(&alloc, "text", 4, NULL);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
 static void event_extract_multiple_events(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "meeting Tuesday, birthday party next week";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 2);
-    SC_ASSERT_TRUE(strstr(out.events[0].description, "meeting") != NULL);
-    SC_ASSERT_STR_EQ(out.events[0].temporal_ref, "Tuesday");
-    SC_ASSERT_TRUE(strstr(out.events[1].description, "birthday") != NULL);
-    SC_ASSERT_STR_EQ(out.events[1].temporal_ref, "next week");
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 2);
+    HU_ASSERT_TRUE(strstr(out.events[0].description, "meeting") != NULL);
+    HU_ASSERT_STR_EQ(out.events[0].temporal_ref, "Tuesday");
+    HU_ASSERT_TRUE(strstr(out.events[1].description, "birthday") != NULL);
+    HU_ASSERT_STR_EQ(out.events[1].temporal_ref, "next week");
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_in_two_weeks(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "I have a meeting in 2 weeks";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 1);
-    SC_ASSERT_STR_EQ(out.events[0].description, "meeting");
-    SC_ASSERT_STR_EQ(out.events[0].temporal_ref, "in 2 weeks");
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 1);
+    HU_ASSERT_STR_EQ(out.events[0].description, "meeting");
+    HU_ASSERT_STR_EQ(out.events[0].temporal_ref, "in 2 weeks");
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 static void event_extract_deinit_partial(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *text = "meeting tomorrow";
-    sc_event_extract_result_t out;
-    sc_error_t err = sc_event_extract(&alloc, text, strlen(text), &out);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(out.event_count, 1);
-    sc_event_extract_result_deinit(&out, &alloc);
+    hu_event_extract_result_t out;
+    hu_error_t err = hu_event_extract(&alloc, text, strlen(text), &out);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(out.event_count, 1);
+    hu_event_extract_result_deinit(&out, &alloc);
 }
 
 void run_event_extract_tests(void) {
-    SC_TEST_SUITE("event_extract");
-    SC_RUN_TEST(event_extract_day_reference);
-    SC_RUN_TEST(event_extract_tomorrow);
-    SC_RUN_TEST(event_extract_next_week);
-    SC_RUN_TEST(event_extract_date);
-    SC_RUN_TEST(event_extract_no_events);
-    SC_RUN_TEST(event_extract_null_input);
-    SC_RUN_TEST(event_extract_null_alloc);
-    SC_RUN_TEST(event_extract_null_out);
-    SC_RUN_TEST(event_extract_multiple_events);
-    SC_RUN_TEST(event_extract_in_two_weeks);
-    SC_RUN_TEST(event_extract_deinit_partial);
+    HU_TEST_SUITE("event_extract");
+    HU_RUN_TEST(event_extract_day_reference);
+    HU_RUN_TEST(event_extract_tomorrow);
+    HU_RUN_TEST(event_extract_next_week);
+    HU_RUN_TEST(event_extract_date);
+    HU_RUN_TEST(event_extract_no_events);
+    HU_RUN_TEST(event_extract_null_input);
+    HU_RUN_TEST(event_extract_null_alloc);
+    HU_RUN_TEST(event_extract_null_out);
+    HU_RUN_TEST(event_extract_multiple_events);
+    HU_RUN_TEST(event_extract_in_two_weeks);
+    HU_RUN_TEST(event_extract_deinit_partial);
 }

@@ -1,6 +1,6 @@
 # Code Review
 
-Automated code review skill for SeaClaw.
+Automated code review skill for Human.
 
 ## Usage
 

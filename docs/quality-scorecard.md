@@ -1,9 +1,9 @@
 ---
-title: SeaClaw Quality Scorecard
+title: Human Quality Scorecard
 updated: 2026-03-09
 ---
 
-# SeaClaw Quality Scorecard
+# Human Quality Scorecard
 
 > Per-surface quality scores across 7 dimensions. Updated quarterly.
 > Target: score higher than every benchmark brand on every dimension.
@@ -90,7 +90,7 @@ Detailed rubrics for each of the 7 dimensions:
 - 1-5: Inconsistent across surfaces, no design system
 - 6-7: Shared tokens, mostly consistent
 - 8: Unified system across web + native, platform-appropriate adaptations
-- 9: Each surface feels native AND unmistakably SeaClaw
+- 9: Each surface feels native AND unmistakably Human
 - 10: Platform Transcendence — best-designed app on every device
 
 **Innovation (feature inventory)**:

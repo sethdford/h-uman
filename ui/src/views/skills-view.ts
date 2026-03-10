@@ -2,22 +2,22 @@ import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import { ScToast } from "../components/sc-toast.js";
-import type { InstalledSkill, RegistrySkill } from "../components/sc-skill-card.js";
-import type { SelectedSkill } from "../components/sc-skill-detail.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-badge.js";
-import "../components/sc-button.js";
-import "../components/sc-card.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-input.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-skill-card.js";
-import "../components/sc-skill-registry.js";
-import "../components/sc-skill-detail.js";
+import { ScToast } from "../components/hu-toast.js";
+import type { InstalledSkill, RegistrySkill } from "../components/hu-skill-card.js";
+import type { SelectedSkill } from "../components/hu-skill-detail.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-badge.js";
+import "../components/hu-button.js";
+import "../components/hu-card.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-input.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-skill-card.js";
+import "../components/hu-skill-registry.js";
+import "../components/hu-skill-detail.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -39,7 +39,7 @@ function parseTags(tags?: string): string[] {
     .filter(Boolean);
 }
 
-@customElement("sc-skills-view")
+@customElement("hu-skills-view")
 export class ScSkillsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
 
@@ -47,20 +47,20 @@ export class ScSkillsView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-skills;
       display: block;
-      color: var(--sc-text);
+      color: var(--hu-text);
     }
     .toolbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: var(--sc-space-sm);
-      margin-bottom: var(--sc-space-lg);
+      gap: var(--hu-space-sm);
+      margin-bottom: var(--hu-space-lg);
     }
     .toolbar-left {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       flex: 1;
       min-width: 12.5rem;
       max-width: 22.5rem;
@@ -68,78 +68,78 @@ export class ScSkillsView extends GatewayAwareLitElement {
     .toolbar-right {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
     .staleness {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
     .section {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
     .section-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-md);
+      gap: var(--hu-space-md);
+      margin-bottom: var(--hu-space-md);
     }
     .section-title {
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-size: var(--hu-text-lg);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
     .section-count {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
     }
     .tag-chips {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sc-space-xs);
-      margin-bottom: var(--sc-space-lg);
+      gap: var(--hu-space-xs);
+      margin-bottom: var(--hu-space-lg);
     }
     .tag-chip {
       display: inline-flex;
       align-items: center;
-      padding: var(--sc-space-2xs) var(--sc-space-sm);
-      border-radius: var(--sc-radius-full);
-      font-size: var(--sc-text-xs);
-      font-weight: var(--sc-weight-medium);
+      padding: var(--hu-space-2xs) var(--hu-space-sm);
+      border-radius: var(--hu-radius-full);
+      font-size: var(--hu-text-xs);
+      font-weight: var(--hu-weight-medium);
       cursor: pointer;
-      border: 1px solid var(--sc-border);
+      border: 1px solid var(--hu-border);
       background: transparent;
-      color: var(--sc-text-muted);
-      font-family: var(--sc-font);
-      transition: all var(--sc-duration-fast) var(--sc-ease-out);
+      color: var(--hu-text-muted);
+      font-family: var(--hu-font);
+      transition: all var(--hu-duration-fast) var(--hu-ease-out);
     }
     .tag-chip:hover {
-      color: var(--sc-text);
-      border-color: var(--sc-text-muted);
+      color: var(--hu-text);
+      border-color: var(--hu-text-muted);
     }
     .tag-chip:focus-visible {
-      outline: 2px solid var(--sc-accent);
+      outline: 2px solid var(--hu-accent);
       outline-offset: 2px;
     }
     .tag-chip[aria-checked="true"] {
-      background: var(--sc-accent);
-      color: var(--sc-bg);
-      border-color: var(--sc-accent);
+      background: var(--hu-accent);
+      color: var(--hu-bg);
+      border-color: var(--hu-accent);
     }
     .skills-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
-      gap: var(--sc-space-lg);
+      gap: var(--hu-space-lg);
     }
     .grid-full {
       grid-column: 1 / -1;
     }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       .skills-grid {
         grid-template-columns: 1fr;
       }
     }
-    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-lg */ {
       .skills-grid {
         grid-template-columns: 1fr 1fr;
       }
@@ -365,63 +365,63 @@ export class ScSkillsView extends GatewayAwareLitElement {
   }
 
   private _renderHero(): TemplateResult {
-    return html` <sc-page-hero role="region" aria-label="Skills">
-      <sc-section-header
+    return html` <hu-page-hero role="region" aria-label="Skills">
+      <hu-section-header
         heading="Skills"
         description="Extend your agent with installable skill packages"
       >
         <div class="toolbar-right">
-          <sc-input
+          <hu-input
             type="url"
             placeholder="Install from URL..."
             aria-label="Skill URL to install"
             .value=${this.installUrl}
             .error=${this.installUrlError}
-            @sc-input=${(e: CustomEvent<{ value: string }>) => {
+            @hu-input=${(e: CustomEvent<{ value: string }>) => {
               this.installUrl = e.detail.value;
               this.installUrlError = this._validateInstallUrl(e.detail.value);
             }}
-          ></sc-input>
-          <sc-button
+          ></hu-input>
+          <hu-button
             variant="primary"
             ?disabled=${!this.installUrl.trim() || !!this.installUrlError || this.actionLoading}
             @click=${this._installFromUrl}
             aria-label="Install skill from URL"
-            >Install</sc-button
+            >Install</hu-button
           >
         </div>
-      </sc-section-header>
-    </sc-page-hero>`;
+      </hu-section-header>
+    </hu-page-hero>`;
   }
 
   private _renderStats(): TemplateResult {
     const c = this.statusCounts;
-    return html`<sc-stats-row>
-      <sc-stat-card
+    return html`<hu-stats-row>
+      <hu-stat-card
         label="Installed"
         .value=${c.total}
         accent="primary"
-        style="--sc-stagger-delay: 0ms"
-      ></sc-stat-card>
-      <sc-stat-card
+        style="--hu-stagger-delay: 0ms"
+      ></hu-stat-card>
+      <hu-stat-card
         label="Enabled"
         .value=${c.enabled}
         accent="secondary"
-        style="--sc-stagger-delay: 50ms"
-      ></sc-stat-card>
-      <sc-stat-card
+        style="--hu-stagger-delay: 50ms"
+      ></hu-stat-card>
+      <hu-stat-card
         label="Disabled"
         .value=${c.disabled}
         accent="tertiary"
-        style="--sc-stagger-delay: 100ms"
-      ></sc-stat-card>
-      <sc-stat-card
+        style="--hu-stagger-delay: 100ms"
+      ></hu-stat-card>
+      <hu-stat-card
         label="Registry"
         .value=${c.registry}
         accent="primary"
-        style="--sc-stagger-delay: 150ms"
-      ></sc-stat-card>
-    </sc-stats-row>`;
+        style="--hu-stagger-delay: 150ms"
+      ></hu-stat-card>
+    </hu-stats-row>`;
   }
 
   private _renderTagChips(): TemplateResult | typeof nothing {
@@ -462,41 +462,41 @@ export class ScSkillsView extends GatewayAwareLitElement {
       ${this._renderTagChips()}
       <div class="toolbar">
         <div class="toolbar-left">
-          <sc-input
+          <hu-input
             placeholder="Filter installed skills..."
             aria-label="Search installed skills"
             .value=${this.localSearch}
-            @sc-input=${(e: CustomEvent<{ value: string }>) => (this.localSearch = e.detail.value)}
-          ></sc-input>
+            @hu-input=${(e: CustomEvent<{ value: string }>) => (this.localSearch = e.detail.value)}
+          ></hu-input>
         </div>
         <div class="toolbar-right">
           <span class="staleness">${this.stalenessLabel}</span>
-          <sc-button variant="ghost" @click=${() => this.load()} aria-label="Refresh skills list"
-            >${icons.refresh} Refresh</sc-button
+          <hu-button variant="ghost" @click=${() => this.load()} aria-label="Refresh skills list"
+            >${icons.refresh} Refresh</hu-button
           >
         </div>
       </div>
       ${filtered.length === 0 && this.skills.length > 0
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.magnifyingGlass}
             heading=${this.localSearch ? `No results for "${this.localSearch}"` : "No matches"}
             description="Try a different search or clear filters."
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : filtered.length === 0
-          ? html`<sc-empty-state
+          ? html`<hu-empty-state
               .icon=${icons.puzzle}
               heading="No skills installed"
               description="Install skills from the registry below or paste a URL above."
-            ></sc-empty-state>`
-          : html`<div class="skills-grid sc-stagger">
+            ></hu-empty-state>`
+          : html`<div class="skills-grid hu-stagger">
               ${filtered.map(
                 (s) => html`
-                  <sc-skill-card
+                  <hu-skill-card
                     variant="installed"
                     .skill=${s}
                     @skill-select=${() => (this.selectedSkill = { source: "installed", skill: s })}
                     @skill-toggle=${() => this._toggleSkill(s)}
-                  ></sc-skill-card>
+                  ></hu-skill-card>
                 `,
               )}
             </div>`}
@@ -505,7 +505,7 @@ export class ScSkillsView extends GatewayAwareLitElement {
 
   private _renderRegistrySection(): TemplateResult {
     return html`
-      <sc-skill-registry
+      <hu-skill-registry
         .results=${this.registryResults}
         .tags=${this.allTags}
         .query=${this.registryQuery}
@@ -520,50 +520,50 @@ export class ScSkillsView extends GatewayAwareLitElement {
           (this.selectedSkill = { source: "registry", skill: e.detail.skill })}
         @install=${(e: CustomEvent<{ skill: RegistrySkill }>) =>
           this._installFromRegistry(e.detail.skill)}
-      ></sc-skill-registry>
+      ></hu-skill-registry>
     `;
   }
 
   private _renderDetailSheet(): TemplateResult | typeof nothing {
     if (!this.selectedSkill) return nothing;
     return html`
-      <sc-skill-detail
+      <hu-skill-detail
         .skill=${this.selectedSkill}
         .installedNames=${Array.from(this.installedNames)}
         .actionLoading=${this.actionLoading}
-        @sc-close=${() => (this.selectedSkill = null)}
+        @hu-close=${() => (this.selectedSkill = null)}
         @skill-toggle=${(e: CustomEvent<{ skill: InstalledSkill }>) =>
           this._toggleSkill(e.detail.skill)}
         @skill-uninstall=${(e: CustomEvent<{ name: string }>) =>
           this._uninstallSkill(e.detail.name)}
         @install=${(e: CustomEvent<{ skill: RegistrySkill }>) =>
           this._installFromRegistry(e.detail.skill)}
-      ></sc-skill-detail>
+      ></hu-skill-detail>
     `;
   }
 
   private _renderSkeleton(): TemplateResult {
-    return html`<sc-stats-row>
-        <sc-skeleton variant="stat-card"></sc-skeleton
-        ><sc-skeleton variant="stat-card"></sc-skeleton
-        ><sc-skeleton variant="stat-card"></sc-skeleton
-        ><sc-skeleton variant="stat-card"></sc-skeleton>
-      </sc-stats-row>
-      <div class="skills-grid sc-stagger">
-        <sc-skeleton variant="card" height="140px"></sc-skeleton
-        ><sc-skeleton variant="card" height="140px"></sc-skeleton
-        ><sc-skeleton variant="card" height="140px"></sc-skeleton>
+    return html`<hu-stats-row>
+        <hu-skeleton variant="stat-card"></hu-skeleton
+        ><hu-skeleton variant="stat-card"></hu-skeleton
+        ><hu-skeleton variant="stat-card"></hu-skeleton
+        ><hu-skeleton variant="stat-card"></hu-skeleton>
+      </hu-stats-row>
+      <div class="skills-grid hu-stagger">
+        <hu-skeleton variant="card" height="140px"></hu-skeleton
+        ><hu-skeleton variant="card" height="140px"></hu-skeleton
+        ><hu-skeleton variant="card" height="140px"></hu-skeleton>
       </div>`;
   }
 
   override render() {
     return html` ${this._renderHero()}
     ${this.error
-      ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-          <sc-button variant="primary" @click=${() => this.load()} aria-label="Retry loading skills"
-            >Retry</sc-button
+      ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+          <hu-button variant="primary" @click=${() => this.load()} aria-label="Retry loading skills"
+            >Retry</hu-button
           >
-        </sc-empty-state>`
+        </hu-empty-state>`
       : nothing}
     ${this.loading
       ? this._renderSkeleton()

@@ -1,37 +1,37 @@
 /*
  * Proactive action system — milestones, morning briefing, check-in.
  */
-#include "seaclaw/agent/proactive.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
+#include "human/agent/proactive.h"
+#include "human/core/string.h"
+#include "human/memory.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_PROACTIVE_EVENT_FOLLOW_UP_CAP 3
+#define HU_PROACTIVE_EVENT_FOLLOW_UP_CAP 3
 #define MS_PER_HOUR                      (3600ULL * 1000ULL)
 #define MS_PER_DAY                       (24ULL * MS_PER_HOUR)
 #define HOURS_3_DAYS                     72u
 #define HOURS_7_DAYS                     168u
 #define HOURS_14_DAYS                    336u
 
-sc_error_t sc_proactive_check_silence(sc_allocator_t *alloc, uint64_t last_contact_ms,
-                                      uint64_t now_ms, const sc_silence_config_t *config,
-                                      sc_proactive_result_t *out) {
+hu_error_t hu_proactive_check_silence(hu_allocator_t *alloc, uint64_t last_contact_ms,
+                                      uint64_t now_ms, const hu_silence_config_t *config,
+                                      hu_proactive_result_t *out) {
     if (!alloc || !out || !config)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!config->enabled || last_contact_ms == 0)
-        return SC_OK;
+        return HU_OK;
     if (now_ms <= last_contact_ms)
-        return SC_OK; /* clock skew or equal timestamps — avoid uint64_t underflow */
+        return HU_OK; /* clock skew or equal timestamps — avoid uint64_t underflow */
 
     uint64_t elapsed_hours = (now_ms - last_contact_ms) / MS_PER_HOUR;
     if (elapsed_hours < config->threshold_hours)
-        return SC_OK;
-    if (out->count >= SC_PROACTIVE_MAX_ACTIONS)
-        return SC_OK;
+        return HU_OK;
+    if (out->count >= HU_PROACTIVE_MAX_ACTIONS)
+        return HU_OK;
 
     /* Data-driven: exact elapsed time, contextual guidance for LLM */
     uint32_t elapsed_days = (uint32_t)(elapsed_hours / 24u);
@@ -56,37 +56,37 @@ sc_error_t sc_proactive_check_silence(sc_allocator_t *alloc, uint64_t last_conta
                      (unsigned)elapsed_days);
     }
     if (n <= 0 || (size_t)n >= sizeof(msg))
-        return SC_OK;
+        return HU_OK;
     size_t msg_len = (size_t)n;
 
-    sc_proactive_action_t *act = &out->actions[out->count];
-    act->type = SC_PROACTIVE_CHECK_IN;
-    act->message = sc_strndup(alloc, msg, msg_len);
+    hu_proactive_action_t *act = &out->actions[out->count];
+    act->type = HU_PROACTIVE_CHECK_IN;
+    act->message = hu_strndup(alloc, msg, msg_len);
     if (!act->message)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     act->message_len = msg_len;
     act->priority = 0.85;
     out->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_proactive_check_reminder(sc_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_proactive_check_reminder(hu_allocator_t *alloc, const char *contact_id,
                                        size_t contact_id_len, const char *interests,
                                        size_t interests_len, uint64_t now_ms,
-                                       uint64_t last_reminder_ms, sc_proactive_result_t *out) {
+                                       uint64_t last_reminder_ms, hu_proactive_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!interests || interests_len == 0)
-        return SC_OK;
+        return HU_OK;
     if (last_reminder_ms > 0) {
         if (now_ms <= last_reminder_ms)
-            return SC_OK;
+            return HU_OK;
         uint64_t elapsed_ms = now_ms - last_reminder_ms;
         if (elapsed_ms < MS_PER_DAY)
-            return SC_OK;
+            return HU_OK;
     }
-    if (out->count >= SC_PROACTIVE_MAX_ACTIONS)
-        return SC_OK;
+    if (out->count >= HU_PROACTIVE_MAX_ACTIONS)
+        return HU_OK;
 
     /* Count comma-separated interests */
     size_t token_count = 0;
@@ -102,7 +102,7 @@ sc_error_t sc_proactive_check_reminder(sc_allocator_t *alloc, const char *contac
             i++;
     }
     if (token_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Pick one randomly using now_ms as seed (deterministic LCG) */
     uint32_t seed = (uint32_t)(now_ms & 0xFFFFFFFFu);
@@ -137,7 +137,7 @@ sc_error_t sc_proactive_check_reminder(sc_allocator_t *alloc, const char *contac
             i++;
     }
     if (!token_start || token_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     const char *contact_display = contact_id && contact_id_len > 0 ? contact_id : "this contact";
     size_t contact_display_len = contact_id && contact_id_len > 0 ? contact_id_len : 14;
@@ -153,20 +153,20 @@ sc_error_t sc_proactive_check_reminder(sc_allocator_t *alloc, const char *contac
         (int)contact_display_len, contact_display, (int)token_len, token_start, (int)token_len,
         token_start, (int)token_len, token_start, (int)token_len, token_start);
     if (n <= 0 || (size_t)n >= sizeof(msg))
-        return SC_OK;
+        return HU_OK;
 
-    sc_proactive_action_t *act = &out->actions[out->count];
-    act->type = SC_PROACTIVE_REMINDER;
-    act->message = sc_strndup(alloc, msg, (size_t)n);
+    hu_proactive_action_t *act = &out->actions[out->count];
+    act->type = HU_PROACTIVE_REMINDER;
+    act->message = hu_strndup(alloc, msg, (size_t)n);
     if (!act->message)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     act->message_len = (size_t)n;
     act->priority = 0.75;
     out->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-uint32_t sc_proactive_backoff_hours(uint32_t consecutive_unanswered) {
+uint32_t hu_proactive_backoff_hours(uint32_t consecutive_unanswered) {
     switch (consecutive_unanswered) {
     case 0:
         return 72u;
@@ -180,8 +180,8 @@ uint32_t sc_proactive_backoff_hours(uint32_t consecutive_unanswered) {
 }
 
 static int compare_priority_desc(const void *a, const void *b) {
-    const sc_proactive_action_t *pa = (const sc_proactive_action_t *)a;
-    const sc_proactive_action_t *pb = (const sc_proactive_action_t *)b;
+    const hu_proactive_action_t *pa = (const hu_proactive_action_t *)a;
+    const hu_proactive_action_t *pb = (const hu_proactive_action_t *)b;
     if (pa->priority > pb->priority)
         return -1;
     if (pa->priority < pb->priority)
@@ -189,24 +189,24 @@ static int compare_priority_desc(const void *a, const void *b) {
     return 0;
 }
 
-sc_error_t sc_proactive_check(sc_allocator_t *alloc, uint32_t session_count, uint8_t hour,
-                              sc_proactive_result_t *out) {
-    return sc_proactive_check_extended(alloc, session_count, hour, NULL, 0, NULL, NULL, 0, out);
+hu_error_t hu_proactive_check(hu_allocator_t *alloc, uint32_t session_count, uint8_t hour,
+                              hu_proactive_result_t *out) {
+    return hu_proactive_check_extended(alloc, session_count, hour, NULL, 0, NULL, NULL, 0, out);
 }
 
-sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_count, uint8_t hour,
-                                       const sc_commitment_t *commitments, size_t commitment_count,
+hu_error_t hu_proactive_check_extended(hu_allocator_t *alloc, uint32_t session_count, uint8_t hour,
+                                       const hu_commitment_t *commitments, size_t commitment_count,
                                        const char *const *pattern_subjects,
                                        const uint32_t *pattern_counts, size_t pattern_count,
-                                       sc_proactive_result_t *out) {
+                                       hu_proactive_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     /* Session count milestones: 10, 25, 50, 100 — data-driven context */
     static const uint32_t MILESTONES[] = {10, 25, 50, 100};
     for (size_t i = 0; i < sizeof(MILESTONES) / sizeof(MILESTONES[0]); i++) {
-        if (session_count == MILESTONES[i] && out->count < SC_PROACTIVE_MAX_ACTIONS) {
+        if (session_count == MILESTONES[i] && out->count < HU_PROACTIVE_MAX_ACTIONS) {
             char msg[320];
             int n = snprintf(msg, sizeof(msg),
                              "MILESTONE: This is conversation #%u together. Don't announce the "
@@ -215,11 +215,11 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
                              "about knowing them.",
                              (unsigned)session_count);
             if (n > 0 && (size_t)n < sizeof(msg)) {
-                sc_proactive_action_t *act = &out->actions[out->count];
-                act->type = SC_PROACTIVE_MILESTONE;
-                act->message = sc_strndup(alloc, msg, (size_t)n);
+                hu_proactive_action_t *act = &out->actions[out->count];
+                act->type = HU_PROACTIVE_MILESTONE;
+                act->message = hu_strndup(alloc, msg, (size_t)n);
                 if (!act->message)
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 act->message_len = (size_t)n;
                 act->priority = 0.9;
                 out->count++;
@@ -229,7 +229,7 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
     }
 
     /* Morning hour (8-10) → MORNING_BRIEFING — data-driven from commitments */
-    if (hour >= 8 && hour <= 10 && out->count < SC_PROACTIVE_MAX_ACTIONS) {
+    if (hour >= 8 && hour <= 10 && out->count < HU_PROACTIVE_MAX_ACTIONS) {
         char msg[384];
         size_t pos = 0;
         int w = snprintf(msg, sizeof(msg), "MORNING CONTEXT: ");
@@ -238,7 +238,7 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
         bool has_commitments = false;
         if (commitments && commitment_count > 0 && pos < sizeof(msg)) {
             for (size_t i = 0; i < commitment_count && pos < sizeof(msg) - 100; i++) {
-                if (commitments[i].status != SC_COMMITMENT_ACTIVE || !commitments[i].summary)
+                if (commitments[i].status != HU_COMMITMENT_ACTIVE || !commitments[i].summary)
                     continue;
                 if (!has_commitments) {
                     w = snprintf(msg + pos, sizeof(msg) - pos, "Active commitments: ");
@@ -261,9 +261,9 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
         if (w > 0 && pos + (size_t)w < sizeof(msg))
             pos += (size_t)w;
         if (pos > 0 && pos < sizeof(msg)) {
-            sc_proactive_action_t *act = &out->actions[out->count];
-            act->type = SC_PROACTIVE_MORNING_BRIEFING;
-            act->message = sc_strndup(alloc, msg, pos);
+            hu_proactive_action_t *act = &out->actions[out->count];
+            act->type = HU_PROACTIVE_MORNING_BRIEFING;
+            act->message = hu_strndup(alloc, msg, pos);
             if (act->message) {
                 act->message_len = pos;
                 act->priority = 0.7;
@@ -273,16 +273,16 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
     }
 
     /* COMMITMENT_FOLLOW_UP: up to 2 active commitments — data-driven context */
-    if (commitments && commitment_count > 0 && out->count < SC_PROACTIVE_MAX_ACTIONS) {
+    if (commitments && commitment_count > 0 && out->count < HU_PROACTIVE_MAX_ACTIONS) {
         static const size_t MAX_COMMITMENT_FOLLOW_UPS = 2;
         size_t added = 0;
         for (size_t i = 0; i < commitment_count && added < MAX_COMMITMENT_FOLLOW_UPS; i++) {
-            const sc_commitment_t *c = &commitments[i];
-            if (c->status != SC_COMMITMENT_ACTIVE)
+            const hu_commitment_t *c = &commitments[i];
+            if (c->status != HU_COMMITMENT_ACTIVE)
                 continue;
             if (!c->summary || c->summary_len == 0)
                 continue;
-            if (out->count >= SC_PROACTIVE_MAX_ACTIONS)
+            if (out->count >= HU_PROACTIVE_MAX_ACTIONS)
                 break;
             char msg[384];
             size_t summary_len = c->summary_len > 120 ? 120 : c->summary_len;
@@ -301,11 +301,11 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
                              (int)summary_len, c->summary);
             }
             if (n > 0 && (size_t)n < sizeof(msg)) {
-                sc_proactive_action_t *act = &out->actions[out->count];
-                act->type = SC_PROACTIVE_COMMITMENT_FOLLOW_UP;
-                act->message = sc_strndup(alloc, msg, (size_t)n);
+                hu_proactive_action_t *act = &out->actions[out->count];
+                act->type = HU_PROACTIVE_COMMITMENT_FOLLOW_UP;
+                act->message = hu_strndup(alloc, msg, (size_t)n);
                 if (!act->message)
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 act->message_len = (size_t)n;
                 act->priority = 0.8;
                 out->count++;
@@ -316,7 +316,7 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
 
     /* PATTERN_INSIGHT: up to 2 patterns with occurrence_count >= 5 — data-driven */
     if (pattern_subjects && pattern_counts && pattern_count > 0 &&
-        out->count < SC_PROACTIVE_MAX_ACTIONS) {
+        out->count < HU_PROACTIVE_MAX_ACTIONS) {
         static const size_t MAX_PATTERN_INSIGHTS = 2;
         static const uint32_t PATTERN_THRESHOLD = 5;
         size_t added = 0;
@@ -326,7 +326,7 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
             const char *subject = pattern_subjects[i];
             if (!subject)
                 continue;
-            if (out->count >= SC_PROACTIVE_MAX_ACTIONS)
+            if (out->count >= HU_PROACTIVE_MAX_ACTIONS)
                 break;
             char msg[320];
             size_t sublen = strlen(subject);
@@ -338,11 +338,11 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
                              "announce it as a statistic.",
                              (int)sublen, subject, (unsigned)pattern_counts[i]);
             if (n > 0 && (size_t)n < sizeof(msg)) {
-                sc_proactive_action_t *act = &out->actions[out->count];
-                act->type = SC_PROACTIVE_PATTERN_INSIGHT;
-                act->message = sc_strndup(alloc, msg, (size_t)n);
+                hu_proactive_action_t *act = &out->actions[out->count];
+                act->type = HU_PROACTIVE_PATTERN_INSIGHT;
+                act->message = hu_strndup(alloc, msg, (size_t)n);
                 if (!act->message)
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 act->message_len = (size_t)n;
                 act->priority = 0.6;
                 out->count++;
@@ -352,36 +352,36 @@ sc_error_t sc_proactive_check_extended(sc_allocator_t *alloc, uint32_t session_c
     }
 
     /* Always: CHECK_IN (low priority) — contextual guidance */
-    if (out->count < SC_PROACTIVE_MAX_ACTIONS) {
+    if (out->count < HU_PROACTIVE_MAX_ACTIONS) {
         static const char CHECK[] =
             "CHECK-IN: Consider how the user is feeling. Ask about progress on any ongoing goals. "
             "Use context from memory and relationship history.";
-        sc_proactive_action_t *act = &out->actions[out->count];
-        act->type = SC_PROACTIVE_CHECK_IN;
-        act->message = sc_strndup(alloc, CHECK, sizeof(CHECK) - 1);
+        hu_proactive_action_t *act = &out->actions[out->count];
+        act->type = HU_PROACTIVE_CHECK_IN;
+        act->message = hu_strndup(alloc, CHECK, sizeof(CHECK) - 1);
         if (!act->message)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         act->message_len = sizeof(CHECK) - 1;
         act->priority = 0.2;
         out->count++;
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_proactive_check_events(sc_allocator_t *alloc, const sc_extracted_event_t *events,
-                                     size_t event_count, sc_proactive_result_t *out) {
+hu_error_t hu_proactive_check_events(hu_allocator_t *alloc, const hu_extracted_event_t *events,
+                                     size_t event_count, hu_proactive_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!events && event_count > 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t added = 0;
-    for (size_t i = 0; i < event_count && added < SC_PROACTIVE_EVENT_FOLLOW_UP_CAP; i++) {
-        const sc_extracted_event_t *ev = &events[i];
+    for (size_t i = 0; i < event_count && added < HU_PROACTIVE_EVENT_FOLLOW_UP_CAP; i++) {
+        const hu_extracted_event_t *ev = &events[i];
         if (ev->confidence < 0.5)
             continue;
-        if (out->count >= SC_PROACTIVE_MAX_ACTIONS)
+        if (out->count >= HU_PROACTIVE_MAX_ACTIONS)
             break;
 
         const char *desc = ev->description ? ev->description : "something";
@@ -409,40 +409,40 @@ sc_error_t sc_proactive_check_events(sc_allocator_t *alloc, const sc_extracted_e
         if (n <= 0 || (size_t)n >= sizeof(msg))
             continue;
 
-        sc_proactive_action_t *act = &out->actions[out->count];
-        act->type = SC_PROACTIVE_CHECK_IN;
-        act->message = sc_strndup(alloc, msg, (size_t)n);
+        hu_proactive_action_t *act = &out->actions[out->count];
+        act->type = HU_PROACTIVE_CHECK_IN;
+        act->message = hu_strndup(alloc, msg, (size_t)n);
         if (!act->message)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         act->message_len = (size_t)n;
         act->priority = ev->confidence;
         out->count++;
         added++;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result, sc_allocator_t *alloc,
+hu_error_t hu_proactive_build_context(const hu_proactive_result_t *result, hu_allocator_t *alloc,
                                       size_t max_actions, char **out, size_t *out_len) {
     if (!result || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
     if (result->count == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Sort by priority descending (copy to avoid mutating) */
-    sc_proactive_action_t sorted[SC_PROACTIVE_MAX_ACTIONS];
-    size_t n = result->count < SC_PROACTIVE_MAX_ACTIONS ? result->count : SC_PROACTIVE_MAX_ACTIONS;
-    memcpy(sorted, result->actions, n * sizeof(sc_proactive_action_t));
-    qsort(sorted, n, sizeof(sc_proactive_action_t), compare_priority_desc);
+    hu_proactive_action_t sorted[HU_PROACTIVE_MAX_ACTIONS];
+    size_t n = result->count < HU_PROACTIVE_MAX_ACTIONS ? result->count : HU_PROACTIVE_MAX_ACTIONS;
+    memcpy(sorted, result->actions, n * sizeof(hu_proactive_action_t));
+    qsort(sorted, n, sizeof(hu_proactive_action_t), compare_priority_desc);
 
     size_t take = n < max_actions ? n : max_actions;
     size_t cap = 64;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t len = 0;
     buf[0] = '\0';
 
@@ -453,7 +453,7 @@ sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result, sc_al
         char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
         if (!nb) {
             alloc->free(alloc->ctx, buf, cap);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         buf = nb;
         cap = new_cap;
@@ -462,7 +462,7 @@ sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result, sc_al
     len = hlen;
 
     for (size_t i = 0; i < take; i++) {
-        const sc_proactive_action_t *act = &sorted[i];
+        const hu_proactive_action_t *act = &sorted[i];
         if (!act->message || act->message_len == 0)
             continue;
         size_t need = len + 2 + act->message_len + 2; /* "- " + msg + "\n" */
@@ -471,7 +471,7 @@ sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result, sc_al
             char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
             if (!nb) {
                 alloc->free(alloc->ctx, buf, cap);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf = nb;
             cap = new_cap;
@@ -486,42 +486,42 @@ sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result, sc_al
 
     *out = buf;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_proactive_build_starter(sc_allocator_t *alloc, sc_memory_t *memory,
+hu_error_t hu_proactive_build_starter(hu_allocator_t *alloc, hu_memory_t *memory,
                                       const char *contact_id, size_t contact_id_len, char **out,
                                       size_t *out_len) {
     if (!alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
     if (!memory || !memory->vtable || !memory->vtable->recall)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     static const char QUERY[] = "recent topics activities interests";
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = memory->vtable->recall(memory->ctx, alloc, QUERY, sizeof(QUERY) - 1, 5,
+    hu_error_t err = memory->vtable->recall(memory->ctx, alloc, QUERY, sizeof(QUERY) - 1, 5,
                                             contact_id, contact_id_len, &entries, &count);
 
-    if (err != SC_OK || !entries || count == 0) {
+    if (err != HU_OK || !entries || count == 0) {
         if (entries) {
             for (size_t i = 0; i < count; i++)
-                sc_memory_entry_free_fields(alloc, &entries[i]);
-            alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+                hu_memory_entry_free_fields(alloc, &entries[i]);
+            alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
         }
-        return SC_OK; /* caller falls back to generic check-in */
+        return HU_OK; /* caller falls back to generic check-in */
     }
 
     size_t cap = 256;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf) {
         for (size_t i = 0; i < count; i++)
-            sc_memory_entry_free_fields(alloc, &entries[i]);
-        alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, &entries[i]);
+        alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t len = 0;
     buf[0] = '\0';
@@ -535,9 +535,9 @@ sc_error_t sc_proactive_build_starter(sc_allocator_t *alloc, sc_memory_t *memory
         if (!nb) {
             alloc->free(alloc->ctx, buf, cap);
             for (size_t i = 0; i < count; i++)
-                sc_memory_entry_free_fields(alloc, &entries[i]);
-            alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-            return SC_ERR_OUT_OF_MEMORY;
+                hu_memory_entry_free_fields(alloc, &entries[i]);
+            alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+            return HU_ERR_OUT_OF_MEMORY;
         }
         buf = nb;
         cap = new_cap;
@@ -556,9 +556,9 @@ sc_error_t sc_proactive_build_starter(sc_allocator_t *alloc, sc_memory_t *memory
             if (!nb) {
                 alloc->free(alloc->ctx, buf, cap);
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf = nb;
             cap = new_cap;
@@ -579,9 +579,9 @@ sc_error_t sc_proactive_build_starter(sc_allocator_t *alloc, sc_memory_t *memory
         if (!nb) {
             alloc->free(alloc->ctx, buf, cap);
             for (size_t i = 0; i < count; i++)
-                sc_memory_entry_free_fields(alloc, &entries[i]);
-            alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-            return SC_ERR_OUT_OF_MEMORY;
+                hu_memory_entry_free_fields(alloc, &entries[i]);
+            alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+            return HU_ERR_OUT_OF_MEMORY;
         }
         buf = nb;
         cap = new_cap;
@@ -591,15 +591,15 @@ sc_error_t sc_proactive_build_starter(sc_allocator_t *alloc, sc_memory_t *memory
     buf[len] = '\0';
 
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
 
     *out = buf;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_proactive_result_deinit(sc_proactive_result_t *result, sc_allocator_t *alloc) {
+void hu_proactive_result_deinit(hu_proactive_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
     for (size_t i = 0; i < result->count; i++) {

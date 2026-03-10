@@ -1,16 +1,16 @@
 ---
-title: Migration from OpenClaw to SeaClaw
-description: Guide to migrating from OpenClaw (TypeScript) to SeaClaw (C, static binary)
+title: Migration from OpenClaw to Human
+description: Guide to migrating from OpenClaw (TypeScript) to Human (C, static binary)
 updated: 2026-03-02
 ---
 
-# Migration from OpenClaw to SeaClaw
+# Migration from OpenClaw to Human
 
-This guide walks you through migrating from [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js) to SeaClaw (C, static binary). SeaClaw is a drop-in replacement that preserves your memory, config structure, and channel integrations while dramatically reducing resource usage and improving security.
+This guide walks you through migrating from [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js) to Human (C, static binary). Human is a drop-in replacement that preserves your memory, config structure, and channel integrations while dramatically reducing resource usage and improving security.
 
 ## Why migrate?
 
-| Benefit          | OpenClaw                                                                       | SeaClaw                                         |
+| Benefit          | OpenClaw                                                                       | Human                                         |
 | ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------- |
 | **Cost**         | $599+ setup (typical M-series Mac), $300+/mo API overhead from bloated runtime | $5 hardware—runs on ARM SBCs, Raspberry Pi Zero |
 | **Binary size**  | ~28 MB (npm dist)                                                              | **~528 KB** core binary                         |
@@ -22,24 +22,24 @@ This guide walks you through migrating from [OpenClaw](https://github.com/opencl
 
 ## Prerequisites
 
-1. **Install SeaClaw binary** — either:
+1. **Install Human binary** — either:
    - **Build from source** (recommended for your platform):
 
      ```bash
-     git clone https://github.com/sethdford/seaclaw.git
-     cd seaclaw
+     git clone https://github.com/sethdford/human.git
+     cd human
      mkdir -p build && cd build
      cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
      cmake --build .
-     sudo cp seaclaw /usr/local/bin/
+     sudo cp human /usr/local/bin/
      ```
 
    - **Download release** (when available):
      ```bash
      # Check releases for your platform
-     curl -Lo seaclaw https://github.com/sethdford/seaclaw/releases/latest/download/seaclaw-$(uname -m)
-     chmod +x seaclaw
-     sudo mv seaclaw /usr/local/bin/
+     curl -Lo human https://github.com/sethdford/human/releases/latest/download/human-$(uname -m)
+     chmod +x human
+     sudo mv human /usr/local/bin/
      ```
 
 2. **Locate your OpenClaw data**:
@@ -48,14 +48,14 @@ This guide walks you through migrating from [OpenClaw](https://github.com/opencl
 
 ## 1. Automatic memory migration
 
-SeaClaw can import memories directly from OpenClaw’s SQLite brain database.
+Human can import memories directly from OpenClaw’s SQLite brain database.
 
 ```bash
-# Migrate from OpenClaw brain.db into SeaClaw's default memory location
-seaclaw migrate sqlite ~/.openclaw/brain.db
+# Migrate from OpenClaw brain.db into Human's default memory location
+human migrate sqlite ~/.openclaw/brain.db
 
 # Or from a project-local brain
-seaclaw migrate sqlite /path/to/openclaw-project/brain.db
+human migrate sqlite /path/to/openclaw-project/brain.db
 ```
 
 Output example:
@@ -64,22 +64,22 @@ Output example:
 Migration: 42 from sqlite, 0 from markdown, 42 imported
 ```
 
-The migration tool detects common schema variants (OpenClaw, ZeroClaw) and maps `key`/`id`/`name`, `content`/`value`/`text`/`memory`, and `category`/`kind`/`type` automatically. Memories are written to SeaClaw’s configured backend (SQLite or Markdown by default).
+The migration tool detects common schema variants (OpenClaw, ZeroClaw) and maps `key`/`id`/`name`, `content`/`value`/`text`/`memory`, and `category`/`kind`/`type` automatically. Memories are written to Human’s configured backend (SQLite or Markdown by default).
 
 ## 2. Config migration
 
-SeaClaw uses the **same config structure** as OpenClaw (snake_case). Most keys map 1:1.
+Human uses the **same config structure** as OpenClaw (snake_case). Most keys map 1:1.
 
 ### Key mappings
 
-| OpenClaw                             | SeaClaw                              | Notes                                |
+| OpenClaw                             | Human                              | Notes                                |
 | ------------------------------------ | ------------------------------------ | ------------------------------------ |
 | `providers` (top-level)              | `providers` (top-level array)        | Same structure                       |
 | `default_provider` / `default_model` | `default_provider` / `default_model` | Same top-level keys                  |
 | `accounts` (per channel)             | `channels.<channel>.accounts`        | Same structure                       |
 | `clients`                            | `providers`                          | Each client becomes a provider entry |
 
-### Example: OpenClaw config → SeaClaw config
+### Example: OpenClaw config → Human config
 
 **OpenClaw (`config.json`):**
 
@@ -96,7 +96,7 @@ SeaClaw uses the **same config structure** as OpenClaw (snake_case). Most keys m
 }
 ```
 
-**SeaClaw (`~/.seaclaw/config.json`):**
+**Human (`~/.human/config.json`):**
 
 ```json
 {
@@ -118,15 +118,15 @@ SeaClaw uses the **same config structure** as OpenClaw (snake_case). Most keys m
 ### Providers
 
 - Map each OpenClaw provider to the top-level `providers` array.
-- SeaClaw expects array form: `[{ "name": "...", "api_key": "...", "base_url": "..." }]`.
+- Human expects array form: `[{ "name": "...", "api_key": "...", "base_url": "..." }]`.
 
 ### Channels
 
-Channel structure is compatible. Copy `channels` (or `accounts` under each channel) into SeaClaw’s `channels` section. See [Channel-by-channel setup](#3-channel-by-channel-setup).
+Channel structure is compatible. Copy `channels` (or `accounts` under each channel) into Human’s `channels` section. See [Channel-by-channel setup](#3-channel-by-channel-setup).
 
 ## 3. Channel-by-channel setup
 
-SeaClaw supports the same channels as OpenClaw. After migrating config, enable them one by one.
+Human supports the same channels as OpenClaw. After migrating config, enable them one by one.
 
 | Channel      | Config path                  | Notes                                         |
 | ------------ | ---------------------------- | --------------------------------------------- |
@@ -158,15 +158,15 @@ SeaClaw supports the same channels as OpenClaw. After migrating config, enable t
 }
 ```
 
-Run `seaclaw onboard --channels-only` to add or adjust channels interactively.
+Run `human onboard --channels-only` to add or adjust channels interactively.
 
 ## 4. Skill migration
 
-OpenClaw skills are npm packages or local JSON/TS modules. SeaClaw uses a **curated skill registry** with TOML manifests and `SKILL.md` instructions.
+OpenClaw skills are npm packages or local JSON/TS modules. Human uses a **curated skill registry** with TOML manifests and `SKILL.md` instructions.
 
 ### Finding equivalents
 
-| OpenClaw skill type     | SeaClaw equivalent                     |
+| OpenClaw skill type     | Human equivalent                     |
 | ----------------------- | -------------------------------------- |
 | npm `@openclaw/skill-*` | Registry skill with same purpose       |
 | Custom/local skills     | Convert to `*.skill.json` + `SKILL.md` |
@@ -174,12 +174,12 @@ OpenClaw skills are npm packages or local JSON/TS modules. SeaClaw uses a **cura
 **Search and install from registry:**
 
 ```bash
-seaclaw skills search code
-seaclaw skills install code-review
-seaclaw skills list
+human skills search code
+human skills install code-review
+human skills list
 ```
 
-**Skill registry:** [https://github.com/seaclaw/skill-registry](https://github.com/seaclaw/skill-registry)
+**Skill registry:** [https://github.com/human/skill-registry](https://github.com/human/skill-registry)
 
 ### Converting a custom skill
 
@@ -187,15 +187,15 @@ seaclaw skills list
    - `name`, `version`, `description`, `author`
    - `tools`, `system_prompt`, `triggers`, `config`
 2. Add `SKILL.md` with usage and config docs.
-3. Optionally submit a PR to the [skill registry](https://github.com/seaclaw/skill-registry).
+3. Optionally submit a PR to the [skill registry](https://github.com/human/skill-registry).
 
 ## 5. Verify migration
 
 ```bash
-seaclaw doctor          # Config, provider, memory OK?
-seaclaw status          # Full system status
-seaclaw agent -m "What do you remember about me?"
-seaclaw channel status  # Channel health
+human doctor          # Config, provider, memory OK?
+human status          # Full system status
+human agent -m "What do you remember about me?"
+human channel status  # Channel health
 ```
 
 ## FAQ / Common issues
@@ -213,13 +213,13 @@ seaclaw channel status  # Channel health
 ### Channel not receiving messages
 
 - Verify `allow_from` is set (empty = deny all; `"*"` = allow all).
-- For webhook channels (Telegram, etc.), ensure the gateway is running (`seaclaw gateway`) and reachable (tunnel or port forwarding).
+- For webhook channels (Telegram, etc.), ensure the gateway is running (`human gateway`) and reachable (tunnel or port forwarding).
 
 ### Secrets in plain text after migration
 
-- Run `seaclaw onboard` or ensure `"secrets": { "encrypt": true }` in config.
+- Run `human onboard` or ensure `"secrets": { "encrypt": true }` in config.
 - Re-add API keys via onboard so they are encrypted with ChaCha20-Poly1305.
 
 ### Memory backend mismatch
 
-- SeaClaw defaults to SQLite for full installs, Markdown for minimal. Set `memory.backend` in config (`"sqlite"` or `"markdown"`).
+- Human defaults to SQLite for full installs, Markdown for minimal. Set `memory.backend` in config (`"sqlite"` or `"markdown"`).

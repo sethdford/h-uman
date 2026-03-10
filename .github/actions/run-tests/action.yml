@@ -1,9 +1,9 @@
-name: Run SeaClaw Tests
-description: Execute the seaclaw_tests binary with optional ASan options
+name: Run Human Tests
+description: Execute the human_tests binary with optional ASan options
 
 inputs:
   build-dir:
-    description: Build directory containing seaclaw_tests
+    description: Build directory containing human_tests
     default: build
   asan-options:
     description: ASAN_OPTIONS environment variable value
@@ -16,7 +16,7 @@ runs:
       shell: bash
       run: |
         if [ -n "${{ inputs.asan-options }}" ]; then
-          ASAN_OPTIONS="${{ inputs.asan-options }}" ./${{ inputs.build-dir }}/seaclaw_tests
+          ASAN_OPTIONS="${{ inputs.asan-options }}" ./${{ inputs.build-dir }}/human_tests
         else
-          ./${{ inputs.build-dir }}/seaclaw_tests
+          ./${{ inputs.build-dir }}/human_tests
         fi

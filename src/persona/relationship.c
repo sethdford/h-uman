@@ -1,8 +1,8 @@
 /*
  * Relationship depth tracker — session-based warmth and formality adaptation.
  */
-#include "seaclaw/persona/relationship.h"
-#include "seaclaw/core/string.h"
+#include "human/persona/relationship.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,55 +21,55 @@ static const char *STAGE_GUIDANCE[] = {
     "Celebrate growth.",
 };
 
-void sc_relationship_new_session(sc_relationship_state_t *state) {
+void hu_relationship_new_session(hu_relationship_state_t *state) {
     if (!state)
         return;
     state->session_count++;
     if (state->session_count >= 50)
-        state->stage = SC_REL_DEEP;
+        state->stage = HU_REL_DEEP;
     else if (state->session_count >= 20)
-        state->stage = SC_REL_TRUSTED;
+        state->stage = HU_REL_TRUSTED;
     else if (state->session_count >= 5)
-        state->stage = SC_REL_FAMILIAR;
+        state->stage = HU_REL_FAMILIAR;
     else
-        state->stage = SC_REL_NEW;
+        state->stage = HU_REL_NEW;
 }
 
-void sc_relationship_update(sc_relationship_state_t *state, uint32_t turn_count) {
+void hu_relationship_update(hu_relationship_state_t *state, uint32_t turn_count) {
     if (!state)
         return;
     state->total_turns += turn_count;
 }
 
-sc_error_t sc_relationship_build_prompt(sc_allocator_t *alloc, const sc_relationship_state_t *state,
+hu_error_t hu_relationship_build_prompt(hu_allocator_t *alloc, const hu_relationship_state_t *state,
                                         char **out, size_t *out_len) {
     if (!alloc || !state || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     const char *stage_name = STAGE_NAMES[(size_t)state->stage];
     const char *guidance = STAGE_GUIDANCE[(size_t)state->stage];
 
-#define SC_REL_BUF_CAP 256
-    char *buf = (char *)alloc->alloc(alloc->ctx, SC_REL_BUF_CAP);
+#define HU_REL_BUF_CAP 256
+    char *buf = (char *)alloc->alloc(alloc->ctx, HU_REL_BUF_CAP);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     int n =
-        snprintf(buf, SC_REL_BUF_CAP, "\n### Relationship Context\nStage: %s. Sessions: %u. %s\n",
+        snprintf(buf, HU_REL_BUF_CAP, "\n### Relationship Context\nStage: %s. Sessions: %u. %s\n",
                  stage_name, state->session_count, guidance);
-    if (n <= 0 || (size_t)n >= SC_REL_BUF_CAP) {
-        alloc->free(alloc->ctx, buf, SC_REL_BUF_CAP);
-        return SC_ERR_INVALID_ARGUMENT;
+    if (n <= 0 || (size_t)n >= HU_REL_BUF_CAP) {
+        alloc->free(alloc->ctx, buf, HU_REL_BUF_CAP);
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     size_t need = (size_t)n + 1;
-    char *shrunk = (char *)alloc->realloc(alloc->ctx, buf, SC_REL_BUF_CAP, need);
+    char *shrunk = (char *)alloc->realloc(alloc->ctx, buf, HU_REL_BUF_CAP, need);
     if (!shrunk) {
-        alloc->free(alloc->ctx, buf, SC_REL_BUF_CAP);
-        return SC_ERR_OUT_OF_MEMORY;
+        alloc->free(alloc->ctx, buf, HU_REL_BUF_CAP);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     *out = shrunk;
     *out_len = (size_t)n;
-#undef SC_REL_BUF_CAP
-    return SC_OK;
+#undef HU_REL_BUF_CAP
+    return HU_OK;
 }

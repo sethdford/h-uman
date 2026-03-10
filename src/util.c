@@ -1,4 +1,4 @@
-#include "seaclaw/util.h"
+#include "human/util.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +12,7 @@
 #include <unistd.h>
 #endif
 
-size_t sc_util_trim(char *s, size_t len) {
+size_t hu_util_trim(char *s, size_t len) {
     if (!s || len == 0)
         return 0;
     size_t start = 0;
@@ -30,7 +30,7 @@ size_t sc_util_trim(char *s, size_t len) {
     return end;
 }
 
-char *sc_util_strdup(void *ctx, void *(*alloc)(void *, size_t), const char *s) {
+char *hu_util_strdup(void *ctx, void *(*alloc)(void *, size_t), const char *s) {
     if (!ctx || !alloc || !s)
         return NULL;
     size_t len = strlen(s) + 1;
@@ -40,13 +40,13 @@ char *sc_util_strdup(void *ctx, void *(*alloc)(void *, size_t), const char *s) {
     return out;
 }
 
-void sc_util_strfree(void *ctx, void (*free_fn)(void *, void *, size_t), char *s) {
+void hu_util_strfree(void *ctx, void (*free_fn)(void *, void *, size_t), char *s) {
     if (!ctx || !free_fn || !s)
         return;
     free_fn(ctx, s, strlen(s) + 1);
 }
 
-int sc_util_strcasecmp(const char *a, const char *b) {
+int hu_util_strcasecmp(const char *a, const char *b) {
     if (!a)
         return b ? -1 : 0;
     if (!b)
@@ -89,7 +89,7 @@ static void fill_random_bytes(unsigned char *buf, size_t n) {
 #endif
 }
 
-char *sc_util_gen_session_id(void *ctx, void *(*alloc)(void *, size_t)) {
+char *hu_util_gen_session_id(void *ctx, void *(*alloc)(void *, size_t)) {
     if (!alloc)
         return NULL;
     unsigned char r[8];

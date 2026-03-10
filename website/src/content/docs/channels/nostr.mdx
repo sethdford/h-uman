@@ -5,7 +5,7 @@ description: Set up the Nostr channel with NIP-17 and nak.
 
 # Nostr Channel
 
-SeaClaw can send and receive Nostr direct messages using [nak](https://github.com/fiatjaf/nak) and the NIP-17 gift-wrapped DM format. Legacy NIP-04 encryption is also supported.
+Human can send and receive Nostr direct messages using [nak](https://github.com/fiatjaf/nak) and the NIP-17 gift-wrapped DM format. Legacy NIP-04 encryption is also supported.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ This outputs a hex-encoded secret key. Store it securely. Derive the public key 
 
 ## 3. Configuration
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -62,7 +62,7 @@ Add to `~/.seaclaw/config.json`:
 
 ## 4. NIP-17 gift-wrapped DMs
 
-SeaClaw uses NIP-17 for encrypted DMs. The nak tool handles event creation and relay publishing. The channel sends kind 14 (gift-wrapped) events to the recipient's pubkey.
+Human uses NIP-17 for encrypted DMs. The nak tool handles event creation and relay publishing. The channel sends kind 14 (gift-wrapped) events to the recipient's pubkey.
 
 ## 5. Legacy NIP-04
 

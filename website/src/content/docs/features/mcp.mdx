@@ -1,17 +1,17 @@
 ---
 title: MCP Server Integration
-description: Connect SeaClaw to Model Context Protocol servers for extended tool access.
+description: Connect Human to Model Context Protocol servers for extended tool access.
 ---
 
-SeaClaw supports the Model Context Protocol (MCP). It can act as an **MCP client** (connecting to external MCP servers and exposing their tools to the agent) and as an **MCP server** (exposing its own tools and resources to MCP clients like Claude Desktop).
+Human supports the Model Context Protocol (MCP). It can act as an **MCP client** (connecting to external MCP servers and exposing their tools to the agent) and as an **MCP server** (exposing its own tools and resources to MCP clients like Claude Desktop).
 
-## SeaClaw as MCP client
+## Human as MCP client
 
-When configured with `mcp_servers`, SeaClaw spawns each server as a child process, discovers tools via `tools/list`, and wraps them as agent tools. Tool names are prefixed with `mcp_<index>_<name>` to avoid collisions.
+When configured with `mcp_servers`, Human spawns each server as a child process, discovers tools via `tools/list`, and wraps them as agent tools. Tool names are prefixed with `mcp_<index>_<name>` to avoid collisions.
 
 ### Configuration
 
-Add MCP servers in `~/.seaclaw/config.json` under `mcp_servers` (object keyed by server name):
+Add MCP servers in `~/.human/config.json` under `mcp_servers` (object keyed by server name):
 
 ```json
 {
@@ -39,7 +39,7 @@ Add MCP servers in `~/.seaclaw/config.json` under `mcp_servers` (object keyed by
 
 ### Google Workspace CLI via MCP
 
-If you have a Google Workspace CLI MCP server (e.g. `@anthropic/gws-mcp` or a custom wrapper), you can connect it to SeaClaw and the agent will gain access to Google Docs, Sheets, Drive, Calendar, and other Workspace APIs:
+If you have a Google Workspace CLI MCP server (e.g. `@anthropic/gws-mcp` or a custom wrapper), you can connect it to Human and the agent will gain access to Google Docs, Sheets, Drive, Calendar, and other Workspace APIs:
 
 ```json
 {
@@ -56,47 +56,47 @@ The agent will automatically discover all tools from the Google Workspace MCP se
 
 ### How it works
 
-1. SeaClaw spawns each MCP server as a child process (stdio transport)
+1. Human spawns each MCP server as a child process (stdio transport)
 2. Sends `initialize` with protocol version `2024-11-05`
 3. Sends `notifications/initialized`
 4. Calls `tools/list` to discover tools
-5. When the agent invokes an MCP tool, SeaClaw forwards the request via `tools/call`
+5. When the agent invokes an MCP tool, Human forwards the request via `tools/call`
 6. Results are returned as standard tool results
 
 ### Transport
 
-The current implementation uses **stdio** only: JSON-RPC messages over stdin/stdout. Each server runs as a subprocess; SeaClaw writes requests and reads responses line-by-line.
+The current implementation uses **stdio** only: JSON-RPC messages over stdin/stdout. Each server runs as a subprocess; Human writes requests and reads responses line-by-line.
 
-## SeaClaw as MCP server
+## Human as MCP server
 
-Run SeaClaw as an MCP server so that MCP clients (e.g. Claude Desktop, Cursor) can use its tools:
+Run Human as an MCP server so that MCP clients (e.g. Claude Desktop, Cursor) can use its tools:
 
 ```bash
-seaclaw mcp
+human mcp
 ```
 
 This reads JSON-RPC from stdin and writes responses to stdout. It exposes:
 
-- **Tools**: All registered SeaClaw tools (from `tools.list`, `tools/call`)
-- **Resources**: `seaclaw://config` (current config), `seaclaw://memory` (memory entries when available)
+- **Tools**: All registered Human tools (from `tools.list`, `tools/call`)
+- **Resources**: `human://config` (current config), `human://memory` (memory entries when available)
 
 ### Protocol version
 
-SeaClaw uses MCP protocol version `2024-11-05`.
+Human uses MCP protocol version `2024-11-05`.
 
 ### Integration with Claude Desktop
 
-Configure Claude Desktop to spawn SeaClaw as an MCP server. Example `claude_desktop_config.json`:
+Configure Claude Desktop to spawn Human as an MCP server. Example `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "seaclaw": {
-      "command": "seaclaw",
+    "human": {
+      "command": "human",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Claude will then have access to SeaClaw’s tools (shell, file operations, memory, etc.) and resources.
+Claude will then have access to Human’s tools (shell, file operations, memory, etc.) and resources.

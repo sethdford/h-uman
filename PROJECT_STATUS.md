@@ -1,6 +1,6 @@
-# SeaClaw — Project Status
+# Human — Project Status
 
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 
 ## Summary
 
@@ -9,7 +9,7 @@ Last updated: 2026-03-09
 | Source files (src/ + include/) | **715**              |
 | Lines of C/H/ASM code          | **~138K**            |
 | Test files                     | 128                  |
-| Tests passing                  | **3788/3788 (100%)** |
+| Tests passing                  | **3795/3795 (100%)** |
 | Binary size (MinSizeRel+LTO)   | **~1679 KB**         |
 | Peak RSS (test suite)          | **~5.9 MB**          |
 
@@ -61,7 +61,7 @@ Last updated: 2026-03-09
 
 ## Tools — All 67 Real (with all feature flags)
 
-Every tool has a real implementation. In test mode (`SC_IS_TEST`), they return mock
+Every tool has a real implementation. In test mode (`HU_IS_TEST`), they return mock
 data to avoid side effects. Highlights:
 
 - **File I/O**: read, write, edit, append, diff, apply_patch
@@ -86,7 +86,7 @@ data to avoid side effects. Highlights:
 | gemini       | Yes (SSE)    | `GEMINI_API_KEY`                  |
 | ollama       | Yes (SSE)    | None (local)                      |
 | openrouter   | Yes (SSE)    | `OPENROUTER_API_KEY`              |
-| compatible   | Yes (SSE)    | Per-provider or `SEACLAW_API_KEY` |
+| compatible   | Yes (SSE)    | Per-provider or `HUMAN_API_KEY` |
 | claude_cli   | No           | `ANTHROPIC_API_KEY`               |
 | codex_cli    | No           | `OPENAI_API_KEY`                  |
 | openai-codex | No           | API key from config               |
@@ -103,8 +103,8 @@ The MCP (Model Context Protocol) client is **fully implemented**:
 - `initialize` + `notifications/initialized` handshake
 - `tools/list` — discovers tools from MCP servers
 - `tools/call` — executes MCP tools with arguments
-- Auto-wraps MCP server tools as `sc_tool_t` via `sc_mcp_init_tools()`
-- MCP Host server mode (`sc_mcp_host_t`) for exposing SeaClaw tools
+- Auto-wraps MCP server tools as `hu_tool_t` via `hu_mcp_init_tools()`
+- MCP Host server mode (`hu_mcp_host_t`) for exposing Human tools
 - Config: `mcp_servers` array in config.json
 
 ## Voice — Real (STT + TTS)
@@ -113,21 +113,21 @@ Voice I/O is **fully implemented**:
 
 - **STT**: Groq Whisper (`whisper-large-v3`) by default, configurable endpoint
 - **TTS**: OpenAI `tts-1` with voice `alloy` by default, configurable endpoint
-- `sc_voice_stt()` — transcribe audio buffer
-- `sc_voice_stt_file()` — transcribe from file path
-- `sc_voice_tts()` — generate speech audio
-- `sc_voice_play()` — play audio (`afplay` on macOS, `paplay`/`aplay` on Linux)
+- `hu_voice_stt()` — transcribe audio buffer
+- `hu_voice_stt_file()` — transcribe from file path
+- `hu_voice_tts()` — generate speech audio
+- `hu_voice_play()` — play audio (`afplay` on macOS, `paplay`/`aplay` on Linux)
 - Configurable API key, model, voice, language
 
 ## Sub-Agent System — Real (pthread pool)
 
 Sub-agent spawning is **fully implemented**:
 
-- `sc_agent_pool_create()` — thread pool with configurable max concurrency
-- `sc_agent_pool_spawn()` — spawn one-shot or persistent agents
-- `sc_agent_pool_query()` — send messages to persistent agents
-- `sc_agent_pool_cancel()` / `sc_agent_pool_status()` / `sc_agent_pool_result()`
-- `sc_agent_pool_list()` — enumerate all agents in pool
+- `hu_agent_pool_create()` — thread pool with configurable max concurrency
+- `hu_agent_pool_spawn()` — spawn one-shot or persistent agents
+- `hu_agent_pool_query()` — send messages to persistent agents
+- `hu_agent_pool_cancel()` / `hu_agent_pool_status()` / `hu_agent_pool_result()`
+- `hu_agent_pool_list()` — enumerate all agents in pool
 - 64-slot pool with `pthread_mutex_t` synchronization
 - `agent_spawn` and `agent_query` tools wired through tool factory
 
@@ -146,7 +146,7 @@ Sub-agent spawning is **fully implemented**:
 | -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
 | Source citations     | `source` field persisted across SQLite, LanceDB, Lucid, Markdown | Gateway returns source in memory.list / memory.recall    |
 | Connection discovery | `src/memory/connections.c` — LLM-powered insight generation      | Finds links between memory entries                       |
-| Consolidation        | `src/memory/consolidation.c` — periodic dedup, decay, insights   | Configurable via `sc_consolidation_config_t`             |
+| Consolidation        | `src/memory/consolidation.c` — periodic dedup, decay, insights   | Configurable via `hu_consolidation_config_t`             |
 | Multimodal ingest    | `src/memory/ingest.c` — text, PDF, image with LLM extraction     | Images use multimodal provider chat                      |
 | File watching        | `src/memory/inbox.c` — directory poll for new files              | Path traversal + symlink protection                      |
 | REST API             | `src/gateway/cp_memory.c` — 7 WebSocket methods                  | store, recall, list, forget, ingest, status, consolidate |
@@ -179,11 +179,11 @@ cron._, skills._, models.list, usage.summary, push.\*, update.check/run, exec.
 
 | Engine     | Build Flag                      | Status | Notes                                 |
 | ---------- | ------------------------------- | ------ | ------------------------------------- |
-| SQLite     | `SC_ENABLE_SQLITE` (ON)         | Real   | FTS5 + vector cosine; primary engine  |
-| PostgreSQL | `SC_ENABLE_POSTGRES`            | Real   | Full libpq implementation behind flag |
-| Redis      | `SC_ENABLE_REDIS_ENGINE`        | Real   | Raw TCP + RESP protocol, no hiredis   |
-| LanceDB    | `SC_ENABLE_LANCEDB_ENGINE` (ON) | Real   | SQLite-backed text search engine      |
-| pgvector   | `SC_ENABLE_POSTGRES`            | Real   | Vector store via libpq + pgvector ext |
+| SQLite     | `HU_ENABLE_SQLITE` (ON)         | Real   | FTS5 + vector cosine; primary engine  |
+| PostgreSQL | `HU_ENABLE_POSTGRES`            | Real   | Full libpq implementation behind flag |
+| Redis      | `HU_ENABLE_REDIS_ENGINE`        | Real   | Raw TCP + RESP protocol, no hiredis   |
+| LanceDB    | `HU_ENABLE_LANCEDB_ENGINE` (ON) | Real   | SQLite-backed text search engine      |
+| pgvector   | `HU_ENABLE_POSTGRES`            | Real   | Vector store via libpq + pgvector ext |
 
 ## What Remains Stubbed
 

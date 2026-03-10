@@ -1,6 +1,6 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <string.h>
 
 /*
@@ -29,13 +29,13 @@
 #include <unistd.h>
 
 #if defined(__x86_64__)
-#define SC_SECCOMP_AUDIT_ARCH AUDIT_ARCH_X86_64
+#define HU_SECCOMP_AUDIT_ARCH AUDIT_ARCH_X86_64
 #elif defined(__aarch64__)
-#define SC_SECCOMP_AUDIT_ARCH AUDIT_ARCH_AARCH64
+#define HU_SECCOMP_AUDIT_ARCH AUDIT_ARCH_AARCH64
 #elif defined(__i386__)
-#define SC_SECCOMP_AUDIT_ARCH AUDIT_ARCH_I386
+#define HU_SECCOMP_AUDIT_ARCH AUDIT_ARCH_I386
 #else
-#define SC_SECCOMP_AUDIT_ARCH 0
+#define HU_SECCOMP_AUDIT_ARCH 0
 #endif
 
 #ifndef SECCOMP_RET_ALLOW
@@ -49,7 +49,7 @@
 #endif
 
 static bool seccomp_supported(void) {
-#if SC_IS_TEST
+#if HU_IS_TEST
     return false;
 #else
     /* prctl(PR_GET_SECCOMP) returns:
@@ -74,12 +74,12 @@ static bool seccomp_supported(void) {
  * Install seccomp-BPF filter. Called after fork(), before child runs.
  * Block dangerous syscalls; optionally block networking.
  */
-static sc_error_t seccomp_apply(void *ctx) {
-#if SC_IS_TEST
+static hu_error_t seccomp_apply(void *ctx) {
+#if HU_IS_TEST
     (void)ctx;
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_seccomp_ctx_t *sc = (sc_seccomp_ctx_t *)ctx;
+    hu_seccomp_ctx_t *sc = (hu_seccomp_ctx_t *)ctx;
 
     /* Dangerous syscalls to block unconditionally (return EPERM) */
     static const int blocked_syscalls[] = {
@@ -161,14 +161,14 @@ static sc_error_t seccomp_apply(void *ctx) {
     const size_t max_insns = 3 + n_blocked * 2 + n_network * 2 + 1;
     struct sock_filter filter[128];
     if (max_insns > sizeof(filter) / sizeof(filter[0]))
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
 
     size_t idx = 0;
 
     /* Load architecture */
     filter[idx++] = BPF_STMT_SC(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch));
     /* Verify architecture matches */
-    filter[idx++] = BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K, SC_SECCOMP_AUDIT_ARCH, 1, 0);
+    filter[idx++] = BPF_JUMP_SC(BPF_JMP | BPF_JEQ | BPF_K, HU_SECCOMP_AUDIT_ARCH, 1, 0);
     filter[idx++] = BPF_STMT_SC(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS);
 
     /* Load syscall number */
@@ -197,17 +197,17 @@ static sc_error_t seccomp_apply(void *ctx) {
     };
 
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0) < 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
-    return SC_OK;
-#endif /* SC_IS_TEST */
+    return HU_OK;
+#endif /* HU_IS_TEST */
 }
 #endif /* __linux__ */
 
-static sc_error_t seccomp_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+static hu_error_t seccomp_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
                                size_t buf_count, size_t *out_count) {
 #ifndef __linux__
     (void)ctx;
@@ -216,17 +216,17 @@ static sc_error_t seccomp_wrap(void *ctx, const char *const *argv, size_t argc, 
     (void)buf;
     (void)buf_count;
     (void)out_count;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
     (void)ctx;
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (buf_count < argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -253,7 +253,7 @@ static const char *seccomp_desc(void *ctx) {
 #endif
 }
 
-static const sc_sandbox_vtable_t seccomp_vtable = {
+static const hu_sandbox_vtable_t seccomp_vtable = {
     .wrap_command = seccomp_wrap,
 #ifdef __linux__
     .apply = seccomp_apply,
@@ -265,15 +265,15 @@ static const sc_sandbox_vtable_t seccomp_vtable = {
     .description = seccomp_desc,
 };
 
-sc_sandbox_t sc_seccomp_sandbox_get(sc_seccomp_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_seccomp_sandbox_get(hu_seccomp_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &seccomp_vtable,
     };
     return sb;
 }
 
-void sc_seccomp_sandbox_init(sc_seccomp_ctx_t *ctx, const char *workspace_dir, bool allow_network) {
+void hu_seccomp_sandbox_init(hu_seccomp_ctx_t *ctx, const char *workspace_dir, bool allow_network) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->allow_network = allow_network;
     if (workspace_dir) {

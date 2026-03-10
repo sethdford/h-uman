@@ -62,7 +62,7 @@ Use: info states, alternative link color, provider-related UI, data visualizatio
 - Pill colors (provider=blue, channel=green, tool=yellow) — already diverse
 - All neutral, seafoam, green, yellow, red, blue primitives
 - Typography, spacing, radius, motion, elevation tokens
-- Dashboard UI tokens (already use teal via `--sc-accent`)
+- Dashboard UI tokens (already use teal via `--hu-accent`)
 
 ## Result
 

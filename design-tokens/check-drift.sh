@@ -45,22 +45,22 @@ if [ -x "$CLANG_FMT" ] && [ -f "$TMPDIR/design_tokens.h" ]; then
 fi
 
 # Check C header output
-if ! diff -q "$TMPDIR/design_tokens.h" "$REPO_ROOT/include/seaclaw/design_tokens.h" >/dev/null 2>&1; then
-  echo "DRIFT: include/seaclaw/design_tokens.h differs from generated output"
+if ! diff -q "$TMPDIR/design_tokens.h" "$REPO_ROOT/include/human/design_tokens.h" >/dev/null 2>&1; then
+  echo "DRIFT: include/human/design_tokens.h differs from generated output"
   DRIFT=1
 fi
 
 # Check Swift output
-if [ -f "$TMPDIR/DesignTokens.swift" ] && [ -f "$REPO_ROOT/apps/shared/SeaClawKit/Sources/SeaClawChatUI/DesignTokens.swift" ]; then
-  if ! diff -q "$TMPDIR/DesignTokens.swift" "$REPO_ROOT/apps/shared/SeaClawKit/Sources/SeaClawChatUI/DesignTokens.swift" >/dev/null 2>&1; then
+if [ -f "$TMPDIR/DesignTokens.swift" ] && [ -f "$REPO_ROOT/apps/shared/HumanKit/Sources/HumanChatUI/DesignTokens.swift" ]; then
+  if ! diff -q "$TMPDIR/DesignTokens.swift" "$REPO_ROOT/apps/shared/HumanKit/Sources/HumanChatUI/DesignTokens.swift" >/dev/null 2>&1; then
     echo "DRIFT: apps/shared/.../DesignTokens.swift differs from generated output"
     DRIFT=1
   fi
 fi
 
 # Check Kotlin output
-if [ -f "$TMPDIR/DesignTokens.kt" ] && [ -f "$REPO_ROOT/apps/android/app/src/main/java/ai/seaclaw/app/ui/DesignTokens.kt" ]; then
-  if ! diff -q "$TMPDIR/DesignTokens.kt" "$REPO_ROOT/apps/android/app/src/main/java/ai/seaclaw/app/ui/DesignTokens.kt" >/dev/null 2>&1; then
+if [ -f "$TMPDIR/DesignTokens.kt" ] && [ -f "$REPO_ROOT/apps/android/app/src/main/java/ai/human/app/ui/DesignTokens.kt" ]; then
+  if ! diff -q "$TMPDIR/DesignTokens.kt" "$REPO_ROOT/apps/android/app/src/main/java/ai/human/app/ui/DesignTokens.kt" >/dev/null 2>&1; then
     echo "DRIFT: apps/android/.../DesignTokens.kt differs from generated output"
     DRIFT=1
   fi

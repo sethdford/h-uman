@@ -1,10 +1,10 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <stdio.h>
 #include <string.h>
 
-#if defined(__linux__) && !SC_IS_TEST
+#if defined(__linux__) && !HU_IS_TEST
 #include <unistd.h>
 static bool firejail_binary_exists(void) {
     if (access("/usr/bin/firejail", X_OK) == 0)
@@ -15,7 +15,7 @@ static bool firejail_binary_exists(void) {
 }
 #endif
 
-static sc_error_t firejail_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+static hu_error_t firejail_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
                                 size_t buf_count, size_t *out_count) {
 #ifndef __linux__
     (void)ctx;
@@ -24,16 +24,16 @@ static sc_error_t firejail_wrap(void *ctx, const char *const *argv, size_t argc,
     (void)buf;
     (void)buf_count;
     (void)out_count;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_firejail_ctx_t *fj = (sc_firejail_ctx_t *)ctx;
+    hu_firejail_ctx_t *fj = (hu_firejail_ctx_t *)ctx;
     const size_t base_prefix = 5;
     size_t extra = fj->extra_args_len;
     size_t total_prefix = base_prefix + extra;
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (buf_count < total_prefix + argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     buf[0] = "firejail";
     buf[1] = fj->private_arg;
@@ -45,14 +45,14 @@ static sc_error_t firejail_wrap(void *ctx, const char *const *argv, size_t argc,
     for (size_t i = 0; i < argc; i++)
         buf[total_prefix + i] = argv[i];
     *out_count = total_prefix + argc;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
 static bool firejail_available(void *ctx) {
     (void)ctx;
 #ifdef __linux__
-#if SC_IS_TEST
+#if HU_IS_TEST
     return false; /* Skip binary check in tests; avoids CI dependency */
 #else
     return firejail_binary_exists();
@@ -72,7 +72,7 @@ static const char *firejail_desc(void *ctx) {
     return "Linux user-space sandbox (requires firejail to be installed)";
 }
 
-static const sc_sandbox_vtable_t firejail_vtable = {
+static const hu_sandbox_vtable_t firejail_vtable = {
     .wrap_command = firejail_wrap,
     .apply = NULL,
     .is_available = firejail_available,
@@ -80,15 +80,15 @@ static const sc_sandbox_vtable_t firejail_vtable = {
     .description = firejail_desc,
 };
 
-sc_sandbox_t sc_firejail_sandbox_get(sc_firejail_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_firejail_sandbox_get(hu_firejail_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &firejail_vtable,
     };
     return sb;
 }
 
-void sc_firejail_sandbox_init(sc_firejail_ctx_t *ctx, const char *workspace_dir) {
+void hu_firejail_sandbox_init(hu_firejail_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     if (workspace_dir) {
         int n = snprintf(ctx->private_arg, 256, "--private=%s", workspace_dir);
@@ -101,7 +101,7 @@ void sc_firejail_sandbox_init(sc_firejail_ctx_t *ctx, const char *workspace_dir)
     }
 }
 
-void sc_firejail_sandbox_set_extra_args(sc_firejail_ctx_t *ctx, const char *const *args,
+void hu_firejail_sandbox_set_extra_args(hu_firejail_ctx_t *ctx, const char *const *args,
                                         size_t args_len) {
     if (!ctx)
         return;

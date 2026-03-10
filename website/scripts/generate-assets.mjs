@@ -57,11 +57,11 @@ async function generateOgImage() {
 
     <text x="200" y="360" fill="#a1a1a6" font-family="system-ui,-apple-system,sans-serif" font-size="22">~528 KB binary · 50+ providers · 33 channels · 65+ tools</text>
 
-    <text x="200" y="420" fill="#7AB648" font-family="system-ui,-apple-system,sans-serif" font-size="20" font-weight="600">SeaClaw</text>
+    <text x="200" y="420" fill="#7AB648" font-family="system-ui,-apple-system,sans-serif" font-size="20" font-weight="600">Human</text>
     <text x="310" y="420" fill="#6e6e73" font-family="system-ui,-apple-system,sans-serif" font-size="18">Pure C11 · Zero dependencies · MIT licensed</text>
 
     <line x1="200" y1="490" x2="1000" y2="490" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-    <text x="200" y="530" fill="#86868b" font-family="ui-monospace,monospace" font-size="14">sethdford.github.io/seaclaw</text>
+    <text x="200" y="530" fill="#86868b" font-family="ui-monospace,monospace" font-size="14">sethdford.github.io/human</text>
   </svg>`;
 
   await sharp(Buffer.from(svg)).png().toFile(join(pub, "og-image.png"));

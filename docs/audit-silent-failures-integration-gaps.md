@@ -28,7 +28,7 @@ static void send_all(int fd, const char *buf, size_t len) {
 
 **Issue:** `send()` failures (n <= 0) are silently ignored. Partial sends leave the client with truncated responses. No logging, no retry, no error propagation.
 
-**Recommendation:** Return `bool` or `sc_error_t`; log failures; consider propagating to caller for 5xx responses.
+**Recommendation:** Return `bool` or `hu_error_t`; log failures; consider propagating to caller for 5xx responses.
 
 ---
 
@@ -51,14 +51,14 @@ static void send_all(int fd, const char *buf, size_t len) {
 
 ---
 
-### 3. Gateway cleanup: `sc_ws_server_deinit(&gw->ws)` when `gw` may be NULL
+### 3. Gateway cleanup: `hu_ws_server_deinit(&gw->ws)` when `gw` may be NULL
 
 **Location:** `src/gateway/gateway.c:1443`
 
 ```c
 cleanup:
     ...
-    sc_ws_server_deinit(&gw->ws);  // BUG: gw may be NULL
+    hu_ws_server_deinit(&gw->ws);  // BUG: gw may be NULL
     ...
     if (gw)
         alloc->free(alloc->ctx, gw, sizeof(*gw));
@@ -66,7 +66,7 @@ cleanup:
 
 **Issue:** When `gw` allocation fails at line 1060, `goto cleanup` runs with `gw == NULL`. `&gw->ws` is undefined behavior (dereferencing NULL).
 
-**Recommendation:** Guard with `if (gw) sc_ws_server_deinit(&gw->ws);`
+**Recommendation:** Guard with `if (gw) hu_ws_server_deinit(&gw->ws);`
 
 ---
 
@@ -84,13 +84,13 @@ sqlite3_bind_text(stmt, 1, contact_buf, -1, NULL);
 
 ---
 
-### 5. Persona `sc_strdup` without NULL checks for optional fields
+### 5. Persona `hu_strdup` without NULL checks for optional fields
 
 **Location:** `src/persona/persona.c` (multiple)
 
 Examples:
 
-- Line 736: `out->biography = sc_strdup(alloc, s);` — no check
+- Line 736: `out->biography = hu_strdup(alloc, s);` — no check
 - Lines 781-787: motivation fields
 - Lines 824-833: humor fields
 - Lines 843-851: conflict_style
@@ -100,32 +100,32 @@ Examples:
 - Lines 938-939: backstory_behaviors
 - Line 954: sensory
 
-**Issue:** If `sc_strdup` returns NULL (OOM), the persona struct has a NULL field where a string was expected. Later code may dereference without checks. Partial persona state can cause inconsistent behavior.
+**Issue:** If `hu_strdup` returns NULL (OOM), the persona struct has a NULL field where a string was expected. Later code may dereference without checks. Partial persona state can cause inconsistent behavior.
 
-**Recommendation:** For optional fields, either check and skip on OOM, or abort load and return `SC_ERR_OUT_OF_MEMORY` to keep persona consistent.
+**Recommendation:** For optional fields, either check and skip on OOM, or abort load and return `HU_ERR_OUT_OF_MEMORY` to keep persona consistent.
 
 ---
 
-### 6. Persona `parse_overlay`: `sc_strdup` for formality/avg_length/emoji_usage
+### 6. Persona `parse_overlay`: `hu_strdup` for formality/avg_length/emoji_usage
 
 **Location:** `src/persona/persona.c:612-619`
 
 ```c
     if (s)
-        ov->formality = sc_strdup(a, s);
-    s = sc_json_get_string(obj, "avg_length");
+        ov->formality = hu_strdup(a, s);
+    s = hu_json_get_string(obj, "avg_length");
     if (s)
-        ov->avg_length = sc_strdup(a, s);
+        ov->avg_length = hu_strdup(a, s);
     ...
 ```
 
-**Issue:** No NULL check after `sc_strdup`. OOM leaves overlay partially populated.
+**Issue:** No NULL check after `hu_strdup`. OOM leaves overlay partially populated.
 
-**Recommendation:** Check each `sc_strdup` result; on failure, return `SC_ERR_OUT_OF_MEMORY` and let caller clean up.
+**Recommendation:** Check each `hu_strdup` result; on failure, return `HU_ERR_OUT_OF_MEMORY` and let caller clean up.
 
 ---
 
-### 7. Persona feedback: silent skip when realloc or sc_strdup fails
+### 7. Persona feedback: silent skip when realloc or hu_strdup fails
 
 **Location:** `src/persona/feedback.c:174-212`
 
@@ -138,7 +138,7 @@ Examples:
         ...
         if (!new_examples)
             continue;
-        bank->examples[n].context = sc_strdup(alloc, context);
+        bank->examples[n].context = hu_strdup(alloc, context);
         ...
         if (bank->examples[n].context && ...) {
             bank->examples_count++;
@@ -169,18 +169,18 @@ Examples:
 
 ---
 
-### 9. Daemon: `sc_proactive_build_starter` return value explicitly discarded
+### 9. Daemon: `hu_proactive_build_starter` return value explicitly discarded
 
 **Location:** `src/daemon.c:501-503`
 
 ```c
-        (void)sc_proactive_build_starter(alloc, memory, cp->contact_id, strlen(cp->contact_id),
+        (void)hu_proactive_build_starter(alloc, memory, cp->contact_id, strlen(cp->contact_id),
                                          &starter, &starter_len);
 ```
 
 **Issue:** Failure is ignored. Proactive prompt may be built without memory-informed starter.
 
-**Recommendation:** Check return value; if `!= SC_OK`, proceed without starter or log.
+**Recommendation:** Check return value; if `!= HU_OK`, proceed without starter or log.
 
 ---
 
@@ -201,20 +201,20 @@ Examples:
 
 ---
 
-### 11. Daemon: `sc_graph_upsert_entity` / `sc_graph_upsert_relation` return values ignored
+### 11. Daemon: `hu_graph_upsert_entity` / `hu_graph_upsert_relation` return values ignored
 
 **Location:** `src/daemon.c:184-189`, `207-212`
 
 ```c
-                if (sc_graph_upsert_entity(...) == SC_OK &&
-                    sc_graph_upsert_entity(...) == SC_OK) {
-                    (void)sc_graph_upsert_relation(...);
+                if (hu_graph_upsert_entity(...) == HU_OK &&
+                    hu_graph_upsert_entity(...) == HU_OK) {
+                    (void)hu_graph_upsert_relation(...);
                 }
 ```
 
-**Issue:** `sc_graph_upsert_relation` result is cast to void. Graph updates can fail silently.
+**Issue:** `hu_graph_upsert_relation` result is cast to void. Graph updates can fail silently.
 
-**Recommendation:** Check `sc_graph_upsert_relation`; log or handle failures.
+**Recommendation:** Check `hu_graph_upsert_relation`; log or handle failures.
 
 ---
 
@@ -248,15 +248,15 @@ When `graph_result.entries` or `graph_result.scores` allocation fails, `graph_ct
 
 ### 1. Persona: wired but conditional
 
-**Status:** Persona is integrated in daemon, agent, gateway (`persona.set`), and demo-gateway. Requires `SC_HAS_PERSONA` and `--with-agent` for the gateway. No gap.
+**Status:** Persona is integrated in daemon, agent, gateway (`persona.set`), and demo-gateway. Requires `HU_HAS_PERSONA` and `--with-agent` for the gateway. No gap.
 
 ### 2. Graph: wired
 
-**Status:** Graph is used in daemon (`sc_graph_open`), retrieval engine (`sc_retrieval_set_graph`), and hybrid retrieval. No gap.
+**Status:** Graph is used in daemon (`hu_graph_open`), retrieval engine (`hu_retrieval_set_graph`), and hybrid retrieval. No gap.
 
 ### 3. Vision: included in daemon
 
-**Status:** `#include "seaclaw/context/vision.h"` in daemon. Usage should be verified (e.g. image handling in agent turn).
+**Status:** `#include "human/context/vision.h"` in daemon. Usage should be verified (e.g. image handling in agent turn).
 
 ### 4. BTH metrics: wired
 
@@ -274,7 +274,7 @@ When `graph_result.entries` or `graph_result.scores` allocation fails, `graph_ct
 
 **Location:** `src/gateway/gateway.c:1170-1178`, `ws_server.c:345`, `437`
 
-**Issue:** The main poll loop reads `gw->ws.conns[i].active` and `conn_count`. WebSocket `on_close` runs from `sc_ws_server_read_and_process` in the same thread, so there is no concurrent modification from another thread. The poll loop and WebSocket processing are single-threaded. **No race.**
+**Issue:** The main poll loop reads `gw->ws.conns[i].active` and `conn_count`. WebSocket `on_close` runs from `hu_ws_server_read_and_process` in the same thread, so there is no concurrent modification from another thread. The poll loop and WebSocket processing are single-threaded. **No race.**
 
 ### 2. OAuth pending and rate entries
 
@@ -298,7 +298,7 @@ When `graph_result.entries` or `graph_result.scores` allocation fails, `graph_ct
 
 **Location:** `src/gateway/gateway.c:489-491`
 
-Body is passed to `sc_openai_compat_handle_chat_completions`. Validation should be confirmed inside that function (JSON parse, size limits).
+Body is passed to `hu_openai_compat_handle_chat_completions`. Validation should be confirmed inside that function (JSON parse, size limits).
 
 ### 2. Gateway webhook body
 
@@ -316,7 +316,7 @@ Code is extracted from JSON and length-checked. Pairing guard validates format. 
 
 **Location:** `src/gateway/gateway.c:243-249`, `358-359`
 
-`sc_gateway_path_has_traversal` and `sc_gateway_path_is` are used for static file serving. Traversal is rejected. Good.
+`hu_gateway_path_has_traversal` and `hu_gateway_path_is` are used for static file serving. Traversal is rejected. Good.
 
 ---
 
@@ -326,21 +326,21 @@ Code is extracted from JSON and length-checked. Pairing guard validates format. 
 
 **Location:** `src/persona/persona.c`
 
-If `sc_strdup` fails for an optional field (e.g. biography, motivation), the persona has mixed valid and NULL fields. Code paths that assume non-NULL may crash or behave oddly.
+If `hu_strdup` fails for an optional field (e.g. biography, motivation), the persona has mixed valid and NULL fields. Code paths that assume non-NULL may crash or behave oddly.
 
-**Recommendation:** Validate all optional `sc_strdup` results; on failure, call `sc_persona_deinit` and return `SC_ERR_OUT_OF_MEMORY`.
+**Recommendation:** Validate all optional `hu_strdup` results; on failure, call `hu_persona_deinit` and return `HU_ERR_OUT_OF_MEMORY`.
 
 ### 2. Persona feedback partial example
 
 **Location:** `src/persona/feedback.c:196-212`
 
-When `sc_strdup` fails for context/incoming/response, the example is not added but allocated strings are freed. Bank state remains consistent. The only inconsistency is that the user's feedback is dropped without notification.
+When `hu_strdup` fails for context/incoming/response, the example is not added but allocated strings are freed. Bank state remains consistent. The only inconsistency is that the user's feedback is dropped without notification.
 
 ### 3. Daemon cleanup order
 
 **Location:** `src/daemon.c`, `src/gateway/gateway.c`
 
-Gateway cleanup order is correct (bridge, pairing, rate limiter, pool, ws, ctrl, body_buf, fd, gw). Fix the `gw` NULL guard for `sc_ws_server_deinit`.
+Gateway cleanup order is correct (bridge, pairing, rate limiter, pool, ws, ctrl, body_buf, fd, gw). Fix the `gw` NULL guard for `hu_ws_server_deinit`.
 
 ---
 
@@ -356,6 +356,6 @@ Gateway cleanup order is correct (bridge, pairing, rate limiter, pool, ws, ctrl,
 
 **Immediate fixes:**
 
-1. Guard `sc_ws_server_deinit(&gw->ws)` with `if (gw)` in gateway cleanup.
-2. Add NULL checks for persona `sc_strdup` on optional fields, or fail load on OOM.
+1. Guard `hu_ws_server_deinit(&gw->ws)` with `if (gw)` in gateway cleanup.
+2. Add NULL checks for persona `hu_strdup` on optional fields, or fail load on OOM.
 3. Replace `sqlite3_bind_text(..., NULL)` with `SQLITE_STATIC` where appropriate for project compliance.

@@ -1,192 +1,192 @@
 /*
  * Tests for previously untested or lightly tested modules:
  * voice_channel, skill_registry, crontab, update, memory/engines/api.
- * Uses SC_IS_TEST paths (no real network/IO).
+ * Uses HU_IS_TEST paths (no real network/IO).
  */
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
 #include "test_framework.h"
 #include <string.h>
 
-#if defined(SC_HAS_SONATA)
-#include "seaclaw/channel.h"
-#include "seaclaw/channels/voice_channel.h"
+#if defined(HU_HAS_SONATA)
+#include "human/channel.h"
+#include "human/channels/voice_channel.h"
 #endif
 
-#include "seaclaw/crontab.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
-#include "seaclaw/skill_registry.h"
-#include "seaclaw/update.h"
+#include "human/crontab.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
+#include "human/skill_registry.h"
+#include "human/update.h"
 
-/* ─── voice_channel (only when built with SC_HAS_SONATA) ──────────────────── */
-#if defined(SC_HAS_SONATA)
+/* ─── voice_channel (only when built with HU_HAS_SONATA) ──────────────────── */
+#if defined(HU_HAS_SONATA)
 static void test_voice_channel_create_destroy(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_channel_t ch = {0};
-    sc_error_t err = sc_channel_voice_create(&alloc, NULL, &ch);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(ch.ctx);
-    SC_ASSERT_NOT_NULL(ch.vtable);
-    SC_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "voice");
-    sc_channel_voice_destroy(&ch);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch = {0};
+    hu_error_t err = hu_channel_voice_create(&alloc, NULL, &ch);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(ch.ctx);
+    HU_ASSERT_NOT_NULL(ch.vtable);
+    HU_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "voice");
+    hu_channel_voice_destroy(&ch);
 }
 
 static void test_voice_channel_create_null_alloc_fails(void) {
-    sc_channel_t ch = {0};
-    sc_error_t err = sc_channel_voice_create(NULL, NULL, &ch);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_channel_t ch = {0};
+    hu_error_t err = hu_channel_voice_create(NULL, NULL, &ch);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_voice_channel_create_null_out_fails(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_error_t err = sc_channel_voice_create(&alloc, NULL, NULL);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_channel_voice_create(&alloc, NULL, NULL);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_voice_channel_create_with_config_applies_defaults(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_channel_voice_config_t config = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_voice_config_t config = {0};
     config.speaker_id = "test-speaker";
-    sc_channel_t ch = {0};
-    sc_error_t err = sc_channel_voice_create(&alloc, &config, &ch);
-    SC_ASSERT_EQ(err, SC_OK);
-    sc_channel_voice_destroy(&ch);
+    hu_channel_t ch = {0};
+    hu_error_t err = hu_channel_voice_create(&alloc, &config, &ch);
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_channel_voice_destroy(&ch);
 }
 #endif
 
 /* ─── skill_registry ──────────────────────────────────────────────────────── */
 static void test_skill_registry_search_null_alloc_fails(void) {
-    sc_skill_registry_entry_t *entries = NULL;
+    hu_skill_registry_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = sc_skill_registry_search(NULL, "query", &entries, &count);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_skill_registry_search(NULL, "query", &entries, &count);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_skill_registry_search_null_out_fails(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_error_t err = sc_skill_registry_search(&alloc, "query", NULL, NULL);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_skill_registry_search(&alloc, "query", NULL, NULL);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_skill_registry_search_mock_returns_valid_entries(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_skill_registry_entry_t *entries = NULL;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_skill_registry_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = sc_skill_registry_search(&alloc, "email", &entries, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(entries);
-    SC_ASSERT_TRUE(count >= 1);
-    sc_skill_registry_entries_free(&alloc, entries, count);
+    hu_error_t err = hu_skill_registry_search(&alloc, "email", &entries, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(entries);
+    HU_ASSERT_TRUE(count >= 1);
+    hu_skill_registry_entries_free(&alloc, entries, count);
 }
 
 /* ─── crontab ────────────────────────────────────────────────────────────── */
 static void test_crontab_get_path_null_alloc_fails(void) {
     char *path = NULL;
     size_t path_len = 0;
-    sc_error_t err = sc_crontab_get_path(NULL, &path, &path_len);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_crontab_get_path(NULL, &path, &path_len);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_crontab_load_nonexistent_returns_empty(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_crontab_entry_t *entries = NULL;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_crontab_entry_t *entries = NULL;
     size_t count = 99;
-    sc_error_t err = sc_crontab_load(&alloc, "/nonexistent/crontab.json", &entries, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, 0u);
-    sc_crontab_entries_free(&alloc, entries, count);
+    hu_error_t err = hu_crontab_load(&alloc, "/nonexistent/crontab.json", &entries, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 0u);
+    hu_crontab_entries_free(&alloc, entries, count);
 }
 
 static void test_crontab_entries_free_null_safe(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_crontab_entries_free(&alloc, NULL, 0);
-    sc_crontab_entries_free(&alloc, NULL, 5);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_crontab_entries_free(&alloc, NULL, 0);
+    hu_crontab_entries_free(&alloc, NULL, 5);
 }
 
 /* ─── update ─────────────────────────────────────────────────────────────── */
 static void test_update_check_null_buf_fails(void) {
-    sc_error_t err = sc_update_check(NULL, 64);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_update_check(NULL, 64);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_update_check_zero_size_fails(void) {
     char buf[64];
-    sc_error_t err = sc_update_check(buf, 0);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_update_check(buf, 0);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_update_check_mock_returns_version(void) {
     char buf[64];
-    sc_error_t err = sc_update_check(buf, sizeof(buf));
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(strlen(buf) > 0);
+    hu_error_t err = hu_update_check(buf, sizeof(buf));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strlen(buf) > 0);
 }
 
 /* ─── memory/engines/api ────────────────────────────────────────────────── */
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
 static void test_api_memory_create_null_alloc_returns_null(void) {
-    sc_memory_t mem = sc_api_memory_create(NULL, "https://api.example.com", NULL, 5000);
-    SC_ASSERT_NULL(mem.ctx);
-    SC_ASSERT_NULL(mem.vtable);
+    hu_memory_t mem = hu_api_memory_create(NULL, "https://api.example.com", NULL, 5000);
+    HU_ASSERT_NULL(mem.ctx);
+    HU_ASSERT_NULL(mem.vtable);
 }
 
 static void test_api_memory_create_null_base_url_returns_null(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_api_memory_create(&alloc, NULL, NULL, 5000);
-    SC_ASSERT_NULL(mem.ctx);
-    SC_ASSERT_NULL(mem.vtable);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_api_memory_create(&alloc, NULL, NULL, 5000);
+    HU_ASSERT_NULL(mem.ctx);
+    HU_ASSERT_NULL(mem.vtable);
 }
 
 static void test_api_memory_store_recall_mock(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_api_memory_create(&alloc, "https://api.example.com", "key", 5000);
-    SC_ASSERT_NOT_NULL(mem.vtable);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_api_memory_create(&alloc, "https://api.example.com", "key", 5000);
+    HU_ASSERT_NOT_NULL(mem.vtable);
 
-    sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
-    sc_error_t err = mem.vtable->store(mem.ctx, "k1", 2, "content", 7, &cat, NULL, 0);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
+    hu_error_t err = mem.vtable->store(mem.ctx, "k1", 2, "content", 7, &cat, NULL, 0);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_memory_entry_t *out = NULL;
+    hu_memory_entry_t *out = NULL;
     size_t count = 0;
     err = mem.vtable->recall(mem.ctx, &alloc, "con", 3, 10, NULL, 0, &out, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(count >= 1);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(count >= 1);
     if (out) {
         for (size_t i = 0; i < count; i++)
-            sc_memory_entry_free_fields(&alloc, &out[i]);
-        alloc.free(alloc.ctx, out, count * sizeof(sc_memory_entry_t));
+            hu_memory_entry_free_fields(&alloc, &out[i]);
+        alloc.free(alloc.ctx, out, count * sizeof(hu_memory_entry_t));
     }
     mem.vtable->deinit(mem.ctx);
 }
 #endif
 
 void run_untested_modules_tests(void) {
-    SC_TEST_SUITE("Untested modules");
+    HU_TEST_SUITE("Untested modules");
 
-#if defined(SC_HAS_SONATA)
-    SC_RUN_TEST(test_voice_channel_create_destroy);
-    SC_RUN_TEST(test_voice_channel_create_null_alloc_fails);
-    SC_RUN_TEST(test_voice_channel_create_null_out_fails);
-    SC_RUN_TEST(test_voice_channel_create_with_config_applies_defaults);
+#if defined(HU_HAS_SONATA)
+    HU_RUN_TEST(test_voice_channel_create_destroy);
+    HU_RUN_TEST(test_voice_channel_create_null_alloc_fails);
+    HU_RUN_TEST(test_voice_channel_create_null_out_fails);
+    HU_RUN_TEST(test_voice_channel_create_with_config_applies_defaults);
 #endif
 
-    SC_RUN_TEST(test_skill_registry_search_null_alloc_fails);
-    SC_RUN_TEST(test_skill_registry_search_null_out_fails);
-    SC_RUN_TEST(test_skill_registry_search_mock_returns_valid_entries);
+    HU_RUN_TEST(test_skill_registry_search_null_alloc_fails);
+    HU_RUN_TEST(test_skill_registry_search_null_out_fails);
+    HU_RUN_TEST(test_skill_registry_search_mock_returns_valid_entries);
 
-    SC_RUN_TEST(test_crontab_get_path_null_alloc_fails);
-    SC_RUN_TEST(test_crontab_load_nonexistent_returns_empty);
-    SC_RUN_TEST(test_crontab_entries_free_null_safe);
+    HU_RUN_TEST(test_crontab_get_path_null_alloc_fails);
+    HU_RUN_TEST(test_crontab_load_nonexistent_returns_empty);
+    HU_RUN_TEST(test_crontab_entries_free_null_safe);
 
-    SC_RUN_TEST(test_update_check_null_buf_fails);
-    SC_RUN_TEST(test_update_check_zero_size_fails);
-    SC_RUN_TEST(test_update_check_mock_returns_version);
+    HU_RUN_TEST(test_update_check_null_buf_fails);
+    HU_RUN_TEST(test_update_check_zero_size_fails);
+    HU_RUN_TEST(test_update_check_mock_returns_version);
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    SC_RUN_TEST(test_api_memory_create_null_alloc_returns_null);
-    SC_RUN_TEST(test_api_memory_create_null_base_url_returns_null);
-    SC_RUN_TEST(test_api_memory_store_recall_mock);
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    HU_RUN_TEST(test_api_memory_create_null_alloc_returns_null);
+    HU_RUN_TEST(test_api_memory_create_null_base_url_returns_null);
+    HU_RUN_TEST(test_api_memory_store_recall_mock);
 #endif
 }

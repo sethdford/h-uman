@@ -1,4 +1,4 @@
-#include "seaclaw/gateway/thread_pool.h"
+#include "human/gateway/thread_pool.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,14 +6,14 @@
 #define POOL_QUEUE_SIZE 64
 
 typedef struct {
-    sc_work_fn fn;
+    hu_work_fn fn;
     void *arg;
-} sc_work_item_t;
+} hu_work_item_t;
 
-struct sc_thread_pool {
+struct hu_thread_pool {
     pthread_t *threads;
     size_t thread_count;
-    sc_work_item_t queue[POOL_QUEUE_SIZE];
+    hu_work_item_t queue[POOL_QUEUE_SIZE];
     size_t head;
     size_t tail;
     size_t count;
@@ -24,7 +24,7 @@ struct sc_thread_pool {
 };
 
 static void *worker(void *arg) {
-    sc_thread_pool_t *pool = (sc_thread_pool_t *)arg;
+    hu_thread_pool_t *pool = (hu_thread_pool_t *)arg;
     for (;;) {
         pthread_mutex_lock(&pool->mutex);
         while (pool->count == 0 && !pool->shutdown)
@@ -33,7 +33,7 @@ static void *worker(void *arg) {
             pthread_mutex_unlock(&pool->mutex);
             return NULL;
         }
-        sc_work_item_t item = pool->queue[pool->head];
+        hu_work_item_t item = pool->queue[pool->head];
         pool->head = (pool->head + 1) % POOL_QUEUE_SIZE;
         pool->count--;
         pthread_cond_signal(&pool->not_full);
@@ -42,10 +42,10 @@ static void *worker(void *arg) {
     }
 }
 
-sc_thread_pool_t *sc_thread_pool_create(size_t n) {
+hu_thread_pool_t *hu_thread_pool_create(size_t n) {
     if (n == 0)
         return NULL;
-    sc_thread_pool_t *pool = (sc_thread_pool_t *)malloc(sizeof(sc_thread_pool_t));
+    hu_thread_pool_t *pool = (hu_thread_pool_t *)malloc(sizeof(hu_thread_pool_t));
     if (!pool)
         return NULL;
     memset(pool, 0, sizeof(*pool));
@@ -90,7 +90,7 @@ sc_thread_pool_t *sc_thread_pool_create(size_t n) {
     return pool;
 }
 
-bool sc_thread_pool_submit(sc_thread_pool_t *pool, sc_work_fn fn, void *arg) {
+bool hu_thread_pool_submit(hu_thread_pool_t *pool, hu_work_fn fn, void *arg) {
     if (!pool || !fn)
         return false;
     pthread_mutex_lock(&pool->mutex);
@@ -113,7 +113,7 @@ bool sc_thread_pool_submit(sc_thread_pool_t *pool, sc_work_fn fn, void *arg) {
     return true;
 }
 
-void sc_thread_pool_destroy(sc_thread_pool_t *pool) {
+void hu_thread_pool_destroy(hu_thread_pool_t *pool) {
     if (!pool)
         return;
     pthread_mutex_lock(&pool->mutex);

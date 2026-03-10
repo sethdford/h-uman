@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end integration tests for seaclaw with a live OpenAI API.
+# End-to-end integration tests for human with a live OpenAI API.
 # Requires OPENAI_API_KEY in the environment.
-# Usage: OPENAI_API_KEY=sk-... ./tests/e2e/run_e2e.sh [path/to/seaclaw]
+# Usage: OPENAI_API_KEY=sk-... ./tests/e2e/run_e2e.sh [path/to/human]
 set -euo pipefail
 
-BINARY="${1:-./build/seaclaw}"
+BINARY="${1:-./build/human}"
 PASS=0
 FAIL=0
 TOTAL=0
@@ -56,7 +56,7 @@ fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
-echo " SeaClaw E2E Integration Tests (live OpenAI API)"
+echo " Human E2E Integration Tests (live OpenAI API)"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
@@ -128,7 +128,7 @@ fi
 MCP_EXEC_READ='{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"file_read","arguments":{"path":"README.md"}}}'
 MCP_OUT3=$(printf '%s\n%s\n' "$MCP_INIT" "$MCP_EXEC_READ" | run_with_timeout 10 "$BINARY" mcp 2>/dev/null || true)
 
-if echo "$MCP_OUT3" | grep -qi "seaclaw\|autonomous"; then
+if echo "$MCP_OUT3" | grep -qi "human\|autonomous"; then
   pass "mcp_file_read"
 else
   fail "mcp_file_read" "README content not found"
@@ -149,10 +149,10 @@ echo ""
 
 echo "── Live LLM (OpenAI gpt-4o) ──"
 
-LOGFILE=$(mktemp /tmp/seaclaw_e2e_XXXXXX.log)
+LOGFILE=$(mktemp /tmp/human_e2e_XXXXXX.log)
 
 echo "What is the capital of France? Answer in one word only." | \
-  SEACLAW_LOG="$LOGFILE" run_with_timeout 30 "$BINARY" agent 2>/dev/null &
+  HUMAN_LOG="$LOGFILE" run_with_timeout 30 "$BINARY" agent 2>/dev/null &
 AGENT_PID=$!
 sleep 15
 kill $AGENT_PID 2>/dev/null || true
@@ -197,10 +197,10 @@ echo ""
 
 echo "── Live LLM Tool Calling ──"
 
-LOGFILE2=$(mktemp /tmp/seaclaw_e2e_XXXXXX.log)
+LOGFILE2=$(mktemp /tmp/human_e2e_XXXXXX.log)
 
 echo "You MUST use the shell tool right now. Run this exact command: echo TOOL_TEST_OK. Do not respond with text, just call the shell tool." | \
-  SEACLAW_LOG="$LOGFILE2" run_with_timeout 60 "$BINARY" agent 2>/dev/null &
+  HUMAN_LOG="$LOGFILE2" run_with_timeout 60 "$BINARY" agent 2>/dev/null &
 AGENT_PID=$!
 # Tool-calling requires 2+ LLM round-trips: wait up to 45s
 for i in $(seq 1 9); do
@@ -239,10 +239,10 @@ echo ""
 
 echo "── Live LLM Streaming ──"
 
-LOGFILE3=$(mktemp /tmp/seaclaw_e2e_XXXXXX.log)
+LOGFILE3=$(mktemp /tmp/human_e2e_XXXXXX.log)
 
 echo "Count from 1 to 5, one number per line." | \
-  SEACLAW_LOG="$LOGFILE3" run_with_timeout 30 "$BINARY" agent 2>/dev/null &
+  HUMAN_LOG="$LOGFILE3" run_with_timeout 30 "$BINARY" agent 2>/dev/null &
 AGENT_PID=$!
 sleep 15
 kill $AGENT_PID 2>/dev/null || true
@@ -272,9 +272,9 @@ else
   fail "bad_key_doctor_survives" "doctor crashed with bad key"
 fi
 
-LOGFILE4=$(mktemp /tmp/seaclaw_e2e_XXXXXX.log)
+LOGFILE4=$(mktemp /tmp/human_e2e_XXXXXX.log)
 echo "Hello" | \
-  OPENAI_API_KEY="sk-invalid" SEACLAW_LOG="$LOGFILE4" run_with_timeout 15 "$BINARY" agent 2>/dev/null &
+  OPENAI_API_KEY="sk-invalid" HUMAN_LOG="$LOGFILE4" run_with_timeout 15 "$BINARY" agent 2>/dev/null &
 AGENT_PID=$!
 sleep 10
 kill $AGENT_PID 2>/dev/null || true
@@ -304,9 +304,9 @@ echo "── Concurrent Stress ──"
 PIDS=""
 ALL_OK=true
 for i in 1 2 3; do
-  TMPLOG=$(mktemp /tmp/seaclaw_e2e_concurrent_${i}_XXXXXX.log)
+  TMPLOG=$(mktemp /tmp/human_e2e_concurrent_${i}_XXXXXX.log)
   (echo "Say the number $i and nothing else." | \
-    SEACLAW_LOG="$TMPLOG" run_with_timeout 30 "$BINARY" agent 2>/dev/null; \
+    HUMAN_LOG="$TMPLOG" run_with_timeout 30 "$BINARY" agent 2>/dev/null; \
     echo "$?" > "${TMPLOG}.exit") &
   PIDS="$PIDS $!"
 done
@@ -317,7 +317,7 @@ for P in $PIDS; do wait "$P" 2>/dev/null || true; done
 
 CONCURRENT_OK=0
 for i in 1 2 3; do
-  TMPLOG=$(ls /tmp/seaclaw_e2e_concurrent_${i}_*.log 2>/dev/null | head -1)
+  TMPLOG=$(ls /tmp/human_e2e_concurrent_${i}_*.log 2>/dev/null | head -1)
   if [ -n "$TMPLOG" ] && [ -f "$TMPLOG" ] && grep -q '"success":true' "$TMPLOG"; then
     CONCURRENT_OK=$((CONCURRENT_OK + 1))
   fi
@@ -346,7 +346,7 @@ cleanup_gateway() {
 }
 trap cleanup_gateway EXIT
 
-SEACLAW_GATEWAY_PORT=$GW_PORT "$BINARY" gateway 2>/dev/null &
+HUMAN_GATEWAY_PORT=$GW_PORT "$BINARY" gateway 2>/dev/null &
 GW_PID=$!
 sleep 2
 
@@ -415,28 +415,28 @@ echo ""
 echo "── MCP Resources ──"
 
 MCP_RES_LIST='{"jsonrpc":"2.0","id":10,"method":"resources/list","params":{}}'
-MCP_RES_READ_CONFIG='{"jsonrpc":"2.0","id":11,"method":"resources/read","params":{"uri":"seaclaw://config"}}'
-MCP_RES_READ_MEM='{"jsonrpc":"2.0","id":12,"method":"resources/read","params":{"uri":"seaclaw://memory"}}'
-MCP_RES_READ_INVALID='{"jsonrpc":"2.0","id":13,"method":"resources/read","params":{"uri":"seaclaw://invalid"}}'
+MCP_RES_READ_CONFIG='{"jsonrpc":"2.0","id":11,"method":"resources/read","params":{"uri":"human://config"}}'
+MCP_RES_READ_MEM='{"jsonrpc":"2.0","id":12,"method":"resources/read","params":{"uri":"human://memory"}}'
+MCP_RES_READ_INVALID='{"jsonrpc":"2.0","id":13,"method":"resources/read","params":{"uri":"human://invalid"}}'
 
 MCP_RES_OUT=$(printf '%s\n%s\n%s\n%s\n%s\n' "$MCP_INIT" "$MCP_RES_LIST" "$MCP_RES_READ_CONFIG" "$MCP_RES_READ_MEM" "$MCP_RES_READ_INVALID" | run_with_timeout 10 "$BINARY" mcp 2>/dev/null || true)
 
-if echo "$MCP_RES_OUT" | grep -q '"resources"' || echo "$MCP_RES_OUT" | grep -q 'seaclaw://config'; then
+if echo "$MCP_RES_OUT" | grep -q '"resources"' || echo "$MCP_RES_OUT" | grep -q 'human://config'; then
   pass "mcp_resources_list"
 else
   fail "mcp_resources_list" "no resources in response"
 fi
 
-if echo "$MCP_RES_OUT" | grep -q 'seaclaw://config'; then
+if echo "$MCP_RES_OUT" | grep -q 'human://config'; then
   pass "mcp_resources_read_config"
 else
-  fail "mcp_resources_read_config" "seaclaw://config not in response"
+  fail "mcp_resources_read_config" "human://config not in response"
 fi
 
-if echo "$MCP_RES_OUT" | grep -q 'seaclaw://memory'; then
+if echo "$MCP_RES_OUT" | grep -q 'human://memory'; then
   pass "mcp_resources_read_memory"
 else
-  fail "mcp_resources_read_memory" "seaclaw://memory not in response"
+  fail "mcp_resources_read_memory" "human://memory not in response"
 fi
 
 if echo "$MCP_RES_OUT" | grep -q "Unknown resource\|error\|-32602"; then

@@ -1,5 +1,5 @@
 #!/bin/sh
-# One-click release script for SeaClaw.
+# One-click release script for Human.
 # Usage: ./scripts/release.sh [version]
 # Example: ./scripts/release.sh 2026.3.15
 #
@@ -66,28 +66,28 @@ JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 BUILD_DIR="build-check"
 mkdir -p "$BUILD_DIR"
 (cd "$BUILD_DIR" && cmake .. -DCMAKE_BUILD_TYPE=Debug 2>/dev/null && cmake --build . -j"$JOBS" 2>&1 | tail -1)
-(cd "$BUILD_DIR" && ./seaclaw_tests) || die "Tests failed. Fix before releasing."
+(cd "$BUILD_DIR" && ./human_tests) || die "Tests failed. Fix before releasing."
 
 info "Running benchmark and saving to history..."
 RELEASE_BUILD_DIR="build-release"
 mkdir -p "$RELEASE_BUILD_DIR"
 (cd "$RELEASE_BUILD_DIR" && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON 2>/dev/null && cmake --build . -j"$JOBS" 2>&1 | tail -1)
-if [ -x "$RELEASE_BUILD_DIR/seaclaw" ]; then
-    "$ROOT/scripts/benchmark.sh" "$RELEASE_BUILD_DIR/seaclaw" --save-history 2>&1 | grep -E "Appended|Created|Results saved"
+if [ -x "$RELEASE_BUILD_DIR/human" ]; then
+    "$ROOT/scripts/benchmark.sh" "$RELEASE_BUILD_DIR/human" --save-history 2>&1 | grep -E "Appended|Created|Results saved"
 else
     warn "Release binary not found — skipping benchmark"
 fi
 
 info "Updating version to $VERSION..."
 
-sed -i.bak "s/SeaClaw v[0-9][0-9.]*/SeaClaw v$VERSION/g" CMakeLists.txt && rm -f CMakeLists.txt.bak
+sed -i.bak "s/Human v[0-9][0-9.]*/Human v$VERSION/g" CMakeLists.txt && rm -f CMakeLists.txt.bak
 
-if grep -q '#define SC_VERSION' src/main.c; then
-    sed -i.bak "s/#define SC_VERSION \"[^\"]*\"/#define SC_VERSION \"$VERSION\"/" src/main.c && rm -f src/main.c.bak
+if grep -q '#define HU_VERSION' src/main.c; then
+    sed -i.bak "s/#define HU_VERSION \"[^\"]*\"/#define HU_VERSION \"$VERSION\"/" src/main.c && rm -f src/main.c.bak
 fi
 
-if grep -q '#define SC_VERSION' src/version.c; then
-    sed -i.bak "s/#define SC_VERSION \"[^\"]*\"/#define SC_VERSION \"$VERSION\"/" src/version.c && rm -f src/version.c.bak
+if grep -q '#define HU_VERSION' src/version.c; then
+    sed -i.bak "s/#define HU_VERSION \"[^\"]*\"/#define HU_VERSION \"$VERSION\"/" src/version.c && rm -f src/version.c.bak
 fi
 
 if [ -f flake.nix ] && grep -q 'version = ' flake.nix; then
@@ -97,11 +97,11 @@ fi
 DEB_CHANGELOG="packaging/debian/changelog"
 if [ -f "$DEB_CHANGELOG" ]; then
     DATE_RFC2822=$(date -R 2>/dev/null || date "+%a, %d %b %Y %H:%M:%S %z")
-    DEB_ENTRY="seaclaw (${VERSION}-1) unstable; urgency=medium
+    DEB_ENTRY="human (${VERSION}-1) unstable; urgency=medium
 
   * Release ${VERSION}
 
- -- SeaClaw Team <team@seaclaw.ai>  ${DATE_RFC2822}
+ -- Human Team <team@h-uman.ai>  ${DATE_RFC2822}
 "
     EXISTING=$(cat "$DEB_CHANGELOG")
     printf '%s\n\n%s\n' "$DEB_ENTRY" "$EXISTING" > "$DEB_CHANGELOG"

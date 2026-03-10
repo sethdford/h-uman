@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Update ~/.seaclaw/personas/seth.json with externalized prompt fields and age-appropriate voice."""
+"""Update ~/.human/personas/seth.json with externalized prompt fields and age-appropriate voice."""
 
 import json
 import os
 
-PERSONA_PATH = os.path.expanduser("~/.seaclaw/personas/seth.json")
+PERSONA_PATH = os.path.expanduser("~/.human/personas/seth.json")
 
 
 def main():

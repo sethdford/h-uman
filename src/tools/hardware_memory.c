@@ -1,10 +1,10 @@
-#include "seaclaw/tools/hardware_memory.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/process_util.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/tools/hardware_memory.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/process_util.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,32 +17,32 @@
 #define HARDWARE_MEMORY_LEN_DEFAULT  128
 #define HARDWARE_MEMORY_LEN_MAX      256
 
-typedef struct sc_hardware_memory_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_hardware_memory_ctx {
+    hu_allocator_t *alloc;
     char **boards;
     size_t boards_count;
-} sc_hardware_memory_ctx_t;
+} hu_hardware_memory_ctx_t;
 
-static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
-                                          const sc_json_value_t *args, sc_tool_result_t *out) {
-    sc_hardware_memory_ctx_t *c = (sc_hardware_memory_ctx_t *)ctx;
+static hu_error_t hardware_memory_execute(void *ctx, hu_allocator_t *alloc,
+                                          const hu_json_value_t *args, hu_tool_result_t *out) {
+    hu_hardware_memory_ctx_t *c = (hu_hardware_memory_ctx_t *)ctx;
     if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
     if (!c->boards || c->boards_count == 0) {
-        *out = sc_tool_result_fail("No peripherals configured", 27);
-        return SC_OK;
+        *out = hu_tool_result_fail("No peripherals configured", 27);
+        return HU_OK;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action || action[0] == '\0') {
-        *out = sc_tool_result_fail("Missing 'action' parameter (read or write)", 43);
-        return SC_OK;
+        *out = hu_tool_result_fail("Missing 'action' parameter (read or write)", 43);
+        return HU_OK;
     }
-    const char *address = sc_json_get_string(args, "address");
-    double length_val = sc_json_get_number(args, "length", HARDWARE_MEMORY_LEN_DEFAULT);
-    const char *value = sc_json_get_string(args, "value");
-    const char *board = sc_json_get_string(args, "board");
+    const char *address = hu_json_get_string(args, "address");
+    double length_val = hu_json_get_number(args, "length", HARDWARE_MEMORY_LEN_DEFAULT);
+    const char *value = hu_json_get_string(args, "value");
+    const char *board = hu_json_get_string(args, "board");
     if (!address || !address[0])
         address = HARDWARE_MEMORY_ADDR_DEFAULT;
     size_t length = (size_t)length_val;
@@ -50,7 +50,7 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
         length = HARDWARE_MEMORY_LEN_DEFAULT;
     if (length > HARDWARE_MEMORY_LEN_MAX)
         length = HARDWARE_MEMORY_LEN_MAX;
-#if SC_IS_TEST
+#if HU_IS_TEST
     (void)value;
     if (board && board[0]) {
         bool found = false;
@@ -61,36 +61,36 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
             }
         }
         if (!found) {
-            *out = sc_tool_result_fail("Board not configured in peripherals list", 40);
-            return SC_OK;
+            *out = hu_tool_result_fail("Board not configured in peripherals list", 40);
+            return HU_OK;
         }
     }
     if (strcmp(action, "read") == 0) {
-        char *msg = sc_strndup(alloc, "00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF", 41);
+        char *msg = hu_strndup(alloc, "00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF", 41);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 41);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 41);
+        return HU_OK;
     }
     if (strcmp(action, "write") == 0) {
-        char *msg = sc_strndup(alloc, "Write OK", 8);
+        char *msg = hu_strndup(alloc, "Write OK", 8);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 8);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 8);
+        return HU_OK;
     }
-    *out = sc_tool_result_fail("Unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("Unknown action", 14);
+    return HU_OK;
 #else
     if (!board || !board[0])
         board = (c->boards_count > 0) ? c->boards[0] : NULL;
     if (!board) {
-        *out = sc_tool_result_fail("No board specified", 18);
-        return SC_OK;
+        *out = hu_tool_result_fail("No board specified", 18);
+        return HU_OK;
     }
     bool supported = false;
     for (size_t i = 0; i < c->boards_count; i++) {
@@ -100,8 +100,8 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
         }
     }
     if (!supported) {
-        *out = sc_tool_result_fail("Board not configured in peripherals list", 40);
-        return SC_OK;
+        *out = hu_tool_result_fail("Board not configured in peripherals list", 40);
+        return HU_OK;
     }
 
     const char *chip = NULL;
@@ -131,37 +131,37 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
         }
         argv[ai] = NULL;
 
-        sc_run_result_t run = {0};
-        sc_error_t err = sc_process_run(alloc, argv, NULL, 65536, &run);
-        if (err != SC_OK || !run.success) {
+        hu_run_result_t run = {0};
+        hu_error_t err = hu_process_run(alloc, argv, NULL, 65536, &run);
+        if (err != HU_OK || !run.success) {
             if (run.stderr_buf && run.stderr_len > 0) {
                 size_t elen = run.stderr_len > 256 ? 256 : run.stderr_len;
-                char *emsg_copy = sc_strndup(alloc, run.stderr_buf, elen);
-                sc_run_result_free(alloc, &run);
+                char *emsg_copy = hu_strndup(alloc, run.stderr_buf, elen);
+                hu_run_result_free(alloc, &run);
                 if (emsg_copy)
-                    *out = sc_tool_result_fail_owned(emsg_copy, elen);
+                    *out = hu_tool_result_fail_owned(emsg_copy, elen);
                 else
-                    *out = sc_tool_result_fail("probe-rs read failed", 20);
+                    *out = hu_tool_result_fail("probe-rs read failed", 20);
             } else {
-                sc_run_result_free(alloc, &run);
-                *out = sc_tool_result_fail("probe-rs read failed", 20);
+                hu_run_result_free(alloc, &run);
+                *out = hu_tool_result_fail("probe-rs read failed", 20);
             }
-            return SC_OK;
+            return HU_OK;
         }
-        char *msg = sc_strndup(alloc, run.stdout_buf, run.stdout_len);
+        char *msg = hu_strndup(alloc, run.stdout_buf, run.stdout_len);
         size_t mlen = run.stdout_len;
-        sc_run_result_free(alloc, &run);
+        hu_run_result_free(alloc, &run);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, mlen);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, mlen);
+        return HU_OK;
     }
     if (strcmp(action, "write") == 0) {
         if (!value || strlen(value) == 0) {
-            *out = sc_tool_result_fail("missing value for write", 23);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing value for write", 23);
+            return HU_OK;
         }
         char addr_buf[32];
         snprintf(addr_buf, sizeof(addr_buf), "%s", address);
@@ -178,34 +178,34 @@ static sc_error_t hardware_memory_execute(void *ctx, sc_allocator_t *alloc,
         }
         argv[ai] = NULL;
 
-        sc_run_result_t run = {0};
-        sc_error_t err = sc_process_run(alloc, argv, NULL, 65536, &run);
-        if (err != SC_OK || !run.success) {
+        hu_run_result_t run = {0};
+        hu_error_t err = hu_process_run(alloc, argv, NULL, 65536, &run);
+        if (err != HU_OK || !run.success) {
             if (run.stderr_buf && run.stderr_len > 0) {
                 size_t elen = run.stderr_len > 256 ? 256 : run.stderr_len;
-                char *emsg_copy = sc_strndup(alloc, run.stderr_buf, elen);
-                sc_run_result_free(alloc, &run);
+                char *emsg_copy = hu_strndup(alloc, run.stderr_buf, elen);
+                hu_run_result_free(alloc, &run);
                 if (emsg_copy)
-                    *out = sc_tool_result_fail_owned(emsg_copy, elen);
+                    *out = hu_tool_result_fail_owned(emsg_copy, elen);
                 else
-                    *out = sc_tool_result_fail("probe-rs write failed", 21);
+                    *out = hu_tool_result_fail("probe-rs write failed", 21);
             } else {
-                sc_run_result_free(alloc, &run);
-                *out = sc_tool_result_fail("probe-rs write failed", 21);
+                hu_run_result_free(alloc, &run);
+                *out = hu_tool_result_fail("probe-rs write failed", 21);
             }
-            return SC_OK;
+            return HU_OK;
         }
-        sc_run_result_free(alloc, &run);
-        char *msg = sc_strndup(alloc, "Write OK", 8);
+        hu_run_result_free(alloc, &run);
+        char *msg = hu_strndup(alloc, "Write OK", 8);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 8);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 8);
+        return HU_OK;
     }
-    *out = sc_tool_result_fail("Unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("Unknown action", 14);
+    return HU_OK;
 #endif
 }
 
@@ -221,8 +221,8 @@ static const char *hardware_memory_params(void *ctx) {
     (void)ctx;
     return HARDWARE_MEMORY_PARAMS;
 }
-static void hardware_memory_deinit(void *ctx, sc_allocator_t *alloc) {
-    sc_hardware_memory_ctx_t *c = (sc_hardware_memory_ctx_t *)ctx;
+static void hardware_memory_deinit(void *ctx, hu_allocator_t *alloc) {
+    hu_hardware_memory_ctx_t *c = (hu_hardware_memory_ctx_t *)ctx;
     if (!c || !alloc)
         return;
     if (c->boards) {
@@ -234,7 +234,7 @@ static void hardware_memory_deinit(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, c, sizeof(*c));
 }
 
-static const sc_tool_vtable_t hardware_memory_vtable = {
+static const hu_tool_vtable_t hardware_memory_vtable = {
     .execute = hardware_memory_execute,
     .name = hardware_memory_name,
     .description = hardware_memory_desc,
@@ -242,13 +242,13 @@ static const sc_tool_vtable_t hardware_memory_vtable = {
     .deinit = hardware_memory_deinit,
 };
 
-sc_error_t sc_hardware_memory_create(sc_allocator_t *alloc, const char *const *boards,
-                                     size_t boards_count, sc_tool_t *out) {
+hu_error_t hu_hardware_memory_create(hu_allocator_t *alloc, const char *const *boards,
+                                     size_t boards_count, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_hardware_memory_ctx_t *c = (sc_hardware_memory_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_hardware_memory_ctx_t *c = (hu_hardware_memory_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->boards_count = boards_count;
@@ -256,7 +256,7 @@ sc_error_t sc_hardware_memory_create(sc_allocator_t *alloc, const char *const *b
         c->boards = (char **)alloc->alloc(alloc->ctx, boards_count * sizeof(char *));
         if (!c->boards) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memset(c->boards, 0, boards_count * sizeof(char *));
         for (size_t i = 0; i < boards_count; i++) {
@@ -267,12 +267,12 @@ sc_error_t sc_hardware_memory_create(sc_allocator_t *alloc, const char *const *b
                     alloc->free(alloc->ctx, c->boards[j], strlen(c->boards[j]) + 1);
                 alloc->free(alloc->ctx, c->boards, boards_count * sizeof(char *));
                 alloc->free(alloc->ctx, c, sizeof(*c));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             memcpy(c->boards[i], boards[i], len + 1);
         }
     }
     out->ctx = c;
     out->vtable = &hardware_memory_vtable;
-    return SC_OK;
+    return HU_OK;
 }

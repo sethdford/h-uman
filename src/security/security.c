@@ -1,7 +1,7 @@
-#include "seaclaw/security.h"
+#include "human/security.h"
 #include <string.h>
 
-bool sc_security_path_allowed(const sc_security_policy_t *policy, const char *path,
+bool hu_security_path_allowed(const hu_security_policy_t *policy, const char *path,
                               size_t path_len) {
     if (!policy || !path)
         return false;
@@ -33,7 +33,7 @@ bool sc_security_path_allowed(const sc_security_policy_t *policy, const char *pa
     return false;
 }
 
-bool sc_security_shell_allowed(const sc_security_policy_t *policy) {
+bool hu_security_shell_allowed(const hu_security_policy_t *policy) {
     if (!policy)
         return false;
     return policy->allow_shell;

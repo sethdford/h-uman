@@ -34,11 +34,11 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: swift
-    directory: /apps/shared/SeaClawKit
+    directory: /apps/shared/HumanKit
     schedule:
       interval: weekly
     groups:
-      seaclawkit-deps:
+      humankit-deps:
         patterns: ["*"]
 
   - package-ecosystem: swift

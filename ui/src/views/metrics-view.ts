@@ -1,14 +1,14 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-card.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-button.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-card.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-button.js";
 import { icons } from "../icons.js";
 
 interface MetricsSnapshot {
@@ -83,7 +83,7 @@ function labelFromKey(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-@customElement("sc-metrics-view")
+@customElement("hu-metrics-view")
 export class ScMetricsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 10_000;
 
@@ -91,42 +91,42 @@ export class ScMetricsView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-metrics;
       display: block;
-      color: var(--sc-text);
+      color: var(--hu-text);
       max-width: 60rem;
     }
     .section {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-      gap: var(--sc-space-md);
+      gap: var(--hu-space-md);
     }
     .metric-item {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-2xs);
+      gap: var(--hu-space-2xs);
     }
     .metric-label {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
     .metric-value {
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-family: var(--hu-font-mono);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
     .bth-group {
-      margin-bottom: var(--sc-space-xl);
+      margin-bottom: var(--hu-space-xl);
     }
     .bth-group:last-child {
       margin-bottom: 0;
     }
     .card-inner {
-      padding: var(--sc-space-md);
+      padding: var(--hu-space-md);
     }
   `;
 
@@ -157,15 +157,15 @@ export class ScMetricsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
-      <sc-skeleton variant="card" height="180px"></sc-skeleton>
-      <sc-skeleton variant="card" height="280px"></sc-skeleton>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
+      <hu-skeleton variant="card" height="180px"></hu-skeleton>
+      <hu-skeleton variant="card" height="280px"></hu-skeleton>
     `;
   }
 
@@ -184,11 +184,11 @@ export class ScMetricsView extends GatewayAwareLitElement {
 
     return html`
       <div class="section" role="region" aria-label="System health metrics">
-        <sc-section-header
+        <hu-section-header
           heading="System Health"
           description="Gateway and request metrics"
-        ></sc-section-header>
-        <sc-card glass>
+        ></hu-section-header>
+        <hu-card glass>
           <div class="card-inner">
             <div class="metric-grid">
               ${items.map(
@@ -207,7 +207,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
               )}
             </div>
           </div>
-        </sc-card>
+        </hu-card>
       </div>
     `;
   }
@@ -218,16 +218,16 @@ export class ScMetricsView extends GatewayAwareLitElement {
 
     return html`
       <div class="section" role="region" aria-label="Intelligence pipeline metrics">
-        <sc-section-header
+        <hu-section-header
           heading="Intelligence Pipeline"
           description="BTH pipeline metrics by category"
-        ></sc-section-header>
-        <sc-card glass>
+        ></hu-section-header>
+        <hu-card glass>
           <div class="card-inner">
             ${Object.entries(BTH_GROUPS).map(
               ([groupName, keys]) => html`
                 <div class="bth-group">
-                  <div class="metric-label" style="margin-bottom: var(--sc-space-sm)">
+                  <div class="metric-label" style="margin-bottom: var(--hu-space-sm)">
                     ${groupName}
                   </div>
                   <div class="metric-grid">
@@ -247,7 +247,7 @@ export class ScMetricsView extends GatewayAwareLitElement {
               `,
             )}
           </div>
-        </sc-card>
+        </hu-card>
       </div>
     `;
   }
@@ -265,51 +265,51 @@ export class ScMetricsView extends GatewayAwareLitElement {
     const totalTurns = bth?.total_turns ?? m?.total_requests ?? 0;
 
     return html`
-      <sc-page-hero role="region" aria-label="Observability">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Observability">
+        <hu-section-header
           heading="Observability"
           description="Live system health and intelligence metrics"
         >
-        </sc-section-header>
-      </sc-page-hero>
+        </hu-section-header>
+      </hu-page-hero>
 
-      <sc-stats-row>
-        <sc-stat-card
+      <hu-stats-row>
+        <hu-stat-card
           .valueStr=${formatUptime(uptime)}
           label="Uptime"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${activeSessions}
           label="Active Sessions"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${avgLatency}
           label="Avg Latency (ms)"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .valueStr="${errorRate}%"
           label="Error Rate"
-          style="--sc-stagger-delay: 150ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 150ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${totalTurns}
           label="Total Turns"
-          style="--sc-stagger-delay: 200ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 200ms"
+        ></hu-stat-card>
+      </hu-stats-row>
 
       ${this.error
-        ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <sc-button
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <hu-button
               variant="primary"
               @click=${() => this.load()}
               aria-label="Retry loading metrics"
-              >Retry</sc-button
+              >Retry</hu-button
             >
-          </sc-empty-state>`
+          </hu-empty-state>`
         : nothing}
       ${this.loading
         ? this._renderSkeleton()

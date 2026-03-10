@@ -1,4 +1,4 @@
-#include "seaclaw/core/allocator.h"
+#include "human/core/allocator.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,8 +21,8 @@ static void sys_free(void *ctx, void *ptr, size_t size) {
     free(ptr);
 }
 
-sc_allocator_t sc_system_allocator(void) {
-    return (sc_allocator_t){
+hu_allocator_t hu_system_allocator(void) {
+    return (hu_allocator_t){
         .ctx = NULL,
         .alloc = sys_alloc,
         .realloc = sys_realloc,
@@ -38,8 +38,8 @@ typedef struct track_entry {
     struct track_entry *next;
 } track_entry_t;
 
-struct sc_tracking_allocator {
-    sc_allocator_t backing;
+struct hu_tracking_allocator {
+    hu_allocator_t backing;
     track_entry_t *entries;
     size_t total_allocated;
     size_t total_freed;
@@ -48,7 +48,7 @@ struct sc_tracking_allocator {
 
 static void track_free(void *ctx, void *ptr, size_t size);
 
-static track_entry_t *track_find(sc_tracking_allocator_t *ta, void *ptr) {
+static track_entry_t *track_find(hu_tracking_allocator_t *ta, void *ptr) {
     for (track_entry_t *e = ta->entries; e; e = e->next) {
         if (e->ptr == ptr)
             return e;
@@ -59,7 +59,7 @@ static track_entry_t *track_find(sc_tracking_allocator_t *ta, void *ptr) {
 static void track_free(void *ctx, void *ptr, size_t size);
 
 static void *track_alloc(void *ctx, size_t size) {
-    sc_tracking_allocator_t *ta = (sc_tracking_allocator_t *)ctx;
+    hu_tracking_allocator_t *ta = (hu_tracking_allocator_t *)ctx;
     void *ptr = malloc(size);
     if (!ptr)
         return NULL;
@@ -81,7 +81,7 @@ static void *track_alloc(void *ctx, size_t size) {
 
 static void *track_realloc(void *ctx, void *ptr, size_t old_size, size_t new_size) {
     (void)old_size;
-    sc_tracking_allocator_t *ta = (sc_tracking_allocator_t *)ctx;
+    hu_tracking_allocator_t *ta = (hu_tracking_allocator_t *)ctx;
 
     if (!ptr)
         return track_alloc(ctx, new_size);
@@ -110,7 +110,7 @@ static void *track_realloc(void *ctx, void *ptr, size_t old_size, size_t new_siz
 }
 
 static void track_free(void *ctx, void *ptr, size_t size) {
-    sc_tracking_allocator_t *ta = (sc_tracking_allocator_t *)ctx;
+    hu_tracking_allocator_t *ta = (hu_tracking_allocator_t *)ctx;
     if (!ptr)
         return;
 
@@ -128,13 +128,13 @@ static void track_free(void *ctx, void *ptr, size_t size) {
     (void)size;
 }
 
-sc_tracking_allocator_t *sc_tracking_allocator_create(void) {
-    sc_tracking_allocator_t *ta = (sc_tracking_allocator_t *)calloc(1, sizeof(*ta));
+hu_tracking_allocator_t *hu_tracking_allocator_create(void) {
+    hu_tracking_allocator_t *ta = (hu_tracking_allocator_t *)calloc(1, sizeof(*ta));
     return ta;
 }
 
-sc_allocator_t sc_tracking_allocator_allocator(sc_tracking_allocator_t *ta) {
-    return (sc_allocator_t){
+hu_allocator_t hu_tracking_allocator_allocator(hu_tracking_allocator_t *ta) {
+    return (hu_allocator_t){
         .ctx = ta,
         .alloc = track_alloc,
         .realloc = track_realloc,
@@ -142,19 +142,19 @@ sc_allocator_t sc_tracking_allocator_allocator(sc_tracking_allocator_t *ta) {
     };
 }
 
-size_t sc_tracking_allocator_leaks(const sc_tracking_allocator_t *ta) {
+size_t hu_tracking_allocator_leaks(const hu_tracking_allocator_t *ta) {
     return ta->active_count;
 }
 
-size_t sc_tracking_allocator_total_allocated(const sc_tracking_allocator_t *ta) {
+size_t hu_tracking_allocator_total_allocated(const hu_tracking_allocator_t *ta) {
     return ta->total_allocated;
 }
 
-size_t sc_tracking_allocator_total_freed(const sc_tracking_allocator_t *ta) {
+size_t hu_tracking_allocator_total_freed(const hu_tracking_allocator_t *ta) {
     return ta->total_freed;
 }
 
-void sc_tracking_allocator_destroy(sc_tracking_allocator_t *ta) {
+void hu_tracking_allocator_destroy(hu_tracking_allocator_t *ta) {
     track_entry_t *e = ta->entries;
     while (e) {
         track_entry_t *next = e->next;

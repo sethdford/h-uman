@@ -9,7 +9,7 @@ const os = require("os");
 const { execSync } = require("child_process");
 
 const VERSION = require("./package.json").version;
-const REPO = "sethdford/seaclaw";
+const REPO = "sethdford/human";
 
 function getPlatformKey() {
   const platform = os.platform();
@@ -26,7 +26,7 @@ function download(url) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith("https") ? https : http;
     client
-      .get(url, { headers: { "User-Agent": "seaclaw-npm" } }, (res) => {
+      .get(url, { headers: { "User-Agent": "human-npm" } }, (res) => {
         if (
           res.statusCode >= 300 &&
           res.statusCode < 400 &&
@@ -49,17 +49,17 @@ function download(url) {
 async function main() {
   const key = getPlatformKey();
   const binDir = path.join(__dirname, "bin");
-  const binPath = path.join(binDir, "seaclaw");
+  const binPath = path.join(binDir, "human");
 
   if (fs.existsSync(binPath)) {
-    console.log("seaclaw binary already exists, skipping download.");
+    console.log("human binary already exists, skipping download.");
     return;
   }
 
   const tag = `v${VERSION}`;
-  const url = `https://github.com/${REPO}/releases/download/${tag}/seaclaw-${key}.bin`;
+  const url = `https://github.com/${REPO}/releases/download/${tag}/human-${key}.bin`;
 
-  console.log(`Downloading seaclaw ${tag} for ${key}...`);
+  console.log(`Downloading human ${tag} for ${key}...`);
 
   try {
     const data = await download(url);
@@ -67,10 +67,10 @@ async function main() {
     fs.writeFileSync(binPath, data);
     fs.chmodSync(binPath, 0o755);
     console.log(
-      `Installed seaclaw to ${binPath} (${(data.length / 1024).toFixed(0)} KB)`,
+      `Installed human to ${binPath} (${(data.length / 1024).toFixed(0)} KB)`,
     );
   } catch (err) {
-    console.error(`Failed to download seaclaw: ${err.message}`);
+    console.error(`Failed to download human: ${err.message}`);
     console.error(`You can build from source: https://github.com/${REPO}`);
     process.exit(1);
   }

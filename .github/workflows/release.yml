@@ -27,13 +27,13 @@ jobs:
           enable-lto: "true"
           enable-curl: "true"
           enable-all-channels: "true"
-          target: seaclaw
+          target: human
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: seaclaw-${{ matrix.target }}
-          path: build/seaclaw
+          name: human-${{ matrix.target }}
+          path: build/human
 
   release:
     needs: build
@@ -54,20 +54,20 @@ jobs:
 
       - name: Rename binaries
         run: |
-          mv seaclaw-linux-x86_64/seaclaw seaclaw-linux-x86_64.bin
-          mv seaclaw-macos-aarch64/seaclaw seaclaw-macos-aarch64.bin
-          chmod +x seaclaw-linux-x86_64.bin seaclaw-macos-aarch64.bin
+          mv human-linux-x86_64/human human-linux-x86_64.bin
+          mv human-macos-aarch64/human human-macos-aarch64.bin
+          chmod +x human-linux-x86_64.bin human-macos-aarch64.bin
 
       - name: Package completions and man pages
-        run: tar czf seaclaw-extras.tar.gz completions/ docs/man/ install.sh LICENSE
+        run: tar czf human-extras.tar.gz completions/ docs/man/ install.sh LICENSE
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            seaclaw-linux-x86_64.bin
-            seaclaw-macos-aarch64.bin
-            seaclaw-extras.tar.gz
+            human-linux-x86_64.bin
+            human-macos-aarch64.bin
+            human-extras.tar.gz
             install.sh
           generate_release_notes: true
 

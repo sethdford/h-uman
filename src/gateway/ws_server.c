@@ -1,12 +1,12 @@
-#include "seaclaw/gateway/ws_server.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/websocket/websocket.h"
+#include "human/gateway/ws_server.h"
+#include "human/core/string.h"
+#include "human/websocket/websocket.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -200,8 +200,8 @@ static bool extract_header(const char *req, size_t req_len, const char *name, ch
 
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
-void sc_ws_server_init(sc_ws_server_t *srv, sc_allocator_t *alloc,
-                       sc_ws_server_on_message_fn on_message, sc_ws_server_on_close_fn on_close,
+void hu_ws_server_init(hu_ws_server_t *srv, hu_allocator_t *alloc,
+                       hu_ws_server_on_message_fn on_message, hu_ws_server_on_close_fn on_close,
                        void *cb_ctx) {
     if (!srv)
         return;
@@ -211,20 +211,20 @@ void sc_ws_server_init(sc_ws_server_t *srv, sc_allocator_t *alloc,
     srv->on_close = on_close;
     srv->cb_ctx = cb_ctx;
     srv->next_id = 1;
-    for (int i = 0; i < SC_WS_SERVER_MAX_CONNS; i++)
+    for (int i = 0; i < HU_WS_SERVER_MAX_CONNS; i++)
         srv->conns[i].fd = -1;
 }
 
-void sc_ws_server_deinit(sc_ws_server_t *srv) {
+void hu_ws_server_deinit(hu_ws_server_t *srv) {
     if (!srv)
         return;
-    for (int i = 0; i < SC_WS_SERVER_MAX_CONNS; i++) {
+    for (int i = 0; i < HU_WS_SERVER_MAX_CONNS; i++) {
         if (srv->conns[i].active)
-            sc_ws_server_close_conn(srv, &srv->conns[i]);
+            hu_ws_server_close_conn(srv, &srv->conns[i]);
     }
 }
 
-bool sc_ws_server_is_upgrade(const char *req, size_t req_len) {
+bool hu_ws_server_is_upgrade(const char *req, size_t req_len) {
     if (!req || req_len < 20)
         return false;
     char upgrade[32] = {0};
@@ -254,25 +254,25 @@ bool sc_ws_server_is_upgrade(const char *req, size_t req_len) {
     return has_ws && has_upgrade;
 }
 
-sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, size_t req_len,
-                                sc_ws_conn_t **out) {
+hu_error_t hu_ws_server_upgrade(hu_ws_server_t *srv, int fd, const char *req, size_t req_len,
+                                hu_ws_conn_t **out) {
     if (!srv || fd < 0 || !req || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
-#ifndef SC_GATEWAY_POSIX
+#ifndef HU_GATEWAY_POSIX
     (void)req_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_ws_conn_t *slot = NULL;
-    for (int i = 0; i < SC_WS_SERVER_MAX_CONNS; i++) {
+    hu_ws_conn_t *slot = NULL;
+    for (int i = 0; i < HU_WS_SERVER_MAX_CONNS; i++) {
         if (!srv->conns[i].active) {
             slot = &srv->conns[i];
             break;
         }
     }
     if (!slot)
-        return SC_ERR_ALREADY_EXISTS;
+        return HU_ERR_ALREADY_EXISTS;
 
     /* Authenticate WebSocket upgrade if auth_token is configured */
     if (srv->auth_token && srv->auth_token[0]) {
@@ -280,12 +280,12 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
         if (!extract_header(req, req_len, "Authorization", auth_hdr, sizeof(auth_hdr))) {
             const char *r401 = "HTTP/1.1 401 Unauthorized\r\n\r\n";
             send(fd, r401, strlen(r401), 0);
-            return SC_ERR_PERMISSION_DENIED;
+            return HU_ERR_PERMISSION_DENIED;
         }
         if (strncmp(auth_hdr, "Bearer ", 7) != 0) {
             const char *r401 = "HTTP/1.1 401 Unauthorized\r\n\r\n";
             send(fd, r401, strlen(r401), 0);
-            return SC_ERR_PERMISSION_DENIED;
+            return HU_ERR_PERMISSION_DENIED;
         }
         const char *tok = auth_hdr + 7;
         size_t tok_len = strlen(tok);
@@ -297,7 +297,7 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
         if (d != 0) {
             const char *r401 = "HTTP/1.1 401 Unauthorized\r\n\r\n";
             send(fd, r401, strlen(r401), 0);
-            return SC_ERR_PERMISSION_DENIED;
+            return HU_ERR_PERMISSION_DENIED;
         }
     }
 
@@ -308,17 +308,17 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
             !strstr(origin, "://[::1]")) {
             const char *r403 = "HTTP/1.1 403 Forbidden\r\n\r\n";
             send(fd, r403, strlen(r403), 0);
-            return SC_ERR_PERMISSION_DENIED;
+            return HU_ERR_PERMISSION_DENIED;
         }
     }
 
     char ws_key[128] = {0};
     if (!extract_header(req, req_len, "Sec-WebSocket-Key", ws_key, sizeof(ws_key)))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char accept[64] = {0};
     if (!compute_accept_key(ws_key, accept, sizeof(accept)))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char resp[512];
     int n = snprintf(resp, sizeof(resp),
@@ -333,7 +333,7 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
     while (sent < (size_t)n) {
         ssize_t w = send(fd, resp + sent, (size_t)n - sent, 0);
         if (w <= 0)
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         sent += (size_t)w;
     }
 
@@ -343,7 +343,7 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
     slot->authenticated = false;
     slot->id = srv->next_id++;
     slot->recv_buf = slot->inline_buf;
-    slot->recv_cap = SC_WS_SERVER_RECV_BUF;
+    slot->recv_cap = HU_WS_SERVER_RECV_BUF;
     slot->recv_len = 0;
     srv->conn_count++;
 
@@ -360,17 +360,17 @@ sc_error_t sc_ws_server_upgrade(sc_ws_server_t *srv, int fd, const char *req, si
         (void)fprintf(stderr, "[ws] failed to set SO_SNDTIMEO: %s\n", strerror(errno));
 
     *out = slot;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
 /* Build an unmasked server→client text frame */
 static size_t build_server_frame(char *buf, size_t buf_size, const char *payload,
                                  size_t payload_len) {
-    if (buf_size < 2 || payload_len > SC_WS_SERVER_MAX_MSG)
+    if (buf_size < 2 || payload_len > HU_WS_SERVER_MAX_MSG)
         return 0;
     size_t pos = 0;
-    buf[pos++] = (char)(0x80 | SC_WS_OP_TEXT);
+    buf[pos++] = (char)(0x80 | HU_WS_OP_TEXT);
     if (payload_len <= 125) {
         buf[pos++] = (char)(payload_len & 0x7F);
     } else if (payload_len <= 65535) {
@@ -388,21 +388,21 @@ static size_t build_server_frame(char *buf, size_t buf_size, const char *payload
     return pos + payload_len;
 }
 
-sc_error_t sc_ws_server_send(sc_ws_conn_t *conn, const char *data, size_t data_len) {
+hu_error_t hu_ws_server_send(hu_ws_conn_t *conn, const char *data, size_t data_len) {
     if (!conn || !conn->active || conn->fd < 0 || !data)
-        return SC_ERR_INVALID_ARGUMENT;
-#ifndef SC_GATEWAY_POSIX
+        return HU_ERR_INVALID_ARGUMENT;
+#ifndef HU_GATEWAY_POSIX
     (void)data_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
     size_t frame_cap = data_len + 14;
     char *buf = (char *)malloc(frame_cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t frame_len = build_server_frame(buf, frame_cap, data, data_len);
     if (frame_len == 0) {
         free(buf);
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     size_t sent = 0;
@@ -410,34 +410,34 @@ sc_error_t sc_ws_server_send(sc_ws_conn_t *conn, const char *data, size_t data_l
         ssize_t w = send(conn->fd, buf + sent, frame_len - sent, MSG_NOSIGNAL);
         if (w <= 0) {
             free(buf);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
         sent += (size_t)w;
     }
     free(buf);
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-void sc_ws_server_broadcast(sc_ws_server_t *srv, const char *data, size_t data_len) {
+void hu_ws_server_broadcast(hu_ws_server_t *srv, const char *data, size_t data_len) {
     if (!srv || !data)
         return;
-    for (int i = 0; i < SC_WS_SERVER_MAX_CONNS; i++) {
+    for (int i = 0; i < HU_WS_SERVER_MAX_CONNS; i++) {
         if (srv->conns[i].active) {
-            sc_error_t err = sc_ws_server_send(&srv->conns[i], data, data_len);
-            if (err != SC_OK)
-                sc_ws_server_close_conn(srv, &srv->conns[i]);
+            hu_error_t err = hu_ws_server_send(&srv->conns[i], data, data_len);
+            if (err != HU_OK)
+                hu_ws_server_close_conn(srv, &srv->conns[i]);
         }
     }
 }
 
-void sc_ws_server_close_conn(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
+void hu_ws_server_close_conn(hu_ws_server_t *srv, hu_ws_conn_t *conn) {
     if (!conn || !conn->active)
         return;
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     /* Send close frame */
     char close_frame[4];
-    close_frame[0] = (char)(0x80 | SC_WS_OP_CLOSE);
+    close_frame[0] = (char)(0x80 | HU_WS_OP_CLOSE);
     close_frame[1] = 0;
     ssize_t n = send(conn->fd, close_frame, 2, MSG_NOSIGNAL);
     if (n < 0)
@@ -454,31 +454,31 @@ void sc_ws_server_close_conn(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
     conn->active = false;
     conn->authenticated = false;
     conn->recv_buf = conn->inline_buf;
-    conn->recv_cap = SC_WS_SERVER_RECV_BUF;
+    conn->recv_cap = HU_WS_SERVER_RECV_BUF;
     conn->recv_len = 0;
     if (srv && srv->conn_count > 0)
         srv->conn_count--;
 }
 
-sc_error_t sc_ws_server_read_and_process(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
+hu_error_t hu_ws_server_read_and_process(hu_ws_server_t *srv, hu_ws_conn_t *conn) {
     if (!srv || !conn || !conn->active)
-        return SC_ERR_INVALID_ARGUMENT;
-#ifndef SC_GATEWAY_POSIX
-    return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_INVALID_ARGUMENT;
+#ifndef HU_GATEWAY_POSIX
+    return HU_ERR_NOT_SUPPORTED;
 #else
     size_t space = conn->recv_cap - conn->recv_len;
     if (space == 0) {
-        if (conn->recv_cap >= SC_WS_SERVER_RECV_MAX) {
-            sc_ws_server_close_conn(srv, conn);
-            return SC_ERR_IO;
+        if (conn->recv_cap >= HU_WS_SERVER_RECV_MAX) {
+            hu_ws_server_close_conn(srv, conn);
+            return HU_ERR_IO;
         }
         size_t new_cap = conn->recv_cap * 2;
-        if (new_cap > SC_WS_SERVER_RECV_MAX)
-            new_cap = SC_WS_SERVER_RECV_MAX;
+        if (new_cap > HU_WS_SERVER_RECV_MAX)
+            new_cap = HU_WS_SERVER_RECV_MAX;
         char *new_buf = (char *)malloc(new_cap);
         if (!new_buf) {
-            sc_ws_server_close_conn(srv, conn);
-            return SC_ERR_IO;
+            hu_ws_server_close_conn(srv, conn);
+            return HU_ERR_IO;
         }
         memcpy(new_buf, conn->recv_buf, conn->recv_len);
         if (conn->recv_buf != conn->inline_buf)
@@ -489,21 +489,21 @@ sc_error_t sc_ws_server_read_and_process(sc_ws_server_t *srv, sc_ws_conn_t *conn
     }
     ssize_t n = recv(conn->fd, conn->recv_buf + conn->recv_len, space, 0);
     if (n <= 0) {
-        sc_ws_server_close_conn(srv, conn);
-        return SC_ERR_IO;
+        hu_ws_server_close_conn(srv, conn);
+        return HU_ERR_IO;
     }
     conn->recv_len += (size_t)n;
-    return sc_ws_server_process(srv, conn);
+    return hu_ws_server_process(srv, conn);
 #endif
 }
 
-sc_error_t sc_ws_server_process(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
+hu_error_t hu_ws_server_process(hu_ws_server_t *srv, hu_ws_conn_t *conn) {
     if (!srv || !conn || !conn->active)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     while (conn->recv_len >= 2) {
-        sc_ws_parsed_header_t hdr = {0};
-        if (sc_ws_parse_header(conn->recv_buf, conn->recv_len, &hdr) != 0)
+        hu_ws_parsed_header_t hdr = {0};
+        if (hu_ws_parse_header(conn->recv_buf, conn->recv_len, &hdr) != 0)
             break;
 
         size_t total = hdr.header_bytes + (size_t)hdr.payload_len;
@@ -516,23 +516,23 @@ sc_error_t sc_ws_server_process(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
         if (hdr.masked && plen > 0) {
             unsigned char mask[4];
             memcpy(mask, conn->recv_buf + hdr.header_bytes - 4, 4);
-            sc_ws_apply_mask(payload, plen, mask);
+            hu_ws_apply_mask(payload, plen, mask);
         }
 
         switch (hdr.opcode) {
-        case SC_WS_OP_TEXT:
-        case SC_WS_OP_BINARY:
+        case HU_WS_OP_TEXT:
+        case HU_WS_OP_BINARY:
             if (srv->on_message)
                 srv->on_message(conn, payload, plen, srv->cb_ctx);
             break;
-        case SC_WS_OP_PING: {
-#ifdef SC_GATEWAY_POSIX
+        case HU_WS_OP_PING: {
+#ifdef HU_GATEWAY_POSIX
             /* RFC 6455 s5.5: control frame payload max is 125 bytes.
                Always reply with PONG echoing the payload. */
             if (plen > 125)
                 plen = 125;
             char pong[2 + 125];
-            pong[0] = (char)(0x80 | SC_WS_OP_PONG);
+            pong[0] = (char)(0x80 | HU_WS_OP_PONG);
             pong[1] = (char)(plen & 0x7F);
             if (plen > 0)
                 memcpy(pong + 2, payload, plen);
@@ -540,15 +540,15 @@ sc_error_t sc_ws_server_process(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
             if (wn < 0 || (size_t)wn < 2 + plen) {
                 (void)fprintf(stderr, "[ws] pong send failed: %s\n",
                               wn < 0 ? strerror(errno) : "partial write");
-                sc_ws_server_close_conn(srv, conn);
-                return SC_ERR_IO;
+                hu_ws_server_close_conn(srv, conn);
+                return HU_ERR_IO;
             }
 #endif
             break;
         }
-        case SC_WS_OP_CLOSE:
-            sc_ws_server_close_conn(srv, conn);
-            return SC_ERR_IO;
+        case HU_WS_OP_CLOSE:
+            hu_ws_server_close_conn(srv, conn);
+            return HU_ERR_IO;
         default:
             break;
         }
@@ -558,5 +558,5 @@ sc_error_t sc_ws_server_process(sc_ws_server_t *srv, sc_ws_conn_t *conn) {
             memmove(conn->recv_buf, conn->recv_buf + total, remaining);
         conn->recv_len = remaining;
     }
-    return SC_OK;
+    return HU_OK;
 }

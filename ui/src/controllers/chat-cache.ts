@@ -1,6 +1,6 @@
 import type { ChatItem } from "./chat-controller.js";
 
-const KEY_PREFIX = "sc-chat-";
+const KEY_PREFIX = "hu-chat-";
 
 function storageKey(sessionKey: string): string {
   return `${KEY_PREFIX}${sessionKey}`;

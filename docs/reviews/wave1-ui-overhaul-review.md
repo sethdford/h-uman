@@ -4,7 +4,7 @@ title: Wave 1 UI Overhaul Code Review
 
 # Wave 1 UI Overhaul — Critical Code Review
 
-**Scope**: `ui/src/lib/markdown.ts`, `ui/src/components/sc-code-block.ts`, `ui/src/components/sc-message-stream.ts`, `ui/src/components/sc-latex.ts`, `ui/src/views/chat-view.ts`
+**Scope**: `ui/src/lib/markdown.ts`, `ui/src/components/hu-code-block.ts`, `ui/src/components/hu-message-stream.ts`, `ui/src/components/hu-latex.ts`, `ui/src/views/chat-view.ts`
 
 **Review date**: 2026-03-07
 
@@ -55,15 +55,15 @@ Then use `isSafeHref(link.href) ? link.href : "#"` and `isSafeImgSrc(img.href) ?
 
 ### 2. `unsafeHTML` without DOMPurify — Shiki and KaTeX output
 
-**Files**: `ui/src/components/sc-code-block.ts` (line 200), `ui/src/components/sc-latex.ts` (line 75)
+**Files**: `ui/src/components/hu-code-block.ts` (line 200), `ui/src/components/hu-latex.ts` (line 75)
 
 **Issue**: Review criteria require "No use of `unsafeHTML` without prior DOMPurify sanitization." Shiki and KaTeX output are trusted library output but should still be sanitized for defense in depth and policy compliance.
 
 **Fix**:
 
-- **sc-code-block.ts**: `html`${unsafeHTML(DOMPurify.sanitize(this.\_highlighted, { ALLOWED_TAGS: ["pre", "code", "span"], ALLOWED_ATTR: ["class", "style"] }))}`  
+- **hu-code-block.ts**: `html`${unsafeHTML(DOMPurify.sanitize(this.\_highlighted, { ALLOWED_TAGS: ["pre", "code", "span"], ALLOWED_ATTR: ["class", "style"] }))}`  
   (Adjust ALLOWED_TAGS/ALLOWED_ATTR to match Shiki’s output structure.)
-- **sc-latex.ts**: `html`<span class="katex">${unsafeHTML(DOMPurify.sanitize(this.\_rendered, { /_ KaTeX-safe config _/ }))}</span>`
+- **hu-latex.ts**: `html`<span class="katex">${unsafeHTML(DOMPurify.sanitize(this.\_rendered, { /_ KaTeX-safe config _/ }))}</span>`
 
 ---
 
@@ -79,9 +79,9 @@ Then use `isSafeHref(link.href) ? link.href : "#"` and `isSafeImgSrc(img.href) ?
 
 ## HIGH (Should Fix)
 
-### 4. sc-latex: `display` changes not triggering re-render
+### 4. hu-latex: `display` changes not triggering re-render
 
-**File**: `ui/src/components/sc-latex.ts` (lines 51–71)
+**File**: `ui/src/components/hu-latex.ts` (lines 51–71)
 
 **Issue**: `updated()` only checks `changed.has("latex")`. If `display` changes from `false` to `true` (or vice versa), the component does not re-render with the correct `displayMode`.
 
@@ -93,9 +93,9 @@ if ((changed.has("latex") || changed.has("display")) && this.latex && this._load
 
 ---
 
-### 5. sc-latex: Initial load when `latex` is set after mount
+### 5. hu-latex: Initial load when `latex` is set after mount
 
-**File**: `ui/src/components/sc-latex.ts` (lines 27–50, 51–71)
+**File**: `ui/src/components/hu-latex.ts` (lines 27–50, 51–71)
 
 **Issue**: If `latex` is empty at mount and set later via a property update, `connectedCallback` does nothing and `updated()` only runs when `_loaded` is true. The first load never happens.
 
@@ -117,9 +117,9 @@ override updated(changed: Map<string, unknown>): void {
 
 ---
 
-### 6. sc-code-block: `setTimeout` not cleared on disconnect — potential leak
+### 6. hu-code-block: `setTimeout` not cleared on disconnect — potential leak
 
-**File**: `ui/src/components/sc-code-block.ts` (lines 159–172)
+**File**: `ui/src/components/hu-code-block.ts` (lines 159–172)
 
 **Issue**: The 2s timeout for resetting `_copied` is not stored or cleared. If the component is removed before it fires, `requestUpdate()` may run on a disconnected element.
 
@@ -161,11 +161,11 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 ### 8. Hardcoded duration — should use design token
 
-**File**: `ui/src/components/sc-code-block.ts` (lines 159–172)
+**File**: `ui/src/components/hu-code-block.ts` (lines 159–172)
 
-**Issue**: `setTimeout(..., 2000)` uses a hardcoded 2000 ms. The animation rule says to use `var(--sc-duration-*)` tokens. `--sc-duration-slow` is 350 ms; there is no 2s token, but `--sc-duration-slowest` (700 ms) or a custom token would be preferable to a raw number.
+**Issue**: `setTimeout(..., 2000)` uses a hardcoded 2000 ms. The animation rule says to use `var(--hu-duration-*)` tokens. `--hu-duration-slow` is 350 ms; there is no 2s token, but `--hu-duration-slowest` (700 ms) or a custom token would be preferable to a raw number.
 
-**Fix**: Use `parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sc-duration-slowest").trim()) || 700` or add a `--sc-toast-duration`-style token (e.g. 2000 ms) and use that. Alternatively, use `ScToast.show`’s `duration` parameter consistently if it already uses a token.
+**Fix**: Use `parseInt(getComputedStyle(document.documentElement).getPropertyValue("--hu-duration-slowest").trim()) || 700` or add a `--hu-toast-duration`-style token (e.g. 2000 ms) and use that. Alternatively, use `ScToast.show`’s `duration` parameter consistently if it already uses a token.
 
 ---
 
@@ -177,13 +177,13 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 **Issue**: Design system requires no raw pixel values. Examples: `width: 8px; height: 8px` (status-dot), `width: 14px; height: 14px` (icons), `width: 6px; height: 6px` (typing dots).
 
-**Fix**: Replace with tokens where they exist, e.g. `var(--sc-space-xs)` for 8px. For icon sizes, use `var(--sc-icon-sm)` or similar if available, or add tokens.
+**Fix**: Replace with tokens where they exist, e.g. `var(--hu-space-xs)` for 8px. For icon sizes, use `var(--hu-icon-sm)` or similar if available, or add tokens.
 
 ---
 
-### 10. sc-code-block: `@property` for private state
+### 10. hu-code-block: `@property` for private state
 
-**File**: `ui/src/components/sc-code-block.ts` (lines 37–39)
+**File**: `ui/src/components/hu-code-block.ts` (lines 37–39)
 
 **Issue**: `_highlighted`, `_copied`, `_shikiReady` are internal state but use `@state()`. That is correct. No change needed here; this is informational.
 
@@ -199,11 +199,11 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 ## LOW (Nitpick)
 
-### 12. sc-message-stream: `line-height: 1.5` in chat-view
+### 12. hu-message-stream: `line-height: 1.5` in chat-view
 
 **File**: `ui/src/views/chat-view.ts` (line 92)
 
-**Issue**: `.message` uses `line-height: 1.5` instead of a typography token. Prefer `var(--sc-leading-relaxed)` or similar if available.
+**Issue**: `.message` uses `line-height: 1.5` instead of a typography token. Prefer `var(--hu-leading-relaxed)` or similar if available.
 
 ---
 
@@ -211,7 +211,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 **File**: `ui/src/views/chat-view.ts` (line 577)
 
-**Issue**: `style="display:flex;align-items:center;gap:var(--sc-space-sm);flex-wrap:wrap;"` could be moved to a class in `static styles` for consistency.
+**Issue**: `style="display:flex;align-items:center;gap:var(--hu-space-sm);flex-wrap:wrap;"` could be moved to a class in `static styles` for consistency.
 
 ---
 
@@ -220,20 +220,20 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 | Criterion                                              | Status                                           |
 | ------------------------------------------------------ | ------------------------------------------------ |
 | markdown.ts uses `marked.lexer()` (AST)                | Yes (line 248)                                   |
-| Code blocks delegate to `<sc-code-block>`              | Yes (lines 145–150)                              |
+| Code blocks delegate to `<hu-code-block>`              | Yes (lines 145–150)                              |
 | Shiki lazy-loaded                                      | Yes (dynamic `import("shiki")`)                  |
 | KaTeX lazy-loaded                                      | Yes (dynamic `import("katex")`)                  |
-| sc-message-stream API (.content, .streaming, .role)    | Unchanged                                        |
+| hu-message-stream API (.content, .streaming, .role)    | Unchanged                                        |
 | chat-view message handling logic                       | Unchanged                                        |
 | Links have `rel="noopener noreferrer"` (hand-built)    | Yes (lines 94–95)                                |
 | Links have `target="_blank"` (hand-built)              | Yes (line 94)                                    |
 | DOMPurify used for HTML tokens                         | Yes (lines 116–121, 195–228)                     |
-| CSS uses `--sc-*` tokens (in reviewed files)           | Mostly; some raw px in chat-view                 |
+| CSS uses `--hu-*` tokens (in reviewed files)           | Mostly; some raw px in chat-view                 |
 | No emoji in UI                                         | Yes                                              |
-| Code blocks have `role="region"` and `aria-label`      | Yes (sc-code-block lines 184–185)                |
+| Code blocks have `role="region"` and `aria-label`      | Yes (hu-code-block lines 184–185)                |
 | Copy button has `aria-label`                           | Yes (line 192)                                   |
 | Message list has `role="log"` and `aria-live="polite"` | Yes (chat-view lines 516–518)                    |
-| Focus-visible with accent outline                      | Yes (sc-code-block line 91)                      |
+| Focus-visible with accent outline                      | Yes (hu-code-block line 91)                      |
 | Shiki highlighter                                      | Uses shorthand `codeToHtml` (internal singleton) |
 
 ---
@@ -241,7 +241,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 ## Summary
 
 - **3 CRITICAL** issues (XSS, unsafeHTML, reduced-motion bug)
-- **5 HIGH** issues (sc-latex logic, timeout cleanup, DOMPurify hooks, hardcoded duration)
+- **5 HIGH** issues (hu-latex logic, timeout cleanup, DOMPurify hooks, hardcoded duration)
 - **3 MEDIUM** issues (design tokens, minor cleanup)
 - **2 LOW** nits
 

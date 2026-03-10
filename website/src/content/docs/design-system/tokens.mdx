@@ -1,11 +1,11 @@
 ---
 title: Design Tokens
-description: Complete reference for SeaClaw's W3C-format design tokens — colors, spacing, typography, motion, glass, and elevation.
+description: Complete reference for Human's W3C-format design tokens — colors, spacing, typography, motion, glass, and elevation.
 ---
 
 import { Code } from "@astrojs/starlight/components";
 
-SeaClaw's design system is built on **W3C Design Tokens Community Group (DTCG)** format JSON files that compile to CSS custom properties, Swift constants, Kotlin objects, and C macros.
+Human's design system is built on **W3C Design Tokens Community Group (DTCG)** format JSON files that compile to CSS custom properties, Swift constants, Kotlin objects, and C macros.
 
 ## Token Architecture
 
@@ -28,21 +28,21 @@ design-tokens/
 
 | Token                   | CSS Variable            | Usage                           |
 | ----------------------- | ----------------------- | ------------------------------- |
-| `dark.bg`               | `--sc-bg`               | Page background                 |
-| `dark.bg-surface`       | `--sc-bg-surface`       | Card/panel surfaces             |
-| `dark.bg-elevated`      | `--sc-bg-elevated`      | Modals, popovers                |
-| `dark.text`             | `--sc-text`             | Primary body text               |
-| `dark.text-muted`       | `--sc-text-muted`       | Secondary text                  |
-| `dark.text-faint`       | `--sc-text-faint`       | Placeholder, hint text          |
-| `dark.accent`           | `--sc-accent`           | Primary accent (Fidelity green) |
-| `dark.accent-secondary` | `--sc-accent-secondary` | Secondary accent (amber)        |
-| `dark.accent-tertiary`  | `--sc-accent-tertiary`  | Tertiary accent (indigo)        |
-| `dark.success`          | `--sc-success`          | Success states                  |
-| `dark.warning`          | `--sc-warning`          | Warning states                  |
-| `dark.error`            | `--sc-error`            | Error states                    |
-| `dark.info`             | `--sc-info`             | Informational states            |
-| `dark.border`           | `--sc-border`           | Default borders                 |
-| `dark.border-subtle`    | `--sc-border-subtle`    | Subtle dividers                 |
+| `dark.bg`               | `--hu-bg`               | Page background                 |
+| `dark.bg-surface`       | `--hu-bg-surface`       | Card/panel surfaces             |
+| `dark.bg-elevated`      | `--hu-bg-elevated`      | Modals, popovers                |
+| `dark.text`             | `--hu-text`             | Primary body text               |
+| `dark.text-muted`       | `--hu-text-muted`       | Secondary text                  |
+| `dark.text-faint`       | `--hu-text-faint`       | Placeholder, hint text          |
+| `dark.accent`           | `--hu-accent`           | Primary accent (Fidelity green) |
+| `dark.accent-secondary` | `--hu-accent-secondary` | Secondary accent (amber)        |
+| `dark.accent-tertiary`  | `--hu-accent-tertiary`  | Tertiary accent (indigo)        |
+| `dark.success`          | `--hu-success`          | Success states                  |
+| `dark.warning`          | `--hu-warning`          | Warning states                  |
+| `dark.error`            | `--hu-error`            | Error states                    |
+| `dark.info`             | `--hu-info`             | Informational states            |
+| `dark.border`           | `--hu-border`           | Default borders                 |
+| `dark.border-subtle`    | `--hu-border-subtle`    | Subtle dividers                 |
 
 ### Light Theme
 
@@ -56,25 +56,25 @@ High contrast tokens maximize luminance ratios for users with low vision. All te
 
 | Token       | Value            | CSS Variable     |
 | ----------- | ---------------- | ---------------- |
-| `space.2xs` | `0.25rem` (4px)  | `--sc-space-2xs` |
-| `space.xs`  | `0.5rem` (8px)   | `--sc-space-xs`  |
-| `space.sm`  | `0.75rem` (12px) | `--sc-space-sm`  |
-| `space.md`  | `1rem` (16px)    | `--sc-space-md`  |
-| `space.lg`  | `1.5rem` (24px)  | `--sc-space-lg`  |
-| `space.xl`  | `2rem` (32px)    | `--sc-space-xl`  |
-| `space.2xl` | `3rem` (48px)    | `--sc-space-2xl` |
-| `space.3xl` | `4rem` (64px)    | `--sc-space-3xl` |
+| `space.2xs` | `0.25rem` (4px)  | `--hu-space-2xs` |
+| `space.xs`  | `0.5rem` (8px)   | `--hu-space-xs`  |
+| `space.sm`  | `0.75rem` (12px) | `--hu-space-sm`  |
+| `space.md`  | `1rem` (16px)    | `--hu-space-md`  |
+| `space.lg`  | `1.5rem` (24px)  | `--hu-space-lg`  |
+| `space.xl`  | `2rem` (32px)    | `--hu-space-xl`  |
+| `space.2xl` | `3rem` (48px)    | `--hu-space-2xl` |
+| `space.3xl` | `4rem` (64px)    | `--hu-space-3xl` |
 
 ## Radius Tokens
 
 | Token         | Value    | CSS Variable       |
 | ------------- | -------- | ------------------ |
-| `radius.xs`   | `4px`    | `--sc-radius-xs`   |
-| `radius.sm`   | `6px`    | `--sc-radius-sm`   |
-| `radius.md`   | `8px`    | `--sc-radius-md`   |
-| `radius.lg`   | `12px`   | `--sc-radius-lg`   |
-| `radius.xl`   | `16px`   | `--sc-radius-xl`   |
-| `radius.full` | `9999px` | `--sc-radius-full` |
+| `radius.xs`   | `4px`    | `--hu-radius-xs`   |
+| `radius.sm`   | `6px`    | `--hu-radius-sm`   |
+| `radius.md`   | `8px`    | `--hu-radius-md`   |
+| `radius.lg`   | `12px`   | `--hu-radius-lg`   |
+| `radius.xl`   | `16px`   | `--hu-radius-xl`   |
+| `radius.full` | `9999px` | `--hu-radius-full` |
 
 ## Elevation Tokens
 
@@ -106,5 +106,5 @@ Outputs:
 - `website/src/styles/_tokens.css` — Website CSS custom properties
 - `apps/shared/.../DesignTokens.swift` — Swift Color/CGFloat constants
 - `apps/android/.../DesignTokens.kt` — Kotlin Color/Dp constants
-- `include/seaclaw/design_tokens.h` — C preprocessor macros (256-color + truecolor)
+- `include/human/design_tokens.h` — C preprocessor macros (256-color + truecolor)
 - `docs/design-tokens-reference.json` — Machine-readable reference for docs

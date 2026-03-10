@@ -1,10 +1,10 @@
-#include "seaclaw/tools/schedule.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/cron.h"
-#include "seaclaw/tool.h"
+#include "human/tools/schedule.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/cron.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,232 +18,232 @@
     "},\"required\":[\"action\"]}"
 
 typedef struct {
-    sc_cron_scheduler_t *sched;
-} sc_schedule_tool_ctx_t;
+    hu_cron_scheduler_t *sched;
+} hu_schedule_tool_ctx_t;
 
-static sc_error_t schedule_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                   sc_tool_result_t *out) {
-    sc_schedule_tool_ctx_t *tctx = (sc_schedule_tool_ctx_t *)ctx;
+static hu_error_t schedule_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                   hu_tool_result_t *out) {
+    hu_schedule_tool_ctx_t *tctx = (hu_schedule_tool_ctx_t *)ctx;
     (void)tctx;
     if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action || action[0] == '\0') {
-        *out = sc_tool_result_fail("Missing 'action' parameter", 27);
-        return SC_OK;
+        *out = hu_tool_result_fail("Missing 'action' parameter", 27);
+        return HU_OK;
     }
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (strcmp(action, "list") == 0) {
-        char *msg = sc_strndup(alloc, "No scheduled tasks.", 19);
+        char *msg = hu_strndup(alloc, "No scheduled tasks.", 19);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 19);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 19);
+        return HU_OK;
     }
     if (strcmp(action, "create") == 0) {
-        const char *expression = sc_json_get_string(args, "expression");
-        const char *command = sc_json_get_string(args, "command");
+        const char *expression = hu_json_get_string(args, "expression");
+        const char *command = hu_json_get_string(args, "command");
         const char *expr = expression && expression[0] ? expression : "* * * * *";
         const char *cmd = command && command[0] ? command : "";
         size_t need = 64 + strlen(expr) + strlen(cmd);
         char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         int n = snprintf(msg, need + 1, "{\"id\":\"1\",\"expression\":\"%s\",\"command\":\"%s\"}",
                          expr, cmd);
         size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
         msg[len] = '\0';
-        *out = sc_tool_result_ok_owned(msg, len);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, len);
+        return HU_OK;
     }
     if (strcmp(action, "get") == 0) {
-        char *msg = sc_strndup(alloc, "{\"id\":\"1\",\"status\":\"pending\"}", 29);
+        char *msg = hu_strndup(alloc, "{\"id\":\"1\",\"status\":\"pending\"}", 29);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 29);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 29);
+        return HU_OK;
     }
     if (strcmp(action, "cancel") == 0 || strcmp(action, "pause") == 0 ||
         strcmp(action, "resume") == 0) {
-        char *msg = sc_strndup(alloc, "{\"status\":\"ok\"}", 15);
+        char *msg = hu_strndup(alloc, "{\"status\":\"ok\"}", 15);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 15);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 15);
+        return HU_OK;
     }
-    *out = sc_tool_result_fail("Unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("Unknown action", 14);
+    return HU_OK;
 #else
     if (!tctx || !tctx->sched) {
-        *out = sc_tool_result_fail("schedule: scheduler not configured", 36);
-        return SC_OK;
+        *out = hu_tool_result_fail("schedule: scheduler not configured", 36);
+        return HU_OK;
     }
-    sc_cron_scheduler_t *sched = tctx->sched;
+    hu_cron_scheduler_t *sched = tctx->sched;
 
     if (strcmp(action, "create") == 0) {
-        const char *expression = sc_json_get_string(args, "expression");
-        const char *name = sc_json_get_string(args, "name");
-        const char *type_str = sc_json_get_string(args, "type");
+        const char *expression = hu_json_get_string(args, "expression");
+        const char *name = hu_json_get_string(args, "name");
+        const char *type_str = hu_json_get_string(args, "type");
         const char *expr = expression && expression[0] ? expression : "* * * * *";
         uint64_t id = 0;
-        sc_error_t err;
+        hu_error_t err;
 
         if (type_str && strcmp(type_str, "agent") == 0) {
-            const char *prompt = sc_json_get_string(args, "prompt");
-            const char *channel = sc_json_get_string(args, "channel");
+            const char *prompt = hu_json_get_string(args, "prompt");
+            const char *channel = hu_json_get_string(args, "channel");
             if (!prompt || !prompt[0]) {
-                *out = sc_tool_result_fail("agent job requires 'prompt'", 27);
-                return SC_OK;
+                *out = hu_tool_result_fail("agent job requires 'prompt'", 27);
+                return HU_OK;
             }
-            err = sc_cron_add_agent_job(sched, alloc, expr, prompt, channel, name, &id);
+            err = hu_cron_add_agent_job(sched, alloc, expr, prompt, channel, name, &id);
         } else {
-            const char *command = sc_json_get_string(args, "command");
+            const char *command = hu_json_get_string(args, "command");
             const char *cmd = command && command[0] ? command : "";
-            err = sc_cron_add_job(sched, alloc, expr, cmd, name, &id);
+            err = hu_cron_add_job(sched, alloc, expr, cmd, name, &id);
         }
-        if (err != SC_OK) {
-            *out = sc_tool_result_fail("failed to add job", 18);
+        if (err != HU_OK) {
+            *out = hu_tool_result_fail("failed to add job", 18);
             return err;
         }
-        char *msg = sc_sprintf(alloc, "{\"id\":\"%llu\",\"expression\":\"%s\",\"type\":\"%s\"}",
+        char *msg = hu_sprintf(alloc, "{\"id\":\"%llu\",\"expression\":\"%s\",\"type\":\"%s\"}",
                                (unsigned long long)id, expr,
                                (type_str && strcmp(type_str, "agent") == 0) ? "agent" : "shell");
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, strlen(msg));
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, strlen(msg));
+        return HU_OK;
     }
     if (strcmp(action, "list") == 0) {
         size_t count = 0;
-        const sc_cron_job_t *jobs = sc_cron_list_jobs(sched, &count);
+        const hu_cron_job_t *jobs = hu_cron_list_jobs(sched, &count);
         if (count == 0) {
-            char *msg = sc_strndup(alloc, "No scheduled tasks.", 19);
+            char *msg = hu_strndup(alloc, "No scheduled tasks.", 19);
             if (!msg) {
-                *out = sc_tool_result_fail("out of memory", 12);
-                return SC_ERR_OUT_OF_MEMORY;
+                *out = hu_tool_result_fail("out of memory", 12);
+                return HU_ERR_OUT_OF_MEMORY;
             }
-            *out = sc_tool_result_ok_owned(msg, 19);
-            return SC_OK;
+            *out = hu_tool_result_ok_owned(msg, 19);
+            return HU_OK;
         }
-        sc_json_buf_t buf;
-        if (sc_json_buf_init(&buf, alloc) != SC_OK) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+        hu_json_buf_t buf;
+        if (hu_json_buf_init(&buf, alloc) != HU_OK) {
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        if (sc_json_buf_append_raw(&buf, "[", 1) != SC_OK)
+        if (hu_json_buf_append_raw(&buf, "[", 1) != HU_OK)
             goto list_fail;
         for (size_t i = 0; i < count; i++) {
             if (i > 0)
-                sc_json_buf_append_raw(&buf, ",", 1);
-            const sc_cron_job_t *j = &jobs[i];
-            if (sc_json_buf_append_raw(&buf, "{\"id\":", 6) != SC_OK)
+                hu_json_buf_append_raw(&buf, ",", 1);
+            const hu_cron_job_t *j = &jobs[i];
+            if (hu_json_buf_append_raw(&buf, "{\"id\":", 6) != HU_OK)
                 goto list_fail;
             char nbuf[32];
             int nlen = snprintf(nbuf, sizeof(nbuf), "\"%llu\"", (unsigned long long)j->id);
-            sc_json_buf_append_raw(&buf, nbuf, (size_t)nlen);
+            hu_json_buf_append_raw(&buf, nbuf, (size_t)nlen);
             if (j->expression) {
-                sc_json_buf_append_raw(&buf, ",\"expression\":", 14);
-                sc_json_append_string(&buf, j->expression, strlen(j->expression));
+                hu_json_buf_append_raw(&buf, ",\"expression\":", 14);
+                hu_json_append_string(&buf, j->expression, strlen(j->expression));
             }
             if (j->command) {
-                sc_json_buf_append_raw(&buf, ",\"command\":", 11);
-                sc_json_append_string(&buf, j->command, strlen(j->command));
+                hu_json_buf_append_raw(&buf, ",\"command\":", 11);
+                hu_json_append_string(&buf, j->command, strlen(j->command));
             }
-            sc_json_buf_append_raw(&buf, "}", 1);
+            hu_json_buf_append_raw(&buf, "}", 1);
         }
-        sc_json_buf_append_raw(&buf, "]", 1);
+        hu_json_buf_append_raw(&buf, "]", 1);
         {
             char *msg = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
             if (!msg) {
             list_fail:
-                sc_json_buf_free(&buf);
-                *out = sc_tool_result_fail("out of memory", 12);
-                return SC_ERR_OUT_OF_MEMORY;
+                hu_json_buf_free(&buf);
+                *out = hu_tool_result_fail("out of memory", 12);
+                return HU_ERR_OUT_OF_MEMORY;
             }
             memcpy(msg, buf.ptr, buf.len);
             msg[buf.len] = '\0';
-            sc_json_buf_free(&buf);
-            *out = sc_tool_result_ok_owned(msg, buf.len);
+            hu_json_buf_free(&buf);
+            *out = hu_tool_result_ok_owned(msg, buf.len);
         }
-        return SC_OK;
+        return HU_OK;
     }
     if (strcmp(action, "get") == 0 || strcmp(action, "cancel") == 0 ||
         strcmp(action, "pause") == 0 || strcmp(action, "resume") == 0) {
-        const char *id_str = sc_json_get_string(args, "id");
+        const char *id_str = hu_json_get_string(args, "id");
         if (!id_str || id_str[0] == '\0') {
-            *out = sc_tool_result_fail("missing id", 10);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing id", 10);
+            return HU_OK;
         }
         char *end = NULL;
         unsigned long long id_val = strtoull(id_str, &end, 10);
         if (end == id_str || *end != '\0' || id_val == 0) {
-            *out = sc_tool_result_fail("invalid id", 10);
-            return SC_OK;
+            *out = hu_tool_result_fail("invalid id", 10);
+            return HU_OK;
         }
         uint64_t job_id = (uint64_t)id_val;
 
         if (strcmp(action, "get") == 0) {
-            const sc_cron_job_t *job = sc_cron_get_job(sched, job_id);
+            const hu_cron_job_t *job = hu_cron_get_job(sched, job_id);
             if (!job) {
-                *out = sc_tool_result_fail("job not found", 14);
-                return SC_OK;
+                *out = hu_tool_result_fail("job not found", 14);
+                return HU_OK;
             }
-            char *msg = sc_sprintf(
+            char *msg = hu_sprintf(
                 alloc,
                 "{\"id\":\"%llu\",\"expression\":\"%s\",\"command\":\"%s\",\"status\":\"%s\"}",
                 (unsigned long long)job->id, job->expression ? job->expression : "",
                 job->command ? job->command : "", job->enabled ? "enabled" : "paused");
             if (!msg) {
-                *out = sc_tool_result_fail("out of memory", 12);
-                return SC_ERR_OUT_OF_MEMORY;
+                *out = hu_tool_result_fail("out of memory", 12);
+                return HU_ERR_OUT_OF_MEMORY;
             }
-            *out = sc_tool_result_ok_owned(msg, strlen(msg));
-            return SC_OK;
+            *out = hu_tool_result_ok_owned(msg, strlen(msg));
+            return HU_OK;
         }
         if (strcmp(action, "cancel") == 0) {
-            sc_error_t err = sc_cron_remove_job(sched, job_id);
-            if (err != SC_OK) {
-                *out = sc_tool_result_fail("job not found", 14);
-                return SC_OK;
+            hu_error_t err = hu_cron_remove_job(sched, job_id);
+            if (err != HU_OK) {
+                *out = hu_tool_result_fail("job not found", 14);
+                return HU_OK;
             }
-            char *msg = sc_strndup(alloc, "{\"status\":\"ok\"}", 15);
+            char *msg = hu_strndup(alloc, "{\"status\":\"ok\"}", 15);
             if (!msg) {
-                *out = sc_tool_result_fail("out of memory", 12);
-                return SC_ERR_OUT_OF_MEMORY;
+                *out = hu_tool_result_fail("out of memory", 12);
+                return HU_ERR_OUT_OF_MEMORY;
             }
-            *out = sc_tool_result_ok_owned(msg, 15);
-            return SC_OK;
+            *out = hu_tool_result_ok_owned(msg, 15);
+            return HU_OK;
         }
         if (strcmp(action, "pause") == 0 || strcmp(action, "resume") == 0) {
             bool enabled = (strcmp(action, "resume") == 0);
-            sc_error_t err = sc_cron_update_job(sched, alloc, job_id, NULL, NULL, &enabled);
-            if (err != SC_OK) {
-                *out = sc_tool_result_fail("update failed", 13);
+            hu_error_t err = hu_cron_update_job(sched, alloc, job_id, NULL, NULL, &enabled);
+            if (err != HU_OK) {
+                *out = hu_tool_result_fail("update failed", 13);
                 return err;
             }
-            char *msg = sc_strndup(alloc, "{\"status\":\"ok\"}", 15);
+            char *msg = hu_strndup(alloc, "{\"status\":\"ok\"}", 15);
             if (!msg) {
-                *out = sc_tool_result_fail("out of memory", 12);
-                return SC_ERR_OUT_OF_MEMORY;
+                *out = hu_tool_result_fail("out of memory", 12);
+                return HU_ERR_OUT_OF_MEMORY;
             }
-            *out = sc_tool_result_ok_owned(msg, 15);
-            return SC_OK;
+            *out = hu_tool_result_ok_owned(msg, 15);
+            return HU_OK;
         }
     }
-    *out = sc_tool_result_fail("Unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("Unknown action", 14);
+    return HU_OK;
 #endif
 }
 
@@ -259,12 +259,12 @@ static const char *schedule_params(void *ctx) {
     (void)ctx;
     return SCHEDULE_PARAMS;
 }
-static void schedule_deinit(void *ctx, sc_allocator_t *alloc) {
+static void schedule_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx)
-        alloc->free(alloc->ctx, ctx, sizeof(sc_schedule_tool_ctx_t));
+        alloc->free(alloc->ctx, ctx, sizeof(hu_schedule_tool_ctx_t));
 }
 
-static const sc_tool_vtable_t schedule_vtable = {
+static const hu_tool_vtable_t schedule_vtable = {
     .execute = schedule_execute,
     .name = schedule_name,
     .description = schedule_desc,
@@ -272,16 +272,16 @@ static const sc_tool_vtable_t schedule_vtable = {
     .deinit = schedule_deinit,
 };
 
-sc_error_t sc_schedule_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched, sc_tool_t *out) {
+hu_error_t hu_schedule_create(hu_allocator_t *alloc, hu_cron_scheduler_t *sched, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_schedule_tool_ctx_t *ctx =
-        (sc_schedule_tool_ctx_t *)alloc->alloc(alloc->ctx, sizeof(sc_schedule_tool_ctx_t));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_schedule_tool_ctx_t *ctx =
+        (hu_schedule_tool_ctx_t *)alloc->alloc(alloc->ctx, sizeof(hu_schedule_tool_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
-    memset(ctx, 0, sizeof(sc_schedule_tool_ctx_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(ctx, 0, sizeof(hu_schedule_tool_ctx_t));
     ctx->sched = sched;
     out->ctx = ctx;
     out->vtable = &schedule_vtable;
-    return SC_OK;
+    return HU_OK;
 }

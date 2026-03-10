@@ -1,21 +1,21 @@
 /* Commitment detection — promises, intentions, reminders, goals from text */
-#include "seaclaw/agent/commitment.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/commitment.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static void generate_commitment_id(sc_allocator_t *alloc, char **out) {
+static void generate_commitment_id(hu_allocator_t *alloc, char **out) {
     static size_t counter = 0;
     char buf[64];
     int n = snprintf(buf, sizeof(buf), "commit-%llu-%zu",
                      (unsigned long long)time(NULL), counter++);
     if (n > 0 && (size_t)n < sizeof(buf)) {
-        *out = sc_strndup(alloc, buf, (size_t)n);
+        *out = hu_strndup(alloc, buf, (size_t)n);
     } else {
-        *out = sc_strndup(alloc, "commit-0", 8);
+        *out = hu_strndup(alloc, "commit-0", 8);
     }
 }
 
@@ -57,61 +57,61 @@ static size_t extract_clause_end(const char *text, size_t text_len, size_t start
     return text_len;
 }
 
-static sc_error_t add_commitment(sc_allocator_t *alloc, sc_commitment_detect_result_t *result,
+static hu_error_t add_commitment(hu_allocator_t *alloc, hu_commitment_detect_result_t *result,
                                  const char *text, size_t text_len, size_t pattern_start,
-                                 size_t pattern_len, sc_commitment_type_t type,
+                                 size_t pattern_len, hu_commitment_type_t type,
                                  const char *role, size_t role_len) {
-    if (result->count >= SC_COMMITMENT_DETECT_MAX)
-        return SC_OK;
+    if (result->count >= HU_COMMITMENT_DETECT_MAX)
+        return HU_OK;
 
     size_t clause_start = pattern_start + pattern_len;
     while (clause_start < text_len && isspace((unsigned char)text[clause_start]))
         clause_start++;
     if (clause_starts_with_negation(text, text_len, clause_start))
-        return SC_OK;
+        return HU_OK;
     size_t clause_end = extract_clause_end(text, text_len, clause_start);
     if (clause_end <= clause_start)
-        return SC_OK;
+        return HU_OK;
 
     size_t summary_len = clause_end - clause_start;
-    char *summary = sc_strndup(alloc, text + clause_start, summary_len);
+    char *summary = hu_strndup(alloc, text + clause_start, summary_len);
     if (!summary)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     char *id = NULL;
     generate_commitment_id(alloc, &id);
     if (!id) {
         alloc->free(alloc->ctx, summary, summary_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     char ts_buf[32];
     fill_timestamp(ts_buf, sizeof(ts_buf));
-    char *created_at_dup = sc_strndup(alloc, ts_buf, strlen(ts_buf));
+    char *created_at_dup = hu_strndup(alloc, ts_buf, strlen(ts_buf));
     if (!created_at_dup) {
         alloc->free(alloc->ctx, id, strlen(id) + 1);
         alloc->free(alloc->ctx, summary, summary_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
-    char *owner = role && role_len > 0 ? sc_strndup(alloc, role, role_len) : sc_strndup(alloc, "user", 4);
+    char *owner = role && role_len > 0 ? hu_strndup(alloc, role, role_len) : hu_strndup(alloc, "user", 4);
     if (!owner) {
         alloc->free(alloc->ctx, created_at_dup, strlen(created_at_dup) + 1);
         alloc->free(alloc->ctx, id, strlen(id) + 1);
         alloc->free(alloc->ctx, summary, summary_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
-    char *statement = sc_strndup(alloc, text + pattern_start, clause_end - pattern_start);
+    char *statement = hu_strndup(alloc, text + pattern_start, clause_end - pattern_start);
     if (!statement) {
         alloc->free(alloc->ctx, owner, (role && role_len > 0 ? role_len : 4) + 1);
         alloc->free(alloc->ctx, created_at_dup, strlen(created_at_dup) + 1);
         alloc->free(alloc->ctx, id, strlen(id) + 1);
         alloc->free(alloc->ctx, summary, summary_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
-    sc_commitment_t *c = &result->commitments[result->count];
+    hu_commitment_t *c = &result->commitments[result->count];
     memset(c, 0, sizeof(*c));
     c->id = id;
     c->statement = statement;
@@ -119,18 +119,18 @@ static sc_error_t add_commitment(sc_allocator_t *alloc, sc_commitment_detect_res
     c->summary = summary;
     c->summary_len = summary_len;
     c->type = type;
-    c->status = SC_COMMITMENT_ACTIVE;
+    c->status = HU_COMMITMENT_ACTIVE;
     c->created_at = created_at_dup;
     c->emotional_weight = NULL;
     c->owner = owner;
     result->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t scan_patterns(sc_allocator_t *alloc, const char *text, size_t text_len,
+static hu_error_t scan_patterns(hu_allocator_t *alloc, const char *text, size_t text_len,
                                const char *role, size_t role_len,
-                               sc_commitment_detect_result_t *result,
-                               const char *const *patterns, sc_commitment_type_t type) {
+                               hu_commitment_detect_result_t *result,
+                               const char *const *patterns, hu_commitment_type_t type) {
     for (size_t p = 0; patterns[p]; p++) {
         size_t plen = strlen(patterns[p]);
         if (plen > text_len)
@@ -142,50 +142,50 @@ static sc_error_t scan_patterns(sc_allocator_t *alloc, const char *text, size_t 
                                  text[i - 1] == ',' || text[i - 1] == '.';
             if (!word_boundary)
                 continue;
-            sc_error_t err = add_commitment(alloc, result, text, text_len, i, plen, type, role,
+            hu_error_t err = add_commitment(alloc, result, text, text_len, i, plen, type, role,
                                             role_len);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 return err;
-            if (result->count >= SC_COMMITMENT_DETECT_MAX)
-                return SC_OK;
+            if (result->count >= HU_COMMITMENT_DETECT_MAX)
+                return HU_OK;
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_commitment_detect(sc_allocator_t *alloc, const char *text, size_t text_len,
+hu_error_t hu_commitment_detect(hu_allocator_t *alloc, const char *text, size_t text_len,
                                const char *role, size_t role_len,
-                               sc_commitment_detect_result_t *result) {
+                               hu_commitment_detect_result_t *result) {
     if (!alloc || !result)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!text)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     result->count = 0;
     memset(result->commitments, 0, sizeof(result->commitments));
     if (text_len == 0)
-        return SC_OK;
+        return HU_OK;
 
-    sc_error_t err;
+    hu_error_t err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, PROMISE_PATTERNS,
-                       SC_COMMITMENT_PROMISE);
-    if (err != SC_OK)
+                       HU_COMMITMENT_PROMISE);
+    if (err != HU_OK)
         return err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, INTENTION_PATTERNS,
-                        SC_COMMITMENT_INTENTION);
-    if (err != SC_OK)
+                        HU_COMMITMENT_INTENTION);
+    if (err != HU_OK)
         return err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, REMINDER_PATTERNS,
-                       SC_COMMITMENT_REMINDER);
-    if (err != SC_OK)
+                       HU_COMMITMENT_REMINDER);
+    if (err != HU_OK)
         return err;
     err = scan_patterns(alloc, text, text_len, role, role_len, result, GOAL_PATTERNS,
-                       SC_COMMITMENT_GOAL);
-    if (err != SC_OK)
+                       HU_COMMITMENT_GOAL);
+    if (err != HU_OK)
         return err;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_commitment_deinit(sc_commitment_t *c, sc_allocator_t *alloc) {
+void hu_commitment_deinit(hu_commitment_t *c, hu_allocator_t *alloc) {
     if (!c || !alloc)
         return;
     if (c->id)
@@ -203,10 +203,10 @@ void sc_commitment_deinit(sc_commitment_t *c, sc_allocator_t *alloc) {
     memset(c, 0, sizeof(*c));
 }
 
-void sc_commitment_detect_result_deinit(sc_commitment_detect_result_t *r, sc_allocator_t *alloc) {
+void hu_commitment_detect_result_deinit(hu_commitment_detect_result_t *r, hu_allocator_t *alloc) {
     if (!r || !alloc)
         return;
     for (size_t i = 0; i < r->count; i++)
-        sc_commitment_deinit(&r->commitments[i], alloc);
+        hu_commitment_deinit(&r->commitments[i], alloc);
     r->count = 0;
 }

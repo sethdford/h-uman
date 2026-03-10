@@ -1,8 +1,8 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,33 +80,33 @@ static const char *csv_next_field(const char *p, char delim, char *out, size_t o
     return p;
 }
 
-static sc_error_t ss_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                             sc_tool_result_t *out) {
+static hu_error_t ss_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                             hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
-    const char *data = sc_json_get_string(args, "data");
-    const char *delim_str = sc_json_get_string(args, "delimiter");
+    const char *data = hu_json_get_string(args, "data");
+    const char *delim_str = hu_json_get_string(args, "delimiter");
     char delim = (delim_str && delim_str[0]) ? delim_str[0] : ',';
 
     if (strcmp(action, "parse") == 0 || strcmp(action, "analyze") == 0 ||
         strcmp(action, "query") == 0) {
         if (!data || strlen(data) == 0) {
-            *out = sc_tool_result_fail("missing data", 12);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing data", 12);
+            return HU_OK;
         }
         if (strlen(data) > 1024 * 1024) {
-            *out = sc_tool_result_fail("data too large (max 1MB)", 24);
-            return SC_OK;
+            *out = hu_tool_result_fail("data too large (max 1MB)", 24);
+            return HU_OK;
         }
 
         size_t num_cols = csv_count_fields(data, delim);
@@ -129,8 +129,8 @@ static sc_error_t ss_execute(void *ctx, sc_allocator_t *alloc, const sc_json_val
             size_t buf_sz = 512 + num_cols * 64;
             char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
             if (!msg) {
-                *out = sc_tool_result_fail("out of memory", 13);
-                return SC_ERR_OUT_OF_MEMORY;
+                *out = hu_tool_result_fail("out of memory", 13);
+                return HU_ERR_OUT_OF_MEMORY;
             }
             char cell[SS_MAX_CELL];
             int n = snprintf(msg, buf_sz,
@@ -142,16 +142,16 @@ static sc_error_t ss_execute(void *ctx, sc_allocator_t *alloc, const sc_json_val
                 n += snprintf(msg + n, buf_sz - (size_t)n, "%s%s", c > 0 ? ", " : "", cell);
             }
             n += snprintf(msg + n, buf_sz - (size_t)n, "\nDelimiter: '%c'", delim);
-            *out = sc_tool_result_ok_owned(msg, (size_t)n);
-            return SC_OK;
+            *out = hu_tool_result_ok_owned(msg, (size_t)n);
+            return HU_OK;
         }
 
         if (strcmp(action, "query") == 0) {
-            const char *col_name = sc_json_get_string(args, "column");
-            const char *match_val = sc_json_get_string(args, "value");
+            const char *col_name = hu_json_get_string(args, "column");
+            const char *match_val = hu_json_get_string(args, "value");
             if (!col_name || !match_val) {
-                *out = sc_tool_result_fail("query needs column and value", 28);
-                return SC_OK;
+                *out = hu_tool_result_fail("query needs column and value", 28);
+                return HU_OK;
             }
 
             char cell[SS_MAX_CELL];
@@ -163,8 +163,8 @@ static sc_error_t ss_execute(void *ctx, sc_allocator_t *alloc, const sc_json_val
                     target_col = c;
             }
             if (target_col == (size_t)-1) {
-                *out = sc_tool_result_fail("column not found", 16);
-                return SC_OK;
+                *out = hu_tool_result_fail("column not found", 16);
+                return HU_OK;
             }
             while (*p == '\n' || *p == '\r')
                 p++;
@@ -172,8 +172,8 @@ static sc_error_t ss_execute(void *ctx, sc_allocator_t *alloc, const sc_json_val
             size_t buf_sz = SS_BUF_INIT;
             char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
             if (!msg) {
-                *out = sc_tool_result_fail("out of memory", 13);
-                return SC_ERR_OUT_OF_MEMORY;
+                *out = hu_tool_result_fail("out of memory", 13);
+                return HU_ERR_OUT_OF_MEMORY;
             }
             int n = snprintf(msg, buf_sz, "Matching rows:\n");
             size_t matches = 0;
@@ -202,42 +202,42 @@ static sc_error_t ss_execute(void *ctx, sc_allocator_t *alloc, const sc_json_val
                     p++;
             }
             n += snprintf(msg + n, buf_sz - (size_t)n, "Total matches: %zu", matches);
-            *out = sc_tool_result_ok_owned(msg, (size_t)n);
-            return SC_OK;
+            *out = hu_tool_result_ok_owned(msg, (size_t)n);
+            return HU_OK;
         }
 
         size_t buf_sz = strlen(data) + 256;
         char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 13);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 13);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         int n =
             snprintf(msg, buf_sz, "Parsed %zu rows, %zu columns (delimiter: '%c')\n%.*s", row_count,
                      num_cols, delim, (int)(strlen(data) > 2048 ? 2048 : strlen(data)), data);
-        *out = sc_tool_result_ok_owned(msg, (size_t)n);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, (size_t)n);
+        return HU_OK;
     }
 
     if (strcmp(action, "generate") == 0) {
         size_t buf_sz = SS_BUF_INIT;
         char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 13);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 13);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-#if SC_IS_TEST
+#if HU_IS_TEST
         int n = snprintf(msg, buf_sz, "name,value\nalpha,1\nbeta,2\n");
-        *out = sc_tool_result_ok_owned(msg, (size_t)n);
+        *out = hu_tool_result_ok_owned(msg, (size_t)n);
 #else
         int n = snprintf(msg, buf_sz, "(generate: provide headers and rows arrays)");
-        *out = sc_tool_result_ok_owned(msg, (size_t)n);
+        *out = hu_tool_result_ok_owned(msg, (size_t)n);
 #endif
-        return SC_OK;
+        return HU_OK;
     }
 
-    *out = sc_tool_result_fail("unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("unknown action", 14);
+    return HU_OK;
 }
 
 static const char *ss_name(void *ctx) {
@@ -252,12 +252,12 @@ static const char *ss_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void ss_deinit(void *ctx, sc_allocator_t *alloc) {
+static void ss_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx)
         alloc->free(alloc->ctx, ctx, sizeof(ss_ctx_t));
 }
 
-static const sc_tool_vtable_t ss_vtable = {
+static const hu_tool_vtable_t ss_vtable = {
     .execute = ss_execute,
     .name = ss_name,
     .description = ss_desc,
@@ -265,12 +265,12 @@ static const sc_tool_vtable_t ss_vtable = {
     .deinit = ss_deinit,
 };
 
-sc_error_t sc_spreadsheet_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_spreadsheet_create(hu_allocator_t *alloc, hu_tool_t *out) {
     void *ctx = alloc->alloc(alloc->ctx, sizeof(ss_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(ss_ctx_t));
     out->ctx = ctx;
     out->vtable = &ss_vtable;
-    return SC_OK;
+    return HU_OK;
 }

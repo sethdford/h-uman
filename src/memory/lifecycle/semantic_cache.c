@@ -1,6 +1,6 @@
-#include "seaclaw/memory/lifecycle/semantic_cache.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory/vector_math.h"
+#include "human/memory/lifecycle/semantic_cache.h"
+#include "human/core/string.h"
+#include "human/memory/vector_math.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -15,18 +15,18 @@ typedef struct cache_entry {
     time_t created_at;
 } cache_entry_t;
 
-struct sc_semantic_cache {
-    sc_allocator_t *alloc;
+struct hu_semantic_cache {
+    hu_allocator_t *alloc;
     cache_entry_t *entries;
     size_t count;
     size_t capacity;
     size_t max_entries;
     int ttl_seconds;
     float similarity_threshold;
-    sc_embedding_provider_t embedding_provider;
+    hu_embedding_provider_t embedding_provider;
 };
 
-static void free_entry(sc_allocator_t *alloc, cache_entry_t *e) {
+static void free_entry(hu_allocator_t *alloc, cache_entry_t *e) {
     if (e->key)
         alloc->free(alloc->ctx, e->key, strlen(e->key) + 1);
     if (e->response)
@@ -44,7 +44,7 @@ static bool entry_expired(const cache_entry_t *e, int ttl_seconds) {
     return (time(NULL) - e->created_at) > ttl_seconds;
 }
 
-static void evict_expired(sc_semantic_cache_t *cache) {
+static void evict_expired(hu_semantic_cache_t *cache) {
     if (cache->ttl_seconds <= 0)
         return;
     size_t dst = 0;
@@ -60,7 +60,7 @@ static void evict_expired(sc_semantic_cache_t *cache) {
     cache->count = dst;
 }
 
-static void evict_oldest(sc_semantic_cache_t *cache) {
+static void evict_oldest(hu_semantic_cache_t *cache) {
     if (cache->count == 0)
         return;
     size_t oldest = 0;
@@ -76,13 +76,13 @@ static void evict_oldest(sc_semantic_cache_t *cache) {
     cache->count--;
 }
 
-sc_semantic_cache_t *sc_semantic_cache_create(sc_allocator_t *alloc, int ttl_minutes,
+hu_semantic_cache_t *hu_semantic_cache_create(hu_allocator_t *alloc, int ttl_minutes,
                                               size_t max_entries, float similarity_threshold,
-                                              sc_embedding_provider_t *embedding_provider) {
+                                              hu_embedding_provider_t *embedding_provider) {
     if (!alloc)
         return NULL;
-    sc_semantic_cache_t *c =
-        (sc_semantic_cache_t *)alloc->alloc(alloc->ctx, sizeof(sc_semantic_cache_t));
+    hu_semantic_cache_t *c =
+        (hu_semantic_cache_t *)alloc->alloc(alloc->ctx, sizeof(hu_semantic_cache_t));
     if (!c)
         return NULL;
     memset(c, 0, sizeof(*c));
@@ -95,31 +95,31 @@ sc_semantic_cache_t *sc_semantic_cache_create(sc_allocator_t *alloc, int ttl_min
     return c;
 }
 
-void sc_semantic_cache_destroy(sc_allocator_t *alloc, sc_semantic_cache_t *cache) {
+void hu_semantic_cache_destroy(hu_allocator_t *alloc, hu_semantic_cache_t *cache) {
     if (!cache || !alloc)
         return;
     for (size_t i = 0; i < cache->count; i++)
         free_entry(alloc, &cache->entries[i]);
     if (cache->entries)
         alloc->free(alloc->ctx, cache->entries, cache->capacity * sizeof(cache_entry_t));
-    alloc->free(alloc->ctx, cache, sizeof(sc_semantic_cache_t));
+    alloc->free(alloc->ctx, cache, sizeof(hu_semantic_cache_t));
 }
 
-sc_error_t sc_semantic_cache_get(sc_semantic_cache_t *cache, sc_allocator_t *alloc,
+hu_error_t hu_semantic_cache_get(hu_semantic_cache_t *cache, hu_allocator_t *alloc,
                                  const char *key_hex, size_t key_len, const char *query_text,
-                                 size_t query_len, sc_semantic_cache_hit_t *out) {
+                                 size_t query_len, hu_semantic_cache_hit_t *out) {
     if (!cache || !alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     evict_expired(cache);
 
     if (cache->embedding_provider.ctx && cache->embedding_provider.vtable &&
         cache->embedding_provider.vtable->embed && query_text && query_len > 0) {
-        sc_embedding_provider_result_t qemb = {0};
-        sc_error_t err = cache->embedding_provider.vtable->embed(
+        hu_embedding_provider_result_t qemb = {0};
+        hu_error_t err = cache->embedding_provider.vtable->embed(
             cache->embedding_provider.ctx, alloc, query_text, query_len, &qemb);
-        if (err == SC_OK && qemb.values && qemb.dimensions > 0) {
+        if (err == HU_OK && qemb.values && qemb.dimensions > 0) {
             float best_sim = 0.0f;
             cache_entry_t *best = NULL;
 
@@ -128,19 +128,19 @@ sc_error_t sc_semantic_cache_get(sc_semantic_cache_t *cache, sc_allocator_t *all
                 if (!e->embedding || e->embedding_dims != qemb.dimensions)
                     continue;
 
-                float sim = sc_vector_cosine_similarity(qemb.values, e->embedding, qemb.dimensions);
+                float sim = hu_vector_cosine_similarity(qemb.values, e->embedding, qemb.dimensions);
                 if (sim > best_sim && sim >= cache->similarity_threshold) {
                     best_sim = sim;
                     best = e;
                 }
             }
-            sc_embedding_provider_free(alloc, &qemb);
+            hu_embedding_provider_free(alloc, &qemb);
 
             if (best) {
-                out->response = sc_strdup(alloc, best->response);
+                out->response = hu_strdup(alloc, best->response);
                 out->similarity = best_sim;
                 out->semantic = 1;
-                return SC_OK;
+                return HU_OK;
             }
         }
     }
@@ -148,22 +148,22 @@ sc_error_t sc_semantic_cache_get(sc_semantic_cache_t *cache, sc_allocator_t *all
     for (size_t i = 0; i < cache->count; i++) {
         cache_entry_t *e = &cache->entries[i];
         if (e->key && key_len == strlen(e->key) && memcmp(e->key, key_hex, key_len) == 0) {
-            out->response = sc_strdup(alloc, e->response);
+            out->response = hu_strdup(alloc, e->response);
             out->similarity = 1.0f;
             out->semantic = 0;
-            return SC_OK;
+            return HU_OK;
         }
     }
 
-    return SC_ERR_NOT_FOUND;
+    return HU_ERR_NOT_FOUND;
 }
 
-sc_error_t sc_semantic_cache_put(sc_semantic_cache_t *cache, sc_allocator_t *alloc,
+hu_error_t hu_semantic_cache_put(hu_semantic_cache_t *cache, hu_allocator_t *alloc,
                                  const char *key_hex, size_t key_len, const char *model,
                                  size_t model_len, const char *response, size_t response_len,
                                  unsigned token_count, const char *query_text, size_t query_len) {
     if (!cache || !alloc || !key_hex)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     evict_expired(cache);
 
@@ -188,24 +188,24 @@ sc_error_t sc_semantic_cache_put(sc_semantic_cache_t *cache, sc_allocator_t *all
         cache_entry_t *tmp =
             (cache_entry_t *)alloc->realloc(alloc->ctx, cache->entries, old_sz, new_sz);
         if (!tmp)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         cache->entries = tmp;
         cache->capacity = new_cap;
     }
 
     cache_entry_t *e = &cache->entries[cache->count];
     memset(e, 0, sizeof(*e));
-    e->key = sc_strndup(alloc, key_hex, key_len);
-    e->response = sc_strndup(alloc, response, response_len);
-    e->model = model && model_len > 0 ? sc_strndup(alloc, model, model_len) : NULL;
+    e->key = hu_strndup(alloc, key_hex, key_len);
+    e->response = hu_strndup(alloc, response, response_len);
+    e->model = model && model_len > 0 ? hu_strndup(alloc, model, model_len) : NULL;
     e->token_count = token_count;
     e->created_at = time(NULL);
 
     if (query_text && query_len > 0 && cache->embedding_provider.ctx &&
         cache->embedding_provider.vtable && cache->embedding_provider.vtable->embed) {
-        sc_embedding_provider_result_t res = {0};
+        hu_embedding_provider_result_t res = {0};
         if (cache->embedding_provider.vtable->embed(cache->embedding_provider.ctx, alloc,
-                                                    query_text, query_len, &res) == SC_OK &&
+                                                    query_text, query_len, &res) == HU_OK &&
             res.values) {
             e->embedding = res.values;
             e->embedding_dims = res.dimensions;
@@ -213,10 +213,10 @@ sc_error_t sc_semantic_cache_put(sc_semantic_cache_t *cache, sc_allocator_t *all
     }
 
     cache->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_semantic_cache_hit_free(sc_allocator_t *alloc, sc_semantic_cache_hit_t *hit) {
+void hu_semantic_cache_hit_free(hu_allocator_t *alloc, hu_semantic_cache_hit_t *hit) {
     if (!alloc || !hit)
         return;
     if (hit->response)

@@ -10,4 +10,4 @@ Jetpack Compose app.
 - Radius: `SCTokens.radiusSm` through `SCTokens.radiusXl` — never `RoundedCornerShape(12.dp)`.
 - Font sizes: `SCTokens.textXs` through `SCTokens.textXl` — never hardcode `14.sp`.
 - Typography: use `AvenirFontFamily` and `AvenirTypography` from `Theme.kt`.
-- Theme: use `MaterialTheme.colorScheme.primary` — not `SeaClawTheme.Coral` directly.
+- Theme: use `MaterialTheme.colorScheme.primary` — not `HumanTheme.Coral` directly.

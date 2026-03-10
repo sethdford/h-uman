@@ -1,6 +1,6 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/retrieval.h"
+#include "human/core/allocator.h"
+#include "human/memory.h"
+#include "human/memory/retrieval.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +35,7 @@ static double parse_iso8601_hours(const char *ts, size_t ts_len) {
     return (double)t / 3600.0;
 }
 
-double sc_temporal_decay_score(double base_score, double decay_factor, const char *timestamp,
+double hu_temporal_decay_score(double base_score, double decay_factor, const char *timestamp,
                                size_t timestamp_len) {
     if (decay_factor <= 0.0)
         return base_score;

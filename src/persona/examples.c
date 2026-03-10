@@ -1,70 +1,70 @@
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/persona.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/persona.h"
 #include <string.h>
 #include <strings.h>
 
-#define SC_PERSONA_EXAMPLES_MAX 256
+#define HU_PERSONA_EXAMPLES_MAX 256
 
 /* Parse example bank from JSON. Format: {"examples":[{context,incoming,response},...]} */
-sc_error_t sc_persona_examples_load_json(sc_allocator_t *alloc, const char *channel,
+hu_error_t hu_persona_examples_load_json(hu_allocator_t *alloc, const char *channel,
                                          size_t channel_len, const char *json, size_t json_len,
-                                         sc_persona_example_bank_t *out) {
+                                         hu_persona_example_bank_t *out) {
     if (!alloc || !channel || !json || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
-    out->channel = sc_strndup(alloc, channel, channel_len);
+    out->channel = hu_strndup(alloc, channel, channel_len);
     if (!out->channel)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-    sc_json_value_t *root = NULL;
-    sc_error_t err = sc_json_parse(alloc, json, json_len, &root);
-    if (err != SC_OK || !root || root->type != SC_JSON_OBJECT) {
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
         alloc->free(alloc->ctx, out->channel, channel_len + 1);
         out->channel = NULL;
-        return err != SC_OK ? err : SC_ERR_JSON_PARSE;
+        return err != HU_OK ? err : HU_ERR_JSON_PARSE;
     }
 
-    sc_json_value_t *arr = sc_json_object_get(root, "examples");
-    if (!arr || arr->type != SC_JSON_ARRAY || !arr->data.array.items) {
+    hu_json_value_t *arr = hu_json_object_get(root, "examples");
+    if (!arr || arr->type != HU_JSON_ARRAY || !arr->data.array.items) {
         alloc->free(alloc->ctx, out->channel, channel_len + 1);
         out->channel = NULL;
-        sc_json_free(alloc, root);
-        return SC_OK;
+        hu_json_free(alloc, root);
+        return HU_OK;
     }
 
     size_t n = arr->data.array.len;
-    sc_persona_example_t *examples =
-        (sc_persona_example_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_persona_example_t));
+    hu_persona_example_t *examples =
+        (hu_persona_example_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_persona_example_t));
     if (!examples) {
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         alloc->free(alloc->ctx, out->channel, channel_len + 1);
         out->channel = NULL;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(examples, 0, n * sizeof(sc_persona_example_t));
+    memset(examples, 0, n * sizeof(hu_persona_example_t));
     size_t count = 0;
 
     for (size_t i = 0; i < n; i++) {
-        sc_json_value_t *item = arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
+        hu_json_value_t *item = arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
             continue;
-        const char *ctx = sc_json_get_string(item, "context");
-        const char *inc = sc_json_get_string(item, "incoming");
-        const char *resp = sc_json_get_string(item, "response");
+        const char *ctx = hu_json_get_string(item, "context");
+        const char *inc = hu_json_get_string(item, "incoming");
+        const char *resp = hu_json_get_string(item, "response");
         /* Accept input/output as alternate field names */
         if (!inc)
-            inc = sc_json_get_string(item, "input");
+            inc = hu_json_get_string(item, "input");
         if (!resp)
-            resp = sc_json_get_string(item, "output");
+            resp = hu_json_get_string(item, "output");
         if (!ctx)
             ctx = "";
         if (!inc || !resp)
             continue;
-        examples[count].context = sc_strdup(alloc, ctx);
-        examples[count].incoming = sc_strdup(alloc, inc);
-        examples[count].response = sc_strdup(alloc, resp);
+        examples[count].context = hu_strdup(alloc, ctx);
+        examples[count].incoming = hu_strdup(alloc, inc);
+        examples[count].response = hu_strdup(alloc, resp);
         if (!examples[count].context || !examples[count].incoming || !examples[count].response) {
             if (examples[count].context)
                 alloc->free(alloc->ctx, examples[count].context,
@@ -83,19 +83,19 @@ sc_error_t sc_persona_examples_load_json(sc_allocator_t *alloc, const char *chan
                 if (examples[j].response)
                     alloc->free(alloc->ctx, examples[j].response, strlen(examples[j].response) + 1);
             }
-            alloc->free(alloc->ctx, examples, n * sizeof(sc_persona_example_t));
-            sc_json_free(alloc, root);
+            alloc->free(alloc->ctx, examples, n * sizeof(hu_persona_example_t));
+            hu_json_free(alloc, root);
             alloc->free(alloc->ctx, out->channel, channel_len + 1);
             out->channel = NULL;
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         count++;
     }
 
     out->examples = examples;
     out->examples_count = count;
-    sc_json_free(alloc, root);
-    return SC_OK;
+    hu_json_free(alloc, root);
+    return HU_OK;
 }
 
 /* Count how many words from topic appear in context (case-insensitive, space-separated) */
@@ -133,21 +133,21 @@ static size_t keyword_overlap(const char *topic, size_t topic_len, const char *c
     return score;
 }
 
-sc_error_t sc_persona_select_examples(const sc_persona_t *persona, const char *channel,
+hu_error_t hu_persona_select_examples(const hu_persona_t *persona, const char *channel,
                                       size_t channel_len, const char *topic, size_t topic_len,
-                                      const sc_persona_example_t **out, size_t *out_count,
+                                      const hu_persona_example_t **out, size_t *out_count,
                                       size_t max_examples) {
     if (!persona || !out || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 
     if (!persona->example_banks || persona->example_banks_count == 0)
-        return SC_OK;
+        return HU_OK;
     if (!channel || channel_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Find matching bank */
-    sc_persona_example_bank_t *bank = NULL;
+    hu_persona_example_bank_t *bank = NULL;
     for (size_t i = 0; i < persona->example_banks_count; i++) {
         if (persona->example_banks[i].channel &&
             strlen(persona->example_banks[i].channel) == channel_len &&
@@ -157,16 +157,16 @@ sc_error_t sc_persona_select_examples(const sc_persona_t *persona, const char *c
         }
     }
     if (!bank || !bank->examples || bank->examples_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Score each example by keyword overlap */
     size_t n = bank->examples_count;
-    if (n > SC_PERSONA_EXAMPLES_MAX)
-        n = SC_PERSONA_EXAMPLES_MAX;
+    if (n > HU_PERSONA_EXAMPLES_MAX)
+        n = HU_PERSONA_EXAMPLES_MAX;
     struct {
         size_t idx;
         size_t score;
-    } scores[SC_PERSONA_EXAMPLES_MAX];
+    } scores[HU_PERSONA_EXAMPLES_MAX];
 
     for (size_t i = 0; i < n; i++) {
         scores[i].idx = i;
@@ -195,5 +195,5 @@ sc_error_t sc_persona_select_examples(const sc_persona_t *persona, const char *c
     for (size_t i = 0; i < take; i++)
         out[i] = &bank->examples[scores[i].idx];
     *out_count = take;
-    return SC_OK;
+    return HU_OK;
 }

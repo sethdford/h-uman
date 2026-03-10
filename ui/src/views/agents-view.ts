@@ -3,18 +3,18 @@ import { customElement, state } from "lit/decorators.js";
 import { formatDate, formatRelative } from "../utils.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import type { DataTableColumnV2 } from "../components/sc-data-table-v2.js";
-import type { ChartData } from "../components/sc-chart.js";
-import "../components/sc-button.js";
-import "../components/sc-card.js";
-import "../components/sc-chart.js";
-import "../components/sc-data-table-v2.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
+import type { DataTableColumnV2 } from "../components/hu-data-table-v2.js";
+import type { ChartData } from "../components/hu-chart.js";
+import "../components/hu-button.js";
+import "../components/hu-card.js";
+import "../components/hu-chart.js";
+import "../components/hu-data-table-v2.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -60,7 +60,7 @@ function formatChartLabel(dateKey: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-@customElement("sc-agents-view")
+@customElement("hu-agents-view")
 export class ScAgentsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
 
@@ -68,70 +68,70 @@ export class ScAgentsView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-agents;
       display: block;
-      color: var(--sc-text);
+      color: var(--hu-text);
       max-width: 75rem;
-      padding: var(--sc-space-lg) var(--sc-space-xl);
+      padding: var(--hu-space-lg) var(--hu-space-xl);
     }
 
     .staleness {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
     .section-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
 
     .section-title {
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-size: var(--hu-text-lg);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
 
     .card-spacer {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
 
     .chart-section {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
 
     .profile-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
 
     .profile-title {
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-size: var(--hu-text-lg);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
 
     .profile-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(8.75rem, 1fr));
-      gap: var(--sc-space-sm);
-      font-size: var(--sc-text-sm);
+      gap: var(--hu-space-sm);
+      font-size: var(--hu-text-sm);
     }
 
     .profile-item {
-      color: var(--sc-text-muted);
+      color: var(--hu-text-muted);
     }
 
     .profile-item strong {
-      color: var(--sc-text);
+      color: var(--hu-text);
     }
 
     .skeleton-sessions {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
 
-    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-lg */ {
       .metrics,
       .skeleton-metrics {
         grid-template-columns: repeat(2, 1fr);
@@ -141,7 +141,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
       }
     }
 
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       .metrics,
       .skeleton-metrics {
         grid-template-columns: 1fr;
@@ -257,7 +257,7 @@ export class ScAgentsView extends GatewayAwareLitElement {
         {
           label: "Sessions",
           data: sorted.map(([, v]) => v),
-          backgroundColor: "var(--sc-chart-brand, var(--sc-accent))",
+          backgroundColor: "var(--hu-chart-brand, var(--hu-accent))",
         },
       ],
     };
@@ -276,11 +276,11 @@ export class ScAgentsView extends GatewayAwareLitElement {
     if (this.loading) return this._renderSkeleton();
     return html`
       ${this.error
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.warning}
             heading="Error"
             description=${this.error}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : nothing}
       ${this._renderHero()} ${this._renderMetrics()} ${this._renderChart()}
       ${this._renderSessions()} ${this._renderConfig()}
@@ -289,14 +289,14 @@ export class ScAgentsView extends GatewayAwareLitElement {
 
   private _renderHero() {
     return html`
-      <sc-page-hero role="region" aria-label="SeaClaw Agent overview">
-        <sc-section-header heading="SeaClaw Agent" description="Monitor autonomous agent instances">
+      <hu-page-hero role="region" aria-label="Human Agent overview">
+        <hu-section-header heading="Human Agent" description="Monitor autonomous agent instances">
           <span class="staleness">${this.stalenessLabel}</span>
-          <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh data"
-            >Refresh</sc-button
+          <hu-button size="sm" @click=${() => this.load()} aria-label="Refresh data"
+            >Refresh</hu-button
           >
-        </sc-section-header>
-      </sc-page-hero>
+        </hu-section-header>
+      </hu-page-hero>
     `;
   }
 
@@ -309,17 +309,17 @@ export class ScAgentsView extends GatewayAwareLitElement {
     ];
 
     return html`
-      <sc-stats-row>
+      <hu-stats-row>
         ${metrics.map(
           (m, i) => html`
-            <sc-stat-card
+            <hu-stat-card
               .value=${m.value}
               .label=${m.label}
-              style="--sc-stagger-delay: ${i * 50}ms"
-            ></sc-stat-card>
+              style="--hu-stagger-delay: ${i * 50}ms"
+            ></hu-stat-card>
           `,
         )}
-      </sc-stats-row>
+      </hu-stats-row>
     `;
   }
 
@@ -327,60 +327,60 @@ export class ScAgentsView extends GatewayAwareLitElement {
     const chartData = this.sessionsPerDayChart;
     if (chartData.labels.length === 0) return nothing;
     return html`
-      <sc-card class="chart-section">
+      <hu-card class="chart-section">
         <div class="section-header">
           <span class="section-title">Sessions per day</span>
         </div>
-        <sc-chart type="bar" .data=${chartData} height=${200}></sc-chart>
-      </sc-card>
+        <hu-chart type="bar" .data=${chartData} height=${200}></hu-chart>
+      </hu-card>
     `;
   }
 
   private _renderSessions() {
     return html`
-      <sc-card class="card-spacer">
+      <hu-card class="card-spacer">
         <div class="section-header">
           <span class="section-title">Active Sessions</span>
-          <sc-button
+          <hu-button
             variant="primary"
             size="sm"
             @click=${() => this.dispatchNavigate("chat:default")}
             aria-label="Start new conversation"
           >
             + New Chat
-          </sc-button>
+          </hu-button>
         </div>
         ${this.sessions.length === 0
           ? html`
-              <sc-empty-state
+              <hu-empty-state
                 .icon=${icons["chat-circle"]}
                 heading="No active sessions"
                 description="Start a conversation to see sessions here."
-              ></sc-empty-state>
+              ></hu-empty-state>
             `
           : html`
-              <sc-data-table-v2
+              <hu-data-table-v2
                 .columns=${this.columns}
                 .rows=${this.tableRows}
-                @sc-row-click=${this._onRowClick}
-              ></sc-data-table-v2>
+                @hu-row-click=${this._onRowClick}
+              ></hu-data-table-v2>
             `}
-      </sc-card>
+      </hu-card>
     `;
   }
 
   private _renderConfig() {
     return html`
-      <sc-card>
+      <hu-card>
         <div class="profile-header">
           <span class="profile-title">Configuration</span>
-          <sc-button
+          <hu-button
             size="sm"
             @click=${() => this.dispatchNavigate("config")}
             aria-label="Edit configuration"
           >
             Edit Config
-          </sc-button>
+          </hu-button>
         </div>
         <div class="profile-grid">
           <div class="profile-item">
@@ -396,20 +396,20 @@ export class ScAgentsView extends GatewayAwareLitElement {
             Max tokens: <strong>${this.config.max_tokens ?? "\u2014"}</strong>
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
   private _renderSkeleton() {
     return html`
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
-      <sc-skeleton variant="card" height="160px" class="skeleton-sessions"></sc-skeleton>
-      <sc-skeleton variant="card" height="100px"></sc-skeleton>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
+      <hu-skeleton variant="card" height="160px" class="skeleton-sessions"></hu-skeleton>
+      <hu-skeleton variant="card" height="100px"></hu-skeleton>
     `;
   }
 }

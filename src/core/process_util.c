@@ -1,19 +1,19 @@
-#include "seaclaw/core/process_util.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/security.h"
-#include "seaclaw/security/sandbox.h"
+#include "human/core/process_util.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/security.h"
+#include "human/security/sandbox.h"
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
 
-void sc_run_result_free(sc_allocator_t *alloc, sc_run_result_t *r) {
+void hu_run_result_free(hu_allocator_t *alloc, hu_run_result_t *r) {
     if (!alloc || !r)
         return;
     if (r->stdout_buf) {
@@ -30,12 +30,12 @@ void sc_run_result_free(sc_allocator_t *alloc, sc_run_result_t *r) {
     r->stderr_cap = 0;
 }
 
-#if defined(SC_GATEWAY_POSIX) && !defined(SC_IS_TEST)
-sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *argv, const char *cwd,
-                                    size_t max_output_bytes, sc_child_setup_fn child_setup,
-                                    void *child_setup_ctx, sc_run_result_t *out) {
+#if defined(HU_GATEWAY_POSIX) && !defined(HU_IS_TEST)
+hu_error_t hu_process_run_sandboxed(hu_allocator_t *alloc, const char *const *argv, const char *cwd,
+                                    size_t max_output_bytes, hu_child_setup_fn child_setup,
+                                    void *child_setup_ctx, hu_run_result_t *out) {
     if (!alloc || !argv || !argv[0] || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (max_output_bytes == 0)
         max_output_bytes = 1048576;
 
@@ -45,7 +45,7 @@ sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *ar
     int stdout_pipe[2];
     int stderr_pipe[2];
     if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -53,7 +53,7 @@ sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *ar
         close(stdout_pipe[1]);
         close(stderr_pipe[0]);
         close(stderr_pipe[1]);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     if (pid == 0) {
@@ -72,8 +72,8 @@ sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *ar
 
         /* Apply sandbox restrictions before running the command */
         if (child_setup) {
-            sc_error_t serr = child_setup(child_setup_ctx);
-            if (serr != SC_OK) {
+            hu_error_t serr = child_setup(child_setup_ctx);
+            if (serr != HU_OK) {
                 _exit(125);
             }
         }
@@ -99,7 +99,7 @@ sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *ar
         close(stdout_pipe[0]);
         close(stderr_pipe[0]);
         waitpid(pid, NULL, 0);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     size_t out_len = 0, err_len = 0;
@@ -170,23 +170,23 @@ sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *ar
         out->success = false;
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_process_run(sc_allocator_t *alloc, const char *const *argv, const char *cwd,
-                          size_t max_output_bytes, sc_run_result_t *out) {
-    return sc_process_run_sandboxed(alloc, argv, cwd, max_output_bytes, NULL, NULL, out);
+hu_error_t hu_process_run(hu_allocator_t *alloc, const char *const *argv, const char *cwd,
+                          size_t max_output_bytes, hu_run_result_t *out) {
+    return hu_process_run_sandboxed(alloc, argv, cwd, max_output_bytes, NULL, NULL, out);
 }
 
-typedef struct sc_policy_child_ctx {
-    sc_security_policy_t *policy;
-} sc_policy_child_ctx_t;
+typedef struct hu_policy_child_ctx {
+    hu_security_policy_t *policy;
+} hu_policy_child_ctx_t;
 
-static sc_error_t policy_child_setup(void *raw) {
-    sc_policy_child_ctx_t *pc = (sc_policy_child_ctx_t *)raw;
+static hu_error_t policy_child_setup(void *raw) {
+    hu_policy_child_ctx_t *pc = (hu_policy_child_ctx_t *)raw;
     if (!pc || !pc->policy)
-        return SC_OK;
-    sc_security_policy_t *p = pc->policy;
+        return HU_OK;
+    hu_security_policy_t *p = pc->policy;
 
     if (p->net_proxy && p->net_proxy->enabled) {
         const char *addr = p->net_proxy->proxy_addr;
@@ -226,69 +226,69 @@ static sc_error_t policy_child_setup(void *raw) {
     }
 
     if (p->sandbox && p->sandbox->vtable && p->sandbox->vtable->apply) {
-        sc_error_t err = p->sandbox->vtable->apply(p->sandbox->ctx);
-        if (err != SC_OK && err != SC_ERR_NOT_SUPPORTED)
+        hu_error_t err = p->sandbox->vtable->apply(p->sandbox->ctx);
+        if (err != HU_OK && err != HU_ERR_NOT_SUPPORTED)
             return err;
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc, const char *const *argv,
+hu_error_t hu_process_run_with_policy(hu_allocator_t *alloc, const char *const *argv,
                                       const char *cwd, size_t max_output_bytes,
-                                      sc_security_policy_t *policy, sc_run_result_t *out) {
+                                      hu_security_policy_t *policy, hu_run_result_t *out) {
     if (!alloc || !argv || !argv[0] || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!policy) {
-        return sc_process_run(alloc, argv, cwd, max_output_bytes, out);
+        return hu_process_run(alloc, argv, cwd, max_output_bytes, out);
     }
-    sc_policy_child_ctx_t ctx = {.policy = policy};
-    return sc_process_run_sandboxed(alloc, argv, cwd, max_output_bytes, policy_child_setup, &ctx,
+    hu_policy_child_ctx_t ctx = {.policy = policy};
+    return hu_process_run_sandboxed(alloc, argv, cwd, max_output_bytes, policy_child_setup, &ctx,
                                     out);
 }
 
 #else
-/* Non-POSIX or SC_IS_TEST: stub that returns empty success */
-sc_error_t sc_process_run_sandboxed(sc_allocator_t *alloc, const char *const *argv, const char *cwd,
-                                    size_t max_output_bytes, sc_child_setup_fn child_setup,
-                                    void *child_setup_ctx, sc_run_result_t *out) {
+/* Non-POSIX or HU_IS_TEST: stub that returns empty success */
+hu_error_t hu_process_run_sandboxed(hu_allocator_t *alloc, const char *const *argv, const char *cwd,
+                                    size_t max_output_bytes, hu_child_setup_fn child_setup,
+                                    void *child_setup_ctx, hu_run_result_t *out) {
     (void)cwd;
     (void)max_output_bytes;
     (void)child_setup;
     (void)child_setup_ctx;
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!argv || !argv[0])
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
     out->stdout_buf = (char *)alloc->alloc(alloc->ctx, 1);
     if (!out->stdout_buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     out->stdout_buf[0] = '\0';
     out->stdout_cap = 1;
     out->stderr_buf = (char *)alloc->alloc(alloc->ctx, 1);
     if (!out->stderr_buf) {
         alloc->free(alloc->ctx, out->stdout_buf, 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     out->stderr_buf[0] = '\0';
     out->stderr_cap = 1;
     out->success = true;
     out->exit_code = 0;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_process_run(sc_allocator_t *alloc, const char *const *argv, const char *cwd,
-                          size_t max_output_bytes, sc_run_result_t *out) {
-    return sc_process_run_sandboxed(alloc, argv, cwd, max_output_bytes, NULL, NULL, out);
+hu_error_t hu_process_run(hu_allocator_t *alloc, const char *const *argv, const char *cwd,
+                          size_t max_output_bytes, hu_run_result_t *out) {
+    return hu_process_run_sandboxed(alloc, argv, cwd, max_output_bytes, NULL, NULL, out);
 }
 
-sc_error_t sc_process_run_with_policy(sc_allocator_t *alloc, const char *const *argv,
+hu_error_t hu_process_run_with_policy(hu_allocator_t *alloc, const char *const *argv,
                                       const char *cwd, size_t max_output_bytes,
-                                      sc_security_policy_t *policy, sc_run_result_t *out) {
+                                      hu_security_policy_t *policy, hu_run_result_t *out) {
     (void)policy;
     if (!alloc || !argv || !argv[0] || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    return sc_process_run(alloc, argv, cwd, max_output_bytes, out);
+        return HU_ERR_INVALID_ARGUMENT;
+    return hu_process_run(alloc, argv, cwd, max_output_bytes, out);
 }
 #endif

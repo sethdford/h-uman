@@ -1,30 +1,30 @@
-#include "seaclaw/agent/theory_of_mind.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/theory_of_mind.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-sc_error_t sc_tom_init(sc_belief_state_t *state, sc_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_tom_init(hu_belief_state_t *state, hu_allocator_t *alloc, const char *contact_id,
                        size_t contact_id_len) {
     if (!state || !alloc || !contact_id)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t len = contact_id_len;
     if (len == 0)
         len = strlen(contact_id);
-    char *dup = sc_strndup(alloc, contact_id, len);
+    char *dup = hu_strndup(alloc, contact_id, len);
     if (!dup)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     state->contact_id = dup;
     state->contact_id_len = strlen(dup);
     state->belief_count = 0;
     memset(state->beliefs, 0, sizeof(state->beliefs));
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_belief_t *find_belief_by_topic(sc_belief_state_t *state, const char *topic,
+static hu_belief_t *find_belief_by_topic(hu_belief_state_t *state, const char *topic,
                                          size_t topic_len) {
     for (size_t i = 0; i < state->belief_count; i++) {
-        sc_belief_t *b = &state->beliefs[i];
+        hu_belief_t *b = &state->beliefs[i];
         if (!b->topic || b->topic_len != topic_len)
             continue;
         if (strncmp(b->topic, topic, topic_len) == 0)
@@ -33,17 +33,17 @@ static sc_belief_t *find_belief_by_topic(sc_belief_state_t *state, const char *t
     return NULL;
 }
 
-sc_error_t sc_tom_record_belief(sc_belief_state_t *state, sc_allocator_t *alloc, const char *topic,
-                                size_t topic_len, sc_belief_type_t type, float confidence) {
+hu_error_t hu_tom_record_belief(hu_belief_state_t *state, hu_allocator_t *alloc, const char *topic,
+                                size_t topic_len, hu_belief_type_t type, float confidence) {
     if (!state || !alloc || !topic)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (type > SC_BELIEF_MISTAKEN)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
+    if (type > HU_BELIEF_MISTAKEN)
+        return HU_ERR_INVALID_ARGUMENT;
     size_t len = topic_len;
     if (len == 0)
         len = strlen(topic);
     if (len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     float clamped = confidence;
     if (clamped < 0.0f)
@@ -53,62 +53,62 @@ sc_error_t sc_tom_record_belief(sc_belief_state_t *state, sc_allocator_t *alloc,
 
     int64_t ts = (int64_t)time(NULL);
 
-    sc_belief_t *existing = find_belief_by_topic(state, topic, len);
+    hu_belief_t *existing = find_belief_by_topic(state, topic, len);
     if (existing) {
         existing->type = type;
         existing->confidence = clamped;
         existing->last_updated = ts;
-        return SC_OK;
+        return HU_OK;
     }
 
-    if (state->belief_count >= SC_TOM_MAX_BELIEFS)
-        return SC_ERR_OUT_OF_MEMORY;
+    if (state->belief_count >= HU_TOM_MAX_BELIEFS)
+        return HU_ERR_OUT_OF_MEMORY;
 
-    char *dup = sc_strndup(alloc, topic, len);
+    char *dup = hu_strndup(alloc, topic, len);
     if (!dup)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-    sc_belief_t *b = &state->beliefs[state->belief_count];
+    hu_belief_t *b = &state->beliefs[state->belief_count];
     b->topic = dup;
     b->topic_len = strlen(dup);
     b->type = type;
     b->confidence = clamped;
     b->last_updated = ts;
     state->belief_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-static const char *belief_type_label(sc_belief_type_t type) {
+static const char *belief_type_label(hu_belief_type_t type) {
     switch (type) {
-    case SC_BELIEF_KNOWS:
+    case HU_BELIEF_KNOWS:
         return "KNOWS";
-    case SC_BELIEF_ASSUMES:
+    case HU_BELIEF_ASSUMES:
         return "ASSUMES";
-    case SC_BELIEF_UNAWARE:
+    case HU_BELIEF_UNAWARE:
         return "UNAWARE";
-    case SC_BELIEF_MISTAKEN:
+    case HU_BELIEF_MISTAKEN:
         return "MISTAKEN";
     default:
         return "UNKNOWN";
     }
 }
 
-static bool belief_shows_confidence(sc_belief_type_t type) {
-    return type == SC_BELIEF_KNOWS || type == SC_BELIEF_ASSUMES || type == SC_BELIEF_MISTAKEN;
+static bool belief_shows_confidence(hu_belief_type_t type) {
+    return type == HU_BELIEF_KNOWS || type == HU_BELIEF_ASSUMES || type == HU_BELIEF_MISTAKEN;
 }
 
-sc_error_t sc_tom_build_context(const sc_belief_state_t *state, sc_allocator_t *alloc, char **out,
+hu_error_t hu_tom_build_context(const hu_belief_state_t *state, hu_allocator_t *alloc, char **out,
                                 size_t *out_len) {
     if (!state || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char buf[4096];
     size_t pos = 0;
 
     pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "### Contact Mental Model\n");
 
-    for (int t = SC_BELIEF_KNOWS; t <= SC_BELIEF_MISTAKEN; t++) {
-        sc_belief_type_t type = (sc_belief_type_t)t;
+    for (int t = HU_BELIEF_KNOWS; t <= HU_BELIEF_MISTAKEN; t++) {
+        hu_belief_type_t type = (hu_belief_type_t)t;
         bool first = true;
         for (size_t i = 0; i < state->belief_count; i++) {
             if (state->beliefs[i].type != type)
@@ -139,22 +139,22 @@ sc_error_t sc_tom_build_context(const sc_belief_state_t *state, sc_allocator_t *
             break;
     }
 
-    char *result = sc_strndup(alloc, buf, pos);
+    char *result = hu_strndup(alloc, buf, pos);
     if (!result)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     *out = result;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_tom_deinit(sc_belief_state_t *state, sc_allocator_t *alloc) {
+void hu_tom_deinit(hu_belief_state_t *state, hu_allocator_t *alloc) {
     if (!state || !alloc)
         return;
-    sc_str_free(alloc, state->contact_id);
+    hu_str_free(alloc, state->contact_id);
     state->contact_id = NULL;
     state->contact_id_len = 0;
     for (size_t i = 0; i < state->belief_count; i++) {
-        sc_str_free(alloc, state->beliefs[i].topic);
+        hu_str_free(alloc, state->beliefs[i].topic);
         state->beliefs[i].topic = NULL;
         state->beliefs[i].topic_len = 0;
     }

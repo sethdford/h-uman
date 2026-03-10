@@ -1,29 +1,29 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security.h"
+#include "human/core/error.h"
+#include "human/security.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#define SC_MAX_ANALYSIS_LEN 16384
+#define HU_MAX_ANALYSIS_LEN 16384
 
 /* ── Tool risk level (for graduated autonomy) ───────────────────── */
 
-sc_command_risk_level_t sc_tool_risk_level(const char *tool_name) {
+hu_command_risk_level_t hu_tool_risk_level(const char *tool_name) {
     if (!tool_name)
-        return SC_RISK_HIGH;
+        return HU_RISK_HIGH;
     if (strcmp(tool_name, "shell") == 0 || strcmp(tool_name, "spawn") == 0)
-        return SC_RISK_HIGH;
+        return HU_RISK_HIGH;
     if (strcmp(tool_name, "file_write") == 0 || strcmp(tool_name, "file_edit") == 0)
-        return SC_RISK_HIGH;
+        return HU_RISK_HIGH;
     if (strcmp(tool_name, "http_request") == 0)
-        return SC_RISK_MEDIUM;
+        return HU_RISK_MEDIUM;
     if (strcmp(tool_name, "browser_open") == 0)
-        return SC_RISK_MEDIUM;
+        return HU_RISK_MEDIUM;
     if (strcmp(tool_name, "file_read") == 0 || strcmp(tool_name, "memory_recall") == 0)
-        return SC_RISK_LOW;
-    return SC_RISK_MEDIUM; /* unknown tools default to medium */
+        return HU_RISK_LOW;
+    return HU_RISK_MEDIUM; /* unknown tools default to medium */
 }
 
 static const char *high_risk_commands[] = {
@@ -39,16 +39,16 @@ static const size_t default_allowed_count = sizeof(default_allowed) / sizeof(def
 
 /* ── Rate tracker ───────────────────────────────────────────────── */
 
-struct sc_rate_tracker {
+struct hu_rate_tracker {
     time_t *timestamps;
     size_t count;
     size_t cap;
     uint32_t max_actions;
     time_t window_secs;
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
 };
 
-static void prune_timestamps(sc_rate_tracker_t *t) {
+static void prune_timestamps(hu_rate_tracker_t *t) {
     time_t now = time(NULL);
     time_t cutoff = now - t->window_secs;
     size_t write = 0;
@@ -60,10 +60,10 @@ static void prune_timestamps(sc_rate_tracker_t *t) {
     t->count = write;
 }
 
-sc_rate_tracker_t *sc_rate_tracker_create(sc_allocator_t *alloc, uint32_t max_actions) {
+hu_rate_tracker_t *hu_rate_tracker_create(hu_allocator_t *alloc, uint32_t max_actions) {
     if (!alloc)
         return NULL;
-    sc_rate_tracker_t *t = (sc_rate_tracker_t *)alloc->alloc(alloc->ctx, sizeof(sc_rate_tracker_t));
+    hu_rate_tracker_t *t = (hu_rate_tracker_t *)alloc->alloc(alloc->ctx, sizeof(hu_rate_tracker_t));
     if (!t)
         return NULL;
     t->timestamps = NULL;
@@ -74,21 +74,21 @@ sc_rate_tracker_t *sc_rate_tracker_create(sc_allocator_t *alloc, uint32_t max_ac
     t->alloc = alloc;
     t->timestamps = (time_t *)alloc->alloc(alloc->ctx, t->cap * sizeof(time_t));
     if (!t->timestamps) {
-        alloc->free(alloc->ctx, t, sizeof(sc_rate_tracker_t));
+        alloc->free(alloc->ctx, t, sizeof(hu_rate_tracker_t));
         return NULL;
     }
     return t;
 }
 
-void sc_rate_tracker_destroy(sc_rate_tracker_t *t) {
+void hu_rate_tracker_destroy(hu_rate_tracker_t *t) {
     if (!t)
         return;
     if (t->timestamps)
         t->alloc->free(t->alloc->ctx, t->timestamps, t->cap * sizeof(time_t));
-    t->alloc->free(t->alloc->ctx, t, sizeof(sc_rate_tracker_t));
+    t->alloc->free(t->alloc->ctx, t, sizeof(hu_rate_tracker_t));
 }
 
-bool sc_rate_tracker_record_action(sc_rate_tracker_t *t) {
+bool hu_rate_tracker_record_action(hu_rate_tracker_t *t) {
     if (!t)
         return true;
     prune_timestamps(t);
@@ -106,21 +106,21 @@ bool sc_rate_tracker_record_action(sc_rate_tracker_t *t) {
     return t->count <= t->max_actions;
 }
 
-bool sc_rate_tracker_is_limited(sc_rate_tracker_t *t) {
+bool hu_rate_tracker_is_limited(hu_rate_tracker_t *t) {
     if (!t)
         return false;
     prune_timestamps(t);
     return t->count >= t->max_actions;
 }
 
-size_t sc_rate_tracker_count(sc_rate_tracker_t *t) {
+size_t hu_rate_tracker_count(hu_rate_tracker_t *t) {
     if (!t)
         return 0;
     prune_timestamps(t);
     return t->count;
 }
 
-uint32_t sc_rate_tracker_remaining(sc_rate_tracker_t *t) {
+uint32_t hu_rate_tracker_remaining(hu_rate_tracker_t *t) {
     if (!t)
         return 0;
     prune_timestamps(t);
@@ -239,8 +239,8 @@ static bool is_args_safe(const char *base, const char *full_cmd) {
 }
 
 static void normalize_command(const char *cmd, size_t len, char *buf) {
-    if (len > SC_MAX_ANALYSIS_LEN)
-        len = SC_MAX_ANALYSIS_LEN;
+    if (len > HU_MAX_ANALYSIS_LEN)
+        len = HU_MAX_ANALYSIS_LEN;
     memcpy(buf, cmd, len);
     buf[len] = '\0';
     /* Replace && and || with nulls */
@@ -264,14 +264,14 @@ static void normalize_command(const char *cmd, size_t len, char *buf) {
 
 /* ── Policy API ─────────────────────────────────────────────────── */
 
-sc_command_risk_level_t sc_policy_command_risk_level(const sc_security_policy_t *policy,
+hu_command_risk_level_t hu_policy_command_risk_level(const hu_security_policy_t *policy,
                                                      const char *command) {
     (void)policy;
     size_t cmd_len = command ? strlen(command) : 0;
-    if (cmd_len > SC_MAX_ANALYSIS_LEN)
-        return SC_RISK_HIGH;
+    if (cmd_len > HU_MAX_ANALYSIS_LEN)
+        return HU_RISK_HIGH;
 
-    char norm[SC_MAX_ANALYSIS_LEN + 1];
+    char norm[HU_MAX_ANALYSIS_LEN + 1];
     normalize_command(command, cmd_len, norm);
 
     bool saw_medium = false;
@@ -303,9 +303,9 @@ sc_command_risk_level_t sc_policy_command_risk_level(const sc_security_policy_t 
         lower_base[bnlen] = '\0';
 
         if (is_high_risk_command(lower_base))
-            return SC_RISK_HIGH;
+            return HU_RISK_HIGH;
         if (contains_str(cmd_part, "rm -rf /") || contains_str(cmd_part, "rm -fr /"))
-            return SC_RISK_HIGH;
+            return HU_RISK_HIGH;
 
         const char *first_arg = sp ? sp + 1 : NULL;
         while (first_arg && *first_arg == ' ')
@@ -316,40 +316,40 @@ sc_command_risk_level_t sc_policy_command_risk_level(const sc_security_policy_t 
         seg = seg_end + 1;
     }
 
-    return saw_medium ? SC_RISK_MEDIUM : SC_RISK_LOW;
+    return saw_medium ? HU_RISK_MEDIUM : HU_RISK_LOW;
 }
 
-sc_error_t sc_policy_validate_command(const sc_security_policy_t *policy, const char *command,
-                                      bool approved, sc_command_risk_level_t *out_risk) {
+hu_error_t hu_policy_validate_command(const hu_security_policy_t *policy, const char *command,
+                                      bool approved, hu_command_risk_level_t *out_risk) {
     if (!policy || !command || !out_risk)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    if (!sc_policy_is_command_allowed(policy, command))
-        return SC_ERR_SECURITY_COMMAND_NOT_ALLOWED;
+    if (!hu_policy_is_command_allowed(policy, command))
+        return HU_ERR_SECURITY_COMMAND_NOT_ALLOWED;
 
-    sc_command_risk_level_t risk = sc_policy_command_risk_level(policy, command);
+    hu_command_risk_level_t risk = hu_policy_command_risk_level(policy, command);
 
-    if (risk == SC_RISK_HIGH) {
+    if (risk == HU_RISK_HIGH) {
         if (policy->block_high_risk_commands)
-            return SC_ERR_SECURITY_HIGH_RISK_BLOCKED;
-        if (policy->autonomy == SC_AUTONOMY_SUPERVISED && !approved)
-            return SC_ERR_SECURITY_APPROVAL_REQUIRED;
+            return HU_ERR_SECURITY_HIGH_RISK_BLOCKED;
+        if (policy->autonomy == HU_AUTONOMY_SUPERVISED && !approved)
+            return HU_ERR_SECURITY_APPROVAL_REQUIRED;
     }
 
-    if (risk == SC_RISK_MEDIUM && policy->autonomy == SC_AUTONOMY_SUPERVISED &&
+    if (risk == HU_RISK_MEDIUM && policy->autonomy == HU_AUTONOMY_SUPERVISED &&
         policy->require_approval_for_medium_risk && !approved)
-        return SC_ERR_SECURITY_APPROVAL_REQUIRED;
+        return HU_ERR_SECURITY_APPROVAL_REQUIRED;
 
     *out_risk = risk;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_policy_is_command_allowed(const sc_security_policy_t *policy, const char *command) {
+bool hu_policy_is_command_allowed(const hu_security_policy_t *policy, const char *command) {
     if (!policy || !command)
         return false;
-    if (policy->autonomy == SC_AUTONOMY_READ_ONLY)
+    if (policy->autonomy == HU_AUTONOMY_READ_ONLY)
         return false;
-    if (strlen(command) > SC_MAX_ANALYSIS_LEN)
+    if (strlen(command) > HU_MAX_ANALYSIS_LEN)
         return false;
 
     if (contains_str(command, "`") || contains_str(command, "$(") || contains_str(command, "${"))
@@ -375,7 +375,7 @@ bool sc_policy_is_command_allowed(const sc_security_policy_t *policy, const char
     }
 
     size_t cmd_len = strlen(command);
-    char norm[SC_MAX_ANALYSIS_LEN + 1];
+    char norm[HU_MAX_ANALYSIS_LEN + 1];
     normalize_command(command, cmd_len, norm);
 
     bool has_cmd = false;
@@ -431,20 +431,20 @@ bool sc_policy_is_command_allowed(const sc_security_policy_t *policy, const char
     return has_cmd;
 }
 
-bool sc_policy_can_act(const sc_security_policy_t *policy) {
-    return policy && policy->autonomy != SC_AUTONOMY_READ_ONLY;
+bool hu_policy_can_act(const hu_security_policy_t *policy) {
+    return policy && policy->autonomy != HU_AUTONOMY_READ_ONLY;
 }
 
-bool sc_policy_record_action(sc_security_policy_t *policy) {
+bool hu_policy_record_action(hu_security_policy_t *policy) {
     if (!policy)
         return true;
     if (!policy->tracker)
         return true;
-    return sc_rate_tracker_record_action(policy->tracker);
+    return hu_rate_tracker_record_action(policy->tracker);
 }
 
-bool sc_policy_is_rate_limited(const sc_security_policy_t *policy) {
+bool hu_policy_is_rate_limited(const hu_security_policy_t *policy) {
     if (!policy || !policy->tracker)
         return false;
-    return sc_rate_tracker_is_limited(policy->tracker);
+    return hu_rate_tracker_is_limited(policy->tracker);
 }

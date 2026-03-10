@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# setup-from-voiceai.sh — Import voiceai credentials into SeaClaw config.
+# setup-from-voiceai.sh — Import voiceai credentials into Human config.
 #
 # Reads ~/Documents/voiceai/.env and maps available credentials to
-# ~/.seaclaw/config.json channels/providers. Does NOT modify any repo files.
+# ~/.human/config.json channels/providers. Does NOT modify any repo files.
 #
 # Usage: bash scripts/setup-from-voiceai.sh [--dry-run]
 #
 set -euo pipefail
 
 VOICEAI_ENV="$HOME/Documents/voiceai/.env"
-SEACLAW_CONFIG="$HOME/.seaclaw/config.json"
+HUMAN_CONFIG="$HOME/.human/config.json"
 DRY_RUN=false
 
 if [ "${1:-}" = "--dry-run" ]; then
@@ -21,8 +21,8 @@ if [ ! -f "$VOICEAI_ENV" ]; then
     exit 1
 fi
 
-if [ ! -f "$SEACLAW_CONFIG" ]; then
-    echo "ERROR: SeaClaw config not found at $SEACLAW_CONFIG"
+if [ ! -f "$HUMAN_CONFIG" ]; then
+    echo "ERROR: Human config not found at $HUMAN_CONFIG"
     exit 1
 fi
 
@@ -43,7 +43,7 @@ while IFS='=' read -r key value; do
     esac
 done < "$VOICEAI_ENV"
 
-echo "=== SeaClaw Channel Setup from voiceai ==="
+echo "=== Human Channel Setup from voiceai ==="
 echo ""
 
 # Report what we found
@@ -88,20 +88,20 @@ echo "Found: $found credentials, Missing: $missing"
 echo ""
 
 if $DRY_RUN; then
-    echo "[dry-run] Would update $SEACLAW_CONFIG"
+    echo "[dry-run] Would update $HUMAN_CONFIG"
     exit 0
 fi
 
 # Back up existing config
-cp "$SEACLAW_CONFIG" "$SEACLAW_CONFIG.bak"
-echo "Backed up config to $SEACLAW_CONFIG.bak"
+cp "$HUMAN_CONFIG" "$HUMAN_CONFIG.bak"
+echo "Backed up config to $HUMAN_CONFIG.bak"
 
 # Build the updated config using python3 (jq alternative with no deps)
 python3 << 'PYEOF'
 import json
 import os
 
-config_path = os.path.expanduser("~/.seaclaw/config.json")
+config_path = os.path.expanduser("~/.human/config.json")
 with open(config_path) as f:
     cfg = json.load(f)
 
@@ -195,5 +195,5 @@ echo "  • whatsapp  — need WhatsApp Business API creds"
 echo "  • facebook  — need FB Page Token"
 echo "  • tiktok    — need TikTok developer creds"
 echo ""
-echo "To start the gateway:  ./build-release/seaclaw gateway"
-echo "To start with agent:   ./build-release/seaclaw gateway --with-agent"
+echo "To start the gateway:  ./build-release/human gateway"
+echo "To start with agent:   ./build-release/human gateway --with-agent"

@@ -5,47 +5,47 @@ description: Migrate from OpenClaw or between memory backends.
 
 ## Migration from OpenClaw
 
-SeaClaw is a drop-in replacement for [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js). It preserves your memory, config structure, and channel integrations while dramatically reducing resource usage.
+Human is a drop-in replacement for [OpenClaw](https://github.com/openclaw/openclaw) (TypeScript, Node.js). It preserves your memory, config structure, and channel integrations while dramatically reducing resource usage.
 
-| Dimension        | OpenClaw               | SeaClaw                        |
+| Dimension        | OpenClaw               | Human                        |
 | ---------------- | ---------------------- | ------------------------------ |
 | **Binary size**  | ~28 MB (npm dist)      | **~528 KB**                    |
 | **Memory**       | Node.js heap (100+ MB) | **&lt; 5 MB** peak RSS         |
 | **Dependencies** | 1,200+ npm packages    | **0** — libc + optional SQLite |
 | **Secrets**      | Plain-text API keys    | ChaCha20-Poly1305 encrypted    |
 
-### 1. Install SeaClaw
+### 1. Install Human
 
 **Build from source (recommended):**
 
 ```bash
-git clone https://github.com/sethdford/seaclaw.git
-cd seaclaw && mkdir -p build && cd build
+git clone https://github.com/sethdford/human.git
+cd human && mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .
-sudo cp seaclaw /usr/local/bin/
+sudo cp human /usr/local/bin/
 ```
 
 **Or download a release:**
 
 ```bash
-curl -Lo seaclaw https://github.com/sethdford/seaclaw/releases/latest/download/seaclaw-$(uname -m)
-chmod +x seaclaw && sudo mv seaclaw /usr/local/bin/
+curl -Lo human https://github.com/sethdford/human/releases/latest/download/human-$(uname -m)
+chmod +x human && sudo mv human /usr/local/bin/
 ```
 
 ### 2. Migrate memory
 
-SeaClaw imports memories directly from OpenClaw's SQLite brain database:
+Human imports memories directly from OpenClaw's SQLite brain database:
 
 ```bash
-seaclaw migrate sqlite ~/.openclaw/brain.db
+human migrate sqlite ~/.openclaw/brain.db
 ```
 
 The migration tool auto-detects common schema variants and maps columns automatically.
 
 ### 3. Migrate config
 
-SeaClaw uses the **same config structure** as OpenClaw. Most keys map 1:1.
+Human uses the **same config structure** as OpenClaw. Most keys map 1:1.
 
 **OpenClaw** (`~/.openclaw/config.json`):
 
@@ -57,7 +57,7 @@ SeaClaw uses the **same config structure** as OpenClaw. Most keys map 1:1.
 }
 ```
 
-**SeaClaw** (`~/.seaclaw/config.json`):
+**Human** (`~/.human/config.json`):
 
 ```json
 {
@@ -73,9 +73,9 @@ SeaClaw uses the **same config structure** as OpenClaw. Most keys map 1:1.
 ### 4. Verify
 
 ```bash
-seaclaw doctor          # Config, provider, memory OK?
-seaclaw status          # Full system status
-seaclaw agent -m "What do you remember about me?"
+human doctor          # Config, provider, memory OK?
+human status          # Full system status
+human agent -m "What do you remember about me?"
 ```
 
 ---
@@ -87,8 +87,8 @@ Transfer memory entries between SQLite and Markdown backends when switching stor
 ### CLI usage
 
 ```bash
-seaclaw migrate sqlite <source_db_path> [target_path]
-seaclaw migrate markdown <source_directory> [target_path]
+human migrate sqlite <source_db_path> [target_path]
+human migrate markdown <source_directory> [target_path]
 ```
 
 ### Examples
@@ -96,13 +96,13 @@ seaclaw migrate markdown <source_directory> [target_path]
 **SQLite → Markdown:**
 
 ```bash
-seaclaw migrate sqlite ~/.seaclaw/memory.db ./memories
+human migrate sqlite ~/.human/memory.db ./memories
 ```
 
 **Markdown → SQLite:**
 
 ```bash
-seaclaw migrate markdown ./old-memories ~/.seaclaw/new-memory.db
+human migrate markdown ./old-memories ~/.human/new-memory.db
 ```
 
 ### Supported paths

@@ -2,23 +2,23 @@
  * Tool validation helpers: path and URL security checks.
  * Secure by default - deny unless explicitly allowed.
  */
-#include "seaclaw/tools/validation.h"
-#include "seaclaw/core/error.h"
+#include "human/tools/validation.h"
+#include "human/core/error.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <string.h>
 
-#define SC_PATH_MAX 4096
-#define SC_URL_MAX  8192
+#define HU_PATH_MAX 4096
+#define HU_URL_MAX  8192
 
-sc_error_t sc_tool_validate_path(const char *path, const char *workspace_dir,
+hu_error_t hu_tool_validate_path(const char *path, const char *workspace_dir,
                                  size_t workspace_dir_len) {
     if (!path || path[0] == '\0')
-        return SC_ERR_TOOL_VALIDATION;
+        return HU_ERR_TOOL_VALIDATION;
 
     size_t len = strlen(path);
-    if (len > SC_PATH_MAX)
-        return SC_ERR_TOOL_VALIDATION;
+    if (len > HU_PATH_MAX)
+        return HU_ERR_TOOL_VALIDATION;
 
     const char *p = path;
     while (*p) {
@@ -26,7 +26,7 @@ sc_error_t sc_tool_validate_path(const char *path, const char *workspace_dir,
             bool sep_before = (p == path || p[-1] == '/' || p[-1] == '\\');
             bool sep_after = (p[2] == '/' || p[2] == '\\' || p[2] == '\0');
             if (sep_before && sep_after)
-                return SC_ERR_TOOL_VALIDATION;
+                return HU_ERR_TOOL_VALIDATION;
         }
         p++;
     }
@@ -44,15 +44,15 @@ sc_error_t sc_tool_validate_path(const char *path, const char *workspace_dir,
             while (ws_len > 0 && workspace_dir[ws_len - 1] == '/')
                 ws_len--;
             if (len < ws_len)
-                return SC_ERR_TOOL_VALIDATION;
+                return HU_ERR_TOOL_VALIDATION;
             if (memcmp(path, workspace_dir, ws_len) != 0)
-                return SC_ERR_TOOL_VALIDATION;
+                return HU_ERR_TOOL_VALIDATION;
             if (path[ws_len] != '\0' && path[ws_len] != '/' && path[ws_len] != '\\')
-                return SC_ERR_TOOL_VALIDATION;
+                return HU_ERR_TOOL_VALIDATION;
         }
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool parse_ipv4_private(const char *host, size_t len) {
@@ -159,27 +159,27 @@ static void extract_host(const char *url, size_t url_len, const char **out_host,
     *out_len = (size_t)(p - start);
 }
 
-sc_error_t sc_tool_validate_url(const char *url) {
+hu_error_t hu_tool_validate_url(const char *url) {
     if (!url || url[0] == '\0')
-        return SC_ERR_TOOL_VALIDATION;
+        return HU_ERR_TOOL_VALIDATION;
 
     size_t len = strlen(url);
-    if (len > SC_URL_MAX)
-        return SC_ERR_TOOL_VALIDATION;
+    if (len > HU_URL_MAX)
+        return HU_ERR_TOOL_VALIDATION;
 
     /* HTTPS only */
     if (len < 8)
-        return SC_ERR_TOOL_VALIDATION;
+        return HU_ERR_TOOL_VALIDATION;
     if (tolower((unsigned char)url[0]) != 'h' || tolower((unsigned char)url[1]) != 't' ||
         tolower((unsigned char)url[2]) != 't' || tolower((unsigned char)url[3]) != 'p' ||
         url[4] != 's' || url[5] != ':' || url[6] != '/' || url[7] != '/')
-        return SC_ERR_TOOL_VALIDATION;
+        return HU_ERR_TOOL_VALIDATION;
 
     const char *host;
     size_t host_len;
     extract_host(url, len, &host, &host_len);
     if (!host || host_len == 0)
-        return SC_ERR_TOOL_VALIDATION;
+        return HU_ERR_TOOL_VALIDATION;
 
     /* Check for IPv4 (all digits and dots) */
     size_t i;
@@ -194,8 +194,8 @@ sc_error_t sc_tool_validate_url(const char *url) {
     }
     if (might_ipv4 && host_len <= 15) {
         if (parse_ipv4_private(host, host_len))
-            return SC_ERR_TOOL_VALIDATION;
-        return SC_OK;
+            return HU_ERR_TOOL_VALIDATION;
+        return HU_OK;
     }
 
     /* Check for IPv6 (host was extracted from [::1] so no brackets in host) */
@@ -207,9 +207,9 @@ sc_error_t sc_tool_validate_url(const char *url) {
                 break;
             }
         if (has_colon && parse_ipv6_private(host, host_len))
-            return SC_ERR_TOOL_VALIDATION;
+            return HU_ERR_TOOL_VALIDATION;
     }
 
     /* Hostname - allow (no private IP) */
-    return SC_OK;
+    return HU_OK;
 }

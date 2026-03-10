@@ -3,400 +3,400 @@
     "name": "code-review",
     "description": "Automated code review with style checks and security scanning",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/code-review",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/code-review",
     "tags": ["development", "review"]
   },
   {
     "name": "git-workflow",
     "description": "Git branch strategy, merge workflows, and PR automation",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/git-workflow",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/git-workflow",
     "tags": ["development", "git", "version-control"]
   },
   {
     "name": "test-generator",
     "description": "Generate unit tests and integration tests from source code",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/test-generator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/test-generator",
     "tags": ["development", "testing", "automation"]
   },
   {
     "name": "code-formatter",
     "description": "Format and lint code according to project conventions",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/code-formatter",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/code-formatter",
     "tags": ["development", "formatting", "linting"]
   },
   {
     "name": "dependency-checker",
     "description": "Check and update project dependencies for security and compatibility",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/dependency-checker",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/dependency-checker",
     "tags": ["development", "dependencies", "security"]
   },
   {
     "name": "api-designer",
     "description": "Design and document REST and GraphQL APIs",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/api-designer",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/api-designer",
     "tags": ["development", "api", "design"]
   },
   {
     "name": "database-migrator",
     "description": "Generate and run database schema migrations",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/database-migrator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/database-migrator",
     "tags": ["development", "database", "migration"]
   },
   {
     "name": "code-documenter",
     "description": "Generate docs, READMEs, and API documentation from code",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/code-documenter",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/code-documenter",
     "tags": ["development", "documentation"]
   },
   {
     "name": "ci-cd-helper",
     "description": "Configure CI/CD pipelines and deployment automation",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/ci-cd-helper",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/ci-cd-helper",
     "tags": ["development", "ci", "cd", "automation"]
   },
   {
     "name": "code-translator",
     "description": "Translate code between programming languages and frameworks",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/code-translator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/code-translator",
     "tags": ["development", "translation", "migration"]
   },
   {
     "name": "email-digest",
     "description": "Daily email digest with priority sorting and action items",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/email-digest",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/email-digest",
     "tags": ["email", "productivity"]
   },
   {
     "name": "meeting-notes",
     "description": "Summarize meetings and extract action items",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/meeting-notes",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/meeting-notes",
     "tags": ["productivity", "meetings"]
   },
   {
     "name": "research-assistant",
     "description": "Research topics and compile summaries from multiple sources",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/research-assistant",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/research-assistant",
     "tags": ["productivity", "research"]
   },
   {
     "name": "calendar-sync",
     "description": "Sync and manage calendar events across providers",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/calendar-sync",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/calendar-sync",
     "tags": ["productivity", "calendar"]
   },
   {
     "name": "expense-tracker",
     "description": "Track expenses and categorize spending",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/expense-tracker",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/expense-tracker",
     "tags": ["productivity", "finance"]
   },
   {
     "name": "todo-manager",
     "description": "Manage tasks, todos, and project checklists",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/todo-manager",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/todo-manager",
     "tags": ["productivity", "tasks"]
   },
   {
     "name": "pomodoro-timer",
     "description": "Pomodoro technique timer for focused work sessions",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/pomodoro-timer",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/pomodoro-timer",
     "tags": ["productivity", "time-management"]
   },
   {
     "name": "daily-standup",
     "description": "Generate and track daily standup notes",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/daily-standup",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/daily-standup",
     "tags": ["productivity", "meetings", "agile"]
   },
   {
     "name": "invoice-generator",
     "description": "Generate invoices and track billing",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/invoice-generator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/invoice-generator",
     "tags": ["productivity", "invoice", "finance"]
   },
   {
     "name": "time-tracker",
     "description": "Track time spent on projects and tasks",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/time-tracker",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/time-tracker",
     "tags": ["productivity", "time-management"]
   },
   {
     "name": "system-monitor",
     "description": "Monitor system resources, processes, and health metrics",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/system-monitor",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/system-monitor",
     "tags": ["devops", "monitoring"]
   },
   {
     "name": "docker-manager",
     "description": "Manage Docker containers, images, and compose stacks",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/docker-manager",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/docker-manager",
     "tags": ["devops", "docker", "containers"]
   },
   {
     "name": "kubernetes-helper",
     "description": "Kubernetes deployment and cluster management helpers",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/kubernetes-helper",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/kubernetes-helper",
     "tags": ["devops", "kubernetes", "orchestration"]
   },
   {
     "name": "log-analyzer",
     "description": "Parse and analyze application and system logs",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/log-analyzer",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/log-analyzer",
     "tags": ["devops", "logging", "debugging"]
   },
   {
     "name": "ssl-cert-monitor",
     "description": "Monitor SSL/TLS certificate expiration and renewal",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/ssl-cert-monitor",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/ssl-cert-monitor",
     "tags": ["devops", "ssl", "security"]
   },
   {
     "name": "uptime-checker",
     "description": "Monitor endpoint uptime and availability",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/uptime-checker",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/uptime-checker",
     "tags": ["devops", "monitoring", "availability"]
   },
   {
     "name": "backup-scheduler",
     "description": "Schedule and manage backup jobs",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/backup-scheduler",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/backup-scheduler",
     "tags": ["devops", "backup", "recovery"]
   },
   {
     "name": "deployment-manager",
     "description": "Orchestrate deployments and rollout strategies",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/deployment-manager",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/deployment-manager",
     "tags": ["devops", "deployment"]
   },
   {
     "name": "home-automation",
     "description": "Control smart home devices and automation rules",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/home-automation",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/home-automation",
     "tags": ["iot", "smart-home"]
   },
   {
     "name": "weather-station",
     "description": "Aggregate and display weather data from sensors",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/weather-station",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/weather-station",
     "tags": ["iot", "weather", "sensors"]
   },
   {
     "name": "plant-monitor",
     "description": "Monitor soil moisture and plant health",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/plant-monitor",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/plant-monitor",
     "tags": ["iot", "gardening", "sensors"]
   },
   {
     "name": "energy-tracker",
     "description": "Track energy consumption from smart meters",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/energy-tracker",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/energy-tracker",
     "tags": ["iot", "energy", "sensors"]
   },
   {
     "name": "garage-door",
     "description": "Control garage door opener via smart relay",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/garage-door",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/garage-door",
     "tags": ["iot", "hardware"]
   },
   {
     "name": "nostr-bot",
     "description": "Nostr relay interaction and DMs bot",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/nostr-bot",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/nostr-bot",
     "tags": ["social", "nostr", "messaging"]
   },
   {
     "name": "rss-monitor",
     "description": "Monitor RSS feeds and notify on new posts",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/rss-monitor",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/rss-monitor",
     "tags": ["social", "rss", "feeds"]
   },
   {
     "name": "slack-digest",
     "description": "Daily Slack channel digest and highlights",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/slack-digest",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/slack-digest",
     "tags": ["social", "slack", "communication"]
   },
   {
     "name": "discord-moderator",
     "description": "Discord moderation and auto-moderation rules",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/discord-moderator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/discord-moderator",
     "tags": ["social", "discord", "moderation"]
   },
   {
     "name": "twitter-scheduler",
     "description": "Schedule and publish tweets",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/twitter-scheduler",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/twitter-scheduler",
     "tags": ["social", "twitter", "scheduling"]
   },
   {
     "name": "newsletter-curator",
     "description": "Curate and compose newsletter content",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/newsletter-curator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/newsletter-curator",
     "tags": ["social", "newsletter", "content"]
   },
   {
     "name": "social-analytics",
     "description": "Analyze social media engagement metrics",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/social-analytics",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/social-analytics",
     "tags": ["social", "analytics"]
   },
   {
     "name": "data-analysis",
     "description": "Analyze datasets and generate insights",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/data-analysis",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/data-analysis",
     "tags": ["data", "analytics"]
   },
   {
     "name": "csv-transformer",
     "description": "Transform, filter, and reshape CSV data",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/csv-transformer",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/csv-transformer",
     "tags": ["data", "csv", "etl"]
   },
   {
     "name": "json-validator",
     "description": "Validate JSON against schemas and fix formatting",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/json-validator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/json-validator",
     "tags": ["data", "json", "validation"]
   },
   {
     "name": "sql-query-builder",
     "description": "Build and optimize SQL queries from natural language",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/sql-query-builder",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/sql-query-builder",
     "tags": ["data", "sql", "database"]
   },
   {
     "name": "report-generator",
     "description": "Generate data reports and visualizations",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/report-generator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/report-generator",
     "tags": ["data", "reporting"]
   },
   {
     "name": "claw-migrator",
-    "description": "Migrate configs and skills between SeaClaw instances",
+    "description": "Migrate configs and skills between Human instances",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/claw-migrator",
-    "tags": ["migration", "setup", "seaclaw"]
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/claw-migrator",
+    "tags": ["migration", "setup", "human"]
   },
   {
     "name": "config-validator",
-    "description": "Validate SeaClaw and skill configuration files",
+    "description": "Validate Human and skill configuration files",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/config-validator",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/config-validator",
     "tags": ["migration", "setup", "config"]
   },
   {
     "name": "health-checker",
     "description": "Run health checks on gateway and provider connectivity",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/health-checker",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/health-checker",
     "tags": ["migration", "setup", "health"]
   },
   {
     "name": "plugin-scanner",
     "description": "Scan and list installed skills and plugins",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/plugin-scanner",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/plugin-scanner",
     "tags": ["migration", "setup", "plugins"]
   },
   {
     "name": "environment-setup",
     "description": "Setup development and deployment environments",
     "version": "1.0.0",
-    "author": "seaclaw",
-    "url": "https://github.com/seaclaw/skill-registry/tree/main/skills/environment-setup",
+    "author": "human",
+    "url": "https://github.com/human/skill-registry/tree/main/skills/environment-setup",
     "tags": ["migration", "setup", "environment"]
   }
 ]

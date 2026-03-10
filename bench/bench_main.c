@@ -1,6 +1,6 @@
-/* Simple benchmark harness for seaclaw core operations.
+/* Simple benchmark harness for human core operations.
  * Uses clock_gettime(CLOCK_MONOTONIC) for timing.
- * Compile with SC_ENABLE_BENCH=ON.
+ * Compile with HU_ENABLE_BENCH=ON.
  */
 #include <stdint.h>
 #include <stdio.h>

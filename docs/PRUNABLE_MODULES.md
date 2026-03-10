@@ -4,17 +4,17 @@ title: Prunable Modules — Binary Size Reduction Candidates
 # Prunable Modules — Binary Size Reduction Candidates
 
 Modules that could be removed or further gated to reduce binary size.
-Status key: **STUB** = returns SC_ERR_NOT_SUPPORTED for core operations,
+Status key: **STUB** = returns HU_ERR_NOT_SUPPORTED for core operations,
 **PARTIAL** = some functions work but core ones are stubbed on certain platforms.
 
-## Stub Runtimes (always return SC_ERR_NOT_SUPPORTED)
+## Stub Runtimes (always return HU_ERR_NOT_SUPPORTED)
 
 | File                       | Object Size | Status | Notes                                                   |
 | -------------------------- | ----------- | ------ | ------------------------------------------------------- |
-| `src/runtime/wasm_rt.c`    | 5.5 KB      | STUB   | `wasm_wrap_command` always returns SC_ERR_NOT_SUPPORTED |
-| `src/runtime/cloudflare.c` | 4.0 KB      | STUB   | `cf_wrap_command` always returns SC_ERR_NOT_SUPPORTED   |
+| `src/runtime/wasm_rt.c`    | 5.5 KB      | STUB   | `wasm_wrap_command` always returns HU_ERR_NOT_SUPPORTED |
+| `src/runtime/cloudflare.c` | 4.0 KB      | STUB   | `cf_wrap_command` always returns HU_ERR_NOT_SUPPORTED   |
 
-**Now gated** behind `SC_ENABLE_RUNTIME_EXOTIC` (OFF by default).
+**Now gated** behind `HU_ENABLE_RUNTIME_EXOTIC` (OFF by default).
 
 ## Peripherals + Hardware Tools
 
@@ -30,7 +30,7 @@ Status key: **STUB** = returns SC_ERR_NOT_SUPPORTED for core operations,
 | `src/tools/i2c.c`             | 8.6 KB      | REAL            | I2C bus tool                   |
 | `src/tools/spi.c`             | 8.6 KB      | REAL            | SPI bus tool                   |
 
-**Now gated** behind `SC_ENABLE_PERIPHERALS` (OFF by default). ~98 KB object total.
+**Now gated** behind `HU_ENABLE_PERIPHERALS` (OFF by default). ~98 KB object total.
 
 ## Tunnels
 
@@ -41,7 +41,7 @@ Status key: **STUB** = returns SC_ERR_NOT_SUPPORTED for core operations,
 | `src/tunnel/tailscale.c`  | 10.3 KB     | REAL   | tailscale funnel wrapper |
 | `src/tunnel/custom.c`     | 12.1 KB     | REAL   | Generic command wrapper  |
 
-**Now gated** behind `SC_ENABLE_TUNNELS` (OFF by default). ~43 KB object total.
+**Now gated** behind `HU_ENABLE_TUNNELS` (OFF by default). ~43 KB object total.
 
 ## Platform-Specific Security Sandboxes (Pruned via Auto-Detect)
 
@@ -129,9 +129,9 @@ behind options would reduce binary size for deployments that don't need them.
 
 | Category                     | Object Size | Savings After LTO (est.) | Status                               |
 | ---------------------------- | ----------- | ------------------------ | ------------------------------------ |
-| Stub runtimes                | 9.5 KB      | ~2 KB                    | **Gated** (SC_ENABLE_RUNTIME_EXOTIC) |
-| Peripherals + HW tools       | 98 KB       | ~15-20 KB                | **Gated** (SC_ENABLE_PERIPHERALS)    |
-| Tunnels                      | 43 KB       | ~10-15 KB                | **Gated** (SC_ENABLE_TUNNELS)        |
+| Stub runtimes                | 9.5 KB      | ~2 KB                    | **Gated** (HU_ENABLE_RUNTIME_EXOTIC) |
+| Peripherals + HW tools       | 98 KB       | ~15-20 KB                | **Gated** (HU_ENABLE_PERIPHERALS)    |
+| Tunnels                      | 43 KB       | ~10-15 KB                | **Gated** (HU_ENABLE_TUNNELS)        |
 | Platform sandbox auto-detect | 50 KB       | ~5-8 KB                  | **Auto-detected**                    |
 | Future: niche tools          | 130 KB      | ~20-30 KB                | Candidate                            |
 | Future: retrieval pipeline   | 100 KB      | ~15-25 KB                | Candidate                            |

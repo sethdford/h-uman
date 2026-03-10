@@ -1,7 +1,7 @@
 ---
-title: Silent Failures Audit — seaclaw Codebase
+title: Silent Failures Audit — human Codebase
 ---
-# Silent Failures Audit — seaclaw Codebase
+# Silent Failures Audit — human Codebase
 
 This document catalogs silent failures, ignored error codes, and inadequate error handling found across the C gateway, WebSocket server, UI controllers/components, and config/main entry points.
 
@@ -13,7 +13,7 @@ This document catalogs silent failures, ignored error codes, and inadequate erro
 
 **Location:** `src/gateway/gateway.c` lines 877–880
 
-**Issue:** When `sc_ws_server_upgrade` fails for any reason, the gateway always sends HTTP 429 ("too many connections") and closes the connection. Other errors (e.g. `SC_ERR_PERMISSION_DENIED`, `SC_ERR_INVALID_ARGUMENT`, `SC_ERR_IO`) are misreported as 429.
+**Issue:** When `hu_ws_server_upgrade` fails for any reason, the gateway always sends HTTP 429 ("too many connections") and closes the connection. Other errors (e.g. `HU_ERR_PERMISSION_DENIED`, `HU_ERR_INVALID_ARGUMENT`, `HU_ERR_IO`) are misreported as 429.
 
 **Hidden errors:** 401 Unauthorized, 403 Forbidden, 400 Bad Request, 500 Internal Server Error
 
@@ -22,16 +22,16 @@ This document catalogs silent failures, ignored error codes, and inadequate erro
 **Recommendation:** Map `ws_err` to appropriate HTTP status codes:
 
 ```c
-if (ws_err != SC_OK) {
+if (ws_err != HU_OK) {
     int code = 500;
     const char *msg = "{\"error\":\"internal error\"}";
-    if (ws_err == SC_ERR_ALREADY_EXISTS) {
+    if (ws_err == HU_ERR_ALREADY_EXISTS) {
         code = 429;
         msg = "{\"error\":\"too many connections\"}";
-    } else if (ws_err == SC_ERR_PERMISSION_DENIED) {
+    } else if (ws_err == HU_ERR_PERMISSION_DENIED) {
         code = (strstr(req, "401") ? 401 : 403);
         msg = "{\"error\":\"unauthorized\"}";
-    } else if (ws_err == SC_ERR_INVALID_ARGUMENT) {
+    } else if (ws_err == HU_ERR_INVALID_ARGUMENT) {
         code = 400;
         msg = "{\"error\":\"bad request\"}";
     }
@@ -69,14 +69,14 @@ else if (n < 0)
 
 ---
 
-### 1.3 Event bridge: `sc_push_send` return value ignored
+### 1.3 Event bridge: `hu_push_send` return value ignored
 
 **Location:** `src/gateway/event_bridge.c` line 98
 
-**Issue:** `sc_push_send` returns `sc_error_t` but the result is discarded.
+**Issue:** `hu_push_send` returns `hu_error_t` but the result is discarded.
 
 ```c
-sc_push_send(bridge->push, title, body, payload_str);
+hu_push_send(bridge->push, title, body, payload_str);
 ```
 
 **Hidden errors:** Push delivery failures (FCM/APNS errors, invalid tokens, network issues)
@@ -86,9 +86,9 @@ sc_push_send(bridge->push, title, body, payload_str);
 **Recommendation:** Log push failures:
 
 ```c
-sc_error_t push_err = sc_push_send(bridge->push, title, body, payload_str);
-if (push_err != SC_OK)
-    /* log sc_error_string(push_err) */;
+hu_error_t push_err = hu_push_send(bridge->push, title, body, payload_str);
+if (push_err != HU_OK)
+    /* log hu_error_string(push_err) */;
 ```
 
 ---
@@ -97,13 +97,13 @@ if (push_err != SC_OK)
 
 **Location:** `src/gateway/control_protocol.c` lines 56–59
 
-**Issue:** `sc_json_object_new` / `sc_json_array_new` can return NULL, but `server`, `features`, and `methods_arr` are used without checks. `json_set_str(alloc, server, ...)` would dereference NULL.
+**Issue:** `hu_json_object_new` / `hu_json_array_new` can return NULL, but `server`, `features`, and `methods_arr` are used without checks. `json_set_str(alloc, server, ...)` would dereference NULL.
 
-**Hidden errors:** `SC_ERR_OUT_OF_MEMORY` when allocating server/features/methods_arr
+**Hidden errors:** `HU_ERR_OUT_OF_MEMORY` when allocating server/features/methods_arr
 
 **User impact:** Crash or undefined behavior on OOM during connect handshake.
 
-**Recommendation:** Add NULL checks after each allocation and return `SC_ERR_OUT_OF_MEMORY` on failure.
+**Recommendation:** Add NULL checks after each allocation and return `HU_ERR_OUT_OF_MEMORY` on failure.
 
 ---
 
@@ -192,7 +192,7 @@ try {
 
 ### 3.3 Copy-to-clipboard shows success even when it fails
 
-**Location:** `ui/src/components/sc-message-actions.ts` lines 93–94
+**Location:** `ui/src/components/hu-message-actions.ts` lines 93–94
 
 **Issue:** `navigator.clipboard?.writeText(this.content).catch(() => {})` swallows rejections, but `ScToast.show({ message: "Copied to clipboard", variant: "success" })` always runs.
 
@@ -230,7 +230,7 @@ try {
 
 ---
 
-## 4. UI Components (`ui/src/components/sc-*.ts`)
+## 4. UI Components (`ui/src/components/hu-*.ts`)
 
 ### 4.1 `querySelector` / `querySelectorAll` without null checks
 
@@ -238,9 +238,9 @@ try {
 
 **Issue:** Several components call `querySelector` / `querySelectorAll` and use the result without checking for null, e.g.:
 
-- `sc-chart.ts` line 195: `const wrapper = this.renderRoot.querySelector(".wrapper");` — used in `wrapper` without null check (guarded by `if (wrapper)` on line 196, so this one is OK).
-- `sc-dropdown.ts` lines 174–175: `const menu = this.renderRoot.querySelector(...); const items = menu?.querySelectorAll(...)` — `menu?.` handles null.
-- `sc-shortcut-overlay.ts` line 188: `const panel = this.renderRoot.querySelector<HTMLElement>(".panel");` — `panel?.querySelectorAll` used; if `panel` is null, `Array.from(panel.querySelectorAll(...))` would throw.
+- `hu-chart.ts` line 195: `const wrapper = this.renderRoot.querySelector(".wrapper");` — used in `wrapper` without null check (guarded by `if (wrapper)` on line 196, so this one is OK).
+- `hu-dropdown.ts` lines 174–175: `const menu = this.renderRoot.querySelector(...); const items = menu?.querySelectorAll(...)` — `menu?.` handles null.
+- `hu-shortcut-overlay.ts` line 188: `const panel = this.renderRoot.querySelector<HTMLElement>(".panel");` — `panel?.querySelectorAll` used; if `panel` is null, `Array.from(panel.querySelectorAll(...))` would throw.
 
 **Recommendation:** Audit all `querySelector`/`querySelectorAll` usages and ensure null/empty results are handled before use.
 
@@ -248,7 +248,7 @@ try {
 
 ### 4.2 Chart.js load failure is silent
 
-**Location:** `ui/src/components/sc-chart.ts` line 70
+**Location:** `ui/src/components/hu-chart.ts` line 70
 
 **Issue:** `import("https://esm.sh/chart.js@4").catch(() => null)` swallows the error. If the CDN fails, `_chartLoadPromise` resolves to `null` and the chart never renders, with no user feedback.
 
@@ -274,13 +274,13 @@ try {
 
 **Location:** `src/config.c` lines 26–172
 
-**Issue:** `sc_strdup` and `a->alloc` can return NULL. `set_defaults` does not check. Fields like `default_provider`, `default_model`, `memory_backend`, etc. may be NULL. Later code (e.g. `cfg.default_provider`) can crash or behave incorrectly.
+**Issue:** `hu_strdup` and `a->alloc` can return NULL. `set_defaults` does not check. Fields like `default_provider`, `default_model`, `memory_backend`, etc. may be NULL. Later code (e.g. `cfg.default_provider`) can crash or behave incorrectly.
 
-**Hidden errors:** `SC_ERR_OUT_OF_MEMORY` during config initialization
+**Hidden errors:** `HU_ERR_OUT_OF_MEMORY` during config initialization
 
 **User impact:** Crash or undefined behavior when memory is tight during startup.
 
-**Recommendation:** Either make `set_defaults` return `sc_error_t` and fail on first OOM, or add fallbacks (e.g. static string literals) for critical fields when `sc_strdup` fails.
+**Recommendation:** Either make `set_defaults` return `hu_error_t` and fail on first OOM, or add fallbacks (e.g. static string literals) for critical fields when `hu_strdup` fails.
 
 ---
 
@@ -288,7 +288,7 @@ try {
 
 **Location:** `src/main.c` lines 570–574, 1691–1696
 
-**Issue:** `sc_plugin_load` failures are logged with `fprintf(stderr, "warning: failed to load plugin: ...")` but execution continues. This is acceptable for optional plugins, but the user may not see stderr in daemon/service mode.
+**Issue:** `hu_plugin_load` failures are logged with `fprintf(stderr, "warning: failed to load plugin: ...")` but execution continues. This is acceptable for optional plugins, but the user may not see stderr in daemon/service mode.
 
 **Recommendation:** Ensure plugin load failures are visible in the configured log/observability path when running as a service.
 
@@ -298,12 +298,12 @@ try {
 
 **Location:** `src/main.c` lines 514–518
 
-**Issue:** `sc_gateway_run` errors are logged to stderr but the main process has no way to react (e.g. exit, restart). The gateway thread just returns.
+**Issue:** `hu_gateway_run` errors are logged to stderr but the main process has no way to react (e.g. exit, restart). The gateway thread just returns.
 
 ```c
-sc_error_t err = sc_gateway_run(ctx->alloc, ctx->host, ctx->port, &ctx->config);
-if (err != SC_OK)
-    fprintf(stderr, "[seaclaw] gateway thread error: %s\n", sc_error_string(err));
+hu_error_t err = hu_gateway_run(ctx->alloc, ctx->host, ctx->port, &ctx->config);
+if (err != HU_OK)
+    fprintf(stderr, "[human] gateway thread error: %s\n", hu_error_string(err));
 return NULL;
 ```
 
@@ -332,15 +332,15 @@ Many `(void)variable` or `(void)func()` uses are intentional (e.g. suppressing u
 | Severity | Location                   | Issue                                          |
 | -------- | -------------------------- | ---------------------------------------------- |
 | CRITICAL | `chat-view.ts:397`         | Session rename failure swallowed; state desync |
-| CRITICAL | `sc-message-actions.ts:93` | Copy success shown when clipboard write fails  |
+| CRITICAL | `hu-message-actions.ts:93` | Copy success shown when clipboard write fails  |
 | HIGH     | `gateway.c:879`            | All WS upgrade errors reported as 429          |
-| HIGH     | `event_bridge.c:98`        | `sc_push_send` return value ignored            |
+| HIGH     | `event_bridge.c:98`        | `hu_push_send` return value ignored            |
 | HIGH     | `control_protocol.c:56-59` | OOM in `build_connect_response` can crash      |
 | HIGH     | `config.c:set_defaults`    | OOM produces invalid config                    |
 | MEDIUM   | `ws_server.c:424,499`      | `send()` return value ignored                  |
 | MEDIUM   | `chat-controller.ts:164`   | History load failure silent                    |
 | MEDIUM   | `overview-view.ts:367`     | Partial load failures hidden                   |
-| MEDIUM   | `sc-chart.ts:70`           | Chart.js load failure silent                   |
+| MEDIUM   | `hu-chart.ts:70`           | Chart.js load failure silent                   |
 | LOW      | `index.html:39`            | Service worker registration failure silent     |
 | LOW      | `main.c:516`               | Gateway thread error not propagated            |
 

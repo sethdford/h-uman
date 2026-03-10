@@ -1,7 +1,7 @@
 services:
   agent:
     build: .
-    image: seaclaw:latest
+    image: human:latest
     profiles: ["agent"]
     stdin_open: true
     tty: true
@@ -9,12 +9,12 @@ services:
       - path: .env
         required: false
     volumes:
-      - seaclaw-data:/seaclaw-data
+      - human-data:/human-data
     restart: unless-stopped
 
   gateway:
     build: .
-    image: seaclaw:latest
+    image: human:latest
     profiles: ["gateway"]
     ports:
       - "3000:3000"
@@ -22,7 +22,7 @@ services:
       - path: .env
         required: false
     volumes:
-      - seaclaw-data:/seaclaw-data
+      - human-data:/human-data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
@@ -31,4 +31,4 @@ services:
       retries: 3
 
 volumes:
-  seaclaw-data:
+  human-data:

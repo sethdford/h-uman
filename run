@@ -1,4 +1,4 @@
 cmake --build build
-build/seaclaw service stop
-build/seaclaw service start
-journalctl --user -u seaclaw -f
+build/human service stop
+build/human service start
+journalctl --user -u human -f

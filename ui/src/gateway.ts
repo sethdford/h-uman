@@ -91,7 +91,7 @@ export class GatewayClient extends EventTarget {
         server?: { version?: string };
         features?: ServerFeatures;
         protocol?: number;
-      }>("connect", { client: "seaclaw-ui", version: "0.3.0" });
+      }>("connect", { client: "human-ui", version: "0.3.0" });
       if (res && typeof res === "object") {
         const payload = res as Record<string, unknown>;
         if (payload.features) this.#features = payload.features as ServerFeatures;

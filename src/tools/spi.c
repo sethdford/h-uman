@@ -1,9 +1,9 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
-#if defined(__linux__) && !SC_IS_TEST
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
+#if defined(__linux__) && !HU_IS_TEST
 #include <fcntl.h>
 #include <linux/spi/spidev.h>
 #include <sys/ioctl.h>
@@ -13,58 +13,58 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_SPI_NAME "spi"
-#define SC_SPI_DESC "SPI bus operations: list devices, transfer data, read bytes."
-#define SC_SPI_PARAMS                                                                          \
+#define HU_SPI_NAME "spi"
+#define HU_SPI_DESC "SPI bus operations: list devices, transfer data, read bytes."
+#define HU_SPI_PARAMS                                                                          \
     "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"list\"," \
     "\"transfer\",\"read\"]},\"device\":{\"type\":\"string\"},\"data\":{\"type\":\"string\"}," \
     "\"speed_hz\":{\"type\":\"integer\"},\"mode\":{\"type\":\"integer\"},\"bits_per_word\":{"  \
     "\"type\":\"integer\"}},\"required\":[\"action\"]}"
 
-typedef struct sc_spi_ctx {
+typedef struct hu_spi_ctx {
     const char *device;
     size_t device_len;
-} sc_spi_ctx_t;
+} hu_spi_ctx_t;
 
-static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                              sc_tool_result_t *out) {
+static hu_error_t spi_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                              hu_tool_result_t *out) {
     (void)ctx;
     if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action || strlen(action) == 0) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (strcmp(action, "list") == 0) {
-        char *msg = sc_strndup(alloc, "{\"devices\":[\"/dev/spidev0.0\"]}", 29);
+        char *msg = hu_strndup(alloc, "{\"devices\":[\"/dev/spidev0.0\"]}", 29);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 29);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 29);
+        return HU_OK;
     }
     if (strcmp(action, "transfer") == 0 || strcmp(action, "read") == 0) {
-        char *msg = sc_strndup(alloc, "{\"rx_data\":\"00 FF\"}", 19);
+        char *msg = hu_strndup(alloc, "{\"rx_data\":\"00 FF\"}", 19);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, 19);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, 19);
+        return HU_OK;
     }
-    *out = sc_tool_result_fail("Unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("Unknown action", 14);
+    return HU_OK;
 #else
 #ifdef __linux__
     if (strcmp(action, "list") == 0) {
-        sc_json_buf_t buf;
-        sc_json_buf_init(&buf, alloc);
-        sc_json_buf_append_raw(&buf, "{\"devices\":[", 12);
+        hu_json_buf_t buf;
+        hu_json_buf_init(&buf, alloc);
+        hu_json_buf_append_raw(&buf, "{\"devices\":[", 12);
         bool first = true;
         for (int b = 0; b <= 2; b++) {
             for (int d = 0; d <= 1; d++) {
@@ -72,43 +72,43 @@ static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
                 snprintf(path, sizeof(path), "/dev/spidev%d.%d", b, d);
                 if (access(path, F_OK) == 0) {
                     if (!first)
-                        sc_json_buf_append_raw(&buf, ",", 1);
-                    sc_json_buf_append_raw(&buf, "\"", 1);
-                    sc_json_buf_append_raw(&buf, path, strlen(path));
-                    sc_json_buf_append_raw(&buf, "\"", 1);
+                        hu_json_buf_append_raw(&buf, ",", 1);
+                    hu_json_buf_append_raw(&buf, "\"", 1);
+                    hu_json_buf_append_raw(&buf, path, strlen(path));
+                    hu_json_buf_append_raw(&buf, "\"", 1);
                     first = false;
                 }
             }
         }
-        sc_json_buf_append_raw(&buf, "]}", 2);
-        char *msg = sc_strndup(alloc, buf.ptr, buf.len);
+        hu_json_buf_append_raw(&buf, "]}", 2);
+        char *msg = hu_strndup(alloc, buf.ptr, buf.len);
         size_t len = buf.len;
-        sc_json_buf_free(&buf);
-        *out = sc_tool_result_ok_owned(msg, len);
-        return SC_OK;
+        hu_json_buf_free(&buf);
+        *out = hu_tool_result_ok_owned(msg, len);
+        return HU_OK;
     }
-    const char *device = sc_json_get_string(args, "device");
+    const char *device = hu_json_get_string(args, "device");
     if (!device || device[0] == '\0')
         device = "/dev/spidev0.0";
-    uint32_t speed = (uint32_t)sc_json_get_number(args, "speed_hz", 1000000);
-    uint8_t mode = (uint8_t)sc_json_get_number(args, "mode", 0);
-    uint8_t bits = (uint8_t)sc_json_get_number(args, "bits_per_word", 8);
+    uint32_t speed = (uint32_t)hu_json_get_number(args, "speed_hz", 1000000);
+    uint8_t mode = (uint8_t)hu_json_get_number(args, "mode", 0);
+    uint8_t bits = (uint8_t)hu_json_get_number(args, "bits_per_word", 8);
 
     int fd = open(device, O_RDWR);
     if (fd < 0) {
-        *out = sc_tool_result_fail("Cannot open SPI device", 22);
-        return SC_OK;
+        *out = hu_tool_result_fail("Cannot open SPI device", 22);
+        return HU_OK;
     }
     ioctl(fd, SPI_IOC_WR_MODE, &mode);
     ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits);
     ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed);
 
     if (strcmp(action, "transfer") == 0) {
-        const char *hex_data = sc_json_get_string(args, "data");
+        const char *hex_data = hu_json_get_string(args, "data");
         if (!hex_data || hex_data[0] == '\0') {
             close(fd);
-            *out = sc_tool_result_fail("missing data for transfer", 25);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing data for transfer", 25);
+            return HU_OK;
         }
         uint8_t tx[128], rx[128];
         size_t tx_len = 0;
@@ -134,8 +134,8 @@ static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
         int ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
         close(fd);
         if (ret < 0) {
-            *out = sc_tool_result_fail("SPI transfer failed", 19);
-            return SC_OK;
+            *out = hu_tool_result_fail("SPI transfer failed", 19);
+            return HU_OK;
         }
         char hex_buf[512];
         size_t hp = 0;
@@ -146,16 +146,16 @@ static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
             hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "%02X", rx[i]);
         }
         hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "\"}");
-        char *msg = sc_strndup(alloc, hex_buf, hp);
+        char *msg = hu_strndup(alloc, hex_buf, hp);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, hp);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, hp);
+        return HU_OK;
     }
     if (strcmp(action, "read") == 0) {
-        double len_val = sc_json_get_number(args, "length", 16);
+        double len_val = hu_json_get_number(args, "length", 16);
         size_t read_len = (size_t)len_val;
         if (read_len > 128)
             read_len = 128;
@@ -174,8 +174,8 @@ static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
         int ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
         close(fd);
         if (ret < 0) {
-            *out = sc_tool_result_fail("SPI read failed", 15);
-            return SC_OK;
+            *out = hu_tool_result_fail("SPI read failed", 15);
+            return HU_OK;
         }
         char hex_buf[512];
         size_t hp = 0;
@@ -186,43 +186,43 @@ static sc_error_t spi_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
             hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "%02X", rx[i]);
         }
         hp += (size_t)snprintf(hex_buf + hp, sizeof(hex_buf) - hp, "\"}");
-        char *msg = sc_strndup(alloc, hex_buf, hp);
+        char *msg = hu_strndup(alloc, hex_buf, hp);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        *out = sc_tool_result_ok_owned(msg, hp);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, hp);
+        return HU_OK;
     }
     close(fd);
-    *out = sc_tool_result_fail("unknown SPI action", 18);
-    return SC_OK;
+    *out = hu_tool_result_fail("unknown SPI action", 18);
+    return HU_OK;
 #else
     (void)alloc;
-    *out = sc_tool_result_fail("SPI requires Linux", 18);
-    return SC_OK;
+    *out = hu_tool_result_fail("SPI requires Linux", 18);
+    return HU_OK;
 #endif
 #endif
 }
 
 static const char *spi_name(void *ctx) {
     (void)ctx;
-    return SC_SPI_NAME;
+    return HU_SPI_NAME;
 }
 static const char *spi_description(void *ctx) {
     (void)ctx;
-    return SC_SPI_DESC;
+    return HU_SPI_DESC;
 }
 static const char *spi_parameters_json(void *ctx) {
     (void)ctx;
-    return SC_SPI_PARAMS;
+    return HU_SPI_PARAMS;
 }
-static void spi_deinit(void *ctx, sc_allocator_t *alloc) {
+static void spi_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
-        alloc->free(alloc->ctx, ctx, sizeof(sc_spi_ctx_t));
+        alloc->free(alloc->ctx, ctx, sizeof(hu_spi_ctx_t));
 }
 
-static const sc_tool_vtable_t spi_vtable = {
+static const hu_tool_vtable_t spi_vtable = {
     .execute = spi_execute,
     .name = spi_name,
     .description = spi_description,
@@ -230,23 +230,23 @@ static const sc_tool_vtable_t spi_vtable = {
     .deinit = spi_deinit,
 };
 
-sc_error_t sc_spi_create(sc_allocator_t *alloc, const char *device, size_t device_len,
-                         sc_tool_t *out) {
+hu_error_t hu_spi_create(hu_allocator_t *alloc, const char *device, size_t device_len,
+                         hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_spi_ctx_t *c = (sc_spi_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_spi_ctx_t *c = (hu_spi_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     if (device && device_len > 0) {
-        c->device = sc_strndup(alloc, device, device_len);
+        c->device = hu_strndup(alloc, device, device_len);
         if (!c->device) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         c->device_len = device_len;
     }
     out->ctx = c;
     out->vtable = &spi_vtable;
-    return SC_OK;
+    return HU_OK;
 }

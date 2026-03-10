@@ -1,8 +1,8 @@
-#include "seaclaw/tools/diff.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tools/validation.h"
+#include "human/tools/diff.h"
+#include "human/core/allocator.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tools/validation.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,46 +22,46 @@
 typedef struct {
     const char *workspace_dir;
     size_t workspace_dir_len;
-} sc_diff_ctx_t;
+} hu_diff_ctx_t;
 
-static sc_error_t diff_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                               sc_tool_result_t *out) {
-    sc_diff_ctx_t *c = (sc_diff_ctx_t *)ctx;
+static hu_error_t diff_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                               hu_tool_result_t *out) {
+    hu_diff_ctx_t *c = (hu_diff_ctx_t *)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
 
     if (strcmp(action, "diff") == 0) {
-        const char *fa = sc_json_get_string(args, "file_a");
-        const char *fb = sc_json_get_string(args, "file_b");
+        const char *fa = hu_json_get_string(args, "file_a");
+        const char *fb = hu_json_get_string(args, "file_b");
         if (!fa || !fb) {
-            *out = sc_tool_result_fail("missing file_a or file_b", 23);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing file_a or file_b", 23);
+            return HU_OK;
         }
-        sc_error_t err_a =
-            sc_tool_validate_path(fa, c ? c->workspace_dir : NULL, c ? c->workspace_dir_len : 0);
-        if (err_a != SC_OK) {
-            *out = sc_tool_result_fail("file_a path not allowed", 22);
-            return SC_OK;
+        hu_error_t err_a =
+            hu_tool_validate_path(fa, c ? c->workspace_dir : NULL, c ? c->workspace_dir_len : 0);
+        if (err_a != HU_OK) {
+            *out = hu_tool_result_fail("file_a path not allowed", 22);
+            return HU_OK;
         }
-        sc_error_t err_b =
-            sc_tool_validate_path(fb, c ? c->workspace_dir : NULL, c ? c->workspace_dir_len : 0);
-        if (err_b != SC_OK) {
-            *out = sc_tool_result_fail("file_b path not allowed", 22);
-            return SC_OK;
+        hu_error_t err_b =
+            hu_tool_validate_path(fb, c ? c->workspace_dir : NULL, c ? c->workspace_dir_len : 0);
+        if (err_b != HU_OK) {
+            *out = hu_tool_result_fail("file_b path not allowed", 22);
+            return HU_OK;
         }
-#if SC_IS_TEST
-        char *msg = sc_sprintf(alloc, "diff %s %s", fa, fb);
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+#if HU_IS_TEST
+        char *msg = hu_sprintf(alloc, "diff %s %s", fa, fb);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
 #else
         FILE *af = fopen(fa, "r");
         FILE *bf = fopen(fb, "r");
@@ -70,8 +70,8 @@ static sc_error_t diff_execute(void *ctx, sc_allocator_t *alloc, const sc_json_v
                 fclose(af);
             if (bf)
                 fclose(bf);
-            *out = sc_tool_result_fail("cannot open file(s)", 19);
-            return SC_OK;
+            *out = hu_tool_result_fail("cannot open file(s)", 19);
+            return HU_OK;
         }
         fseek(af, 0, SEEK_END);
         long alen = ftell(af);
@@ -82,8 +82,8 @@ static sc_error_t diff_execute(void *ctx, sc_allocator_t *alloc, const sc_json_v
         if (alen < 0 || blen < 0 || alen > 1048576 || blen > 1048576) {
             fclose(af);
             fclose(bf);
-            *out = sc_tool_result_fail("file too large", 14);
-            return SC_OK;
+            *out = hu_tool_result_fail("file too large", 14);
+            return HU_OK;
         }
         char *abuf = (char *)alloc->alloc(alloc->ctx, (size_t)alen + 1);
         char *bbuf = (char *)alloc->alloc(alloc->ctx, (size_t)blen + 1);
@@ -94,8 +94,8 @@ static sc_error_t diff_execute(void *ctx, sc_allocator_t *alloc, const sc_json_v
                 alloc->free(alloc->ctx, bbuf, (size_t)blen + 1);
             fclose(af);
             fclose(bf);
-            *out = sc_tool_result_fail("oom", 3);
-            return SC_OK;
+            *out = hu_tool_result_fail("oom", 3);
+            return HU_OK;
         }
         size_t ar = fread(abuf, 1, (size_t)alen, af);
         abuf[ar] = '\0';
@@ -107,28 +107,28 @@ static sc_error_t diff_execute(void *ctx, sc_allocator_t *alloc, const sc_json_v
         if (strcmp(abuf, bbuf) == 0) {
             alloc->free(alloc->ctx, abuf, (size_t)alen + 1);
             alloc->free(alloc->ctx, bbuf, (size_t)blen + 1);
-            *out = sc_tool_result_ok("files are identical", 19);
+            *out = hu_tool_result_ok("files are identical", 19);
         } else {
-            char *msg = sc_sprintf(alloc, "files differ (a=%ld bytes, b=%ld bytes)", alen, blen);
+            char *msg = hu_sprintf(alloc, "files differ (a=%ld bytes, b=%ld bytes)", alen, blen);
             alloc->free(alloc->ctx, abuf, (size_t)alen + 1);
             alloc->free(alloc->ctx, bbuf, (size_t)blen + 1);
-            *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+            *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
         }
 #endif
     } else if (strcmp(action, "merge") == 0) {
-        const char *base = sc_json_get_string(args, "base");
-        const char *ours = sc_json_get_string(args, "ours");
-        const char *theirs = sc_json_get_string(args, "theirs");
+        const char *base = hu_json_get_string(args, "base");
+        const char *ours = hu_json_get_string(args, "ours");
+        const char *theirs = hu_json_get_string(args, "theirs");
         if (!base || !ours || !theirs) {
-            *out = sc_tool_result_fail("missing base, ours, or theirs", 29);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing base, ours, or theirs", 29);
+            return HU_OK;
         }
-        char *msg = sc_sprintf(alloc, "merge %s %s %s", base, ours, theirs);
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        char *msg = hu_sprintf(alloc, "merge %s %s %s", base, ours, theirs);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else {
-        *out = sc_tool_result_fail("unknown action", 14);
+        *out = hu_tool_result_fail("unknown action", 14);
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *diff_name(void *ctx) {
@@ -144,7 +144,7 @@ static const char *diff_params(void *ctx) {
     return TOOL_PARAMS;
 }
 
-static const sc_tool_vtable_t diff_vtable = {
+static const hu_tool_vtable_t diff_vtable = {
     .execute = diff_execute,
     .name = diff_name,
     .description = diff_desc,
@@ -152,25 +152,25 @@ static const sc_tool_vtable_t diff_vtable = {
     .deinit = NULL,
 };
 
-sc_error_t sc_diff_tool_create(sc_allocator_t *alloc, const char *workspace_dir,
-                               size_t workspace_dir_len, sc_security_policy_t *policy,
-                               sc_tool_t *out) {
+hu_error_t hu_diff_tool_create(hu_allocator_t *alloc, const char *workspace_dir,
+                               size_t workspace_dir_len, hu_security_policy_t *policy,
+                               hu_tool_t *out) {
     (void)policy;
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_diff_ctx_t *c = (sc_diff_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_diff_ctx_t *c = (hu_diff_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     if (workspace_dir && workspace_dir_len > 0) {
-        c->workspace_dir = sc_strndup(alloc, workspace_dir, workspace_dir_len);
+        c->workspace_dir = hu_strndup(alloc, workspace_dir, workspace_dir_len);
         if (!c->workspace_dir) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         c->workspace_dir_len = workspace_dir_len;
     }
     out->ctx = c;
     out->vtable = &diff_vtable;
-    return SC_OK;
+    return HU_OK;
 }

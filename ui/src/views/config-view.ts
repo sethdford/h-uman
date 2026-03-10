@@ -1,19 +1,19 @@
 import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
-import { ScToast } from "../components/sc-toast.js";
+import { ScToast } from "../components/hu-toast.js";
 import { icons } from "../icons.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-card.js";
-import "../components/sc-badge.js";
-import "../components/sc-input.js";
-import "../components/sc-button.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-form-group.js";
-import "../components/sc-combobox.js";
-import "../components/sc-code-block.js";
-import "../components/sc-empty-state.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-card.js";
+import "../components/hu-badge.js";
+import "../components/hu-input.js";
+import "../components/hu-button.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-form-group.js";
+import "../components/hu-combobox.js";
+import "../components/hu-code-block.js";
+import "../components/hu-empty-state.js";
 
 type SaveStatus = "saved" | "error" | "unsaved" | "idle";
 
@@ -69,7 +69,7 @@ function toRawConfig(edited: ConfigData): Record<string, unknown> {
   };
 }
 
-@customElement("sc-config-view")
+@customElement("hu-config-view")
 export class ScConfigView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
   static override styles = css`
@@ -81,39 +81,39 @@ export class ScConfigView extends GatewayAwareLitElement {
     }
     .header-actions {
       display: flex;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       align-items: center;
     }
     .form {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-xl);
+      gap: var(--hu-space-xl);
     }
     .section {
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
+      border: 1px solid var(--hu-border);
+      border-radius: var(--hu-radius);
       overflow: hidden;
-      background: var(--sc-bg-elevated);
+      background: var(--hu-bg-elevated);
     }
     .section + .section {
-      margin-top: var(--sc-space-sm);
+      margin-top: var(--hu-space-sm);
     }
     .section-header {
-      padding: var(--sc-space-md) var(--sc-space-md);
-      background: var(--sc-bg-elevated);
+      padding: var(--hu-space-md) var(--hu-space-md);
+      background: var(--hu-bg-elevated);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: space-between;
       user-select: none;
-      transition: background var(--sc-duration-fast);
+      transition: background var(--hu-duration-fast);
     }
     .section-header:hover {
-      background: var(--sc-bg-overlay);
+      background: var(--hu-bg-overlay);
     }
     .section-header .chevron {
-      transition: transform var(--sc-duration-normal) var(--sc-ease-out);
-      color: var(--sc-text-muted);
+      transition: transform var(--hu-duration-normal) var(--hu-ease-out);
+      color: var(--hu-text-muted);
       display: flex;
     }
     .section-header .chevron svg {
@@ -124,16 +124,16 @@ export class ScConfigView extends GatewayAwareLitElement {
       transform: rotate(-90deg);
     }
     .section-content {
-      padding: var(--sc-space-md) var(--sc-space-lg);
+      padding: var(--hu-space-md) var(--hu-space-lg);
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-md);
+      gap: var(--hu-space-md);
       max-height: 37.5rem;
       overflow: hidden;
       transition:
-        max-height var(--sc-duration-slow) var(--sc-ease-out),
-        padding var(--sc-duration-normal),
-        opacity var(--sc-duration-normal);
+        max-height var(--hu-duration-slow) var(--hu-ease-out),
+        padding var(--hu-duration-normal),
+        opacity var(--hu-duration-normal);
     }
     .section.collapsed .section-content {
       max-height: 0;
@@ -144,25 +144,25 @@ export class ScConfigView extends GatewayAwareLitElement {
     .field {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
     }
     .field label {
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-medium);
-      color: var(--sc-text);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-medium);
+      color: var(--hu-text);
     }
     .field .description {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
-      margin-top: var(--sc-space-2xs);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
+      margin-top: var(--hu-space-2xs);
     }
     .field .description-error {
-      color: var(--sc-error);
+      color: var(--hu-error);
     }
     .raw-area {
-      --sc-font: var(--sc-font-mono);
-      --sc-text-base: var(--sc-text-sm);
-      --sc-bg-elevated: var(--sc-bg-inset);
+      --hu-font: var(--hu-font-mono);
+      --hu-text-base: var(--hu-text-sm);
+      --hu-bg-elevated: var(--hu-bg-inset);
       width: 100%;
     }
     .unsaved-banner {
@@ -173,17 +173,17 @@ export class ScConfigView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: var(--sc-space-md) var(--sc-space-lg);
-      background: var(--sc-bg-surface);
-      border-top: 1px solid var(--sc-border);
-      box-shadow: 0 calc(-1 * var(--sc-space-xs)) var(--sc-space-md) var(--sc-shadow-lg);
+      padding: var(--hu-space-md) var(--hu-space-lg);
+      background: var(--hu-bg-surface);
+      border-top: 1px solid var(--hu-border);
+      box-shadow: 0 calc(-1 * var(--hu-space-xs)) var(--hu-space-md) var(--hu-shadow-lg);
       z-index: 10;
     }
     .unsaved-banner-actions {
       display: flex;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       :host {
         max-width: 100%;
       }
@@ -442,102 +442,102 @@ export class ScConfigView extends GatewayAwareLitElement {
   override render() {
     if (this.loading) return this._renderSkeleton();
     if (this.loadError)
-      return html`<sc-empty-state
+      return html`<hu-empty-state
         .icon=${icons.warning}
         heading="Error"
         description=${this.loadError}
-      ></sc-empty-state>`;
+      ></hu-empty-state>`;
     if (this.rawMode) return this._renderRaw();
     return this._renderForm();
   }
 
   private _renderSkeleton(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Configuration">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Configuration">
+        <hu-section-header
           heading="Configuration"
-          description="Manage your SeaClaw instance settings"
-        ></sc-section-header>
-      </sc-page-hero>
-      <div class="form sc-stagger">
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
+          description="Manage your Human instance settings"
+        ></hu-section-header>
+      </hu-page-hero>
+      <div class="form hu-stagger">
+        <hu-skeleton variant="card" height="200px"></hu-skeleton>
+        <hu-skeleton variant="card" height="200px"></hu-skeleton>
       </div>
     `;
   }
 
   private _renderSaveStatusBadge(): TemplateResult | typeof nothing {
-    if (this.saving) return html`<sc-badge variant="warning">Saving...</sc-badge>`;
-    if (this.saveStatus === "saved") return html`<sc-badge variant="success">Saved</sc-badge>`;
-    if (this.hasChanges()) return html`<sc-badge variant="warning">Unsaved changes</sc-badge>`;
+    if (this.saving) return html`<hu-badge variant="warning">Saving...</hu-badge>`;
+    if (this.saveStatus === "saved") return html`<hu-badge variant="success">Saved</hu-badge>`;
+    if (this.hasChanges()) return html`<hu-badge variant="warning">Unsaved changes</hu-badge>`;
     if (this.saveStatus === "error")
-      return html`<sc-badge variant="error">${this.errorMessage || "Error"}</sc-badge>`;
+      return html`<hu-badge variant="error">${this.errorMessage || "Error"}</hu-badge>`;
     return nothing;
   }
 
   private _renderRaw(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Configuration">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Configuration">
+        <hu-section-header
           heading="Configuration"
-          description="Manage your SeaClaw instance settings"
+          description="Manage your Human instance settings"
         >
           ${this._renderSaveStatusBadge()}
           <div class="header-actions">
-            <sc-button
+            <hu-button
               variant="ghost"
               size="sm"
               @click=${this.toggleRawMode}
               aria-label=${this.rawMode ? "Switch to form editor" : "Switch to raw JSON editor"}
             >
               ${this.rawMode ? "Form" : "Raw JSON"}
-            </sc-button>
-            <sc-button
+            </hu-button>
+            <hu-button
               variant="primary"
               ?disabled=${!this.hasChanges()}
               @click=${() => this.save()}
               aria-label="Save configuration"
             >
               Save
-            </sc-button>
+            </hu-button>
           </div>
-        </sc-section-header>
-      </sc-page-hero>
-      <sc-card glass>
+        </hu-section-header>
+      </hu-page-hero>
+      <hu-card glass>
         <div class="form">
           ${this.rawEditing
             ? html`
-                <sc-textarea
+                <hu-textarea
                   class="raw-area"
                   .value=${this.rawText}
-                  @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                  @hu-input=${(e: CustomEvent<{ value: string }>) => {
                     this.rawText = e.detail.value;
                     if (this.saveStatus === "saved") this.saveStatus = "idle";
                   }}
                   rows="12"
                   resize="vertical"
-                ></sc-textarea>
-                <sc-button variant="secondary" size="sm" @click=${() => (this.rawEditing = false)}>
+                ></hu-textarea>
+                <hu-button variant="secondary" size="sm" @click=${() => (this.rawEditing = false)}>
                   Done editing
-                </sc-button>
+                </hu-button>
               `
             : html`
-                <sc-code-block .code=${this.rawText} language="json"></sc-code-block>
-                <sc-button variant="secondary" size="sm" @click=${() => (this.rawEditing = true)}>
+                <hu-code-block .code=${this.rawText} language="json"></hu-code-block>
+                <hu-button variant="secondary" size="sm" @click=${() => (this.rawEditing = true)}>
                   Edit
-                </sc-button>
+                </hu-button>
               `}
         </div>
-      </sc-card>
+      </hu-card>
       ${this.hasChanges()
         ? html`
             <div class="unsaved-banner">
               <span>You have unsaved changes</span>
               <div class="unsaved-banner-actions">
-                <sc-button variant="secondary" @click=${this.revert}>Revert</sc-button>
-                <sc-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
+                <hu-button variant="secondary" @click=${this.revert}>Revert</hu-button>
+                <hu-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
                   Save
-                </sc-button>
+                </hu-button>
               </div>
             </div>
           `
@@ -552,79 +552,79 @@ export class ScConfigView extends GatewayAwareLitElement {
 
   private _renderForm(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Configuration">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Configuration">
+        <hu-section-header
           heading="Configuration"
-          description="Manage your SeaClaw instance settings"
+          description="Manage your Human instance settings"
         >
           ${this._renderSaveStatusBadge()}
           <div class="header-actions">
-            <sc-button
+            <hu-button
               variant="ghost"
               size="sm"
               @click=${this.toggleRawMode}
               aria-label=${this.rawMode ? "Switch to form editor" : "Switch to raw JSON editor"}
             >
               ${this.rawMode ? "Form" : "Raw JSON"}
-            </sc-button>
-            <sc-button
+            </hu-button>
+            <hu-button
               variant="primary"
               ?disabled=${!this.hasChanges()}
               @click=${() => this.save()}
               aria-label="Save configuration"
             >
               Save
-            </sc-button>
+            </hu-button>
           </div>
-        </sc-section-header>
-      </sc-page-hero>
-      <div class="form sc-stagger">
-        <sc-card glass>
-          <sc-form-group title="Provider Settings" description="Default AI provider and model">
-            <sc-combobox
+        </hu-section-header>
+      </hu-page-hero>
+      <div class="form hu-stagger">
+        <hu-card glass>
+          <hu-form-group title="Provider Settings" description="Default AI provider and model">
+            <hu-combobox
               label="Provider"
               .options=${this.providerOptions}
               .value=${this.edited.default_provider ?? ""}
               placeholder="Select provider"
               freeText
-              @sc-combobox-change=${(e: CustomEvent<{ value: string }>) => {
+              @hu-combobox-change=${(e: CustomEvent<{ value: string }>) => {
                 this.edited = { ...this.edited, default_provider: e.detail.value };
                 this._onFormChange();
               }}
-            ></sc-combobox>
-            <sc-combobox
+            ></hu-combobox>
+            <hu-combobox
               label="Model"
               .options=${this.modelOptions}
               .value=${this.edited.default_model ?? ""}
               placeholder="Select or type model"
               freeText
-              @sc-combobox-change=${(e: CustomEvent<{ value: string }>) => {
+              @hu-combobox-change=${(e: CustomEvent<{ value: string }>) => {
                 this.edited = { ...this.edited, default_model: e.detail.value };
                 this._onFormChange();
               }}
-            ></sc-combobox>
-          </sc-form-group>
-        </sc-card>
+            ></hu-combobox>
+          </hu-form-group>
+        </hu-card>
 
-        <sc-card glass>
-          <sc-form-group title="Model Settings" description="Token and temperature limits">
+        <hu-card glass>
+          <hu-form-group title="Model Settings" description="Token and temperature limits">
             <div class="field">
               <label for="max_tokens">Max tokens</label>
-              <sc-input
+              <hu-input
                 id="max_tokens"
                 type="number"
                 .min=${0}
                 .value=${String(this.edited.max_tokens ?? 0)}
-                @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                @hu-input=${(e: CustomEvent<{ value: string }>) => {
                   const v = parseInt(e.detail.value, 10);
                   this.edited = { ...this.edited, max_tokens: isNaN(v) ? 0 : v };
                   this._onFormChange();
                 }}
-              ></sc-input>
+              ></hu-input>
             </div>
             <div class="field">
               <label for="temperature">Temperature (0–2)</label>
-              <sc-input
+              <hu-input
                 id="temperature"
                 type="number"
                 .min=${0}
@@ -632,47 +632,47 @@ export class ScConfigView extends GatewayAwareLitElement {
                 .step=${0.1}
                 .value=${String(this.edited.temperature ?? 0.7)}
                 .error=${this.temperatureError}
-                @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                @hu-input=${(e: CustomEvent<{ value: string }>) => {
                   const v = parseFloat(e.detail.value);
                   const clamped = isNaN(v) ? 0.7 : Math.max(0, Math.min(2, v));
                   this.edited = { ...this.edited, temperature: clamped };
                   this._onFormChange();
                 }}
-              ></sc-input>
+              ></hu-input>
               ${this.temperatureError
                 ? html`<span class="description description-error">${this.temperatureError}</span>`
                 : nothing}
             </div>
-          </sc-form-group>
-        </sc-card>
+          </hu-form-group>
+        </hu-card>
 
-        <sc-card glass>
-          <sc-form-group title="Agent Settings" description="Workspace and paths">
+        <hu-card glass>
+          <hu-form-group title="Agent Settings" description="Workspace and paths">
             <div class="field">
               <label for="workspace_dir">Workspace directory</label>
-              <sc-input
+              <hu-input
                 id="workspace_dir"
                 type="text"
                 .value=${this.edited.workspace_dir ?? ""}
                 placeholder="."
-                @sc-input=${(e: CustomEvent<{ value: string }>) => {
+                @hu-input=${(e: CustomEvent<{ value: string }>) => {
                   this.edited = { ...this.edited, workspace_dir: e.detail.value };
                   this._onFormChange();
                 }}
-              ></sc-input>
+              ></hu-input>
             </div>
-          </sc-form-group>
-        </sc-card>
+          </hu-form-group>
+        </hu-card>
       </div>
       ${this.hasChanges()
         ? html`
             <div class="unsaved-banner">
               <span>You have unsaved changes</span>
               <div class="unsaved-banner-actions">
-                <sc-button variant="secondary" @click=${this.revert}>Revert</sc-button>
-                <sc-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
+                <hu-button variant="secondary" @click=${this.revert}>Revert</hu-button>
+                <hu-button variant="primary" ?disabled=${this.saving} @click=${() => this.save()}>
                   Save
-                </sc-button>
+                </hu-button>
               </div>
             </div>
           `

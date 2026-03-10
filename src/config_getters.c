@@ -1,11 +1,11 @@
-#include "seaclaw/config.h"
-#include "seaclaw/core/error.h"
+#include "human/config.h"
+#include "human/core/error.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-bool sc_config_provider_requires_api_key(const char *provider) {
+bool hu_config_provider_requires_api_key(const char *provider) {
     if (!provider)
         return true;
     if (strcmp(provider, "ollama") == 0)
@@ -29,29 +29,29 @@ bool sc_config_provider_requires_api_key(const char *provider) {
     return true;
 }
 
-/* sc_config_validate_strict implemented in config_validate.c */
+/* hu_config_validate_strict implemented in config_validate.c */
 
-sc_error_t sc_config_validate(const sc_config_t *cfg) {
+hu_error_t hu_config_validate(const hu_config_t *cfg) {
     if (!cfg)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!cfg->default_provider || !cfg->default_provider[0])
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (!cfg->default_model || !cfg->default_model[0])
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (cfg->security.autonomy_level > 4)
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (cfg->gateway.port == 0)
-        return SC_ERR_CONFIG_INVALID;
-    if (sc_config_provider_requires_api_key(cfg->default_provider)) {
-        const char *key = sc_config_default_provider_key(cfg);
+        return HU_ERR_CONFIG_INVALID;
+    if (hu_config_provider_requires_api_key(cfg->default_provider)) {
+        const char *key = hu_config_default_provider_key(cfg);
         if (!key || !key[0])
             fprintf(stderr, "Warning: provider %s requires an API key but none is configured\n",
                     cfg->default_provider ? cfg->default_provider : "(unknown)");
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-const char *sc_config_get_provider_key(const sc_config_t *cfg, const char *name) {
+const char *hu_config_get_provider_key(const hu_config_t *cfg, const char *name) {
     if (!cfg || !name)
         return NULL;
     for (size_t i = 0; i < cfg->providers_len; i++) {
@@ -64,11 +64,11 @@ const char *sc_config_get_provider_key(const sc_config_t *cfg, const char *name)
     return (cfg->api_key && cfg->api_key[0]) ? cfg->api_key : NULL;
 }
 
-const char *sc_config_default_provider_key(const sc_config_t *cfg) {
-    return cfg ? sc_config_get_provider_key(cfg, cfg->default_provider) : NULL;
+const char *hu_config_default_provider_key(const hu_config_t *cfg) {
+    return cfg ? hu_config_get_provider_key(cfg, cfg->default_provider) : NULL;
 }
 
-const char *sc_config_get_provider_base_url(const sc_config_t *cfg, const char *name) {
+const char *hu_config_get_provider_base_url(const hu_config_t *cfg, const char *name) {
     if (!cfg || !name)
         return NULL;
     for (size_t i = 0; i < cfg->providers_len; i++) {
@@ -78,7 +78,7 @@ const char *sc_config_get_provider_base_url(const sc_config_t *cfg, const char *
     return NULL;
 }
 
-bool sc_config_get_provider_native_tools(const sc_config_t *cfg, const char *name) {
+bool hu_config_get_provider_native_tools(const hu_config_t *cfg, const char *name) {
     if (!cfg || !name)
         return true;
     for (size_t i = 0; i < cfg->providers_len; i++) {
@@ -88,10 +88,10 @@ bool sc_config_get_provider_native_tools(const sc_config_t *cfg, const char *nam
     return true;
 }
 
-const char *sc_config_get_web_search_provider(const sc_config_t *cfg) {
+const char *hu_config_get_web_search_provider(const hu_config_t *cfg) {
     const char *v = getenv("WEB_SEARCH_PROVIDER");
     if (!v)
-        v = getenv("SEACLAW_WEB_SEARCH_PROVIDER");
+        v = getenv("HUMAN_WEB_SEARCH_PROVIDER");
     if (v && v[0])
         return v;
     return (cfg && cfg->tools.web_search_provider && cfg->tools.web_search_provider[0])
@@ -99,7 +99,7 @@ const char *sc_config_get_web_search_provider(const sc_config_t *cfg) {
                : "duckduckgo";
 }
 
-size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char *key) {
+size_t hu_config_get_channel_configured_count(const hu_config_t *cfg, const char *key) {
     if (!cfg || !key)
         return 0;
     for (size_t i = 0; i < cfg->channels.channel_config_len; i++) {
@@ -110,7 +110,7 @@ size_t sc_config_get_channel_configured_count(const sc_config_t *cfg, const char
     return 0;
 }
 
-bool sc_config_get_provider_ws_streaming(const sc_config_t *cfg, const char *name) {
+bool hu_config_get_provider_ws_streaming(const hu_config_t *cfg, const char *name) {
     if (!cfg || !name)
         return false;
     for (size_t i = 0; i < cfg->providers_len; i++) {
@@ -120,7 +120,7 @@ bool sc_config_get_provider_ws_streaming(const sc_config_t *cfg, const char *nam
     return false;
 }
 
-const char *sc_config_persona_for_channel(const sc_config_t *cfg, const char *channel) {
+const char *hu_config_persona_for_channel(const hu_config_t *cfg, const char *channel) {
     if (!cfg)
         return NULL;
     if (channel && cfg->agent.persona_channels && cfg->agent.persona_channels_count > 0) {
@@ -133,7 +133,7 @@ const char *sc_config_persona_for_channel(const sc_config_t *cfg, const char *ch
     return cfg->agent.persona;
 }
 
-const char *sc_config_persona_for_contact(const sc_config_t *cfg, const char *contact_id) {
+const char *hu_config_persona_for_contact(const hu_config_t *cfg, const char *contact_id) {
     if (!cfg)
         return NULL;
     if (contact_id && cfg->agent.persona_contacts && cfg->agent.persona_contacts_count > 0) {
@@ -146,7 +146,7 @@ const char *sc_config_persona_for_contact(const sc_config_t *cfg, const char *co
     return NULL;
 }
 
-bool sc_config_get_tool_model_override(const sc_config_t *cfg, const char *tool_name,
+bool hu_config_get_tool_model_override(const hu_config_t *cfg, const char *tool_name,
                                        const char **provider_out, const char **model_out) {
     if (!cfg || !tool_name)
         return false;
@@ -163,12 +163,12 @@ bool sc_config_get_tool_model_override(const sc_config_t *cfg, const char *tool_
     return false;
 }
 
-static volatile _Atomic int sc_reload_flag = 0;
+static volatile _Atomic int hu_reload_flag = 0;
 
-void sc_config_set_reload_requested(void) {
-    atomic_store(&sc_reload_flag, 1);
+void hu_config_set_reload_requested(void) {
+    atomic_store(&hu_reload_flag, 1);
 }
 
-bool sc_config_get_and_clear_reload_requested(void) {
-    return atomic_exchange(&sc_reload_flag, 0) != 0;
+bool hu_config_get_and_clear_reload_requested(void) {
+    return atomic_exchange(&hu_reload_flag, 0) != 0;
 }

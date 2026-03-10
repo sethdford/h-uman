@@ -1,9 +1,9 @@
 #include "config_internal.h"
-#include "seaclaw/config.h"
-#include "seaclaw/core/arena.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/config.h"
+#include "human/core/arena.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,33 +17,33 @@ static const char *default_allowed_commands[] = {"git",  "npm",  "cargo", "ls", 
 static const size_t default_allowed_commands_len =
     sizeof(default_allowed_commands) / sizeof(default_allowed_commands[0]);
 
-static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
+static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->providers = NULL;
     cfg->providers_len = 0;
     cfg->api_key = NULL;
-    cfg->default_provider = sc_strdup(a, "gemini");
+    cfg->default_provider = hu_strdup(a, "gemini");
     if (!cfg->default_provider)
         return;
-    cfg->default_model = sc_strdup(a, "gemini-3.1-flash-lite-preview");
+    cfg->default_model = hu_strdup(a, "gemini-3.1-flash-lite-preview");
     if (!cfg->default_model)
         return;
     cfg->default_temperature = 0.7;
     cfg->temperature = 0.7;
     cfg->max_tokens = 0;
-    cfg->memory_backend = sc_strdup(a, "markdown");
+    cfg->memory_backend = hu_strdup(a, "markdown");
     if (!cfg->memory_backend)
         return;
     cfg->memory_auto_save = true;
     cfg->heartbeat_enabled = false;
     cfg->heartbeat_interval_minutes = 30;
-    cfg->gateway_host = sc_strdup(a, "127.0.0.1");
+    cfg->gateway_host = hu_strdup(a, "127.0.0.1");
     if (!cfg->gateway_host)
         return;
     cfg->gateway_port = 3000;
     cfg->workspace_only = true;
     cfg->max_actions_per_hour = 20;
-    cfg->autonomy.level = sc_strdup(a, "supervised");
+    cfg->autonomy.level = hu_strdup(a, "supervised");
     if (!cfg->autonomy.level)
         return;
     cfg->autonomy.workspace_only = true;
@@ -54,12 +54,12 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
         (char **)a->alloc(a->ctx, default_allowed_commands_len * sizeof(char *));
     if (cfg->autonomy.allowed_commands) {
         for (size_t i = 0; i < default_allowed_commands_len; i++)
-            cfg->autonomy.allowed_commands[i] = sc_strdup(a, default_allowed_commands[i]);
+            cfg->autonomy.allowed_commands[i] = hu_strdup(a, default_allowed_commands[i]);
         cfg->autonomy.allowed_commands_len = default_allowed_commands_len;
     }
     cfg->autonomy.allowed_paths = NULL;
     cfg->autonomy.allowed_paths_len = 0;
-    cfg->diagnostics.backend = sc_strdup(a, "none");
+    cfg->diagnostics.backend = hu_strdup(a, "none");
     if (!cfg->diagnostics.backend)
         return;
     cfg->diagnostics.otel_endpoint = NULL;
@@ -77,10 +77,10 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->agent.max_tool_iterations = 1000;
     cfg->agent.max_history_messages = 100;
     cfg->agent.parallel_tools = false;
-    cfg->agent.tool_dispatcher = sc_strdup(a, "auto");
+    cfg->agent.tool_dispatcher = hu_strdup(a, "auto");
     if (!cfg->agent.tool_dispatcher)
         return;
-    cfg->agent.token_limit = SC_DEFAULT_AGENT_TOKEN_LIMIT;
+    cfg->agent.token_limit = HU_DEFAULT_AGENT_TOKEN_LIMIT;
     cfg->agent.session_idle_timeout_secs = 1800;
     cfg->agent.compaction_keep_recent = 20;
     cfg->agent.compaction_max_summary_chars = 2000;
@@ -113,17 +113,17 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->router.powerful = NULL;
     cfg->router.complexity_low = 50;
     cfg->router.complexity_high = 500;
-    cfg->runtime.kind = sc_strdup(a, "native");
+    cfg->runtime.kind = hu_strdup(a, "native");
     if (!cfg->runtime.kind)
         return;
     cfg->runtime.docker_image = NULL;
     cfg->runtime.gce_project = NULL;
     cfg->runtime.gce_zone = NULL;
     cfg->runtime.gce_instance = NULL;
-    cfg->memory.profile = sc_strdup(a, "markdown_only");
+    cfg->memory.profile = hu_strdup(a, "markdown_only");
     if (!cfg->memory.profile)
         return;
-    cfg->memory.backend = sc_strdup(a, "markdown");
+    cfg->memory.backend = hu_strdup(a, "markdown");
     if (!cfg->memory.backend)
         return;
     cfg->memory.auto_save = true;
@@ -134,13 +134,13 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->heartbeat.interval_minutes = 30;
     cfg->channels.cli = true;
     cfg->channels.default_channel = NULL;
-    cfg->tunnel.provider = sc_strdup(a, "none");
+    cfg->tunnel.provider = hu_strdup(a, "none");
     if (!cfg->tunnel.provider)
         return;
     cfg->tunnel.domain = NULL;
     cfg->gateway.enabled = true;
     cfg->gateway.port = 3000;
-    cfg->gateway.host = sc_strdup(a, "127.0.0.1");
+    cfg->gateway.host = hu_strdup(a, "127.0.0.1");
     if (!cfg->gateway.host)
         return;
     cfg->gateway.require_pairing = true;
@@ -151,12 +151,12 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->gateway.rate_limit_window = 0;
     cfg->gateway.webhook_hmac_secret = NULL;
     cfg->secrets.encrypt = true;
-    cfg->security.sandbox = sc_strdup(a, "auto");
+    cfg->security.sandbox = hu_strdup(a, "auto");
     if (!cfg->security.sandbox)
         return;
     cfg->security.autonomy_level = 1;
     cfg->security.sandbox_config.enabled = false;
-    cfg->security.sandbox_config.backend = SC_SANDBOX_AUTO;
+    cfg->security.sandbox_config.backend = HU_SANDBOX_AUTO;
     cfg->security.sandbox_config.firejail_args = NULL;
     cfg->security.sandbox_config.firejail_args_len = 0;
     cfg->security.sandbox_config.net_proxy.enabled = false;
@@ -173,7 +173,7 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->tools.shell_max_output_bytes = 1048576;
     cfg->tools.max_file_size_bytes = 10485760;
     cfg->tools.web_fetch_max_chars = 100000;
-    cfg->tools.web_search_provider = sc_strdup(a, "duckduckgo");
+    cfg->tools.web_search_provider = hu_strdup(a, "duckduckgo");
     if (!cfg->tools.web_search_provider)
         return;
     cfg->tools.enabled_tools = NULL;
@@ -184,7 +184,7 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->session.idle_minutes = 60;
     cfg->session.identity_links = NULL;
     cfg->session.identity_links_len = 0;
-    cfg->identity.format = sc_strdup(a, "seaclaw");
+    cfg->identity.format = hu_strdup(a, "human");
     cfg->cost.enabled = false;
     cfg->cost.daily_limit_usd = 10.0;
     cfg->cost.monthly_limit_usd = 100.0;
@@ -194,18 +194,18 @@ static void set_defaults(sc_config_t *cfg, sc_allocator_t *a) {
     cfg->peripherals.enabled = false;
     cfg->peripherals.datasheet_dir = NULL;
     cfg->hardware.enabled = false;
-    cfg->hardware.transport = sc_strdup(a, "none");
+    cfg->hardware.transport = hu_strdup(a, "none");
     cfg->hardware.baud_rate = 115200;
     cfg->cron.enabled = false;
     cfg->cron.interval_minutes = 30;
     cfg->cron.max_run_history = 50;
     cfg->scheduler.max_concurrent = 4;
     cfg->nodes_len = 1;
-    cfg->nodes[0].name = sc_strdup(a, "local");
-    cfg->nodes[0].status = sc_strdup(a, "online");
+    cfg->nodes[0].name = hu_strdup(a, "local");
+    cfg->nodes[0].status = hu_strdup(a, "online");
 }
 
-static void sync_autonomy_level_from_string(sc_config_t *cfg) {
+static void sync_autonomy_level_from_string(hu_config_t *cfg) {
     if (!cfg->autonomy.level)
         return;
     if (strcmp(cfg->autonomy.level, "locked") == 0 ||
@@ -221,7 +221,7 @@ static void sync_autonomy_level_from_string(sc_config_t *cfg) {
         cfg->security.autonomy_level = 3;
 }
 
-static void sync_autonomy_string_from_level(sc_config_t *cfg, sc_allocator_t *a) {
+static void sync_autonomy_string_from_level(hu_config_t *cfg, hu_allocator_t *a) {
     const char *level = "supervised";
     if (cfg->security.autonomy_level == 0)
         level = "locked";
@@ -231,15 +231,15 @@ static void sync_autonomy_string_from_level(sc_config_t *cfg, sc_allocator_t *a)
         level = "autonomous";
     if (cfg->autonomy.level)
         a->free(a->ctx, cfg->autonomy.level, strlen(cfg->autonomy.level) + 1);
-    cfg->autonomy.level = sc_strdup(a, level);
+    cfg->autonomy.level = hu_strdup(a, level);
 }
 
-static sc_error_t load_json_file(sc_config_t *cfg, const char *path) {
+static hu_error_t load_json_file(hu_config_t *cfg, const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f)
-        return SC_OK;
-    sc_allocator_t *a = &cfg->allocator;
-    sc_error_t err = SC_OK;
+        return HU_OK;
+    hu_allocator_t *a = &cfg->allocator;
+    hu_error_t err = HU_OK;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -248,14 +248,14 @@ static sc_error_t load_json_file(sc_config_t *cfg, const char *path) {
         if (buf) {
             size_t read_len = fread(buf, 1, (size_t)sz, f);
             buf[read_len] = '\0';
-            err = sc_config_parse_json(cfg, buf, read_len);
+            err = hu_config_parse_json(cfg, buf, read_len);
         }
     }
     fclose(f);
     return err;
 }
 
-static void sync_flat_fields(sc_config_t *cfg) {
+static void sync_flat_fields(hu_config_t *cfg) {
     cfg->temperature = cfg->default_temperature;
     if (cfg->memory.backend)
         cfg->memory_backend = cfg->memory.backend;
@@ -270,15 +270,15 @@ static void sync_flat_fields(sc_config_t *cfg) {
     cfg->max_actions_per_hour = cfg->autonomy.max_actions_per_hour;
 }
 
-sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
+hu_error_t hu_config_load(hu_allocator_t *backing, hu_config_t *out) {
     if (!backing || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_arena_t *arena = sc_arena_create(*backing);
+    hu_arena_t *arena = hu_arena_create(*backing);
     if (!arena)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-    sc_allocator_t a = sc_arena_allocator(arena);
+    hu_allocator_t a = hu_arena_allocator(arena);
     set_defaults(out, &a);
     out->arena = arena;
     out->allocator = a;
@@ -287,40 +287,40 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
     if (!home)
         home = ".";
 
-    char path_buf[SC_MAX_PATH];
-    int n = snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, SC_CONFIG_DIR, SC_CONFIG_FILE);
+    char path_buf[HU_MAX_PATH];
+    int n = snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, HU_CONFIG_DIR, HU_CONFIG_FILE);
     if (n <= 0 || (size_t)n >= sizeof(path_buf)) {
-        out->config_path = sc_strdup(&a, "");
-        out->workspace_dir = sc_strdup(&a, ".");
+        out->config_path = hu_strdup(&a, "");
+        out->workspace_dir = hu_strdup(&a, ".");
         sync_flat_fields(out);
-        return sc_config_validate(out);
+        return hu_config_validate(out);
     }
 
-    char global_path[SC_MAX_PATH];
+    char global_path[HU_MAX_PATH];
     strncpy(global_path, path_buf, sizeof(global_path) - 1);
     global_path[sizeof(global_path) - 1] = '\0';
 
-    n = snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, SC_CONFIG_DIR, SC_DEFAULT_WORKSPACE);
-    char workspace_dir[SC_MAX_PATH];
+    n = snprintf(path_buf, sizeof(path_buf), "%s/%s/%s", home, HU_CONFIG_DIR, HU_DEFAULT_WORKSPACE);
+    char workspace_dir[HU_MAX_PATH];
     if (n > 0 && (size_t)n < sizeof(path_buf))
         strncpy(workspace_dir, path_buf, sizeof(workspace_dir) - 1);
     else
         strncpy(workspace_dir, ".", sizeof(workspace_dir) - 1);
     workspace_dir[sizeof(workspace_dir) - 1] = '\0';
 
-    out->config_path = sc_strdup(&a, global_path);
-    out->workspace_dir = sc_strdup(&a, workspace_dir);
+    out->config_path = hu_strdup(&a, global_path);
+    out->workspace_dir = hu_strdup(&a, workspace_dir);
 
-    sc_error_t err = load_json_file(out, global_path);
-    if (err != SC_OK) {
-        sc_config_deinit(out);
+    hu_error_t err = load_json_file(out, global_path);
+    if (err != HU_OK) {
+        hu_config_deinit(out);
         return err;
     }
 
     /* Tighten config directory permissions if too permissive */
     {
-        char dir_buf[SC_MAX_PATH];
-        int dn = snprintf(dir_buf, sizeof(dir_buf), "%s/%s", home, SC_CONFIG_DIR);
+        char dir_buf[HU_MAX_PATH];
+        int dn = snprintf(dir_buf, sizeof(dir_buf), "%s/%s", home, HU_CONFIG_DIR);
         if (dn > 0 && (size_t)dn < sizeof(dir_buf)) {
             struct stat dir_st;
             if (stat(dir_buf, &dir_st) == 0 && (dir_st.st_mode & 0077) != 0)
@@ -328,23 +328,23 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
         }
     }
 
-    char cwd[SC_MAX_PATH];
+    char cwd[HU_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd))) {
-        char workspace_cfg[SC_MAX_PATH];
-        int wn = snprintf(workspace_cfg, sizeof(workspace_cfg), "%s/%s/%s", cwd, SC_CONFIG_DIR,
-                          SC_CONFIG_FILE);
+        char workspace_cfg[HU_MAX_PATH];
+        int wn = snprintf(workspace_cfg, sizeof(workspace_cfg), "%s/%s/%s", cwd, HU_CONFIG_DIR,
+                          HU_CONFIG_FILE);
         if (wn > 0 && (size_t)wn < sizeof(workspace_cfg))
             load_json_file(out, workspace_cfg);
     }
 
-    sc_config_apply_env_overrides(out);
+    hu_config_apply_env_overrides(out);
     sync_autonomy_level_from_string(out);
     sync_flat_fields(out);
-    /* Strict validation: warnings by default; fail if SEACLAW_STRICT_CONFIG=1 */
+    /* Strict validation: warnings by default; fail if HUMAN_STRICT_CONFIG=1 */
     {
-        const char *strict_env = getenv("SEACLAW_STRICT_CONFIG");
+        const char *strict_env = getenv("HUMAN_STRICT_CONFIG");
         bool strict = (strict_env != NULL && strict_env[0] != '\0' && strict_env[0] != '0');
-        sc_json_value_t *validation_root = NULL;
+        hu_json_value_t *validation_root = NULL;
         if (out->config_path) {
             FILE *vf = fopen(out->config_path, "rb");
             if (vf) {
@@ -356,56 +356,56 @@ sc_error_t sc_config_load(sc_allocator_t *backing, sc_config_t *out) {
                     if (vbuf) {
                         size_t vread = fread(vbuf, 1, (size_t)vsz, vf);
                         vbuf[vread] = '\0';
-                        sc_error_t verr = sc_json_parse(&a, vbuf, vread, &validation_root);
-                        if (verr != SC_OK)
+                        hu_error_t verr = hu_json_parse(&a, vbuf, vread, &validation_root);
+                        if (verr != HU_OK)
                             validation_root = NULL;
                     }
                 }
                 fclose(vf);
             }
         }
-        sc_error_t verr = sc_config_validate_strict(out, validation_root, strict);
-        if (verr != SC_OK)
+        hu_error_t verr = hu_config_validate_strict(out, validation_root, strict);
+        if (verr != HU_OK)
             return verr;
     }
-    return sc_config_validate(out);
+    return hu_config_validate(out);
 }
 
-const char *sc_config_env_get(const char *name) {
+const char *hu_config_env_get(const char *name) {
     const char *v = getenv(name);
     return (v && v[0]) ? v : NULL;
 }
 
-void sc_config_apply_env_str(sc_allocator_t *a, char **dst, const char *v) {
+void hu_config_apply_env_str(hu_allocator_t *a, char **dst, const char *v) {
     if (!v || !v[0])
         return;
     if (*dst)
         a->free(a->ctx, *dst, strlen(*dst) + 1);
-    *dst = sc_strdup(a, v);
+    *dst = hu_strdup(a, v);
 }
 
-void sc_config_apply_env_overrides(sc_config_t *cfg) {
+void hu_config_apply_env_overrides(hu_config_t *cfg) {
     if (!cfg)
         return;
-    sc_allocator_t *a = &cfg->allocator;
+    hu_allocator_t *a = &cfg->allocator;
 
     const char *v;
-    v = getenv("SEACLAW_PROVIDER");
+    v = getenv("HUMAN_PROVIDER");
     if (v)
-        sc_config_apply_env_str(a, &cfg->default_provider, v);
+        hu_config_apply_env_str(a, &cfg->default_provider, v);
 
-    v = getenv("SEACLAW_MODEL");
+    v = getenv("HUMAN_MODEL");
     if (v)
-        sc_config_apply_env_str(a, &cfg->default_model, v);
+        hu_config_apply_env_str(a, &cfg->default_model, v);
 
-    v = getenv("SEACLAW_TEMPERATURE");
+    v = getenv("HUMAN_TEMPERATURE");
     if (v) {
         double temp = strtod(v, NULL);
         if (temp >= 0.0 && temp <= 2.0)
             cfg->default_temperature = temp;
     }
 
-    v = getenv("SEACLAW_GATEWAY_PORT");
+    v = getenv("HUMAN_GATEWAY_PORT");
     if (v) {
         unsigned long port = strtoul(v, NULL, 10);
         if (port < 1)
@@ -415,25 +415,25 @@ void sc_config_apply_env_overrides(sc_config_t *cfg) {
         cfg->gateway.port = (uint16_t)port;
     }
 
-    v = getenv("SEACLAW_GATEWAY_HOST");
+    v = getenv("HUMAN_GATEWAY_HOST");
     if (v)
-        sc_config_apply_env_str(a, &cfg->gateway.host, v);
+        hu_config_apply_env_str(a, &cfg->gateway.host, v);
 
-    v = getenv("SEACLAW_WORKSPACE");
+    v = getenv("HUMAN_WORKSPACE");
     if (v && !strstr(v, ".."))
-        sc_config_apply_env_str(a, &cfg->workspace_dir, v);
+        hu_config_apply_env_str(a, &cfg->workspace_dir, v);
 
-    v = getenv("SEACLAW_ALLOW_PUBLIC_BIND");
+    v = getenv("HUMAN_ALLOW_PUBLIC_BIND");
     if (v)
         cfg->gateway.allow_public_bind = (strcmp(v, "1") == 0 || strcmp(v, "true") == 0);
 
-    v = getenv("SEACLAW_WEBHOOK_HMAC_SECRET");
+    v = getenv("HUMAN_WEBHOOK_HMAC_SECRET");
     if (v)
-        sc_config_apply_env_str(a, &cfg->gateway.webhook_hmac_secret, v);
+        hu_config_apply_env_str(a, &cfg->gateway.webhook_hmac_secret, v);
 
-    v = getenv("SEACLAW_API_KEY");
+    v = getenv("HUMAN_API_KEY");
     if (v)
-        sc_config_apply_env_str(a, &cfg->api_key, v);
+        hu_config_apply_env_str(a, &cfg->api_key, v);
     else if (cfg->default_provider && !cfg->api_key) {
         if (strcmp(cfg->default_provider, "openai") == 0)
             v = getenv("OPENAI_API_KEY");
@@ -445,10 +445,10 @@ void sc_config_apply_env_overrides(sc_config_t *cfg) {
         else if (strcmp(cfg->default_provider, "ollama") == 0)
             v = getenv("OLLAMA_HOST");
         if (v)
-            sc_config_apply_env_str(a, &cfg->api_key, v);
+            hu_config_apply_env_str(a, &cfg->api_key, v);
     }
 
-    v = getenv("SEACLAW_AUTONOMY");
+    v = getenv("HUMAN_AUTONOMY");
     if (v) {
         unsigned long al = strtoul(v, NULL, 10);
         if (al <= 4)

@@ -1,8 +1,8 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,19 +26,19 @@ typedef struct {
     char _unused;
 } report_ctx_t;
 
-static sc_error_t report_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                 sc_tool_result_t *out) {
+static hu_error_t report_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                 hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
 
     if (strcmp(action, "template") == 0) {
@@ -48,13 +48,13 @@ static sc_error_t report_execute(void *ctx, sc_allocator_t *alloc, const sc_json
             "- weekly_status: Title, Accomplishments, In Progress, Blockers, Plan\n"
             "- incident_report: Title, Summary, Timeline, Impact, Root Cause, Remediation\n"
             "- financial_summary: Title, Revenue, Expenses, Net, Forecast\n";
-        *out = sc_tool_result_ok(list, strlen(list));
-        return SC_OK;
+        *out = hu_tool_result_ok(list, strlen(list));
+        return HU_OK;
     }
 
     if (strcmp(action, "create") == 0) {
-        const char *title = sc_json_get_string(args, "title");
-        const char *format = sc_json_get_string(args, "format");
+        const char *title = hu_json_get_string(args, "title");
+        const char *format = hu_json_get_string(args, "format");
         bool html = format && strcmp(format, "html") == 0;
 
         time_t now = time(NULL);
@@ -65,8 +65,8 @@ static sc_error_t report_execute(void *ctx, sc_allocator_t *alloc, const sc_json
         size_t buf_sz = 16384;
         char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 13);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 13);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         int n = 0;
         if (html) {
@@ -83,14 +83,14 @@ static sc_error_t report_execute(void *ctx, sc_allocator_t *alloc, const sc_json
                           title ? title : "Report", date);
         }
 
-        sc_json_value_t *sections = sc_json_object_get((sc_json_value_t *)args, "sections");
-        if (sections && sections->type == SC_JSON_ARRAY) {
+        hu_json_value_t *sections = hu_json_object_get((hu_json_value_t *)args, "sections");
+        if (sections && sections->type == HU_JSON_ARRAY) {
             for (size_t i = 0; i < sections->data.array.len; i++) {
-                sc_json_value_t *sec = sections->data.array.items[i];
-                if (!sec || sec->type != SC_JSON_OBJECT)
+                hu_json_value_t *sec = sections->data.array.items[i];
+                if (!sec || sec->type != HU_JSON_OBJECT)
                     continue;
-                const char *heading = sc_json_get_string(sec, "heading");
-                const char *content = sc_json_get_string(sec, "content");
+                const char *heading = hu_json_get_string(sec, "heading");
+                const char *content = hu_json_get_string(sec, "content");
                 if (html) {
                     n += snprintf(msg + n, buf_sz - (size_t)n, "<h2>%s</h2><p>%s</p>",
                                   heading ? heading : "", content ? content : "");
@@ -104,17 +104,17 @@ static sc_error_t report_execute(void *ctx, sc_allocator_t *alloc, const sc_json
         if (html)
             n += snprintf(msg + n, buf_sz - (size_t)n, "</body></html>");
 
-        *out = sc_tool_result_ok_owned(msg, (size_t)n);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, (size_t)n);
+        return HU_OK;
     }
 
     if (strcmp(action, "export") == 0) {
-        *out = sc_tool_result_ok("Use 'create' with format='html' or format='markdown'", 51);
-        return SC_OK;
+        *out = hu_tool_result_ok("Use 'create' with format='html' or format='markdown'", 51);
+        return HU_OK;
     }
 
-    *out = sc_tool_result_fail("unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("unknown action", 14);
+    return HU_OK;
 }
 
 static const char *report_name(void *ctx) {
@@ -129,12 +129,12 @@ static const char *report_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void report_deinit(void *ctx, sc_allocator_t *alloc) {
+static void report_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
         alloc->free(alloc->ctx, ctx, sizeof(report_ctx_t));
 }
 
-static const sc_tool_vtable_t report_vtable = {
+static const hu_tool_vtable_t report_vtable = {
     .execute = report_execute,
     .name = report_name,
     .description = report_desc,
@@ -142,14 +142,14 @@ static const sc_tool_vtable_t report_vtable = {
     .deinit = report_deinit,
 };
 
-sc_error_t sc_report_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_report_create(hu_allocator_t *alloc, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     void *ctx = alloc->alloc(alloc->ctx, sizeof(report_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(report_ctx_t));
     out->ctx = ctx;
     out->vtable = &report_vtable;
-    return SC_OK;
+    return HU_OK;
 }

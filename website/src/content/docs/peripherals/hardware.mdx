@@ -1,9 +1,9 @@
 ---
 title: Hardware Peripherals
-description: Connect Arduino, STM32, and Raspberry Pi boards to SeaClaw for physical-world interaction.
+description: Connect Arduino, STM32, and Raspberry Pi boards to Human for physical-world interaction.
 ---
 
-SeaClaw can interface with hardware peripherals via a vtable-based API. Supported boards include Arduino (serial), STM32/Nucleo (probe-rs), and Raspberry Pi (GPIO).
+Human can interface with hardware peripherals via a vtable-based API. Supported boards include Arduino (serial), STM32/Nucleo (probe-rs), and Raspberry Pi (GPIO).
 
 ## Supported boards
 
@@ -16,13 +16,13 @@ SeaClaw can interface with hardware peripherals via a vtable-based API. Supporte
 ## CLI commands
 
 ```bash
-seaclaw hardware list                 # List detected hardware and supported boards
-seaclaw hardware info <board>         # Show info for a specific board type
+human hardware list                 # List detected hardware and supported boards
+human hardware info <board>         # Show info for a specific board type
 ```
 
 ## Configuration
 
-Hardware is configured in `~/.seaclaw/config.json`:
+Hardware is configured in `~/.human/config.json`:
 
 ```json
 {

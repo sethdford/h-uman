@@ -1,5 +1,5 @@
-#include "seaclaw/agent/info_asymmetry.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/info_asymmetry.h"
+#include "human/core/string.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,7 +17,7 @@ static bool topic_in_list(const char *topic, size_t topic_len, const char **list
 }
 
 static size_t extract_topics(const char *text, size_t text_len, char **out_topics, size_t *out_lens,
-                             size_t max_out, sc_allocator_t *alloc) {
+                             size_t max_out, hu_allocator_t *alloc) {
     size_t count = 0;
     const char *p = text;
     const char *end = text + text_len;
@@ -49,7 +49,7 @@ static size_t extract_topics(const char *text, size_t text_len, char **out_topic
         if (topic_len == 0)
             continue;
 
-        char *dup = sc_strndup(alloc, topic_start, topic_len);
+        char *dup = hu_strndup(alloc, topic_start, topic_len);
         if (!dup)
             break;
         out_topics[count] = dup;
@@ -59,35 +59,35 @@ static size_t extract_topics(const char *text, size_t text_len, char **out_topic
     return count;
 }
 
-sc_error_t sc_info_asymmetry_analyze(sc_info_asymmetry_t *result, sc_allocator_t *alloc,
+hu_error_t hu_info_asymmetry_analyze(hu_info_asymmetry_t *result, hu_allocator_t *alloc,
                                      const char *agent_context, size_t agent_context_len,
                                      const char *contact_context, size_t contact_context_len) {
     if (!result || !alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     memset(result, 0, sizeof(*result));
 
-    char *agent_topics[SC_INFO_GAP_MAX];
-    size_t agent_lens[SC_INFO_GAP_MAX];
+    char *agent_topics[HU_INFO_GAP_MAX];
+    size_t agent_lens[HU_INFO_GAP_MAX];
     size_t agent_count = 0;
     if (agent_context && agent_context_len > 0) {
         agent_count = extract_topics(agent_context, agent_context_len, agent_topics, agent_lens,
-                                     SC_INFO_GAP_MAX, alloc);
+                                     HU_INFO_GAP_MAX, alloc);
     }
 
-    char *contact_topics[SC_INFO_GAP_MAX];
-    size_t contact_lens[SC_INFO_GAP_MAX];
+    char *contact_topics[HU_INFO_GAP_MAX];
+    size_t contact_lens[HU_INFO_GAP_MAX];
     size_t contact_count = 0;
     if (contact_context && contact_context_len > 0) {
         contact_count = extract_topics(contact_context, contact_context_len, contact_topics,
-                                       contact_lens, SC_INFO_GAP_MAX, alloc);
+                                       contact_lens, HU_INFO_GAP_MAX, alloc);
     }
 
     /* Classify and add to result */
-    for (size_t i = 0; i < agent_count && result->gap_count < SC_INFO_GAP_MAX; i++) {
+    for (size_t i = 0; i < agent_count && result->gap_count < HU_INFO_GAP_MAX; i++) {
         bool in_contact = topic_in_list(agent_topics[i], agent_lens[i],
                                         (const char **)contact_topics, contact_lens, contact_count);
-        sc_info_gap_type_t type = in_contact ? SC_GAP_SHARED : SC_GAP_AGENT_KNOWS;
+        hu_info_gap_type_t type = in_contact ? HU_GAP_SHARED : HU_GAP_AGENT_KNOWS;
 
         result->gaps[result->gap_count].topic = agent_topics[i];
         result->gaps[result->gap_count].topic_len = agent_lens[i];
@@ -96,7 +96,7 @@ sc_error_t sc_info_asymmetry_analyze(sc_info_asymmetry_t *result, sc_allocator_t
         result->gap_count++;
     }
 
-    for (size_t i = 0; i < contact_count && result->gap_count < SC_INFO_GAP_MAX; i++) {
+    for (size_t i = 0; i < contact_count && result->gap_count < HU_INFO_GAP_MAX; i++) {
         bool in_agent = topic_in_list(contact_topics[i], contact_lens[i],
                                       (const char **)agent_topics, agent_lens, agent_count);
         if (in_agent)
@@ -104,7 +104,7 @@ sc_error_t sc_info_asymmetry_analyze(sc_info_asymmetry_t *result, sc_allocator_t
 
         result->gaps[result->gap_count].topic = contact_topics[i];
         result->gaps[result->gap_count].topic_len = contact_lens[i];
-        result->gaps[result->gap_count].type = SC_GAP_CONTACT_KNOWS;
+        result->gaps[result->gap_count].type = HU_GAP_CONTACT_KNOWS;
         result->gaps[result->gap_count].disclosure_appropriate = true;
         result->gap_count++;
     }
@@ -119,7 +119,7 @@ sc_error_t sc_info_asymmetry_analyze(sc_info_asymmetry_t *result, sc_allocator_t
             }
         }
         if (!transferred)
-            sc_str_free(alloc, agent_topics[i]);
+            hu_str_free(alloc, agent_topics[i]);
     }
     for (size_t i = 0; i < contact_count; i++) {
         bool transferred = false;
@@ -130,22 +130,22 @@ sc_error_t sc_info_asymmetry_analyze(sc_info_asymmetry_t *result, sc_allocator_t
             }
         }
         if (!transferred)
-            sc_str_free(alloc, contact_topics[i]);
+            hu_str_free(alloc, contact_topics[i]);
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_info_asymmetry_build_guidance(const sc_info_asymmetry_t *asym, sc_allocator_t *alloc,
+hu_error_t hu_info_asymmetry_build_guidance(const hu_info_asymmetry_t *asym, hu_allocator_t *alloc,
                                             char **out, size_t *out_len) {
     if (!asym || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     *out = NULL;
     *out_len = 0;
 
     if (asym->gap_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     char buf[4096];
     size_t pos = 0;
@@ -155,7 +155,7 @@ sc_error_t sc_info_asymmetry_build_guidance(const sc_info_asymmetry_t *asym, sc_
     /* You know but they don't */
     bool first = true;
     for (size_t i = 0; i < asym->gap_count; i++) {
-        if (asym->gaps[i].type != SC_GAP_AGENT_KNOWS)
+        if (asym->gaps[i].type != HU_GAP_AGENT_KNOWS)
             continue;
         if (first) {
             pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "You know but they don't: ");
@@ -175,7 +175,7 @@ sc_error_t sc_info_asymmetry_build_guidance(const sc_info_asymmetry_t *asym, sc_
     /* They know but you don't */
     first = true;
     for (size_t i = 0; i < asym->gap_count; i++) {
-        if (asym->gaps[i].type != SC_GAP_CONTACT_KNOWS)
+        if (asym->gaps[i].type != HU_GAP_CONTACT_KNOWS)
             continue;
         if (first) {
             pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "They know but you don't: ");
@@ -195,7 +195,7 @@ sc_error_t sc_info_asymmetry_build_guidance(const sc_info_asymmetry_t *asym, sc_
     /* Shared knowledge */
     first = true;
     for (size_t i = 0; i < asym->gap_count; i++) {
-        if (asym->gaps[i].type != SC_GAP_SHARED)
+        if (asym->gaps[i].type != HU_GAP_SHARED)
             continue;
         if (first) {
             pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "Shared knowledge: ");
@@ -212,19 +212,19 @@ sc_error_t sc_info_asymmetry_build_guidance(const sc_info_asymmetry_t *asym, sc_
     if (!first)
         pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "\n");
 
-    *out = sc_strndup(alloc, buf, pos);
+    *out = hu_strndup(alloc, buf, pos);
     if (!*out)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_info_asymmetry_deinit(sc_info_asymmetry_t *asym, sc_allocator_t *alloc) {
+void hu_info_asymmetry_deinit(hu_info_asymmetry_t *asym, hu_allocator_t *alloc) {
     if (!asym || !alloc)
         return;
     for (size_t i = 0; i < asym->gap_count; i++) {
         if (asym->gaps[i].topic) {
-            sc_str_free(alloc, asym->gaps[i].topic);
+            hu_str_free(alloc, asym->gaps[i].topic);
             asym->gaps[i].topic = NULL;
         }
         asym->gaps[i].topic_len = 0;

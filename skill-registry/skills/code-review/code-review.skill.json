@@ -2,7 +2,7 @@
   "name": "code-review",
   "description": "Automated code review with style checks and security scanning. Apply security checks (SQL injection, XSS, auth bypass), verify error handling and edge cases, suggest style and clarity improvements.",
   "version": "1.0.0",
-  "author": "seaclaw",
+  "author": "human",
   "dependencies": [],
   "parameters": "{}",
   "enabled": true

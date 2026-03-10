@@ -1,6 +1,6 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <stdio.h>
 #include <string.h>
 #if defined(__unix__) || defined(__APPLE__)
@@ -33,7 +33,7 @@
 #include <fcntl.h>
 #endif
 
-#if defined(__linux__) && !SC_IS_TEST
+#if defined(__linux__) && !HU_IS_TEST
 static bool firecracker_binary_exists(void) {
     if (access("/usr/bin/firecracker", X_OK) == 0)
         return true;
@@ -48,11 +48,11 @@ static bool kvm_available(void) {
 #endif
 
 #ifdef __linux__
-static sc_error_t firecracker_write_config(sc_firecracker_ctx_t *fc, const char *config_path,
+static hu_error_t firecracker_write_config(hu_firecracker_ctx_t *fc, const char *config_path,
                                            const char *const *argv, size_t argc) {
     FILE *f = fopen(config_path, "w");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     /* Build boot_args: shell-safe single-quoted command.
      * Inside single quotes, only '\'' works to escape a literal quote
@@ -106,11 +106,11 @@ static sc_error_t firecracker_write_config(sc_firecracker_ctx_t *fc, const char 
             "    \"mem_size_mib\": %u\n  }\n}\n",
             fc->vcpu_count, fc->mem_size_mib);
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }
 #endif
 
-static sc_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t argc,
+static hu_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t argc,
                                    const char **buf, size_t buf_count, size_t *out_count) {
 #ifndef __linux__
     (void)ctx;
@@ -119,21 +119,21 @@ static sc_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t ar
     (void)buf;
     (void)buf_count;
     (void)out_count;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_firecracker_ctx_t *fc = (sc_firecracker_ctx_t *)ctx;
+    hu_firecracker_ctx_t *fc = (hu_firecracker_ctx_t *)ctx;
 
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (buf_count < 4)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     static char config_path[280];
     static char config_arg[300];
     snprintf(config_path, sizeof(config_path), "%s.json", fc->socket_path);
 
-    sc_error_t err = firecracker_write_config(fc, config_path, argv, argc);
-    if (err != SC_OK)
+    hu_error_t err = firecracker_write_config(fc, config_path, argv, argc);
+    if (err != HU_OK)
         return err;
 
     snprintf(config_arg, sizeof(config_arg), "--config-file=%s", config_path);
@@ -143,14 +143,14 @@ static sc_error_t firecracker_wrap(void *ctx, const char *const *argv, size_t ar
     buf[2] = "--boot-timer";
     buf[3] = config_arg;
     *out_count = 4;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
 static bool firecracker_available(void *ctx) {
     (void)ctx;
 #ifdef __linux__
-#if SC_IS_TEST
+#if HU_IS_TEST
     return false;
 #else
     return firecracker_binary_exists() && kvm_available();
@@ -174,7 +174,7 @@ static const char *firecracker_desc(void *ctx) {
 #endif
 }
 
-static const sc_sandbox_vtable_t firecracker_vtable = {
+static const hu_sandbox_vtable_t firecracker_vtable = {
     .wrap_command = firecracker_wrap,
     .apply = NULL,
     .is_available = firecracker_available,
@@ -182,15 +182,15 @@ static const sc_sandbox_vtable_t firecracker_vtable = {
     .description = firecracker_desc,
 };
 
-sc_sandbox_t sc_firecracker_sandbox_get(sc_firecracker_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_firecracker_sandbox_get(hu_firecracker_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &firecracker_vtable,
     };
     return sb;
 }
 
-void sc_firecracker_sandbox_init(sc_firecracker_ctx_t *ctx, const char *workspace_dir) {
+void hu_firecracker_sandbox_init(hu_firecracker_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     ctx->vcpu_count = 1;
     ctx->mem_size_mib = 128;
@@ -203,7 +203,7 @@ void sc_firecracker_sandbox_init(sc_firecracker_ctx_t *ctx, const char *workspac
         ctx->workspace_dir[len] = '\0';
     }
 
-    snprintf(ctx->socket_path, sizeof(ctx->socket_path), "/tmp/sc_fc_%d.sock", (int)getpid());
+    snprintf(ctx->socket_path, sizeof(ctx->socket_path), "/tmp/hu_fc_%d.sock", (int)getpid());
     memcpy(ctx->kernel_path, "/var/lib/firecracker/vmlinux", 29);
     memcpy(ctx->rootfs_path, "/var/lib/firecracker/rootfs.ext4", 33);
 }

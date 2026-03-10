@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e-channels.sh — Build seaclaw, start gateway, prove channel webhooks work E2E.
+# e2e-channels.sh — Build human, start gateway, prove channel webhooks work E2E.
 #
 # This script tests the full webhook → poll → agent → send loop for each channel
 # by POSTing webhook payloads to the gateway and verifying the response cycle.
@@ -23,9 +23,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BINARY="$REPO_ROOT/build-release/seaclaw"
+BINARY="$REPO_ROOT/build-release/human"
 E2E_HOME=$(mktemp -d)
-E2E_CONFIG_DIR="$E2E_HOME/.seaclaw"
+E2E_CONFIG_DIR="$E2E_HOME/.human"
 GW_PID=""
 GW_PORT=${GW_PORT:-3100}
 EXIT_CODE=0

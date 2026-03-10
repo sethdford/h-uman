@@ -2,23 +2,23 @@
 import PackageDescription
 
 let package = Package(
-    name: "SeaClawiOS",
+    name: "HumaniOS",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
-        .library(name: "SeaClawiOS", targets: ["SeaClawiOS"]),
+        .library(name: "HumaniOS", targets: ["HumaniOS"]),
     ],
     dependencies: [
-        .package(path: "../shared/SeaClawKit"),
+        .package(path: "../shared/HumanKit"),
     ],
     targets: [
         .target(
-            name: "SeaClawiOS",
+            name: "HumaniOS",
             dependencies: [
-                .product(name: "SeaClawClient", package: "SeaClawKit"),
-                .product(name: "SeaClawChatUI", package: "SeaClawKit"),
-                .product(name: "SeaClawProtocol", package: "SeaClawKit"),
+                .product(name: "HumanClient", package: "HumanKit"),
+                .product(name: "HumanChatUI", package: "HumanKit"),
+                .product(name: "HumanProtocol", package: "HumanKit"),
             ],
-            path: "Sources/SeaClawiOS"
+            path: "Sources/HumaniOS"
         ),
     ]
 )

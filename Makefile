@@ -16,7 +16,7 @@ $(BUILD)/CMakeCache.txt:
 	@$(MAKE) configure
 
 test: build
-	$(BUILD)/seaclaw_tests
+	$(BUILD)/human_tests
 
 asan:
 	cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug \
@@ -24,18 +24,18 @@ asan:
 		-DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
 		-DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
 	cmake --build build-asan -j$(JOBS)
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 build-asan/seaclaw_tests
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 build-asan/human_tests
 
 release:
 	cmake -B $(BUILD) -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON \
 		-DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
 	cmake --build $(BUILD) -j$(JOBS)
-	@SIZE=$$(stat -c%s $(BUILD)/seaclaw 2>/dev/null || stat -f%z $(BUILD)/seaclaw); \
+	@SIZE=$$(stat -c%s $(BUILD)/human 2>/dev/null || stat -f%z $(BUILD)/human); \
 	echo "Binary: $$((SIZE / 1024)) KB"
 
 check: build
 	@echo "Running tests (use 'make asan' for AddressSanitizer)"
-	$(BUILD)/seaclaw_tests
+	$(BUILD)/human_tests
 
 lint:
 	cmake -B build-tidy -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON \
@@ -48,7 +48,7 @@ coverage:
 	cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON \
 		-DSC_ENABLE_CURL=ON -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
 	cmake --build build-cov -j$(JOBS)
-	build-cov/seaclaw_tests
+	build-cov/human_tests
 	@echo "Generating coverage report..."
 	@lcov --capture --directory build-cov --output-file build-cov/coverage.info --ignore-errors mismatch 2>/dev/null || true
 	@lcov --remove build-cov/coverage.info '/usr/*' --output-file build-cov/coverage.info 2>/dev/null || true
@@ -73,12 +73,12 @@ fuzz:
 	@echo "Fuzz targets built. Run: ./build-fuzz/fuzz_<name> -max_total_time=30"
 
 bench: release
-	@if [ -x scripts/benchmark.sh ]; then scripts/benchmark.sh $(BUILD)/seaclaw; \
-	else echo "Binary: $$(stat -c%s $(BUILD)/seaclaw 2>/dev/null || stat -f%z $(BUILD)/seaclaw) bytes"; fi
+	@if [ -x scripts/benchmark.sh ]; then scripts/benchmark.sh $(BUILD)/human; \
+	else echo "Binary: $$(stat -c%s $(BUILD)/human 2>/dev/null || stat -f%z $(BUILD)/human) bytes"; fi
 
 install: release
 	cmake --install $(BUILD) --prefix $(or $(PREFIX),$(HOME)/.local)
-	@echo "Installed to $(or $(PREFIX),$(HOME)/.local)/bin/seaclaw"
+	@echo "Installed to $(or $(PREFIX),$(HOME)/.local)/bin/human"
 
 setup:
 	@echo "==> Installing dependencies"

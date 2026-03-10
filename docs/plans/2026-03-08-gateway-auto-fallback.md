@@ -146,13 +146,13 @@ test("auto-fallback populates overview without live gateway", async ({
 }) => {
   await page.goto("/");
   // Wait for fallback timer (2.5s) + demo gateway connect (400ms) + view load
-  const overview = page.locator("sc-app >> sc-overview-view");
+  const overview = page.locator("hu-app >> hu-overview-view");
   await expect(overview).toBeAttached({ timeout: 5000 });
   // Verify actual content loaded (not just skeleton)
   await expect(async () => {
     const text = await page.evaluate(() => {
-      const app = document.querySelector("sc-app");
-      const view = app?.shadowRoot?.querySelector("sc-overview-view");
+      const app = document.querySelector("hu-app");
+      const view = app?.shadowRoot?.querySelector("hu-overview-view");
       return view?.shadowRoot?.textContent ?? "";
     });
     // Overview should show capabilities data from demo gateway

@@ -1,74 +1,74 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/factory.h"
-#include "seaclaw/tools/shell.h"
-#include "seaclaw/tools/validation.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/tool.h"
+#include "human/tools/factory.h"
+#include "human/tools/shell.h"
+#include "human/tools/validation.h"
 #include "test_framework.h"
 #include <string.h>
 
 static void test_shell_create_succeeds(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool;
-    sc_error_t err = sc_shell_create(&alloc, "/tmp", 4, NULL, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "shell");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool;
+    hu_error_t err = hu_shell_create(&alloc, "/tmp", 4, NULL, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "shell");
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_shell_name(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool;
-    sc_error_t err = sc_shell_create(&alloc, NULL, 0, NULL, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "shell");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool;
+    hu_error_t err = hu_shell_create(&alloc, NULL, 0, NULL, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "shell");
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_shell_description(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool;
-    sc_error_t err = sc_shell_create(&alloc, NULL, 0, NULL, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool;
+    hu_error_t err = hu_shell_create(&alloc, NULL, 0, NULL, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
     const char *desc = tool.vtable->description(tool.ctx);
-    SC_ASSERT_NOT_NULL(desc);
-    SC_ASSERT_TRUE(strlen(desc) > 0);
+    HU_ASSERT_NOT_NULL(desc);
+    HU_ASSERT_TRUE(strlen(desc) > 0);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_shell_parameters_json(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool;
-    sc_error_t err = sc_shell_create(&alloc, NULL, 0, NULL, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool;
+    hu_error_t err = hu_shell_create(&alloc, NULL, 0, NULL, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
     const char *params = tool.vtable->parameters_json(tool.ctx);
-    SC_ASSERT_NOT_NULL(params);
-    SC_ASSERT_TRUE(strstr(params, "command") != NULL);
+    HU_ASSERT_NOT_NULL(params);
+    HU_ASSERT_TRUE(strstr(params, "command") != NULL);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_shell_execute_disabled_in_test(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool;
-    sc_error_t err = sc_shell_create(&alloc, NULL, 0, NULL, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool;
+    hu_error_t err = hu_shell_create(&alloc, NULL, 0, NULL, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_json_value_t *args = sc_json_object_new(&alloc);
-    SC_ASSERT_NOT_NULL(args);
-    sc_json_value_t *cmd_val = sc_json_string_new(&alloc, "echo hello", 10);
-    sc_json_object_set(&alloc, args, "command", cmd_val);
+    hu_json_value_t *args = hu_json_object_new(&alloc);
+    HU_ASSERT_NOT_NULL(args);
+    hu_json_value_t *cmd_val = hu_json_string_new(&alloc, "echo hello", 10);
+    hu_json_object_set(&alloc, args, "command", cmd_val);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
-    sc_json_free(&alloc, args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(result.success);
-    SC_ASSERT_NOT_NULL(result.output);
+    hu_json_free(&alloc, args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result.success);
+    HU_ASSERT_NOT_NULL(result.output);
     if (result.output) {
         alloc.free(alloc.ctx, (void *)result.output, result.output_len + 1);
     }
@@ -77,64 +77,64 @@ static void test_shell_execute_disabled_in_test(void) {
 }
 
 static void test_validate_path_rejects_traversal(void) {
-    SC_ASSERT_EQ(sc_tool_validate_path("../etc/passwd", NULL, 0), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_path("foo/../bar", NULL, 0), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_path("/etc/../etc/passwd", NULL, 0), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_path("..", NULL, 0), SC_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_path("../etc/passwd", NULL, 0), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_path("foo/../bar", NULL, 0), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_path("/etc/../etc/passwd", NULL, 0), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_path("..", NULL, 0), HU_ERR_TOOL_VALIDATION);
 }
 
 static void test_validate_path_accepts_safe(void) {
-    SC_ASSERT_EQ(sc_tool_validate_path("foo.txt", NULL, 0), SC_OK);
-    SC_ASSERT_EQ(sc_tool_validate_path("subdir/file.txt", NULL, 0), SC_OK);
+    HU_ASSERT_EQ(hu_tool_validate_path("foo.txt", NULL, 0), HU_OK);
+    HU_ASSERT_EQ(hu_tool_validate_path("subdir/file.txt", NULL, 0), HU_OK);
     {
         const char *ws = "/tmp/workspace";
-        SC_ASSERT_EQ(sc_tool_validate_path("/tmp/workspace/file", ws, strlen(ws)), SC_OK);
+        HU_ASSERT_EQ(hu_tool_validate_path("/tmp/workspace/file", ws, strlen(ws)), HU_OK);
     }
 }
 
 static void test_validate_path_rejects_outside_workspace(void) {
-    SC_ASSERT_EQ(sc_tool_validate_path("/etc/passwd", "/tmp/workspace", 15),
-                 SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_path("/tmp/workspace_evil", "/tmp/workspace", 15),
-                 SC_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_path("/etc/passwd", "/tmp/workspace", 15),
+                 HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_path("/tmp/workspace_evil", "/tmp/workspace", 15),
+                 HU_ERR_TOOL_VALIDATION);
 }
 
 static void test_validate_url_https_only(void) {
-    SC_ASSERT_EQ(sc_tool_validate_url("http://example.com"), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_url("https://example.com"), SC_OK);
+    HU_ASSERT_EQ(hu_tool_validate_url("http://example.com"), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_url("https://example.com"), HU_OK);
 }
 
 static void test_validate_url_rejects_private_ips(void) {
-    SC_ASSERT_EQ(sc_tool_validate_url("https://127.0.0.1/"), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_url("https://10.0.0.1/"), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_url("https://192.168.1.1/"), SC_ERR_TOOL_VALIDATION);
-    SC_ASSERT_EQ(sc_tool_validate_url("https://[::1]/"), SC_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_url("https://127.0.0.1/"), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_url("https://10.0.0.1/"), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_url("https://192.168.1.1/"), HU_ERR_TOOL_VALIDATION);
+    HU_ASSERT_EQ(hu_tool_validate_url("https://[::1]/"), HU_ERR_TOOL_VALIDATION);
 }
 
 static void test_tools_factory_create_default(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t *tools = NULL;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t *tools = NULL;
     size_t count = 0;
-    sc_error_t err =
-        sc_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(tools);
-    SC_ASSERT(count >= 1);
-    SC_ASSERT_STR_EQ(tools[0].vtable->name(tools[0].ctx), "shell");
-    sc_tools_destroy_default(&alloc, tools, count);
+    hu_error_t err =
+        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(tools);
+    HU_ASSERT(count >= 1);
+    HU_ASSERT_STR_EQ(tools[0].vtable->name(tools[0].ctx), "shell");
+    hu_tools_destroy_default(&alloc, tools, count);
 }
 
 void run_tool_tests(void) {
-    SC_TEST_SUITE("Tool");
-    SC_RUN_TEST(test_validate_path_rejects_traversal);
-    SC_RUN_TEST(test_validate_path_accepts_safe);
-    SC_RUN_TEST(test_validate_path_rejects_outside_workspace);
-    SC_RUN_TEST(test_validate_url_https_only);
-    SC_RUN_TEST(test_validate_url_rejects_private_ips);
-    SC_RUN_TEST(test_shell_create_succeeds);
-    SC_RUN_TEST(test_shell_name);
-    SC_RUN_TEST(test_shell_description);
-    SC_RUN_TEST(test_shell_parameters_json);
-    SC_RUN_TEST(test_shell_execute_disabled_in_test);
-    SC_RUN_TEST(test_tools_factory_create_default);
+    HU_TEST_SUITE("Tool");
+    HU_RUN_TEST(test_validate_path_rejects_traversal);
+    HU_RUN_TEST(test_validate_path_accepts_safe);
+    HU_RUN_TEST(test_validate_path_rejects_outside_workspace);
+    HU_RUN_TEST(test_validate_url_https_only);
+    HU_RUN_TEST(test_validate_url_rejects_private_ips);
+    HU_RUN_TEST(test_shell_create_succeeds);
+    HU_RUN_TEST(test_shell_name);
+    HU_RUN_TEST(test_shell_description);
+    HU_RUN_TEST(test_shell_parameters_json);
+    HU_RUN_TEST(test_shell_execute_disabled_in_test);
+    HU_RUN_TEST(test_tools_factory_create_default);
 }

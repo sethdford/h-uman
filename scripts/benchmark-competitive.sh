@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SeaClaw competitive benchmarking via Google PageSpeed Insights API v5.
-# Usage: ./scripts/benchmark-competitive.sh [--seaclaw-only] [--markdown] [--help]
-# Benchmarks SeaClaw and 15 competitor sites; outputs table, JSON, and optionally markdown report.
+# Human competitive benchmarking via Google PageSpeed Insights API v5.
+# Usage: ./scripts/benchmark-competitive.sh [--human-only] [--markdown] [--help]
+# Benchmarks Human and 15 competitor sites; outputs table, JSON, and optionally markdown report.
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ done
 
 # --- URL array ---
 URLS=(
-  "SeaClaw|https://seaclaw.dev"
+  "Human|https://human.dev"
   "Linear|https://linear.app"
   "Vercel|https://vercel.com"
   "Raycast|https://raycast.com"
@@ -40,13 +40,13 @@ URLS=(
 )
 
 # --- Parse flags ---
-SEACLAW_ONLY=0
+HUMAN_ONLY=0
 MARKDOWN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --seaclaw-only)
-      SEACLAW_ONLY=1
+    --human-only)
+      HUMAN_ONLY=1
       shift
       ;;
     --markdown)
@@ -54,12 +54,12 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --help|-h)
-      printf "Usage: %s [--seaclaw-only] [--markdown] [--help]\n" "$0"
+      printf "Usage: %s [--human-only] [--markdown] [--help]\n" "$0"
       printf "\n"
-      printf "Benchmarks SeaClaw and competitor sites via Google PageSpeed Insights API v5.\n"
+      printf "Benchmarks Human and competitor sites via Google PageSpeed Insights API v5.\n"
       printf "\n"
       printf "Options:\n"
-      printf "  --seaclaw-only   Only benchmark SeaClaw (https://seaclaw.dev)\n"
+      printf "  --human-only   Only benchmark Human (https://human.dev)\n"
       printf "  --markdown      Write markdown report to docs/competitive-benchmarks-latest.md\n"
       printf "  --help          Show this usage info\n"
       printf "\n"
@@ -78,9 +78,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# --- Filter URLs if --seaclaw-only ---
-if [ "$SEACLAW_ONLY" -eq 1 ]; then
-  URLS=("SeaClaw|https://seaclaw.dev")
+# --- Filter URLs if --human-only ---
+if [ "$HUMAN_ONLY" -eq 1 ]; then
+  URLS=("Human|https://human.dev")
 fi
 
 # --- API key warning ---
@@ -235,11 +235,11 @@ if [ "$MARKDOWN" -eq 1 ]; then
   mkdir -p "$(dirname "$MD_FILE")"
   {
     echo "---"
-    echo "title: SeaClaw Competitive Benchmarks (Latest Run)"
+    echo "title: Human Competitive Benchmarks (Latest Run)"
     echo "generated: $TIMESTAMP"
     echo "---"
     echo ""
-    echo "# SeaClaw Competitive Benchmarks"
+    echo "# Human Competitive Benchmarks"
     echo ""
     echo "**Generated:** $TIMESTAMP"
     echo ""
@@ -251,17 +251,17 @@ if [ "$MARKDOWN" -eq 1 ]; then
     echo "$RESULTS_JSON" | jq -r '.[] | "| \(.name) | \(.performance // "—") | \(.accessibility // "—") | \(.best_practices // "—") | \(.seo // "—") | \(.lcp_ms // "—") | \(.cls // "—") | \(.tbt_ms // "—") | \(.ttfb_ms // "—") |"'
 
     echo ""
-    echo "## SeaClaw vs Category-Defining Targets"
+    echo "## Human vs Category-Defining Targets"
     echo ""
-    echo "| Metric | Industry Best | SeaClaw Target | SeaClaw Actual |"
+    echo "| Metric | Industry Best | Human Target | Human Actual |"
     echo "| ------ | ------------- | -------------- | -------------- |"
 
-    seaclaw=$(echo "$RESULTS_JSON" | jq '.[] | select(.name == "SeaClaw")')
-    if [ -n "$seaclaw" ] && [ "$seaclaw" != "null" ] && ! echo "$seaclaw" | jq -e '.error' >/dev/null 2>&1; then
-      perf_actual=$(echo "$seaclaw" | jq -r '.performance // "—"')
-      a11y_actual=$(echo "$seaclaw" | jq -r '.accessibility // "—"')
-      lcp_actual=$(echo "$seaclaw" | jq -r 'if .lcp_ms then "\(.lcp_ms)ms" else "—" end')
-      cls_actual=$(echo "$seaclaw" | jq -r '.cls // "—"')
+    human=$(echo "$RESULTS_JSON" | jq '.[] | select(.name == "Human")')
+    if [ -n "$human" ] && [ "$human" != "null" ] && ! echo "$human" | jq -e '.error' >/dev/null 2>&1; then
+      perf_actual=$(echo "$human" | jq -r '.performance // "—"')
+      a11y_actual=$(echo "$human" | jq -r '.accessibility // "—"')
+      lcp_actual=$(echo "$human" | jq -r 'if .lcp_ms then "\(.lcp_ms)ms" else "—" end')
+      cls_actual=$(echo "$human" | jq -r '.cls // "—"')
       echo "| Lighthouse Performance | 95–97 (Vercel) | 99+ | $perf_actual |"
       echo "| LCP | 0.8s (Linear) | < 0.5s | $lcp_actual |"
       echo "| CLS | ~0.02 (Stripe) | 0.00 | $cls_actual |"

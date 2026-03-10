@@ -1,18 +1,18 @@
-#include "seaclaw/context/mood.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
+#include "human/context/mood.h"
+#include "human/core/allocator.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
 #include "test_framework.h"
 #include <string.h>
 
 static void mood_context_with_emotions(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
-    SC_ASSERT_NOT_NULL(mem.ctx);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
 
     static const char emotions_cat[] = "emotions";
-    sc_memory_category_t cat = {
-        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
         .data.custom = {.name = emotions_cat, .name_len = sizeof(emotions_cat) - 1},
     };
 
@@ -33,14 +33,14 @@ static void mood_context_with_emotions(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(&alloc, &mem, "contact_a", 9, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(out);
-    SC_ASSERT_TRUE(out_len > 0);
-    SC_ASSERT_TRUE(strstr(out, "joy") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "anxiety") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "excitement") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "positive") != NULL);
+    hu_error_t err = hu_mood_build_context(&alloc, &mem, "contact_a", 9, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_TRUE(strstr(out, "joy") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "anxiety") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "excitement") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "positive") != NULL);
 
     alloc.free(alloc.ctx, out, out_len + 1);
     if (mem.vtable->deinit)
@@ -48,38 +48,38 @@ static void mood_context_with_emotions(void) {
 }
 
 static void mood_context_no_emotions(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
-    SC_ASSERT_NOT_NULL(mem.ctx);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(&alloc, &mem, "contact_empty", 13, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NULL(out);
-    SC_ASSERT_EQ(out_len, 0);
+    hu_error_t err = hu_mood_build_context(&alloc, &mem, "contact_empty", 13, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NULL(out);
+    HU_ASSERT_EQ(out_len, 0);
 
     if (mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
 }
 
 static void mood_context_null_memory(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(&alloc, NULL, "contact_a", 9, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NULL(out);
+    hu_error_t err = hu_mood_build_context(&alloc, NULL, "contact_a", 9, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NULL(out);
 }
 
 static void mood_context_negative_trend(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
-    SC_ASSERT_NOT_NULL(mem.ctx);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
 
     static const char emotions_cat[] = "emotions";
-    sc_memory_category_t cat = {
-        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
         .data.custom = {.name = emotions_cat, .name_len = sizeof(emotions_cat) - 1},
     };
 
@@ -95,12 +95,12 @@ static void mood_context_negative_trend(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(&alloc, &mem, "contact_b", 9, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(out);
-    SC_ASSERT_TRUE(strstr(out, "sadness") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "anger") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "negative") != NULL);
+    hu_error_t err = hu_mood_build_context(&alloc, &mem, "contact_b", 9, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "sadness") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "anger") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "negative") != NULL);
 
     alloc.free(alloc.ctx, out, out_len + 1);
     if (mem.vtable->deinit)
@@ -108,44 +108,44 @@ static void mood_context_negative_trend(void) {
 }
 
 static void mood_context_null_alloc(void) {
-    sc_memory_t mem = {0};
+    hu_memory_t mem = {0};
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(NULL, &mem, "contact_a", 9, &out, &out_len);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_mood_build_context(NULL, &mem, "contact_a", 9, &out, &out_len);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void mood_context_empty_contact_id(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
-    SC_ASSERT_NOT_NULL(mem.ctx);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(&alloc, &mem, "", 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NULL(out);
+    hu_error_t err = hu_mood_build_context(&alloc, &mem, "", 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NULL(out);
 
     if (mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
 }
 
 static void mood_context_null_output_ptrs(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
-    SC_ASSERT_NOT_NULL(mem.ctx);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
 
-    sc_error_t err = sc_mood_build_context(&alloc, &mem, "contact_a", 9, NULL, NULL);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_mood_build_context(&alloc, &mem, "contact_a", 9, NULL, NULL);
+    HU_ASSERT_NEQ(err, HU_OK);
 
     if (mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
 }
 
 static void mood_context_large_contact_id(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_memory_t mem = sc_memory_lru_create(&alloc, 100);
-    SC_ASSERT_NOT_NULL(mem.ctx);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_memory_lru_create(&alloc, 100);
+    HU_ASSERT_NOT_NULL(mem.ctx);
 
     char large_id[1025];
     memset(large_id, 'x', 1024);
@@ -153,22 +153,22 @@ static void mood_context_large_contact_id(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_mood_build_context(&alloc, &mem, large_id, 1024, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NULL(out);
+    hu_error_t err = hu_mood_build_context(&alloc, &mem, large_id, 1024, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NULL(out);
 
     if (mem.vtable->deinit)
         mem.vtable->deinit(mem.ctx);
 }
 
 void run_mood_tests(void) {
-    SC_TEST_SUITE("mood");
-    SC_RUN_TEST(mood_context_with_emotions);
-    SC_RUN_TEST(mood_context_no_emotions);
-    SC_RUN_TEST(mood_context_null_memory);
-    SC_RUN_TEST(mood_context_negative_trend);
-    SC_RUN_TEST(mood_context_null_alloc);
-    SC_RUN_TEST(mood_context_empty_contact_id);
-    SC_RUN_TEST(mood_context_null_output_ptrs);
-    SC_RUN_TEST(mood_context_large_contact_id);
+    HU_TEST_SUITE("mood");
+    HU_RUN_TEST(mood_context_with_emotions);
+    HU_RUN_TEST(mood_context_no_emotions);
+    HU_RUN_TEST(mood_context_null_memory);
+    HU_RUN_TEST(mood_context_negative_trend);
+    HU_RUN_TEST(mood_context_null_alloc);
+    HU_RUN_TEST(mood_context_empty_contact_id);
+    HU_RUN_TEST(mood_context_null_output_ptrs);
+    HU_RUN_TEST(mood_context_large_contact_id);
 }

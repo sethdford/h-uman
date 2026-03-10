@@ -1,13 +1,13 @@
-#include "seaclaw/heartbeat.h"
+#include "human/heartbeat.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_HEARTBEAT_MIN_INTERVAL 5
-#define SC_HEARTBEAT_PATH         "HEARTBEAT.md"
-#define SC_HEARTBEAT_MAX_CONTENT  65536
+#define HU_HEARTBEAT_MIN_INTERVAL 5
+#define HU_HEARTBEAT_PATH         "HEARTBEAT.md"
+#define HU_HEARTBEAT_MAX_CONTENT  65536
 
 static bool is_markdown_header(const char *line) {
     size_t i = 0;
@@ -41,14 +41,14 @@ static bool is_empty_bullet(const char *line) {
     return false;
 }
 
-void sc_heartbeat_engine_init(sc_heartbeat_engine_t *engine, bool enabled,
+void hu_heartbeat_engine_init(hu_heartbeat_engine_t *engine, bool enabled,
                               uint32_t interval_minutes, const char *workspace_dir) {
     if (!engine)
         return;
     memset(engine, 0, sizeof(*engine));
     engine->enabled = enabled;
     engine->interval_minutes =
-        interval_minutes < SC_HEARTBEAT_MIN_INTERVAL ? SC_HEARTBEAT_MIN_INTERVAL : interval_minutes;
+        interval_minutes < HU_HEARTBEAT_MIN_INTERVAL ? HU_HEARTBEAT_MIN_INTERVAL : interval_minutes;
     engine->workspace_dir = workspace_dir;
 }
 
@@ -58,15 +58,15 @@ static const char *trim_left(const char *s) {
     return s;
 }
 
-sc_error_t sc_heartbeat_parse_tasks(sc_allocator_t *alloc, const char *content, char ***tasks_out,
+hu_error_t hu_heartbeat_parse_tasks(hu_allocator_t *alloc, const char *content, char ***tasks_out,
                                     size_t *out_count) {
     if (!alloc || !content || !tasks_out || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *tasks_out = NULL;
     *out_count = 0;
     char **list = alloc->alloc(alloc->ctx, 64 * sizeof(char *));
     if (!list)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t cap = 64, count = 0;
     const char *p = content;
     for (;;) {
@@ -119,10 +119,10 @@ sc_error_t sc_heartbeat_parse_tasks(sc_allocator_t *alloc, const char *content, 
         *tasks_out = list;
     }
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_heartbeat_free_tasks(sc_allocator_t *alloc, char **tasks, size_t count) {
+void hu_heartbeat_free_tasks(hu_allocator_t *alloc, char **tasks, size_t count) {
     if (!alloc || !tasks)
         return;
     for (size_t i = 0; i < count; i++) {
@@ -132,7 +132,7 @@ void sc_heartbeat_free_tasks(sc_allocator_t *alloc, char **tasks, size_t count) 
     alloc->free(alloc->ctx, tasks, count * sizeof(char *));
 }
 
-bool sc_heartbeat_is_empty_content(const char *content) {
+bool hu_heartbeat_is_empty_content(const char *content) {
     if (!content)
         return true;
     const char *p = content;
@@ -156,102 +156,102 @@ bool sc_heartbeat_is_empty_content(const char *content) {
     }
 }
 
-sc_error_t sc_heartbeat_collect_tasks(sc_heartbeat_engine_t *engine, sc_allocator_t *alloc,
+hu_error_t hu_heartbeat_collect_tasks(hu_heartbeat_engine_t *engine, hu_allocator_t *alloc,
                                       char ***tasks_out, size_t *out_count) {
     if (!engine || !alloc || !tasks_out || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *tasks_out = NULL;
     *out_count = 0;
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s", engine->workspace_dir, SC_HEARTBEAT_PATH);
+    snprintf(path, sizeof(path), "%s/%s", engine->workspace_dir, HU_HEARTBEAT_PATH);
     FILE *f = fopen(path, "rb");
     if (!f)
-        return SC_OK; /* No file = empty */
+        return HU_OK; /* No file = empty */
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (sz <= 0 || sz > (long)SC_HEARTBEAT_MAX_CONTENT) {
+    if (sz <= 0 || sz > (long)HU_HEARTBEAT_MAX_CONTENT) {
         fclose(f);
-        return SC_OK;
+        return HU_OK;
     }
     char *buf = alloc->alloc(alloc->ctx, (size_t)sz + 1);
     if (!buf) {
         fclose(f);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t nr = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[nr] = '\0';
-    if (sc_heartbeat_is_empty_content(buf)) {
+    if (hu_heartbeat_is_empty_content(buf)) {
         alloc->free(alloc->ctx, buf, (size_t)sz + 1);
-        return SC_OK;
+        return HU_OK;
     }
-    sc_error_t err = sc_heartbeat_parse_tasks(alloc, buf, tasks_out, out_count);
+    hu_error_t err = hu_heartbeat_parse_tasks(alloc, buf, tasks_out, out_count);
     alloc->free(alloc->ctx, buf, (size_t)sz + 1);
     return err;
 }
 
-sc_error_t sc_heartbeat_tick(sc_heartbeat_engine_t *engine, sc_allocator_t *alloc,
-                             sc_heartbeat_result_t *result) {
+hu_error_t hu_heartbeat_tick(hu_heartbeat_engine_t *engine, hu_allocator_t *alloc,
+                             hu_heartbeat_result_t *result) {
     if (!engine || !alloc || !result)
-        return SC_ERR_INVALID_ARGUMENT;
-    result->outcome = SC_HEARTBEAT_SKIPPED_MISSING;
+        return HU_ERR_INVALID_ARGUMENT;
+    result->outcome = HU_HEARTBEAT_SKIPPED_MISSING;
     result->task_count = 0;
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s", engine->workspace_dir, SC_HEARTBEAT_PATH);
+    snprintf(path, sizeof(path), "%s/%s", engine->workspace_dir, HU_HEARTBEAT_PATH);
     FILE *f = fopen(path, "rb");
     if (!f)
-        return SC_OK;
+        return HU_OK;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (sz <= 0 || sz > (long)SC_HEARTBEAT_MAX_CONTENT) {
+    if (sz <= 0 || sz > (long)HU_HEARTBEAT_MAX_CONTENT) {
         fclose(f);
-        return SC_OK;
+        return HU_OK;
     }
     char *buf = alloc->alloc(alloc->ctx, (size_t)sz + 1);
     if (!buf) {
         fclose(f);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t nr = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[nr] = '\0';
-    if (sc_heartbeat_is_empty_content(buf)) {
-        result->outcome = SC_HEARTBEAT_SKIPPED_EMPTY;
+    if (hu_heartbeat_is_empty_content(buf)) {
+        result->outcome = HU_HEARTBEAT_SKIPPED_EMPTY;
         alloc->free(alloc->ctx, buf, (size_t)sz + 1);
-        return SC_OK;
+        return HU_OK;
     }
     char **tasks = NULL;
     size_t count = 0;
-    sc_error_t err = sc_heartbeat_parse_tasks(alloc, buf, &tasks, &count);
+    hu_error_t err = hu_heartbeat_parse_tasks(alloc, buf, &tasks, &count);
     alloc->free(alloc->ctx, buf, (size_t)sz + 1);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
-    result->outcome = SC_HEARTBEAT_PROCESSED;
+    result->outcome = HU_HEARTBEAT_PROCESSED;
     result->task_count = count;
-    sc_heartbeat_free_tasks(alloc, tasks, count);
-    return SC_OK;
+    hu_heartbeat_free_tasks(alloc, tasks, count);
+    return HU_OK;
 }
 
-sc_error_t sc_heartbeat_ensure_file(const char *workspace_dir, sc_allocator_t *alloc) {
+hu_error_t hu_heartbeat_ensure_file(const char *workspace_dir, hu_allocator_t *alloc) {
     (void)alloc;
     if (!workspace_dir)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s", workspace_dir, SC_HEARTBEAT_PATH);
+    snprintf(path, sizeof(path), "%s/%s", workspace_dir, HU_HEARTBEAT_PATH);
     FILE *f = fopen(path, "rb");
     if (f) {
         fclose(f);
-        return SC_OK;
+        return HU_OK;
     }
     f = fopen(path, "wb");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     fputs("# Periodic Tasks\n\n"
           "# Add tasks below (one per line, starting with `- `)\n"
           "# The agent will check this file on each heartbeat tick.\n",
           f);
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }

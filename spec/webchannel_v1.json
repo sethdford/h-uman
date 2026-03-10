@@ -113,7 +113,7 @@
   },
   "relay_security": {
     "pairing_code": {
-      "description": "One-time code printed by seaclaw relay connection",
+      "description": "One-time code printed by human relay connection",
       "ttl_seconds": "configurable via relay_pairing_code_ttl_secs (60..300)"
     },
     "ui_access_token": {
@@ -121,8 +121,8 @@
       "ttl_seconds": "configurable via relay_ui_token_ttl_secs (300..2592000)"
     },
     "relay_agent_token": {
-      "description": "Dedicated relay credential for seaclaw <-> relay transport auth",
-      "lifecycle": "config relay_token -> env SEACLAW_RELAY_TOKEN -> persisted auth credential -> generated token",
+      "description": "Dedicated relay credential for human <-> relay transport auth",
+      "lifecycle": "config relay_token -> env HUMAN_RELAY_TOKEN -> persisted auth credential -> generated token",
       "ttl_seconds": "configurable via relay_token_ttl_secs (3600..31536000)"
     }
   }

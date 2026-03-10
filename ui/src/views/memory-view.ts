@@ -2,17 +2,17 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-card.js";
-import "../components/sc-badge.js";
-import "../components/sc-button.js";
-import "../components/sc-input.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-segmented-control.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-card.js";
+import "../components/hu-badge.js";
+import "../components/hu-button.js";
+import "../components/hu-input.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-segmented-control.js";
 
 interface MemoryEntry {
   key: string;
@@ -96,7 +96,7 @@ function sourceLabel(source?: string): string {
   return source;
 }
 
-@customElement("sc-memory-view")
+@customElement("hu-memory-view")
 export class ScMemoryView extends GatewayAwareLitElement {
   static override styles = css`
     :host {
@@ -105,103 +105,103 @@ export class ScMemoryView extends GatewayAwareLitElement {
       flex-direction: column;
       flex: 1;
       min-height: 0;
-      color: var(--sc-text);
+      color: var(--hu-text);
       max-width: 72rem;
     }
     .layout {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-lg);
+      gap: var(--hu-space-lg);
     }
     .controls {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       flex-wrap: wrap;
     }
-    .controls sc-input {
+    .controls hu-input {
       flex: 1;
       min-width: 12rem;
     }
     .memory-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
-      gap: var(--sc-space-md);
+      gap: var(--hu-space-md);
     }
     .memory-card {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
     }
     .memory-card .entry-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
     }
-    .memory-card .entry-header sc-button {
+    .memory-card .entry-header hu-button {
       flex-shrink: 0;
       opacity: 0;
-      transition: opacity var(--sc-duration-fast) var(--sc-ease-out);
+      transition: opacity var(--hu-duration-fast) var(--hu-ease-out);
     }
-    .memory-card:hover .entry-header sc-button {
+    .memory-card:hover .entry-header hu-button {
       opacity: 1;
     }
     .memory-card .key {
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-family: var(--hu-font-mono);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .memory-card .content {
-      font-size: var(--sc-text-sm);
-      line-height: var(--sc-leading-relaxed);
-      color: var(--sc-text);
+      font-size: var(--hu-text-sm);
+      line-height: var(--hu-leading-relaxed);
+      color: var(--hu-text);
     }
     .memory-card .meta {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
       flex-wrap: wrap;
-      margin-top: var(--sc-space-xs);
+      margin-top: var(--hu-space-xs);
     }
     .memory-card .source {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-faint);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-faint);
     }
     .memory-card .timestamp {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-faint);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-faint);
       margin-left: auto;
     }
     .insight-card {
-      border-left: 3px solid var(--sc-accent-tertiary);
+      border-left: 3px solid var(--hu-accent-tertiary);
     }
     .consolidate-row {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
     .consolidate-row .last-run {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
     .error-banner {
-      padding: var(--sc-space-md);
-      background: color-mix(in srgb, var(--sc-error) 10%, transparent);
-      border-radius: var(--sc-radius);
-      color: var(--sc-error);
-      font-size: var(--sc-text-sm);
+      padding: var(--hu-space-md);
+      background: color-mix(in srgb, var(--hu-error) 10%, transparent);
+      border-radius: var(--hu-radius);
+      color: var(--hu-error);
+      font-size: var(--hu-text-sm);
     }
     .skeleton-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
-      gap: var(--sc-space-md);
+      gap: var(--hu-space-md);
     }
 
-    @media (max-width: 48rem) /* --sc-breakpoint-md */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-md */ {
       .memory-grid {
         grid-template-columns: 1fr;
       }
@@ -408,11 +408,11 @@ export class ScMemoryView extends GatewayAwareLitElement {
 
   override render() {
     return html`
-      <sc-page-hero
+      <hu-page-hero
         heading="Memory"
         description="Browse, search, and manage stored memories and auto-generated insights."
         .icon=${icons.brain}
-      ></sc-page-hero>
+      ></hu-page-hero>
 
       <div class="layout">
         ${this.loading
@@ -426,14 +426,14 @@ export class ScMemoryView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-stats-row>
+      <hu-stats-row>
         ${[1, 2, 3, 4].map(
-          () => html`<sc-skeleton variant="card" style="min-height:5rem"></sc-skeleton>`,
+          () => html`<hu-skeleton variant="card" style="min-height:5rem"></hu-skeleton>`,
         )}
-      </sc-stats-row>
+      </hu-stats-row>
       <div class="skeleton-grid">
         ${[1, 2, 3, 4, 5, 6].map(
-          () => html`<sc-skeleton variant="card" style="min-height:8rem"></sc-skeleton>`,
+          () => html`<hu-skeleton variant="card" style="min-height:8rem"></hu-skeleton>`,
         )}
       </div>
     `;
@@ -443,7 +443,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
     return html`
       <div class="error-banner" role="alert">
         ${this.error}
-        <sc-button size="sm" variant="ghost" @click=${() => this.load()} label="Retry"></sc-button>
+        <hu-button size="sm" variant="ghost" @click=${() => this.load()} label="Retry"></hu-button>
       </div>
     `;
   }
@@ -454,70 +454,70 @@ export class ScMemoryView extends GatewayAwareLitElement {
     const cats = s?.categories ?? {};
 
     return html`
-      <sc-stats-row>
-        <sc-stat-card
+      <hu-stats-row>
+        <hu-stat-card
           label="Total Memories"
           value=${String(s?.total_entries ?? this.entries.length)}
           .icon=${icons.brain}
-        ></sc-stat-card>
-        <sc-stat-card
+        ></hu-stat-card>
+        <hu-stat-card
           label="Core"
           value=${String(cats.core ?? 0)}
           .icon=${icons["bookmark-simple"]}
-        ></sc-stat-card>
-        <sc-stat-card
+        ></hu-stat-card>
+        <hu-stat-card
           label="Insights"
           value=${String(cats.insight ?? 0)}
           .icon=${icons.zap}
-        ></sc-stat-card>
-        <sc-stat-card label="Engine" valueStr=${s?.engine ?? "—"} .icon=${icons.cpu}></sc-stat-card>
-      </sc-stats-row>
+        ></hu-stat-card>
+        <hu-stat-card label="Engine" valueStr=${s?.engine ?? "—"} .icon=${icons.cpu}></hu-stat-card>
+      </hu-stats-row>
 
-      <sc-section-header
+      <hu-section-header
         heading="Memories"
         description="${filtered.length} ${filtered.length === 1 ? "entry" : "entries"}"
       >
         <div slot="actions" class="consolidate-row">
-          <sc-button
+          <hu-button
             size="sm"
             variant="ghost"
             ?disabled=${this.consolidating}
             @click=${() => this._consolidate()}
-            >${this.consolidating ? "Running…" : "Consolidate"}</sc-button
+            >${this.consolidating ? "Running…" : "Consolidate"}</hu-button
           >
         </div>
-      </sc-section-header>
+      </hu-section-header>
 
       ${this.actionError
         ? html`<div class="error-banner" role="alert">${this.actionError}</div>`
         : nothing}
 
       <div class="controls">
-        <sc-input
+        <hu-input
           placeholder="Search memories…"
           .value=${this.searchQuery}
           @input=${(e: InputEvent) => {
             this.searchQuery = (e.target as HTMLInputElement).value;
           }}
           aria-label="Search memories"
-        ></sc-input>
-        <sc-segmented-control
+        ></hu-input>
+        <hu-segmented-control
           .options=${CATEGORY_OPTIONS}
           .value=${this.categoryFilter}
           @change=${(e: CustomEvent) => {
             this.categoryFilter = e.detail;
           }}
-        ></sc-segmented-control>
+        ></hu-segmented-control>
       </div>
 
       ${filtered.length === 0
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             heading="No memories found"
             description=${this.searchQuery || this.categoryFilter !== "all"
               ? "Try adjusting your search or filter."
-              : "Memories will appear here as seaclaw learns from conversations and ingested files."}
+              : "Memories will appear here as human learns from conversations and ingested files."}
             .icon=${icons.brain}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : html`
             <div class="memory-grid" role="list" aria-label="Memory entries">
               ${filtered.map((entry) => this._renderEntry(entry))}
@@ -525,12 +525,12 @@ export class ScMemoryView extends GatewayAwareLitElement {
           `}
       ${this.graphEntities.length > 0
         ? html`
-            <sc-section-header
+            <hu-section-header
               heading="Knowledge Graph"
               description="Entities and relations in the knowledge graph"
-            ></sc-section-header>
-            <sc-card>
-              <div class="graph-container" style="background: var(--sc-surface-container)">
+            ></hu-section-header>
+            <hu-card>
+              <div class="graph-container" style="background: var(--hu-surface-container)">
                 <svg
                   part="graph"
                   viewBox="0 0 400 400"
@@ -554,7 +554,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
                       y1=${src.y}
                       x2=${tgt.x}
                       y2=${tgt.y}
-                      stroke="var(--sc-border)"
+                      stroke="var(--hu-border)"
                       stroke-width="1"
                     />`;
                   })}
@@ -568,16 +568,16 @@ export class ScMemoryView extends GatewayAwareLitElement {
                           cx=${x}
                           cy=${y}
                           r=${r}
-                          fill="var(--sc-accent)"
+                          fill="var(--hu-accent)"
                           aria-label=${e.name}
                         />
                         <text
                           x=${x}
                           y=${y + r + 12}
                           text-anchor="middle"
-                          fill="var(--sc-text-primary)"
+                          fill="var(--hu-text-primary)"
                           font-size="10"
-                          font-family="var(--sc-font)"
+                          font-family="var(--hu-font)"
                         >
                           ${e.name.length > 14 ? e.name.slice(0, 12) + "…" : e.name}
                         </text>
@@ -586,7 +586,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
                   })}
                 </svg>
               </div>
-            </sc-card>
+            </hu-card>
           `
         : nothing}
     `;
@@ -595,21 +595,21 @@ export class ScMemoryView extends GatewayAwareLitElement {
   private _renderEntry(entry: MemoryEntry) {
     const isInsight = entry.category === "insight";
     return html`
-      <sc-card hoverable class=${isInsight ? "insight-card" : ""} role="listitem">
+      <hu-card hoverable class=${isInsight ? "insight-card" : ""} role="listitem">
         <div class="memory-card">
           <div class="entry-header">
             <div class="key">${entry.key}</div>
-            <sc-button
+            <hu-button
               size="xs"
               variant="ghost"
               aria-label="Forget memory"
               @click=${() => this._forget(entry.key)}
-              >${icons.trash}</sc-button
+              >${icons.trash}</hu-button
             >
           </div>
           <div class="content">${entry.content}</div>
           <div class="meta">
-            <sc-badge variant=${categoryVariant(entry.category)} label=${entry.category}></sc-badge>
+            <hu-badge variant=${categoryVariant(entry.category)} label=${entry.category}></hu-badge>
             ${entry.source
               ? html`<span class="source">${sourceLabel(entry.source)}</span>`
               : nothing}
@@ -618,13 +618,13 @@ export class ScMemoryView extends GatewayAwareLitElement {
               : nothing}
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 }
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-memory-view": ScMemoryView;
+    "hu-memory-view": ScMemoryView;
   }
 }

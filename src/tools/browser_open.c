@@ -1,12 +1,12 @@
-#include "seaclaw/tools/browser_open.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/process_util.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/security.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/validation.h"
+#include "human/tools/browser_open.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/process_util.h"
+#include "human/core/string.h"
+#include "human/security.h"
+#include "human/tool.h"
+#include "human/tools/validation.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,12 +14,12 @@
 #define BROWSER_OPEN_PARAMS \
     "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"]}"
 
-typedef struct sc_browser_open_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_browser_open_ctx {
+    hu_allocator_t *alloc;
     char **allowed_domains;
     size_t allowed_count;
-    sc_security_policy_t *policy;
-} sc_browser_open_ctx_t;
+    hu_security_policy_t *policy;
+} hu_browser_open_ctx_t;
 
 static bool is_local_or_private(const char *host, size_t len) {
     if (len >= 9 && strncmp(host, "localhost", 9) == 0)
@@ -41,22 +41,22 @@ static bool is_local_or_private(const char *host, size_t len) {
     return false;
 }
 
-static sc_error_t browser_open_execute(void *ctx, sc_allocator_t *alloc,
-                                       const sc_json_value_t *args, sc_tool_result_t *out) {
-    sc_browser_open_ctx_t *c = (sc_browser_open_ctx_t *)ctx;
+static hu_error_t browser_open_execute(void *ctx, hu_allocator_t *alloc,
+                                       const hu_json_value_t *args, hu_tool_result_t *out) {
+    hu_browser_open_ctx_t *c = (hu_browser_open_ctx_t *)ctx;
     if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *url = sc_json_get_string(args, "url");
+    const char *url = hu_json_get_string(args, "url");
     if (!url || url[0] == '\0') {
-        *out = sc_tool_result_fail("Missing 'url' parameter", 24);
-        return SC_OK;
+        *out = hu_tool_result_fail("Missing 'url' parameter", 24);
+        return HU_OK;
     }
     size_t url_len = strlen(url);
     if (url_len < 9 || strncmp(url, "https://", 8) != 0) {
-        *out = sc_tool_result_fail("Only https:// URLs are allowed", 31);
-        return SC_OK;
+        *out = hu_tool_result_fail("Only https:// URLs are allowed", 31);
+        return HU_OK;
     }
     const char *rest = url + 8;
     size_t rest_len = url_len - 8;
@@ -68,8 +68,8 @@ static sc_error_t browser_open_execute(void *ctx, sc_allocator_t *alloc,
         }
     }
     if (host_end == 0) {
-        *out = sc_tool_result_fail("URL must include a host", 23);
-        return SC_OK;
+        *out = hu_tool_result_fail("URL must include a host", 23);
+        return HU_OK;
     }
     const char *host = rest;
     size_t host_len = host_end;
@@ -80,12 +80,12 @@ static sc_error_t browser_open_execute(void *ctx, sc_allocator_t *alloc,
         }
     }
     if (is_local_or_private(host, host_len)) {
-        *out = sc_tool_result_fail("Blocked local/private host", 28);
-        return SC_OK;
+        *out = hu_tool_result_fail("Blocked local/private host", 28);
+        return HU_OK;
     }
     if (!c->allowed_domains || c->allowed_count == 0) {
-        *out = sc_tool_result_fail("No allowed_domains configured for browser_open", 46);
-        return SC_OK;
+        *out = hu_tool_result_fail("No allowed_domains configured for browser_open", 46);
+        return HU_OK;
     }
     bool allowed = false;
     for (size_t i = 0; i < c->allowed_count; i++) {
@@ -102,23 +102,23 @@ static sc_error_t browser_open_execute(void *ctx, sc_allocator_t *alloc,
         }
     }
     if (!allowed) {
-        *out = sc_tool_result_fail("Host is not in browser allowed_domains", 39);
-        return SC_OK;
+        *out = hu_tool_result_fail("Host is not in browser allowed_domains", 39);
+        return HU_OK;
     }
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
         size_t need = 28 + url_len;
         char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         int n = snprintf(msg, need + 1, "Opened %s in default browser", url);
         size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
         msg[len] = '\0';
-        *out = sc_tool_result_ok_owned(msg, len);
+        *out = hu_tool_result_ok_owned(msg, len);
     }
-    return SC_OK;
+    return HU_OK;
 #else
     {
         const char *argv[4];
@@ -129,29 +129,29 @@ static sc_error_t browser_open_execute(void *ctx, sc_allocator_t *alloc,
 #endif
         argv[1] = url;
         argv[2] = NULL;
-        sc_run_result_t run = {0};
-        sc_error_t err = sc_process_run_with_policy(alloc, argv, NULL, 4096, c->policy, &run);
-        sc_run_result_free(alloc, &run);
-        if (err != SC_OK) {
-            *out = sc_tool_result_fail("Failed to open browser", 22);
-            return SC_OK;
+        hu_run_result_t run = {0};
+        hu_error_t err = hu_process_run_with_policy(alloc, argv, NULL, 4096, c->policy, &run);
+        hu_run_result_free(alloc, &run);
+        if (err != HU_OK) {
+            *out = hu_tool_result_fail("Failed to open browser", 22);
+            return HU_OK;
         }
         if (!run.success) {
-            *out = sc_tool_result_fail("Browser open failed", 18);
-            return SC_OK;
+            *out = hu_tool_result_fail("Browser open failed", 18);
+            return HU_OK;
         }
         size_t need = 28 + url_len;
         char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         int n = snprintf(msg, need + 1, "Opened %s in default browser", url);
         size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
         msg[len] = '\0';
-        *out = sc_tool_result_ok_owned(msg, len);
+        *out = hu_tool_result_ok_owned(msg, len);
     }
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -168,8 +168,8 @@ static const char *browser_open_params(void *ctx) {
     (void)ctx;
     return BROWSER_OPEN_PARAMS;
 }
-static void browser_open_deinit(void *ctx, sc_allocator_t *alloc) {
-    sc_browser_open_ctx_t *c = (sc_browser_open_ctx_t *)ctx;
+static void browser_open_deinit(void *ctx, hu_allocator_t *alloc) {
+    hu_browser_open_ctx_t *c = (hu_browser_open_ctx_t *)ctx;
     if (c && alloc) {
         if (c->allowed_domains) {
             for (size_t i = 0; i < c->allowed_count; i++)
@@ -182,7 +182,7 @@ static void browser_open_deinit(void *ctx, sc_allocator_t *alloc) {
     }
 }
 
-static const sc_tool_vtable_t browser_open_vtable = {
+static const hu_tool_vtable_t browser_open_vtable = {
     .execute = browser_open_execute,
     .name = browser_open_name,
     .description = browser_open_desc,
@@ -190,14 +190,14 @@ static const sc_tool_vtable_t browser_open_vtable = {
     .deinit = browser_open_deinit,
 };
 
-sc_error_t sc_browser_open_create(sc_allocator_t *alloc, const char *const *allowed_domains,
-                                  size_t allowed_count, sc_security_policy_t *policy,
-                                  sc_tool_t *out) {
+hu_error_t hu_browser_open_create(hu_allocator_t *alloc, const char *const *allowed_domains,
+                                  size_t allowed_count, hu_security_policy_t *policy,
+                                  hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_browser_open_ctx_t *c = (sc_browser_open_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_browser_open_ctx_t *c = (hu_browser_open_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->policy = policy;
@@ -206,7 +206,7 @@ sc_error_t sc_browser_open_create(sc_allocator_t *alloc, const char *const *allo
         c->allowed_domains = (char **)alloc->alloc(alloc->ctx, allowed_count * sizeof(char *));
         if (!c->allowed_domains) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memset(c->allowed_domains, 0, allowed_count * sizeof(char *));
         for (size_t i = 0; i < allowed_count; i++) {
@@ -218,12 +218,12 @@ sc_error_t sc_browser_open_create(sc_allocator_t *alloc, const char *const *allo
                                 strlen(c->allowed_domains[j]) + 1);
                 alloc->free(alloc->ctx, c->allowed_domains, allowed_count * sizeof(char *));
                 alloc->free(alloc->ctx, c, sizeof(*c));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             memcpy(c->allowed_domains[i], allowed_domains[i], len + 1);
         }
     }
     out->ctx = c;
     out->vtable = &browser_open_vtable;
-    return SC_OK;
+    return HU_OK;
 }

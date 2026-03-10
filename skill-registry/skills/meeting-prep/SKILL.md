@@ -4,7 +4,7 @@ Prepare briefs for upcoming meetings by pulling calendar events and related docu
 
 ## Usage
 
-Invoke with `seaclaw skills run meeting-prep` or configure as a cron job.
+Invoke with `human skills run meeting-prep` or configure as a cron job.
 
 ## Parameters
 

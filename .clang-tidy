@@ -27,4 +27,4 @@ CheckOptions:
   - key: bugprone-sizeof-expression.WarnOnSizeOfCompareToConstant
     value: true
 
-HeaderFilterRegex: "include/seaclaw/.*"
+HeaderFilterRegex: "include/human/.*"

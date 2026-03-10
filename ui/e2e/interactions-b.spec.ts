@@ -12,7 +12,7 @@ test.describe("Automations (Interactions)", () => {
 
   test("shows existing automations", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-automations-view"));
+      const text: string = await page.evaluate(deepText("hu-automations-view"));
       expect(text).toContain("Daily Summary");
     }).toPass({ timeout: POLL });
   });
@@ -20,9 +20,9 @@ test.describe("Automations (Interactions)", () => {
   test("new automation button exists", async ({ page }) => {
     await expect(async () => {
       const hasBtn = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-automations-view");
-        const btns = view?.shadowRoot?.querySelectorAll("sc-button") ?? [];
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-automations-view");
+        const btns = view?.shadowRoot?.querySelectorAll("hu-button") ?? [];
         return [...btns].some(b => b.textContent?.includes("New"));
       })()`);
       expect(hasBtn).toBe(true);
@@ -32,9 +32,9 @@ test.describe("Automations (Interactions)", () => {
   test("paused automation shows paused state", async ({ page }) => {
     await expect(async () => {
       const hasPausedCard = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-automations-view");
-        const cards = view?.shadowRoot?.querySelectorAll("sc-automation-card") ?? [];
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-automations-view");
+        const cards = view?.shadowRoot?.querySelectorAll("hu-automation-card") ?? [];
         for (const card of cards) {
           const wrapper = card.shadowRoot?.querySelector(".card-wrapper.paused");
           const nameEl = card.shadowRoot?.querySelector(".job-name");
@@ -48,13 +48,13 @@ test.describe("Automations (Interactions)", () => {
 
   test("shell jobs tab shows shell automations", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-automations-view", "sc-tabs"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-automations-view", "hu-tabs"))).toBe(true);
     }).toPass({ timeout: POLL });
 
     await page.evaluate(() => {
-      const app = document.querySelector("sc-app");
-      const view = app?.shadowRoot?.querySelector("sc-automations-view");
-      const tabs = view?.shadowRoot?.querySelector("sc-tabs");
+      const app = document.querySelector("hu-app");
+      const view = app?.shadowRoot?.querySelector("hu-automations-view");
+      const tabs = view?.shadowRoot?.querySelector("hu-tabs");
       const shellTab = tabs?.shadowRoot?.querySelector(
         '[data-tab-id="shell"]',
       ) as HTMLElement | null;
@@ -63,14 +63,14 @@ test.describe("Automations (Interactions)", () => {
     await page.waitForTimeout(600);
 
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-automations-view"));
+      const text: string = await page.evaluate(deepText("hu-automations-view"));
       expect(text).toContain("Health Check");
     }).toPass({ timeout: POLL });
   });
 
   test("automation card shows type badge", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-automations-view"));
+      const text: string = await page.evaluate(deepText("hu-automations-view"));
       expect(text).toMatch(/Agent|Shell/);
     }).toPass({ timeout: POLL });
   });
@@ -87,20 +87,20 @@ test.describe("Skills (Interactions)", () => {
 
   test("shows installed skills", async ({ page }) => {
     await expect(async () => {
-      const count = await page.evaluate(shadowCount("sc-skills-view", "sc-skill-card"));
+      const count = await page.evaluate(shadowCount("hu-skills-view", "hu-skill-card"));
       expect(count).toBeGreaterThanOrEqual(1);
     }).toPass({ timeout: POLL });
   });
 
   test("shows registry section", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-skills-view", "sc-skill-registry"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-skills-view", "hu-skill-registry"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
   test("page hero renders", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-skills-view", "sc-page-hero"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-skills-view", "hu-page-hero"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 });

@@ -1,7 +1,7 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/memory.h"
+#include "human/core/allocator.h"
+#include "human/memory.h"
 
-void sc_memory_entry_free_fields(sc_allocator_t *alloc, sc_memory_entry_t *e) {
+void hu_memory_entry_free_fields(hu_allocator_t *alloc, hu_memory_entry_t *e) {
     if (!alloc || !e)
         return;
     if (e->id)
@@ -21,16 +21,16 @@ void sc_memory_entry_free_fields(sc_allocator_t *alloc, sc_memory_entry_t *e) {
         alloc->free(alloc->ctx, (void *)e->source, e->source_len + 1);
 }
 
-sc_error_t sc_memory_store_with_source(sc_memory_t *mem, const char *key, size_t key_len,
+hu_error_t hu_memory_store_with_source(hu_memory_t *mem, const char *key, size_t key_len,
                                        const char *content, size_t content_len,
-                                       const sc_memory_category_t *category, const char *session_id,
+                                       const hu_memory_category_t *category, const char *session_id,
                                        size_t session_id_len, const char *source,
                                        size_t source_len) {
     if (!mem || !mem->vtable)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (mem->vtable->store_ex && source && source_len > 0) {
-        sc_memory_store_opts_t opts = {
+        hu_memory_store_opts_t opts = {
             .source = source, .source_len = source_len, .importance = -1.0};
         return mem->vtable->store_ex(mem->ctx, key, key_len, content, content_len, category,
                                      session_id, session_id_len, &opts);

@@ -1,6 +1,6 @@
-#include "seaclaw/context_tokens.h"
-#include "seaclaw/config_types.h"
-#include "seaclaw/util.h"
+#include "human/context_tokens.h"
+#include "human/config_types.h"
+#include "human/util.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <string.h>
@@ -175,11 +175,11 @@ static uint64_t lookup_model_candidates(const char *model_id_raw, size_t len) {
     return infer_from_pattern(model_id_raw, len);
 }
 
-uint64_t sc_context_tokens_default(void) {
-    return SC_DEFAULT_AGENT_TOKEN_LIMIT;
+uint64_t hu_context_tokens_default(void) {
+    return HU_DEFAULT_AGENT_TOKEN_LIMIT;
 }
 
-uint64_t sc_context_tokens_lookup(const char *model_ref, size_t len) {
+uint64_t hu_context_tokens_lookup(const char *model_ref, size_t len) {
     if (!model_ref || len == 0)
         return 0;
     const char *p = model_ref;
@@ -226,9 +226,9 @@ uint64_t sc_context_tokens_lookup(const char *model_ref, size_t len) {
     return 0;
 }
 
-uint64_t sc_context_tokens_resolve(uint64_t override, const char *model_ref, size_t len) {
+uint64_t hu_context_tokens_resolve(uint64_t override, const char *model_ref, size_t len) {
     if (override)
         return override;
-    uint64_t v = sc_context_tokens_lookup(model_ref, len);
-    return v ? v : SC_DEFAULT_AGENT_TOKEN_LIMIT;
+    uint64_t v = hu_context_tokens_lookup(model_ref, len);
+    return v ? v : HU_DEFAULT_AGENT_TOKEN_LIMIT;
 }

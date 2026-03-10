@@ -1,42 +1,42 @@
-#include "seaclaw/websocket/websocket.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/websocket/websocket.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
+#if defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
 
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #endif
 
-#define SC_WS_MAGIC             "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-#define SC_WS_MAX_FRAME_PAYLOAD (4 * 1024 * 1024)
-#define SC_WS_MAX_MSG           (64 * 1024)
+#define HU_WS_MAGIC             "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+#define HU_WS_MAX_FRAME_PAYLOAD (4 * 1024 * 1024)
+#define HU_WS_MAX_MSG           (64 * 1024)
 
 /* RFC 6455 opcodes */
-#define SC_WS_OP_CONTINUATION 0
-#define SC_WS_OP_TEXT         1
-#define SC_WS_OP_BINARY       2
-#define SC_WS_OP_CLOSE        8
-#define SC_WS_OP_PING         9
-#define SC_WS_OP_PONG         10
+#define HU_WS_OP_CONTINUATION 0
+#define HU_WS_OP_TEXT         1
+#define HU_WS_OP_BINARY       2
+#define HU_WS_OP_CLOSE        8
+#define HU_WS_OP_PING         9
+#define HU_WS_OP_PONG         10
 
-#define SC_WS_INVALID_SOCK (-1)
+#define HU_WS_INVALID_SOCK (-1)
 
-struct sc_ws_client {
-    sc_allocator_t *alloc;
-#if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
+struct hu_ws_client {
+    hu_allocator_t *alloc;
+#if defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
     int sockfd;
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
     SSL *ssl;
     SSL_CTX *ssl_ctx;
 #endif
@@ -48,9 +48,9 @@ struct sc_ws_client {
 };
 
 /* Build a masked WebSocket frame into buf. Returns bytes written. */
-size_t sc_ws_build_frame(char *buf, size_t buf_size, unsigned opcode, const char *payload,
+size_t hu_ws_build_frame(char *buf, size_t buf_size, unsigned opcode, const char *payload,
                          size_t payload_len, const unsigned char mask_key[4]) {
-    if (buf_size < 6 || payload_len > SC_WS_MAX_FRAME_PAYLOAD)
+    if (buf_size < 6 || payload_len > HU_WS_MAX_FRAME_PAYLOAD)
         return 0;
 
     size_t pos = 0;
@@ -90,13 +90,13 @@ size_t sc_ws_build_frame(char *buf, size_t buf_size, unsigned opcode, const char
 }
 
 /* Apply XOR mask in-place (for server→client frames). */
-void sc_ws_apply_mask(char *payload, size_t len, const unsigned char mask_key[4]) {
+void hu_ws_apply_mask(char *payload, size_t len, const unsigned char mask_key[4]) {
     for (size_t i = 0; i < len; i++)
         payload[i] = (char)((unsigned char)payload[i] ^ mask_key[i % 4]);
 }
 
 /* Parse WebSocket frame header. Returns 0 on success, non-zero on error. */
-int sc_ws_parse_header(const char *bytes, size_t bytes_len, sc_ws_parsed_header_t *out) {
+int hu_ws_parse_header(const char *bytes, size_t bytes_len, hu_ws_parsed_header_t *out) {
     if (bytes_len < 2 || !out)
         return -1;
 
@@ -122,7 +122,7 @@ int sc_ws_parse_header(const char *bytes, size_t bytes_len, sc_ws_parsed_header_
 
     if (out->masked)
         hlen += 4;
-    if (payload_len > SC_WS_MAX_FRAME_PAYLOAD)
+    if (payload_len > HU_WS_MAX_FRAME_PAYLOAD)
         return -1;
 
     out->payload_len = (unsigned long long)payload_len;
@@ -130,7 +130,7 @@ int sc_ws_parse_header(const char *bytes, size_t bytes_len, sc_ws_parsed_header_
     return 0;
 }
 
-#if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
+#if defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
 /* Base64 encode 16 bytes into 24 chars. RFC 6455 accepts padding. */
 static void ws_b64_encode_16(const unsigned char *in, char *out) {
     static const char tbl[] = "ABCDEFGHIJKLMOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -203,25 +203,25 @@ static int ws_parse_url(const char *url, char *host, size_t host_size, uint16_t 
 }
 #endif
 
-sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t **out) {
+hu_error_t hu_ws_connect(hu_allocator_t *alloc, const char *url, hu_ws_client_t **out) {
     if (!alloc || !url || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     (void)alloc;
-    return SC_ERR_NOT_SUPPORTED;
-#elif defined(SC_GATEWAY_POSIX)
+    return HU_ERR_NOT_SUPPORTED;
+#elif defined(HU_GATEWAY_POSIX)
     int use_tls = 0;
-#if !defined(SC_HAS_TLS)
+#if !defined(HU_HAS_TLS)
     if (strncmp(url, "wss://", 6) == 0)
-        return SC_ERR_NOT_SUPPORTED; /* TLS requires OpenSSL */
+        return HU_ERR_NOT_SUPPORTED; /* TLS requires OpenSSL */
 #endif
 
     char host[256], path[512];
     uint16_t port;
     if (ws_parse_url(url, host, sizeof(host), &port, path, sizeof(path), &use_tls) != 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (!use_tls) {
         fprintf(stderr,
@@ -235,28 +235,28 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(host, port_str, &hints, &res) != 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     int sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sockfd < 0) {
         freeaddrinfo(res);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0) {
         close(sockfd);
         freeaddrinfo(res);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     freeaddrinfo(res);
 
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
     SSL *ssl = NULL;
     SSL_CTX *ssl_ctx = NULL;
     if (use_tls) {
         ssl_ctx = SSL_CTX_new(TLS_client_method());
         if (!ssl_ctx) {
             close(sockfd);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
         SSL_CTX_set_default_verify_paths(ssl_ctx);
         SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
@@ -265,7 +265,7 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
         if (!ssl) {
             SSL_CTX_free(ssl_ctx);
             close(sockfd);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
         SSL_set_fd(ssl, sockfd);
         SSL_set_tlsext_host_name(ssl, host);
@@ -273,7 +273,7 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
             SSL_free(ssl);
             SSL_CTX_free(ssl_ctx);
             close(sockfd);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
     }
 #endif
@@ -311,14 +311,14 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
                1;
     char *req = (char *)alloc->alloc(alloc->ctx, req_len);
     if (!req) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         if (ssl) {
             SSL_free(ssl);
             SSL_CTX_free(ssl_ctx);
         }
 #endif
         close(sockfd);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     (void)snprintf(req, req_len,
                    "GET %s HTTP/1.1\r\n"
@@ -332,7 +332,7 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
     size_t sent = 0;
     size_t to_send = strlen(req);
     while (sent < to_send) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         ssize_t n = ssl ? (ssize_t)SSL_write(ssl, req + sent, (int)(to_send - sent))
                         : send(sockfd, req + sent, to_send - sent, 0);
 #else
@@ -340,14 +340,14 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
 #endif
         if (n <= 0) {
             alloc->free(alloc->ctx, req, req_len);
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
             if (ssl) {
                 SSL_free(ssl);
                 SSL_CTX_free(ssl_ctx);
             }
 #endif
             close(sockfd);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
         sent += (size_t)n;
     }
@@ -357,7 +357,7 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
     char resp[4096];
     size_t resp_len = 0;
     while (resp_len < sizeof(resp) - 1) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         ssize_t n =
             ssl ? (ssize_t)SSL_read(ssl, resp + resp_len, (int)(sizeof(resp) - 1 - resp_len))
                 : recv(sockfd, resp + resp_len, sizeof(resp) - 1 - resp_len, 0);
@@ -365,14 +365,14 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
         ssize_t n = recv(sockfd, resp + resp_len, sizeof(resp) - 1 - resp_len, 0);
 #endif
         if (n <= 0) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
             if (ssl) {
                 SSL_free(ssl);
                 SSL_CTX_free(ssl_ctx);
             }
 #endif
             close(sockfd);
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         }
         resp_len += (size_t)n;
         resp[resp_len] = '\0';
@@ -380,74 +380,74 @@ sc_error_t sc_ws_connect(sc_allocator_t *alloc, const char *url, sc_ws_client_t 
             break;
     }
     if (strstr(resp, "\r\n\r\n") == NULL) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         if (ssl) {
             SSL_free(ssl);
             SSL_CTX_free(ssl_ctx);
         }
 #endif
         close(sockfd);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     if (!strstr(resp, "101")) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         if (ssl) {
             SSL_free(ssl);
             SSL_CTX_free(ssl_ctx);
         }
 #endif
         close(sockfd);
-        return SC_ERR_IO; /* Expected 101 Switching Protocols */
+        return HU_ERR_IO; /* Expected 101 Switching Protocols */
     }
     if (!strstr(resp, "Upgrade:") || !strstr(resp, "websocket")) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         if (ssl) {
             SSL_free(ssl);
             SSL_CTX_free(ssl_ctx);
         }
 #endif
         close(sockfd);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
-    sc_ws_client_t *ws = (sc_ws_client_t *)alloc->alloc(alloc->ctx, sizeof(sc_ws_client_t));
+    hu_ws_client_t *ws = (hu_ws_client_t *)alloc->alloc(alloc->ctx, sizeof(hu_ws_client_t));
     if (!ws) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         if (ssl) {
             SSL_free(ssl);
             SSL_CTX_free(ssl_ctx);
         }
 #endif
         close(sockfd);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memset(ws, 0, sizeof(*ws));
     ws->alloc = alloc;
     ws->sockfd = sockfd;
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
     ws->ssl = ssl;
     ws->ssl_ctx = ssl_ctx;
 #endif
     *out = ws;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)alloc;
     (void)url;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-sc_error_t sc_ws_send(sc_ws_client_t *ws, const char *data, size_t data_len) {
+hu_error_t hu_ws_send(hu_ws_client_t *ws, const char *data, size_t data_len) {
     if (!ws || !data)
-        return SC_ERR_INVALID_ARGUMENT;
-#if SC_IS_TEST
+        return HU_ERR_INVALID_ARGUMENT;
+#if HU_IS_TEST
     (void)data_len;
-    return SC_ERR_NOT_SUPPORTED;
-#elif defined(SC_GATEWAY_POSIX)
-    if (data_len > SC_WS_MAX_MSG)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (ws->sockfd == SC_WS_INVALID_SOCK)
-        return SC_ERR_IO;
+    return HU_ERR_NOT_SUPPORTED;
+#elif defined(HU_GATEWAY_POSIX)
+    if (data_len > HU_WS_MAX_MSG)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (ws->sockfd == HU_WS_INVALID_SOCK)
+        return HU_ERR_IO;
 
     unsigned char mask_key[4];
 #if defined(__linux__) || defined(__APPLE__)
@@ -464,55 +464,55 @@ sc_error_t sc_ws_send(sc_ws_client_t *ws, const char *data, size_t data_len) {
             mask_key[i] = (unsigned char)((i * 17 + (unsigned long)data) & 0xFF);
     }
 
-    char buf[SC_WS_MAX_MSG + 14]; /* max header 14 bytes for len 64K */
-    size_t frame_len = sc_ws_build_frame(buf, sizeof(buf), SC_WS_OP_TEXT, data, data_len, mask_key);
+    char buf[HU_WS_MAX_MSG + 14]; /* max header 14 bytes for len 64K */
+    size_t frame_len = hu_ws_build_frame(buf, sizeof(buf), HU_WS_OP_TEXT, data, data_len, mask_key);
     if (frame_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t sent = 0;
     while (sent < frame_len) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         ssize_t n = ws->ssl ? (ssize_t)SSL_write(ws->ssl, buf + sent, (int)(frame_len - sent))
                             : send(ws->sockfd, buf + sent, frame_len - sent, 0);
 #else
         ssize_t n = send(ws->sockfd, buf + sent, frame_len - sent, 0);
 #endif
         if (n <= 0)
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         sent += (size_t)n;
     }
-    return SC_OK;
+    return HU_OK;
 #else
     (void)data_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out,
+hu_error_t hu_ws_recv(hu_ws_client_t *ws, hu_allocator_t *alloc, char **data_out,
                       size_t *data_len_out) {
     if (!ws || !alloc || !data_out || !data_len_out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *data_out = NULL;
     *data_len_out = 0;
 
-#if SC_IS_TEST
-    return SC_ERR_NOT_SUPPORTED;
-#elif defined(SC_GATEWAY_POSIX)
-    if (ws->sockfd == SC_WS_INVALID_SOCK)
-        return SC_ERR_IO;
+#if HU_IS_TEST
+    return HU_ERR_NOT_SUPPORTED;
+#elif defined(HU_GATEWAY_POSIX)
+    if (ws->sockfd == HU_WS_INVALID_SOCK)
+        return HU_ERR_IO;
 
     for (;;) {
         char hdr_buf[14];
         size_t hdr_read = 0;
         while (hdr_read < 2) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
             ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, hdr_buf + hdr_read, 2 - hdr_read)
                                 : recv(ws->sockfd, hdr_buf + hdr_read, 2 - hdr_read, 0);
 #else
             ssize_t n = recv(ws->sockfd, hdr_buf + hdr_read, 2 - hdr_read, 0);
 #endif
             if (n <= 0)
-                return SC_ERR_IO;
+                return HU_ERR_IO;
             hdr_read += (size_t)n;
         }
         /* Compute full header size: 2 + (2 if len=126, 8 if len=127) + (4 if masked) */
@@ -527,32 +527,32 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
                 need += 4;
         }
         while (hdr_read < need) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
             ssize_t n = ws->ssl ? (ssize_t)SSL_read(ws->ssl, hdr_buf + hdr_read, need - hdr_read)
                                 : recv(ws->sockfd, hdr_buf + hdr_read, need - hdr_read, 0);
 #else
             ssize_t n = recv(ws->sockfd, hdr_buf + hdr_read, need - hdr_read, 0);
 #endif
             if (n <= 0)
-                return SC_ERR_IO;
+                return HU_ERR_IO;
             hdr_read += (size_t)n;
         }
 
-        sc_ws_parsed_header_t hdr = {0};
-        if (sc_ws_parse_header(hdr_buf, hdr_read, &hdr) != 0)
-            return SC_ERR_PARSE;
+        hu_ws_parsed_header_t hdr = {0};
+        if (hu_ws_parse_header(hdr_buf, hdr_read, &hdr) != 0)
+            return HU_ERR_PARSE;
 
-        if (hdr.payload_len > SC_WS_MAX_MSG)
-            return SC_ERR_IO;
+        if (hdr.payload_len > HU_WS_MAX_MSG)
+            return HU_ERR_IO;
 
         char *payload = NULL;
         if (hdr.payload_len > 0) {
             payload = (char *)alloc->alloc(alloc->ctx, hdr.payload_len + 1);
             if (!payload)
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             size_t pl_read = 0;
             while (pl_read < hdr.payload_len) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
                 ssize_t n = ws->ssl
                                 ? (ssize_t)SSL_read(ws->ssl, payload + pl_read,
                                                     (int)(hdr.payload_len - pl_read))
@@ -562,29 +562,29 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
 #endif
                 if (n <= 0) {
                     alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
-                    return SC_ERR_IO;
+                    return HU_ERR_IO;
                 }
                 pl_read += (size_t)n;
             }
             if (hdr.masked) {
                 unsigned char mask[4];
                 memcpy(mask, hdr_buf + hdr.header_bytes - 4, 4);
-                sc_ws_apply_mask(payload, hdr.payload_len, mask);
+                hu_ws_apply_mask(payload, hdr.payload_len, mask);
             }
             payload[hdr.payload_len] = '\0';
         }
 
         switch (hdr.opcode) {
-        case SC_WS_OP_PING:
+        case HU_WS_OP_PING:
             if (hdr.payload_len <= 125) {
                 char pong_buf[128];
                 unsigned char mask[4] = {0, 0, 0, 0};
-                size_t pl = sc_ws_build_frame(pong_buf, sizeof(pong_buf), SC_WS_OP_PONG,
+                size_t pl = hu_ws_build_frame(pong_buf, sizeof(pong_buf), HU_WS_OP_PONG,
                                               payload ? payload : "", hdr.payload_len, mask);
                 if (pl > 0) {
                     size_t sent = 0;
                     while (sent < pl) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
                         ssize_t nn =
                             ws->ssl ? (ssize_t)SSL_write(ws->ssl, pong_buf + sent, (int)(pl - sent))
                                     : send(ws->sockfd, pong_buf + sent, pl - sent, 0);
@@ -600,11 +600,11 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
             if (payload)
                 alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             continue;
-        case SC_WS_OP_PONG:
+        case HU_WS_OP_PONG:
             if (payload)
                 alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             continue;
-        case SC_WS_OP_CLOSE:
+        case HU_WS_OP_CLOSE:
             if (ws->frag_buf) {
                 alloc->free(alloc->ctx, ws->frag_buf, ws->frag_cap);
                 ws->frag_buf = NULL;
@@ -613,10 +613,10 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
             }
             if (payload)
                 alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
-            ws->sockfd = SC_WS_INVALID_SOCK;
-            return SC_ERR_IO;
-        case SC_WS_OP_TEXT:
-        case SC_WS_OP_BINARY:
+            ws->sockfd = HU_WS_INVALID_SOCK;
+            return HU_ERR_IO;
+        case HU_WS_OP_TEXT:
+        case HU_WS_OP_BINARY:
             if (hdr.fin) {
                 if (ws->frag_buf) {
                     alloc->free(alloc->ctx, ws->frag_buf, ws->frag_cap);
@@ -627,10 +627,10 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
                 *data_out = payload ? payload : (char *)alloc->alloc(alloc->ctx, 1);
                 *data_len_out = hdr.payload_len;
                 if (!*data_out && hdr.payload_len > 0)
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 if (hdr.payload_len == 0 && *data_out)
                     (*data_out)[0] = '\0';
-                return SC_OK;
+                return HU_OK;
             }
             /* First fragment of a multi-frame message */
             if (ws->frag_buf) {
@@ -645,7 +645,7 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
             if (!ws->frag_buf) {
                 if (payload)
                     alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             if (payload && hdr.payload_len > 0)
                 memcpy(ws->frag_buf, payload, hdr.payload_len);
@@ -653,7 +653,7 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
             if (payload)
                 alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
             continue;
-        case SC_WS_OP_CONTINUATION:
+        case HU_WS_OP_CONTINUATION:
             if (!ws->frag_buf) {
                 if (payload)
                     alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
@@ -661,13 +661,13 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
             }
             if (hdr.payload_len > 0 && payload) {
                 size_t need_total = ws->frag_len + hdr.payload_len;
-                if (need_total > SC_WS_MAX_MSG) {
+                if (need_total > HU_WS_MAX_MSG) {
                     alloc->free(alloc->ctx, ws->frag_buf, ws->frag_cap);
                     ws->frag_buf = NULL;
                     ws->frag_len = 0;
                     ws->frag_cap = 0;
                     alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
-                    return SC_ERR_IO;
+                    return HU_ERR_IO;
                 }
                 if (need_total + 1 > ws->frag_cap) {
                     size_t new_cap = ws->frag_cap * 2;
@@ -681,7 +681,7 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
                         ws->frag_len = 0;
                         ws->frag_cap = 0;
                         alloc->free(alloc->ctx, payload, hdr.payload_len + 1);
-                        return SC_ERR_OUT_OF_MEMORY;
+                        return HU_ERR_OUT_OF_MEMORY;
                     }
                     ws->frag_buf = nb;
                     ws->frag_cap = new_cap;
@@ -698,7 +698,7 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
                 ws->frag_buf = NULL;
                 ws->frag_len = 0;
                 ws->frag_cap = 0;
-                return SC_OK;
+                return HU_OK;
             }
             continue;
         default:
@@ -708,28 +708,28 @@ sc_error_t sc_ws_recv(sc_ws_client_t *ws, sc_allocator_t *alloc, char **data_out
         }
     }
 #else
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-void sc_ws_close(sc_ws_client_t *ws, sc_allocator_t *alloc) {
+void hu_ws_close(hu_ws_client_t *ws, hu_allocator_t *alloc) {
     if (!ws)
         return;
-#if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
+#if defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
     if (ws->frag_buf && alloc) {
         alloc->free(alloc->ctx, ws->frag_buf, ws->frag_cap);
         ws->frag_buf = NULL;
         ws->frag_len = 0;
         ws->frag_cap = 0;
     }
-    if (ws->sockfd != SC_WS_INVALID_SOCK) {
+    if (ws->sockfd != HU_WS_INVALID_SOCK) {
         char close_buf[16];
         unsigned char mask[4] = {0, 0, 0, 0};
-        size_t n = sc_ws_build_frame(close_buf, sizeof(close_buf), SC_WS_OP_CLOSE, "", 0, mask);
+        size_t n = hu_ws_build_frame(close_buf, sizeof(close_buf), HU_WS_OP_CLOSE, "", 0, mask);
         if (n > 0) {
             size_t sent = 0;
             while (sent < n) {
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
                 ssize_t r = ws->ssl ? (ssize_t)SSL_write(ws->ssl, close_buf + sent, (int)(n - sent))
                                     : send(ws->sockfd, close_buf + sent, n - sent, 0);
 #else
@@ -740,7 +740,7 @@ void sc_ws_close(sc_ws_client_t *ws, sc_allocator_t *alloc) {
                 sent += (size_t)r;
             }
         }
-#ifdef SC_HAS_TLS
+#ifdef HU_HAS_TLS
         if (ws->ssl) {
             SSL_shutdown(ws->ssl);
             SSL_free(ws->ssl);
@@ -752,7 +752,7 @@ void sc_ws_close(sc_ws_client_t *ws, sc_allocator_t *alloc) {
         }
 #endif
         close(ws->sockfd);
-        ws->sockfd = SC_WS_INVALID_SOCK;
+        ws->sockfd = HU_WS_INVALID_SOCK;
     }
 #endif
     (void)alloc;

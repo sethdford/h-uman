@@ -1,17 +1,17 @@
 ---
-title: seaclaw STIG Hardening Checklist
-description: DoD STIG hardening checklist for seaclaw deployments
+title: human STIG Hardening Checklist
+description: DoD STIG hardening checklist for human deployments
 updated: 2026-03-02
 ---
 
-# seaclaw STIG Hardening Checklist
+# human STIG Hardening Checklist
 
-Checklist for hardening seaclaw deployments per DoD STIG requirements.
+Checklist for hardening human deployments per DoD STIG requirements.
 
 ## Build Configuration
 
-- [ ] Build with `SC_ENABLE_FIPS_CRYPTO=ON` for FIPS 140-2 compliant crypto
-- [ ] Build with `CMAKE_BUILD_TYPE=MinSizeRel` and `SC_ENABLE_LTO=ON`
+- [ ] Build with `HU_ENABLE_FIPS_CRYPTO=ON` for FIPS 140-2 compliant crypto
+- [ ] Build with `CMAKE_BUILD_TYPE=MinSizeRel` and `HU_ENABLE_LTO=ON`
 - [ ] Verify binary with `checksec` shows: Full RELRO, Stack Canary, NX, PIE
 - [ ] Generate SBOM: `cmake --build build --target sbom`
 
@@ -32,7 +32,7 @@ Checklist for hardening seaclaw deployments per DoD STIG requirements.
 
 ## Cryptography
 
-- [ ] API keys encrypted at rest (sc_secret_store)
+- [ ] API keys encrypted at rest (hu_secret_store)
 - [ ] Auth credentials encrypted at rest
 - [ ] TLS 1.2+ enforced for all outbound connections
 - [ ] Verify `CURLOPT_SSL_VERIFYPEER` and `CURLOPT_SSL_VERIFYHOST` are set

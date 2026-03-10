@@ -278,7 +278,7 @@ export const tokens = {
     onAccentTertiary: "#ffffff",
     pressedOverlay: "rgba(122, 182, 72, 0.12)",
     shadowCard: "0 1px 3px rgba(3,8,16,0.3), 0 8px 24px rgba(3,8,16,0.25), inset 0 1px 0 rgba(255,255,255,0.05)",
-    shadowGlowAccent: "0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
+    shadowGlowAccent: "0 0 0 1px var(--hu-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
     shadowGlowBlue: "0 0 0 1px rgba(59,130,246,0.12), 0 4px 16px rgba(59,130,246,0.10)",
     shadowInset: "inset 0 1px 2px rgba(0,0,0,0.06)",
     shadowLg: "0 4px 8px rgba(3,8,16,0.4), 0 16px 48px rgba(3,8,16,0.4), inset 0 1px 0 rgba(255,255,255,0.04)",

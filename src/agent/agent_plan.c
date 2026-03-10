@@ -1,21 +1,21 @@
-/* Plan execution: sc_agent_commands_execute_plan_steps, sc_agent_execute_plan */
+/* Plan execution: hu_agent_commands_execute_plan_steps, hu_agent_execute_plan */
 #include "agent_internal.h"
-#include "seaclaw/agent/commands.h"
-#include "seaclaw/agent/planner.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/observer.h"
-#include "seaclaw/tool.h"
+#include "human/agent/commands.h"
+#include "human/agent/planner.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/observer.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *plan,
+hu_error_t hu_agent_commands_execute_plan_steps(hu_agent_t *agent, hu_plan_t *plan,
                                                 char **summary_out, size_t *summary_len_out,
                                                 const char *original_goal,
                                                 size_t original_goal_len) {
-    sc_agent_internal_generate_trace_id(agent->trace_id);
+    hu_agent_internal_generate_trace_id(agent->trace_id);
     char result_buf[4096];
     int result_off = 0;
     bool replanned = false;
@@ -24,62 +24,62 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
 
     for (size_t i = 0; i < plan->steps_count; i++) {
         if (agent->cancel_requested) {
-            sc_planner_mark_step(plan, i, SC_PLAN_STEP_FAILED);
+            hu_planner_mark_step(plan, i, HU_PLAN_STEP_FAILED);
             result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
                                    "  [%zu] %s: CANCELLED\n", i + 1, plan->steps[i].tool_name);
             continue;
         }
 
-        sc_planner_mark_step(plan, i, SC_PLAN_STEP_RUNNING);
+        hu_planner_mark_step(plan, i, HU_PLAN_STEP_RUNNING);
 
         {
-            sc_observer_event_t ev = {.tag = SC_OBSERVER_EVENT_TOOL_CALL_START, .data = {{0}}};
+            hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TOOL_CALL_START, .data = {{0}}};
             ev.data.tool_call_start.tool = plan->steps[i].tool_name;
-            SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+            HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
         }
 
-        sc_tool_t *tool = sc_agent_internal_find_tool(agent, plan->steps[i].tool_name,
+        hu_tool_t *tool = hu_agent_internal_find_tool(agent, plan->steps[i].tool_name,
                                                       strlen(plan->steps[i].tool_name));
         if (!tool) {
-            sc_planner_mark_step(plan, i, SC_PLAN_STEP_FAILED);
+            hu_planner_mark_step(plan, i, HU_PLAN_STEP_FAILED);
             result_off += snprintf(result_buf + result_off, sizeof(result_buf) - (size_t)result_off,
                                    "  [%zu] %s: tool not found\n", i + 1, plan->steps[i].tool_name);
             {
-                sc_observer_event_t ev = {.tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}}};
+                hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TOOL_CALL, .data = {{0}}};
                 ev.data.tool_call.tool = plan->steps[i].tool_name;
                 ev.data.tool_call.success = false;
                 ev.data.tool_call.detail = "tool not found";
-                SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+                HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
             }
             continue;
         }
 
-        sc_json_value_t *args = NULL;
+        hu_json_value_t *args = NULL;
         if (plan->steps[i].args_json) {
             size_t args_len = strlen(plan->steps[i].args_json);
-            sc_error_t pe = sc_json_parse(agent->alloc, plan->steps[i].args_json, args_len, &args);
-            if (pe != SC_OK)
+            hu_error_t pe = hu_json_parse(agent->alloc, plan->steps[i].args_json, args_len, &args);
+            if (pe != HU_OK)
                 args = NULL;
         }
 
-        sc_tool_result_t result = sc_tool_result_fail("invalid arguments", 16);
+        hu_tool_result_t result = hu_tool_result_fail("invalid arguments", 16);
         clock_t tool_start = clock();
         if (args) {
             tool->vtable->execute(tool->ctx, agent->alloc, args, &result);
-            sc_json_free(agent->alloc, args);
+            hu_json_free(agent->alloc, args);
         }
-        uint64_t tool_duration_ms = sc_agent_internal_clock_diff_ms(tool_start, clock());
+        uint64_t tool_duration_ms = hu_agent_internal_clock_diff_ms(tool_start, clock());
 
         bool ok = result.success;
-        sc_planner_mark_step(plan, i, ok ? SC_PLAN_STEP_DONE : SC_PLAN_STEP_FAILED);
+        hu_planner_mark_step(plan, i, ok ? HU_PLAN_STEP_DONE : HU_PLAN_STEP_FAILED);
 
         {
-            sc_observer_event_t ev = {.tag = SC_OBSERVER_EVENT_TOOL_CALL, .data = {{0}}};
+            hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_TOOL_CALL, .data = {{0}}};
             ev.data.tool_call.tool = plan->steps[i].tool_name;
             ev.data.tool_call.duration_ms = tool_duration_ms;
             ev.data.tool_call.success = ok;
             ev.data.tool_call.detail = ok ? NULL : (result.error_msg ? result.error_msg : "failed");
-            SC_OBS_SAFE_RECORD_EVENT(agent, &ev);
+            HU_OBS_SAFE_RECORD_EVENT(agent, &ev);
         }
 
         const char *desc =
@@ -94,7 +94,7 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
             char progress_buf[2048];
             int prog_off = 0;
             for (size_t j = 0; j < i && prog_off < (int)sizeof(progress_buf) - 64; j++) {
-                if (plan->steps[j].status == SC_PLAN_STEP_DONE && plan->steps[j].description) {
+                if (plan->steps[j].status == HU_PLAN_STEP_DONE && plan->steps[j].description) {
                     prog_off +=
                         snprintf(progress_buf + prog_off, sizeof(progress_buf) - (size_t)prog_off,
                                  "  [%zu] %s: done\n", j + 1, plan->steps[j].description);
@@ -125,8 +125,8 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
                 }
             }
 
-            sc_plan_t *new_plan = NULL;
-            sc_error_t replan_err = sc_planner_replan(
+            hu_plan_t *new_plan = NULL;
+            hu_error_t replan_err = hu_planner_replan(
                 agent->alloc, &agent->provider, agent->model_name, agent->model_name_len,
                 original_goal, original_goal_len, progress_buf, (size_t)prog_off, fail_buf,
                 (size_t)fail_off, tool_names, tn_count, &new_plan);
@@ -135,7 +135,7 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
                 agent->alloc->free(agent->alloc->ctx, (void *)tool_names,
                                    agent->tools_count * sizeof(const char *));
 
-            if (replan_err == SC_OK && new_plan && new_plan->steps_count > 0) {
+            if (replan_err == HU_OK && new_plan && new_plan->steps_count > 0) {
                 /* Free old steps from i+1 onward */
                 for (size_t j = i + 1; j < plan->steps_count; j++) {
                     if (plan->steps[j].tool_name)
@@ -152,12 +152,12 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
                 size_t new_total = i + 1 + new_plan->steps_count;
                 if (new_total > plan->steps_cap) {
                     size_t new_cap = new_total;
-                    sc_plan_step_t *new_steps = (sc_plan_step_t *)agent->alloc->alloc(
-                        agent->alloc->ctx, new_cap * sizeof(sc_plan_step_t));
+                    hu_plan_step_t *new_steps = (hu_plan_step_t *)agent->alloc->alloc(
+                        agent->alloc->ctx, new_cap * sizeof(hu_plan_step_t));
                     if (new_steps) {
-                        memcpy(new_steps, plan->steps, (i + 1) * sizeof(sc_plan_step_t));
+                        memcpy(new_steps, plan->steps, (i + 1) * sizeof(hu_plan_step_t));
                         agent->alloc->free(agent->alloc->ctx, plan->steps,
-                                           plan->steps_cap * sizeof(sc_plan_step_t));
+                                           plan->steps_cap * sizeof(hu_plan_step_t));
                         plan->steps = new_steps;
                         plan->steps_cap = new_cap;
                     }
@@ -165,16 +165,16 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
 
                 if (plan->steps_cap >= new_total) {
                     for (size_t j = 0; j < new_plan->steps_count; j++) {
-                        sc_plan_step_t *dst = &plan->steps[i + 1 + j];
-                        dst->tool_name = sc_strdup(agent->alloc, new_plan->steps[j].tool_name);
+                        hu_plan_step_t *dst = &plan->steps[i + 1 + j];
+                        dst->tool_name = hu_strdup(agent->alloc, new_plan->steps[j].tool_name);
                         dst->args_json = new_plan->steps[j].args_json
-                                             ? sc_strdup(agent->alloc, new_plan->steps[j].args_json)
+                                             ? hu_strdup(agent->alloc, new_plan->steps[j].args_json)
                                              : NULL;
                         dst->description =
                             new_plan->steps[j].description
-                                ? sc_strdup(agent->alloc, new_plan->steps[j].description)
+                                ? hu_strdup(agent->alloc, new_plan->steps[j].description)
                                 : NULL;
-                        dst->status = SC_PLAN_STEP_PENDING;
+                        dst->status = HU_PLAN_STEP_PENDING;
                     }
                     plan->steps_count = i + 1 + new_plan->steps_count;
                     replanned = true;
@@ -183,35 +183,35 @@ sc_error_t sc_agent_commands_execute_plan_steps(sc_agent_t *agent, sc_plan_t *pl
                                  "  [replan] %zu new steps\n", new_plan->steps_count);
                 }
 
-                sc_plan_free(agent->alloc, new_plan);
+                hu_plan_free(agent->alloc, new_plan);
             }
         }
 
-        sc_tool_result_free(agent->alloc, &result);
+        hu_tool_result_free(agent->alloc, &result);
     }
 
-    *summary_out = sc_strndup(agent->alloc, result_buf, (size_t)result_off);
+    *summary_out = hu_strndup(agent->alloc, result_buf, (size_t)result_off);
     if (!*summary_out)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     if (summary_len_out)
         *summary_len_out = (size_t)result_off;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_agent_execute_plan(sc_agent_t *agent, const char *plan_json, size_t plan_json_len,
+hu_error_t hu_agent_execute_plan(hu_agent_t *agent, const char *plan_json, size_t plan_json_len,
                                  char **summary_out, size_t *summary_len_out) {
     if (!agent || !plan_json || !summary_out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *summary_out = NULL;
     if (summary_len_out)
         *summary_len_out = 0;
 
-    sc_plan_t *plan = NULL;
-    sc_error_t err = sc_planner_create_plan(agent->alloc, plan_json, plan_json_len, &plan);
-    if (err != SC_OK)
+    hu_plan_t *plan = NULL;
+    hu_error_t err = hu_planner_create_plan(agent->alloc, plan_json, plan_json_len, &plan);
+    if (err != HU_OK)
         return err;
 
-    err = sc_agent_commands_execute_plan_steps(agent, plan, summary_out, summary_len_out, NULL, 0);
-    sc_plan_free(agent->alloc, plan);
+    err = hu_agent_commands_execute_plan_steps(agent, plan, summary_out, summary_len_out, NULL, 0);
+    hu_plan_free(agent->alloc, plan);
     return err;
 }

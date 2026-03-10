@@ -1,15 +1,15 @@
-Source: seaclaw
+Source: human
 Section: utils
 Priority: optional
-Maintainer: SeaClaw Team <team@seaclaw.ai>
+Maintainer: Human Team <team@h-uman.ai>
 Build-Depends: cmake (>= 3.20), debhelper, gcc, libsqlite3-dev, libcurl4-openssl-dev
 Standards-Version: 4.6.2
-Homepage: https://seaclaw.ai
+Homepage: https://h-uman.ai
 
-Package: seaclaw
+Package: human
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Autonomous AI assistant runtime
- SeaClaw is a lightweight, self-contained AI assistant runtime written in C.
+ Human is a lightweight, self-contained AI assistant runtime written in C.
  Features include 50+ AI providers, 33 messaging channels, 66+ tools,
  vector memory, sandboxing, MCP support, and a web dashboard.

@@ -1,5 +1,5 @@
 {
-  description = "seaclaw — autonomous AI assistant runtime";
+  description = "human — autonomous AI assistant runtime";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -13,7 +13,7 @@
       in
       {
         packages.default = pkgs.stdenv.mkDerivation {
-          pname = "seaclaw";
+          pname = "human";
           version = "0.3.0";
           src = ./.;
 
@@ -33,14 +33,14 @@
 
           meta = with pkgs.lib; {
             description = "Smallest fully autonomous AI assistant infrastructure";
-            homepage = "https://github.com/sethdford/seaclaw";
+            homepage = "https://github.com/sethdford/human";
             license = licenses.mit;
             platforms = platforms.unix;
           };
         };
 
         devShells.default = pkgs.mkShell {
-          name = "seaclaw";
+          name = "human";
           packages = with pkgs; [
             cmake
             sqlite
@@ -50,7 +50,7 @@
           ];
 
           shellHook = ''
-            echo "SeaClaw dev shell — cmake, sqlite3, clang-tools available"
+            echo "Human dev shell — cmake, sqlite3, clang-tools available"
           '';
         };
       }

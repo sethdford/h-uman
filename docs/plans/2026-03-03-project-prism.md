@@ -14,11 +14,11 @@ Design: `docs/plans/2026-03-03-project-prism-design.md`
 - Run: `npm run tokens:build` (or equivalent) to generate CSS
 
 **Changes:**
-Add all tokens from design doc Section 1. Ensure `--sc-bg`, `--sc-bg-surface`, `--sc-bg-elevated`, `--sc-border`, `--sc-border-subtle`, `--sc-text`, `--sc-text-muted`, `--sc-accent`, `--sc-accent-hover`, `--sc-accent-subtle`, `--sc-accent-text` are updated for both dark and light themes.
+Add all tokens from design doc Section 1. Ensure `--hu-bg`, `--hu-bg-surface`, `--hu-bg-elevated`, `--hu-border`, `--hu-border-subtle`, `--hu-text`, `--hu-text-muted`, `--hu-accent`, `--hu-accent-hover`, `--hu-accent-subtle`, `--hu-accent-text` are updated for both dark and light themes.
 
-Add shadow tokens: `--sc-shadow-sm`, `--sc-shadow-md`, `--sc-shadow-lg`, `--sc-shadow-glow`.
+Add shadow tokens: `--hu-shadow-sm`, `--hu-shadow-md`, `--hu-shadow-lg`, `--hu-shadow-glow`.
 
-Add glass tokens: `--sc-glass-sessions-bg`, `--sc-glass-actions-bg`, `--sc-glass-menu-bg`, `--sc-glass-blur`, `--sc-glass-saturate`.
+Add glass tokens: `--hu-glass-sessions-bg`, `--hu-glass-actions-bg`, `--hu-glass-menu-bg`, `--hu-glass-blur`, `--hu-glass-saturate`.
 
 **Test:** `cd ui && npm run typecheck && npm run test && npm run lint`
 
@@ -33,50 +33,50 @@ Add glass tokens: `--sc-glass-sessions-bg`, `--sc-glass-actions-bg`, `--sc-glass
 
 **Changes:**
 
-- Custom scrollbar: 6px thumb, `--sc-bg-elevated`, transparent track, rounded
-- Global focus-visible: `0 0 0 2px var(--sc-accent), 0 0 12px rgba(59,130,246,0.2)`
-- Body/html background: `--sc-bg`
+- Custom scrollbar: 6px thumb, `--hu-bg-elevated`, transparent track, rounded
+- Global focus-visible: `0 0 0 2px var(--hu-accent), 0 0 12px rgba(59,130,246,0.2)`
+- Body/html background: `--hu-bg`
 - Selection color: accent-subtle background
 
 **Commit:** `style: global scrollbar, focus glow, selection color`
 
 ## Phase 2: Composer Overhaul
 
-### Task 3: sc-composer — command bar styling
+### Task 3: hu-composer — command bar styling
 
 **Files:**
 
-- Modify: `ui/src/components/sc-composer.ts`
+- Modify: `ui/src/components/hu-composer.ts`
 
 **Changes:**
 
-- Replace flat textarea border with `--sc-bg-surface` container + inner shadow
-- Focus state: border → accent + `--sc-shadow-glow` (200ms transition)
-- **Send button**: change from text "Send" to 36px circle with Phosphor "arrow-up" icon, solid `--sc-accent` background, white icon
+- Replace flat textarea border with `--hu-bg-surface` container + inner shadow
+- Focus state: border → accent + `--hu-shadow-glow` (200ms transition)
+- **Send button**: change from text "Send" to 36px circle with Phosphor "arrow-up" icon, solid `--hu-accent` background, white icon
 - Send press: `transform: scale(0.95)` on `:active`, spring ease back
 - Attach button: ghost style, accent on hover
 - Character count: only show when `value.length > 100`
 - Stream elapsed: move into the send button area (inline badge)
-- Directional border-radius: `--sc-radius-lg` on container
+- Directional border-radius: `--hu-radius-lg` on container
 
-**Test:** Existing sc-composer tests must pass. Add test for circle send button rendering.
+**Test:** Existing hu-composer tests must pass. Add test for circle send button rendering.
 
 **Commit:** `style(composer): command bar design — circle send, focus glow, inner shadow`
 
-### Task 4: sc-composer — bento suggestion grid
+### Task 4: hu-composer — bento suggestion grid
 
 **Files:**
 
-- Modify: `ui/src/components/sc-composer.ts`
+- Modify: `ui/src/components/hu-composer.ts`
 
 **Changes:**
 
 - Replace flat prompt pills with 2x2 grid of suggestion cards
 - Each card: Phosphor icon + title + description (one line)
-- Card styling: `--sc-bg-surface`, 1px border, `--sc-radius`, hover → elevated + shadow-glow
+- Card styling: `--hu-bg-surface`, 1px border, `--hu-radius`, hover → elevated + shadow-glow
 - Above grid: "How can I help?" heading (large, light weight, centered)
-- Stagger entrance: `animation-delay: calc(var(--sc-stagger-delay) * var(--idx))`
-- `@keyframes sc-card-enter`: translateY(8px) + opacity 0 → translateY(0) + opacity 1
+- Stagger entrance: `animation-delay: calc(var(--hu-stagger-delay) * var(--idx))`
+- `@keyframes hu-card-enter`: translateY(8px) + opacity 0 → translateY(0) + opacity 1
 
 **Suggestions data:**
 
@@ -113,16 +113,16 @@ const SUGGESTIONS = [
 
 **Files:**
 
-- Modify: `ui/src/components/sc-message-list.ts`
+- Modify: `ui/src/components/hu-message-list.ts`
 
 **Changes:**
 
 - User bubbles: `background: linear-gradient(135deg, #1e40af, #2563eb)`, white text
-- Assistant bubbles: `--sc-bg-surface`, 1px `--sc-border`
-- Directional radius: user bubbles → bottom-right `--sc-radius-sm`, rest `--sc-radius-lg`. Assistant → bottom-left `--sc-radius-sm`, rest `--sc-radius-lg`
+- Assistant bubbles: `--hu-bg-surface`, 1px `--hu-border`
+- Directional radius: user bubbles → bottom-right `--hu-radius-sm`, rest `--hu-radius-lg`. Assistant → bottom-left `--hu-radius-sm`, rest `--hu-radius-lg`
 - Timestamp: hidden by default, `.message:hover .message-meta` → opacity 1, translateY(0) from translateY(-4px)
-- Stagger entrance: `animation-delay: min(calc(50ms * var(--sc-stagger-index)), 300ms)`
-- `@keyframes sc-slide-up`: translateY(12px) opacity(0) → translateY(0) opacity(1) with spring easing
+- Stagger entrance: `animation-delay: min(calc(50ms * var(--hu-stagger-index)), 300ms)`
+- `@keyframes hu-slide-up`: translateY(12px) opacity(0) → translateY(0) opacity(1) with spring easing
 
 **Commit:** `style(messages): gradient user bubbles, directional radius, hover timestamps`
 
@@ -130,14 +130,14 @@ const SUGGESTIONS = [
 
 **Files:**
 
-- Modify: `ui/src/components/sc-tool-result.ts`
+- Modify: `ui/src/components/hu-tool-result.ts`
 
 **Changes:**
 
 - Left border: 3px solid, color based on status (blue=running, green=success, red=error)
-- Running: `@keyframes sc-pulse-border`: opacity 1 → 0.4 → 1 (1.5s cycle)
+- Running: `@keyframes hu-pulse-border`: opacity 1 → 0.4 → 1 (1.5s cycle)
 - Collapse/expand: `max-height` transition with overflow hidden
-- Card: `--sc-bg-surface` background, `--sc-shadow-sm`
+- Card: `--hu-bg-surface` background, `--hu-shadow-sm`
 
 **Commit:** `style(tools): accent border states, pulse animation, collapse`
 
@@ -145,15 +145,15 @@ const SUGGESTIONS = [
 
 **Files:**
 
-- Modify: `ui/src/components/sc-thinking.ts`
-- Modify: `ui/src/components/sc-message-list.ts` (thinking container)
+- Modify: `ui/src/components/hu-thinking.ts`
+- Modify: `ui/src/components/hu-message-list.ts` (thinking container)
 
 **Changes:**
 
-- Three dots: 6px circles, `--sc-accent` color
-- `@keyframes sc-dot-bounce`: translateY(0) → translateY(-6px) → translateY(0), 1.2s infinite
+- Three dots: 6px circles, `--hu-accent` color
+- `@keyframes hu-dot-bounce`: translateY(0) → translateY(-6px) → translateY(0), 1.2s infinite
 - Each dot: `animation-delay: 0ms, 150ms, 300ms`
-- "Thinking..." label: `--sc-text-muted`, italic
+- "Thinking..." label: `--hu-text-muted`, italic
 - Abort button: ghost border, red text + red border on hover
 
 **Commit:** `style(thinking): blue stagger bounce dots`
@@ -164,14 +164,14 @@ const SUGGESTIONS = [
 
 **Files:**
 
-- Modify: `ui/src/components/sc-chat-sessions-panel.ts`
+- Modify: `ui/src/components/hu-chat-sessions-panel.ts`
 
 **Changes:**
 
 - Entrance: `transform: translateX(-100%) → translateX(0)` + `opacity: 0 → 1` (spring easing, 300ms)
 - Time groups: compute "Today", "Yesterday", "This Week", "Older" from `ts` field
-- Section headers: uppercase, `--sc-text-2xs`, `letter-spacing: 0.05em`, `--sc-text-muted`
-- Inline rename: double-click session title → contenteditable, blur/Enter to save, fires `sc-session-rename`
+- Section headers: uppercase, `--hu-text-2xs`, `letter-spacing: 0.05em`, `--hu-text-muted`
+- Inline rename: double-click session title → contenteditable, blur/Enter to save, fires `hu-session-rename`
 - Shadow-lg on right edge for depth separation
 - Glass background with blue tint (tokens from Task 1)
 
@@ -181,13 +181,13 @@ const SUGGESTIONS = [
 
 **Files:**
 
-- Modify: `ui/src/components/sc-message-actions.ts`
+- Modify: `ui/src/components/hu-message-actions.ts`
 
 **Changes:**
 
 - Copy click: swap copy icon → checkmark icon for 1.5s, green tint on button
 - Entrance: `translateY(-4px) opacity(0)` → `translateY(0) opacity(1)` (150ms)
-- Glass background: use `--sc-glass-actions-bg` token
+- Glass background: use `--hu-glass-actions-bg` token
 - Add tooltips: `title` attribute or custom tooltip element with glass styling, 100ms hover delay
 
 **Commit:** `feat(actions): copy feedback animation, glass tooltips`
@@ -206,7 +206,7 @@ const SUGGESTIONS = [
 - Left: sessions toggle + connection indicator
 - Center: session title (editable via click, contenteditable)
 - Right: keyboard shortcut hint `Cmd+F`
-- Background: transparent (no `--sc-bg-surface`)
+- Background: transparent (no `--hu-bg-surface`)
 - 1px bottom border only
 
 **Commit:** `style(chat): HUD status bar with editable title`
@@ -215,14 +215,14 @@ const SUGGESTIONS = [
 
 **Files:**
 
-- Modify: `ui/src/components/sc-file-preview.ts`
+- Modify: `ui/src/components/hu-file-preview.ts`
 
 **Changes:**
 
-- Card background: `--sc-bg-surface` with `--sc-shadow-sm`
-- Image thumbnails: `--sc-radius-sm`, slight inner shadow
+- Card background: `--hu-bg-surface` with `--hu-shadow-sm`
+- Image thumbnails: `--hu-radius-sm`, slight inner shadow
 - Remove button: glass background, red on hover
-- Hover: card lifts with `--sc-shadow-md` (translateY(-2px))
+- Hover: card lifts with `--hu-shadow-md` (translateY(-2px))
 
 **Commit:** `style(files): glass cards with shadow depth`
 
@@ -235,7 +235,7 @@ const SUGGESTIONS = [
 3. `cd ui && npm run lint`
 4. `cd ui && npx playwright test` — all E2E pass
 5. `cd ui && npx playwright test --update-snapshots` — update baselines
-6. `cd build && cmake --build . && ./seaclaw_tests` — all C tests pass
+6. `cd build && cmake --build . && ./human_tests` — all C tests pass
 
 **Commit:** `test: update visual baselines for Project Prism`
 

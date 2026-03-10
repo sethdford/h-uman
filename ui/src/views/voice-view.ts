@@ -6,14 +6,14 @@ import type { GatewayStatus } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { SESSION_KEY_VOICE } from "../utils.js";
 import type { ChatItem } from "../controllers/chat-controller.js";
-import { ScToast } from "../components/sc-toast.js";
+import { ScToast } from "../components/hu-toast.js";
 import { AudioRecorder, blobToBase64 } from "../audio-recorder.js";
-import "../components/sc-button.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-status-dot.js";
-import "../components/sc-voice-orb.js";
-import "../components/sc-voice-conversation.js";
+import "../components/hu-button.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-status-dot.js";
+import "../components/hu-voice-orb.js";
+import "../components/hu-voice-conversation.js";
 
 type VoiceStatus = "idle" | "listening" | "processing" | "unsupported";
 
@@ -23,7 +23,7 @@ interface VoiceMessage {
   ts: number;
 }
 
-@customElement("sc-voice-view")
+@customElement("hu-voice-view")
 export class ScVoiceView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
 
@@ -33,7 +33,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       height: 100%;
-      max-height: calc(100vh - var(--sc-space-5xl));
+      max-height: calc(100vh - var(--hu-space-5xl));
     }
 
     .container {
@@ -54,13 +54,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
-      background: color-mix(in srgb, var(--sc-bg-surface) 60%, transparent);
-      backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
-      -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px));
-      border-bottom: 1px solid var(--sc-border-subtle);
+      padding: var(--hu-space-xs) var(--hu-space-md);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
+      background: color-mix(in srgb, var(--hu-bg-surface) 60%, transparent);
+      backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px));
+      -webkit-backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px));
+      border-bottom: 1px solid var(--hu-border-subtle);
       flex-shrink: 0;
     }
 
@@ -68,18 +68,18 @@ export class ScVoiceView extends GatewayAwareLitElement {
     .status-right {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
 
     .status-title {
-      font-weight: var(--sc-weight-medium);
-      color: var(--sc-text);
-      font-size: var(--sc-text-sm);
+      font-weight: var(--hu-weight-medium);
+      color: var(--hu-text);
+      font-size: var(--hu-text-sm);
     }
 
     .status-meta {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
     /* ── Error banner ───────────────────────────────── */
@@ -88,12 +88,12 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: var(--sc-space-md);
-      background: var(--sc-error-dim);
-      border: 1px solid var(--sc-error);
-      border-radius: var(--sc-radius);
-      color: var(--sc-error);
-      font-size: var(--sc-text-base);
+      padding: var(--hu-space-md);
+      background: var(--hu-error-dim);
+      border: 1px solid var(--hu-error);
+      border-radius: var(--hu-radius);
+      color: var(--hu-error);
+      font-size: var(--hu-text-base);
       flex-shrink: 0;
     }
 
@@ -103,33 +103,33 @@ export class ScVoiceView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: var(--sc-space-sm);
-      padding: var(--sc-space-sm) var(--sc-space-md) var(--sc-space-md);
+      gap: var(--hu-space-sm);
+      padding: var(--hu-space-sm) var(--hu-space-md) var(--hu-space-md);
       flex-shrink: 0;
     }
 
     .input-row {
       display: flex;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       align-items: flex-end;
       width: 100%;
-      padding: var(--sc-space-md);
-      background: var(--sc-bg-surface);
-      background-image: var(--sc-surface-gradient);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius-lg);
-      box-shadow: var(--sc-shadow-card);
-      backdrop-filter: blur(var(--sc-glass-subtle-blur));
-      -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur));
+      padding: var(--hu-space-md);
+      background: var(--hu-bg-surface);
+      background-image: var(--hu-surface-gradient);
+      border: 1px solid var(--hu-border);
+      border-radius: var(--hu-radius-lg);
+      box-shadow: var(--hu-shadow-card);
+      backdrop-filter: blur(var(--hu-glass-subtle-blur));
+      -webkit-backdrop-filter: blur(var(--hu-glass-subtle-blur));
       box-sizing: border-box;
     }
 
-    .input-row sc-textarea {
+    .input-row hu-textarea {
       flex: 1;
-      --sc-bg-elevated: var(--sc-bg);
+      --hu-bg-elevated: var(--hu-bg);
     }
 
-    .input-row sc-button {
+    .input-row hu-button {
       min-height: 2.75rem;
     }
 
@@ -137,25 +137,25 @@ export class ScVoiceView extends GatewayAwareLitElement {
 
     .skeleton-bar {
       height: 2.25rem;
-      margin-bottom: var(--sc-space-xs);
+      margin-bottom: var(--hu-space-xs);
     }
 
     .skeleton-controls {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: var(--sc-space-sm);
-      padding: var(--sc-space-md);
+      gap: var(--hu-space-sm);
+      padding: var(--hu-space-md);
     }
 
     /* ── Responsive ──────────────────────────────────── */
 
-    @media (max-width: 480px) /* --sc-breakpoint-sm */ {
+    @media (max-width: 480px) /* --hu-breakpoint-sm */ {
       .input-row {
         flex-direction: column;
         align-items: stretch;
       }
-      .input-row sc-button {
+      .input-row hu-button {
         min-height: 2.5rem;
       }
     }
@@ -179,7 +179,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
   };
   private _boundGateway: GatewayClient | null = null;
 
-  @query("sc-voice-conversation") private _conversation!: HTMLElement & {
+  @query("hu-voice-conversation") private _conversation!: HTMLElement & {
     scrollToBottom: () => void;
   };
 
@@ -188,11 +188,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
   }
 
   private get _cacheKey(): string {
-    return `sc-voice-messages`;
+    return `hu-voice-messages`;
   }
 
   private get _sessionCountKey(): string {
-    return `sc-voice-session-count`;
+    return `hu-voice-session-count`;
   }
 
   private get _sessionCount(): number {
@@ -499,10 +499,10 @@ export class ScVoiceView extends GatewayAwareLitElement {
     return html`
       <div class="container">
         ${this._renderStatusBar()} ${this._renderErrorBanner()}
-        <sc-voice-conversation
+        <hu-voice-conversation
           .items=${this._chatItems}
           .isWaiting=${this.voiceStatus === "processing"}
-        ></sc-voice-conversation>
+        ></hu-voice-conversation>
         ${this._renderControls()}
       </div>
     `;
@@ -511,11 +511,11 @@ export class ScVoiceView extends GatewayAwareLitElement {
   private _renderSkeleton() {
     return html`
       <div class="container">
-        <sc-skeleton variant="card" class="skeleton-bar"></sc-skeleton>
-        <sc-skeleton variant="card" style="flex:1"></sc-skeleton>
+        <hu-skeleton variant="card" class="skeleton-bar"></hu-skeleton>
+        <hu-skeleton variant="card" style="flex:1"></hu-skeleton>
         <div class="skeleton-controls">
-          <sc-skeleton variant="circle" width="72px" height="72px"></sc-skeleton>
-          <sc-skeleton variant="card" height="60px" style="width:100%"></sc-skeleton>
+          <hu-skeleton variant="circle" width="72px" height="72px"></hu-skeleton>
+          <hu-skeleton variant="card" height="60px" style="width:100%"></hu-skeleton>
         </div>
       </div>
     `;
@@ -535,9 +535,9 @@ export class ScVoiceView extends GatewayAwareLitElement {
     return html`
       <div class="status-bar" role="region" aria-label="Voice status">
         <div class="status-left">
-          <sc-status-dot
+          <hu-status-dot
             .status=${this._connectionStatus === "connected" ? "healthy" : "offline"}
-          ></sc-status-dot>
+          ></hu-status-dot>
           <span class="status-title">Voice</span>
           <span class="status-meta">${connLabel}</span>
           ${durationLabel ? html`<span class="status-meta">· ${durationLabel}</span>` : nothing}
@@ -548,7 +548,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
             : nothing}
         </div>
         <div class="status-right">
-          <sc-button
+          <hu-button
             variant="ghost"
             size="sm"
             ?disabled=${this._messages.length === 0}
@@ -556,15 +556,15 @@ export class ScVoiceView extends GatewayAwareLitElement {
             aria-label="Export conversation"
           >
             Export
-          </sc-button>
-          <sc-button
+          </hu-button>
+          <hu-button
             variant="ghost"
             size="sm"
             @click=${this._newSession}
             aria-label="Start new session"
           >
             New Session
-          </sc-button>
+          </hu-button>
         </div>
       </div>
     `;
@@ -575,9 +575,9 @@ export class ScVoiceView extends GatewayAwareLitElement {
     return html`
       <div class="error-banner" role="alert">
         <span>${this.error}</span>
-        <sc-button variant="ghost" size="sm" @click=${this._retrySend} aria-label="Retry">
+        <hu-button variant="ghost" size="sm" @click=${this._retrySend} aria-label="Retry">
           Retry
-        </sc-button>
+        </hu-button>
       </div>
     `;
   }
@@ -586,25 +586,25 @@ export class ScVoiceView extends GatewayAwareLitElement {
     const micDisabled = !this._recorder.isSupported || this._connectionStatus === "disconnected";
     return html`
       <div class="controls-zone">
-        <sc-voice-orb
+        <hu-voice-orb
           .state=${this.voiceStatus}
           ?disabled=${micDisabled}
-          @sc-voice-mic-toggle=${this.toggleMic}
-        ></sc-voice-orb>
+          @hu-voice-mic-toggle=${this.toggleMic}
+        ></hu-voice-orb>
         <div class="input-row">
-          <sc-textarea
+          <hu-textarea
             placeholder="Speak or type a message…"
             .value=${this.transcript}
             ?disabled=${this._connectionStatus === "disconnected"}
-            @sc-input=${(e: CustomEvent<{ value: string }>) => {
+            @hu-input=${(e: CustomEvent<{ value: string }>) => {
               this.transcript = e.detail.value;
             }}
             @keydown=${this.handleKeyDown}
             resize="none"
             rows="2"
             .accessibleLabel=${"Voice message input"}
-          ></sc-textarea>
-          <sc-button
+          ></hu-textarea>
+          <hu-button
             variant="primary"
             ?disabled=${!this.transcript.trim() ||
             this.voiceStatus === "processing" ||
@@ -613,7 +613,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
             aria-label="Send voice message"
           >
             Send
-          </sc-button>
+          </hu-button>
         </div>
       </div>
     `;

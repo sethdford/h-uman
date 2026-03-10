@@ -1,140 +1,140 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <stdlib.h>
 #include <string.h>
 
-struct sc_sandbox_storage {
-    sc_noop_sandbox_ctx_t noop;
-    sc_docker_ctx_t docker;
-    sc_wasi_sandbox_ctx_t wasi;
+struct hu_sandbox_storage {
+    hu_noop_sandbox_ctx_t noop;
+    hu_docker_ctx_t docker;
+    hu_wasi_sandbox_ctx_t wasi;
 #ifdef __APPLE__
-    sc_seatbelt_ctx_t seatbelt;
+    hu_seatbelt_ctx_t seatbelt;
 #endif
 #if defined(__linux__)
-    sc_landlock_ctx_t landlock;
-    sc_firejail_ctx_t firejail;
-    sc_bubblewrap_ctx_t bubblewrap;
-    sc_seccomp_ctx_t seccomp;
-    sc_landlock_seccomp_ctx_t landlock_seccomp;
-    sc_firecracker_ctx_t firecracker;
+    hu_landlock_ctx_t landlock;
+    hu_firejail_ctx_t firejail;
+    hu_bubblewrap_ctx_t bubblewrap;
+    hu_seccomp_ctx_t seccomp;
+    hu_landlock_seccomp_ctx_t landlock_seccomp;
+    hu_firecracker_ctx_t firecracker;
 #endif
 #ifdef _WIN32
-    sc_appcontainer_ctx_t appcontainer;
+    hu_appcontainer_ctx_t appcontainer;
 #endif
 };
 
-sc_sandbox_storage_t *sc_sandbox_storage_create(const sc_sandbox_alloc_t *alloc) {
+hu_sandbox_storage_t *hu_sandbox_storage_create(const hu_sandbox_alloc_t *alloc) {
     if (!alloc || !alloc->alloc)
         return NULL;
-    void *p = alloc->alloc(alloc->ctx, sizeof(struct sc_sandbox_storage));
-    return (sc_sandbox_storage_t *)p;
+    void *p = alloc->alloc(alloc->ctx, sizeof(struct hu_sandbox_storage));
+    return (hu_sandbox_storage_t *)p;
 }
 
-void sc_sandbox_storage_destroy(sc_sandbox_storage_t *s, const sc_sandbox_alloc_t *alloc) {
+void hu_sandbox_storage_destroy(hu_sandbox_storage_t *s, const hu_sandbox_alloc_t *alloc) {
     if (!s || !alloc || !alloc->free)
         return;
-    alloc->free(alloc->ctx, s, sizeof(struct sc_sandbox_storage));
+    alloc->free(alloc->ctx, s, sizeof(struct hu_sandbox_storage));
 }
 
-sc_sandbox_t sc_sandbox_create(sc_sandbox_backend_t backend, const char *workspace_dir,
-                               sc_sandbox_storage_t *storage, const sc_sandbox_alloc_t *alloc) {
+hu_sandbox_t hu_sandbox_create(hu_sandbox_backend_t backend, const char *workspace_dir,
+                               hu_sandbox_storage_t *storage, const hu_sandbox_alloc_t *alloc) {
     if (!storage) {
-        sc_sandbox_t empty = {.ctx = NULL, .vtable = NULL};
+        hu_sandbox_t empty = {.ctx = NULL, .vtable = NULL};
         return empty;
     }
 
-    struct sc_sandbox_storage *st = (struct sc_sandbox_storage *)storage;
-    sc_sandbox_t result = {.ctx = NULL, .vtable = NULL};
+    struct hu_sandbox_storage *st = (struct hu_sandbox_storage *)storage;
+    hu_sandbox_t result = {.ctx = NULL, .vtable = NULL};
     const char *ws = workspace_dir ? workspace_dir : "/tmp";
 
     switch (backend) {
-    case SC_SANDBOX_NONE: {
-        result = sc_noop_sandbox_get(&st->noop);
+    case HU_SANDBOX_NONE: {
+        result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #if defined(__linux__)
-    case SC_SANDBOX_LANDLOCK: {
-        sc_landlock_sandbox_init(&st->landlock, ws);
-        result = sc_landlock_sandbox_get(&st->landlock);
+    case HU_SANDBOX_LANDLOCK: {
+        hu_landlock_sandbox_init(&st->landlock, ws);
+        result = hu_landlock_sandbox_get(&st->landlock);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
-    case SC_SANDBOX_FIREJAIL: {
-        sc_firejail_sandbox_init(&st->firejail, ws);
-        result = sc_firejail_sandbox_get(&st->firejail);
+    case HU_SANDBOX_FIREJAIL: {
+        hu_firejail_sandbox_init(&st->firejail, ws);
+        result = hu_firejail_sandbox_get(&st->firejail);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
-    case SC_SANDBOX_BUBBLEWRAP: {
-        sc_bubblewrap_sandbox_init(&st->bubblewrap, ws);
-        result = sc_bubblewrap_sandbox_get(&st->bubblewrap);
+    case HU_SANDBOX_BUBBLEWRAP: {
+        hu_bubblewrap_sandbox_init(&st->bubblewrap, ws);
+        result = hu_bubblewrap_sandbox_get(&st->bubblewrap);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #endif
-    case SC_SANDBOX_DOCKER: {
+    case HU_SANDBOX_DOCKER: {
         if (!alloc || !alloc->alloc || !alloc->free)
             break;
-        sc_docker_sandbox_init(&st->docker, ws, "alpine:latest", alloc->ctx, alloc->alloc,
+        hu_docker_sandbox_init(&st->docker, ws, "alpine:latest", alloc->ctx, alloc->alloc,
                                alloc->free);
-        result = sc_docker_sandbox_get(&st->docker);
+        result = hu_docker_sandbox_get(&st->docker);
         break;
     }
 #ifdef __APPLE__
-    case SC_SANDBOX_SEATBELT: {
-        sc_seatbelt_sandbox_init(&st->seatbelt, ws);
-        result = sc_seatbelt_sandbox_get(&st->seatbelt);
+    case HU_SANDBOX_SEATBELT: {
+        hu_seatbelt_sandbox_init(&st->seatbelt, ws);
+        result = hu_seatbelt_sandbox_get(&st->seatbelt);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #endif
 #if defined(__linux__)
-    case SC_SANDBOX_SECCOMP: {
-        sc_seccomp_sandbox_init(&st->seccomp, ws, false);
-        result = sc_seccomp_sandbox_get(&st->seccomp);
+    case HU_SANDBOX_SECCOMP: {
+        hu_seccomp_sandbox_init(&st->seccomp, ws, false);
+        result = hu_seccomp_sandbox_get(&st->seccomp);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #endif
-    case SC_SANDBOX_WASI: {
-        sc_wasi_sandbox_init(&st->wasi, ws);
-        result = sc_wasi_sandbox_get(&st->wasi);
+    case HU_SANDBOX_WASI: {
+        hu_wasi_sandbox_init(&st->wasi, ws);
+        result = hu_wasi_sandbox_get(&st->wasi);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #if defined(__linux__)
-    case SC_SANDBOX_LANDLOCK_SECCOMP: {
-        sc_landlock_seccomp_sandbox_init(&st->landlock_seccomp, ws, false);
-        result = sc_landlock_seccomp_sandbox_get(&st->landlock_seccomp);
+    case HU_SANDBOX_LANDLOCK_SECCOMP: {
+        hu_landlock_seccomp_sandbox_init(&st->landlock_seccomp, ws, false);
+        result = hu_landlock_seccomp_sandbox_get(&st->landlock_seccomp);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
-    case SC_SANDBOX_FIRECRACKER: {
-        sc_firecracker_sandbox_init(&st->firecracker, ws);
-        result = sc_firecracker_sandbox_get(&st->firecracker);
+    case HU_SANDBOX_FIRECRACKER: {
+        hu_firecracker_sandbox_init(&st->firecracker, ws);
+        result = hu_firecracker_sandbox_get(&st->firecracker);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #endif
 #ifdef _WIN32
-    case SC_SANDBOX_APPCONTAINER: {
-        sc_appcontainer_sandbox_init(&st->appcontainer, ws);
-        result = sc_appcontainer_sandbox_get(&st->appcontainer);
+    case HU_SANDBOX_APPCONTAINER: {
+        hu_appcontainer_sandbox_init(&st->appcontainer, ws);
+        result = hu_appcontainer_sandbox_get(&st->appcontainer);
         if (!result.vtable->is_available(result.ctx))
-            result = sc_noop_sandbox_get(&st->noop);
+            result = hu_noop_sandbox_get(&st->noop);
         break;
     }
 #endif
-    case SC_SANDBOX_AUTO: {
+    case HU_SANDBOX_AUTO: {
         /*
          * Tiered auto-detection:
          *
@@ -144,128 +144,128 @@ sc_sandbox_t sc_sandbox_create(sc_sandbox_backend_t backend, const char *workspa
          * Windows: AppContainer -> WASI -> noop
          */
 #ifdef __APPLE__
-        sc_seatbelt_sandbox_init(&st->seatbelt, ws);
-        result = sc_seatbelt_sandbox_get(&st->seatbelt);
+        hu_seatbelt_sandbox_init(&st->seatbelt, ws);
+        result = hu_seatbelt_sandbox_get(&st->seatbelt);
         if (result.vtable->is_available(result.ctx))
             break;
 #endif
 
 #ifdef __linux__
         /* Tier 1: Kernel-level combined (Landlock FS ACLs + seccomp syscall filter) */
-        sc_landlock_seccomp_sandbox_init(&st->landlock_seccomp, ws, false);
-        result = sc_landlock_seccomp_sandbox_get(&st->landlock_seccomp);
+        hu_landlock_seccomp_sandbox_init(&st->landlock_seccomp, ws, false);
+        result = hu_landlock_seccomp_sandbox_get(&st->landlock_seccomp);
         if (result.vtable->is_available(result.ctx))
             break;
 
         /* Tier 2: User-space namespace isolation */
-        sc_bubblewrap_sandbox_init(&st->bubblewrap, ws);
-        result = sc_bubblewrap_sandbox_get(&st->bubblewrap);
+        hu_bubblewrap_sandbox_init(&st->bubblewrap, ws);
+        result = hu_bubblewrap_sandbox_get(&st->bubblewrap);
         if (result.vtable->is_available(result.ctx))
             break;
 
-        sc_firejail_sandbox_init(&st->firejail, ws);
-        result = sc_firejail_sandbox_get(&st->firejail);
+        hu_firejail_sandbox_init(&st->firejail, ws);
+        result = hu_firejail_sandbox_get(&st->firejail);
         if (result.vtable->is_available(result.ctx))
             break;
 
         /* Tier 3: MicroVM (requires KVM) */
-        sc_firecracker_sandbox_init(&st->firecracker, ws);
-        result = sc_firecracker_sandbox_get(&st->firecracker);
+        hu_firecracker_sandbox_init(&st->firecracker, ws);
+        result = hu_firecracker_sandbox_get(&st->firecracker);
         if (result.vtable->is_available(result.ctx))
             break;
 #endif
 
 #ifdef _WIN32
-        sc_appcontainer_sandbox_init(&st->appcontainer, ws);
-        result = sc_appcontainer_sandbox_get(&st->appcontainer);
+        hu_appcontainer_sandbox_init(&st->appcontainer, ws);
+        result = hu_appcontainer_sandbox_get(&st->appcontainer);
         if (result.vtable->is_available(result.ctx))
             break;
 #endif
 
         /* Cross-platform fallbacks */
         if (alloc && alloc->alloc && alloc->free) {
-            sc_docker_sandbox_init(&st->docker, ws, "alpine:latest", alloc->ctx, alloc->alloc,
+            hu_docker_sandbox_init(&st->docker, ws, "alpine:latest", alloc->ctx, alloc->alloc,
                                    alloc->free);
-            result = sc_docker_sandbox_get(&st->docker);
+            result = hu_docker_sandbox_get(&st->docker);
             if (result.vtable->is_available(result.ctx))
                 break;
         }
 
-        sc_wasi_sandbox_init(&st->wasi, ws);
-        result = sc_wasi_sandbox_get(&st->wasi);
+        hu_wasi_sandbox_init(&st->wasi, ws);
+        result = hu_wasi_sandbox_get(&st->wasi);
         if (result.vtable->is_available(result.ctx))
             break;
 
-        result = sc_noop_sandbox_get(&st->noop);
+        result = hu_noop_sandbox_get(&st->noop);
         break;
     }
     default:
-        result = sc_noop_sandbox_get(&st->noop);
+        result = hu_noop_sandbox_get(&st->noop);
         break;
     }
     return result;
 }
 
-sc_available_backends_t sc_sandbox_detect_available(const char *workspace_dir,
-                                                    const sc_sandbox_alloc_t *alloc) {
-    sc_available_backends_t out = {0};
-    sc_sandbox_storage_t *st = alloc && alloc->alloc ? sc_sandbox_storage_create(alloc) : NULL;
+hu_available_backends_t hu_sandbox_detect_available(const char *workspace_dir,
+                                                    const hu_sandbox_alloc_t *alloc) {
+    hu_available_backends_t out = {0};
+    hu_sandbox_storage_t *st = alloc && alloc->alloc ? hu_sandbox_storage_create(alloc) : NULL;
     if (!st)
         return out;
 
     const char *ws = workspace_dir ? workspace_dir : "/tmp";
-    sc_sandbox_t sb;
+    hu_sandbox_t sb;
 
 #ifdef __linux__
-    sc_landlock_sandbox_init(&((struct sc_sandbox_storage *)st)->landlock, ws);
-    sb = sc_landlock_sandbox_get(&((struct sc_sandbox_storage *)st)->landlock);
+    hu_landlock_sandbox_init(&((struct hu_sandbox_storage *)st)->landlock, ws);
+    sb = hu_landlock_sandbox_get(&((struct hu_sandbox_storage *)st)->landlock);
     out.landlock = sb.vtable->is_available(sb.ctx);
 
-    sc_firejail_sandbox_init(&((struct sc_sandbox_storage *)st)->firejail, ws);
-    sb = sc_firejail_sandbox_get(&((struct sc_sandbox_storage *)st)->firejail);
+    hu_firejail_sandbox_init(&((struct hu_sandbox_storage *)st)->firejail, ws);
+    sb = hu_firejail_sandbox_get(&((struct hu_sandbox_storage *)st)->firejail);
     out.firejail = sb.vtable->is_available(sb.ctx);
 
-    sc_bubblewrap_sandbox_init(&((struct sc_sandbox_storage *)st)->bubblewrap, ws);
-    sb = sc_bubblewrap_sandbox_get(&((struct sc_sandbox_storage *)st)->bubblewrap);
+    hu_bubblewrap_sandbox_init(&((struct hu_sandbox_storage *)st)->bubblewrap, ws);
+    sb = hu_bubblewrap_sandbox_get(&((struct hu_sandbox_storage *)st)->bubblewrap);
     out.bubblewrap = sb.vtable->is_available(sb.ctx);
 
-    sc_seccomp_sandbox_init(&((struct sc_sandbox_storage *)st)->seccomp, ws, false);
-    sb = sc_seccomp_sandbox_get(&((struct sc_sandbox_storage *)st)->seccomp);
+    hu_seccomp_sandbox_init(&((struct hu_sandbox_storage *)st)->seccomp, ws, false);
+    sb = hu_seccomp_sandbox_get(&((struct hu_sandbox_storage *)st)->seccomp);
     out.seccomp = sb.vtable->is_available(sb.ctx);
 
-    sc_firecracker_sandbox_init(&((struct sc_sandbox_storage *)st)->firecracker, ws);
-    sb = sc_firecracker_sandbox_get(&((struct sc_sandbox_storage *)st)->firecracker);
+    hu_firecracker_sandbox_init(&((struct hu_sandbox_storage *)st)->firecracker, ws);
+    sb = hu_firecracker_sandbox_get(&((struct hu_sandbox_storage *)st)->firecracker);
     out.firecracker = sb.vtable->is_available(sb.ctx);
 
-    sc_landlock_seccomp_sandbox_init(&((struct sc_sandbox_storage *)st)->landlock_seccomp, ws,
+    hu_landlock_seccomp_sandbox_init(&((struct hu_sandbox_storage *)st)->landlock_seccomp, ws,
                                      false);
-    sb = sc_landlock_seccomp_sandbox_get(&((struct sc_sandbox_storage *)st)->landlock_seccomp);
+    sb = hu_landlock_seccomp_sandbox_get(&((struct hu_sandbox_storage *)st)->landlock_seccomp);
     out.landlock_seccomp = sb.vtable->is_available(sb.ctx);
 #endif
 
 #ifdef _WIN32
-    sc_appcontainer_sandbox_init(&((struct sc_sandbox_storage *)st)->appcontainer, ws);
-    sb = sc_appcontainer_sandbox_get(&((struct sc_sandbox_storage *)st)->appcontainer);
+    hu_appcontainer_sandbox_init(&((struct hu_sandbox_storage *)st)->appcontainer, ws);
+    sb = hu_appcontainer_sandbox_get(&((struct hu_sandbox_storage *)st)->appcontainer);
     out.appcontainer = sb.vtable->is_available(sb.ctx);
 #endif
 
 #ifdef __APPLE__
-    sc_seatbelt_sandbox_init(&((struct sc_sandbox_storage *)st)->seatbelt, ws);
-    sb = sc_seatbelt_sandbox_get(&((struct sc_sandbox_storage *)st)->seatbelt);
+    hu_seatbelt_sandbox_init(&((struct hu_sandbox_storage *)st)->seatbelt, ws);
+    sb = hu_seatbelt_sandbox_get(&((struct hu_sandbox_storage *)st)->seatbelt);
     out.seatbelt = sb.vtable->is_available(sb.ctx);
 #endif
 
     if (alloc && alloc->alloc && alloc->free) {
-        sc_docker_sandbox_init(&((struct sc_sandbox_storage *)st)->docker, ws, "alpine:latest",
+        hu_docker_sandbox_init(&((struct hu_sandbox_storage *)st)->docker, ws, "alpine:latest",
                                alloc->ctx, alloc->alloc, alloc->free);
-        sb = sc_docker_sandbox_get(&((struct sc_sandbox_storage *)st)->docker);
+        sb = hu_docker_sandbox_get(&((struct hu_sandbox_storage *)st)->docker);
         out.docker = sb.vtable->is_available(sb.ctx);
     }
 
-    sc_wasi_sandbox_init(&((struct sc_sandbox_storage *)st)->wasi, ws);
-    sb = sc_wasi_sandbox_get(&((struct sc_sandbox_storage *)st)->wasi);
+    hu_wasi_sandbox_init(&((struct hu_sandbox_storage *)st)->wasi, ws);
+    sb = hu_wasi_sandbox_get(&((struct hu_sandbox_storage *)st)->wasi);
     out.wasi = sb.vtable->is_available(sb.ctx);
 
-    sc_sandbox_storage_destroy(st, alloc);
+    hu_sandbox_storage_destroy(st, alloc);
     return out;
 }

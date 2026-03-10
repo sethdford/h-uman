@@ -3,22 +3,22 @@ import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
 import { observeAllCards, unobserveAllCards } from "../utils/scroll-entrance.js";
-import type { ActivityEvent } from "../components/sc-activity-feed.js";
-import "../components/sc-card.js";
-import "../components/sc-badge.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-button.js";
-import "../components/sc-welcome.js";
-import "../components/sc-welcome-card.js";
-import "../components/sc-tooltip.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-overview-stats.js";
-import "../components/sc-sessions-table.js";
-import "../components/sc-activity-timeline.js";
-import "../components/sc-status-dot.js";
-import "../components/sc-chart.js";
+import type { ActivityEvent } from "../components/hu-activity-feed.js";
+import "../components/hu-card.js";
+import "../components/hu-badge.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-button.js";
+import "../components/hu-welcome.js";
+import "../components/hu-welcome-card.js";
+import "../components/hu-tooltip.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-overview-stats.js";
+import "../components/hu-sessions-table.js";
+import "../components/hu-activity-timeline.js";
+import "../components/hu-status-dot.js";
+import "../components/hu-chart.js";
 
 interface HealthRes {
   status?: string;
@@ -68,7 +68,7 @@ function formatUptime(secs: number | undefined): string {
   return parts.join(" ");
 }
 
-@customElement("sc-overview-view")
+@customElement("hu-overview-view")
 export class ScOverviewView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
 
@@ -77,7 +77,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       view-transition-name: view-overview;
       display: block;
       max-width: 75rem;
-      padding: var(--sc-space-lg) var(--sc-space-xl);
+      padding: var(--hu-space-lg) var(--hu-space-xl);
     }
 
     /* ── Hero zone ────────────────────────────────────── */
@@ -85,37 +85,37 @@ export class ScOverviewView extends GatewayAwareLitElement {
     .hero-left {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-lg);
+      gap: var(--hu-space-lg);
       min-width: 0;
     }
 
     .hero-status {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-2xs);
+      gap: var(--hu-space-2xs);
     }
 
     .hero-title {
       margin: 0;
-      font-size: var(--sc-text-3xl);
-      font-weight: var(--sc-weight-bold);
-      letter-spacing: var(--sc-tracking-hero);
-      color: var(--sc-text);
-      line-height: var(--sc-leading-tight);
+      font-size: var(--hu-text-3xl);
+      font-weight: var(--hu-weight-bold);
+      letter-spacing: var(--hu-tracking-hero);
+      color: var(--hu-text);
+      line-height: var(--hu-leading-tight);
     }
 
     .hero-meta {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      gap: var(--hu-space-sm);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
     .hero-meta .update-link {
-      color: var(--sc-accent-text, var(--sc-accent));
+      color: var(--hu-accent-text, var(--hu-accent));
       text-decoration: none;
-      font-weight: var(--sc-weight-medium);
+      font-weight: var(--hu-weight-medium);
     }
 
     .hero-meta .update-link:hover {
@@ -125,12 +125,12 @@ export class ScOverviewView extends GatewayAwareLitElement {
     .hero-actions {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
 
     .staleness {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
     /* ── Detail zone (asymmetric bento) ────────────────── */
@@ -138,7 +138,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
     .details {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-xl);
+      gap: var(--hu-space-xl);
     }
 
     .bento {
@@ -147,7 +147,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       grid-template-areas:
         "activity activity channels channels"
         "activity activity sessions sessions";
-      gap: var(--sc-space-xl);
+      gap: var(--hu-space-xl);
     }
 
     .bento .activity {
@@ -163,28 +163,28 @@ export class ScOverviewView extends GatewayAwareLitElement {
     }
 
     .section-label {
-      font-size: var(--sc-text-xs);
-      font-weight: var(--sc-weight-semibold);
-      letter-spacing: var(--sc-tracking-xs);
+      font-size: var(--hu-text-xs);
+      font-weight: var(--hu-weight-semibold);
+      letter-spacing: var(--hu-tracking-xs);
       text-transform: uppercase;
-      color: var(--sc-accent-text, var(--sc-accent));
-      margin-bottom: var(--sc-space-sm);
+      color: var(--hu-accent-text, var(--hu-accent));
+      margin-bottom: var(--hu-space-sm);
     }
 
     .channels-with-chart {
       display: flex;
-      gap: var(--sc-space-lg);
+      gap: var(--hu-space-lg);
       align-items: flex-start;
     }
 
-    .channels-with-chart sc-chart {
+    .channels-with-chart hu-chart {
       flex-shrink: 0;
     }
 
     .channels-inner {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(var(--sc-sidebar-width), 1fr));
-      gap: var(--sc-space-sm);
+      grid-template-columns: repeat(auto-fill, minmax(var(--hu-sidebar-width), 1fr));
+      gap: var(--hu-space-sm);
       flex: 1;
       min-width: 0;
     }
@@ -193,26 +193,26 @@ export class ScOverviewView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
 
     .channel-name {
-      font-size: var(--sc-text-sm);
-      font-weight: var(--sc-weight-medium);
-      color: var(--sc-text);
+      font-size: var(--hu-text-sm);
+      font-weight: var(--hu-weight-medium);
+      color: var(--hu-text);
     }
 
     /* ── Skeleton ─────────────────────────────────────── */
 
     .skeleton-hero {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
 
     .skeleton-metrics {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: var(--sc-space-lg);
-      margin-bottom: var(--sc-space-2xl);
+      gap: var(--hu-space-lg);
+      margin-bottom: var(--hu-space-2xl);
     }
 
     .skeleton-bento {
@@ -221,7 +221,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       grid-template-areas:
         "activity activity channels channels"
         "activity activity sessions sessions";
-      gap: var(--sc-space-xl);
+      gap: var(--hu-space-xl);
     }
 
     .skeleton-bento .activity {
@@ -238,7 +238,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
     /* ── Responsive ───────────────────────────────────── */
 
-    @media (max-width: var(--sc-breakpoint-md)) /* --sc-breakpoint-md */ {
+    @media (max-width: var(--hu-breakpoint-md)) /* --hu-breakpoint-md */ {
       .bento {
         grid-template-columns: 1fr;
         grid-template-areas:
@@ -261,9 +261,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
       }
     }
 
-    @media (max-width: var(--sc-breakpoint-sm)) /* --sc-breakpoint-sm */ {
+    @media (max-width: var(--hu-breakpoint-sm)) /* --hu-breakpoint-sm */ {
       :host {
-        padding: var(--sc-space-md) var(--sc-space-lg);
+        padding: var(--hu-space-md) var(--hu-space-lg);
       }
       .skeleton-metrics {
         grid-template-columns: 1fr;
@@ -275,34 +275,34 @@ export class ScOverviewView extends GatewayAwareLitElement {
     .quick-actions {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: var(--sc-space-lg);
-      margin-bottom: var(--sc-space-2xl);
+      gap: var(--hu-space-lg);
+      margin-bottom: var(--hu-space-2xl);
     }
     .quick-action-card {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: var(--sc-space-sm);
-      padding: var(--sc-space-lg);
+      gap: var(--hu-space-sm);
+      padding: var(--hu-space-lg);
     }
     .quick-action-card .icon-wrap {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: var(--sc-icon-2xl);
-      height: var(--sc-icon-2xl);
-      color: var(--sc-accent);
+      width: var(--hu-icon-2xl);
+      height: var(--hu-icon-2xl);
+      color: var(--hu-accent);
     }
     .quick-action-card .icon-wrap svg {
-      width: var(--sc-icon-lg);
-      height: var(--sc-icon-lg);
+      width: var(--hu-icon-lg);
+      height: var(--hu-icon-lg);
     }
     .quick-action-card .label {
-      font-size: var(--sc-text-sm);
-      font-weight: var(--sc-weight-medium);
-      color: var(--sc-text);
+      font-size: var(--hu-text-sm);
+      font-weight: var(--hu-weight-medium);
+      color: var(--hu-text);
     }
-    @media (max-width: var(--sc-breakpoint-md)) /* --sc-breakpoint-md */ {
+    @media (max-width: var(--hu-breakpoint-md)) /* --hu-breakpoint-md */ {
       .quick-actions {
         grid-template-columns: 1fr;
       }
@@ -405,7 +405,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
   }
 
   private _updateWelcome(): void {
-    const welcome = this.shadowRoot?.querySelector("sc-welcome") as
+    const welcome = this.shadowRoot?.querySelector("hu-welcome") as
       | (HTMLElement & { markStep: (k: string) => void })
       | null;
     if (!welcome) return;
@@ -443,7 +443,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
   }
 
   private get _onboarded(): boolean {
-    return localStorage.getItem("sc-onboarded") === "true";
+    return localStorage.getItem("hu-onboarded") === "true";
   }
 
   /* ── Render: top-level ──────────────────────────────── */
@@ -452,9 +452,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
     if (this.loading) return this._renderSkeleton();
     return html`
       ${this.error
-        ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <sc-button variant="primary" @click=${() => this.load()}> Retry </sc-button>
-          </sc-empty-state>`
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <hu-button variant="primary" @click=${() => this.load()}> Retry </hu-button>
+          </hu-empty-state>`
         : nothing}
       ${this._renderHero()} ${this._renderMetrics()} ${this._renderQuickActions()}
       ${this._renderDetails()}
@@ -466,10 +466,10 @@ export class ScOverviewView extends GatewayAwareLitElement {
   private _renderHero() {
     if (!this._onboarded) {
       return html`
-        <sc-page-hero role="region" aria-label="Overview">
-          <sc-welcome-card></sc-welcome-card>
-          <sc-welcome></sc-welcome>
-        </sc-page-hero>
+        <hu-page-hero role="region" aria-label="Overview">
+          <hu-welcome-card></hu-welcome-card>
+          <hu-welcome></hu-welcome>
+        </hu-page-hero>
       `;
     }
 
@@ -477,25 +477,25 @@ export class ScOverviewView extends GatewayAwareLitElement {
     const cap = this.capabilities;
 
     return html`
-      <sc-page-hero role="region" aria-label="Overview">
-        <sc-section-header heading="Overview" description="Your AI assistant at a glance">
+      <hu-page-hero role="region" aria-label="Overview">
+        <hu-section-header heading="Overview" description="Your AI assistant at a glance">
           <div class="hero-actions">
             ${this.lastLoadedAt
               ? html`<span class="staleness">Updated ${this.stalenessLabel}</span>`
               : nothing}
-            <sc-tooltip text="Reload all dashboard data" position="bottom">
-              <sc-button variant="secondary" @click=${() => this.load()}>Refresh</sc-button>
-            </sc-tooltip>
+            <hu-tooltip text="Reload all dashboard data" position="bottom">
+              <hu-button variant="secondary" @click=${() => this.load()}>Refresh</hu-button>
+            </hu-tooltip>
           </div>
-        </sc-section-header>
+        </hu-section-header>
         <div class="hero-inner">
           <div class="hero-left">
-            <sc-tooltip text=${gwOk ? "All subsystems responding" : "Gateway is unreachable"}>
-              <sc-status-dot status=${gwOk ? "operational" : "offline"} size="md"></sc-status-dot>
-            </sc-tooltip>
+            <hu-tooltip text=${gwOk ? "All subsystems responding" : "Gateway is unreachable"}>
+              <hu-status-dot status=${gwOk ? "operational" : "offline"} size="md"></hu-status-dot>
+            </hu-tooltip>
             <div class="hero-status">
               <div class="hero-meta">
-                <span>${cap.version ?? "SeaClaw"}</span>
+                <span>${cap.version ?? "Human"}</span>
                 ${this.updateInfo.available
                   ? html`<span>&middot;</span>
                       <a
@@ -511,7 +511,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             </div>
           </div>
         </div>
-      </sc-page-hero>
+      </hu-page-hero>
     `;
   }
 
@@ -545,7 +545,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       },
     ];
     return html`
-      <sc-overview-stats .metrics=${metrics} .metricRowItems=${metricRowItems}></sc-overview-stats>
+      <hu-overview-stats .metrics=${metrics} .metricRowItems=${metricRowItems}></hu-overview-stats>
     `;
   }
 
@@ -562,7 +562,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       <div class="quick-actions">
         ${actions.map(
           (a) => html`
-            <sc-card
+            <hu-card
               glass
               clickable
               class="quick-action-card"
@@ -579,7 +579,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             >
               <div class="icon-wrap" aria-hidden="true">${a.icon}</div>
               <span class="label">${a.label}</span>
-            </sc-card>
+            </hu-card>
           `,
         )}
       </div>
@@ -592,50 +592,50 @@ export class ScOverviewView extends GatewayAwareLitElement {
     return html`
       <div class="details">
         <div class="bento">
-          <sc-card hoverable accent class="activity">
-            <sc-activity-timeline .events=${this.activityEvents}></sc-activity-timeline>
-          </sc-card>
+          <hu-card hoverable accent class="activity">
+            <hu-activity-timeline .events=${this.activityEvents}></hu-activity-timeline>
+          </hu-card>
 
-          <sc-card hoverable accent class="channels">
+          <hu-card hoverable accent class="channels">
             <div class="section-label">Channels</div>
             ${this.channels.length === 0
               ? html`
-                  <sc-empty-state
+                  <hu-empty-state
                     .icon=${icons.radio}
                     heading="No channels yet"
                     description="Connect Telegram, Discord, Slack, or any messaging platform."
                   >
-                    <sc-button variant="primary" @click=${() => this._navigate("channels")}>
+                    <hu-button variant="primary" @click=${() => this._navigate("channels")}>
                       Configure a Channel
-                    </sc-button>
-                  </sc-empty-state>
+                    </hu-button>
+                  </hu-empty-state>
                 `
               : html`
                   <div class="channels-with-chart">
-                    <sc-chart
+                    <hu-chart
                       type="doughnut"
                       .data=${this._channelDoughnutData}
                       height=${100}
-                    ></sc-chart>
+                    ></hu-chart>
                     <div class="channels-inner">
                       ${this.channels.map(
                         (ch) => html`
                           <div class="channel-item">
                             <span class="channel-name">${ch.label ?? ch.key ?? "unnamed"}</span>
-                            <sc-badge variant=${ch.configured ? "success" : "neutral"} dot>
+                            <hu-badge variant=${ch.configured ? "success" : "neutral"} dot>
                               ${ch.status ?? (ch.configured ? "Configured" : "\u2014")}
-                            </sc-badge>
+                            </hu-badge>
                           </div>
                         `,
                       )}
                     </div>
                   </div>
                 `}
-          </sc-card>
+          </hu-card>
 
-          <sc-card hoverable accent class="sessions">
+          <hu-card hoverable accent class="sessions">
             <div class="section-label">Recent Sessions</div>
-            <sc-sessions-table
+            <hu-sessions-table
               .sessions=${this.recentSessions}
               @session-select=${(e: CustomEvent<{ key: string }>) =>
                 this.dispatchEvent(
@@ -645,8 +645,8 @@ export class ScOverviewView extends GatewayAwareLitElement {
                     composed: true,
                   }),
                 )}
-            ></sc-sessions-table>
-          </sc-card>
+            ></hu-sessions-table>
+          </hu-card>
         </div>
       </div>
     `;
@@ -657,18 +657,18 @@ export class ScOverviewView extends GatewayAwareLitElement {
   private _renderSkeleton() {
     return html`
       <div class="skeleton-hero">
-        <sc-skeleton variant="card" height="100px"></sc-skeleton>
+        <hu-skeleton variant="card" height="100px"></hu-skeleton>
       </div>
       <div class="skeleton-metrics">
-        <sc-skeleton variant="stat-card"></sc-skeleton>
-        <sc-skeleton variant="stat-card"></sc-skeleton>
-        <sc-skeleton variant="stat-card"></sc-skeleton>
-        <sc-skeleton variant="stat-card"></sc-skeleton>
+        <hu-skeleton variant="stat-card"></hu-skeleton>
+        <hu-skeleton variant="stat-card"></hu-skeleton>
+        <hu-skeleton variant="stat-card"></hu-skeleton>
+        <hu-skeleton variant="stat-card"></hu-skeleton>
       </div>
       <div class="skeleton-bento">
-        <sc-skeleton variant="card" height="280px" class="activity"></sc-skeleton>
-        <sc-skeleton variant="card" height="140px" class="channels"></sc-skeleton>
-        <sc-skeleton variant="card" height="140px" class="sessions"></sc-skeleton>
+        <hu-skeleton variant="card" height="280px" class="activity"></hu-skeleton>
+        <hu-skeleton variant="card" height="140px" class="channels"></hu-skeleton>
+        <hu-skeleton variant="card" height="140px" class="sessions"></hu-skeleton>
       </div>
     `;
   }

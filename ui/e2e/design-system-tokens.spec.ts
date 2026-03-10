@@ -17,8 +17,8 @@ function getComputedToken(token: string) {
 
 function getSidebarStyle(prop: string) {
   return `(() => {
-    const app = document.querySelector("sc-app");
-    const sidebar = app?.shadowRoot?.querySelector("sc-sidebar");
+    const app = document.querySelector("hu-app");
+    const sidebar = app?.shadowRoot?.querySelector("hu-sidebar");
     if (!sidebar) return "";
     return getComputedStyle(sidebar).getPropertyValue("${prop}").trim();
   })()`;
@@ -31,9 +31,9 @@ test.describe("Design Tokens — Core Tokens Present", () => {
   });
 
   test("tonal surface tokens are defined", async ({ page }) => {
-    const container = await page.evaluate(getComputedToken("--sc-surface-container"));
-    const high = await page.evaluate(getComputedToken("--sc-surface-container-high"));
-    const highest = await page.evaluate(getComputedToken("--sc-surface-container-highest"));
+    const container = await page.evaluate(getComputedToken("--hu-surface-container"));
+    const high = await page.evaluate(getComputedToken("--hu-surface-container-high"));
+    const highest = await page.evaluate(getComputedToken("--hu-surface-container-highest"));
 
     expect(container).toBeTruthy();
     expect(high).toBeTruthy();
@@ -41,9 +41,9 @@ test.describe("Design Tokens — Core Tokens Present", () => {
   });
 
   test("tinted overlay tokens are defined", async ({ page }) => {
-    const hover = await page.evaluate(getComputedToken("--sc-hover-overlay"));
-    const pressed = await page.evaluate(getComputedToken("--sc-pressed-overlay"));
-    const focus = await page.evaluate(getComputedToken("--sc-focus-overlay"));
+    const hover = await page.evaluate(getComputedToken("--hu-hover-overlay"));
+    const pressed = await page.evaluate(getComputedToken("--hu-pressed-overlay"));
+    const focus = await page.evaluate(getComputedToken("--hu-focus-overlay"));
 
     expect(hover).toBeTruthy();
     expect(pressed).toBeTruthy();
@@ -51,9 +51,9 @@ test.describe("Design Tokens — Core Tokens Present", () => {
   });
 
   test("glass tokens are defined", async ({ page }) => {
-    const blur = await page.evaluate(getComputedToken("--sc-glass-standard-blur"));
-    const saturate = await page.evaluate(getComputedToken("--sc-glass-standard-saturate"));
-    const bgOpacity = await page.evaluate(getComputedToken("--sc-glass-standard-bg-opacity"));
+    const blur = await page.evaluate(getComputedToken("--hu-glass-standard-blur"));
+    const saturate = await page.evaluate(getComputedToken("--hu-glass-standard-saturate"));
+    const bgOpacity = await page.evaluate(getComputedToken("--hu-glass-standard-bg-opacity"));
 
     expect(blur).toBeTruthy();
     expect(saturate).toBeTruthy();
@@ -61,13 +61,13 @@ test.describe("Design Tokens — Core Tokens Present", () => {
   });
 
   test("dynamic color tokens are defined", async ({ page }) => {
-    const primary500 = await page.evaluate(getComputedToken("--sc-dynamic-primary-500"));
+    const primary500 = await page.evaluate(getComputedToken("--hu-dynamic-primary-500"));
     expect(primary500).toBeTruthy();
   });
 
   test("sidebar width tokens are defined", async ({ page }) => {
-    const width = await page.evaluate(getComputedToken("--sc-sidebar-width"));
-    const collapsed = await page.evaluate(getComputedToken("--sc-sidebar-collapsed"));
+    const width = await page.evaluate(getComputedToken("--hu-sidebar-width"));
+    const collapsed = await page.evaluate(getComputedToken("--hu-sidebar-collapsed"));
 
     expect(width).toBeTruthy();
     expect(collapsed).toBeTruthy();
@@ -78,7 +78,7 @@ test.describe("Design Tokens — Sidebar Glass Effect", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/?demo");
     await page.waitForLoadState("domcontentloaded");
-    await page.locator("sc-app >> sc-sidebar").waitFor({ timeout: 5000 });
+    await page.locator("hu-app >> hu-sidebar").waitFor({ timeout: 5000 });
   });
 
   test("sidebar has backdrop-filter applied", async ({ page }) => {
@@ -96,13 +96,13 @@ test.describe("Design Tokens — Sidebar Glass Effect", () => {
 
 test.describe("Design Tokens — Theme Parity", () => {
   const criticalTokens = [
-    "--sc-surface-container",
-    "--sc-surface-container-high",
-    "--sc-surface-container-highest",
-    "--sc-hover-overlay",
-    "--sc-pressed-overlay",
-    "--sc-bg",
-    "--sc-text",
+    "--hu-surface-container",
+    "--hu-surface-container-high",
+    "--hu-surface-container-highest",
+    "--hu-hover-overlay",
+    "--hu-pressed-overlay",
+    "--hu-bg",
+    "--hu-text",
   ];
 
   for (const token of criticalTokens) {

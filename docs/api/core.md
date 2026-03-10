@@ -6,25 +6,25 @@ updated: 2026-03-02
 
 # Core API
 
-Core types and utilities used across seaclaw: allocator, error, JSON, string, slice, HTTP, arena.
+Core types and utilities used across human: allocator, error, JSON, string, slice, HTTP, arena.
 
 ## Allocator (`core/allocator.h`)
 
 ```c
-typedef struct sc_allocator {
+typedef struct hu_allocator {
     void *ctx;
     void* (*alloc)(void *ctx, size_t size);
     void* (*realloc)(void *ctx, void *ptr, size_t old_size, size_t new_size);
     void  (*free)(void *ctx, void *ptr, size_t size);
-} sc_allocator_t;
+} hu_allocator_t;
 
-sc_allocator_t sc_system_allocator(void);
+hu_allocator_t hu_system_allocator(void);
 ```
 
 **Usage:** Obtain system allocator, pass to API functions that need heap allocation.
 
 ```c
-sc_allocator_t alloc = sc_system_allocator();
+hu_allocator_t alloc = hu_system_allocator();
 char *buf = alloc.alloc(alloc.ctx, 1024);
 if (buf) {
     /* use buf */
@@ -35,11 +35,11 @@ if (buf) {
 ### Tracking Allocator (tests/debugging)
 
 ```c
-sc_tracking_allocator_t *ta = sc_tracking_allocator_create();
-sc_allocator_t alloc = sc_tracking_allocator_allocator(ta);
+hu_tracking_allocator_t *ta = hu_tracking_allocator_create();
+hu_allocator_t alloc = hu_tracking_allocator_allocator(ta);
 /* ... use alloc ... */
-size_t leaks = sc_tracking_allocator_leaks(ta);
-sc_tracking_allocator_destroy(ta);
+size_t leaks = hu_tracking_allocator_leaks(ta);
+hu_tracking_allocator_destroy(ta);
 ```
 
 ---
@@ -47,15 +47,15 @@ sc_tracking_allocator_destroy(ta);
 ## Error (`core/error.h`)
 
 ```c
-typedef enum sc_error {
-    SC_OK = 0,
-    SC_ERR_OUT_OF_MEMORY,
-    SC_ERR_INVALID_ARGUMENT,
-    SC_ERR_NOT_FOUND,
+typedef enum hu_error {
+    HU_OK = 0,
+    HU_ERR_OUT_OF_MEMORY,
+    HU_ERR_INVALID_ARGUMENT,
+    HU_ERR_NOT_FOUND,
     /* ... (see header for full list) */
-} sc_error_t;
+} hu_error_t;
 
-const char *sc_error_string(sc_error_t err);
+const char *hu_error_string(hu_error_t err);
 ```
 
 ---
@@ -63,36 +63,36 @@ const char *sc_error_string(sc_error_t err);
 ## Slice / String (`core/slice.h`)
 
 ```c
-typedef struct sc_str {
+typedef struct hu_str {
     const char *ptr;
     size_t len;
-} sc_str_t;
+} hu_str_t;
 
-typedef struct sc_bytes {
+typedef struct hu_bytes {
     const uint8_t *ptr;
     size_t len;
-} sc_bytes_t;
+} hu_bytes_t;
 
-#define SC_STR_LIT(s) ((sc_str_t){ .ptr = (s), .len = sizeof(s) - 1 })
-#define SC_STR_NULL   ((sc_str_t){ .ptr = NULL, .len = 0 })
+#define HU_STR_LIT(s) ((hu_str_t){ .ptr = (s), .len = sizeof(s) - 1 })
+#define HU_STR_NULL   ((hu_str_t){ .ptr = NULL, .len = 0 })
 ```
 
-**Inline helpers:** `sc_str_from_cstr`, `sc_str_is_empty`, `sc_str_eq`, `sc_str_starts_with`, `sc_str_ends_with`, `sc_str_trim`.
+**Inline helpers:** `hu_str_from_cstr`, `hu_str_is_empty`, `hu_str_eq`, `hu_str_starts_with`, `hu_str_ends_with`, `hu_str_trim`.
 
 ---
 
 ## String (`core/string.h`)
 
 ```c
-char *sc_strdup(sc_allocator_t *alloc, const char *s);
-char *sc_strndup(sc_allocator_t *alloc, const char *s, size_t n);
-char *sc_str_dup(sc_allocator_t *alloc, sc_str_t s);
-char *sc_str_concat(sc_allocator_t *alloc, sc_str_t a, sc_str_t b);
-char *sc_str_join(sc_allocator_t *alloc, const sc_str_t *parts, size_t count, sc_str_t sep);
-char *sc_sprintf(sc_allocator_t *alloc, const char *fmt, ...);
-void sc_str_free(sc_allocator_t *alloc, char *s);
-bool sc_str_contains(sc_str_t haystack, sc_str_t needle);
-int sc_str_index_of(sc_str_t haystack, sc_str_t needle);
+char *hu_strdup(hu_allocator_t *alloc, const char *s);
+char *hu_strndup(hu_allocator_t *alloc, const char *s, size_t n);
+char *hu_str_dup(hu_allocator_t *alloc, hu_str_t s);
+char *hu_str_concat(hu_allocator_t *alloc, hu_str_t a, hu_str_t b);
+char *hu_str_join(hu_allocator_t *alloc, const hu_str_t *parts, size_t count, hu_str_t sep);
+char *hu_sprintf(hu_allocator_t *alloc, const char *fmt, ...);
+void hu_str_free(hu_allocator_t *alloc, char *s);
+bool hu_str_contains(hu_str_t haystack, hu_str_t needle);
+int hu_str_index_of(hu_str_t haystack, hu_str_t needle);
 ```
 
 ---
@@ -100,70 +100,70 @@ int sc_str_index_of(sc_str_t haystack, sc_str_t needle);
 ## JSON (`core/json.h`)
 
 ```c
-typedef enum sc_json_type {
-    SC_JSON_NULL, SC_JSON_BOOL, SC_JSON_NUMBER,
-    SC_JSON_STRING, SC_JSON_ARRAY, SC_JSON_OBJECT
-} sc_json_type_t;
+typedef enum hu_json_type {
+    HU_JSON_NULL, HU_JSON_BOOL, HU_JSON_NUMBER,
+    HU_JSON_STRING, HU_JSON_ARRAY, HU_JSON_OBJECT
+} hu_json_type_t;
 
-typedef struct sc_json_value sc_json_value_t;
+typedef struct hu_json_value hu_json_value_t;
 
-sc_error_t sc_json_parse(sc_allocator_t *alloc, const char *input, size_t input_len, sc_json_value_t **out);
-void sc_json_free(sc_allocator_t *alloc, sc_json_value_t *val);
+hu_error_t hu_json_parse(hu_allocator_t *alloc, const char *input, size_t input_len, hu_json_value_t **out);
+void hu_json_free(hu_allocator_t *alloc, hu_json_value_t *val);
 
-sc_json_value_t *sc_json_null_new(sc_allocator_t *alloc);
-sc_json_value_t *sc_json_bool_new(sc_allocator_t *alloc, bool val);
-sc_json_value_t *sc_json_number_new(sc_allocator_t *alloc, double val);
-sc_json_value_t *sc_json_string_new(sc_allocator_t *alloc, const char *s, size_t len);
-sc_json_value_t *sc_json_array_new(sc_allocator_t *alloc);
-sc_json_value_t *sc_json_object_new(sc_allocator_t *alloc);
+hu_json_value_t *hu_json_null_new(hu_allocator_t *alloc);
+hu_json_value_t *hu_json_bool_new(hu_allocator_t *alloc, bool val);
+hu_json_value_t *hu_json_number_new(hu_allocator_t *alloc, double val);
+hu_json_value_t *hu_json_string_new(hu_allocator_t *alloc, const char *s, size_t len);
+hu_json_value_t *hu_json_array_new(hu_allocator_t *alloc);
+hu_json_value_t *hu_json_object_new(hu_allocator_t *alloc);
 
-sc_error_t sc_json_array_push(sc_allocator_t *alloc, sc_json_value_t *arr, sc_json_value_t *val);
-sc_error_t sc_json_object_set(sc_allocator_t *alloc, sc_json_value_t *obj, const char *key, sc_json_value_t *val);
-sc_json_value_t *sc_json_object_get(const sc_json_value_t *obj, const char *key);
+hu_error_t hu_json_array_push(hu_allocator_t *alloc, hu_json_value_t *arr, hu_json_value_t *val);
+hu_error_t hu_json_object_set(hu_allocator_t *alloc, hu_json_value_t *obj, const char *key, hu_json_value_t *val);
+hu_json_value_t *hu_json_object_get(const hu_json_value_t *obj, const char *key);
 
-const char *sc_json_get_string(const sc_json_value_t *val, const char *key);
-double sc_json_get_number(const sc_json_value_t *val, const char *key, double default_val);
-bool sc_json_get_bool(const sc_json_value_t *val, const char *key, bool default_val);
+const char *hu_json_get_string(const hu_json_value_t *val, const char *key);
+double hu_json_get_number(const hu_json_value_t *val, const char *key, double default_val);
+bool hu_json_get_bool(const hu_json_value_t *val, const char *key, bool default_val);
 
-sc_error_t sc_json_stringify(sc_allocator_t *alloc, const sc_json_value_t *val, char **out, size_t *out_len);
+hu_error_t hu_json_stringify(hu_allocator_t *alloc, const hu_json_value_t *val, char **out, size_t *out_len);
 ```
 
 **Example:**
 
 ```c
-sc_json_value_t *obj = sc_json_object_new(alloc);
-sc_json_object_set(alloc, obj, "name", sc_json_string_new(alloc, "test", 4));
-const char *name = sc_json_get_string(obj, "name");  /* "test" */
-sc_json_free(alloc, obj);
+hu_json_value_t *obj = hu_json_object_new(alloc);
+hu_json_object_set(alloc, obj, "name", hu_json_string_new(alloc, "test", 4));
+const char *name = hu_json_get_string(obj, "name");  /* "test" */
+hu_json_free(alloc, obj);
 ```
 
 ---
 
 ## HTTP (`core/http.h`)
 
-Requires `SC_ENABLE_CURL=ON`.
+Requires `HU_ENABLE_CURL=ON`.
 
 ```c
-typedef struct sc_http_response {
+typedef struct hu_http_response {
     char *body;
     size_t body_len;
     size_t body_cap;
     long status_code;
     bool owned;
-} sc_http_response_t;
+} hu_http_response_t;
 
-sc_error_t sc_http_post_json(sc_allocator_t *alloc, const char *url,
+hu_error_t hu_http_post_json(hu_allocator_t *alloc, const char *url,
     const char *auth_header, const char *json_body, size_t json_body_len,
-    sc_http_response_t *out);
+    hu_http_response_t *out);
 
-sc_error_t sc_http_post_json_ex(sc_allocator_t *alloc, const char *url,
+hu_error_t hu_http_post_json_ex(hu_allocator_t *alloc, const char *url,
     const char *auth_header, const char *extra_headers,
-    const char *json_body, size_t json_body_len, sc_http_response_t *out);
+    const char *json_body, size_t json_body_len, hu_http_response_t *out);
 
-sc_error_t sc_http_get(sc_allocator_t *alloc, const char *url,
-    const char *auth_header, sc_http_response_t *out);
+hu_error_t hu_http_get(hu_allocator_t *alloc, const char *url,
+    const char *auth_header, hu_http_response_t *out);
 
-void sc_http_response_free(sc_allocator_t *alloc, sc_http_response_t *resp);
+void hu_http_response_free(hu_allocator_t *alloc, hu_http_response_t *resp);
 ```
 
 ---
@@ -173,11 +173,11 @@ void sc_http_response_free(sc_allocator_t *alloc, sc_http_response_t *resp);
 Bump allocator for short-lived allocations.
 
 ```c
-sc_arena_t *sc_arena_create(sc_allocator_t backing);
-sc_allocator_t sc_arena_allocator(sc_arena_t *arena);
-void sc_arena_reset(sc_arena_t *arena);
-void sc_arena_destroy(sc_arena_t *arena);
-size_t sc_arena_bytes_used(const sc_arena_t *arena);
+hu_arena_t *hu_arena_create(hu_allocator_t backing);
+hu_allocator_t hu_arena_allocator(hu_arena_t *arena);
+void hu_arena_reset(hu_arena_t *arena);
+void hu_arena_destroy(hu_arena_t *arena);
+size_t hu_arena_bytes_used(const hu_arena_t *arena);
 ```
 
 ---

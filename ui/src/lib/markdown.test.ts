@@ -28,10 +28,10 @@ describe("renderMarkdown", () => {
     expect(out).toContain("md-heading");
   });
 
-  it("renders code block as sc-code-block element", () => {
+  it("renders code block as hu-code-block element", () => {
     const result = renderMarkdown("```js\nconst x = 1;\n```");
     const out = renderToHtml(result);
-    expect(out).toContain("sc-code-block");
+    expect(out).toContain("hu-code-block");
   });
 
   it("renders unordered list", () => {
@@ -87,7 +87,7 @@ describe("renderMarkdown", () => {
   it("handles streaming with unclosed code fence", () => {
     const result = renderMarkdown("```js\nconst x = 1;\n", { streaming: true });
     const out = renderToHtml(result);
-    expect(out).toContain("sc-code-block");
+    expect(out).toContain("hu-code-block");
   });
 
   it("renders inline bold, italic, code", () => {

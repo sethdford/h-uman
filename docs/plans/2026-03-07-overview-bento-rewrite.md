@@ -27,8 +27,8 @@ Encodes visual hierarchy through card sizing: health = XL, stats = medium, activ
 ## Key Changes
 
 - **Health card**: SVG status ring (animated fill), version, quick actions (Start Chat, Configure)
-- **Stat cards**: Composed with sc-sparkline-enhanced + sc-animated-number, accent colors per metric
-- **Activity card**: Live pulse indicator, sc-timeline, "Live" badge
+- **Stat cards**: Composed with hu-sparkline-enhanced + hu-animated-number, accent colors per metric
+- **Activity card**: Live pulse indicator, hu-timeline, "Live" badge
 - **Channels card**: Compact grid with status dots (not badges)
 - **Sessions card**: Horizontal card strip (not a table)
 - **Skeleton**: Mirrors bento grid areas
@@ -40,7 +40,7 @@ Encodes visual hierarchy through card sizing: health = XL, stats = medium, activ
 
 ## Preserved Behavior
 
-- Onboarding welcome flow (not-onboarded shows sc-welcome-card + sc-welcome)
+- Onboarding welcome flow (not-onboarded shows hu-welcome-card + hu-welcome)
 - 30s auto-refresh via GatewayAwareLitElement
 - SSE activity event stream
 - Scroll entrance animations

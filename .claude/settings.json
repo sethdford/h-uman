@@ -3,9 +3,9 @@
     "allow": [
       "Bash(cmake *)",
       "Bash(make *)",
-      "Bash(./build/seaclaw_tests)",
-      "Bash(./build/seaclaw *)",
-      "Bash(./build-*/seaclaw*)",
+      "Bash(./build/human_tests)",
+      "Bash(./build/human *)",
+      "Bash(./build-*/human*)",
       "Bash(scripts/*)",
       "Bash(git status*)",
       "Bash(git diff*)",

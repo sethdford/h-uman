@@ -2,16 +2,16 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import type { DataTableColumnV2 } from "../components/sc-data-table-v2.js";
-import "../components/sc-button.js";
-import "../components/sc-data-table-v2.js";
-import "../components/sc-json-viewer.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
+import type { DataTableColumnV2 } from "../components/hu-data-table-v2.js";
+import "../components/hu-button.js";
+import "../components/hu-data-table-v2.js";
+import "../components/hu-json-viewer.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -55,7 +55,7 @@ function countParams(raw: unknown): number {
   return Object.keys(obj).length;
 }
 
-@customElement("sc-tools-view")
+@customElement("hu-tools-view")
 export class ScToolsView extends GatewayAwareLitElement {
   static override styles = css`
     :host {
@@ -64,23 +64,23 @@ export class ScToolsView extends GatewayAwareLitElement {
       max-width: 75rem;
     }
     .table-section {
-      margin-top: var(--sc-space-xl);
+      margin-top: var(--hu-space-xl);
     }
     .expand-panel {
-      margin-top: var(--sc-space-md);
-      padding: var(--sc-space-md);
-      background: var(--sc-bg-elevated);
-      border: 1px solid var(--sc-border-subtle);
-      border-radius: var(--sc-radius);
+      margin-top: var(--hu-space-md);
+      padding: var(--hu-space-md);
+      background: var(--hu-bg-elevated);
+      border: 1px solid var(--hu-border-subtle);
+      border-radius: var(--hu-radius);
     }
     .expand-panel-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: var(--sc-space-md);
-      font-weight: var(--sc-weight-semibold);
-      font-size: var(--sc-text-base);
-      color: var(--sc-text);
+      margin-bottom: var(--hu-space-md);
+      font-weight: var(--hu-weight-semibold);
+      font-size: var(--hu-text-base);
+      color: var(--hu-text);
     }
     @media (prefers-reduced-motion: reduce) {
       * {
@@ -153,19 +153,19 @@ export class ScToolsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-page-hero role="region" aria-label="Tools overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Tools overview">
+        <hu-section-header
           heading="Tools"
           description="Available tool integrations and their configurations"
-        ></sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
+        ></hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
       <div class="table-section">
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
+        <hu-skeleton variant="card" height="200px"></hu-skeleton>
       </div>
     `;
   }
@@ -176,58 +176,58 @@ export class ScToolsView extends GatewayAwareLitElement {
     const expandedParams = this._expandedToolData;
 
     return html`
-      <sc-page-hero role="region" aria-label="Tools overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Tools overview">
+        <hu-section-header
           heading="Tools"
           description="Available tool integrations and their configurations"
-        ></sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-stat-card
+        ></hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-stat-card
           .value=${count}
           label="Total Tools"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.tools.filter((t) => countParams(t.parameters) > 0).length}
           label="With Parameters"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${rows.reduce((sum, r) => sum + (Number(r.paramsCount) || 0), 0)}
           label="Total Parameters"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+      </hu-stats-row>
       ${this.error
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.warning}
             heading="Error"
             description=${this.error}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : nothing}
       <div class="table-section" role="region" aria-label="Tools table">
         ${rows.length === 0
           ? html`
-              <sc-empty-state
+              <hu-empty-state
                 .icon=${icons.wrench}
                 heading="No tools available"
                 description="Tools will appear here when the gateway provides them."
-              ></sc-empty-state>
+              ></hu-empty-state>
             `
           : html`
-              <sc-data-table-v2
+              <hu-data-table-v2
                 .columns=${this.columns}
                 .rows=${rows}
                 searchable
-                @sc-row-click=${this._onRowClick}
-              ></sc-data-table-v2>
+                @hu-row-click=${this._onRowClick}
+              ></hu-data-table-v2>
               ${expandedParams !== undefined
                 ? html`
                     <div class="expand-panel" role="region" aria-label="Parameter schema">
                       <div class="expand-panel-header">
                         <span>Parameters: ${this._expandedTool}</span>
-                        <sc-button
+                        <hu-button
                           variant="ghost"
                           size="sm"
                           @click=${() => {
@@ -236,12 +236,12 @@ export class ScToolsView extends GatewayAwareLitElement {
                           aria-label="Close parameter view"
                         >
                           Close
-                        </sc-button>
+                        </hu-button>
                       </div>
-                      <sc-json-viewer
+                      <hu-json-viewer
                         .data=${expandedParams}
                         root-label="parameters"
-                      ></sc-json-viewer>
+                      ></hu-json-viewer>
                     </div>
                   `
                 : nothing}

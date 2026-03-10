@@ -4,17 +4,17 @@ import { GatewayClient } from "../gateway.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { EVENT_NAMES } from "../utils.js";
 import { icons } from "../icons.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-input.js";
-import "../components/sc-button.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-card.js";
-import "../components/sc-segmented-control.js";
-import "../components/sc-badge.js";
-import "../components/sc-timeline.js";
-import "../components/sc-skeleton.js";
-import type { TimelineItem } from "../components/sc-timeline.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-input.js";
+import "../components/hu-button.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-card.js";
+import "../components/hu-segmented-control.js";
+import "../components/hu-badge.js";
+import "../components/hu-timeline.js";
+import "../components/hu-skeleton.js";
+import type { TimelineItem } from "../components/hu-timeline.js";
 
 interface LogEntry {
   ts: string;
@@ -44,7 +44,7 @@ function formatRelativeTime(ts: string): string {
   }
 }
 
-@customElement("sc-logs-view")
+@customElement("hu-logs-view")
 export class ScLogsView extends GatewayAwareLitElement {
   static override styles = css`
     :host {
@@ -53,7 +53,7 @@ export class ScLogsView extends GatewayAwareLitElement {
       flex-direction: column;
       flex: 1;
       min-height: 0;
-      color: var(--sc-text);
+      color: var(--hu-text);
       max-width: 60rem;
     }
     .layout {
@@ -66,57 +66,57 @@ export class ScLogsView extends GatewayAwareLitElement {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: var(--sc-space-md);
+      margin-bottom: var(--hu-space-md);
       flex-wrap: wrap;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
     .controls-sticky {
       position: sticky;
       top: 0;
       z-index: 1;
-      background: var(--sc-bg);
-      padding: var(--sc-space-md) 0;
-      margin-bottom: var(--sc-space-sm);
-      border-bottom: 1px solid var(--sc-border-subtle);
+      background: var(--hu-bg);
+      padding: var(--hu-space-md) 0;
+      margin-bottom: var(--hu-space-sm);
+      border-bottom: 1px solid var(--hu-border-subtle);
     }
     .controls {
       display: flex;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       align-items: center;
       flex-wrap: wrap;
     }
     .filter-input {
-      padding: var(--sc-space-sm) var(--sc-space-md);
-      background: var(--sc-bg-surface);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      color: var(--sc-text);
-      font-size: var(--sc-text-sm);
-      font-family: var(--sc-font-mono);
+      padding: var(--hu-space-sm) var(--hu-space-md);
+      background: var(--hu-bg-surface);
+      border: 1px solid var(--hu-border);
+      border-radius: var(--hu-radius);
+      color: var(--hu-text);
+      font-size: var(--hu-text-sm);
+      font-family: var(--hu-font-mono);
       width: 13.75rem;
       transition:
-        border-color var(--sc-duration-fast) var(--sc-ease-out),
-        box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+        border-color var(--hu-duration-fast) var(--hu-ease-out),
+        box-shadow var(--hu-duration-fast) var(--hu-ease-out);
     }
     .filter-input:focus {
       outline: none;
-      border-color: var(--sc-accent);
-      box-shadow: 0 0 0 var(--sc-space-xs) var(--sc-accent-subtle);
+      border-color: var(--hu-accent);
+      box-shadow: 0 0 0 var(--hu-space-xs) var(--hu-accent-subtle);
     }
     .filter-input::placeholder {
-      color: var(--sc-text-muted);
+      color: var(--hu-text-muted);
     }
     .event.chat {
-      color: var(--sc-success);
+      color: var(--hu-success);
     }
     .event.tool-call {
-      color: var(--sc-info);
+      color: var(--hu-info);
     }
     .event.error {
-      color: var(--sc-error);
+      color: var(--hu-error);
     }
     .event.health {
-      color: var(--sc-warning);
+      color: var(--hu-warning);
     }
     .log-card {
       flex: 1;
@@ -133,26 +133,26 @@ export class ScLogsView extends GatewayAwareLitElement {
     .log-area {
       flex: 1;
       min-height: 0;
-      padding: var(--sc-space-md);
+      padding: var(--hu-space-md);
       overflow-y: auto;
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-sm);
+      font-family: var(--hu-font-mono);
+      font-size: var(--hu-text-sm);
       line-height: 1.6;
-      color: var(--sc-text);
+      color: var(--hu-text);
     }
     .log-area::-webkit-scrollbar {
-      width: var(--sc-space-sm);
+      width: var(--hu-space-sm);
     }
     .log-area::-webkit-scrollbar-track {
-      background: var(--sc-bg-elevated);
-      border-radius: var(--sc-radius-sm);
+      background: var(--hu-bg-elevated);
+      border-radius: var(--hu-radius-sm);
     }
     .log-area::-webkit-scrollbar-thumb {
-      background: var(--sc-border);
-      border-radius: var(--sc-radius-sm);
+      background: var(--hu-border);
+      border-radius: var(--hu-radius-sm);
     }
     .log-area::-webkit-scrollbar-thumb:hover {
-      background: var(--sc-text-muted);
+      background: var(--hu-text-muted);
     }
     .skeleton-control {
       width: 12rem;
@@ -168,24 +168,24 @@ export class ScLogsView extends GatewayAwareLitElement {
     }
     .skeleton-line {
       width: 100%;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
     .skeleton-line-90 {
       width: 90%;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
     .skeleton-line-95 {
       width: 95%;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
     .skeleton-line-85 {
       width: 85%;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
     .skeleton-line-70 {
       width: 70%;
     }
-    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-lg */ {
       .header {
         flex-wrap: wrap;
       }
@@ -193,7 +193,7 @@ export class ScLogsView extends GatewayAwareLitElement {
         flex-wrap: wrap;
       }
     }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       .filter-input {
         width: 100%;
       }
@@ -339,7 +339,7 @@ export class ScLogsView extends GatewayAwareLitElement {
     this.requestUpdate();
   }
 
-  /** Map log event to sc-timeline status */
+  /** Map log event to hu-timeline status */
   private timelineStatus(event: string): TimelineItem["status"] {
     switch (event) {
       case EVENT_NAMES.CHAT:
@@ -398,12 +398,12 @@ export class ScLogsView extends GatewayAwareLitElement {
 
   private _renderHeader(): ReturnType<typeof html> {
     return html`
-      <sc-page-hero role="region" aria-label="Logs">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Logs">
+        <hu-section-header
           heading="Logs"
           description="System event log and debugging output"
-        ></sc-section-header>
-      </sc-page-hero>
+        ></hu-section-header>
+      </hu-page-hero>
     `;
   }
 
@@ -411,22 +411,22 @@ export class ScLogsView extends GatewayAwareLitElement {
     return html`
       <div class="controls-sticky">
         <div class="controls">
-          <sc-skeleton variant="card" height="2.5rem" class="skeleton-control"></sc-skeleton>
-          <sc-skeleton variant="card" height="2.5rem" class="skeleton-filter"></sc-skeleton>
-          <sc-skeleton variant="card" height="2.5rem" class="skeleton-action"></sc-skeleton>
+          <hu-skeleton variant="card" height="2.5rem" class="skeleton-control"></hu-skeleton>
+          <hu-skeleton variant="card" height="2.5rem" class="skeleton-filter"></hu-skeleton>
+          <hu-skeleton variant="card" height="2.5rem" class="skeleton-action"></hu-skeleton>
         </div>
       </div>
-      <sc-card class="log-card" glass>
+      <hu-card class="log-card" glass>
         <div class="log-area-wrapper log-area-min">
           <div class="log-area">
-            <sc-skeleton variant="line" class="skeleton-line"></sc-skeleton>
-            <sc-skeleton variant="line" class="skeleton-line-90"></sc-skeleton>
-            <sc-skeleton variant="line" class="skeleton-line-95"></sc-skeleton>
-            <sc-skeleton variant="line" class="skeleton-line-85"></sc-skeleton>
-            <sc-skeleton variant="line" class="skeleton-line-70"></sc-skeleton>
+            <hu-skeleton variant="line" class="skeleton-line"></hu-skeleton>
+            <hu-skeleton variant="line" class="skeleton-line-90"></hu-skeleton>
+            <hu-skeleton variant="line" class="skeleton-line-95"></hu-skeleton>
+            <hu-skeleton variant="line" class="skeleton-line-85"></hu-skeleton>
+            <hu-skeleton variant="line" class="skeleton-line-70"></hu-skeleton>
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
@@ -434,30 +434,30 @@ export class ScLogsView extends GatewayAwareLitElement {
     return html`
       <div class="controls-sticky" role="toolbar" aria-label="Log filters and actions">
         <div class="controls">
-          <sc-segmented-control
+          <hu-segmented-control
             .value=${this._level}
             .options=${LEVEL_OPTIONS}
-            @sc-change=${(e: CustomEvent<{ value: string }>) => (this._level = e.detail.value)}
-          ></sc-segmented-control>
-          <sc-input
+            @hu-change=${(e: CustomEvent<{ value: string }>) => (this._level = e.detail.value)}
+          ></hu-segmented-control>
+          <hu-input
             type="text"
             placeholder="Filter..."
             aria-label="Filter log events"
             .value=${this.filter}
-            @sc-input=${(e: CustomEvent<{ value: string }>) => (this.filter = e.detail.value)}
-          ></sc-input>
-          <sc-badge variant="neutral">${this.filteredLogs.length}</sc-badge>
-          <sc-button
+            @hu-input=${(e: CustomEvent<{ value: string }>) => (this.filter = e.detail.value)}
+          ></hu-input>
+          <hu-badge variant="neutral">${this.filteredLogs.length}</hu-badge>
+          <hu-button
             variant="ghost"
             size="sm"
             @click=${this.togglePause}
             aria-label=${this._paused ? "Resume" : "Pause"}
           >
             ${this._paused ? icons.play : icons.pause} ${this._paused ? "Resume" : "Pause"}
-          </sc-button>
-          <sc-button variant="ghost" size="sm" @click=${this.clearLogs} aria-label="Clear all logs">
+          </hu-button>
+          <hu-button variant="ghost" size="sm" @click=${this.clearLogs} aria-label="Clear all logs">
             Clear
-          </sc-button>
+          </hu-button>
         </div>
       </div>
     `;
@@ -468,27 +468,27 @@ export class ScLogsView extends GatewayAwareLitElement {
     void this._relativeTimeKey;
     const timelineItems = this.toTimelineItems(entries);
     return html`
-      <div class="sc-stagger">
-        <sc-card class="log-card" glass>
+      <div class="hu-stagger">
+        <hu-card class="log-card" glass>
           <div class="log-area-wrapper">
             <div class="log-area" role="log" aria-live="polite">
               ${entries.length === 0
                 ? html`
-                    <sc-empty-state
+                    <hu-empty-state
                       .icon=${icons["file-text"]}
                       heading="Waiting for events..."
                       description="Logs will stream here in real-time as the system processes requests."
-                    ></sc-empty-state>
+                    ></hu-empty-state>
                   `
                 : html`
-                    <sc-timeline
+                    <hu-timeline
                       .items=${timelineItems}
                       .max=${Math.max(entries.length, 10000)}
-                    ></sc-timeline>
+                    ></hu-timeline>
                   `}
             </div>
           </div>
-        </sc-card>
+        </hu-card>
       </div>
     `;
   }
@@ -498,14 +498,14 @@ export class ScLogsView extends GatewayAwareLitElement {
       return html`
         <div class="layout">
           ${this._renderHeader()}
-          <sc-empty-state .icon=${icons.warning} heading="Not connected" description=${this.error}>
-            <sc-button
+          <hu-empty-state .icon=${icons.warning} heading="Not connected" description=${this.error}>
+            <hu-button
               variant="primary"
               @click=${() => this.load()}
               aria-label="Retry logs connection"
-              >Retry</sc-button
+              >Retry</hu-button
             >
-          </sc-empty-state>
+          </hu-empty-state>
         </div>
       `;
     }

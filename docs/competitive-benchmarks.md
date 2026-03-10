@@ -1,11 +1,11 @@
 ---
-title: SeaClaw Competitive Benchmarks
+title: Human Competitive Benchmarks
 updated: 2026-03-09
 ---
 
-# SeaClaw Competitive Benchmarks
+# Human Competitive Benchmarks
 
-This is a living document updated quarterly. It combines automated PageSpeed data with manual quality audits to benchmark SeaClaw against industry leaders across performance, visual craft, motion, accessibility, and innovation.
+This is a living document updated quarterly. It combines automated PageSpeed data with manual quality audits to benchmark Human against industry leaders across performance, visual craft, motion, accessibility, and innovation.
 
 **Methodology**: Automated metrics (Lighthouse, CWV) are collected via CI; quality scores are assigned by human auditors using the rubric below. Each dimension is scored 1–10; totals are out of 70.
 
@@ -58,11 +58,11 @@ This is a living document updated quarterly. It combines automated PageSpeed dat
 
 ## Automated Metrics
 
-_Last updated: 2026-03-10. SeaClaw data from local Lighthouse; competitors from PageSpeed Insights API._
+_Last updated: 2026-03-10. Human data from local Lighthouse; competitors from PageSpeed Insights API._
 
 | Brand            | Perf | A11y | BP  | SEO | LCP   | CLS  | TBT    | TTFB |
 | ---------------- | ---- | ---- | --- | --- | ----- | ---- | ------ | ---- |
-| SeaClaw\*        | 96   | 100  | 100 | 100 | 2.6s  | 0.00 | 0ms    | —    |
+| Human\*        | 96   | 100  | 100 | 100 | 2.6s  | 0.00 | 0ms    | —    |
 | Linear           | 27   | 79   | 88  | 100 | 26.1s | 0.00 | 2308ms | 48ms |
 | Vercel           | 57   | 89   | 96  | 92  | 12.0s | 0.00 | 412ms  | 20ms |
 | Raycast          | —    | —    | —   | —   | —     | —    | —      | —    |
@@ -79,7 +79,7 @@ _Last updated: 2026-03-10. SeaClaw data from local Lighthouse; competitors from 
 | Immersive Garden | —    | —    | —   | —   | —     | —    | —      | —    |
 | Malvah           | 57   | 94   | 100 | 100 | 10.6s | 0.00 | 368ms  | 41ms |
 
-**Note**: Raycast, Lando Norris, and Immersive Garden returned API errors during data collection. SeaClaw scores (\*) are from a local Lighthouse run against the built site.
+**Note**: Raycast, Lando Norris, and Immersive Garden returned API errors during data collection. Human scores (\*) are from a local Lighthouse run against the built site.
 
 ## Quality Scores
 
@@ -87,7 +87,7 @@ _Last updated: 2026-03-10. Scores based on industry analysis and site evaluation
 
 | Brand            | Perf | Visual | Motion | Density | A11y | Brand | Innovation | Total |
 | ---------------- | ---- | ------ | ------ | ------- | ---- | ----- | ---------- | ----- |
-| SeaClaw          | 8    | 7      | 7      | 7       | 9    | 6     | 7          | 51/70 |
+| Human          | 8    | 7      | 7      | 7       | 9    | 6     | 7          | 51/70 |
 | Linear           | 4    | 9      | 9      | 9       | 6    | 9     | 8          | 54/70 |
 | Vercel           | 6    | 8      | 7      | 8       | 7    | 8     | 8          | 52/70 |
 | Raycast          | 7    | 9      | 9      | 9       | 7    | 9     | 8          | 58/70 |
@@ -106,9 +106,9 @@ _Last updated: 2026-03-10. Scores based on industry analysis and site evaluation
 
 ## Category-Defining Targets
 
-SeaClaw's targets vs industry best:
+Human's targets vs industry best:
 
-| Metric                 | Industry Best      | SeaClaw Target |
+| Metric                 | Industry Best      | Human Target |
 | ---------------------- | ------------------ | -------------- |
 | Lighthouse Performance | 95–97 (Vercel)     | 99+            |
 | LCP                    | 0.8s (Linear)      | < 0.5s         |
@@ -116,7 +116,7 @@ SeaClaw's targets vs industry best:
 | INP                    | ~80ms (Superhuman) | < 50ms         |
 | Accessibility          | 98 (Vercel)        | 100            |
 
-SeaClaw's lightweight C runtime and minimal UI stack (Lit, design tokens) position it to exceed these targets. The dashboard and marketing site are optimized for sub-500ms LCP and zero layout shift.
+Human's lightweight C runtime and minimal UI stack (Lit, design tokens) position it to exceed these targets. The dashboard and marketing site are optimized for sub-500ms LCP and zero layout shift.
 
 ## Update History
 
@@ -143,7 +143,7 @@ When assigning manual quality scores, verify:
 ## Next Steps
 
 - Re-run benchmark with PageSpeed API key to reduce fetch failures (Raycast, Lando Norris, Immersive Garden).
-- Deploy seaclaw.ai custom domain to get production PageSpeed data.
+- Deploy h-uman.ai custom domain to get production PageSpeed data.
 - Schedule Q2 2026 quarterly review.
 - Investigate LCP optimization for sub-1s target (font loading, hero image preload).
 

@@ -79,7 +79,7 @@ const tools = [
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="canonical" href="https://seaclaw.ai/" />
+    <link rel="canonical" href="https://h-uman.ai/" />
     <link
       rel="preload"
       href="/fonts/avenir/Avenir-Black.woff2"
@@ -102,12 +102,12 @@ const tools = [
       type="font/woff2"
       crossorigin
     />
-    <title>SeaClaw — Bring AI to every device on Earth</title>
+    <title>Human — Bring AI to every device on Earth</title>
     <meta
       name="description"
       content="A complete autonomous AI agent runtime in 528 kilobytes of pure C. One static binary. Zero dependencies. 50+ providers. Runs on anything with a CPU."
     />
-    <link rel="preload" href={`${base}seaclaw.svg`} as="image" fetchpriority="high" />
+    <link rel="preload" href={`${base}human.svg`} as="image" fetchpriority="high" />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <link
       rel="icon"
@@ -120,33 +120,33 @@ const tools = [
     <meta name="theme-color" content="#7AB648" />
     <meta
       property="og:title"
-      content="SeaClaw — Bring AI to every device on Earth"
+      content="Human — Bring AI to every device on Earth"
     />
     <meta
       property="og:description"
       content="~528 KB binary. 50+ AI providers. 33 channels. 66+ tools. Zero dependencies. Pure C."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://seaclaw.ai/" />
-    <meta property="og:image" content="https://seaclaw.ai/og-image.png" />
+    <meta property="og:url" content="https://h-uman.ai/" />
+    <meta property="og:image" content="https://h-uman.ai/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="SeaClaw - Autonomous AI agent runtime"
+      content="Human - Autonomous AI agent runtime"
     />
     <meta property="og:locale" content="en_US" />
-    <meta property="og:site_name" content="SeaClaw" />
+    <meta property="og:site_name" content="Human" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="SeaClaw — Bring AI to every device on Earth"
+      content="Human — Bring AI to every device on Earth"
     />
     <meta
       name="twitter:description"
       content="~528 KB binary. 50+ AI providers. 33 channels. 66+ tools. Zero dependencies. Pure C."
     />
-    <meta name="twitter:image" content="https://seaclaw.ai/og-image.png" />
+    <meta name="twitter:image" content="https://h-uman.ai/og-image.png" />
 
     <script
       is:inline
@@ -154,49 +154,49 @@ const tools = [
       set:html={JSON.stringify({
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        name: "SeaClaw",
+        name: "Human",
         description:
           "A complete autonomous AI agent runtime in 528 kilobytes of pure C.",
         applicationCategory: "DeveloperApplication",
         operatingSystem: "Cross-platform",
-        url: "https://seaclaw.ai/",
+        url: "https://h-uman.ai/",
         license: "https://opensource.org/licenses/MIT",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
         author: {
           "@type": "Organization",
-          name: "SeaClaw",
-          url: "https://github.com/sethdford/seaclaw",
+          name: "Human",
+          url: "https://github.com/sethdford/human",
         },
       })}
     />
     <style is:global>
-      /* --color-* aliases for index.astro (maps to --sc-web-* / --sc-* tokens) */
+      /* --color-* aliases for index.astro (maps to --hu-web-* / --hu-* tokens) */
       :root {
-        --color-bg: var(--sc-web-bg);
-        --color-text: var(--sc-web-text);
-        --color-text-secondary: var(--sc-web-text-secondary);
-        --color-text-tertiary: var(--sc-web-text-tertiary);
-        --color-accent: var(--sc-accent);
-        --color-accent-light: var(--sc-accent-light, var(--sc-accent-subtle));
-        --color-accent-glow: var(--sc-accent-subtle);
-        --color-border: var(--sc-web-border);
-        --color-line-stroke: var(--sc-web-line-stroke);
-        --color-node-fill: var(--sc-web-node-fill);
-        --color-node-stroke: var(--sc-web-node-stroke);
+        --color-bg: var(--hu-web-bg);
+        --color-text: var(--hu-web-text);
+        --color-text-secondary: var(--hu-web-text-secondary);
+        --color-text-tertiary: var(--hu-web-text-tertiary);
+        --color-accent: var(--hu-accent);
+        --color-accent-light: var(--hu-accent-light, var(--hu-accent-subtle));
+        --color-accent-glow: var(--hu-accent-subtle);
+        --color-border: var(--hu-web-border);
+        --color-line-stroke: var(--hu-web-line-stroke);
+        --color-node-fill: var(--hu-web-node-fill);
+        --color-node-stroke: var(--hu-web-node-stroke);
         /* Terminal (dark surface — light border intentional) */
-        --color-terminal-bg: var(--sc-web-terminal-bg);
-        --color-terminal-chrome: var(--sc-web-terminal-chrome);
+        --color-terminal-bg: var(--hu-web-terminal-bg);
+        --color-terminal-chrome: var(--hu-web-terminal-chrome);
         --color-terminal-border: rgba(255, 255, 255, 0.06);
         /* Pills */
-        --color-pill-provider: var(--sc-web-pill-provider);
-        --color-pill-provider-bg: var(--sc-web-pill-provider-bg);
-        --color-pill-provider-border: var(--sc-web-pill-provider-border);
-        --color-pill-channel: var(--sc-web-pill-channel);
-        --color-pill-channel-bg: var(--sc-web-pill-channel-bg);
-        --color-pill-channel-border: var(--sc-web-pill-channel-border);
-        --color-pill-tool: var(--sc-web-pill-tool);
-        --color-pill-tool-bg: var(--sc-web-pill-tool-bg);
-        --color-pill-tool-border: var(--sc-web-pill-tool-border);
+        --color-pill-provider: var(--hu-web-pill-provider);
+        --color-pill-provider-bg: var(--hu-web-pill-provider-bg);
+        --color-pill-provider-border: var(--hu-web-pill-provider-border);
+        --color-pill-channel: var(--hu-web-pill-channel);
+        --color-pill-channel-bg: var(--hu-web-pill-channel-bg);
+        --color-pill-channel-border: var(--hu-web-pill-channel-border);
+        --color-pill-tool: var(--hu-web-pill-tool);
+        --color-pill-tool-bg: var(--hu-web-pill-tool-bg);
+        --color-pill-tool-border: var(--hu-web-pill-tool-border);
       }
     </style>
   </head>
@@ -223,8 +223,8 @@ const tools = [
         <div class="ambient-blue" style="top: 30%; right: 10%;"></div>
         <div class="hero-content text-center max-w-3xl mx-auto relative z-10">
           <img
-            src={`${base}seaclaw.svg`}
-            alt="SeaClaw logo"
+            src={`${base}human.svg`}
+            alt="Human logo"
             width="512"
             height="512"
             fetchpriority="high"
@@ -253,7 +253,7 @@ const tools = [
               >Get Started</a
             >
             <a
-              href="https://github.com/sethdford/seaclaw"
+              href="https://github.com/sethdford/human"
               target="_blank"
               rel="noopener noreferrer"
               class="btn-outline">View on GitHub</a
@@ -340,7 +340,7 @@ const tools = [
             class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)]" data-reveal
             style="color: var(--color-text)"
           >
-            SeaClaw needs one thing: <span
+            Human needs one thing: <span
               style="color: var(--color-accent)"
               class="font-semibold">a CPU.</span
             >
@@ -391,7 +391,7 @@ const tools = [
                 <div
                   class="spectrum-card card-glow card-spotlight glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1"
                   data-reveal="scale-up"
-                  style={`--ri: ${i}; --tw-shadow: var(--sc-shadow-md);`}
+                  style={`--ri: ${i}; --tw-shadow: var(--hu-shadow-md);`}
                 >
                   <span
                     class="w-8 h-8 mx-auto mb-4 flex items-center justify-center [&>svg]:flex-shrink-0"
@@ -424,13 +424,13 @@ const tools = [
         <div class="ambient-blue" style="bottom: 10%; right: 15%;"></div>
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="arch-title sc-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
+            class="arch-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             Swap anything. Lock in nothing.
           </h2>
           <p
-            class="arch-sub sc-scroll-reveal text-lg mb-20" data-reveal
+            class="arch-sub hu-scroll-reveal text-lg mb-20" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Every subsystem is a vtable interface. Change any layer with a
@@ -442,11 +442,11 @@ const tools = [
             viewBox="0 0 600 600"
             width="600"
             height="600"
-            class="sc-scroll-scale w-full max-w-lg mx-auto"
+            class="hu-scroll-scale w-full max-w-lg mx-auto"
             style="aspect-ratio: 1;"
             xmlns="http://www.w3.org/2000/svg"
             role="img"
-            aria-label="SeaClaw architecture diagram showing 8 swappable subsystems"
+            aria-label="Human architecture diagram showing 8 swappable subsystems"
           >
             <defs>
               <filter
@@ -503,7 +503,7 @@ const tools = [
                 fill="var(--color-text)"
                 font-size="11"
                 font-weight="600"
-                font-family="var(--font-sans)">SeaClaw</text
+                font-family="var(--font-sans)">Human</text
               >
               <text
                 x="300"
@@ -599,7 +599,7 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="providers-title sc-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
+            class="providers-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             50+ providers. 33 channels. 65+ tools.
@@ -675,7 +675,7 @@ const tools = [
           <div
             id="terminal"
             class="rounded-2xl overflow-hidden opacity-0"
-            style="background: var(--color-terminal-bg); box-shadow: var(--sc-shadow-lg);"
+            style="background: var(--color-terminal-bg); box-shadow: var(--hu-shadow-lg);"
           >
             <div
               class="flex items-center gap-2 px-5 py-3.5 border-b"
@@ -687,7 +687,7 @@ const tools = [
               <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
               <span
                 class="text-[11px] ml-2 font-mono"
-                style="color: var(--sc-web-text-tertiary)">terminal</span
+                style="color: var(--hu-web-text-tertiary)">terminal</span
               >
             </div>
             <div
@@ -718,7 +718,7 @@ const tools = [
           </p>
           <div
             class="dash-preview opacity-0 glass rounded-2xl overflow-hidden"
-            style="box-shadow: var(--sc-shadow-xl);"
+            style="box-shadow: var(--hu-shadow-xl);"
           >
             <div
               class="flex items-center gap-2 px-5 py-3 border-b"
@@ -730,12 +730,12 @@ const tools = [
               <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
               <span
                 class="text-[11px] ml-2 font-mono"
-                style="color: var(--sc-web-text-tertiary)"
-                >SeaClaw Dashboard</span
+                style="color: var(--hu-web-text-tertiary)"
+                >Human Dashboard</span
               >
               <span
                 class="ml-auto text-[11px] px-2 py-0.5 rounded-full"
-                style="background: var(--sc-success-dim); color: var(--sc-success);"
+                style="background: var(--hu-success-dim); color: var(--hu-success);"
                 >Live</span
               >
             </div>
@@ -750,19 +750,19 @@ const tools = [
                 >
                   <div
                     class="text-[10px] uppercase tracking-wider mb-2"
-                    style="color: var(--sc-web-text-tertiary);"
+                    style="color: var(--hu-web-text-tertiary);"
                   >
                     Providers
                   </div>
                   <div
                     class="text-2xl font-bold mb-1"
-                    style="color: var(--sc-web-text);"
+                    style="color: var(--hu-web-text);"
                   >
                     <span class="dash-count" data-target="50">0</span>
                   </div>
                   <div
                     class="flex items-center gap-1 text-[11px]"
-                    style="color: var(--sc-accent);"
+                    style="color: var(--hu-accent);"
                   >
                     <svg
                       width="12"
@@ -782,19 +782,19 @@ const tools = [
                 >
                   <div
                     class="text-[10px] uppercase tracking-wider mb-2"
-                    style="color: var(--sc-web-text-tertiary);"
+                    style="color: var(--hu-web-text-tertiary);"
                   >
                     Channels
                   </div>
                   <div
                     class="text-2xl font-bold mb-1"
-                    style="color: var(--sc-web-text);"
+                    style="color: var(--hu-web-text);"
                   >
                     <span class="dash-count" data-target="20">0</span>
                   </div>
                   <div
                     class="flex items-center gap-1 text-[11px]"
-                    style="color: var(--sc-accent);"
+                    style="color: var(--hu-accent);"
                   >
                     <svg
                       width="12"
@@ -814,19 +814,19 @@ const tools = [
                 >
                   <div
                     class="text-[10px] uppercase tracking-wider mb-2"
-                    style="color: var(--sc-web-text-tertiary);"
+                    style="color: var(--hu-web-text-tertiary);"
                   >
                     Tools
                   </div>
                   <div
                     class="text-2xl font-bold mb-1"
-                    style="color: var(--sc-web-text);"
+                    style="color: var(--hu-web-text);"
                   >
                     <span class="dash-count" data-target="53">0</span>
                   </div>
                   <div
                     class="flex items-center gap-1 text-[11px]"
-                    style="color: var(--sc-web-text-tertiary);"
+                    style="color: var(--hu-web-text-tertiary);"
                   >
                     <svg
                       width="12"
@@ -846,19 +846,19 @@ const tools = [
                 >
                   <div
                     class="text-[10px] uppercase tracking-wider mb-2"
-                    style="color: var(--sc-web-text-tertiary);"
+                    style="color: var(--hu-web-text-tertiary);"
                   >
                     Sessions
                   </div>
                   <div
                     class="text-2xl font-bold mb-1"
-                    style="color: var(--sc-web-text);"
+                    style="color: var(--hu-web-text);"
                   >
                     <span class="dash-count" data-target="5">0</span>
                   </div>
                   <div
                     class="flex items-center gap-1 text-[11px]"
-                    style="color: var(--sc-accent);"
+                    style="color: var(--hu-accent);"
                   >
                     <svg
                       width="12"
@@ -876,7 +876,7 @@ const tools = [
               <div
                 id="dash-activity"
                 class="text-left text-[13px] space-y-2"
-                style="color: var(--sc-web-text-secondary);"
+                style="color: var(--hu-web-text-secondary);"
               >
               </div>
             </div>
@@ -901,13 +901,13 @@ const tools = [
         <div class="ambient-blue" style="top: 40%; right: 20%;"></div>
         <div class="max-w-3xl mx-auto text-center">
           <h2
-            class="cta-title sc-scroll-reveal font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6" data-reveal="scale-up"
+            class="cta-title hu-scroll-reveal font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6" data-reveal="scale-up"
             style="color: var(--color-text); letter-spacing: -0.04em;"
           >
             Bring AI to every device on&nbsp;Earth.
           </h2>
           <p
-            class="cta-sub sc-scroll-reveal text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 max-w-xl mx-auto leading-relaxed" data-reveal
+            class="cta-sub hu-scroll-reveal text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 max-w-xl mx-auto leading-relaxed" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Open source. MIT licensed. ~528 KB. Runs anywhere.
@@ -919,7 +919,7 @@ const tools = [
               >Get Started</a
             >
             <a
-              href="https://github.com/sethdford/seaclaw"
+              href="https://github.com/sethdford/human"
               target="_blank"
               rel="noopener noreferrer"
               class="btn-outline">View on GitHub</a
@@ -936,7 +936,7 @@ const tools = [
             class="text-2xl md:text-3xl font-bold text-center mb-12"
             style="font-weight: 900;"
           >
-            How SeaClaw Compares
+            How Human Compares
           </h2>
           <div class="overflow-x-auto">
             <table
@@ -949,7 +949,7 @@ const tools = [
                   <th
                     class="p-3"
                     style="color: var(--color-accent); font-weight: 900;"
-                    >SeaClaw</th
+                    >Human</th
                   >
                   <th class="p-3 opacity-60">Claude Code</th>
                   <th class="p-3 opacity-60">OpenAI Codex</th>
@@ -1021,8 +1021,8 @@ const tools = [
       >
         <div class="flex items-center gap-3">
           <img
-            src={`${base}seaclaw.svg`}
-            alt="SeaClaw logo"
+            src={`${base}human.svg`}
+            alt="Human logo"
             width="512"
             height="512"
             class="w-5 h-5"
@@ -1030,7 +1030,7 @@ const tools = [
             decoding="async"
           />
           <span class="text-[13px]" style="color: var(--color-text-tertiary)"
-            >SeaClaw</span
+            >Human</span
           >
         </div>
         <p
@@ -1046,7 +1046,7 @@ const tools = [
           <span>MIT License</span>
           <span>Made with C11</span>
           <a
-            href="https://github.com/sethdford/seaclaw"
+            href="https://github.com/sethdford/human"
             target="_blank"
             rel="noopener noreferrer"
             class="hover:opacity-80 transition-opacity">GitHub</a
@@ -1074,12 +1074,12 @@ const tools = [
         const outputEl = document.getElementById("terminal-output");
         if (outputEl) {
           outputEl.innerHTML = [
-            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--sc-web-text)">git clone https://github.com/sethdford/seaclaw.git</span></div>',
-            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--sc-web-text)">cd seaclaw && mkdir -p build && cd build</span></div>',
-            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--sc-web-text)">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build .</span></div>',
-            '<div><span style="color:var(--sc-web-text-tertiary)">[100%] Built target seaclaw</span></div>',
-            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--sc-web-text)">ls -lh seaclaw</span></div>',
-            '<div><span style="color:var(--sc-web-text-tertiary)">-rwxr-xr-x  1 user  staff  </span><span style="color:var(--color-accent)">528K</span><span style="color:var(--sc-web-text-tertiary)">  seaclaw</span></div>',
+            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">git clone https://github.com/sethdford/human.git</span></div>',
+            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">cd human && mkdir -p build && cd build</span></div>',
+            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build .</span></div>',
+            '<div><span style="color:var(--hu-web-text-tertiary)">[100%] Built target human</span></div>',
+            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">ls -lh human</span></div>',
+            '<div><span style="color:var(--hu-web-text-tertiary)">-rwxr-xr-x  1 user  staff  </span><span style="color:var(--color-accent)">528K</span><span style="color:var(--hu-web-text-tertiary)">  human</span></div>',
           ].join("");
         }
 
@@ -1250,32 +1250,32 @@ const tools = [
             const lines: TermLine[] = [
               {
                 prompt: true,
-                text: "git clone https://github.com/sethdford/seaclaw.git",
+                text: "git clone https://github.com/sethdford/human.git",
               },
               {
                 prompt: true,
-                text: "cd seaclaw && mkdir -p build && cd build",
+                text: "cd human && mkdir -p build && cd build",
               },
               {
                 prompt: true,
                 text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON",
               },
               { prompt: true, text: "cmake --build ." },
-              { prompt: false, text: "[100%] Built target seaclaw" },
-              { prompt: true, text: "ls -lh seaclaw" },
+              { prompt: false, text: "[100%] Built target human" },
+              { prompt: true, text: "ls -lh human" },
               {
                 prompt: false,
-                text: "-rwxr-xr-x  1 user  staff  528K  seaclaw",
+                text: "-rwxr-xr-x  1 user  staff  528K  human",
                 highlights: [{ text: "528K", cls: accentColor }],
               },
               {
                 prompt: true,
-                text: './seaclaw agent -m "Hello from a ~528 KB binary."',
+                text: './human agent -m "Hello from a ~528 KB binary."',
               },
               {
                 prompt: false,
-                text: "Hello! I'm SeaClaw — a fully autonomous AI assistant",
-                highlights: [{ text: "SeaClaw", cls: accentColor }],
+                text: "Hello! I'm Human — a fully autonomous AI assistant",
+                highlights: [{ text: "Human", cls: accentColor }],
               },
               {
                 prompt: false,
@@ -1301,7 +1301,7 @@ const tools = [
                 p.textContent = "$ ";
                 div.appendChild(p);
                 const t = document.createElement("span");
-                t.style.color = "var(--sc-web-text)";
+                t.style.color = "var(--hu-web-text)";
                 div.appendChild(t);
                 container.appendChild(div);
                 let ci = 0;
@@ -1318,7 +1318,7 @@ const tools = [
                 tc();
               } else {
                 const w = document.createElement("span");
-                w.style.color = "var(--sc-web-text-tertiary)";
+                w.style.color = "var(--hu-web-text-tertiary)";
                 if (line.highlights?.length) {
                   let rem = line.text;
                   for (const hl of line.highlights) {
@@ -1410,7 +1410,7 @@ const tools = [
                       const div = document.createElement("div");
                       div.className = "flex items-center gap-2";
                       div.style.opacity = "0";
-                      div.innerHTML = `<span class="flex-shrink-0 [&>svg]:block">${act.icon}</span><span style="color: var(--sc-web-text-secondary); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: var(--sc-web-text-tertiary)">${act.time}</span>`;
+                      div.innerHTML = `<span class="flex-shrink-0 [&>svg]:block">${act.icon}</span><span style="color: var(--hu-web-text-secondary); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: var(--hu-web-text-tertiary)">${act.time}</span>`;
                       actContainer.appendChild(div);
                       requestAnimationFrame(() => {
                         div.style.transition = "opacity 0.4s ease-out";

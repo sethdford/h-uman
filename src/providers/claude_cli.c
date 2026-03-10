@@ -1,31 +1,31 @@
-#include "seaclaw/config.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/provider.h"
+#include "human/config.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/provider.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
 
-#define SC_CLAUDE_CLI_NAME      "claude"
-#define SC_CLAUDE_DEFAULT_MODEL "claude-sonnet-4"
+#define HU_CLAUDE_CLI_NAME      "claude"
+#define HU_CLAUDE_DEFAULT_MODEL "claude-sonnet-4"
 
-typedef struct sc_claude_cli_ctx {
+typedef struct hu_claude_cli_ctx {
     char *claude_path;
     size_t claude_path_len;
-} sc_claude_cli_ctx_t;
+} hu_claude_cli_ctx_t;
 
-#if defined(SC_GATEWAY_POSIX) && !SC_IS_TEST
-static sc_error_t run_claude_cli(sc_allocator_t *alloc, const char *prompt, size_t prompt_len,
+#if defined(HU_GATEWAY_POSIX) && !HU_IS_TEST
+static hu_error_t run_claude_cli(hu_allocator_t *alloc, const char *prompt, size_t prompt_len,
                                  const char *model, size_t model_len, char **out, size_t *out_len) {
-    const char *cli = SC_CLAUDE_CLI_NAME;
+    const char *cli = HU_CLAUDE_CLI_NAME;
 
     char *argv_with_model[] = {(char *)cli, "-p", "--output-format", "json", "--model", NULL, NULL};
     char *argv_default[] = {(char *)cli, "-p", "--output-format", "json", NULL};
@@ -46,11 +46,11 @@ static sc_error_t run_claude_cli(sc_allocator_t *alloc, const char *prompt, size
     int stdout_fds[2];
     int stdin_fds[2];
     if (pipe(stdout_fds) != 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     if (pipe(stdin_fds) != 0) {
         close(stdout_fds[0]);
         close(stdout_fds[1]);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     pid_t pid = fork();
@@ -59,7 +59,7 @@ static sc_error_t run_claude_cli(sc_allocator_t *alloc, const char *prompt, size
         close(stdout_fds[1]);
         close(stdin_fds[0]);
         close(stdin_fds[1]);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     if (pid == 0) {
@@ -92,7 +92,7 @@ static sc_error_t run_claude_cli(sc_allocator_t *alloc, const char *prompt, size
     if (!buf) {
         close(stdout_fds[0]);
         waitpid(pid, NULL, 0);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t len = 0;
     for (;;) {
@@ -110,29 +110,29 @@ static sc_error_t run_claude_cli(sc_allocator_t *alloc, const char *prompt, size
     waitpid(pid, &status, 0);
 
     /* Parse JSON output: {"type":"result","result":"..."} */
-    sc_json_value_t *parsed = NULL;
-    sc_error_t err = sc_json_parse(alloc, buf, len, &parsed);
+    hu_json_value_t *parsed = NULL;
+    hu_error_t err = hu_json_parse(alloc, buf, len, &parsed);
     alloc->free(alloc->ctx, buf, cap);
 
-    if (err != SC_OK || !parsed)
-        return SC_ERR_PROVIDER_RESPONSE;
+    if (err != HU_OK || !parsed)
+        return HU_ERR_PROVIDER_RESPONSE;
 
-    const char *result = sc_json_get_string(parsed, "result");
+    const char *result = hu_json_get_string(parsed, "result");
     if (result && strlen(result) > 0) {
         size_t rlen = strlen(result);
-        *out = sc_strndup(alloc, result, rlen);
+        *out = hu_strndup(alloc, result, rlen);
         *out_len = rlen;
-        sc_json_free(alloc, parsed);
+        hu_json_free(alloc, parsed);
         if (!*out)
-            return SC_ERR_OUT_OF_MEMORY;
-        return SC_OK;
+            return HU_ERR_OUT_OF_MEMORY;
+        return HU_OK;
     }
-    sc_json_free(alloc, parsed);
-    return SC_ERR_PROVIDER_RESPONSE;
+    hu_json_free(alloc, parsed);
+    return HU_ERR_PROVIDER_RESPONSE;
 }
-#endif /* SC_GATEWAY_POSIX && !SC_IS_TEST */
+#endif /* HU_GATEWAY_POSIX && !HU_IS_TEST */
 
-static sc_error_t claude_cli_chat_with_system(void *ctx, sc_allocator_t *alloc,
+static hu_error_t claude_cli_chat_with_system(void *ctx, hu_allocator_t *alloc,
                                               const char *system_prompt, size_t system_prompt_len,
                                               const char *message, size_t message_len,
                                               const char *model, size_t model_len,
@@ -146,24 +146,24 @@ static sc_error_t claude_cli_chat_with_system(void *ctx, sc_allocator_t *alloc,
     (void)message;
     (void)message_len;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     const char *mock = "Hello from mock Claude CLI";
     size_t n = strlen(mock);
     char *buf = (char *)alloc->alloc(alloc->ctx, n + 1);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(buf, mock, n + 1);
     *out = buf;
     *out_len = n;
-    return SC_OK;
+    return HU_OK;
 #else
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     {
         char combined[65536];
         size_t combined_len;
         if (system_prompt && system_prompt_len > 0) {
             if (system_prompt_len + message_len + 4 >= sizeof(combined))
-                return SC_ERR_INVALID_ARGUMENT;
+                return HU_ERR_INVALID_ARGUMENT;
             memcpy(combined, system_prompt, system_prompt_len);
             combined[system_prompt_len] = '\n';
             combined[system_prompt_len + 1] = '\n';
@@ -171,7 +171,7 @@ static sc_error_t claude_cli_chat_with_system(void *ctx, sc_allocator_t *alloc,
             combined_len = system_prompt_len + 2 + message_len;
         } else {
             if (message_len >= sizeof(combined))
-                return SC_ERR_INVALID_ARGUMENT;
+                return HU_ERR_INVALID_ARGUMENT;
             memcpy(combined, message, message_len);
             combined_len = message_len;
         }
@@ -187,16 +187,16 @@ static sc_error_t claude_cli_chat_with_system(void *ctx, sc_allocator_t *alloc,
     (void)model_len;
     (void)out;
     (void)out_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 #endif
 }
 
-#if !SC_IS_TEST
-static const char *extract_last_user_message(const sc_chat_message_t *msgs, size_t count,
+#if !HU_IS_TEST
+static const char *extract_last_user_message(const hu_chat_message_t *msgs, size_t count,
                                              size_t *out_len) {
     for (size_t i = count; i > 0; i--) {
-        if (msgs[i - 1].role == SC_ROLE_USER && msgs[i - 1].content &&
+        if (msgs[i - 1].role == HU_ROLE_USER && msgs[i - 1].content &&
             msgs[i - 1].content_len > 0) {
             *out_len = msgs[i - 1].content_len;
             return msgs[i - 1].content;
@@ -204,48 +204,48 @@ static const char *extract_last_user_message(const sc_chat_message_t *msgs, size
     }
     return NULL;
 }
-#endif /* !SC_IS_TEST */
+#endif /* !HU_IS_TEST */
 
-static sc_error_t claude_cli_chat(void *ctx, sc_allocator_t *alloc,
-                                  const sc_chat_request_t *request, const char *model,
-                                  size_t model_len, double temperature, sc_chat_response_t *out) {
+static hu_error_t claude_cli_chat(void *ctx, hu_allocator_t *alloc,
+                                  const hu_chat_request_t *request, const char *model,
+                                  size_t model_len, double temperature, hu_chat_response_t *out) {
     (void)ctx;
     (void)temperature;
     (void)model;
     (void)model_len;
     (void)request;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     memset(out, 0, sizeof(*out));
     const char *content = "Hello from mock Claude CLI";
     size_t len = strlen(content);
-    out->content = sc_strndup(alloc, content, len);
+    out->content = hu_strndup(alloc, content, len);
     out->content_len = len;
-    return SC_OK;
+    return HU_OK;
 #else
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     {
         size_t prompt_len = 0;
         const char *prompt =
             extract_last_user_message(request->messages, request->messages_count, &prompt_len);
         if (!prompt)
-            return SC_ERR_INVALID_ARGUMENT;
+            return HU_ERR_INVALID_ARGUMENT;
 
         char *text = NULL;
         size_t text_len = 0;
-        sc_error_t err =
+        hu_error_t err =
             run_claude_cli(alloc, prompt, prompt_len, model, model_len, &text, &text_len);
-        if (err != SC_OK)
+        if (err != HU_OK)
             return err;
 
         memset(out, 0, sizeof(*out));
         out->content = text;
         out->content_len = text_len;
-        const char *rmodel = (model_len > 0) ? model : SC_CLAUDE_DEFAULT_MODEL;
-        size_t rmodel_len = (model_len > 0) ? model_len : (sizeof(SC_CLAUDE_DEFAULT_MODEL) - 1);
-        out->model = sc_strndup(alloc, rmodel, rmodel_len);
+        const char *rmodel = (model_len > 0) ? model : HU_CLAUDE_DEFAULT_MODEL;
+        size_t rmodel_len = (model_len > 0) ? model_len : (sizeof(HU_CLAUDE_DEFAULT_MODEL) - 1);
+        out->model = hu_strndup(alloc, rmodel, rmodel_len);
         out->model_len = rmodel_len;
-        return SC_OK;
+        return HU_OK;
     }
 #else
     (void)alloc;
@@ -253,7 +253,7 @@ static sc_error_t claude_cli_chat(void *ctx, sc_allocator_t *alloc,
     (void)model;
     (void)model_len;
     (void)out;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 #endif
 }
@@ -268,8 +268,8 @@ static const char *claude_cli_get_name(void *ctx) {
     (void)ctx;
     return "claude-cli";
 }
-static void claude_cli_deinit(void *ctx, sc_allocator_t *alloc) {
-    sc_claude_cli_ctx_t *cc = (sc_claude_cli_ctx_t *)ctx;
+static void claude_cli_deinit(void *ctx, hu_allocator_t *alloc) {
+    hu_claude_cli_ctx_t *cc = (hu_claude_cli_ctx_t *)ctx;
     if (!cc || !alloc)
         return;
     if (cc->claude_path)
@@ -277,7 +277,7 @@ static void claude_cli_deinit(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, cc, sizeof(*cc));
 }
 
-static const sc_provider_vtable_t claude_cli_vtable = {
+static const hu_provider_vtable_t claude_cli_vtable = {
     .chat_with_system = claude_cli_chat_with_system,
     .chat = claude_cli_chat,
     .supports_native_tools = claude_cli_supports_native_tools,
@@ -292,19 +292,19 @@ static const sc_provider_vtable_t claude_cli_vtable = {
     .stream_chat = NULL,
 };
 
-sc_error_t sc_claude_cli_create(sc_allocator_t *alloc, const char *api_key, size_t api_key_len,
-                                const char *base_url, size_t base_url_len, sc_provider_t *out) {
+hu_error_t hu_claude_cli_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
+                                const char *base_url, size_t base_url_len, hu_provider_t *out) {
     (void)api_key;
     (void)api_key_len;
     (void)base_url;
     (void)base_url_len;
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_claude_cli_ctx_t *cc = (sc_claude_cli_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*cc));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_claude_cli_ctx_t *cc = (hu_claude_cli_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*cc));
     if (!cc)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(cc, 0, sizeof(*cc));
     out->ctx = cc;
     out->vtable = &claude_cli_vtable;
-    return SC_OK;
+    return HU_OK;
 }

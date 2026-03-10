@@ -5,7 +5,7 @@ description: Connect to IRC servers for real-time chat.
 
 # IRC Channel
 
-SeaClaw can connect to IRC servers and participate in channels. The connection is bidirectional: it joins and receives messages over a raw TCP socket, and sends via `PRIVMSG`.
+Human can connect to IRC servers and participate in channels. The connection is bidirectional: it joins and receives messages over a raw TCP socket, and sends via `PRIVMSG`.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ SeaClaw can connect to IRC servers and participate in channels. The connection i
 
 ## Configuration
 
-Add to `~/.seaclaw/config.json`. IRC expects a `channels.irc` array of account configs:
+Add to `~/.human/config.json`. IRC expects a `channels.irc` array of account configs:
 
 ```json
 {
@@ -23,8 +23,8 @@ Add to `~/.seaclaw/config.json`. IRC expects a `channels.irc` array of account c
       {
         "host": "irc.libera.chat",
         "port": 6667,
-        "nick": "seaclaw",
-        "channel": "#seaclaw",
+        "nick": "human",
+        "channel": "#human",
         "tls": false,
         "allow_from": []
       }

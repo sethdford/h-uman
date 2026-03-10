@@ -1,4 +1,4 @@
-#include "seaclaw/memory/retrieval/adaptive.h"
+#include "human/memory/retrieval/adaptive.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -24,14 +24,14 @@ static int is_question_query(const char *query, size_t len) {
     return 0;
 }
 
-sc_query_analysis_t sc_adaptive_analyze_query(const char *query, size_t query_len,
-                                              const sc_adaptive_config_t *config) {
-    sc_query_analysis_t out = {
+hu_query_analysis_t hu_adaptive_analyze_query(const char *query, size_t query_len,
+                                              const hu_adaptive_config_t *config) {
+    hu_query_analysis_t out = {
         .token_count = 0,
         .has_special_chars = false,
         .is_question = false,
         .avg_token_length = 0.0f,
-        .recommended_strategy = SC_ADAPTIVE_HYBRID,
+        .recommended_strategy = HU_ADAPTIVE_HYBRID,
     };
 
     if (!config || !config->enabled)
@@ -64,22 +64,22 @@ sc_query_analysis_t sc_adaptive_analyze_query(const char *query, size_t query_le
     out.is_question = (bool)is_question_query(query, query_len);
 
     if (token_count == 0) {
-        out.recommended_strategy = SC_ADAPTIVE_KEYWORD_ONLY;
+        out.recommended_strategy = HU_ADAPTIVE_KEYWORD_ONLY;
         return out;
     }
 
     out.avg_token_length = (float)total_len / (float)token_count;
 
     if (has_special)
-        out.recommended_strategy = SC_ADAPTIVE_KEYWORD_ONLY;
+        out.recommended_strategy = HU_ADAPTIVE_KEYWORD_ONLY;
     else if (token_count <= config->keyword_max_tokens)
-        out.recommended_strategy = SC_ADAPTIVE_KEYWORD_ONLY;
+        out.recommended_strategy = HU_ADAPTIVE_KEYWORD_ONLY;
     else if (out.is_question && token_count >= config->vector_min_tokens)
-        out.recommended_strategy = SC_ADAPTIVE_VECTOR_ONLY;
+        out.recommended_strategy = HU_ADAPTIVE_VECTOR_ONLY;
     else if (token_count >= config->vector_min_tokens)
-        out.recommended_strategy = SC_ADAPTIVE_HYBRID;
+        out.recommended_strategy = HU_ADAPTIVE_HYBRID;
     else
-        out.recommended_strategy = SC_ADAPTIVE_HYBRID;
+        out.recommended_strategy = HU_ADAPTIVE_HYBRID;
 
     return out;
 }

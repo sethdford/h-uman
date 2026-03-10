@@ -20,7 +20,7 @@ status: approved
 
 ### Problem
 
-SeaClaw's design system references SOTA sources (Apple HIG, Material Design 3, Disney/Pixar, Tufte, Dieter Rams, NNG) but lacks:
+Human's design system references SOTA sources (Apple HIG, Material Design 3, Disney/Pixar, Tufte, Dieter Rams, NNG) but lacks:
 
 - **Named competitive targets** — no specific brands to measure against
 - **Quantified deltas** — no data on where we stand vs. leaders
@@ -30,7 +30,7 @@ SeaClaw's design system references SOTA sources (Apple HIG, Material Design 3, D
 
 ### Vision
 
-SeaClaw becomes the brand that other developer tools benchmark against. Not parity — dominance. Every UI surface simultaneously the most functional AND the most beautiful version of that element in the developer tools space.
+Human becomes the brand that other developer tools benchmark against. Not parity — dominance. Every UI surface simultaneously the most functional AND the most beautiful version of that element in the developer tools space.
 
 ## 2. Competitive Benchmark Registry
 
@@ -72,7 +72,7 @@ Each brand scored 1-10. Updated quarterly.
 
 ### 3.1 Performance — Redefine the Ceiling
 
-| Metric                    | Industry Best         | SeaClaw Target | Strategy                                                           |
+| Metric                    | Industry Best         | Human Target | Strategy                                                           |
 | ------------------------- | --------------------- | -------------- | ------------------------------------------------------------------ |
 | Lighthouse Performance    | 95-97 (Vercel)        | **99+**        | Astro static + aggressive prefetch + edge CDN                      |
 | LCP                       | 0.8s (Linear)         | **< 0.5s**     | Inline critical CSS, prerendered content, zero JS in critical path |
@@ -87,7 +87,7 @@ Each brand scored 1-10. Updated quarterly.
 
 ### 3.2 Interaction Latency — Instant by Default
 
-| Interaction                  | Industry Best      | SeaClaw Target                  | How                                    |
+| Interaction                  | Industry Best      | Human Target                  | How                                    |
 | ---------------------------- | ------------------ | ------------------------------- | -------------------------------------- |
 | Key press to visual feedback | ~80ms (Superhuman) | **< 16ms** (single frame)       | Optimistic UI, CSS-only state changes  |
 | Button tap to state change   | ~100ms (Linear)    | **< 50ms**                      | No async in critical path              |
@@ -97,7 +97,7 @@ Each brand scored 1-10. Updated quarterly.
 
 ### 3.3 C Runtime — Unmatched (Competitors Can't Touch This)
 
-| Metric          | Competitors                | SeaClaw                   |
+| Metric          | Competitors                | Human                   |
 | --------------- | -------------------------- | ------------------------- |
 | Binary size     | N/A (web-only or Electron) | **< 1.5MB** full-featured |
 | Cold startup    | N/A (Electron: 2-5s)       | **< 30ms**                |
@@ -110,7 +110,7 @@ Each brand scored 1-10. Updated quarterly.
 
 #### Zero-Compromise Aesthetics
 
-Stripe proved beauty elevates utility by 20%. SeaClaw goes further: every pixel must simultaneously be the most functional AND the most beautiful version of that element in the developer tools space. No trade-off mentality. If a design choice requires choosing between craft and function, the design is wrong — find the third option.
+Stripe proved beauty elevates utility by 20%. Human goes further: every pixel must simultaneously be the most functional AND the most beautiful version of that element in the developer tools space. No trade-off mentality. If a design choice requires choosing between craft and function, the design is wrong — find the third option.
 
 #### Perceptual Performance
 
@@ -134,7 +134,7 @@ Type as a primary design element, not just for reading. Award winners (Malvah, L
 
 #### New Quality Bar Table
 
-Every quality checklist item gets a "Competitive Ceiling" column showing what the best brands achieve, and a "SeaClaw Target" column showing our category-defining bar.
+Every quality checklist item gets a "Competitive Ceiling" column showing what the best brands achieve, and a "Human Target" column showing our category-defining bar.
 
 ### 4.2 `ux-patterns.md` — New Principles
 
@@ -188,7 +188,7 @@ Animation that tells a story. Staggered data reveals, sequential storytelling th
 
 #### Competitive Dominance Metrics
 
-Every token table gets a "Category Status Quo" column and a "SeaClaw Redefines" column showing where we set the new ceiling.
+Every token table gets a "Category Status Quo" column and a "Human Redefines" column showing where we set the new ceiling.
 
 #### Design Innovation Pipeline
 
@@ -208,7 +208,7 @@ Every quarter, evaluate and adopt one emerging web platform feature before compe
 
 New `scripts/benchmark-competitive.sh`:
 
-- Calls Google PageSpeed Insights API (v5) for SeaClaw + all 15 competitor marketing sites
+- Calls Google PageSpeed Insights API (v5) for Human + all 15 competitor marketing sites
 - Collects: Performance, Accessibility, Best Practices, SEO + Core Web Vitals (LCP, CLS, INP, TTFB)
 - Outputs: `benchmark-competitive.json` + `docs/competitive-benchmarks.md` (markdown summary table)
 - Runs on-demand locally and weekly in CI (scheduled GitHub Action)
@@ -245,7 +245,7 @@ Upgrade `.lighthouserc.json`:
 - Trigger: weekly schedule (Sunday night) + manual dispatch
 - Jobs: run `scripts/benchmark-competitive.sh` against all 15 competitors
 - Artifact: upload `benchmark-competitive.json` and markdown report
-- Alert: post to Slack/Discord if SeaClaw drops below any competitor on any Core Web Vital
+- Alert: post to Slack/Discord if Human drops below any competitor on any Core Web Vital
 
 ### 5.4 UI Dashboard Performance Tests
 

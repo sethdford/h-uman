@@ -1,10 +1,10 @@
-#include "seaclaw/agent/outcomes.h"
+#include "human/agent/outcomes.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 static uint64_t outcome_now_ms(void) {
-#ifdef SC_IS_TEST
+#ifdef HU_IS_TEST
     return 1000000;
 #else
     struct timespec ts;
@@ -13,17 +13,17 @@ static uint64_t outcome_now_ms(void) {
 #endif
 }
 
-void sc_outcome_tracker_init(sc_outcome_tracker_t *tracker, bool auto_apply_feedback) {
+void hu_outcome_tracker_init(hu_outcome_tracker_t *tracker, bool auto_apply_feedback) {
     if (!tracker)
         return;
     memset(tracker, 0, sizeof(*tracker));
     tracker->auto_apply_feedback = auto_apply_feedback;
 }
 
-static void record_entry(sc_outcome_tracker_t *tracker, sc_outcome_type_t type,
+static void record_entry(hu_outcome_tracker_t *tracker, hu_outcome_type_t type,
                          const char *tool_name, const char *summary) {
-    size_t idx = tracker->write_idx % SC_OUTCOME_MAX_RECENT;
-    sc_outcome_entry_t *e = &tracker->entries[idx];
+    size_t idx = tracker->write_idx % HU_OUTCOME_MAX_RECENT;
+    hu_outcome_entry_t *e = &tracker->entries[idx];
     e->type = type;
     e->timestamp_ms = outcome_now_ms();
 
@@ -45,11 +45,11 @@ static void record_entry(sc_outcome_tracker_t *tracker, sc_outcome_type_t type,
     tracker->total++;
 }
 
-void sc_outcome_record_tool(sc_outcome_tracker_t *tracker, const char *tool_name, bool success,
+void hu_outcome_record_tool(hu_outcome_tracker_t *tracker, const char *tool_name, bool success,
                             const char *summary) {
     if (!tracker)
         return;
-    record_entry(tracker, success ? SC_OUTCOME_TOOL_SUCCESS : SC_OUTCOME_TOOL_FAILURE, tool_name,
+    record_entry(tracker, success ? HU_OUTCOME_TOOL_SUCCESS : HU_OUTCOME_TOOL_FAILURE, tool_name,
                  summary);
     if (success)
         tracker->tool_successes++;
@@ -57,30 +57,30 @@ void sc_outcome_record_tool(sc_outcome_tracker_t *tracker, const char *tool_name
         tracker->tool_failures++;
 }
 
-void sc_outcome_record_correction(sc_outcome_tracker_t *tracker, const char *original,
+void hu_outcome_record_correction(hu_outcome_tracker_t *tracker, const char *original,
                                   const char *correction) {
     if (!tracker)
         return;
-    record_entry(tracker, SC_OUTCOME_USER_CORRECTION, NULL, correction ? correction : original);
+    record_entry(tracker, HU_OUTCOME_USER_CORRECTION, NULL, correction ? correction : original);
     tracker->corrections++;
 }
 
-void sc_outcome_record_positive(sc_outcome_tracker_t *tracker, const char *context) {
+void hu_outcome_record_positive(hu_outcome_tracker_t *tracker, const char *context) {
     if (!tracker)
         return;
-    record_entry(tracker, SC_OUTCOME_USER_POSITIVE, NULL, context);
+    record_entry(tracker, HU_OUTCOME_USER_POSITIVE, NULL, context);
     tracker->positives++;
 }
 
-const sc_outcome_entry_t *sc_outcome_get_recent(const sc_outcome_tracker_t *tracker,
+const hu_outcome_entry_t *hu_outcome_get_recent(const hu_outcome_tracker_t *tracker,
                                                 size_t *count) {
     if (!tracker || !count)
         return NULL;
-    *count = tracker->total < SC_OUTCOME_MAX_RECENT ? tracker->total : SC_OUTCOME_MAX_RECENT;
+    *count = tracker->total < HU_OUTCOME_MAX_RECENT ? tracker->total : HU_OUTCOME_MAX_RECENT;
     return tracker->entries;
 }
 
-char *sc_outcome_build_summary(const sc_outcome_tracker_t *tracker, sc_allocator_t *alloc,
+char *hu_outcome_build_summary(const hu_outcome_tracker_t *tracker, hu_allocator_t *alloc,
                                size_t *out_len) {
     if (!tracker || !alloc)
         return NULL;
@@ -112,17 +112,17 @@ char *sc_outcome_build_summary(const sc_outcome_tracker_t *tracker, sc_allocator
     return result;
 }
 
-bool sc_outcome_detect_repeated_failure(const sc_outcome_tracker_t *tracker, const char *tool_name,
+bool hu_outcome_detect_repeated_failure(const hu_outcome_tracker_t *tracker, const char *tool_name,
                                         size_t threshold) {
     if (!tracker || !tool_name || threshold == 0)
         return false;
 
     size_t count = 0;
-    size_t n = tracker->total < SC_OUTCOME_MAX_RECENT ? tracker->total : SC_OUTCOME_MAX_RECENT;
+    size_t n = tracker->total < HU_OUTCOME_MAX_RECENT ? tracker->total : HU_OUTCOME_MAX_RECENT;
 
     for (size_t i = 0; i < n; i++) {
-        const sc_outcome_entry_t *e = &tracker->entries[i];
-        if (e->type == SC_OUTCOME_TOOL_FAILURE && strcmp(e->tool_name, tool_name) == 0)
+        const hu_outcome_entry_t *e = &tracker->entries[i];
+        if (e->type == HU_OUTCOME_TOOL_FAILURE && strcmp(e->tool_name, tool_name) == 0)
             count++;
     }
 

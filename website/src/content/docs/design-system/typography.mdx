@@ -1,9 +1,9 @@
 ---
 title: Typography
-description: SeaClaw's type system — Avenir for UI, Geist Mono for code, with a modular scale from 12px to 48px.
+description: Human's type system — Avenir for UI, Geist Mono for code, with a modular scale from 12px to 48px.
 ---
 
-SeaClaw uses a **dual-typeface system**: Avenir for interface text and Geist Mono for code. The type scale follows a modular progression optimized for readability at every size.
+Human uses a **dual-typeface system**: Avenir for interface text and Geist Mono for code. The type scale follows a modular progression optimized for readability at every size.
 
 ## Typefaces
 
@@ -56,17 +56,17 @@ Font stack: `'Geist Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace`
 
 ```css
 h1 {
-  font-size: var(--sc-text-3xl);
-  font-weight: var(--sc-weight-bold);
-  letter-spacing: var(--sc-tracking-tight);
+  font-size: var(--hu-text-3xl);
+  font-weight: var(--hu-weight-bold);
+  letter-spacing: var(--hu-tracking-tight);
 }
 h2 {
-  font-size: var(--sc-text-2xl);
-  font-weight: var(--sc-weight-semibold);
+  font-size: var(--hu-text-2xl);
+  font-weight: var(--hu-weight-semibold);
 }
 h3 {
-  font-size: var(--sc-text-xl);
-  font-weight: var(--sc-weight-semibold);
+  font-size: var(--hu-text-xl);
+  font-weight: var(--hu-weight-semibold);
 }
 ```
 
@@ -74,13 +74,13 @@ h3 {
 
 ```css
 p {
-  font-size: var(--sc-text-base);
+  font-size: var(--hu-text-base);
   line-height: 1.6;
-  color: var(--sc-text);
+  color: var(--hu-text);
 }
 .secondary {
-  font-size: var(--sc-text-sm);
-  color: var(--sc-text-muted);
+  font-size: var(--hu-text-sm);
+  color: var(--hu-text-muted);
 }
 ```
 
@@ -88,11 +88,11 @@ p {
 
 ```css
 code {
-  font-family: var(--sc-font-mono);
-  font-size: var(--sc-text-sm);
+  font-family: var(--hu-font-mono);
+  font-size: var(--hu-text-sm);
 }
 pre code {
-  font-size: var(--sc-text-xs);
+  font-size: var(--hu-text-xs);
   line-height: 1.6;
 }
 ```
@@ -101,13 +101,13 @@ pre code {
 
 | CSS Variable           | Swift                           | Kotlin                 | C               |
 | ---------------------- | ------------------------------- | ---------------------- | --------------- |
-| `--sc-text-base`       | `SCTokens.textBase`             | `SCTokens.textBase`    | N/A (terminal)  |
-| `--sc-weight-semibold` | `.semibold`                     | `FontWeight.SemiBold`  | `SC_COLOR_BOLD` |
-| `--sc-font-mono`       | `Font.custom("GeistMono", ...)` | `FontFamily.Monospace` | N/A             |
+| `--hu-text-base`       | `SCTokens.textBase`             | `SCTokens.textBase`    | N/A (terminal)  |
+| `--hu-weight-semibold` | `.semibold`                     | `FontWeight.SemiBold`  | `SC_COLOR_BOLD` |
+| `--hu-font-mono`       | `Font.custom("GeistMono", ...)` | `FontFamily.Monospace` | N/A             |
 
 ## Accessibility
 
 - Minimum body text size is 16px (1rem) for comfortable reading
 - Line heights are tuned per size — larger text uses tighter leading
-- `letter-spacing: var(--sc-tracking-wide)` is applied to all-caps text for legibility
+- `letter-spacing: var(--hu-tracking-wide)` is applied to all-caps text for legibility
 - Font weight never drops below 400 for body text

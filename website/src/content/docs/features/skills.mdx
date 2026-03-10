@@ -8,12 +8,12 @@ Skills are reusable capability packages that give the agent domain-specific know
 ## CLI commands
 
 ```bash
-seaclaw skills list                  # List installed skills
-seaclaw skills search <query>        # Search the skill registry
-seaclaw skills install <name>        # Install a skill
-seaclaw skills remove <name>         # Remove a skill
-seaclaw skills info <name>           # Show skill details
-seaclaw skills publish <path>        # Publish a skill to the registry
+human skills list                  # List installed skills
+human skills search <query>        # Search the skill registry
+human skills install <name>        # Install a skill
+human skills remove <name>         # Remove a skill
+human skills info <name>           # Show skill details
+human skills publish <path>        # Publish a skill to the registry
 ```
 
 ## Skill structure
@@ -48,5 +48,5 @@ A skill is a directory with a `skill.json` manifest:
 
 1. Create a directory with `skill.json`
 2. Define the system prompt and tool configuration
-3. Test locally with `seaclaw skills install ./my-skill`
-4. Publish with `seaclaw skills publish ./my-skill`
+3. Test locally with `human skills install ./my-skill`
+4. Publish with `human skills publish ./my-skill`

@@ -1,23 +1,23 @@
 /*
  * Pattern radar — tracks recurring topics, emotional trends, and behavioral patterns.
  */
-#include "seaclaw/agent/pattern_radar.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/pattern_radar.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_PATTERN_THRESHOLD 3
+#define HU_PATTERN_THRESHOLD 3
 
-sc_error_t sc_pattern_radar_init(sc_pattern_radar_t *radar, sc_allocator_t alloc) {
+hu_error_t hu_pattern_radar_init(hu_pattern_radar_t *radar, hu_allocator_t alloc) {
     if (!radar)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(radar, 0, sizeof(*radar));
     radar->alloc = alloc;
-    return SC_OK;
+    return HU_OK;
 }
 
-static void observation_deinit(sc_pattern_observation_t *obs, sc_allocator_t *alloc) {
+static void observation_deinit(hu_pattern_observation_t *obs, hu_allocator_t *alloc) {
     if (!obs || !alloc)
         return;
     if (obs->subject) {
@@ -38,17 +38,17 @@ static void observation_deinit(sc_pattern_observation_t *obs, sc_allocator_t *al
     }
 }
 
-void sc_pattern_radar_deinit(sc_pattern_radar_t *radar) {
+void hu_pattern_radar_deinit(hu_pattern_radar_t *radar) {
     if (!radar)
         return;
-    sc_allocator_t *a = &radar->alloc;
+    hu_allocator_t *a = &radar->alloc;
     for (size_t i = 0; i < radar->observation_count; i++)
         observation_deinit(&radar->observations[i], a);
     radar->observation_count = 0;
 }
 
-static bool observation_matches(const sc_pattern_observation_t *obs, const char *subject,
-                                size_t subject_len, sc_pattern_type_t type) {
+static bool observation_matches(const hu_pattern_observation_t *obs, const char *subject,
+                                size_t subject_len, hu_pattern_type_t type) {
     if (obs->type != type)
         return false;
     if (obs->subject_len != subject_len)
@@ -56,19 +56,19 @@ static bool observation_matches(const sc_pattern_observation_t *obs, const char 
     return memcmp(obs->subject, subject, subject_len) == 0;
 }
 
-sc_error_t sc_pattern_radar_observe(sc_pattern_radar_t *radar,
+hu_error_t hu_pattern_radar_observe(hu_pattern_radar_t *radar,
                                      const char *subject, size_t subject_len,
-                                     sc_pattern_type_t type,
+                                     hu_pattern_type_t type,
                                      const char *detail, size_t detail_len,
                                      const char *timestamp, size_t timestamp_len) {
     if (!radar || !subject || subject_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_allocator_t *a = &radar->alloc;
+    hu_allocator_t *a = &radar->alloc;
 
     /* Search for existing matching observation */
     for (size_t i = 0; i < radar->observation_count; i++) {
-        sc_pattern_observation_t *obs = &radar->observations[i];
+        hu_pattern_observation_t *obs = &radar->observations[i];
         if (observation_matches(obs, subject, subject_len, type)) {
             obs->occurrence_count++;
             if (timestamp && timestamp_len > 0 && obs->last_seen) {
@@ -76,38 +76,38 @@ sc_error_t sc_pattern_radar_observe(sc_pattern_radar_t *radar,
                 obs->last_seen = NULL;
             }
             if (timestamp && timestamp_len > 0) {
-                obs->last_seen = sc_strndup(a, timestamp, timestamp_len);
+                obs->last_seen = hu_strndup(a, timestamp, timestamp_len);
                 if (!obs->last_seen)
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
             }
-            return SC_OK;
+            return HU_OK;
         }
     }
 
     /* At capacity: skip new entry */
-    if (radar->observation_count >= SC_PATTERN_MAX_OBSERVATIONS)
-        return SC_OK;
+    if (radar->observation_count >= HU_PATTERN_MAX_OBSERVATIONS)
+        return HU_OK;
 
     /* Add new observation */
-    sc_pattern_observation_t *obs = &radar->observations[radar->observation_count];
+    hu_pattern_observation_t *obs = &radar->observations[radar->observation_count];
     obs->type = type;
-    obs->subject = sc_strndup(a, subject, subject_len);
+    obs->subject = hu_strndup(a, subject, subject_len);
     if (!obs->subject)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     obs->subject_len = subject_len;
 
-    obs->detail = (detail && detail_len > 0) ? sc_strndup(a, detail, detail_len) : NULL;
+    obs->detail = (detail && detail_len > 0) ? hu_strndup(a, detail, detail_len) : NULL;
     obs->detail_len = obs->detail ? detail_len : 0;
 
     obs->occurrence_count = 1;
     obs->confidence = 1.0;
 
     if (timestamp && timestamp_len > 0) {
-        obs->first_seen = sc_strndup(a, timestamp, timestamp_len);
-        obs->last_seen = sc_strndup(a, timestamp, timestamp_len);
+        obs->first_seen = hu_strndup(a, timestamp, timestamp_len);
+        obs->last_seen = hu_strndup(a, timestamp, timestamp_len);
         if (!obs->first_seen || !obs->last_seen) {
             observation_deinit(obs, a);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
     } else {
         obs->first_seen = NULL;
@@ -115,27 +115,27 @@ sc_error_t sc_pattern_radar_observe(sc_pattern_radar_t *radar,
     }
 
     radar->observation_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_pattern_radar_build_context(sc_pattern_radar_t *radar, sc_allocator_t *alloc,
+hu_error_t hu_pattern_radar_build_context(hu_pattern_radar_t *radar, hu_allocator_t *alloc,
                                            char **out, size_t *out_len) {
     if (!radar || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
     size_t cap = 256;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t len = 0;
     buf[0] = '\0';
 
     bool first = true;
     for (size_t i = 0; i < radar->observation_count; i++) {
-        const sc_pattern_observation_t *obs = &radar->observations[i];
-        if (obs->occurrence_count < SC_PATTERN_THRESHOLD)
+        const hu_pattern_observation_t *obs = &radar->observations[i];
+        if (obs->occurrence_count < HU_PATTERN_THRESHOLD)
             continue;
 
         if (first) {
@@ -146,7 +146,7 @@ sc_error_t sc_pattern_radar_build_context(sc_pattern_radar_t *radar, sc_allocato
                 char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
                 if (!nb) {
                     alloc->free(alloc->ctx, buf, cap);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 buf = nb;
                 cap = new_cap;
@@ -170,7 +170,7 @@ sc_error_t sc_pattern_radar_build_context(sc_pattern_radar_t *radar, sc_allocato
                 char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
                 if (!nb) {
                     alloc->free(alloc->ctx, buf, cap);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 buf = nb;
                 cap = new_cap;
@@ -184,10 +184,10 @@ sc_error_t sc_pattern_radar_build_context(sc_pattern_radar_t *radar, sc_allocato
         alloc->free(alloc->ctx, buf, cap);
         *out = NULL;
         *out_len = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
     *out = buf;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 }

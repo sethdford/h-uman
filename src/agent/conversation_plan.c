@@ -1,5 +1,5 @@
-#include "seaclaw/agent/conversation_plan.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/conversation_plan.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -52,44 +52,44 @@ static bool mentions_new_topic(const char *msg, size_t len) {
     return false;
 }
 
-static const char *intent_name(sc_plan_intent_t intent) {
+static const char *intent_name(hu_plan_intent_t intent) {
     switch (intent) {
-    case SC_PLAN_RESPOND:
+    case HU_PLAN_RESPOND:
         return "respond";
-    case SC_PLAN_REDIRECT:
+    case HU_PLAN_REDIRECT:
         return "redirect";
-    case SC_PLAN_DEEPEN:
+    case HU_PLAN_DEEPEN:
         return "deepen";
-    case SC_PLAN_LIGHTEN:
+    case HU_PLAN_LIGHTEN:
         return "lighten";
-    case SC_PLAN_VALIDATE:
+    case HU_PLAN_VALIDATE:
         return "validate";
-    case SC_PLAN_INFORM:
+    case HU_PLAN_INFORM:
         return "inform";
     default:
         return "respond";
     }
 }
 
-sc_error_t sc_plan_conversation(sc_allocator_t *alloc, const char *user_message,
+hu_error_t hu_plan_conversation(hu_allocator_t *alloc, const char *user_message,
                                 size_t user_msg_len,
                                 const char *conversation_history __attribute__((unused)),
                                 size_t history_len, const char *emotional_context,
-                                size_t emotional_len, sc_conversation_plan_t *plan) {
+                                size_t emotional_len, hu_conversation_plan_t *plan) {
     if (!alloc || !plan)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     memset(plan, 0, sizeof(*plan));
 
-    plan->primary_intent = SC_PLAN_RESPOND;
+    plan->primary_intent = HU_PLAN_RESPOND;
 
     if (user_message && user_msg_len > 0) {
         if (user_msg_len < 20 && contains_emotional_keyword(user_message, user_msg_len))
-            plan->primary_intent = SC_PLAN_VALIDATE;
+            plan->primary_intent = HU_PLAN_VALIDATE;
         else if (mentions_new_topic(user_message, user_msg_len))
-            plan->primary_intent = SC_PLAN_INFORM;
+            plan->primary_intent = HU_PLAN_INFORM;
         else if (contains_question(user_message, user_msg_len))
-            plan->primary_intent = SC_PLAN_RESPOND;
+            plan->primary_intent = HU_PLAN_RESPOND;
     }
 
     /* Target length: roughly match message length, cap at 300 */
@@ -102,18 +102,18 @@ sc_error_t sc_plan_conversation(sc_allocator_t *alloc, const char *user_message,
 
     /* Tone guidance from emotional context */
     if (emotional_context && emotional_len > 0) {
-        plan->tone_guidance = sc_strndup(alloc, emotional_context, emotional_len);
+        plan->tone_guidance = hu_strndup(alloc, emotional_context, emotional_len);
         if (plan->tone_guidance)
             plan->tone_guidance_len = emotional_len;
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_plan_build_prompt(const sc_conversation_plan_t *plan, sc_allocator_t *alloc,
+hu_error_t hu_plan_build_prompt(const hu_conversation_plan_t *plan, hu_allocator_t *alloc,
                                 char **out, size_t *out_len) {
     if (!plan || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     *out = NULL;
     *out_len = 0;
@@ -134,23 +134,23 @@ sc_error_t sc_plan_build_prompt(const sc_conversation_plan_t *plan, sc_allocator
         pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos,
                                 "Share something personal if relevant.\n");
 
-    *out = sc_strndup(alloc, buf, pos);
+    *out = hu_strndup(alloc, buf, pos);
     if (!*out)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_plan_deinit(sc_conversation_plan_t *plan, sc_allocator_t *alloc) {
+void hu_plan_deinit(hu_conversation_plan_t *plan, hu_allocator_t *alloc) {
     if (!plan || !alloc)
         return;
     if (plan->reasoning) {
-        sc_str_free(alloc, plan->reasoning);
+        hu_str_free(alloc, plan->reasoning);
         plan->reasoning = NULL;
     }
     plan->reasoning_len = 0;
     if (plan->tone_guidance) {
-        sc_str_free(alloc, plan->tone_guidance);
+        hu_str_free(alloc, plan->tone_guidance);
         plan->tone_guidance = NULL;
     }
     plan->tone_guidance_len = 0;

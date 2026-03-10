@@ -1,5 +1,5 @@
-name: Setup and Build SeaClaw
-description: Install dependencies, configure, and build SeaClaw
+name: Setup and Build Human
+description: Install dependencies, configure, and build Human
 
 inputs:
   build-type:

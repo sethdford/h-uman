@@ -1,38 +1,38 @@
-#include "seaclaw/agent/cli.h"
-#include "seaclaw/agent.h"
-#include "seaclaw/agent/awareness.h"
-#include "seaclaw/agent/outcomes.h"
-#include "seaclaw/agent/profile.h"
-#include "seaclaw/agent/tui.h"
-#include "seaclaw/channels/cli.h"
-#include "seaclaw/config.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#ifdef SC_HAS_CRON
-#include "seaclaw/cron.h"
+#include "human/agent/cli.h"
+#include "human/agent.h"
+#include "human/agent/awareness.h"
+#include "human/agent/outcomes.h"
+#include "human/agent/profile.h"
+#include "human/agent/tui.h"
+#include "human/channels/cli.h"
+#include "human/config.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#ifdef HU_HAS_CRON
+#include "human/cron.h"
 #endif
-#include "seaclaw/bus.h"
-#include "seaclaw/design_tokens.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
-#include "seaclaw/memory/factory.h"
-#include "seaclaw/memory/retrieval.h"
-#include "seaclaw/memory/vector.h"
-#include "seaclaw/observability/log_observer.h"
-#ifdef SC_HAS_OTEL
-#include "seaclaw/observability/otel.h"
+#include "human/bus.h"
+#include "human/design_tokens.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
+#include "human/memory/factory.h"
+#include "human/memory/retrieval.h"
+#include "human/memory/vector.h"
+#include "human/observability/log_observer.h"
+#ifdef HU_HAS_OTEL
+#include "human/observability/otel.h"
 #endif
-#include "seaclaw/plugin.h"
-#include "seaclaw/provider.h"
-#include "seaclaw/providers/factory.h"
-#include "seaclaw/runtime.h"
-#include "seaclaw/security.h"
-#include "seaclaw/security/audit.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/factory.h"
-#include "seaclaw/version.h"
+#include "human/plugin.h"
+#include "human/provider.h"
+#include "human/providers/factory.h"
+#include "human/runtime.h"
+#include "human/security.h"
+#include "human/security/audit.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
+#include "human/tool.h"
+#include "human/tools/factory.h"
+#include "human/version.h"
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
@@ -40,26 +40,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(SC_GATEWAY_POSIX) && !defined(SC_IS_TEST)
+#if defined(HU_GATEWAY_POSIX) && !defined(HU_IS_TEST)
 #include <poll.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
-#define SC_CLI_ASYNC 1
+#define HU_CLI_ASYNC 1
 #else
-#define SC_CLI_ASYNC 0
+#define HU_CLI_ASYNC 0
 #endif
 
-#define SC_CODENAME     "SeaClaw"
-#define SC_CLI_MAX_PATH 1024
+#define HU_CODENAME     "Human"
+#define HU_CLI_MAX_PATH 1024
 
 /* ── ANSI escape helpers (from design_tokens.h) ─────────────────────── */
-#define SC_ANSI_HIDE_CURSOR "\033[?25l"
-#define SC_ANSI_SHOW_CURSOR "\033[?25h"
-#define SC_ANSI_CLEAR_LINE  "\033[2K\r"
+#define HU_ANSI_HIDE_CURSOR "\033[?25l"
+#define HU_ANSI_SHOW_CURSOR "\033[?25h"
+#define HU_ANSI_CLEAR_LINE  "\033[2K\r"
 
-#if SC_CLI_ASYNC
+#if HU_CLI_ASYNC
 static const char *spinner_frames[] = {
     "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8", "\xe2\xa0\xbc",
     "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7", "\xe2\xa0\x87", "\xe2\xa0\x8f"};
@@ -68,7 +68,7 @@ static const char *spinner_frames[] = {
 
 /* ── Global cancel flag (set by SIGINT handler) ──────────────────────── */
 static volatile sig_atomic_t g_cancel = 0;
-static sc_agent_t *g_active_agent = NULL;
+static hu_agent_t *g_active_agent = NULL;
 
 static void sigint_handler(int sig) {
     (void)sig;
@@ -80,10 +80,10 @@ static void sigint_handler(int sig) {
 /* ── Memory from config — delegates to shared factory ────────────────── */
 
 /* ── Arg parsing ─────────────────────────────────────────────────────── */
-sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
-                                   sc_parsed_agent_args_t *out) {
+hu_error_t hu_agent_cli_parse_args(const char *const *argv, size_t argc,
+                                   hu_parsed_agent_args_t *out) {
     if (!argv || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
     for (size_t i = 0; i < argc; i++) {
         const char *a = argv[i];
@@ -124,7 +124,7 @@ sc_error_t sc_agent_cli_parse_args(const char *const *argv, size_t argc,
             out->demo_mode = 1;
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 /* ── Streaming token callback ────────────────────────────────────────── */
@@ -135,7 +135,7 @@ static void cli_stream_token(const char *delta, size_t len, void *ctx) {
     if (delta && len > 0) {
         if (!cli_stream_started) {
             cli_stream_started = 1;
-            printf(SC_ANSI_SHOW_CURSOR SC_ANSI_CLEAR_LINE);
+            printf(HU_ANSI_SHOW_CURSOR HU_ANSI_CLEAR_LINE);
         }
         fwrite(delta, 1, len, stdout);
         fflush(stdout);
@@ -143,14 +143,14 @@ static void cli_stream_token(const char *delta, size_t len, void *ctx) {
 }
 
 /* ── Background agent turn (async mode) ──────────────────────────────── */
-#if SC_CLI_ASYNC
+#if HU_CLI_ASYNC
 typedef struct agent_turn_ctx {
-    sc_agent_t *agent;
+    hu_agent_t *agent;
     const char *msg;
     size_t msg_len;
     char *response;
     size_t response_len;
-    sc_error_t err;
+    hu_error_t err;
     volatile int done;
 } agent_turn_ctx_t;
 
@@ -158,7 +158,7 @@ static void *agent_turn_thread(void *arg) {
     agent_turn_ctx_t *ctx = (agent_turn_ctx_t *)arg;
     ctx->agent->active_channel = "cli";
     ctx->agent->active_channel_len = 3;
-    ctx->err = sc_agent_turn_stream(ctx->agent, ctx->msg, ctx->msg_len, cli_stream_token, NULL,
+    ctx->err = hu_agent_turn_stream(ctx->agent, ctx->msg, ctx->msg_len, cli_stream_token, NULL,
                                     &ctx->response, &ctx->response_len);
     ctx->done = 1;
     return NULL;
@@ -173,15 +173,15 @@ static int get_terminal_width(void) {
 
 static void run_spinner_loop(agent_turn_ctx_t *tctx) {
     int frame = 0;
-    printf(SC_ANSI_HIDE_CURSOR);
+    printf(HU_ANSI_HIDE_CURSOR);
     fflush(stdout);
 
     while (!tctx->done && !g_cancel) {
         if (!cli_stream_started) {
             int width = get_terminal_width();
             const char *label = " Thinking...";
-            printf(SC_ANSI_CLEAR_LINE SC_COLOR_ACCENT "%s" SC_COLOR_RESET SC_COLOR_DIM
-                                                      "%s" SC_COLOR_RESET,
+            printf(HU_ANSI_CLEAR_LINE HU_COLOR_ACCENT "%s" HU_COLOR_RESET HU_COLOR_DIM
+                                                      "%s" HU_COLOR_RESET,
                    spinner_frames[frame % SPINNER_FRAME_COUNT], label);
             (void)width;
             fflush(stdout);
@@ -193,43 +193,43 @@ static void run_spinner_loop(agent_turn_ctx_t *tctx) {
     }
 
     if (!cli_stream_started) {
-        printf(SC_ANSI_CLEAR_LINE SC_ANSI_SHOW_CURSOR);
+        printf(HU_ANSI_CLEAR_LINE HU_ANSI_SHOW_CURSOR);
         fflush(stdout);
     } else {
-        printf(SC_ANSI_SHOW_CURSOR);
+        printf(HU_ANSI_SHOW_CURSOR);
         fflush(stdout);
     }
 }
-#endif /* SC_CLI_ASYNC */
+#endif /* HU_CLI_ASYNC */
 
 /* ── Print welcome banner ────────────────────────────────────────────── */
 static void print_banner(const char *prov_name, const char *model, size_t tools_count) {
-    printf(SC_COLOR_BOLD SC_COLOR_ACCENT "%s" SC_COLOR_RESET " v%s\n", SC_CODENAME,
-           sc_version_string());
-    printf(SC_COLOR_DIM "Provider: %s | Model: %s | Tools: %zu" SC_COLOR_RESET "\n", prov_name,
+    printf(HU_COLOR_BOLD HU_COLOR_ACCENT "%s" HU_COLOR_RESET " v%s\n", HU_CODENAME,
+           hu_version_string());
+    printf(HU_COLOR_DIM "Provider: %s | Model: %s | Tools: %zu" HU_COLOR_RESET "\n", prov_name,
            (model[0] ? model : "(default)"), tools_count);
-    printf("Type your message, or " SC_COLOR_DIM "'exit'" SC_COLOR_RESET " to leave. " SC_COLOR_DIM
-           "Ctrl+C cancels a running turn." SC_COLOR_RESET "\n\n");
+    printf("Type your message, or " HU_COLOR_DIM "'exit'" HU_COLOR_RESET " to leave. " HU_COLOR_DIM
+           "Ctrl+C cancels a running turn." HU_COLOR_RESET "\n\n");
 }
 
 /* ── Main CLI loop ───────────────────────────────────────────────────── */
-sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size_t argc) {
+hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size_t argc) {
     if (!alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_parsed_agent_args_t parsed_args;
-    sc_agent_cli_parse_args(argv, argc, &parsed_args);
+    hu_parsed_agent_args_t parsed_args;
+    hu_agent_cli_parse_args(argv, argc, &parsed_args);
 
-    sc_config_t cfg;
-    sc_error_t err = sc_config_load(alloc, &cfg);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Config error: %s\n", SC_CODENAME, sc_error_string(err));
+    hu_config_t cfg;
+    hu_error_t err = hu_config_load(alloc, &cfg);
+    if (err != HU_OK) {
+        fprintf(stderr, "[%s] Config error: %s\n", HU_CODENAME, hu_error_string(err));
         return err;
     }
 
     if (parsed_args.demo_mode) {
-        fprintf(stderr, "[seaclaw] Demo mode — using local Ollama (no API key required)\n");
-        fprintf(stderr, "[seaclaw] Make sure Ollama is running: ollama serve\n");
+        fprintf(stderr, "[human] Demo mode — using local Ollama (no API key required)\n");
+        fprintf(stderr, "[human] Make sure Ollama is running: ollama serve\n");
         cfg.default_provider = "ollama";
         cfg.default_model = "llama3.2";
         cfg.memory.backend = "none";
@@ -238,18 +238,18 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
 
     const char *prov_name = cfg.default_provider ? cfg.default_provider : "openai";
     size_t prov_name_len = strlen(prov_name);
-    const char *api_key = sc_config_default_provider_key(&cfg);
+    const char *api_key = hu_config_default_provider_key(&cfg);
     size_t api_key_len = api_key ? strlen(api_key) : 0;
-    const char *base_url = sc_config_get_provider_base_url(&cfg, prov_name);
+    const char *base_url = hu_config_get_provider_base_url(&cfg, prov_name);
     size_t base_url_len = base_url ? strlen(base_url) : 0;
 
-    sc_provider_t provider;
-    err = sc_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
+    hu_provider_t provider;
+    err = hu_provider_create(alloc, prov_name, prov_name_len, api_key, api_key_len, base_url,
                              base_url_len, &provider);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", SC_CODENAME, prov_name,
-                sc_error_string(err));
-        sc_config_deinit(&cfg);
+    if (err != HU_OK) {
+        fprintf(stderr, "[%s] Provider '%s' init failed: %s\n", HU_CODENAME, prov_name,
+                hu_error_string(err));
+        hu_config_deinit(&cfg);
         return err;
     }
 
@@ -259,49 +259,49 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
     uint32_t max_iters = cfg.agent.max_tool_iterations > 0 ? cfg.agent.max_tool_iterations : 25;
     uint32_t max_hist = cfg.agent.max_history_messages > 0 ? cfg.agent.max_history_messages : 100;
 
-    sc_runtime_t runtime;
-    err = sc_runtime_from_config(&cfg, &runtime);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Runtime '%s' not supported: %s\n", SC_CODENAME,
-                cfg.runtime.kind ? cfg.runtime.kind : "(null)", sc_error_string(err));
-        sc_config_deinit(&cfg);
+    hu_runtime_t runtime;
+    err = hu_runtime_from_config(&cfg, &runtime);
+    if (err != HU_OK) {
+        fprintf(stderr, "[%s] Runtime '%s' not supported: %s\n", HU_CODENAME,
+                cfg.runtime.kind ? cfg.runtime.kind : "(null)", hu_error_string(err));
+        hu_config_deinit(&cfg);
         return err;
     }
 
-    sc_security_policy_t policy = {0};
-    policy.autonomy = (sc_autonomy_level_t)cfg.security.autonomy_level;
+    hu_security_policy_t policy = {0};
+    policy.autonomy = (hu_autonomy_level_t)cfg.security.autonomy_level;
     policy.workspace_dir = ws;
     policy.workspace_only = true;
-    policy.allow_shell = (policy.autonomy != SC_AUTONOMY_READ_ONLY);
+    policy.allow_shell = (policy.autonomy != HU_AUTONOMY_READ_ONLY);
     if (runtime.vtable && runtime.vtable->has_shell_access)
         policy.allow_shell = policy.allow_shell && runtime.vtable->has_shell_access(runtime.ctx);
-    policy.block_high_risk_commands = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
-    policy.require_approval_for_medium_risk = (policy.autonomy == SC_AUTONOMY_SUPERVISED);
+    policy.block_high_risk_commands = (policy.autonomy == HU_AUTONOMY_SUPERVISED);
+    policy.require_approval_for_medium_risk = (policy.autonomy == HU_AUTONOMY_SUPERVISED);
     policy.max_actions_per_hour = 100;
-    policy.tracker = sc_rate_tracker_create(alloc, policy.max_actions_per_hour);
+    policy.tracker = hu_rate_tracker_create(alloc, policy.max_actions_per_hour);
 
-    sc_sandbox_alloc_t sb_alloc = {
+    hu_sandbox_alloc_t sb_alloc = {
         .ctx = alloc->ctx,
         .alloc = alloc->alloc,
         .free = alloc->free,
     };
-    sc_sandbox_storage_t *sb_storage = NULL;
-    sc_sandbox_t sandbox = {0};
-    sc_net_proxy_t net_proxy = {0};
+    hu_sandbox_storage_t *sb_storage = NULL;
+    hu_sandbox_t sandbox = {0};
+    hu_net_proxy_t net_proxy = {0};
 
     if (cfg.security.sandbox_config.enabled ||
-        cfg.security.sandbox_config.backend != SC_SANDBOX_NONE) {
-        sb_storage = sc_sandbox_storage_create(&sb_alloc);
+        cfg.security.sandbox_config.backend != HU_SANDBOX_NONE) {
+        sb_storage = hu_sandbox_storage_create(&sb_alloc);
         if (sb_storage) {
             sandbox =
-                sc_sandbox_create(cfg.security.sandbox_config.backend, ws, sb_storage, &sb_alloc);
+                hu_sandbox_create(cfg.security.sandbox_config.backend, ws, sb_storage, &sb_alloc);
             if (sandbox.vtable) {
                 policy.sandbox = &sandbox;
 #if defined(__linux__)
-                if (strcmp(sc_sandbox_name(&sandbox), "firejail") == 0 &&
+                if (strcmp(hu_sandbox_name(&sandbox), "firejail") == 0 &&
                     cfg.security.sandbox_config.firejail_args_len > 0) {
-                    sc_firejail_sandbox_set_extra_args(
-                        (sc_firejail_ctx_t *)sandbox.ctx,
+                    hu_firejail_sandbox_set_extra_args(
+                        (hu_firejail_ctx_t *)sandbox.ctx,
                         (const char *const *)cfg.security.sandbox_config.firejail_args,
                         cfg.security.sandbox_config.firejail_args_len);
                 }
@@ -316,7 +316,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         net_proxy.proxy_addr = cfg.security.sandbox_config.net_proxy.proxy_addr;
         net_proxy.allowed_domains_count = 0;
         for (size_t i = 0; i < cfg.security.sandbox_config.net_proxy.allowed_domains_len &&
-                           i < SC_NET_PROXY_MAX_DOMAINS;
+                           i < HU_NET_PROXY_MAX_DOMAINS;
              i++) {
             net_proxy.allowed_domains[net_proxy.allowed_domains_count++] =
                 cfg.security.sandbox_config.net_proxy.allowed_domains[i];
@@ -324,52 +324,52 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         policy.net_proxy = &net_proxy;
     }
 
-    sc_observer_t observer = {0};
+    hu_observer_t observer = {0};
     FILE *log_fp = NULL;
-    const char *log_env = getenv("SEACLAW_LOG");
+    const char *log_env = getenv("HUMAN_LOG");
     if (log_env && log_env[0]) {
         log_fp = fopen(log_env, "a");
         if (!log_fp) {
             fprintf(stderr, "[warn] could not open log file '%s': %s\n", log_env, strerror(errno));
         } else {
-            observer = sc_log_observer_create(alloc, log_fp);
+            observer = hu_log_observer_create(alloc, log_fp);
         }
     }
 
-    sc_bus_t cli_bus;
-    sc_bus_init(&cli_bus);
-    sc_awareness_t cli_awareness = {0};
-    (void)sc_awareness_init(&cli_awareness, &cli_bus);
+    hu_bus_t cli_bus;
+    hu_bus_init(&cli_bus);
+    hu_awareness_t cli_awareness = {0};
+    (void)hu_awareness_init(&cli_awareness, &cli_bus);
 
-    sc_memory_t memory = sc_memory_create_from_config(alloc, &cfg, ws);
-    sc_session_store_t session_store = {0};
+    hu_memory_t memory = hu_memory_create_from_config(alloc, &cfg, ws);
+    hu_session_store_t session_store = {0};
     if (memory.vtable &&
         strcmp(cfg.memory.backend ? cfg.memory.backend : "markdown", "sqlite") == 0)
-        session_store = sc_sqlite_memory_get_session_store(&memory);
+        session_store = hu_sqlite_memory_get_session_store(&memory);
 
-    sc_embedder_t embedder = sc_embedder_local_create(alloc);
-    sc_vector_store_t vector_store = sc_vector_store_mem_create(alloc);
-    sc_retrieval_engine_t retrieval_engine =
-        sc_retrieval_create_with_vector(alloc, &memory, &embedder, &vector_store);
+    hu_embedder_t embedder = hu_embedder_local_create(alloc);
+    hu_vector_store_t vector_store = hu_vector_store_mem_create(alloc);
+    hu_retrieval_engine_t retrieval_engine =
+        hu_retrieval_create_with_vector(alloc, &memory, &embedder, &vector_store);
 
-#ifdef SC_HAS_CRON
-    sc_cron_scheduler_t *cron = sc_cron_create(alloc, 64, true);
+#ifdef HU_HAS_CRON
+    hu_cron_scheduler_t *cron = hu_cron_create(alloc, 64, true);
 #else
-    sc_cron_scheduler_t *cron = NULL;
+    hu_cron_scheduler_t *cron = NULL;
 #endif
 
-    sc_agent_pool_t *cli_agent_pool = sc_agent_pool_create(alloc, cfg.agent.pool_max_concurrent);
-    sc_mailbox_t *cli_mailbox = sc_mailbox_create(alloc, 64);
+    hu_agent_pool_t *cli_agent_pool = hu_agent_pool_create(alloc, cfg.agent.pool_max_concurrent);
+    hu_mailbox_t *cli_mailbox = hu_mailbox_create(alloc, 64);
 
-    sc_tool_t *tools = NULL;
+    hu_tool_t *tools = NULL;
     size_t tools_count = 0;
-    err = sc_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
+    err = hu_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
                                   memory.vtable ? &memory : NULL, cron, cli_agent_pool, cli_mailbox,
                                   &tools, &tools_count);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Tools init failed: %s\n", SC_CODENAME, sc_error_string(err));
+    if (err != HU_OK) {
+        fprintf(stderr, "[%s] Tools init failed: %s\n", HU_CODENAME, hu_error_string(err));
         if (cron)
-            sc_cron_destroy(cron, alloc);
+            hu_cron_destroy(cron, alloc);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
         if (vector_store.vtable && vector_store.vtable->deinit)
@@ -379,15 +379,15 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         if (memory.vtable && memory.vtable->deinit)
             memory.vtable->deinit(memory.ctx);
         if (policy.tracker)
-            sc_rate_tracker_destroy(policy.tracker);
+            hu_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
-            sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
-        sc_awareness_deinit(&cli_awareness);
-        sc_config_deinit(&cfg);
+            hu_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        hu_awareness_deinit(&cli_awareness);
+        hu_config_deinit(&cfg);
         return err;
     }
 
-    sc_agent_context_config_t ctx_cfg = {
+    hu_agent_context_config_t ctx_cfg = {
         .token_limit = cfg.agent.token_limit,
         .pressure_warn = cfg.agent.context_pressure_warn,
         .pressure_compact = cfg.agent.context_pressure_compact,
@@ -395,21 +395,21 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         .llm_compiler_enabled = cfg.agent.llm_compiler_enabled,
         .tool_routing_enabled = cfg.agent.tool_routing_enabled,
     };
-    sc_agent_t agent;
-    err = sc_agent_from_config(
+    hu_agent_t agent;
+    err = hu_agent_from_config(
         &agent, alloc, provider, tools, tools_count, memory.vtable ? &memory : NULL,
         session_store.vtable ? &session_store : NULL, &observer, NULL, model, strlen(model),
         prov_name, prov_name_len, temp, ws, strlen(ws), max_iters, max_hist, cfg.memory.auto_save,
         2, NULL, 0, cfg.agent.persona, cfg.agent.persona ? strlen(cfg.agent.persona) : 0, &ctx_cfg);
-    if (err != SC_OK) {
-        fprintf(stderr, "[%s] Agent init failed: %s\n", SC_CODENAME, sc_error_string(err));
+    if (err != HU_OK) {
+        fprintf(stderr, "[%s] Agent init failed: %s\n", HU_CODENAME, hu_error_string(err));
         if (observer.vtable && observer.vtable->deinit)
             observer.vtable->deinit(observer.ctx);
         if (log_fp)
             fclose(log_fp);
-        sc_tools_destroy_default(alloc, tools, tools_count);
+        hu_tools_destroy_default(alloc, tools, tools_count);
         if (cron)
-            sc_cron_destroy(cron, alloc);
+            hu_cron_destroy(cron, alloc);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
         if (vector_store.vtable && vector_store.vtable->deinit)
@@ -417,39 +417,39 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         if (embedder.vtable && embedder.vtable->deinit)
             embedder.vtable->deinit(embedder.ctx, alloc);
         if (policy.tracker)
-            sc_rate_tracker_destroy(policy.tracker);
+            hu_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
-            sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
-        sc_awareness_deinit(&cli_awareness);
-        sc_bus_deinit(&cli_bus);
-        sc_config_deinit(&cfg);
+            hu_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        hu_awareness_deinit(&cli_awareness);
+        hu_bus_deinit(&cli_bus);
+        hu_config_deinit(&cfg);
         return err;
     }
     agent.agent_pool = cli_agent_pool;
-    sc_agent_set_mailbox(&agent, cli_mailbox);
+    hu_agent_set_mailbox(&agent, cli_mailbox);
     agent.policy_engine = NULL;
 
     if (cfg.security.audit.enabled) {
-        sc_audit_config_t acfg = SC_AUDIT_CONFIG_DEFAULT;
+        hu_audit_config_t acfg = HU_AUDIT_CONFIG_DEFAULT;
         acfg.enabled = true;
         acfg.log_path = cfg.security.audit.log_path ? cfg.security.audit.log_path : "audit.log";
         acfg.max_size_mb = cfg.security.audit.max_size_mb > 0 ? cfg.security.audit.max_size_mb : 10;
-        agent.audit_logger = sc_audit_logger_create(alloc, &acfg, ws);
+        agent.audit_logger = hu_audit_logger_create(alloc, &acfg, ws);
     }
 
     if (cfg.policy.enabled) {
-        agent.policy_engine = sc_policy_engine_create(alloc);
+        agent.policy_engine = hu_policy_engine_create(alloc);
     }
 
     if (cfg.agent.default_profile) {
-        const sc_agent_profile_t *prof =
-            sc_agent_profile_by_name(cfg.agent.default_profile, strlen(cfg.agent.default_profile));
+        const hu_agent_profile_t *prof =
+            hu_agent_profile_by_name(cfg.agent.default_profile, strlen(cfg.agent.default_profile));
         if (prof) {
             if (prof->preferred_model && prof->preferred_model[0] && !parsed_args.model_override) {
                 char *old = agent.model_name;
                 size_t old_len = agent.model_name_len;
                 agent.model_name =
-                    sc_strndup(alloc, prof->preferred_model, strlen(prof->preferred_model));
+                    hu_strndup(alloc, prof->preferred_model, strlen(prof->preferred_model));
                 agent.model_name_len = strlen(prof->preferred_model);
                 if (old)
                     alloc->free(alloc->ctx, old, old_len + 1);
@@ -463,47 +463,47 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         }
     }
 
-#ifdef SC_HAS_OTEL
-    sc_observer_t otel_observer = {0};
+#ifdef HU_HAS_OTEL
+    hu_observer_t otel_observer = {0};
     if (cfg.diagnostics.otel_endpoint && cfg.diagnostics.otel_endpoint[0]) {
-        sc_otel_config_t otel_cfg = {
+        hu_otel_config_t otel_cfg = {
             .endpoint = cfg.diagnostics.otel_endpoint,
             .endpoint_len = strlen(cfg.diagnostics.otel_endpoint),
             .service_name =
-                cfg.diagnostics.otel_service_name ? cfg.diagnostics.otel_service_name : "seaclaw",
+                cfg.diagnostics.otel_service_name ? cfg.diagnostics.otel_service_name : "human",
             .service_name_len =
                 cfg.diagnostics.otel_service_name ? strlen(cfg.diagnostics.otel_service_name) : 7,
             .enable_traces = true,
             .enable_metrics = true,
             .enable_logs = true,
         };
-        if (sc_otel_observer_create(alloc, &otel_cfg, &otel_observer) == SC_OK &&
+        if (hu_otel_observer_create(alloc, &otel_cfg, &otel_observer) == HU_OK &&
             otel_observer.vtable) {
             agent.observer = &otel_observer;
         }
     }
 #endif
 
-    sc_agent_set_retrieval_engine(&agent, &retrieval_engine);
+    hu_agent_set_retrieval_engine(&agent, &retrieval_engine);
     if (cli_awareness.bus)
-        sc_agent_set_awareness(&agent, (struct sc_awareness *)&cli_awareness);
+        hu_agent_set_awareness(&agent, (struct hu_awareness *)&cli_awareness);
 
-    sc_outcome_tracker_t cli_outcomes;
-    sc_outcome_tracker_init(&cli_outcomes, true);
-    sc_agent_set_outcomes(&agent, &cli_outcomes);
-    agent.scheduler = (struct sc_cron_scheduler *)cron;
+    hu_outcome_tracker_t cli_outcomes;
+    hu_outcome_tracker_init(&cli_outcomes, true);
+    hu_agent_set_outcomes(&agent, &cli_outcomes);
+    agent.scheduler = (struct hu_cron_scheduler *)cron;
 
     /* TUI mode: launch split-pane terminal UI if --tui was passed */
     if (parsed_args.use_tui) {
-        sc_tui_state_t tui_state;
-        err = sc_tui_init(&tui_state, alloc, &agent, prov_name, model, tools_count);
-        if (err == SC_OK) {
-            err = sc_tui_run(&tui_state);
-            sc_tui_deinit(&tui_state);
+        hu_tui_state_t tui_state;
+        err = hu_tui_init(&tui_state, alloc, &agent, prov_name, model, tools_count);
+        if (err == HU_OK) {
+            err = hu_tui_run(&tui_state);
+            hu_tui_deinit(&tui_state);
         } else {
-            fprintf(stderr, "[%s] TUI not available: %s\n", SC_CODENAME, sc_error_string(err));
+            fprintf(stderr, "[%s] TUI not available: %s\n", HU_CODENAME, hu_error_string(err));
         }
-        sc_agent_deinit(&agent);
+        hu_agent_deinit(&agent);
         if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
         if (vector_store.vtable && vector_store.vtable->deinit)
@@ -516,23 +516,23 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             observer.vtable->deinit(observer.ctx);
         if (log_fp)
             fclose(log_fp);
-        sc_tools_destroy_default(alloc, tools, tools_count);
-#ifdef SC_HAS_OTEL
+        hu_tools_destroy_default(alloc, tools, tools_count);
+#ifdef HU_HAS_OTEL
         if (otel_observer.vtable && otel_observer.vtable->deinit)
             otel_observer.vtable->deinit(otel_observer.ctx);
 #endif
         if (agent.policy_engine)
-            sc_policy_engine_destroy(agent.policy_engine);
+            hu_policy_engine_destroy(agent.policy_engine);
         if (cli_mailbox)
-            sc_mailbox_destroy(cli_mailbox);
+            hu_mailbox_destroy(cli_mailbox);
         if (cli_agent_pool)
-            sc_agent_pool_destroy(cli_agent_pool);
+            hu_agent_pool_destroy(cli_agent_pool);
         if (policy.tracker)
-            sc_rate_tracker_destroy(policy.tracker);
+            hu_rate_tracker_destroy(policy.tracker);
         if (sb_storage)
-            sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
-        sc_awareness_deinit(&cli_awareness);
-        sc_config_deinit(&cfg);
+            hu_sandbox_storage_destroy(sb_storage, &sb_alloc);
+        hu_awareness_deinit(&cli_awareness);
+        hu_config_deinit(&cfg);
         return err;
     }
 
@@ -563,19 +563,19 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             line_owned = 0;
             one_shot = 0;
         } else {
-            printf(SC_COLOR_BOLD SC_COLOR_SUCCESS "> " SC_COLOR_RESET);
+            printf(HU_COLOR_BOLD HU_COLOR_SUCCESS "> " HU_COLOR_RESET);
             fflush(stdout);
-            line = sc_cli_readline(alloc, &line_len);
+            line = hu_cli_readline(alloc, &line_len);
         }
         if (!line)
             break;
 
-        if (line_owned && sc_cli_is_quit_command(line, line_len)) {
+        if (line_owned && hu_cli_is_quit_command(line, line_len)) {
             alloc->free(alloc->ctx, line, line_len + 1);
             break;
         }
 
-        char *slash = sc_agent_handle_slash_command(&agent, line, line_len);
+        char *slash = hu_agent_handle_slash_command(&agent, line, line_len);
         if (slash) {
             printf("%s\n", slash);
             alloc->free(alloc->ctx, slash, strlen(slash) + 1);
@@ -588,7 +588,7 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         agent.cancel_requested = 0;
         cli_stream_started = 0;
 
-#if SC_CLI_ASYNC
+#if HU_CLI_ASYNC
         agent_turn_ctx_t tctx;
         memset(&tctx, 0, sizeof(tctx));
         tctx.agent = &agent;
@@ -606,17 +606,17 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         run_spinner_loop(&tctx);
 
         if (g_cancel && !tctx.done) {
-            printf(SC_ANSI_CLEAR_LINE SC_ANSI_SHOW_CURSOR SC_COLOR_WARNING
-                   "Cancelled." SC_COLOR_RESET "\n");
+            printf(HU_ANSI_CLEAR_LINE HU_ANSI_SHOW_CURSOR HU_COLOR_WARNING
+                   "Cancelled." HU_COLOR_RESET "\n");
         }
 
         pthread_join(tid, NULL);
         err = tctx.err;
 
-        if (err == SC_ERR_CANCELLED) {
-            printf(SC_COLOR_DIM "Turn cancelled by user." SC_COLOR_RESET "\n");
-        } else if (err != SC_OK) {
-            fprintf(stderr, "[error] %s\n", sc_error_string(err));
+        if (err == HU_ERR_CANCELLED) {
+            printf(HU_COLOR_DIM "Turn cancelled by user." HU_COLOR_RESET "\n");
+        } else if (err != HU_OK) {
+            fprintf(stderr, "[error] %s\n", hu_error_string(err));
         } else if (tctx.response && tctx.response_len > 0) {
             if (!cli_stream_started) {
                 fwrite(tctx.response, 1, tctx.response_len, stdout);
@@ -632,16 +632,16 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         agent.active_channel_len = 3;
         printf("Thinking...\r");
         fflush(stdout);
-        err = sc_agent_turn_stream(&agent, line, line_len, cli_stream_token, NULL, &response,
+        err = hu_agent_turn_stream(&agent, line, line_len, cli_stream_token, NULL, &response,
                                    &response_len);
         if (!cli_stream_started) {
             printf("                    \r");
             fflush(stdout);
         }
-        if (err == SC_ERR_CANCELLED) {
+        if (err == HU_ERR_CANCELLED) {
             printf("Turn cancelled.\n");
-        } else if (err != SC_OK) {
-            fprintf(stderr, "[error] %s\n", sc_error_string(err));
+        } else if (err != HU_OK) {
+            fprintf(stderr, "[error] %s\n", hu_error_string(err));
         } else if (response && response_len > 0) {
             fputc('\n', stdout);
             fflush(stdout);
@@ -655,10 +655,10 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
             break;
     }
 
-    printf("\n" SC_COLOR_DIM "Goodbye." SC_COLOR_RESET "\n");
+    printf("\n" HU_COLOR_DIM "Goodbye." HU_COLOR_RESET "\n");
     g_active_agent = NULL;
     sigaction(SIGINT, &old_sa, NULL);
-    sc_agent_deinit(&agent);
+    hu_agent_deinit(&agent);
     if (retrieval_engine.vtable && retrieval_engine.vtable->deinit)
         retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
     if (vector_store.vtable && vector_store.vtable->deinit)
@@ -671,25 +671,25 @@ sc_error_t sc_agent_cli_run(sc_allocator_t *alloc, const char *const *argv, size
         observer.vtable->deinit(observer.ctx);
     if (log_fp)
         fclose(log_fp);
-    sc_tools_destroy_default(alloc, tools, tools_count);
-#ifdef SC_HAS_OTEL
+    hu_tools_destroy_default(alloc, tools, tools_count);
+#ifdef HU_HAS_OTEL
     if (otel_observer.vtable && otel_observer.vtable->deinit)
         otel_observer.vtable->deinit(otel_observer.ctx);
 #endif
     if (agent.policy_engine)
-        sc_policy_engine_destroy(agent.policy_engine);
+        hu_policy_engine_destroy(agent.policy_engine);
     if (cli_mailbox)
-        sc_mailbox_destroy(cli_mailbox);
+        hu_mailbox_destroy(cli_mailbox);
     if (cli_agent_pool)
-        sc_agent_pool_destroy(cli_agent_pool);
+        hu_agent_pool_destroy(cli_agent_pool);
     if (cron)
-        sc_cron_destroy(cron, alloc);
+        hu_cron_destroy(cron, alloc);
     if (policy.tracker)
-        sc_rate_tracker_destroy(policy.tracker);
+        hu_rate_tracker_destroy(policy.tracker);
     if (sb_storage)
-        sc_sandbox_storage_destroy(sb_storage, &sb_alloc);
-    sc_awareness_deinit(&cli_awareness);
-    sc_bus_deinit(&cli_bus);
-    sc_config_deinit(&cfg);
-    return SC_OK;
+        hu_sandbox_storage_destroy(sb_storage, &sb_alloc);
+    hu_awareness_deinit(&cli_awareness);
+    hu_bus_deinit(&cli_bus);
+    hu_config_deinit(&cfg);
+    return HU_OK;
 }

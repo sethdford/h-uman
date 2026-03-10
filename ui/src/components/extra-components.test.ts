@@ -1,99 +1,99 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import type { ScChart } from "./sc-chart.js";
-import type { ScJsonViewer } from "./sc-json-viewer.js";
-import type { ScPagination } from "./sc-pagination.js";
-import type { ScDataTableV2 } from "./sc-data-table-v2.js";
-import type { ScCheckbox } from "./sc-checkbox.js";
-import type { ScCombobox } from "./sc-combobox.js";
-import type { ScFormGroup } from "./sc-form-group.js";
+import type { ScChart } from "./hu-chart.js";
+import type { ScJsonViewer } from "./hu-json-viewer.js";
+import type { ScPagination } from "./hu-pagination.js";
+import type { ScDataTableV2 } from "./hu-data-table-v2.js";
+import type { ScCheckbox } from "./hu-checkbox.js";
+import type { ScCombobox } from "./hu-combobox.js";
+import type { ScFormGroup } from "./hu-form-group.js";
 
 import "./floating-mic.js";
 import "./sidebar.js";
 import "./command-palette.js";
-import "./sc-welcome.js";
-import "./sc-sparkline.js";
-import "./sc-animated-icon.js";
-import "./sc-animated-number.js";
-import "./sc-activity-feed.js";
-import "./sc-thinking.js";
-import "./sc-tool-result.js";
-import "./sc-code-block.js";
-import "./sc-artifact-viewer.js";
-import "./sc-artifact-panel.js";
-import "./sc-latex.js";
-import "./sc-message-stream.js";
-import "./sc-message-branch.js";
-import "./sc-reasoning-block.js";
-import "./sc-shortcut-overlay.js";
-import "./sc-context-menu.js";
-import "./sc-error-boundary.js";
-import "./sc-welcome-card.js";
-import "./sc-message-actions.js";
-import "./sc-chat-sessions-panel.js";
-import "./sc-file-preview.js";
-import "./sc-stat-card.js";
-import "./sc-stats-row.js";
-import "./sc-section-header.js";
-import "./sc-metric-row.js";
-import "./sc-timeline.js";
-import "./sc-sparkline-enhanced.js";
-import "./sc-forecast-chart.js";
-import "./sc-page-hero.js";
-import "./sc-schedule-builder.js";
-import "./sc-automation-card.js";
-import "./sc-automation-form.js";
-import "./sc-chat-bubble.js";
-import "./sc-typing-indicator.js";
-import "./sc-delivery-status.js";
-import "./sc-message-group.js";
-import "./sc-link-preview.js";
-import "./sc-model-selector.js";
-import "./sc-tapback-menu.js";
-import "./sc-chat-composer.js";
-import "./sc-message-thread.js";
-import "./sc-branch-tree.js";
-import "./sc-image-viewer.js";
-import "./sc-voice-orb.js";
-import "./sc-voice-conversation.js";
-import "./sc-chart.js";
-import "./sc-json-viewer.js";
-import "./sc-pagination.js";
-import "./sc-data-table-v2.js";
-import "./sc-checkbox.js";
-import "./sc-combobox.js";
-import "./sc-form-group.js";
-import "./sc-activity-timeline.js";
-import "./sc-overview-stats.js";
-import "./sc-sessions-table.js";
-import "./sc-skill-card.js";
-import "./sc-skill-detail.js";
-import "./sc-skill-registry.js";
+import "./hu-welcome.js";
+import "./hu-sparkline.js";
+import "./hu-animated-icon.js";
+import "./hu-animated-number.js";
+import "./hu-activity-feed.js";
+import "./hu-thinking.js";
+import "./hu-tool-result.js";
+import "./hu-code-block.js";
+import "./hu-artifact-viewer.js";
+import "./hu-artifact-panel.js";
+import "./hu-latex.js";
+import "./hu-message-stream.js";
+import "./hu-message-branch.js";
+import "./hu-reasoning-block.js";
+import "./hu-shortcut-overlay.js";
+import "./hu-context-menu.js";
+import "./hu-error-boundary.js";
+import "./hu-welcome-card.js";
+import "./hu-message-actions.js";
+import "./hu-chat-sessions-panel.js";
+import "./hu-file-preview.js";
+import "./hu-stat-card.js";
+import "./hu-stats-row.js";
+import "./hu-section-header.js";
+import "./hu-metric-row.js";
+import "./hu-timeline.js";
+import "./hu-sparkline-enhanced.js";
+import "./hu-forecast-chart.js";
+import "./hu-page-hero.js";
+import "./hu-schedule-builder.js";
+import "./hu-automation-card.js";
+import "./hu-automation-form.js";
+import "./hu-chat-bubble.js";
+import "./hu-typing-indicator.js";
+import "./hu-delivery-status.js";
+import "./hu-message-group.js";
+import "./hu-link-preview.js";
+import "./hu-model-selector.js";
+import "./hu-tapback-menu.js";
+import "./hu-chat-composer.js";
+import "./hu-message-thread.js";
+import "./hu-branch-tree.js";
+import "./hu-image-viewer.js";
+import "./hu-voice-orb.js";
+import "./hu-voice-conversation.js";
+import "./hu-chart.js";
+import "./hu-json-viewer.js";
+import "./hu-pagination.js";
+import "./hu-data-table-v2.js";
+import "./hu-checkbox.js";
+import "./hu-combobox.js";
+import "./hu-form-group.js";
+import "./hu-activity-timeline.js";
+import "./hu-overview-stats.js";
+import "./hu-sessions-table.js";
+import "./hu-skill-card.js";
+import "./hu-skill-detail.js";
+import "./hu-skill-registry.js";
 import { SPRING_PRESETS, springAnimate } from "../lib/spring.js";
 
-describe("sc-checkbox", () => {
+describe("hu-checkbox", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-checkbox")).toBeDefined();
+    expect(customElements.get("hu-checkbox")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-checkbox");
+    const el = document.createElement("hu-checkbox");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should default checked to false", () => {
-    const el = document.createElement("sc-checkbox") as ScCheckbox;
+    const el = document.createElement("hu-checkbox") as ScCheckbox;
     expect(el.checked).toBe(false);
   });
 
   it("should toggle on click", async () => {
-    const el = document.createElement("sc-checkbox") as ScCheckbox;
+    const el = document.createElement("hu-checkbox") as ScCheckbox;
     document.body.appendChild(el);
     await el.updateComplete;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    el.addEventListener("sc-change", (e: any) => events.push(e.detail));
+    el.addEventListener("hu-change", (e: any) => events.push(e.detail));
     (el.shadowRoot?.querySelector('[role="checkbox"]') as HTMLElement)?.click();
     expect(events.length).toBe(1);
     expect(events[0].checked).toBe(true);
@@ -101,55 +101,55 @@ describe("sc-checkbox", () => {
   });
 
   it("should not toggle when disabled", async () => {
-    const el = document.createElement("sc-checkbox") as ScCheckbox;
+    const el = document.createElement("hu-checkbox") as ScCheckbox;
     el.disabled = true;
     document.body.appendChild(el);
     await el.updateComplete;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    el.addEventListener("sc-change", (e: any) => events.push(e.detail));
+    el.addEventListener("hu-change", (e: any) => events.push(e.detail));
     (el.shadowRoot?.querySelector('[role="checkbox"]') as HTMLElement)?.click();
     expect(events.length).toBe(0);
     el.remove();
   });
 
   it("should support label", () => {
-    const el = document.createElement("sc-checkbox") as ScCheckbox;
+    const el = document.createElement("hu-checkbox") as ScCheckbox;
     el.label = "Accept terms";
     expect(el.label).toBe("Accept terms");
   });
 });
 
-describe("sc-combobox", () => {
+describe("hu-combobox", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-combobox")).toBeDefined();
+    expect(customElements.get("hu-combobox")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-combobox");
+    const el = document.createElement("hu-combobox");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept options", () => {
-    const el = document.createElement("sc-combobox") as ScCombobox;
+    const el = document.createElement("hu-combobox") as ScCombobox;
     el.options = [{ value: "a", label: "Alpha" }];
     expect(el.options.length).toBe(1);
   });
 
   it("should accept value", () => {
-    const el = document.createElement("sc-combobox") as ScCombobox;
+    const el = document.createElement("hu-combobox") as ScCombobox;
     el.value = "test";
     expect(el.value).toBe("test");
   });
 
   it("should default freeText to false", () => {
-    const el = document.createElement("sc-combobox") as ScCombobox;
+    const el = document.createElement("hu-combobox") as ScCombobox;
     expect(el.freeText).toBe(false);
   });
 
   it("should have combobox role", async () => {
-    const el = document.createElement("sc-combobox") as ScCombobox;
+    const el = document.createElement("hu-combobox") as ScCombobox;
     document.body.appendChild(el);
     await el.updateComplete;
     const input = el.shadowRoot?.querySelector('[role="combobox"]');
@@ -158,66 +158,66 @@ describe("sc-combobox", () => {
   });
 });
 
-describe("sc-form-group", () => {
+describe("hu-form-group", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-form-group")).toBeDefined();
+    expect(customElements.get("hu-form-group")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-form-group");
+    const el = document.createElement("hu-form-group");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should default dirty to false", () => {
-    const el = document.createElement("sc-form-group") as ScFormGroup;
+    const el = document.createElement("hu-form-group") as ScFormGroup;
     expect(el.dirty).toBe(false);
   });
 
   it("should default valid to true", () => {
-    const el = document.createElement("sc-form-group") as ScFormGroup;
+    const el = document.createElement("hu-form-group") as ScFormGroup;
     expect(el.valid).toBe(true);
   });
 
   it("should have validate method", () => {
-    const el = document.createElement("sc-form-group") as ScFormGroup;
+    const el = document.createElement("hu-form-group") as ScFormGroup;
     expect(typeof el.validate).toBe("function");
   });
 
   it("should have reset method", () => {
-    const el = document.createElement("sc-form-group") as ScFormGroup;
+    const el = document.createElement("hu-form-group") as ScFormGroup;
     expect(typeof el.reset).toBe("function");
   });
 });
 
-describe("sc-pagination", () => {
+describe("hu-pagination", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-pagination")).toBeDefined();
+    expect(customElements.get("hu-pagination")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-pagination");
+    const el = document.createElement("hu-pagination");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should compute page count from total and pageSize", () => {
-    const el = document.createElement("sc-pagination") as ScPagination;
+    const el = document.createElement("hu-pagination") as ScPagination;
     el.total = 100;
     el.pageSize = 10;
     expect(el.pageCount).toBe(10);
   });
 
   it("should default page to 1", () => {
-    const el = document.createElement("sc-pagination") as ScPagination;
+    const el = document.createElement("hu-pagination") as ScPagination;
     expect(el.page).toBe(1);
   });
 
   it("should default pageSize to 10", () => {
-    const el = document.createElement("sc-pagination") as ScPagination;
+    const el = document.createElement("hu-pagination") as ScPagination;
     expect(el.pageSize).toBe(10);
   });
 
-  it("should fire sc-page-change on page navigation", async () => {
-    const el = document.createElement("sc-pagination") as ScPagination;
+  it("should fire hu-page-change on page navigation", async () => {
+    const el = document.createElement("hu-pagination") as ScPagination;
     el.total = 50;
     el.pageSize = 10;
     el.page = 1;
@@ -227,7 +227,7 @@ describe("sc-pagination", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    el.addEventListener("sc-page-change", (e: any) => events.push(e.detail));
+    el.addEventListener("hu-page-change", (e: any) => events.push(e.detail));
 
     const nextBtn = el.shadowRoot?.querySelector('[aria-label="Next page"]') as HTMLButtonElement;
     nextBtn?.click();
@@ -237,7 +237,7 @@ describe("sc-pagination", () => {
   });
 
   it("should render showing label", async () => {
-    const el = document.createElement("sc-pagination") as ScPagination;
+    const el = document.createElement("hu-pagination") as ScPagination;
     el.total = 100;
     el.pageSize = 10;
     el.page = 1;
@@ -251,18 +251,18 @@ describe("sc-pagination", () => {
   });
 });
 
-describe("sc-data-table-v2", () => {
+describe("hu-data-table-v2", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-data-table-v2")).toBeDefined();
+    expect(customElements.get("hu-data-table-v2")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-data-table-v2");
+    const el = document.createElement("hu-data-table-v2");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render rows", async () => {
-    const el = document.createElement("sc-data-table-v2") as ScDataTableV2;
+    const el = document.createElement("hu-data-table-v2") as ScDataTableV2;
     el.columns = [{ key: "name", label: "Name" }];
     el.rows = [{ name: "Alice" }, { name: "Bob" }];
     el.paginated = false;
@@ -273,8 +273,8 @@ describe("sc-data-table-v2", () => {
     el.remove();
   });
 
-  it("should fire sc-row-click on row click", async () => {
-    const el = document.createElement("sc-data-table-v2") as ScDataTableV2;
+  it("should fire hu-row-click on row click", async () => {
+    const el = document.createElement("hu-data-table-v2") as ScDataTableV2;
     el.columns = [{ key: "name", label: "Name" }];
     el.rows = [{ name: "Alice" }];
     el.paginated = false;
@@ -284,7 +284,7 @@ describe("sc-data-table-v2", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    el.addEventListener("sc-row-click", (e: any) => events.push(e.detail));
+    el.addEventListener("hu-row-click", (e: any) => events.push(e.detail));
 
     const row = el.shadowRoot?.querySelector("tbody tr") as HTMLElement;
     row?.click();
@@ -294,7 +294,7 @@ describe("sc-data-table-v2", () => {
   });
 
   it("should sort when clicking sortable column", async () => {
-    const el = document.createElement("sc-data-table-v2") as ScDataTableV2;
+    const el = document.createElement("hu-data-table-v2") as ScDataTableV2;
     el.columns = [{ key: "name", label: "Name", sortable: true }];
     el.rows = [{ name: "Bob" }, { name: "Alice" }];
     el.paginated = false;
@@ -311,7 +311,7 @@ describe("sc-data-table-v2", () => {
   });
 
   it("should show empty state for no rows", async () => {
-    const el = document.createElement("sc-data-table-v2") as ScDataTableV2;
+    const el = document.createElement("hu-data-table-v2") as ScDataTableV2;
     el.columns = [{ key: "name", label: "Name" }];
     el.rows = [];
     document.body.appendChild(el);
@@ -322,34 +322,34 @@ describe("sc-data-table-v2", () => {
   });
 
   it("should default paginated to true", () => {
-    const el = document.createElement("sc-data-table-v2") as ScDataTableV2;
+    const el = document.createElement("hu-data-table-v2") as ScDataTableV2;
     expect(el.paginated).toBe(true);
   });
 });
 
-describe("sc-json-viewer", () => {
+describe("hu-json-viewer", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-json-viewer")).toBeDefined();
+    expect(customElements.get("hu-json-viewer")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-json-viewer");
+    const el = document.createElement("hu-json-viewer");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept data property", () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     el.data = { key: "value" };
     expect(el.data).toEqual({ key: "value" });
   });
 
   it("should default expandedDepth to 2", () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     expect(el.expandedDepth).toBe(2);
   });
 
   it("should render primitive string value", async () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     el.data = "hello";
     document.body.appendChild(el);
     await el.updateComplete;
@@ -359,7 +359,7 @@ describe("sc-json-viewer", () => {
   });
 
   it("should render object keys", async () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     el.data = { name: "test" };
     document.body.appendChild(el);
     await el.updateComplete;
@@ -369,7 +369,7 @@ describe("sc-json-viewer", () => {
   });
 
   it("should render array length indicator", async () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     el.data = [1, 2, 3];
     document.body.appendChild(el);
     await el.updateComplete;
@@ -379,7 +379,7 @@ describe("sc-json-viewer", () => {
   });
 
   it("should render null value", async () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     el.data = null;
     document.body.appendChild(el);
     await el.updateComplete;
@@ -389,7 +389,7 @@ describe("sc-json-viewer", () => {
   });
 
   it("should use tree role for accessibility", async () => {
-    const el = document.createElement("sc-json-viewer") as ScJsonViewer;
+    const el = document.createElement("hu-json-viewer") as ScJsonViewer;
     el.data = { a: 1 };
     document.body.appendChild(el);
     await el.updateComplete;
@@ -399,57 +399,57 @@ describe("sc-json-viewer", () => {
   });
 });
 
-describe("sc-floating-mic", () => {
+describe("hu-floating-mic", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-floating-mic")).toBeDefined();
+    expect(customElements.get("hu-floating-mic")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-floating-mic");
+    const el = document.createElement("hu-floating-mic");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-sidebar", () => {
+describe("hu-sidebar", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-sidebar")).toBeDefined();
+    expect(customElements.get("hu-sidebar")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-sidebar");
+    const el = document.createElement("hu-sidebar");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-command-palette", () => {
+describe("hu-command-palette", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-command-palette")).toBeDefined();
+    expect(customElements.get("hu-command-palette")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-command-palette");
+    const el = document.createElement("hu-command-palette");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-welcome", () => {
+describe("hu-welcome", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-welcome")).toBeDefined();
+    expect(customElements.get("hu-welcome")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-welcome");
+    const el = document.createElement("hu-welcome");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-sparkline", () => {
+describe("hu-sparkline", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-sparkline")).toBeDefined();
+    expect(customElements.get("hu-sparkline")).toBeDefined();
   });
 
   it("should render with default props", () => {
-    const el = document.createElement("sc-sparkline") as HTMLElement & {
+    const el = document.createElement("hu-sparkline") as HTMLElement & {
       data: number[];
       width: number;
       height: number;
@@ -460,19 +460,19 @@ describe("sc-sparkline", () => {
   });
 
   it("should accept data array", () => {
-    const el = document.createElement("sc-sparkline") as HTMLElement & { data: number[] };
+    const el = document.createElement("hu-sparkline") as HTMLElement & { data: number[] };
     el.data = [1, 5, 3, 8, 2];
     expect(el.data).toEqual([1, 5, 3, 8, 2]);
   });
 });
 
-describe("sc-animated-icon", () => {
+describe("hu-animated-icon", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-animated-icon")).toBeDefined();
+    expect(customElements.get("hu-animated-icon")).toBeDefined();
   });
 
   it("should have default icon and state", () => {
-    const el = document.createElement("sc-animated-icon") as HTMLElement & {
+    const el = document.createElement("hu-animated-icon") as HTMLElement & {
       icon: string;
       state: string;
     };
@@ -481,13 +481,13 @@ describe("sc-animated-icon", () => {
   });
 });
 
-describe("sc-animated-number", () => {
+describe("hu-animated-number", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-animated-number")).toBeDefined();
+    expect(customElements.get("hu-animated-number")).toBeDefined();
   });
 
   it("should have default value 0", () => {
-    const el = document.createElement("sc-animated-number") as HTMLElement & {
+    const el = document.createElement("hu-animated-number") as HTMLElement & {
       value: number;
       suffix: string;
       prefix: string;
@@ -498,19 +498,19 @@ describe("sc-animated-number", () => {
   });
 
   it("should accept value property", () => {
-    const el = document.createElement("sc-animated-number") as HTMLElement & { value: number };
+    const el = document.createElement("hu-animated-number") as HTMLElement & { value: number };
     el.value = 42;
     expect(el.value).toBe(42);
   });
 });
 
-describe("sc-activity-feed", () => {
+describe("hu-activity-feed", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-activity-feed")).toBeDefined();
+    expect(customElements.get("hu-activity-feed")).toBeDefined();
   });
 
   it("should have default empty events and max 6", () => {
-    const el = document.createElement("sc-activity-feed") as HTMLElement & {
+    const el = document.createElement("hu-activity-feed") as HTMLElement & {
       events: unknown[];
       max: number;
     };
@@ -519,13 +519,13 @@ describe("sc-activity-feed", () => {
   });
 });
 
-describe("sc-thinking", () => {
+describe("hu-thinking", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-thinking")).toBeDefined();
+    expect(customElements.get("hu-thinking")).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const el = document.createElement("sc-thinking") as HTMLElement & {
+    const el = document.createElement("hu-thinking") as HTMLElement & {
       active: boolean;
       steps: string[];
       expanded: boolean;
@@ -538,7 +538,7 @@ describe("sc-thinking", () => {
   });
 
   it("shows active state", async () => {
-    const el = document.createElement("sc-thinking") as HTMLElement & {
+    const el = document.createElement("hu-thinking") as HTMLElement & {
       active: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -551,7 +551,7 @@ describe("sc-thinking", () => {
   });
 
   it("toggles expanded on click", async () => {
-    const el = document.createElement("sc-thinking") as HTMLElement & {
+    const el = document.createElement("hu-thinking") as HTMLElement & {
       steps: string[];
       expanded: boolean;
       updateComplete: Promise<boolean>;
@@ -569,7 +569,7 @@ describe("sc-thinking", () => {
   });
 
   it("has correct aria attributes", async () => {
-    const el = document.createElement("sc-thinking") as HTMLElement & {
+    const el = document.createElement("hu-thinking") as HTMLElement & {
       expanded: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -583,13 +583,13 @@ describe("sc-thinking", () => {
   });
 });
 
-describe("sc-tool-result", () => {
+describe("hu-tool-result", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-tool-result")).toBeDefined();
+    expect(customElements.get("hu-tool-result")).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const el = document.createElement("sc-tool-result") as HTMLElement & {
+    const el = document.createElement("hu-tool-result") as HTMLElement & {
       tool: string;
       status: string;
       content: string;
@@ -602,7 +602,7 @@ describe("sc-tool-result", () => {
   });
 
   it("renders tool name", async () => {
-    const el = document.createElement("sc-tool-result") as HTMLElement & {
+    const el = document.createElement("hu-tool-result") as HTMLElement & {
       tool: string;
       status: string;
       content: string;
@@ -619,7 +619,7 @@ describe("sc-tool-result", () => {
   });
 
   it("shows status indicator", async () => {
-    const el = document.createElement("sc-tool-result") as HTMLElement & {
+    const el = document.createElement("hu-tool-result") as HTMLElement & {
       status: string;
       updateComplete: Promise<boolean>;
     };
@@ -632,7 +632,7 @@ describe("sc-tool-result", () => {
   });
 
   it("toggles collapsed", async () => {
-    const el = document.createElement("sc-tool-result") as HTMLElement & {
+    const el = document.createElement("hu-tool-result") as HTMLElement & {
       content: string;
       collapsed: boolean;
       updateComplete: Promise<boolean>;
@@ -648,13 +648,13 @@ describe("sc-tool-result", () => {
   });
 });
 
-describe("sc-code-block", () => {
+describe("hu-code-block", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-code-block")).toBeDefined();
+    expect(customElements.get("hu-code-block")).toBeDefined();
   });
 
   it("renders with plain code when no language", async () => {
-    const el = document.createElement("sc-code-block") as HTMLElement & {
+    const el = document.createElement("hu-code-block") as HTMLElement & {
       code: string;
       language: string;
       updateComplete: Promise<boolean>;
@@ -671,7 +671,7 @@ describe("sc-code-block", () => {
   });
 
   it("renders with language label", async () => {
-    const el = document.createElement("sc-code-block") as HTMLElement & {
+    const el = document.createElement("hu-code-block") as HTMLElement & {
       code: string;
       language: string;
       updateComplete: Promise<boolean>;
@@ -686,7 +686,7 @@ describe("sc-code-block", () => {
   });
 
   it("copy button is present and labeled", async () => {
-    const el = document.createElement("sc-code-block") as HTMLElement & {
+    const el = document.createElement("hu-code-block") as HTMLElement & {
       code: string;
       updateComplete: Promise<boolean>;
     };
@@ -701,7 +701,7 @@ describe("sc-code-block", () => {
   });
 
   it("renders code content correctly", async () => {
-    const el = document.createElement("sc-code-block") as HTMLElement & {
+    const el = document.createElement("hu-code-block") as HTMLElement & {
       code: string;
       updateComplete: Promise<boolean>;
     };
@@ -715,13 +715,13 @@ describe("sc-code-block", () => {
   });
 });
 
-describe("sc-artifact-viewer", () => {
+describe("hu-artifact-viewer", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-artifact-viewer")).toBeDefined();
+    expect(customElements.get("hu-artifact-viewer")).toBeDefined();
   });
 
-  it("renders code type with sc-code-block", async () => {
-    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+  it("renders code type with hu-code-block", async () => {
+    const el = document.createElement("hu-artifact-viewer") as HTMLElement & {
       type: string;
       content: string;
       language: string;
@@ -732,13 +732,13 @@ describe("sc-artifact-viewer", () => {
     el.language = "javascript";
     document.body.appendChild(el);
     await el.updateComplete;
-    const codeBlock = el.shadowRoot?.querySelector("sc-code-block");
+    const codeBlock = el.shadowRoot?.querySelector("hu-code-block");
     expect(codeBlock).toBeTruthy();
     el.remove();
   });
 
   it("shows type label in toolbar", async () => {
-    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+    const el = document.createElement("hu-artifact-viewer") as HTMLElement & {
       type: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -753,7 +753,7 @@ describe("sc-artifact-viewer", () => {
   });
 
   it("renders markdown content for type=document", async () => {
-    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+    const el = document.createElement("hu-artifact-viewer") as HTMLElement & {
       type: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -769,7 +769,7 @@ describe("sc-artifact-viewer", () => {
   });
 
   it("renders iframe for type=html", async () => {
-    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+    const el = document.createElement("hu-artifact-viewer") as HTMLElement & {
       type: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -785,7 +785,7 @@ describe("sc-artifact-viewer", () => {
   });
 
   it("shows copy toolbar", async () => {
-    const el = document.createElement("sc-artifact-viewer") as HTMLElement & {
+    const el = document.createElement("hu-artifact-viewer") as HTMLElement & {
       type: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -803,13 +803,13 @@ describe("sc-artifact-viewer", () => {
   });
 });
 
-describe("sc-artifact-panel", () => {
+describe("hu-artifact-panel", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-artifact-panel")).toBeDefined();
+    expect(customElements.get("hu-artifact-panel")).toBeDefined();
   });
 
   it("renders nothing when no artifact is provided", async () => {
-    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+    const el = document.createElement("hu-artifact-panel") as HTMLElement & {
       artifact: unknown;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -824,7 +824,7 @@ describe("sc-artifact-panel", () => {
   });
 
   it("renders header with title when artifact is provided", async () => {
-    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+    const el = document.createElement("hu-artifact-panel") as HTMLElement & {
       artifact: { id: string; type: string; title: string; content: string; versions: unknown[] };
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -841,13 +841,13 @@ describe("sc-artifact-panel", () => {
     await el.updateComplete;
     const headerTitle = el.shadowRoot?.querySelector(".header-title");
     expect(headerTitle?.textContent).toBe("Test Artifact");
-    const viewer = el.shadowRoot?.querySelector("sc-artifact-viewer");
+    const viewer = el.shadowRoot?.querySelector("hu-artifact-viewer");
     expect(viewer).toBeTruthy();
     el.remove();
   });
 
   it("shows version navigation when artifact has multiple versions", async () => {
-    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+    const el = document.createElement("hu-artifact-panel") as HTMLElement & {
       artifact: {
         id: string;
         type: string;
@@ -879,8 +879,8 @@ describe("sc-artifact-panel", () => {
     el.remove();
   });
 
-  it("dispatches sc-artifact-close event when close button is clicked", async () => {
-    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+  it("dispatches hu-artifact-close event when close button is clicked", async () => {
+    const el = document.createElement("hu-artifact-panel") as HTMLElement & {
       artifact: {
         id: string;
         type: string;
@@ -902,7 +902,7 @@ describe("sc-artifact-panel", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let closed = false;
-    el.addEventListener("sc-artifact-close", () => {
+    el.addEventListener("hu-artifact-close", () => {
       closed = true;
     });
     const closeBtn = el.shadowRoot?.querySelector(".close-btn") as HTMLButtonElement;
@@ -912,7 +912,7 @@ describe("sc-artifact-panel", () => {
   });
 
   it("copy button exists in footer", async () => {
-    const el = document.createElement("sc-artifact-panel") as HTMLElement & {
+    const el = document.createElement("hu-artifact-panel") as HTMLElement & {
       artifact: {
         id: string;
         type: string;
@@ -935,20 +935,20 @@ describe("sc-artifact-panel", () => {
     await el.updateComplete;
     const footer = el.shadowRoot?.querySelector(".footer");
     expect(footer).toBeTruthy();
-    const copyBtn = footer?.querySelector("sc-button");
+    const copyBtn = footer?.querySelector("hu-button");
     expect(copyBtn).toBeTruthy();
     expect(footer?.textContent).toContain("Copy");
     el.remove();
   });
 });
 
-describe("sc-latex", () => {
+describe("hu-latex", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-latex")).toBeDefined();
+    expect(customElements.get("hu-latex")).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const el = document.createElement("sc-latex") as HTMLElement & {
+    const el = document.createElement("hu-latex") as HTMLElement & {
       latex: string;
       display: boolean;
     };
@@ -957,7 +957,7 @@ describe("sc-latex", () => {
   });
 
   it("renders raw latex before KaTeX loads", async () => {
-    const el = document.createElement("sc-latex") as HTMLElement & {
+    const el = document.createElement("hu-latex") as HTMLElement & {
       latex: string;
       updateComplete: Promise<boolean>;
     };
@@ -971,13 +971,13 @@ describe("sc-latex", () => {
   });
 });
 
-describe("sc-message-stream", () => {
+describe("hu-message-stream", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-message-stream")).toBeDefined();
+    expect(customElements.get("hu-message-stream")).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       streaming: boolean;
       role: string;
@@ -988,7 +988,7 @@ describe("sc-message-stream", () => {
   });
 
   it("renders content", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       role: string;
       updateComplete: Promise<boolean>;
@@ -1003,7 +1003,7 @@ describe("sc-message-stream", () => {
   });
 
   it("renders markdown headings", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       updateComplete: Promise<boolean>;
     };
@@ -1016,22 +1016,22 @@ describe("sc-message-stream", () => {
     el.remove();
   });
 
-  it("renders markdown code blocks via sc-code-block", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+  it("renders markdown code blocks via hu-code-block", async () => {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       updateComplete: Promise<boolean>;
     };
     el.content = "```js\nconst x = 1;\n```";
     document.body.appendChild(el);
     await el.updateComplete;
-    const codeBlock = el.shadowRoot?.querySelector("sc-code-block");
+    const codeBlock = el.shadowRoot?.querySelector("hu-code-block");
     expect(codeBlock).toBeTruthy();
     expect((codeBlock as { code: string }).code).toContain("const x = 1;");
     el.remove();
   });
 
   it("renders markdown lists", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       updateComplete: Promise<boolean>;
     };
@@ -1046,7 +1046,7 @@ describe("sc-message-stream", () => {
   });
 
   it("renders markdown links", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       updateComplete: Promise<boolean>;
     };
@@ -1061,7 +1061,7 @@ describe("sc-message-stream", () => {
   });
 
   it("renders inline bold, italic, code", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       updateComplete: Promise<boolean>;
     };
@@ -1076,7 +1076,7 @@ describe("sc-message-stream", () => {
   });
 
   it("shows cursor when streaming", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       streaming: boolean;
       updateComplete: Promise<boolean>;
@@ -1091,7 +1091,7 @@ describe("sc-message-stream", () => {
   });
 
   it("does not show cursor when not streaming", async () => {
-    const el = document.createElement("sc-message-stream") as HTMLElement & {
+    const el = document.createElement("hu-message-stream") as HTMLElement & {
       content: string;
       streaming: boolean;
       updateComplete: Promise<boolean>;
@@ -1106,13 +1106,13 @@ describe("sc-message-stream", () => {
   });
 });
 
-describe("sc-message-branch", () => {
+describe("hu-message-branch", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-message-branch")).toBeDefined();
+    expect(customElements.get("hu-message-branch")).toBeDefined();
   });
 
   it("should have default properties", () => {
-    const el = document.createElement("sc-message-branch") as HTMLElement & {
+    const el = document.createElement("hu-message-branch") as HTMLElement & {
       branches: number;
       current: number;
     };
@@ -1121,7 +1121,7 @@ describe("sc-message-branch", () => {
   });
 
   it("renders branch count", async () => {
-    const el = document.createElement("sc-message-branch") as HTMLElement & {
+    const el = document.createElement("hu-message-branch") as HTMLElement & {
       branches: number;
       current: number;
       updateComplete: Promise<boolean>;
@@ -1137,7 +1137,7 @@ describe("sc-message-branch", () => {
   });
 
   it("fires branch-change event", async () => {
-    const el = document.createElement("sc-message-branch") as HTMLElement & {
+    const el = document.createElement("hu-message-branch") as HTMLElement & {
       branches: number;
       current: number;
       updateComplete: Promise<boolean>;
@@ -1161,7 +1161,7 @@ describe("sc-message-branch", () => {
   });
 
   it("keyboard navigation", async () => {
-    const el = document.createElement("sc-message-branch") as HTMLElement & {
+    const el = document.createElement("hu-message-branch") as HTMLElement & {
       branches: number;
       current: number;
       updateComplete: Promise<boolean>;
@@ -1182,13 +1182,13 @@ describe("sc-message-branch", () => {
   });
 });
 
-describe("sc-reasoning-block", () => {
+describe("hu-reasoning-block", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-reasoning-block")).toBeDefined();
+    expect(customElements.get("hu-reasoning-block")).toBeDefined();
   });
 
   it("renders with content", async () => {
-    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+    const el = document.createElement("hu-reasoning-block") as HTMLElement & {
       content: string;
       updateComplete: Promise<boolean>;
     };
@@ -1203,7 +1203,7 @@ describe("sc-reasoning-block", () => {
   });
 
   it("starts collapsed by default", async () => {
-    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+    const el = document.createElement("hu-reasoning-block") as HTMLElement & {
       content: string;
       collapsed: boolean;
       updateComplete: Promise<boolean>;
@@ -1218,7 +1218,7 @@ describe("sc-reasoning-block", () => {
   });
 
   it("header has aria-expanded=false when collapsed", async () => {
-    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+    const el = document.createElement("hu-reasoning-block") as HTMLElement & {
       collapsed: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -1231,7 +1231,7 @@ describe("sc-reasoning-block", () => {
   });
 
   it("clicking header toggles expanded", async () => {
-    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+    const el = document.createElement("hu-reasoning-block") as HTMLElement & {
       content: string;
       collapsed: boolean;
       updateComplete: Promise<boolean>;
@@ -1252,7 +1252,7 @@ describe("sc-reasoning-block", () => {
   });
 
   it("shows preview when collapsed", async () => {
-    const el = document.createElement("sc-reasoning-block") as HTMLElement & {
+    const el = document.createElement("hu-reasoning-block") as HTMLElement & {
       content: string;
       collapsed: boolean;
       updateComplete: Promise<boolean>;
@@ -1270,20 +1270,20 @@ describe("sc-reasoning-block", () => {
   });
 });
 
-describe("sc-shortcut-overlay", () => {
+describe("hu-shortcut-overlay", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-shortcut-overlay")).toBeDefined();
+    expect(customElements.get("hu-shortcut-overlay")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+    const el = document.createElement("hu-shortcut-overlay") as HTMLElement & {
       open: boolean;
     };
     expect(el.open).toBe(false);
   });
 
   it("renders when open", async () => {
-    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+    const el = document.createElement("hu-shortcut-overlay") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -1298,7 +1298,7 @@ describe("sc-shortcut-overlay", () => {
   });
 
   it("lists keyboard shortcuts by category", async () => {
-    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+    const el = document.createElement("hu-shortcut-overlay") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -1315,7 +1315,7 @@ describe("sc-shortcut-overlay", () => {
   });
 
   it("has role dialog and aria-modal", async () => {
-    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+    const el = document.createElement("hu-shortcut-overlay") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -1330,7 +1330,7 @@ describe("sc-shortcut-overlay", () => {
   });
 
   it("fires close on Escape", async () => {
-    const el = document.createElement("sc-shortcut-overlay") as HTMLElement & {
+    const el = document.createElement("hu-shortcut-overlay") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -1347,18 +1347,18 @@ describe("sc-shortcut-overlay", () => {
   });
 });
 
-describe("sc-error-boundary", () => {
+describe("hu-error-boundary", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-error-boundary")).toBeDefined();
+    expect(customElements.get("hu-error-boundary")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-error-boundary");
+    const el = document.createElement("hu-error-boundary");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should show fallback when error is set", async () => {
-    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+    const el = document.createElement("hu-error-boundary") as HTMLElement & {
       error: Error | null;
       updateComplete: Promise<boolean>;
     };
@@ -1367,13 +1367,13 @@ describe("sc-error-boundary", () => {
     await el.updateComplete;
     const heading = el.shadowRoot?.querySelector(".heading");
     expect(heading?.textContent).toBe("Something went wrong");
-    const btn = el.shadowRoot?.querySelector("sc-button");
+    const btn = el.shadowRoot?.querySelector("hu-button");
     expect(btn?.textContent?.trim()).toBe("Try again");
     el.remove();
   });
 
   it("should render slot when no error", async () => {
-    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+    const el = document.createElement("hu-error-boundary") as HTMLElement & {
       error: Error | null;
       updateComplete: Promise<boolean>;
     };
@@ -1391,7 +1391,7 @@ describe("sc-error-boundary", () => {
   });
 
   it("should fire retry event when Try again is clicked", async () => {
-    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+    const el = document.createElement("hu-error-boundary") as HTMLElement & {
       error: Error | null;
       updateComplete: Promise<boolean>;
     };
@@ -1400,14 +1400,14 @@ describe("sc-error-boundary", () => {
     await el.updateComplete;
     let fired = false;
     el.addEventListener("retry", () => (fired = true));
-    const btn = el.shadowRoot?.querySelector("sc-button") as HTMLElement | null;
+    const btn = el.shadowRoot?.querySelector("hu-button") as HTMLElement | null;
     btn?.click();
     expect(fired).toBe(true);
     el.remove();
   });
 
   it("should have role alert when showing fallback", async () => {
-    const el = document.createElement("sc-error-boundary") as HTMLElement & {
+    const el = document.createElement("hu-error-boundary") as HTMLElement & {
       error: Error | null;
       updateComplete: Promise<boolean>;
     };
@@ -1420,8 +1420,8 @@ describe("sc-error-boundary", () => {
   });
 });
 
-describe("sc-welcome-card", () => {
-  const ONBOARDED_KEY = "sc-onboarded";
+describe("hu-welcome-card", () => {
+  const ONBOARDED_KEY = "hu-onboarded";
   const storage: Record<string, string> = {};
 
   beforeEach(() => {
@@ -1447,16 +1447,16 @@ describe("sc-welcome-card", () => {
   });
 
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-welcome-card")).toBeDefined();
+    expect(customElements.get("hu-welcome-card")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-welcome-card");
+    const el = document.createElement("hu-welcome-card");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should have default visible true and userName empty", () => {
-    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+    const el = document.createElement("hu-welcome-card") as HTMLElement & {
       visible: boolean;
       userName: string;
     };
@@ -1465,43 +1465,43 @@ describe("sc-welcome-card", () => {
   });
 
   it("should show welcome content when not onboarded", async () => {
-    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+    const el = document.createElement("hu-welcome-card") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
     const heading = el.shadowRoot?.querySelector(".hero h2");
-    expect(heading?.textContent).toContain("Welcome to SeaClaw");
+    expect(heading?.textContent).toContain("Welcome to Human");
     const desc = el.shadowRoot?.querySelector(".hero p");
     expect(desc?.textContent).toContain("autonomous AI assistant runtime");
     const features = el.shadowRoot?.querySelectorAll(".feature");
     expect(features?.length).toBe(3);
-    const cta = el.shadowRoot?.querySelector(".cta sc-button");
+    const cta = el.shadowRoot?.querySelector(".cta hu-button");
     expect(cta?.textContent?.trim()).toBe("Get Started");
     el.remove();
   });
 
   it("should not render when onboarded", async () => {
     localStorage.setItem(ONBOARDED_KEY, "true");
-    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+    const el = document.createElement("hu-welcome-card") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
-    const card = el.shadowRoot?.querySelector("sc-card");
+    const card = el.shadowRoot?.querySelector("hu-card");
     expect(card).toBeNull();
     el.remove();
   });
 
   it("should fire dismiss and set onboarded when Get Started clicked", async () => {
-    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+    const el = document.createElement("hu-welcome-card") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
     let dismissFired = false;
     el.addEventListener("dismiss", () => (dismissFired = true));
-    const btn = el.shadowRoot?.querySelector(".cta sc-button") as HTMLElement | null;
+    const btn = el.shadowRoot?.querySelector(".cta hu-button") as HTMLElement | null;
     btn?.click();
     await el.updateComplete;
     expect(dismissFired).toBe(true);
@@ -1510,7 +1510,7 @@ describe("sc-welcome-card", () => {
   });
 
   it("should show userName in greeting when provided", async () => {
-    const el = document.createElement("sc-welcome-card") as HTMLElement & {
+    const el = document.createElement("hu-welcome-card") as HTMLElement & {
       userName: string;
       updateComplete: Promise<boolean>;
     };
@@ -1523,13 +1523,13 @@ describe("sc-welcome-card", () => {
   });
 });
 
-describe("sc-message-actions", () => {
+describe("hu-message-actions", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-message-actions")).toBeDefined();
+    expect(customElements.get("hu-message-actions")).toBeDefined();
   });
 
   it("renders copy button", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       role: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -1544,7 +1544,7 @@ describe("sc-message-actions", () => {
   });
 
   it("renders retry button for user role", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       role: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -1559,7 +1559,7 @@ describe("sc-message-actions", () => {
   });
 
   it("renders regenerate button for assistant role", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       role: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -1573,8 +1573,8 @@ describe("sc-message-actions", () => {
     el.remove();
   });
 
-  it("fires sc-retry when retry clicked", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+  it("fires hu-retry when retry clicked", async () => {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       role: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -1584,7 +1584,7 @@ describe("sc-message-actions", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { content: string; index: number } | null = null;
-    el.addEventListener("sc-retry", ((e: CustomEvent) => {
+    el.addEventListener("hu-retry", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const retryBtn = el.shadowRoot?.querySelector('button[aria-label="Retry"]') as HTMLElement;
@@ -1593,8 +1593,8 @@ describe("sc-message-actions", () => {
     el.remove();
   });
 
-  it("fires sc-copy when copy clicked", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+  it("fires hu-copy when copy clicked", async () => {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       role: string;
       content: string;
       updateComplete: Promise<boolean>;
@@ -1604,7 +1604,7 @@ describe("sc-message-actions", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-copy", () => {
+    el.addEventListener("hu-copy", () => {
       fired = true;
     });
     const copyBtn = el.shadowRoot?.querySelector('button[aria-label="Copy"]') as HTMLElement;
@@ -1613,8 +1613,8 @@ describe("sc-message-actions", () => {
     el.remove();
   });
 
-  it("fires sc-regenerate when regenerate clicked", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+  it("fires hu-regenerate when regenerate clicked", async () => {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       role: string;
       content: string;
       index: number;
@@ -1626,7 +1626,7 @@ describe("sc-message-actions", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { content: string; index: number } | null = null;
-    el.addEventListener("sc-regenerate", ((e: CustomEvent) => {
+    el.addEventListener("hu-regenerate", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const regenBtn = el.shadowRoot?.querySelector('button[aria-label="Regenerate"]') as HTMLElement;
@@ -1636,13 +1636,13 @@ describe("sc-message-actions", () => {
   });
 });
 
-describe("sc-chat-sessions-panel", () => {
+describe("hu-chat-sessions-panel", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-chat-sessions-panel")).toBeDefined();
+    expect(customElements.get("hu-chat-sessions-panel")).toBeDefined();
   });
 
   it("renders new chat button", async () => {
-    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+    const el = document.createElement("hu-chat-sessions-panel") as HTMLElement & {
       sessions: unknown[];
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -1657,7 +1657,7 @@ describe("sc-chat-sessions-panel", () => {
   });
 
   it("renders sessions", async () => {
-    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+    const el = document.createElement("hu-chat-sessions-panel") as HTMLElement & {
       sessions: Array<{ id: string; title: string; ts: number; active: boolean }>;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -1675,8 +1675,8 @@ describe("sc-chat-sessions-panel", () => {
     el.remove();
   });
 
-  it("fires sc-session-select when session clicked", async () => {
-    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+  it("fires hu-session-select when session clicked", async () => {
+    const el = document.createElement("hu-chat-sessions-panel") as HTMLElement & {
       sessions: Array<{ id: string; title: string; ts: number; active: boolean }>;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -1686,7 +1686,7 @@ describe("sc-chat-sessions-panel", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { id: string } | null = null;
-    el.addEventListener("sc-session-select", ((e: CustomEvent) => {
+    el.addEventListener("hu-session-select", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const item = el.shadowRoot?.querySelector(".session-item") as HTMLElement;
@@ -1695,8 +1695,8 @@ describe("sc-chat-sessions-panel", () => {
     el.remove();
   });
 
-  it("fires sc-session-delete when delete clicked", async () => {
-    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+  it("fires hu-session-delete when delete clicked", async () => {
+    const el = document.createElement("hu-chat-sessions-panel") as HTMLElement & {
       sessions: Array<{ id: string; title: string; ts: number; active: boolean }>;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -1711,7 +1711,7 @@ describe("sc-chat-sessions-panel", () => {
     if (delBtn) {
       delBtn.style.setProperty("opacity", "1");
       let detail: { id: string } | null = null;
-      el.addEventListener("sc-session-delete", ((e: CustomEvent) => {
+      el.addEventListener("hu-session-delete", ((e: CustomEvent) => {
         detail = e.detail;
       }) as EventListener);
       delBtn.click();
@@ -1720,8 +1720,8 @@ describe("sc-chat-sessions-panel", () => {
     el.remove();
   });
 
-  it("fires sc-session-new when new chat clicked", async () => {
-    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+  it("fires hu-session-new when new chat clicked", async () => {
+    const el = document.createElement("hu-chat-sessions-panel") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -1729,7 +1729,7 @@ describe("sc-chat-sessions-panel", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-session-new", () => {
+    el.addEventListener("hu-session-new", () => {
       fired = true;
     });
     const btn = el.shadowRoot?.querySelector(".new-chat-btn") as HTMLElement;
@@ -1739,13 +1739,13 @@ describe("sc-chat-sessions-panel", () => {
   });
 });
 
-describe("sc-file-preview", () => {
+describe("hu-file-preview", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-file-preview")).toBeDefined();
+    expect(customElements.get("hu-file-preview")).toBeDefined();
   });
 
   it("renders with no files", async () => {
-    const el = document.createElement("sc-file-preview") as HTMLElement & {
+    const el = document.createElement("hu-file-preview") as HTMLElement & {
       files: Array<{ name: string; size: number; type: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -1758,7 +1758,7 @@ describe("sc-file-preview", () => {
   });
 
   it("renders files", async () => {
-    const el = document.createElement("sc-file-preview") as HTMLElement & {
+    const el = document.createElement("hu-file-preview") as HTMLElement & {
       files: Array<{ name: string; size: number; type: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -1776,7 +1776,7 @@ describe("sc-file-preview", () => {
   });
 
   it("shows image preview when dataUrl provided", async () => {
-    const el = document.createElement("sc-file-preview") as HTMLElement & {
+    const el = document.createElement("hu-file-preview") as HTMLElement & {
       files: Array<{ name: string; size: number; type: string; dataUrl?: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -1791,8 +1791,8 @@ describe("sc-file-preview", () => {
     el.remove();
   });
 
-  it("fires sc-file-remove when remove clicked", async () => {
-    const el = document.createElement("sc-file-preview") as HTMLElement & {
+  it("fires hu-file-remove when remove clicked", async () => {
+    const el = document.createElement("hu-file-preview") as HTMLElement & {
       files: Array<{ name: string; size: number; type: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -1800,7 +1800,7 @@ describe("sc-file-preview", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { index: number } | null = null;
-    el.addEventListener("sc-file-remove", ((e: CustomEvent) => {
+    el.addEventListener("hu-file-remove", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const removeBtn = el.shadowRoot?.querySelector(".remove-btn") as HTMLElement;
@@ -1810,20 +1810,20 @@ describe("sc-file-preview", () => {
   });
 });
 
-describe("sc-context-menu", () => {
+describe("hu-context-menu", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-context-menu")).toBeDefined();
+    expect(customElements.get("hu-context-menu")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const el = document.createElement("sc-context-menu") as HTMLElement & {
+    const el = document.createElement("hu-context-menu") as HTMLElement & {
       open: boolean;
     };
     expect(el.open).toBe(false);
   });
 
   it("positions at x,y when open", async () => {
-    const el = document.createElement("sc-context-menu") as HTMLElement & {
+    const el = document.createElement("hu-context-menu") as HTMLElement & {
       open: boolean;
       x: number;
       y: number;
@@ -1845,7 +1845,7 @@ describe("sc-context-menu", () => {
 
   it("items are clickable", async () => {
     let actionFired = false;
-    const el = document.createElement("sc-context-menu") as HTMLElement & {
+    const el = document.createElement("hu-context-menu") as HTMLElement & {
       open: boolean;
       items: { label: string; action: () => void }[];
       updateComplete: Promise<boolean>;
@@ -1861,7 +1861,7 @@ describe("sc-context-menu", () => {
   });
 
   it("has role menu", async () => {
-    const el = document.createElement("sc-context-menu") as HTMLElement & {
+    const el = document.createElement("hu-context-menu") as HTMLElement & {
       open: boolean;
       items: { label: string; action: () => void }[];
       updateComplete: Promise<boolean>;
@@ -1876,18 +1876,18 @@ describe("sc-context-menu", () => {
   });
 });
 
-describe("sc-stat-card", () => {
+describe("hu-stat-card", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-stat-card")).toBeDefined();
+    expect(customElements.get("hu-stat-card")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-stat-card");
+    const el = document.createElement("hu-stat-card");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render value and label", async () => {
-    const el = document.createElement("sc-stat-card") as HTMLElement & {
+    const el = document.createElement("hu-stat-card") as HTMLElement & {
       value: number;
       label: string;
       updateComplete: Promise<boolean>;
@@ -1902,7 +1902,7 @@ describe("sc-stat-card", () => {
   });
 
   it("should render prefix when set with valueStr", async () => {
-    const el = document.createElement("sc-stat-card") as HTMLElement & {
+    const el = document.createElement("hu-stat-card") as HTMLElement & {
       valueStr: string;
       label: string;
       prefix: string;
@@ -1919,7 +1919,7 @@ describe("sc-stat-card", () => {
   });
 
   it("should render suffix when set with valueStr", async () => {
-    const el = document.createElement("sc-stat-card") as HTMLElement & {
+    const el = document.createElement("hu-stat-card") as HTMLElement & {
       valueStr: string;
       label: string;
       suffix: string;
@@ -1936,19 +1936,19 @@ describe("sc-stat-card", () => {
   });
 });
 
-describe("sc-stats-row", () => {
+describe("hu-stats-row", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-stats-row")).toBeDefined();
+    expect(customElements.get("hu-stats-row")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-stats-row");
+    const el = document.createElement("hu-stats-row");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render slot content", async () => {
-    const el = document.createElement("sc-stats-row");
-    const card = document.createElement("sc-stat-card");
+    const el = document.createElement("hu-stats-row");
+    const card = document.createElement("hu-stat-card");
     (card as HTMLElement & { value: number; label: string }).value = 42;
     (card as HTMLElement & { value: number; label: string }).label = "Tests";
     el.appendChild(card);
@@ -1960,18 +1960,18 @@ describe("sc-stats-row", () => {
   });
 });
 
-describe("sc-section-header", () => {
+describe("hu-section-header", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-section-header")).toBeDefined();
+    expect(customElements.get("hu-section-header")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-section-header");
+    const el = document.createElement("hu-section-header");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render heading", async () => {
-    const el = document.createElement("sc-section-header") as HTMLElement & {
+    const el = document.createElement("hu-section-header") as HTMLElement & {
       heading: string;
       updateComplete: Promise<boolean>;
     };
@@ -1983,7 +1983,7 @@ describe("sc-section-header", () => {
   });
 
   it("should render description when set", async () => {
-    const el = document.createElement("sc-section-header") as HTMLElement & {
+    const el = document.createElement("hu-section-header") as HTMLElement & {
       heading: string;
       description: string;
       updateComplete: Promise<boolean>;
@@ -1998,18 +1998,18 @@ describe("sc-section-header", () => {
   });
 });
 
-describe("sc-metric-row", () => {
+describe("hu-metric-row", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-metric-row")).toBeDefined();
+    expect(customElements.get("hu-metric-row")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-metric-row");
+    const el = document.createElement("hu-metric-row");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render items", async () => {
-    const el = document.createElement("sc-metric-row") as HTMLElement & {
+    const el = document.createElement("hu-metric-row") as HTMLElement & {
       items: Array<{ label: string; value: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2022,7 +2022,7 @@ describe("sc-metric-row", () => {
   });
 
   it("should render multiple items from array", async () => {
-    const el = document.createElement("sc-metric-row") as HTMLElement & {
+    const el = document.createElement("hu-metric-row") as HTMLElement & {
       items: Array<{ label: string; value: string; accent?: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2040,18 +2040,18 @@ describe("sc-metric-row", () => {
   });
 });
 
-describe("sc-timeline", () => {
+describe("hu-timeline", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-timeline")).toBeDefined();
+    expect(customElements.get("hu-timeline")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-timeline");
+    const el = document.createElement("hu-timeline");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render items", async () => {
-    const el = document.createElement("sc-timeline") as HTMLElement & {
+    const el = document.createElement("hu-timeline") as HTMLElement & {
       items: Array<{ time: string; message: string; status: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2063,7 +2063,7 @@ describe("sc-timeline", () => {
   });
 
   it("should render multiple items from array", async () => {
-    const el = document.createElement("sc-timeline") as HTMLElement & {
+    const el = document.createElement("hu-timeline") as HTMLElement & {
       items: Array<{ time: string; message: string; status: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2081,7 +2081,7 @@ describe("sc-timeline", () => {
   });
 
   it("should show empty state", async () => {
-    const el = document.createElement("sc-timeline") as HTMLElement & {
+    const el = document.createElement("hu-timeline") as HTMLElement & {
       items: Array<{ time: string; message: string; status: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2093,18 +2093,18 @@ describe("sc-timeline", () => {
   });
 });
 
-describe("sc-sparkline-enhanced", () => {
+describe("hu-sparkline-enhanced", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-sparkline-enhanced")).toBeDefined();
+    expect(customElements.get("hu-sparkline-enhanced")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-sparkline-enhanced");
+    const el = document.createElement("hu-sparkline-enhanced");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render SVG with data", async () => {
-    const el = document.createElement("sc-sparkline-enhanced") as HTMLElement & {
+    const el = document.createElement("hu-sparkline-enhanced") as HTMLElement & {
       data: number[];
       updateComplete: Promise<boolean>;
     };
@@ -2117,18 +2117,18 @@ describe("sc-sparkline-enhanced", () => {
   });
 });
 
-describe("sc-forecast-chart", () => {
+describe("hu-forecast-chart", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-forecast-chart")).toBeDefined();
+    expect(customElements.get("hu-forecast-chart")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-forecast-chart");
+    const el = document.createElement("hu-forecast-chart");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render SVG with history data", async () => {
-    const el = document.createElement("sc-forecast-chart") as HTMLElement & {
+    const el = document.createElement("hu-forecast-chart") as HTMLElement & {
       history: Array<{ date: string; cost: number }>;
       projectedTotal: number;
       daysInMonth: number;
@@ -2149,7 +2149,7 @@ describe("sc-forecast-chart", () => {
   });
 
   it("should not render with insufficient data", async () => {
-    const el = document.createElement("sc-forecast-chart") as HTMLElement & {
+    const el = document.createElement("hu-forecast-chart") as HTMLElement & {
       history: Array<{ date: string; cost: number }>;
       updateComplete: Promise<boolean>;
     };
@@ -2162,18 +2162,18 @@ describe("sc-forecast-chart", () => {
   });
 });
 
-describe("sc-page-hero", () => {
+describe("hu-page-hero", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-page-hero")).toBeDefined();
+    expect(customElements.get("hu-page-hero")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-page-hero");
+    const el = document.createElement("hu-page-hero");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render slot content", async () => {
-    const el = document.createElement("sc-page-hero") as HTMLElement & {
+    const el = document.createElement("hu-page-hero") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     const p = document.createElement("p");
@@ -2188,18 +2188,18 @@ describe("sc-page-hero", () => {
   });
 });
 
-describe("sc-schedule-builder", () => {
+describe("hu-schedule-builder", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-schedule-builder")).toBeDefined();
+    expect(customElements.get("hu-schedule-builder")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-schedule-builder");
+    const el = document.createElement("hu-schedule-builder");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render with shadow DOM", async () => {
-    const el = document.createElement("sc-schedule-builder") as HTMLElement & {
+    const el = document.createElement("hu-schedule-builder") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2209,18 +2209,18 @@ describe("sc-schedule-builder", () => {
   });
 });
 
-describe("sc-message-actions", () => {
+describe("hu-message-actions", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-message-actions")).toBeDefined();
+    expect(customElements.get("hu-message-actions")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-message-actions");
+    const el = document.createElement("hu-message-actions");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept role and content properties", async () => {
-    const el = document.createElement("sc-message-actions") as HTMLElement & {
+    const el = document.createElement("hu-message-actions") as HTMLElement & {
       updateComplete: Promise<boolean>;
       role: string;
       content: string;
@@ -2234,18 +2234,18 @@ describe("sc-message-actions", () => {
   });
 });
 
-describe("sc-automation-card", () => {
+describe("hu-automation-card", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-automation-card")).toBeDefined();
+    expect(customElements.get("hu-automation-card")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-automation-card");
+    const el = document.createElement("hu-automation-card");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render empty state without job", async () => {
-    const el = document.createElement("sc-automation-card") as HTMLElement & {
+    const el = document.createElement("hu-automation-card") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2255,18 +2255,18 @@ describe("sc-automation-card", () => {
   });
 });
 
-describe("sc-automation-form", () => {
+describe("hu-automation-form", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-automation-form")).toBeDefined();
+    expect(customElements.get("hu-automation-form")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-automation-form");
+    const el = document.createElement("hu-automation-form");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render form fields", async () => {
-    const el = document.createElement("sc-automation-form") as HTMLElement & {
+    const el = document.createElement("hu-automation-form") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     el.setAttribute("type", "agent");
@@ -2277,18 +2277,18 @@ describe("sc-automation-form", () => {
   });
 });
 
-describe("sc-voice-orb", () => {
+describe("hu-voice-orb", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-voice-orb")).toBeDefined();
+    expect(customElements.get("hu-voice-orb")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-voice-orb");
+    const el = document.createElement("hu-voice-orb");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render mic button and status", async () => {
-    const el = document.createElement("sc-voice-orb") as HTMLElement & {
+    const el = document.createElement("hu-voice-orb") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2298,8 +2298,8 @@ describe("sc-voice-orb", () => {
     el.remove();
   });
 
-  it("should dispatch sc-voice-mic-toggle on click", async () => {
-    const el = document.createElement("sc-voice-orb") as HTMLElement & {
+  it("should dispatch hu-voice-mic-toggle on click", async () => {
+    const el = document.createElement("hu-voice-orb") as HTMLElement & {
       disabled: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2307,7 +2307,7 @@ describe("sc-voice-orb", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-voice-mic-toggle", () => {
+    el.addEventListener("hu-voice-mic-toggle", () => {
       fired = true;
     });
     const btn = el.shadowRoot?.querySelector(".mic-btn") as HTMLButtonElement;
@@ -2317,29 +2317,29 @@ describe("sc-voice-orb", () => {
   });
 });
 
-describe("sc-voice-conversation", () => {
+describe("hu-voice-conversation", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-voice-conversation")).toBeDefined();
+    expect(customElements.get("hu-voice-conversation")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-voice-conversation");
+    const el = document.createElement("hu-voice-conversation");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render empty state when no messages", async () => {
-    const el = document.createElement("sc-voice-conversation") as HTMLElement & {
+    const el = document.createElement("hu-voice-conversation") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
     expect(el.shadowRoot).toBeTruthy();
-    expect(el.shadowRoot?.querySelector("sc-empty-state")).toBeTruthy();
+    expect(el.shadowRoot?.querySelector("hu-empty-state")).toBeTruthy();
     el.remove();
   });
 
   it("has scrollToBottom method", async () => {
-    const el = document.createElement("sc-voice-conversation") as HTMLElement & {
+    const el = document.createElement("hu-voice-conversation") as HTMLElement & {
       updateComplete: Promise<boolean>;
       scrollToBottom: () => void;
     };
@@ -2351,18 +2351,18 @@ describe("sc-voice-conversation", () => {
   });
 });
 
-describe("sc-chat-sessions-panel", () => {
+describe("hu-chat-sessions-panel", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-chat-sessions-panel")).toBeDefined();
+    expect(customElements.get("hu-chat-sessions-panel")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-chat-sessions-panel");
+    const el = document.createElement("hu-chat-sessions-panel");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept open property", async () => {
-    const el = document.createElement("sc-chat-sessions-panel") as HTMLElement & {
+    const el = document.createElement("hu-chat-sessions-panel") as HTMLElement & {
       updateComplete: Promise<boolean>;
       open: boolean;
     };
@@ -2374,18 +2374,18 @@ describe("sc-chat-sessions-panel", () => {
   });
 });
 
-describe("sc-file-preview", () => {
+describe("hu-file-preview", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-file-preview")).toBeDefined();
+    expect(customElements.get("hu-file-preview")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-file-preview");
+    const el = document.createElement("hu-file-preview");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render empty with no files", async () => {
-    const el = document.createElement("sc-file-preview") as HTMLElement & {
+    const el = document.createElement("hu-file-preview") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2395,18 +2395,18 @@ describe("sc-file-preview", () => {
   });
 });
 
-describe("sc-chat-bubble", () => {
+describe("hu-chat-bubble", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-chat-bubble")).toBeDefined();
+    expect(customElements.get("hu-chat-bubble")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-chat-bubble");
+    const el = document.createElement("hu-chat-bubble");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render with default props", async () => {
-    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+    const el = document.createElement("hu-chat-bubble") as HTMLElement & {
       content: string;
       role: "user" | "assistant";
       streaming: boolean;
@@ -2423,7 +2423,7 @@ describe("sc-chat-bubble", () => {
   });
 
   it("renders content and role=user changes output", async () => {
-    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+    const el = document.createElement("hu-chat-bubble") as HTMLElement & {
       content: string;
       role: "user" | "assistant";
       updateComplete: Promise<boolean>;
@@ -2439,7 +2439,7 @@ describe("sc-chat-bubble", () => {
   });
 
   it("shows cursor when streaming", async () => {
-    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+    const el = document.createElement("hu-chat-bubble") as HTMLElement & {
       content: string;
       streaming: boolean;
       updateComplete: Promise<boolean>;
@@ -2454,7 +2454,7 @@ describe("sc-chat-bubble", () => {
   });
 
   it("has role=article for accessibility", async () => {
-    const el = document.createElement("sc-chat-bubble") as HTMLElement & {
+    const el = document.createElement("hu-chat-bubble") as HTMLElement & {
       content: string;
       role: "user" | "assistant";
       updateComplete: Promise<boolean>;
@@ -2469,18 +2469,18 @@ describe("sc-chat-bubble", () => {
   });
 });
 
-describe("sc-typing-indicator", () => {
+describe("hu-typing-indicator", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-typing-indicator")).toBeDefined();
+    expect(customElements.get("hu-typing-indicator")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-typing-indicator");
+    const el = document.createElement("hu-typing-indicator");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render with default props", async () => {
-    const el = document.createElement("sc-typing-indicator") as HTMLElement & {
+    const el = document.createElement("hu-typing-indicator") as HTMLElement & {
       elapsed: string;
       updateComplete: Promise<boolean>;
     };
@@ -2491,7 +2491,7 @@ describe("sc-typing-indicator", () => {
   });
 
   it("renders elapsed time when provided", async () => {
-    const el = document.createElement("sc-typing-indicator") as HTMLElement & {
+    const el = document.createElement("hu-typing-indicator") as HTMLElement & {
       elapsed: string;
       updateComplete: Promise<boolean>;
     };
@@ -2504,7 +2504,7 @@ describe("sc-typing-indicator", () => {
   });
 
   it("has role=status for accessibility", async () => {
-    const el = document.createElement("sc-typing-indicator") as HTMLElement & {
+    const el = document.createElement("hu-typing-indicator") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2515,18 +2515,18 @@ describe("sc-typing-indicator", () => {
   });
 });
 
-describe("sc-delivery-status", () => {
+describe("hu-delivery-status", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-delivery-status")).toBeDefined();
+    expect(customElements.get("hu-delivery-status")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-delivery-status");
+    const el = document.createElement("hu-delivery-status");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should render with default status", async () => {
-    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+    const el = document.createElement("hu-delivery-status") as HTMLElement & {
       status: string;
       updateComplete: Promise<boolean>;
     };
@@ -2537,7 +2537,7 @@ describe("sc-delivery-status", () => {
   });
 
   it("status=failed shows retry button", async () => {
-    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+    const el = document.createElement("hu-delivery-status") as HTMLElement & {
       status: string;
       updateComplete: Promise<boolean>;
     };
@@ -2550,8 +2550,8 @@ describe("sc-delivery-status", () => {
     el.remove();
   });
 
-  it("fires sc-retry when retry clicked", async () => {
-    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+  it("fires hu-retry when retry clicked", async () => {
+    const el = document.createElement("hu-delivery-status") as HTMLElement & {
       status: string;
       updateComplete: Promise<boolean>;
     };
@@ -2559,7 +2559,7 @@ describe("sc-delivery-status", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-retry", () => (fired = true));
+    el.addEventListener("hu-retry", () => (fired = true));
     const retryBtn = el.shadowRoot?.querySelector(".retry") as HTMLElement | null;
     retryBtn?.click();
     expect(fired).toBe(true);
@@ -2567,7 +2567,7 @@ describe("sc-delivery-status", () => {
   });
 
   it("has role=status for accessibility", async () => {
-    const el = document.createElement("sc-delivery-status") as HTMLElement & {
+    const el = document.createElement("hu-delivery-status") as HTMLElement & {
       status: string;
       updateComplete: Promise<boolean>;
     };
@@ -2580,16 +2580,16 @@ describe("sc-delivery-status", () => {
   });
 });
 
-describe("sc-message-group", () => {
+describe("hu-message-group", () => {
   it("should be defined", () => {
-    expect(customElements.get("sc-message-group")).toBeDefined();
+    expect(customElements.get("hu-message-group")).toBeDefined();
   });
   it("defaults to assistant role", () => {
-    const el = document.createElement("sc-message-group") as HTMLElement & { role: string };
+    const el = document.createElement("hu-message-group") as HTMLElement & { role: string };
     expect(el.role).toBe("assistant");
   });
   it("has role=group with aria-label", async () => {
-    const el = document.createElement("sc-message-group") as HTMLElement & {
+    const el = document.createElement("hu-message-group") as HTMLElement & {
       role: string;
       updateComplete: Promise<boolean>;
     };
@@ -2601,7 +2601,7 @@ describe("sc-message-group", () => {
     el.remove();
   });
   it("has avatar and timestamp slots", async () => {
-    const el = document.createElement("sc-message-group") as HTMLElement & {
+    const el = document.createElement("hu-message-group") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2612,12 +2612,12 @@ describe("sc-message-group", () => {
   });
 });
 
-describe("sc-link-preview", () => {
+describe("hu-link-preview", () => {
   it("is defined as custom element", () => {
-    expect(customElements.get("sc-link-preview")).toBeDefined();
+    expect(customElements.get("hu-link-preview")).toBeDefined();
   });
   it("renders nothing without url", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       updateComplete: Promise<boolean>;
     };
@@ -2628,7 +2628,7 @@ describe("sc-link-preview", () => {
     el.remove();
   });
   it("renders card with url and title", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       title: string;
       updateComplete: Promise<boolean>;
@@ -2644,7 +2644,7 @@ describe("sc-link-preview", () => {
     el.remove();
   });
   it("extracts domain", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       title: string;
       updateComplete: Promise<boolean>;
@@ -2657,7 +2657,7 @@ describe("sc-link-preview", () => {
     el.remove();
   });
   it("uses title as aria-label", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       title: string;
       updateComplete: Promise<boolean>;
@@ -2670,7 +2670,7 @@ describe("sc-link-preview", () => {
     el.remove();
   });
   it("shows skeleton loading state when loading=true", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       loading: boolean;
       updateComplete: Promise<boolean>;
@@ -2685,7 +2685,7 @@ describe("sc-link-preview", () => {
     el.remove();
   });
   it("shows fallback link when failed=true", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       failed: boolean;
       updateComplete: Promise<boolean>;
@@ -2701,7 +2701,7 @@ describe("sc-link-preview", () => {
     el.remove();
   });
   it("renders title and domain when provided", async () => {
-    const el = document.createElement("sc-link-preview") as HTMLElement & {
+    const el = document.createElement("hu-link-preview") as HTMLElement & {
       url: string;
       title: string;
       domain: string;
@@ -2718,12 +2718,12 @@ describe("sc-link-preview", () => {
   });
 });
 
-describe("sc-model-selector", () => {
+describe("hu-model-selector", () => {
   it("should be defined", () => {
-    expect(customElements.get("sc-model-selector")).toBeDefined();
+    expect(customElements.get("hu-model-selector")).toBeDefined();
   });
   it("has combobox trigger", async () => {
-    const el = document.createElement("sc-model-selector") as HTMLElement & {
+    const el = document.createElement("hu-model-selector") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2734,7 +2734,7 @@ describe("sc-model-selector", () => {
     el.remove();
   });
   it("opens dropdown on click", async () => {
-    const el = document.createElement("sc-model-selector") as HTMLElement & {
+    const el = document.createElement("hu-model-selector") as HTMLElement & {
       models: Array<{ id: string; name: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2746,8 +2746,8 @@ describe("sc-model-selector", () => {
     expect(el.shadowRoot?.querySelector("[role='listbox']")).toBeTruthy();
     el.remove();
   });
-  it("fires sc-model-change", async () => {
-    const el = document.createElement("sc-model-selector") as HTMLElement & {
+  it("fires hu-model-change", async () => {
+    const el = document.createElement("hu-model-selector") as HTMLElement & {
       models: Array<{ id: string; name: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2760,7 +2760,7 @@ describe("sc-model-selector", () => {
     (el.shadowRoot?.querySelector("[role='combobox']") as HTMLElement)?.click();
     await el.updateComplete;
     let detail: { model: string } | null = null;
-    el.addEventListener("sc-model-change", ((e: CustomEvent) => {
+    el.addEventListener("hu-model-change", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     (el.shadowRoot?.querySelectorAll("[role='option']")?.[1] as HTMLElement)?.click();
@@ -2768,7 +2768,7 @@ describe("sc-model-selector", () => {
     el.remove();
   });
   it("keyboard Escape closes", async () => {
-    const el = document.createElement("sc-model-selector") as HTMLElement & {
+    const el = document.createElement("hu-model-selector") as HTMLElement & {
       models: Array<{ id: string; name: string }>;
       updateComplete: Promise<boolean>;
     };
@@ -2785,12 +2785,12 @@ describe("sc-model-selector", () => {
   });
 });
 
-describe("sc-tapback-menu", () => {
+describe("hu-tapback-menu", () => {
   it("should be defined", () => {
-    expect(customElements.get("sc-tapback-menu")).toBeDefined();
+    expect(customElements.get("hu-tapback-menu")).toBeDefined();
   });
   it("renders nothing when closed", async () => {
-    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+    const el = document.createElement("hu-tapback-menu") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2801,7 +2801,7 @@ describe("sc-tapback-menu", () => {
     el.remove();
   });
   it("renders menu when open", async () => {
-    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+    const el = document.createElement("hu-tapback-menu") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2812,8 +2812,8 @@ describe("sc-tapback-menu", () => {
     expect(el.shadowRoot?.querySelectorAll("[role='menuitem']")?.length).toBe(5);
     el.remove();
   });
-  it("fires sc-react on click", async () => {
-    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+  it("fires hu-react on click", async () => {
+    const el = document.createElement("hu-tapback-menu") as HTMLElement & {
       open: boolean;
       messageIndex: number;
       updateComplete: Promise<boolean>;
@@ -2823,15 +2823,15 @@ describe("sc-tapback-menu", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: Record<string, unknown> | null = null;
-    el.addEventListener("sc-react", ((e: CustomEvent) => {
+    el.addEventListener("hu-react", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     (el.shadowRoot?.querySelector("[role='menuitem']") as HTMLElement)?.click();
     expect(detail?.["index"]).toBe(3);
     el.remove();
   });
-  it("fires sc-tapback-close on Escape", async () => {
-    const el = document.createElement("sc-tapback-menu") as HTMLElement & {
+  it("fires hu-tapback-close on Escape", async () => {
+    const el = document.createElement("hu-tapback-menu") as HTMLElement & {
       open: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2839,19 +2839,19 @@ describe("sc-tapback-menu", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let closed = false;
-    el.addEventListener("sc-tapback-close", () => (closed = true));
+    el.addEventListener("hu-tapback-close", () => (closed = true));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(closed).toBe(true);
     el.remove();
   });
 });
 
-describe("sc-chat-composer", () => {
+describe("hu-chat-composer", () => {
   it("should be defined", () => {
-    expect(customElements.get("sc-chat-composer")).toBeDefined();
+    expect(customElements.get("hu-chat-composer")).toBeDefined();
   });
   it("has default props", () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       value: string;
       waiting: boolean;
       disabled: boolean;
@@ -2863,7 +2863,7 @@ describe("sc-chat-composer", () => {
     expect(el.placeholder).toBe("Type a message...");
   });
   it("renders textarea and send button", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2873,7 +2873,7 @@ describe("sc-chat-composer", () => {
     el.remove();
   });
   it("send disabled when empty", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       value: string;
       updateComplete: Promise<boolean>;
     };
@@ -2886,7 +2886,7 @@ describe("sc-chat-composer", () => {
     el.remove();
   });
   it("shows stop button when waiting", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       waiting: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2897,8 +2897,8 @@ describe("sc-chat-composer", () => {
     expect(el.shadowRoot?.querySelector('[aria-label="Send"]')).toBeNull();
     el.remove();
   });
-  it("fires sc-abort on stop click", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+  it("fires hu-abort on stop click", async () => {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       waiting: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2906,13 +2906,13 @@ describe("sc-chat-composer", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-abort", () => (fired = true));
+    el.addEventListener("hu-abort", () => (fired = true));
     (el.shadowRoot?.querySelector('[aria-label="Stop generating"]') as HTMLElement)?.click();
     expect(fired).toBe(true);
     el.remove();
   });
   it("shows suggestions when enabled", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       showSuggestions: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2923,7 +2923,7 @@ describe("sc-chat-composer", () => {
     el.remove();
   });
   it("renders model chip", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       model: string;
       updateComplete: Promise<boolean>;
     };
@@ -2934,7 +2934,7 @@ describe("sc-chat-composer", () => {
     el.remove();
   });
   it("has attach file button", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2943,7 +2943,7 @@ describe("sc-chat-composer", () => {
     el.remove();
   });
   it("shows mic button when voiceSupported", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -2952,7 +2952,7 @@ describe("sc-chat-composer", () => {
     el.remove();
   });
   it("hides mic button when voiceSupported is false", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       voiceSupported: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2962,21 +2962,21 @@ describe("sc-chat-composer", () => {
     expect(el.shadowRoot?.querySelector('[aria-label="Voice input"]')).toBeNull();
     el.remove();
   });
-  it("dispatches sc-voice-start on mic click when not voiceActive", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+  it("dispatches hu-voice-start on mic click when not voiceActive", async () => {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       voiceActive: boolean;
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
     await el.updateComplete;
     let eventName = "";
-    el.addEventListener("sc-voice-start", () => (eventName = "sc-voice-start"));
+    el.addEventListener("hu-voice-start", () => (eventName = "hu-voice-start"));
     (el.shadowRoot?.querySelector('[aria-label="Voice input"]') as HTMLElement)?.click();
-    expect(eventName).toBe("sc-voice-start");
+    expect(eventName).toBe("hu-voice-start");
     el.remove();
   });
-  it("dispatches sc-voice-stop on mic click when voiceActive", async () => {
-    const el = document.createElement("sc-chat-composer") as HTMLElement & {
+  it("dispatches hu-voice-stop on mic click when voiceActive", async () => {
+    const el = document.createElement("hu-chat-composer") as HTMLElement & {
       voiceActive: boolean;
       updateComplete: Promise<boolean>;
     };
@@ -2984,27 +2984,27 @@ describe("sc-chat-composer", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let eventName = "";
-    el.addEventListener("sc-voice-stop", () => (eventName = "sc-voice-stop"));
+    el.addEventListener("hu-voice-stop", () => (eventName = "hu-voice-stop"));
     (el.shadowRoot?.querySelector('[aria-label="Voice input"]') as HTMLElement)?.click();
-    expect(eventName).toBe("sc-voice-stop");
+    expect(eventName).toBe("hu-voice-stop");
     el.remove();
   });
 });
 
-describe("sc-branch-tree", () => {
+describe("hu-branch-tree", () => {
   it("is defined as custom element", () => {
-    expect(customElements.get("sc-branch-tree")).toBeDefined();
+    expect(customElements.get("hu-branch-tree")).toBeDefined();
   });
   it("has default props", () => {
-    const el = document.createElement("sc-branch-tree") as HTMLElement & {
+    const el = document.createElement("hu-branch-tree") as HTMLElement & {
       branches: unknown[];
       activeId: string;
     };
     expect(el.branches).toEqual([]);
     expect(el.activeId).toBe("");
   });
-  it("dispatches sc-branch-select on node click", async () => {
-    const el = document.createElement("sc-branch-tree") as HTMLElement & {
+  it("dispatches hu-branch-select on node click", async () => {
+    const el = document.createElement("hu-branch-tree") as HTMLElement & {
       branches: Array<{
         id: string;
         label: string;
@@ -3020,7 +3020,7 @@ describe("sc-branch-tree", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let receivedId: string | null = null;
-    el.addEventListener("sc-branch-select", ((e: CustomEvent<{ id: string }>) => {
+    el.addEventListener("hu-branch-select", ((e: CustomEvent<{ id: string }>) => {
       receivedId = e.detail.id;
     }) as EventListener);
     const node = el.shadowRoot?.querySelector(".node-label");
@@ -3029,7 +3029,7 @@ describe("sc-branch-tree", () => {
     el.remove();
   });
   it("renders nodes from branches array", async () => {
-    const el = document.createElement("sc-branch-tree") as HTMLElement & {
+    const el = document.createElement("hu-branch-tree") as HTMLElement & {
       branches: Array<{
         id: string;
         label: string;
@@ -3052,7 +3052,7 @@ describe("sc-branch-tree", () => {
     el.remove();
   });
   it("marks active node with accent styling", async () => {
-    const el = document.createElement("sc-branch-tree") as HTMLElement & {
+    const el = document.createElement("hu-branch-tree") as HTMLElement & {
       branches: Array<{
         id: string;
         label: string;
@@ -3077,13 +3077,13 @@ describe("sc-branch-tree", () => {
   });
 });
 
-describe("sc-image-viewer", () => {
+describe("hu-image-viewer", () => {
   it("is defined as custom element", () => {
-    expect(customElements.get("sc-image-viewer")).toBeDefined();
+    expect(customElements.get("hu-image-viewer")).toBeDefined();
   });
 
   it("renders backdrop when open", async () => {
-    const el = document.createElement("sc-image-viewer") as HTMLElement & {
+    const el = document.createElement("hu-image-viewer") as HTMLElement & {
       src: string;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -3098,7 +3098,7 @@ describe("sc-image-viewer", () => {
   });
 
   it("dispatches close event on escape key", async () => {
-    const el = document.createElement("sc-image-viewer") as HTMLElement & {
+    const el = document.createElement("hu-image-viewer") as HTMLElement & {
       src: string;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -3118,7 +3118,7 @@ describe("sc-image-viewer", () => {
   });
 
   it("hides when not open", async () => {
-    const el = document.createElement("sc-image-viewer") as HTMLElement & {
+    const el = document.createElement("hu-image-viewer") as HTMLElement & {
       src: string;
       open: boolean;
       updateComplete: Promise<boolean>;
@@ -3132,12 +3132,12 @@ describe("sc-image-viewer", () => {
   });
 });
 
-describe("sc-message-thread", () => {
+describe("hu-message-thread", () => {
   it("should be defined", () => {
-    expect(customElements.get("sc-message-thread")).toBeDefined();
+    expect(customElements.get("hu-message-thread")).toBeDefined();
   });
   it("has default props", () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       items: unknown[];
       isWaiting: boolean;
       historyLoading: boolean;
@@ -3147,7 +3147,7 @@ describe("sc-message-thread", () => {
     expect(el.historyLoading).toBe(false);
   });
   it("renders role=log container", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -3157,8 +3157,8 @@ describe("sc-message-thread", () => {
     expect(c?.getAttribute("aria-live")).toBe("polite");
     el.remove();
   });
-  it("renders messages as sc-chat-bubble", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+  it("renders messages as hu-chat-bubble", async () => {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       items: Array<{ type: string; role: string; content: string; ts: number }>;
       updateComplete: Promise<boolean>;
     };
@@ -3168,12 +3168,12 @@ describe("sc-message-thread", () => {
     ];
     document.body.appendChild(el);
     await el.updateComplete;
-    expect(el.shadowRoot?.querySelectorAll("sc-chat-bubble")?.length).toBe(2);
+    expect(el.shadowRoot?.querySelectorAll("hu-chat-bubble")?.length).toBe(2);
     el.remove();
   });
   it("groups consecutive same-role messages", async () => {
     const now = Date.now();
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       items: Array<{ type: string; role: string; content: string; ts: number }>;
       updateComplete: Promise<boolean>;
     };
@@ -3184,11 +3184,11 @@ describe("sc-message-thread", () => {
     ];
     document.body.appendChild(el);
     await el.updateComplete;
-    expect(el.shadowRoot?.querySelectorAll("sc-message-group")?.length).toBe(2);
+    expect(el.shadowRoot?.querySelectorAll("hu-message-group")?.length).toBe(2);
     el.remove();
   });
   it("shows typing indicator when waiting", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       isWaiting: boolean;
       items: Array<{ type: string; role: string; content: string; ts: number }>;
       updateComplete: Promise<boolean>;
@@ -3197,39 +3197,39 @@ describe("sc-message-thread", () => {
     el.isWaiting = true;
     document.body.appendChild(el);
     await el.updateComplete;
-    expect(el.shadowRoot?.querySelector("sc-typing-indicator")).toBeTruthy();
+    expect(el.shadowRoot?.querySelector("hu-typing-indicator")).toBeTruthy();
     el.remove();
   });
   it("shows skeleton when historyLoading", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       historyLoading: boolean;
       updateComplete: Promise<boolean>;
     };
     el.historyLoading = true;
     document.body.appendChild(el);
     await el.updateComplete;
-    expect(el.shadowRoot?.querySelector("sc-skeleton")).toBeTruthy();
+    expect(el.shadowRoot?.querySelector("hu-skeleton")).toBeTruthy();
     el.remove();
   });
   it("renders tool calls", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       items: Array<{ type: string; name?: string; status?: string; result?: string }>;
       updateComplete: Promise<boolean>;
     };
     el.items = [{ type: "tool_call", name: "shell", status: "completed", result: "ok" }];
     document.body.appendChild(el);
     await el.updateComplete;
-    expect(el.shadowRoot?.querySelector("sc-tool-result")).toBeTruthy();
+    expect(el.shadowRoot?.querySelector("hu-tool-result")).toBeTruthy();
     el.remove();
   });
   it("has scrollToBottom method", () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       scrollToBottom: () => void;
     };
     expect(typeof el.scrollToBottom).toBe("function");
   });
   it("should render load-earlier button when hasEarlierMessages is true", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       items: Array<{ type: string; role: string; content: string; ts: number }>;
       hasEarlierMessages: boolean;
       loadingEarlier: boolean;
@@ -3245,8 +3245,8 @@ describe("sc-message-thread", () => {
     expect(btn?.textContent).toContain("Load earlier messages");
     el.remove();
   });
-  it("should fire sc-load-earlier event on button click", async () => {
-    const el = document.createElement("sc-message-thread") as HTMLElement & {
+  it("should fire hu-load-earlier event on button click", async () => {
+    const el = document.createElement("hu-message-thread") as HTMLElement & {
       items: Array<{ type: string; role: string; content: string; ts: number }>;
       hasEarlierMessages: boolean;
       loadingEarlier: boolean;
@@ -3258,7 +3258,7 @@ describe("sc-message-thread", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-load-earlier", () => (fired = true));
+    el.addEventListener("hu-load-earlier", () => (fired = true));
     const btn = el.shadowRoot?.querySelector(".load-earlier-btn") as HTMLElement;
     btn?.click();
     expect(fired).toBe(true);
@@ -3266,47 +3266,47 @@ describe("sc-message-thread", () => {
   });
 });
 
-describe("sc-chart", () => {
+describe("hu-chart", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-chart")).toBeDefined();
+    expect(customElements.get("hu-chart")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-chart");
+    const el = document.createElement("hu-chart");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept type property", () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     el.type = "bar";
     expect(el.type).toBe("bar");
   });
 
   it("should accept data property", () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     const data = { labels: ["A", "B"], datasets: [{ data: [1, 2] }] };
     el.data = data;
     expect(el.data).toEqual(data);
   });
 
   it("should default height to 200", () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     expect(el.height).toBe(200);
   });
 
   it("should default horizontal to false", () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     expect(el.horizontal).toBe(false);
   });
 
   it("should accept horizontal property", () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     el.horizontal = true;
     expect(el.horizontal).toBe(true);
   });
 
   it("should render a canvas when data has entries", async () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     el.type = "bar";
     el.data = { labels: ["A"], datasets: [{ data: [1] }] };
     document.body.appendChild(el);
@@ -3317,7 +3317,7 @@ describe("sc-chart", () => {
   });
 
   it("should show empty message when no data", async () => {
-    const el = document.createElement("sc-chart") as ScChart;
+    const el = document.createElement("hu-chart") as ScChart;
     el.data = { labels: [], datasets: [] };
     document.body.appendChild(el);
     await el.updateComplete;
@@ -3328,68 +3328,68 @@ describe("sc-chart", () => {
   });
 });
 
-describe("sc-activity-timeline", () => {
+describe("hu-activity-timeline", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-activity-timeline")).toBeDefined();
+    expect(customElements.get("hu-activity-timeline")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-activity-timeline");
+    const el = document.createElement("hu-activity-timeline");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-overview-stats", () => {
+describe("hu-overview-stats", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-overview-stats")).toBeDefined();
+    expect(customElements.get("hu-overview-stats")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-overview-stats");
+    const el = document.createElement("hu-overview-stats");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-sessions-table", () => {
+describe("hu-sessions-table", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-sessions-table")).toBeDefined();
+    expect(customElements.get("hu-sessions-table")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-sessions-table");
+    const el = document.createElement("hu-sessions-table");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-skill-card", () => {
+describe("hu-skill-card", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-skill-card")).toBeDefined();
+    expect(customElements.get("hu-skill-card")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-skill-card");
+    const el = document.createElement("hu-skill-card");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-skill-detail", () => {
+describe("hu-skill-detail", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-skill-detail")).toBeDefined();
+    expect(customElements.get("hu-skill-detail")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-skill-detail");
+    const el = document.createElement("hu-skill-detail");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });
 
-describe("sc-skill-registry", () => {
+describe("hu-skill-registry", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-skill-registry")).toBeDefined();
+    expect(customElements.get("hu-skill-registry")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-skill-registry");
+    const el = document.createElement("hu-skill-registry");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 });

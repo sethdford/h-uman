@@ -5,7 +5,7 @@ description: Bidirectional email via SMTP send and IMAP receive.
 
 # Email Channel
 
-SeaClaw can send and receive email via SMTP and IMAP. Messages are sent using curl over SMTP (TLS), and received by polling the INBOX with IMAP `SEARCH UNSEEN`.
+Human can send and receive email via SMTP and IMAP. Messages are sent using curl over SMTP (TLS), and received by polling the INBOX with IMAP `SEARCH UNSEEN`.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ SeaClaw can send and receive email via SMTP and IMAP. Messages are sent using cu
 
 ## Configuration
 
-Add to `~/.seaclaw/config.json` under `channels.email`:
+Add to `~/.human/config.json` under `channels.email`:
 
 ```json
 {
@@ -53,7 +53,7 @@ Gmail requires [App Passwords](https://support.google.com/accounts/answer/185833
 
 ### Outbound (send)
 
-- SeaClaw writes a MIME plain-text email to a temp file
+- Human writes a MIME plain-text email to a temp file
 - Invokes `curl` with `--url smtps://host:port` (or `smtp://` for non-TLS)
 - Sends via `--mail-from`, `--mail-rcpt`, `--upload-file`
 - Port 587 uses STARTTLS; port 465 uses implicit TLS

@@ -4,11 +4,11 @@ test.describe("Performance Latency Budgets", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
-    await expect(page.locator("sc-app")).toBeAttached({ timeout: 5000 });
+    await expect(page.locator("hu-app")).toBeAttached({ timeout: 5000 });
   });
 
   test("button click responds within 50ms budget", async ({ page }) => {
-    const sidebar = page.locator("sc-app >> sc-sidebar");
+    const sidebar = page.locator("hu-app >> hu-sidebar");
     await expect(sidebar).toBeAttached({ timeout: 5000 });
 
     const navItems = sidebar.locator("[data-testid]").or(sidebar.locator("a, button"));
@@ -27,7 +27,7 @@ test.describe("Performance Latency Budgets", () => {
   });
 
   test("view transition completes within 200ms budget", async ({ page }) => {
-    const sidebar = page.locator("sc-app >> sc-sidebar");
+    const sidebar = page.locator("hu-app >> hu-sidebar");
     await expect(sidebar).toBeAttached({ timeout: 5000 });
 
     const chatLink = sidebar.locator('a[href*="chat"], [data-view="chat"]').first();
@@ -39,7 +39,7 @@ test.describe("Performance Latency Budgets", () => {
 
     const start = await page.evaluate(() => performance.now());
     await chatLink.click();
-    const chatView = page.locator("sc-app >> sc-chat-view");
+    const chatView = page.locator("hu-app >> hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 5000 });
     const elapsed = await page.evaluate((s) => performance.now() - s, start);
 
@@ -51,8 +51,8 @@ test.describe("Performance Latency Budgets", () => {
     await page.keyboard.press("Control+k");
 
     const commandPalette = page
-      .locator("sc-app")
-      .locator("sc-command-palette, [role='combobox'], [data-testid='command-palette']");
+      .locator("hu-app")
+      .locator("hu-command-palette, [role='combobox'], [data-testid='command-palette']");
 
     const appeared = await commandPalette.count();
     if (appeared === 0) {

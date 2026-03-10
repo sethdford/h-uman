@@ -1,11 +1,11 @@
-# seaclaw
+# human
 
 Autonomous AI assistant runtime in C11. 239 KB binary. Zero dependencies. 50+ providers.
 
 ## Install
 
 ```bash
-npm install -g seaclaw
+npm install -g human
 ```
 
 This downloads a pre-built binary for your platform (macOS ARM/x86, Linux x86).
@@ -13,24 +13,24 @@ This downloads a pre-built binary for your platform (macOS ARM/x86, Linux x86).
 ## Usage
 
 ```bash
-seaclaw onboard --interactive  # first-time setup
-seaclaw doctor                 # verify configuration
-seaclaw agent -m "hello"       # send a message
+human onboard --interactive  # first-time setup
+human doctor                 # verify configuration
+human agent -m "hello"       # send a message
 ```
 
 ## Build from source
 
 ```bash
-git clone https://github.com/sethdford/seaclaw.git
-cd seaclaw && mkdir -p build && cd build
+git clone https://github.com/sethdford/human.git
+cd human && mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
 cmake --build .
 ```
 
 ## Links
 
-- [Documentation](https://sethdford.github.io/seaclaw/)
-- [GitHub](https://github.com/sethdford/seaclaw)
+- [Documentation](https://sethdford.github.io/human/)
+- [GitHub](https://github.com/sethdford/human)
 
 ## License
 

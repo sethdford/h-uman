@@ -1,23 +1,23 @@
-#include "seaclaw/context/mood.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
+#include "human/context/mood.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
 #include <stdio.h>
 #include <string.h>
 
-#define SC_MOOD_MAX_TAGS 16
-#define SC_MOOD_TAG_LEN  32
+#define HU_MOOD_MAX_TAGS 16
+#define HU_MOOD_TAG_LEN  32
 
 /* Emotion tags from stm.h / promotion.c */
-static const char *const SC_MOOD_POSITIVE[] = {"joy", "excitement", "surprise"};
-static const size_t SC_MOOD_POSITIVE_COUNT =
-    sizeof(SC_MOOD_POSITIVE) / sizeof(SC_MOOD_POSITIVE[0]);
-static const char *const SC_MOOD_NEGATIVE[] = {"sadness", "anger", "fear", "frustration", "anxiety"};
-static const size_t SC_MOOD_NEGATIVE_COUNT =
-    sizeof(SC_MOOD_NEGATIVE) / sizeof(SC_MOOD_NEGATIVE[0]);
+static const char *const HU_MOOD_POSITIVE[] = {"joy", "excitement", "surprise"};
+static const size_t HU_MOOD_POSITIVE_COUNT =
+    sizeof(HU_MOOD_POSITIVE) / sizeof(HU_MOOD_POSITIVE[0]);
+static const char *const HU_MOOD_NEGATIVE[] = {"sadness", "anger", "fear", "frustration", "anxiety"};
+static const size_t HU_MOOD_NEGATIVE_COUNT =
+    sizeof(HU_MOOD_NEGATIVE) / sizeof(HU_MOOD_NEGATIVE[0]);
 
 typedef struct mood_tag_agg {
-    char tag[SC_MOOD_TAG_LEN];
+    char tag[HU_MOOD_TAG_LEN];
     double sum_intensity;
     size_t count;
 } mood_tag_agg_t;
@@ -39,7 +39,7 @@ static bool key_matches_contact(const char *key, size_t key_len, const char *con
 }
 
 /* Parse emotion JSON from memory entry content. content must be non-NULL and
- * null-terminated — all memory backends (sc_memory_entry_t.content) guarantee
+ * null-terminated — all memory backends (hu_memory_entry_t.content) guarantee
  * null-termination. strstr/strchr rely on this. */
 static bool parse_emotion_json(const char *content, size_t content_len, char *tag_out,
                                 size_t tag_cap, double *intensity_out) {
@@ -80,16 +80,16 @@ static bool parse_emotion_json(const char *content, size_t content_len, char *ta
 }
 
 static bool is_positive(const char *tag) {
-    for (size_t i = 0; i < SC_MOOD_POSITIVE_COUNT; i++) {
-        if (strcmp(tag, SC_MOOD_POSITIVE[i]) == 0)
+    for (size_t i = 0; i < HU_MOOD_POSITIVE_COUNT; i++) {
+        if (strcmp(tag, HU_MOOD_POSITIVE[i]) == 0)
             return true;
     }
     return false;
 }
 
 static bool is_negative(const char *tag) {
-    for (size_t i = 0; i < SC_MOOD_NEGATIVE_COUNT; i++) {
-        if (strcmp(tag, SC_MOOD_NEGATIVE[i]) == 0)
+    for (size_t i = 0; i < HU_MOOD_NEGATIVE_COUNT; i++) {
+        if (strcmp(tag, HU_MOOD_NEGATIVE[i]) == 0)
             return true;
     }
     return false;
@@ -103,52 +103,52 @@ static const char *intensity_label(double avg) {
     return "low";
 }
 
-sc_error_t sc_mood_build_context(sc_allocator_t *alloc, sc_memory_t *memory,
+hu_error_t hu_mood_build_context(hu_allocator_t *alloc, hu_memory_t *memory,
                                  const char *contact_id, size_t contact_id_len,
                                  char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
     if (!memory || !memory->vtable || !memory->vtable->list)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     static const char emotions_cat[] = "emotions";
-    sc_memory_category_t cat = {
-        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
         .data.custom = {.name = emotions_cat, .name_len = sizeof(emotions_cat) - 1},
     };
 
     /* List all emotions; we filter by key prefix "emotion:<contact_id>:" since
      * session_id may vary by backend (e.g. buf->session_id vs contact_id). */
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = memory->vtable->list(memory->ctx, alloc, &cat, NULL, 0, &entries, &count);
-    if (err != SC_OK)
+    hu_error_t err = memory->vtable->list(memory->ctx, alloc, &cat, NULL, 0, &entries, &count);
+    if (err != HU_OK)
         return err;
     if (!entries || count == 0) {
         if (entries) {
             for (size_t i = 0; i < count; i++)
-                sc_memory_entry_free_fields(alloc, &entries[i]);
-            alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+                hu_memory_entry_free_fields(alloc, &entries[i]);
+            alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
         }
-        return SC_OK;
+        return HU_OK;
     }
 
-    mood_tag_agg_t aggs[SC_MOOD_MAX_TAGS];
+    mood_tag_agg_t aggs[HU_MOOD_MAX_TAGS];
     size_t agg_count = 0;
     memset(aggs, 0, sizeof(aggs));
 
     for (size_t i = 0; i < count; i++) {
-        const sc_memory_entry_t *e = &entries[i];
+        const hu_memory_entry_t *e = &entries[i];
         if (!e->content || e->content_len == 0)
             continue;
         if (contact_id && contact_id_len > 0 && e->key && e->key_len > 0 &&
             !key_matches_contact(e->key, e->key_len, contact_id, contact_id_len))
             continue;
 
-        char tag_buf[SC_MOOD_TAG_LEN];
+        char tag_buf[HU_MOOD_TAG_LEN];
         double intensity = 0.0;
         if (!parse_emotion_json(e->content, e->content_len, tag_buf, sizeof(tag_buf), &intensity))
             continue;
@@ -161,10 +161,10 @@ sc_error_t sc_mood_build_context(sc_allocator_t *alloc, sc_memory_t *memory,
                 break;
             }
         }
-        if (j >= agg_count && agg_count < SC_MOOD_MAX_TAGS) {
+        if (j >= agg_count && agg_count < HU_MOOD_MAX_TAGS) {
             size_t tag_len = strlen(tag_buf);
-            if (tag_len >= SC_MOOD_TAG_LEN)
-                tag_len = SC_MOOD_TAG_LEN - 1;
+            if (tag_len >= HU_MOOD_TAG_LEN)
+                tag_len = HU_MOOD_TAG_LEN - 1;
             memcpy(aggs[agg_count].tag, tag_buf, tag_len);
             aggs[agg_count].tag[tag_len] = '\0';
             aggs[agg_count].sum_intensity = intensity;
@@ -174,11 +174,11 @@ sc_error_t sc_mood_build_context(sc_allocator_t *alloc, sc_memory_t *memory,
     }
 
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
 
     if (agg_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Find dominant (highest total intensity) */
     size_t dominant_idx = 0;
@@ -248,10 +248,10 @@ sc_error_t sc_mood_build_context(sc_allocator_t *alloc, sc_memory_t *memory,
 
     char *result = (char *)alloc->alloc(alloc->ctx, pos + 1);
     if (!result)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(result, buf, pos);
     result[pos] = '\0';
     *out = result;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }

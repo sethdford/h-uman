@@ -1,12 +1,12 @@
 ---
 title: Installation
-description: Build SeaClaw from source on macOS and Linux.
+description: Build Human from source on macOS and Linux.
 ---
 
-SeaClaw can be installed via pre-built binaries or built from source with CMake.
+Human can be installed via pre-built binaries or built from source with CMake.
 
 :::tip Pre-built binaries
-Pre-built binaries are available via **Homebrew** (`brew install --HEAD ./Formula/seaclaw.rb`), **Docker** (`docker pull ghcr.io/sethdford/seaclaw:latest`), **Nix** (`nix run github:sethdford/seaclaw`), and **Debian** (`.deb` from [Releases](https://github.com/sethdford/seaclaw/releases)). See the main [README](https://github.com/sethdford/seaclaw#installation) for details.
+Pre-built binaries are available via **Homebrew** (`brew install --HEAD ./Formula/human.rb`), **Docker** (`docker pull ghcr.io/sethdford/human:latest`), **Nix** (`nix run github:sethdford/human`), and **Debian** (`.deb` from [Releases](https://github.com/sethdford/human/releases)). See the main [README](https://github.com/sethdford/human#installation) for details.
 :::
 
 ## Prerequisites
@@ -43,8 +43,8 @@ sudo dnf install -y cmake sqlite-devel libcurl-devel
 Clone the repository, then build:
 
 ```bash
-git clone https://github.com/sethdford/seaclaw.git
-cd seaclaw
+git clone https://github.com/sethdford/human.git
+cd human
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
 cmake --build . -j$(nproc)
@@ -52,8 +52,8 @@ cmake --build . -j$(nproc)
 
 The binaries are produced in `build/`:
 
-- `build/seaclaw` — main CLI
-- `build/seaclaw_tests` — test suite
+- `build/human` — main CLI
+- `build/human_tests` — test suite
 
 ### Release build (minimal size)
 
@@ -80,7 +80,7 @@ For detecting memory errors during development:
 ```bash
 cmake -B build -DSC_ENABLE_ASAN=ON -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build build
-./build/seaclaw_tests
+./build/human_tests
 ```
 
 ## Build options
@@ -100,15 +100,15 @@ Per-channel options (`SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, etc.) are availa
 Confirm the binary runs:
 
 ```bash
-./build/seaclaw --help
+./build/human --help
 ```
 
 Example output:
 
 ```
-seaclaw v0.1.0 — Autonomous AI Assistant Runtime (C/ASM/WASM)
+human v0.1.0 — Autonomous AI Assistant Runtime (C/ASM/WASM)
 
-Usage: seaclaw [command] [options]
+Usage: human [command] [options]
 
 Commands:
   agent          Run the agent loop
@@ -120,13 +120,13 @@ Commands:
 Run diagnostics to check config and provider setup:
 
 ```bash
-./build/seaclaw doctor
+./build/human doctor
 ```
 
 Example output (with valid config):
 
 ```
-[doctor] config: ok (loaded from /home/user/.seaclaw/config.json)
+[doctor] config: ok (loaded from /home/user/.human/config.json)
 [doctor] provider (ollama): ok (local — no API key required)
 [doctor] memory engine: sqlite
 ```
@@ -136,7 +136,7 @@ If config is missing, run the onboard wizard first (see [Quick Start](/getting-s
 ## Run tests
 
 ```bash
-./build/seaclaw_tests
+./build/human_tests
 ```
 
 All 3,185+ tests must pass with zero ASan errors.

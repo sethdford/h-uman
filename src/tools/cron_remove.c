@@ -1,105 +1,105 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/cron.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/cron.h"
+#include "human/tool.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "seaclaw/tools/schema_common.h"
-#define SC_CRON_REMOVE_NAME   "cron_remove"
-#define SC_CRON_REMOVE_DESC   "Remove cron job"
-#define SC_CRON_REMOVE_PARAMS SC_SCHEMA_ID_ONLY
+#include "human/tools/schema_common.h"
+#define HU_CRON_REMOVE_NAME   "cron_remove"
+#define HU_CRON_REMOVE_DESC   "Remove cron job"
+#define HU_CRON_REMOVE_PARAMS HU_SCHEMA_ID_ONLY
 
 typedef struct {
-    sc_cron_scheduler_t *sched;
-} sc_cron_tool_ctx_t;
+    hu_cron_scheduler_t *sched;
+} hu_cron_tool_ctx_t;
 
-static sc_error_t cron_remove_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                      sc_tool_result_t *out) {
-    sc_cron_tool_ctx_t *tctx = (sc_cron_tool_ctx_t *)ctx;
+static hu_error_t cron_remove_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                      hu_tool_result_t *out) {
+    hu_cron_tool_ctx_t *tctx = (hu_cron_tool_ctx_t *)ctx;
     (void)tctx;
     if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *id_str = sc_json_get_string(args, "id");
+    const char *id_str = hu_json_get_string(args, "id");
     if (!id_str || id_str[0] == '\0') {
-        *out = sc_tool_result_fail("missing id", 10);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing id", 10);
+        return HU_OK;
     }
     char *end = NULL;
     unsigned long long id_val = strtoull(id_str, &end, 10);
     if (end == id_str || *end != '\0' || id_val == 0) {
-        *out = sc_tool_result_fail("invalid id", 10);
-        return SC_OK;
+        *out = hu_tool_result_fail("invalid id", 10);
+        return HU_OK;
     }
     uint64_t job_id = (uint64_t)id_val;
     (void)job_id;
 
-#if SC_IS_TEST
-    sc_cron_scheduler_t *sched = sc_cron_create(alloc, 100, true);
+#if HU_IS_TEST
+    hu_cron_scheduler_t *sched = hu_cron_create(alloc, 100, true);
     if (!sched) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     uint64_t added_id = 0;
-    sc_cron_add_job(sched, alloc, "* * * * *", "echo x", NULL, &added_id);
-    sc_error_t err = sc_cron_remove_job(sched, job_id);
-    if (err != SC_OK) {
-        sc_cron_destroy(sched, alloc);
-        *out = sc_tool_result_fail("job not found", 14);
-        return SC_OK;
+    hu_cron_add_job(sched, alloc, "* * * * *", "echo x", NULL, &added_id);
+    hu_error_t err = hu_cron_remove_job(sched, job_id);
+    if (err != HU_OK) {
+        hu_cron_destroy(sched, alloc);
+        *out = hu_tool_result_fail("job not found", 14);
+        return HU_OK;
     }
-    char *msg = sc_sprintf(alloc, "{\"removed\":true,\"id\":\"%llu\"}", (unsigned long long)job_id);
-    sc_cron_destroy(sched, alloc);
+    char *msg = hu_sprintf(alloc, "{\"removed\":true,\"id\":\"%llu\"}", (unsigned long long)job_id);
+    hu_cron_destroy(sched, alloc);
     if (!msg) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    *out = sc_tool_result_ok_owned(msg, strlen(msg));
-    return SC_OK;
+    *out = hu_tool_result_ok_owned(msg, strlen(msg));
+    return HU_OK;
 #else
     if (!tctx || !tctx->sched) {
-        *out = sc_tool_result_fail("cron_remove: scheduler not configured", 38);
-        return SC_OK;
+        *out = hu_tool_result_fail("cron_remove: scheduler not configured", 38);
+        return HU_OK;
     }
-    sc_cron_scheduler_t *sched = tctx->sched;
-    sc_error_t err = sc_cron_remove_job(sched, job_id);
-    if (err != SC_OK) {
-        *out = sc_tool_result_fail("job not found", 14);
-        return SC_OK;
+    hu_cron_scheduler_t *sched = tctx->sched;
+    hu_error_t err = hu_cron_remove_job(sched, job_id);
+    if (err != HU_OK) {
+        *out = hu_tool_result_fail("job not found", 14);
+        return HU_OK;
     }
-    char *msg = sc_sprintf(alloc, "{\"removed\":true,\"id\":\"%llu\"}", (unsigned long long)job_id);
+    char *msg = hu_sprintf(alloc, "{\"removed\":true,\"id\":\"%llu\"}", (unsigned long long)job_id);
     if (!msg) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    *out = sc_tool_result_ok_owned(msg, strlen(msg));
-    return SC_OK;
+    *out = hu_tool_result_ok_owned(msg, strlen(msg));
+    return HU_OK;
 #endif
 }
 
 static const char *cron_remove_name(void *ctx) {
     (void)ctx;
-    return SC_CRON_REMOVE_NAME;
+    return HU_CRON_REMOVE_NAME;
 }
 static const char *cron_remove_description(void *ctx) {
     (void)ctx;
-    return SC_CRON_REMOVE_DESC;
+    return HU_CRON_REMOVE_DESC;
 }
 static const char *cron_remove_parameters_json(void *ctx) {
     (void)ctx;
-    return SC_CRON_REMOVE_PARAMS;
+    return HU_CRON_REMOVE_PARAMS;
 }
-static void cron_remove_deinit(void *ctx, sc_allocator_t *alloc) {
+static void cron_remove_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
-        alloc->free(alloc->ctx, ctx, sizeof(sc_cron_tool_ctx_t));
+        alloc->free(alloc->ctx, ctx, sizeof(hu_cron_tool_ctx_t));
 }
 
-static const sc_tool_vtable_t cron_remove_vtable = {
+static const hu_tool_vtable_t cron_remove_vtable = {
     .execute = cron_remove_execute,
     .name = cron_remove_name,
     .description = cron_remove_description,
@@ -107,17 +107,17 @@ static const sc_tool_vtable_t cron_remove_vtable = {
     .deinit = cron_remove_deinit,
 };
 
-sc_error_t sc_cron_remove_create(sc_allocator_t *alloc, sc_cron_scheduler_t *sched,
-                                 sc_tool_t *out) {
+hu_error_t hu_cron_remove_create(hu_allocator_t *alloc, hu_cron_scheduler_t *sched,
+                                 hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_cron_tool_ctx_t *ctx =
-        (sc_cron_tool_ctx_t *)alloc->alloc(alloc->ctx, sizeof(sc_cron_tool_ctx_t));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_cron_tool_ctx_t *ctx =
+        (hu_cron_tool_ctx_t *)alloc->alloc(alloc->ctx, sizeof(hu_cron_tool_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
-    memset(ctx, 0, sizeof(sc_cron_tool_ctx_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(ctx, 0, sizeof(hu_cron_tool_ctx_t));
     ctx->sched = sched;
     out->ctx = ctx;
     out->vtable = &cron_remove_vtable;
-    return SC_OK;
+    return HU_OK;
 }

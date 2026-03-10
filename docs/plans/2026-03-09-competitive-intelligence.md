@@ -71,7 +71,7 @@ Create `scripts/benchmark-competitive.sh` that:
    - `https://scoutmotors.com` (Scout Motors)
    - `https://immersive-g.com` (Immersive Garden)
    - `https://malvah.com` (Malvah)
-3. Also includes `https://seaclaw.dev` (our site) as the first entry
+3. Also includes `https://human.dev` (our site) as the first entry
 4. For each URL, calls the PageSpeed Insights API v5: `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=URL&strategy=mobile&category=PERFORMANCE&category=ACCESSIBILITY&category=BEST_PRACTICES&category=SEO`
 5. Extracts from JSON response using `jq`:
    - Performance score (`.lighthouseResult.categories.performance.score * 100`)
@@ -83,7 +83,7 @@ Create `scripts/benchmark-competitive.sh` that:
    - TBT as INP proxy (`.lighthouseResult.audits["total-blocking-time"].numericValue`)
    - TTFB (`.lighthouseResult.audits["server-response-time"].numericValue`)
 6. Outputs results to `benchmark-competitive.json` (full data) and prints a markdown summary table to stdout
-7. Has a `--seaclaw-only` flag for quick self-check
+7. Has a `--human-only` flag for quick self-check
 8. Has a `--markdown` flag to output markdown to `docs/competitive-benchmarks-latest.md`
 9. Includes rate limiting (1 second between requests) to avoid API throttling
 10. Requires `curl` and `jq` (checks at startup)
@@ -92,7 +92,7 @@ Make the script executable: `chmod +x scripts/benchmark-competitive.sh`
 
 **Step 2: Run the script in dry-run / self-only mode to verify**
 
-Run: `bash scripts/benchmark-competitive.sh --seaclaw-only 2>&1 | head -20`
+Run: `bash scripts/benchmark-competitive.sh --human-only 2>&1 | head -20`
 Expected: Script starts, may fail on actual URL (site may not be deployed) but should handle errors gracefully
 
 **Step 3: Commit**
@@ -221,7 +221,7 @@ These principles go beyond industry standards. They define the ceiling other dev
 
 ### Zero-Compromise Aesthetics
 
-Stripe proved beauty elevates utility by 20%. SeaClaw goes further: every pixel must simultaneously be the most functional AND the most beautiful version of that element in the developer tools space. No trade-off mentality. If a design choice requires choosing between craft and function, the design is wrong — find the third option.
+Stripe proved beauty elevates utility by 20%. Human goes further: every pixel must simultaneously be the most functional AND the most beautiful version of that element in the developer tools space. No trade-off mentality. If a design choice requires choosing between craft and function, the design is wrong — find the third option.
 
 ### Perceptual Performance
 
@@ -421,7 +421,7 @@ Implementation:
 - Assign `view-transition-name` to persistent elements (nav, sidebar, selected card)
 - Shared elements morph between views (position, size, border-radius)
 - Non-shared elements crossfade with stagger
-- Duration: `--sc-duration-moderate` (300ms) with `--sc-ease-spring-gentle`
+- Duration: `--hu-duration-moderate` (300ms) with `--hu-ease-spring-gentle`
 - Fallback: standard fade transition for browsers without View Transitions API
 
 Rules:
@@ -429,7 +429,7 @@ Rules:
 - Maximum 5 elements with `view-transition-name` per view (performance)
 - Morphing elements must have compatible aspect ratios (no extreme stretching)
 - Test with Network throttling — transitions must degrade gracefully on slow connections
-- `::view-transition-*` pseudo-elements use SeaClaw easing tokens, not raw curves
+- `::view-transition-*` pseudo-elements use Human easing tokens, not raw curves
 
 ### Narrative Motion
 
@@ -476,9 +476,9 @@ At the end of the document (before any existing cross-reference section), add:
 ```markdown
 ## Competitive Dominance Metrics
 
-SeaClaw doesn't benchmark against industry averages — it sets the ceiling others measure against.
+Human doesn't benchmark against industry averages — it sets the ceiling others measure against.
 
-| Metric                 | Category Status Quo    | SeaClaw Target | Competitive Edge                                |
+| Metric                 | Category Status Quo    | Human Target | Competitive Edge                                |
 | ---------------------- | ---------------------- | -------------- | ----------------------------------------------- |
 | Lighthouse Performance | 90-95                  | **99+**        | Astro static + zero JS in critical path         |
 | LCP                    | 0.8-2.0s               | **< 0.5s**     | Inline critical CSS + prerendered content       |
@@ -555,11 +555,11 @@ Create `docs/quality-scorecard.md`:
 
 ```markdown
 ---
-title: SeaClaw Quality Scorecard
+title: Human Quality Scorecard
 updated: 2026-03-09
 ---
 
-# SeaClaw Quality Scorecard
+# Human Quality Scorecard
 
 > Per-surface quality scores across 7 dimensions. Updated quarterly.
 > Target: score higher than every benchmark brand on every dimension.
@@ -644,7 +644,7 @@ updated: 2026-03-09
 - 1-5: Inconsistent across surfaces, no design system
 - 6-7: Shared tokens, mostly consistent
 - 8: Unified system across web + native, platform-appropriate adaptations
-- 9: Each surface feels native AND unmistakably SeaClaw
+- 9: Each surface feels native AND unmistakably Human
 - 10: Platform Transcendence — best-designed app on every device
 
 ### Innovation (feature inventory)
@@ -694,7 +694,7 @@ Read `AGENTS.md` and find section 12 (UI & Design System Contract).
 
 In AGENTS.md section 12, add to the SOTA Design References table (§12.0):
 
-| Source                     | What We Take                                   | SeaClaw Doc                      |
+| Source                     | What We Take                                   | Human Doc                      |
 | -------------------------- | ---------------------------------------------- | -------------------------------- |
 | **Competitive Benchmarks** | Named brand targets, quantified quality deltas | `docs/competitive-benchmarks.md` |
 | **Quality Scorecard**      | Per-surface scoring, quarterly tracking        | `docs/quality-scorecard.md`      |
@@ -744,7 +744,7 @@ Run: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/competitiv
 
 **Step 3: Build and test to verify no breakage**
 
-Run: `cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc) && ./build/seaclaw_tests 2>&1 | tail -5`
+Run: `cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc) && ./build/human_tests 2>&1 | tail -5`
 Expected: All tests pass, 0 failures, 0 ASan errors
 
 **Step 4: Review git log**

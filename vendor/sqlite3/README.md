@@ -1,6 +1,6 @@
 # vendored sqlite3
 
-This directory vendors the SQLite 3.51.0 amalgamation sources used by SeaClaw.
+This directory vendors the SQLite 3.51.0 amalgamation sources used by Human.
 
 Why vendored:
 

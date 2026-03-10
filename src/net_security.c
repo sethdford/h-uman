@@ -1,5 +1,5 @@
-#include "seaclaw/net_security.h"
-#include "seaclaw/core/error.h"
+#include "human/net_security.h"
+#include "human/core/error.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -286,29 +286,29 @@ static int is_http(const char *url) {
            url[5] == '/' && url[6] == '/';
 }
 
-sc_error_t sc_validate_url(const char *url) {
+hu_error_t hu_validate_url(const char *url) {
     if (!url || !url[0])
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (is_https(url))
-        return SC_OK;
+        return HU_OK;
 
     if (is_http(url)) {
         const char *host;
         size_t host_len;
         extract_host_from_url(url, &host, &host_len);
         if (!host || host_len == 0)
-            return SC_ERR_INVALID_ARGUMENT;
+            return HU_ERR_INVALID_ARGUMENT;
         /* Allow http only for localhost */
         if (is_localhost_name(host, host_len))
-            return SC_OK;
-        return SC_ERR_INVALID_ARGUMENT; /* non-HTTPS to non-localhost */
+            return HU_OK;
+        return HU_ERR_INVALID_ARGUMENT; /* non-HTTPS to non-localhost */
     }
 
-    return SC_ERR_INVALID_ARGUMENT;
+    return HU_ERR_INVALID_ARGUMENT;
 }
 
-bool sc_is_private_ip(const char *ip) {
+bool hu_is_private_ip(const char *ip) {
     if (!ip || !ip[0])
         return true; /* fail closed */
 
@@ -354,7 +354,7 @@ bool sc_is_private_ip(const char *ip) {
     return false; /* unknown format - treat as public */
 }
 
-bool sc_validate_domain(const char *host, const char *const *allowed, size_t allowed_count) {
+bool hu_validate_domain(const char *host, const char *const *allowed, size_t allowed_count) {
     if (!host || !host[0])
         return false;
     if (allowed_count == 0)

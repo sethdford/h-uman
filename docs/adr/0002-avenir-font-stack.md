@@ -10,7 +10,7 @@ title: ADR-0002: Avenir Font Stack
 
 ## Context
 
-SeaClaw needed a consistent typeface across web, iOS, macOS, and Android that conveys precision and modernity without depending on external CDNs.
+Human needed a consistent typeface across web, iOS, macOS, and Android that conveys precision and modernity without depending on external CDNs.
 
 ## Decision
 
@@ -23,7 +23,7 @@ Adopt Avenir as the canonical typeface. Web uses local woff2 files with `@font-f
 - Consistent identity across all platforms
 - No external CDN dependency
 - Excellent readability at all sizes
-- Optical size tracking via `--sc-tracking-*` tokens
+- Optical size tracking via `--hu-tracking-*` tokens
 
 ### Negative
 

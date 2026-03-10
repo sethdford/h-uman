@@ -1,9 +1,9 @@
-#include "seaclaw/channels/imessage.h"
-#include "seaclaw/channel_loop.h"
-#include "seaclaw/core/process_util.h"
-#include "seaclaw/core/string.h"
-#ifndef SC_CODENAME
-#define SC_CODENAME "seaclaw"
+#include "human/channels/imessage.h"
+#include "human/channel_loop.h"
+#include "human/core/process_util.h"
+#include "human/core/string.h"
+#ifndef HU_CODENAME
+#define HU_CODENAME "human"
 #endif
 #include <stdint.h>
 #include <stdio.h>
@@ -13,28 +13,28 @@
 #include <time.h>
 #include <unistd.h>
 
-#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
-#ifdef SC_ENABLE_SQLITE
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+#ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 #endif
 #endif
 
-#define SC_IMESSAGE_SENT_RING_SIZE  32
-#define SC_IMESSAGE_SENT_PREFIX_LEN 256
+#define HU_IMESSAGE_SENT_RING_SIZE  32
+#define HU_IMESSAGE_SENT_PREFIX_LEN 256
 
-typedef struct sc_imessage_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_imessage_ctx {
+    hu_allocator_t *alloc;
     char *default_target;
     size_t default_target_len;
     bool running;
     int64_t last_rowid;
     const char *const *allow_from;
     size_t allow_from_count;
-    char sent_ring[SC_IMESSAGE_SENT_RING_SIZE][SC_IMESSAGE_SENT_PREFIX_LEN];
-    size_t sent_ring_len[SC_IMESSAGE_SENT_RING_SIZE];
-    uint32_t sent_ring_hash[SC_IMESSAGE_SENT_RING_SIZE];
+    char sent_ring[HU_IMESSAGE_SENT_RING_SIZE][HU_IMESSAGE_SENT_PREFIX_LEN];
+    size_t sent_ring_len[HU_IMESSAGE_SENT_RING_SIZE];
+    uint32_t sent_ring_hash[HU_IMESSAGE_SENT_RING_SIZE];
     size_t sent_ring_idx;
-#if SC_IS_TEST
+#if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
     struct {
@@ -42,12 +42,12 @@ typedef struct sc_imessage_ctx {
         char content[4096];
     } mock_msgs[8];
     size_t mock_count;
-    sc_reaction_type_t last_reaction;
+    hu_reaction_type_t last_reaction;
     int64_t last_reaction_message_id;
 #endif
-} sc_imessage_ctx_t;
+} hu_imessage_ctx_t;
 
-#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 static uint32_t imessage_hash(const char *s, size_t len) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++)
@@ -55,10 +55,10 @@ static uint32_t imessage_hash(const char *s, size_t len) {
     return h;
 }
 
-static void imessage_record_sent(sc_imessage_ctx_t *c, const char *msg, size_t msg_len) {
-    size_t slot = c->sent_ring_idx % SC_IMESSAGE_SENT_RING_SIZE;
+static void imessage_record_sent(hu_imessage_ctx_t *c, const char *msg, size_t msg_len) {
+    size_t slot = c->sent_ring_idx % HU_IMESSAGE_SENT_RING_SIZE;
     size_t copy_len =
-        msg_len < SC_IMESSAGE_SENT_PREFIX_LEN - 1 ? msg_len : SC_IMESSAGE_SENT_PREFIX_LEN - 1;
+        msg_len < HU_IMESSAGE_SENT_PREFIX_LEN - 1 ? msg_len : HU_IMESSAGE_SENT_PREFIX_LEN - 1;
     memcpy(c->sent_ring[slot], msg, copy_len);
     c->sent_ring[slot][copy_len] = '\0';
     c->sent_ring_len[slot] = copy_len;
@@ -66,9 +66,9 @@ static void imessage_record_sent(sc_imessage_ctx_t *c, const char *msg, size_t m
     c->sent_ring_idx++;
 }
 
-static bool imessage_was_sent_by_us(sc_imessage_ctx_t *c, const char *text, size_t text_len) {
+static bool imessage_was_sent_by_us(hu_imessage_ctx_t *c, const char *text, size_t text_len) {
     uint32_t h = imessage_hash(text, text_len);
-    for (size_t i = 0; i < SC_IMESSAGE_SENT_RING_SIZE; i++) {
+    for (size_t i = 0; i < HU_IMESSAGE_SENT_RING_SIZE; i++) {
         size_t slen = c->sent_ring_len[i];
         if (slen == 0)
             continue;
@@ -81,8 +81,8 @@ static bool imessage_was_sent_by_us(sc_imessage_ctx_t *c, const char *text, size
     return false;
 }
 
-#ifdef SC_ENABLE_SQLITE
-bool sc_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
+#ifdef HU_ENABLE_SQLITE
+bool hu_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
                                          int within_seconds) {
     (void)channel_ctx;
     if (!handle || handle_len == 0 || within_seconds <= 0)
@@ -136,25 +136,25 @@ bool sc_imessage_user_responded_recently(void *channel_ctx, const char *handle, 
 #endif
 #endif
 
-static sc_error_t imessage_start(void *ctx) {
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
+static hu_error_t imessage_start(void *ctx) {
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void imessage_stop(void *ctx) {
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (c)
         c->running = false;
 }
 
-#if (defined(__APPLE__) && defined(__MACH__)) || SC_IS_TEST
+#if (defined(__APPLE__) && defined(__MACH__)) || HU_IS_TEST
 
-#if !SC_IS_TEST
+#if !HU_IS_TEST
 /* Safety net: remove AI-sounding phrases that slipped through. Primary mechanism is
- * prompt-level guidance in sc_conversation_build_awareness. Modifies in-place.
+ * prompt-level guidance in hu_conversation_build_awareness. Modifies in-place.
  * Returns new length. Case-insensitive except "Absolutely! " (capital A only). */
 static size_t imessage_sanitize_output(char *buf, size_t len) {
     if (!buf || len == 0)
@@ -236,21 +236,21 @@ static size_t imessage_sanitize_output(char *buf, size_t len) {
 
     return len;
 }
-#endif /* !SC_IS_TEST */
+#endif /* !HU_IS_TEST */
 
-const char *sc_imessage_reaction_to_tapback_name(sc_reaction_type_t reaction) {
+const char *hu_imessage_reaction_to_tapback_name(hu_reaction_type_t reaction) {
     switch (reaction) {
-    case SC_REACTION_HEART:
+    case HU_REACTION_HEART:
         return "love";
-    case SC_REACTION_THUMBS_UP:
+    case HU_REACTION_THUMBS_UP:
         return "like";
-    case SC_REACTION_THUMBS_DOWN:
+    case HU_REACTION_THUMBS_DOWN:
         return "dislike";
-    case SC_REACTION_HAHA:
+    case HU_REACTION_HAHA:
         return "laugh";
-    case SC_REACTION_EMPHASIS:
+    case HU_REACTION_EMPHASIS:
         return "emphasize";
-    case SC_REACTION_QUESTION:
+    case HU_REACTION_QUESTION:
         return "question";
     default:
         return NULL;
@@ -273,20 +273,20 @@ size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t 
 }
 #endif
 
-static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len,
+static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
-#if SC_IS_TEST
+#if HU_IS_TEST
     (void)media;
     (void)media_count;
     {
-        sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
+        hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        return SC_OK;
+        return HU_OK;
     }
 #elif !defined(__APPLE__) || !defined(__MACH__)
     (void)ctx;
@@ -294,9 +294,9 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     (void)target_len;
     (void)message;
     (void)message_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     /* Use target if provided, else default_target */
     const char *tgt = target;
     size_t tgt_len = target_len;
@@ -305,7 +305,7 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         tgt_len = c->default_target_len;
     }
     if (!c || !c->alloc || !tgt || tgt_len == 0 || !message)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /*
      * Post-processing: strip markdown and sanitize AI-sounding phrases
@@ -314,7 +314,7 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     size_t clean_cap = message_len + 1;
     char *clean = (char *)c->alloc->alloc(c->alloc->ctx, clean_cap);
     if (!clean)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     {
         size_t out_i = 0;
         size_t i = 0;
@@ -370,13 +370,13 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
         }
     }
 
-    sc_error_t send_err = SC_OK;
+    hu_error_t send_err = HU_OK;
 
     /* Escaped strings: worst case 2x length */
     size_t msg_esc_cap = message_len * 2 + 1;
     size_t tgt_esc_cap = tgt_len * 2 + 1;
     if (msg_esc_cap > 65536 || tgt_esc_cap > 4096) {
-        send_err = SC_ERR_INVALID_ARGUMENT;
+        send_err = HU_ERR_INVALID_ARGUMENT;
         goto imsg_cleanup;
     }
 
@@ -387,7 +387,7 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
             c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         if (tgt_esc)
             c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        send_err = SC_ERR_OUT_OF_MEMORY;
+        send_err = HU_ERR_OUT_OF_MEMORY;
         goto imsg_cleanup;
     }
     escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
@@ -399,7 +399,7 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     if (!script) {
         c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        send_err = SC_ERR_OUT_OF_MEMORY;
+        send_err = HU_ERR_OUT_OF_MEMORY;
         goto imsg_cleanup;
     }
     int n = snprintf(script, script_cap,
@@ -413,7 +413,7 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
     c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
     if (n < 0 || (size_t)n >= script_cap) {
         c->alloc->free(c->alloc->ctx, script, script_cap);
-        send_err = SC_ERR_INTERNAL;
+        send_err = HU_ERR_INTERNAL;
         goto imsg_cleanup;
     }
 
@@ -429,27 +429,27 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
 
     {
         const char *argv[] = {"osascript", "-e", script, NULL};
-        sc_run_result_t result = {0};
-        sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
+        hu_run_result_t result = {0};
+        hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
         c->alloc->free(c->alloc->ctx, script, script_cap);
-        bool ok = (err == SC_OK && result.success && result.exit_code == 0);
-        sc_run_result_free(c->alloc, &result);
+        bool ok = (err == HU_OK && result.success && result.exit_code == 0);
+        hu_run_result_free(c->alloc, &result);
         if (err || !ok)
-            send_err = SC_ERR_CHANNEL_SEND;
+            send_err = HU_ERR_CHANNEL_SEND;
     }
 
-    if (send_err == SC_OK)
+    if (send_err == HU_OK)
         imessage_record_sent(c, message, message_len);
 
-#if !SC_IS_TEST
+#if !HU_IS_TEST
     /* Send media attachments (local file paths only) after text succeeds */
-    if (send_err == SC_OK && media && media_count > 0) {
+    if (send_err == HU_OK && media && media_count > 0) {
         size_t m_tgt_cap = tgt_len * 2 + 1;
         if (m_tgt_cap <= 4096) {
             char *m_tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, m_tgt_cap);
             if (m_tgt_esc) {
                 escape_for_applescript(m_tgt_esc, m_tgt_cap, tgt, tgt_len);
-                for (size_t i = 0; i < media_count && send_err == SC_OK; i++) {
+                for (size_t i = 0; i < media_count && send_err == HU_OK; i++) {
                     const char *url = media[i];
                     if (!url || url[0] != '/')
                         continue; /* Skip URLs and non-file media */
@@ -475,12 +475,12 @@ static sc_error_t imessage_send(void *ctx, const char *target, size_t target_len
                         c->alloc->free(c->alloc->ctx, path_esc, path_esc_cap);
                         if (m_n > 0 && (size_t)m_n < m_script_cap) {
                             const char *argv[] = {"osascript", "-e", m_script, NULL};
-                            sc_run_result_t result = {0};
-                            sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
-                            bool ok = (err == SC_OK && result.success && result.exit_code == 0);
-                            sc_run_result_free(c->alloc, &result);
+                            hu_run_result_t result = {0};
+                            hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
+                            bool ok = (err == HU_OK && result.success && result.exit_code == 0);
+                            hu_run_result_free(c->alloc, &result);
                             if (!ok)
-                                send_err = SC_ERR_CHANNEL_SEND;
+                                send_err = HU_ERR_CHANNEL_SEND;
                         }
                         c->alloc->free(c->alloc->ctx, m_script, m_script_cap);
                     } else {
@@ -507,7 +507,7 @@ static bool imessage_health_check(void *ctx) {
     (void)ctx;
 #if !defined(__APPLE__) || !defined(__MACH__)
     return false;
-#elif SC_IS_TEST
+#elif HU_IS_TEST
     return true;
 #else
     const char *home = getenv("HOME");
@@ -521,38 +521,38 @@ static bool imessage_health_check(void *ctx) {
         fprintf(
             stderr,
             "[%s] imessage: ~/Library/Messages/chat.db not readable (Full Disk Access required)\n",
-            SC_CODENAME);
+            HU_CODENAME);
         return false;
     }
     return true;
 #endif
 }
 
-static sc_error_t imessage_load_conversation_history(void *ctx, sc_allocator_t *alloc,
+static hu_error_t imessage_load_conversation_history(void *ctx, hu_allocator_t *alloc,
                                                      const char *contact_id, size_t contact_id_len,
-                                                     size_t limit, sc_channel_history_entry_t **out,
+                                                     size_t limit, hu_channel_history_entry_t **out,
                                                      size_t *out_count) {
     (void)ctx;
     if (!alloc || !contact_id || !out || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
 
-#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
     const char *home = getenv("HOME");
     if (!home)
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
 
     char db_path[512];
     int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
     if (n < 0 || (size_t)n >= sizeof(db_path))
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
 
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
 
     const char *sql = "SELECT m.is_from_me, m.text, "
@@ -565,7 +565,7 @@ static sc_error_t imessage_load_conversation_history(void *ctx, sc_allocator_t *
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
 
     char contact_buf[128];
@@ -578,12 +578,12 @@ static sc_error_t imessage_load_conversation_history(void *ctx, sc_allocator_t *
 
     if (limit > 50)
         limit = 50;
-    sc_channel_history_entry_t *entries =
-        (sc_channel_history_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(*entries));
+    hu_channel_history_entry_t *entries =
+        (hu_channel_history_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(*entries));
     if (!entries) {
         sqlite3_finalize(stmt);
         sqlite3_close(db);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memset(entries, 0, limit * sizeof(*entries));
     size_t count = 0;
@@ -602,7 +602,7 @@ static sc_error_t imessage_load_conversation_history(void *ctx, sc_allocator_t *
             snprintf(entries[count].text, sizeof(entries[0].text), "[you replied]");
         } else {
             /* Empty text = attachment. Use generic placeholder; prompt builder
-             * should call sc_conversation_attachment_context() to inject guidance
+             * should call hu_conversation_attachment_context() to inject guidance
              * for natural acknowledgment ("love that!", "that looks great", etc.). */
             snprintf(entries[count].text, sizeof(entries[0].text), "[image or attachment]");
         }
@@ -620,73 +620,73 @@ static sc_error_t imessage_load_conversation_history(void *ctx, sc_allocator_t *
 
     /* Results come in DESC order; reverse to chronological for caller */
     for (size_t i = 0; i < count / 2; i++) {
-        sc_channel_history_entry_t tmp = entries[i];
+        hu_channel_history_entry_t tmp = entries[i];
         entries[i] = entries[count - 1 - i];
         entries[count - 1 - i] = tmp;
     }
 
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)contact_id_len;
     (void)limit;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t imessage_get_response_constraints(void *ctx,
-                                                    sc_channel_response_constraints_t *out) {
+static hu_error_t imessage_get_response_constraints(void *ctx,
+                                                    hu_channel_response_constraints_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     out->max_chars = 300;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t imessage_react(void *ctx, const char *target, size_t target_len,
-                                 int64_t message_id, sc_reaction_type_t reaction) {
+static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
+                                 int64_t message_id, hu_reaction_type_t reaction) {
     (void)target_len;
     (void)message_id;
-#if SC_IS_TEST
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
+#if HU_IS_TEST
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->last_reaction = reaction;
     c->last_reaction_message_id = message_id;
-    return SC_OK;
+    return HU_OK;
 #else
 #if !defined(__APPLE__) || !defined(__MACH__)
     (void)ctx;
     (void)target;
     (void)target_len;
     (void)reaction;
-    return SC_ERR_NOT_SUPPORTED;
-#elif !defined(SC_IMESSAGE_TAPBACK_ENABLED)
+    return HU_ERR_NOT_SUPPORTED;
+#elif !defined(HU_IMESSAGE_TAPBACK_ENABLED)
     (void)ctx;
     (void)target;
     (void)target_len;
     (void)reaction;
-    if (getenv("SC_DEBUG"))
-        fprintf(stderr, "[imessage] tapback disabled (SC_IMESSAGE_TAPBACK_ENABLED=OFF)\n");
-    return SC_ERR_NOT_SUPPORTED;
+    if (getenv("HU_DEBUG"))
+        fprintf(stderr, "[imessage] tapback disabled (HU_IMESSAGE_TAPBACK_ENABLED=OFF)\n");
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c || !c->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
-    const char *tapback = sc_imessage_reaction_to_tapback_name(reaction);
+        return HU_ERR_INVALID_ARGUMENT;
+    const char *tapback = hu_imessage_reaction_to_tapback_name(reaction);
     if (!tapback)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!target || target_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* Escape target for JavaScript string. */
     size_t tgt_esc_cap = target_len * 2 + 1;
     if (tgt_esc_cap > 4096)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
     if (!tgt_esc)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     {
         size_t j = 0;
         for (size_t i = 0; i < target_len && j + 2 < tgt_esc_cap; i++) {
@@ -727,13 +727,13 @@ static sc_error_t imessage_react(void *ctx, const char *target, size_t target_le
     char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
     if (!script) {
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     int n = snprintf(script, script_cap, script_tpl, tapback, tgt_esc);
     c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
     if (n < 0 || (size_t)n >= script_cap) {
         c->alloc->free(c->alloc->ctx, script, script_cap);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
 
     /*
@@ -742,32 +742,32 @@ static sc_error_t imessage_react(void *ctx, const char *target, size_t target_le
      */
     const char *argv[] = {
         "perl", "-e", "alarm 15; exec @ARGV", "osascript", "-l", "JavaScript", "-e", script, NULL};
-    sc_run_result_t result = {0};
-    sc_error_t err = sc_process_run(c->alloc, argv, NULL, 65536, &result);
+    hu_run_result_t result = {0};
+    hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
     c->alloc->free(c->alloc->ctx, script, script_cap);
-    if (err != SC_OK) {
-        if (getenv("SC_DEBUG"))
-            fprintf(stderr, "[imessage] tapback osascript failed: sc_process_run err=%d\n",
+    if (err != HU_OK) {
+        if (getenv("HU_DEBUG"))
+            fprintf(stderr, "[imessage] tapback osascript failed: hu_process_run err=%d\n",
                     (int)err);
-        sc_run_result_free(c->alloc, &result);
-        return SC_ERR_NOT_SUPPORTED;
+        hu_run_result_free(c->alloc, &result);
+        return HU_ERR_NOT_SUPPORTED;
     }
     int exit_code = result.exit_code;
     bool ok = result.success && exit_code == 0;
-    sc_run_result_free(c->alloc, &result);
+    hu_run_result_free(c->alloc, &result);
     if (!ok) {
-        if (getenv("SC_DEBUG"))
+        if (getenv("HU_DEBUG"))
             fprintf(stderr,
                     "[imessage] tapback JXA failed (exit=%d, accessibility may be denied)\n",
                     exit_code);
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
     }
-    return SC_OK;
+    return HU_OK;
 #endif
 #endif
 }
 
-static const sc_channel_vtable_t imessage_vtable = {
+static const hu_channel_vtable_t imessage_vtable = {
     .start = imessage_start,
     .stop = imessage_stop,
     .send = imessage_send,
@@ -781,14 +781,14 @@ static const sc_channel_vtable_t imessage_vtable = {
     .react = imessage_react,
 };
 
-sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
+hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
                               size_t default_target_len, const char *const *allow_from,
-                              size_t allow_from_count, sc_channel_t *out) {
+                              size_t allow_from_count, hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->default_target = NULL;
@@ -799,16 +799,16 @@ sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
         c->default_target = (char *)malloc(default_target_len + 1);
         if (!c->default_target) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->default_target, default_target, default_target_len);
         c->default_target[default_target_len] = '\0';
         c->default_target_len = default_target_len;
     }
     /* Seed last_rowid to current max so we only pick up NEW messages.
-     * SC_IMESSAGE_LOOKBACK env var: if set, look back N messages from max
+     * HU_IMESSAGE_LOOKBACK env var: if set, look back N messages from max
      * to pick up recently missed messages on restart. */
-#if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
+#if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
     {
         const char *home_env = getenv("HOME");
         if (home_env) {
@@ -824,7 +824,7 @@ sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
                             c->last_rowid = sqlite3_column_int64(stmt, 0);
                         sqlite3_finalize(stmt);
                     }
-                    const char *lookback_env = getenv("SC_IMESSAGE_LOOKBACK");
+                    const char *lookback_env = getenv("HU_IMESSAGE_LOOKBACK");
                     if (lookback_env) {
                         long lb = strtol(lookback_env, NULL, 10);
                         if (lb > 0 && lb < 100 && c->last_rowid > lb)
@@ -839,20 +839,20 @@ sc_error_t sc_imessage_create(sc_allocator_t *alloc, const char *default_target,
 
     out->ctx = c;
     out->vtable = &imessage_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_imessage_is_configured(sc_channel_t *ch) {
+bool hu_imessage_is_configured(hu_channel_t *ch) {
     if (!ch || !ch->ctx)
         return false;
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ch->ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     return c->default_target != NULL && c->default_target_len > 0;
 }
 
-void sc_imessage_destroy(sc_channel_t *ch) {
+void hu_imessage_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
+        hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
         if (c->default_target)
             free(c->default_target);
         a->free(a->ctx, c, sizeof(*c));
@@ -861,9 +861,9 @@ void sc_imessage_destroy(sc_channel_t *ch) {
     }
 }
 
-#ifndef SC_IS_TEST
-#if defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
-char *sc_imessage_get_attachment_path(sc_allocator_t *alloc, int64_t message_id) {
+#ifndef HU_IS_TEST
+#if defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+char *hu_imessage_get_attachment_path(hu_allocator_t *alloc, int64_t message_id) {
     if (!alloc || message_id <= 0)
         return NULL;
 
@@ -911,7 +911,7 @@ char *sc_imessage_get_attachment_path(sc_allocator_t *alloc, int64_t message_id)
                     path[total - 1] = '\0';
                 }
             } else {
-                path = sc_strndup(alloc, filename, len);
+                path = hu_strndup(alloc, filename, len);
             }
         }
     }
@@ -932,15 +932,15 @@ char *sc_imessage_get_attachment_path(sc_allocator_t *alloc, int64_t message_id)
     return path;
 }
 #else
-char *sc_imessage_get_attachment_path(sc_allocator_t *alloc, int64_t message_id) {
+char *hu_imessage_get_attachment_path(hu_allocator_t *alloc, int64_t message_id) {
     (void)alloc;
     (void)message_id;
     return NULL;
 }
 #endif
 
-#if defined(__APPLE__) && defined(__MACH__) && defined(SC_ENABLE_SQLITE)
-char *sc_imessage_get_latest_attachment_path(sc_allocator_t *alloc, const char *contact_id,
+#if defined(__APPLE__) && defined(__MACH__) && defined(HU_ENABLE_SQLITE)
+char *hu_imessage_get_latest_attachment_path(hu_allocator_t *alloc, const char *contact_id,
                                              size_t contact_id_len) {
     if (!alloc || !contact_id || contact_id_len == 0)
         return NULL;
@@ -997,7 +997,7 @@ char *sc_imessage_get_latest_attachment_path(sc_allocator_t *alloc, const char *
                     path[total - 1] = '\0';
                 }
             } else {
-                path = sc_strndup(alloc, filename, len);
+                path = hu_strndup(alloc, filename, len);
             }
         }
     }
@@ -1018,7 +1018,7 @@ char *sc_imessage_get_latest_attachment_path(sc_allocator_t *alloc, const char *
     return path;
 }
 #else
-char *sc_imessage_get_latest_attachment_path(sc_allocator_t *alloc, const char *contact_id,
+char *hu_imessage_get_latest_attachment_path(hu_allocator_t *alloc, const char *contact_id,
                                              size_t contact_id_len) {
     (void)alloc;
     (void)contact_id;
@@ -1030,16 +1030,16 @@ char *sc_imessage_get_latest_attachment_path(sc_allocator_t *alloc, const char *
 
 /* ── iMessage polling via ~/Library/Messages/chat.db ──────────────────── */
 
-sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
+hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                             size_t max_msgs, size_t *out_count) {
     (void)alloc;
     if (!channel_ctx || !msgs || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
-        sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)channel_ctx;
+        hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
         if (c->mock_count > 0) {
             size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
             for (size_t i = 0; i < n; i++) {
@@ -1049,27 +1049,27 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
             }
             *out_count = n;
             c->mock_count = 0;
-            return SC_OK;
+            return HU_OK;
         }
-        return SC_OK;
+        return HU_OK;
     }
 #elif !defined(__APPLE__) || !defined(__MACH__)
     (void)max_msgs;
-    return SC_ERR_NOT_SUPPORTED;
-#elif !defined(SC_ENABLE_SQLITE)
+    return HU_ERR_NOT_SUPPORTED;
+#elif !defined(HU_ENABLE_SQLITE)
     (void)max_msgs;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)channel_ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
 
     const char *home = getenv("HOME");
     if (!home)
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
 
     char db_path[512];
     int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
     if (n < 0 || (size_t)n >= sizeof(db_path))
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
 
     sqlite3 *db = NULL;
     int rc = sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL);
@@ -1078,7 +1078,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
                 db ? sqlite3_errmsg(db) : "unknown", rc);
         if (db)
             sqlite3_close(db);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     /* If last_rowid was never seeded (e.g. FDA wasn't granted at startup),
@@ -1096,7 +1096,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
                 (long long)c->last_rowid);
         sqlite3_close(db);
         *out_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
     const char *sql = "SELECT m.ROWID, m.text, h.id, "
@@ -1117,7 +1117,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
     if (rc != SQLITE_OK) {
         fprintf(stderr, "[imessage] SQL prepare failed: %s\n", sqlite3_errmsg(db));
         sqlite3_close(db);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     sqlite3_bind_int64(stmt, 1, c->last_rowid);
@@ -1173,7 +1173,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
 
         c->last_rowid = rowid;
         count++;
-        if (getenv("SC_DEBUG"))
+        if (getenv("HU_DEBUG"))
             fprintf(stderr, "[imessage] received from %.20s (group=%d): %.*s\n", handle,
                     (int)msgs[count - 1].is_group, (int)(text_len > 80 ? 80 : text_len), text);
     }
@@ -1181,24 +1181,24 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 
-    if (count == 0 && getenv("SC_DEBUG"))
+    if (count == 0 && getenv("HU_DEBUG"))
         fprintf(stderr, "[imessage] poll: 0 messages (last_rowid=%lld)\n",
                 (long long)c->last_rowid);
 
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-#if SC_IS_TEST
-sc_error_t sc_imessage_test_inject_mock(sc_channel_t *ch, const char *session_key,
+#if HU_IS_TEST
+hu_error_t hu_imessage_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                         size_t session_key_len, const char *content,
                                         size_t content_len) {
     if (!ch || !ch->ctx)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ch->ctx;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     if (c->mock_count >= 8)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t i = c->mock_count++;
     size_t sk = session_key_len > 127 ? 127 : session_key_len;
     size_t ct = content_len > 4095 ? 4095 : content_len;
@@ -1208,23 +1208,23 @@ sc_error_t sc_imessage_test_inject_mock(sc_channel_t *ch, const char *session_ke
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
 
-const char *sc_imessage_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+const char *hu_imessage_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ch->ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     if (out_len)
         *out_len = c->last_message_len;
     return c->last_message;
 }
 
-void sc_imessage_test_get_last_reaction(sc_channel_t *ch, sc_reaction_type_t *out_reaction,
+void hu_imessage_test_get_last_reaction(hu_channel_t *ch, hu_reaction_type_t *out_reaction,
                                         int64_t *out_message_id) {
     if (!ch || !ch->ctx || !out_reaction || !out_message_id)
         return;
-    sc_imessage_ctx_t *c = (sc_imessage_ctx_t *)ch->ctx;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
     *out_reaction = c->last_reaction;
     *out_message_id = c->last_reaction_message_id;
 }

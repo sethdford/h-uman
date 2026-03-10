@@ -1,18 +1,18 @@
 /* Replay auto-tune: aggregate replay insights from LTM into cumulative feedback. */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/persona/auto_tune.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/persona/auto_tune.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_AUTO_TUNE_MAX_SIGNALS 64
-#define SC_AUTO_TUNE_MAX_SIGNAL_LEN 128
+#define HU_AUTO_TUNE_MAX_SIGNALS 64
+#define HU_AUTO_TUNE_MAX_SIGNAL_LEN 128
 
 typedef struct {
     char *key;
@@ -39,12 +39,12 @@ static void trim_and_lower(char *buf, size_t *len) {
 }
 
 static int find_or_add_signal(signal_count_t *signals, size_t *n, int positive,
-                              const char *text, size_t text_len, sc_allocator_t *alloc) {
+                              const char *text, size_t text_len, hu_allocator_t *alloc) {
     (void)positive;
-    if (!text || text_len == 0 || *n >= SC_AUTO_TUNE_MAX_SIGNALS)
+    if (!text || text_len == 0 || *n >= HU_AUTO_TUNE_MAX_SIGNALS)
         return -1;
 
-    char norm[SC_AUTO_TUNE_MAX_SIGNAL_LEN];
+    char norm[HU_AUTO_TUNE_MAX_SIGNAL_LEN];
     size_t copy_len = text_len < sizeof(norm) - 1 ? text_len : sizeof(norm) - 1;
     memcpy(norm, text, copy_len);
     norm[copy_len] = '\0';
@@ -58,7 +58,7 @@ static int find_or_add_signal(signal_count_t *signals, size_t *n, int positive,
             return 0;
         }
     }
-    signals[*n].key = sc_strndup(alloc, norm, copy_len);
+    signals[*n].key = hu_strndup(alloc, norm, copy_len);
     if (!signals[*n].key)
         return -1;
     signals[*n].count = 1;
@@ -66,7 +66,7 @@ static int find_or_add_signal(signal_count_t *signals, size_t *n, int positive,
     return 0;
 }
 
-static void free_signals(signal_count_t *signals, size_t n, sc_allocator_t *alloc) {
+static void free_signals(signal_count_t *signals, size_t n, hu_allocator_t *alloc) {
     for (size_t i = 0; i < n; i++) {
         if (signals[i].key) {
             alloc->free(alloc->ctx, signals[i].key, strlen(signals[i].key) + 1);
@@ -79,7 +79,7 @@ static void free_signals(signal_count_t *signals, size_t n, sc_allocator_t *allo
 static void parse_insight_content(const char *content, size_t content_len,
                                   signal_count_t *pos_signals, size_t *pos_n,
                                   signal_count_t *neg_signals, size_t *neg_n,
-                                  sc_allocator_t *alloc) {
+                                  hu_allocator_t *alloc) {
     if (!content || content_len == 0)
         return;
 
@@ -155,32 +155,32 @@ static void sort_signals_by_count(signal_count_t *signals, size_t n) {
     }
 }
 
-sc_error_t sc_replay_auto_tune(sc_allocator_t *alloc, sc_memory_t *memory,
+hu_error_t hu_replay_auto_tune(hu_allocator_t *alloc, hu_memory_t *memory,
                               const char *contact_id, size_t contact_id_len,
                               char **summary_out, size_t *summary_len) {
     if (!alloc || !summary_out || !summary_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!memory || !memory->vtable || !memory->vtable->list)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     *summary_out = NULL;
     *summary_len = 0;
 
     static const char cat_name[] = "replay_insights";
-    sc_memory_category_t cat = {
-        .tag = SC_MEMORY_CATEGORY_CUSTOM,
+    hu_memory_category_t cat = {
+        .tag = HU_MEMORY_CATEGORY_CUSTOM,
         .data.custom = {.name = cat_name, .name_len = sizeof(cat_name) - 1},
     };
 
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t entry_count = 0;
-    sc_error_t err = memory->vtable->list(memory->ctx, alloc, &cat, contact_id, contact_id_len,
+    hu_error_t err = memory->vtable->list(memory->ctx, alloc, &cat, contact_id, contact_id_len,
                                           &entries, &entry_count);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
-    signal_count_t pos_signals[SC_AUTO_TUNE_MAX_SIGNALS];
-    signal_count_t neg_signals[SC_AUTO_TUNE_MAX_SIGNALS];
+    signal_count_t pos_signals[HU_AUTO_TUNE_MAX_SIGNALS];
+    signal_count_t neg_signals[HU_AUTO_TUNE_MAX_SIGNALS];
     memset(pos_signals, 0, sizeof(pos_signals));
     memset(neg_signals, 0, sizeof(neg_signals));
     size_t pos_n = 0;
@@ -194,8 +194,8 @@ sc_error_t sc_replay_auto_tune(sc_allocator_t *alloc, sc_memory_t *memory,
 
     if (entries) {
         for (size_t i = 0; i < entry_count; i++)
-            sc_memory_entry_free_fields(alloc, &entries[i]);
-        alloc->free(alloc->ctx, entries, entry_count * sizeof(sc_memory_entry_t));
+            hu_memory_entry_free_fields(alloc, &entries[i]);
+        alloc->free(alloc->ctx, entries, entry_count * sizeof(hu_memory_entry_t));
     }
 
     int total_pos = 0;
@@ -208,7 +208,7 @@ sc_error_t sc_replay_auto_tune(sc_allocator_t *alloc, sc_memory_t *memory,
     if (pos_n == 0 && neg_n == 0) {
         free_signals(pos_signals, pos_n, alloc);
         free_signals(neg_signals, neg_n, alloc);
-        return SC_OK;
+        return HU_OK;
     }
 
     sort_signals_by_count(pos_signals, pos_n);
@@ -224,7 +224,7 @@ sc_error_t sc_replay_auto_tune(sc_allocator_t *alloc, sc_memory_t *memory,
     if (!buf) {
         free_signals(pos_signals, pos_n, alloc);
         free_signals(neg_signals, neg_n, alloc);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     size_t pos = 0;
@@ -266,15 +266,15 @@ sc_error_t sc_replay_auto_tune(sc_allocator_t *alloc, sc_memory_t *memory,
     free_signals(pos_signals, pos_n, alloc);
     free_signals(neg_signals, neg_n, alloc);
 
-    *summary_out = sc_strndup(alloc, buf, pos);
+    *summary_out = hu_strndup(alloc, buf, pos);
     alloc->free(alloc->ctx, buf, cap);
     if (!*summary_out)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     *summary_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
-char *sc_replay_tune_build_context(sc_allocator_t *alloc, const char *summary, size_t summary_len,
+char *hu_replay_tune_build_context(hu_allocator_t *alloc, const char *summary, size_t summary_len,
                                    size_t *out_len) {
     if (!alloc || !out_len)
         return NULL;
@@ -295,7 +295,7 @@ char *sc_replay_tune_build_context(sc_allocator_t *alloc, const char *summary, s
         return NULL;
     }
 
-    char *out = sc_strndup(alloc, buf, (size_t)w);
+    char *out = hu_strndup(alloc, buf, (size_t)w);
     alloc->free(alloc->ctx, buf, cap);
     if (out)
         *out_len = (size_t)w;

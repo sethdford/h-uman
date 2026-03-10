@@ -1,9 +1,9 @@
 ---
 title: Accessibility
-description: SeaClaw's accessibility system — contrast requirements, focus patterns, reduced motion, forced colors, and screen reader support.
+description: Human's accessibility system — contrast requirements, focus patterns, reduced motion, forced colors, and screen reader support.
 ---
 
-Accessibility is a first-class design constraint in SeaClaw. Every token, component, and animation is validated against WCAG 2.2 AA (minimum) with AAA targets for critical paths.
+Accessibility is a first-class design constraint in Human. Every token, component, and animation is validated against WCAG 2.2 AA (minimum) with AAA targets for critical paths.
 
 ## Color Contrast
 
@@ -20,11 +20,11 @@ Accessibility is a first-class design constraint in SeaClaw. Every token, compon
 
 All semantic color combinations are tested:
 
-- `--sc-text` on `--sc-bg` — passes AA
-- `--sc-text-muted` on `--sc-bg` — passes AA
-- `--sc-accent-text` on `--sc-bg` — passes AA (note: `accent-text` is distinct from `accent` for this reason)
-- `--sc-on-accent` on `--sc-accent` — passes AA
-- `--sc-error` on `--sc-bg` — passes AA
+- `--hu-text` on `--hu-bg` — passes AA
+- `--hu-text-muted` on `--hu-bg` — passes AA
+- `--hu-accent-text` on `--hu-bg` — passes AA (note: `accent-text` is distinct from `accent` for this reason)
+- `--hu-on-accent` on `--hu-accent` — passes AA
+- `--hu-error` on `--hu-bg` — passes AA
 
 ## Focus Management
 
@@ -34,12 +34,12 @@ Every interactive element shows a visible focus indicator using the token system
 
 ```css
 :focus-visible {
-  outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);
-  outline-offset: var(--sc-focus-ring-offset);
+  outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+  outline-offset: var(--hu-focus-ring-offset);
 }
 ```
 
-In high-contrast mode, `--sc-focus-ring` is white and `--sc-focus-ring-width` increases to 3px.
+In high-contrast mode, `--hu-focus-ring` is white and `--hu-focus-ring-width` increases to 3px.
 
 ### Focus Trapping
 
@@ -87,16 +87,16 @@ Windows High Contrast Mode is supported via `forced-colors: active`:
 
 ```css
 @media (forced-colors: active) {
-  .sc-button {
+  .hu-button {
     border: 2px solid ButtonText;
     background: ButtonFace;
     color: ButtonText;
   }
-  .sc-button:hover {
+  .hu-button:hover {
     background: Highlight;
     color: HighlightText;
   }
-  .sc-card {
+  .hu-card {
     border: 1px solid CanvasText;
   }
 }
@@ -119,7 +119,7 @@ For users who prefer reduced transparency (`prefers-reduced-transparency: reduce
   .glass-subtle,
   .glass-prominent {
     backdrop-filter: none;
-    background: var(--sc-bg-surface);
+    background: var(--hu-bg-surface);
     opacity: 1;
   }
 }

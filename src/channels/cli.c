@@ -1,37 +1,37 @@
-#include "seaclaw/channel.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/channel.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_ENABLE_LINENOISE
+#ifdef HU_ENABLE_LINENOISE
 #include "linenoise.h"
-#elif defined(SC_ENABLE_READLINE)
+#elif defined(HU_ENABLE_READLINE)
 #include <readline/history.h>
 #include <readline/readline.h>
 #endif
 
-typedef struct sc_cli_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_cli_ctx {
+    hu_allocator_t *alloc;
     bool running;
-} sc_cli_ctx_t;
+} hu_cli_ctx_t;
 
-static sc_error_t cli_start(void *ctx) {
-    sc_cli_ctx_t *c = (sc_cli_ctx_t *)ctx;
+static hu_error_t cli_start(void *ctx) {
+    hu_cli_ctx_t *c = (hu_cli_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void cli_stop(void *ctx) {
-    sc_cli_ctx_t *c = (sc_cli_ctx_t *)ctx;
+    hu_cli_ctx_t *c = (hu_cli_ctx_t *)ctx;
     if (c)
         c->running = false;
 }
 
-static sc_error_t cli_send(void *ctx, const char *target, size_t target_len, const char *message,
+static hu_error_t cli_send(void *ctx, const char *target, size_t target_len, const char *message,
                            size_t message_len, const char *const *media, size_t media_count) {
     (void)ctx;
     (void)target;
@@ -43,7 +43,7 @@ static sc_error_t cli_send(void *ctx, const char *target, size_t target_len, con
         fputc('\n', stdout);
         fflush(stdout);
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *cli_name(void *ctx) {
@@ -56,7 +56,7 @@ static bool cli_health_check(void *ctx) {
     return true;
 }
 
-static const sc_channel_vtable_t cli_vtable = {
+static const hu_channel_vtable_t cli_vtable = {
     .start = cli_start,
     .stop = cli_stop,
     .send = cli_send,
@@ -67,24 +67,24 @@ static const sc_channel_vtable_t cli_vtable = {
     .stop_typing = NULL,
 };
 
-sc_error_t sc_cli_create(sc_allocator_t *alloc, sc_channel_t *out) {
+hu_error_t hu_cli_create(hu_allocator_t *alloc, hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_cli_ctx_t *c = (sc_cli_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_cli_ctx_t *c = (hu_cli_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->running = false;
     out->ctx = c;
     out->vtable = &cli_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_cli_destroy(sc_channel_t *ch) {
+void hu_cli_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_cli_ctx_t *c = (sc_cli_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
+        hu_cli_ctx_t *c = (hu_cli_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
         if (a)
             a->free(a->ctx, c, sizeof(*c));
         ch->ctx = NULL;
@@ -92,12 +92,12 @@ void sc_cli_destroy(sc_channel_t *ch) {
     }
 }
 
-char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len) {
+char *hu_cli_readline(hu_allocator_t *alloc, size_t *out_len) {
     if (!alloc || !out_len)
         return NULL;
     *out_len = 0;
 
-#ifdef SC_ENABLE_LINENOISE
+#ifdef HU_ENABLE_LINENOISE
     char *ln = linenoise("");
     if (!ln)
         return NULL;
@@ -113,7 +113,7 @@ char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len) {
     free(ln);
     *out_len = len;
     return buf;
-#elif defined(SC_ENABLE_READLINE)
+#elif defined(HU_ENABLE_READLINE)
     char *rl = readline("");
     if (!rl)
         return NULL;
@@ -158,7 +158,7 @@ char *sc_cli_readline(sc_allocator_t *alloc, size_t *out_len) {
 #endif
 }
 
-bool sc_cli_is_quit_command(const char *line, size_t len) {
+bool hu_cli_is_quit_command(const char *line, size_t len) {
     if (!line || len == 0)
         return false;
     size_t i = 0;

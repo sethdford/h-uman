@@ -1,6 +1,6 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory/vector.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory/vector.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -44,28 +44,28 @@ static const char *find_split_point(const char *p, const char *end, size_t max_f
     return best ? best : end;
 }
 
-sc_error_t sc_chunker_split(sc_allocator_t *alloc, const char *text, size_t text_len,
-                            const sc_chunker_options_t *opts, sc_text_chunk_t **out,
+hu_error_t hu_chunker_split(hu_allocator_t *alloc, const char *text, size_t text_len,
+                            const hu_chunker_options_t *opts, hu_text_chunk_t **out,
                             size_t *out_count) {
     if (!alloc || !opts || !out || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!text && text_len > 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     *out = NULL;
     *out_count = 0;
 
     if (!text || text_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t max_chunk = opts->max_chunk_size > 0 ? opts->max_chunk_size : 512;
     size_t overlap = opts->overlap;
 
     /* Build chunks dynamically (simple: over-allocate, trim later) */
-    sc_text_chunk_t *chunks = (sc_text_chunk_t *)alloc->alloc(
-        alloc->ctx, sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+    hu_text_chunk_t *chunks = (hu_text_chunk_t *)alloc->alloc(
+        alloc->ctx, sizeof(hu_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
     if (!chunks)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     size_t count = 0;
     const char *p = text;
@@ -104,27 +104,27 @@ sc_error_t sc_chunker_split(sc_allocator_t *alloc, const char *text, size_t text
 
     if (count == 0) {
         alloc->free(alloc->ctx, chunks,
-                    sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
-        return SC_OK;
+                    sizeof(hu_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+        return HU_OK;
     }
 
     /* Trim to exact size */
-    sc_text_chunk_t *trimmed =
-        (sc_text_chunk_t *)alloc->alloc(alloc->ctx, sizeof(sc_text_chunk_t) * count);
+    hu_text_chunk_t *trimmed =
+        (hu_text_chunk_t *)alloc->alloc(alloc->ctx, sizeof(hu_text_chunk_t) * count);
     if (!trimmed) {
         alloc->free(alloc->ctx, chunks,
-                    sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
-        return SC_ERR_OUT_OF_MEMORY;
+                    sizeof(hu_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memcpy(trimmed, chunks, sizeof(sc_text_chunk_t) * count);
-    alloc->free(alloc->ctx, chunks, sizeof(sc_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
+    memcpy(trimmed, chunks, sizeof(hu_text_chunk_t) * count);
+    alloc->free(alloc->ctx, chunks, sizeof(hu_text_chunk_t) * ((text_len / (max_chunk / 2)) + 2));
 
     *out = trimmed;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_chunker_free(sc_allocator_t *alloc, sc_text_chunk_t *chunks, size_t count) {
+void hu_chunker_free(hu_allocator_t *alloc, hu_text_chunk_t *chunks, size_t count) {
     if (alloc && chunks && count > 0)
-        alloc->free(alloc->ctx, chunks, sizeof(sc_text_chunk_t) * count);
+        alloc->free(alloc->ctx, chunks, sizeof(hu_text_chunk_t) * count);
 }

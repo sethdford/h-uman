@@ -1,9 +1,9 @@
 ---
 title: Channel Overview
-description: Messaging channel architecture in SeaClaw.
+description: Messaging channel architecture in Human.
 ---
 
-Channels are how SeaClaw receives and sends messages. Each channel implements the `sc_channel_t` vtable.
+Channels are how Human receives and sends messages. Each channel implements the `sc_channel_t` vtable.
 
 ## Channel vtable interface
 
@@ -71,7 +71,7 @@ Example (Telegram):
 
 ## Gateway webhooks
 
-When using the gateway (`seaclaw gateway`), incoming webhooks are routed by path:
+When using the gateway (`human gateway`), incoming webhooks are routed by path:
 
 | Path                | Channel           |
 | ------------------- | ----------------- |

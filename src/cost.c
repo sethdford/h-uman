@@ -1,6 +1,6 @@
-#include "seaclaw/cost.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/cost.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,7 +8,7 @@
 #include <string.h>
 #include <time.h>
 
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
 #include <sys/stat.h>
 #endif
 
@@ -18,7 +18,7 @@ static double sanitize_price(double v) {
     return 0.0;
 }
 
-void sc_token_usage_init(sc_cost_entry_t *u, const char *model, uint64_t input_tokens,
+void hu_token_usage_init(hu_cost_entry_t *u, const char *model, uint64_t input_tokens,
                          uint64_t output_tokens, double input_price_per_million,
                          double output_price_per_million) {
     if (!u)
@@ -34,11 +34,11 @@ void sc_token_usage_init(sc_cost_entry_t *u, const char *model, uint64_t input_t
     u->timestamp_secs = (int64_t)time(NULL);
 }
 
-sc_error_t sc_cost_tracker_init(sc_cost_tracker_t *t, sc_allocator_t *alloc,
+hu_error_t hu_cost_tracker_init(hu_cost_tracker_t *t, hu_allocator_t *alloc,
                                 const char *workspace_dir, bool enabled, double daily_limit,
                                 double monthly_limit, uint32_t warn_percent) {
     if (!t || !alloc || !workspace_dir)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(t, 0, sizeof(*t));
 
     t->alloc = alloc;
@@ -51,17 +51,17 @@ sc_error_t sc_cost_tracker_init(sc_cost_tracker_t *t, sc_allocator_t *alloc,
     size_t path_len = wlen + 20;
     t->storage_path = (char *)alloc->alloc(alloc->ctx, path_len);
     if (!t->storage_path)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     snprintf(t->storage_path, path_len, "%s/state/costs.jsonl", workspace_dir);
 
     t->history = NULL;
     t->history_count = 0;
     t->history_cap = 0;
 
-    return SC_OK;
+    return HU_OK;
 }
 
-static void free_record_model(sc_allocator_t *alloc, sc_cost_record_t *r) {
+static void free_record_model(hu_allocator_t *alloc, hu_cost_record_t *r) {
     if (!alloc || !r)
         return;
     if (r->usage.model) {
@@ -70,17 +70,17 @@ static void free_record_model(sc_allocator_t *alloc, sc_cost_record_t *r) {
     }
 }
 
-void sc_cost_tracker_deinit(sc_cost_tracker_t *t) {
+void hu_cost_tracker_deinit(hu_cost_tracker_t *t) {
     if (!t || !t->alloc)
         return;
     if (t->records) {
-        t->alloc->free(t->alloc->ctx, t->records, t->record_cap * sizeof(sc_cost_record_t));
+        t->alloc->free(t->alloc->ctx, t->records, t->record_cap * sizeof(hu_cost_record_t));
         t->records = NULL;
     }
     if (t->history) {
         for (size_t i = 0; i < t->history_count; i++)
             free_record_model(t->alloc, &t->history[i]);
-        t->alloc->free(t->alloc->ctx, t->history, t->history_cap * sizeof(sc_cost_record_t));
+        t->alloc->free(t->alloc->ctx, t->history, t->history_cap * sizeof(hu_cost_record_t));
         t->history = NULL;
     }
     if (t->storage_path) {
@@ -93,66 +93,66 @@ void sc_cost_tracker_deinit(sc_cost_tracker_t *t) {
     t->history_cap = 0;
 }
 
-sc_budget_check_t sc_cost_check_budget(const sc_cost_tracker_t *t, double estimated_cost_usd,
-                                       sc_budget_info_t *info_out) {
+hu_budget_check_t hu_cost_check_budget(const hu_cost_tracker_t *t, double estimated_cost_usd,
+                                       hu_budget_info_t *info_out) {
     if (!t)
-        return SC_BUDGET_ALLOWED;
+        return HU_BUDGET_ALLOWED;
     if (!t->enabled)
-        return SC_BUDGET_ALLOWED;
+        return HU_BUDGET_ALLOWED;
     if (!isfinite(estimated_cost_usd) || estimated_cost_usd < 0.0)
-        return SC_BUDGET_ALLOWED;
+        return HU_BUDGET_ALLOWED;
 
-    double session_cost = sc_cost_session_total(t);
+    double session_cost = hu_cost_session_total(t);
     double projected = session_cost + estimated_cost_usd;
 
     if (projected > t->daily_limit_usd && info_out) {
         info_out->current_usd = session_cost;
         info_out->limit_usd = t->daily_limit_usd;
-        info_out->period = SC_USAGE_PERIOD_DAY;
-        return SC_BUDGET_EXCEEDED;
+        info_out->period = HU_USAGE_PERIOD_DAY;
+        return HU_BUDGET_EXCEEDED;
     }
     if (projected > t->monthly_limit_usd && info_out) {
         info_out->current_usd = session_cost;
         info_out->limit_usd = t->monthly_limit_usd;
-        info_out->period = SC_USAGE_PERIOD_MONTH;
-        return SC_BUDGET_EXCEEDED;
+        info_out->period = HU_USAGE_PERIOD_MONTH;
+        return HU_BUDGET_EXCEEDED;
     }
     double warn_threshold = (double)t->warn_at_percent / 100.0;
     double daily_warn = t->daily_limit_usd * warn_threshold;
     if (projected >= daily_warn && info_out) {
         info_out->current_usd = session_cost;
         info_out->limit_usd = t->daily_limit_usd;
-        info_out->period = SC_USAGE_PERIOD_DAY;
-        return SC_BUDGET_WARNING;
+        info_out->period = HU_USAGE_PERIOD_DAY;
+        return HU_BUDGET_WARNING;
     }
-    return SC_BUDGET_ALLOWED;
+    return HU_BUDGET_ALLOWED;
 }
 
-sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usage,
+hu_error_t hu_cost_record_usage(hu_cost_tracker_t *t, const hu_cost_entry_t *usage,
                                uint64_t job_id) {
     if (!t || !usage)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!t->enabled)
-        return SC_OK;
+        return HU_OK;
     if (!isfinite(usage->cost_usd) || usage->cost_usd < 0.0)
-        return SC_OK;
-    if (t->record_count >= SC_COST_MAX_RECORDS)
-        return SC_OK;
+        return HU_OK;
+    if (t->record_count >= HU_COST_MAX_RECORDS)
+        return HU_OK;
 
     if (t->record_count >= t->record_cap) {
         size_t new_cap = t->record_cap ? t->record_cap * 2 : 8;
-        if (new_cap > SC_COST_MAX_RECORDS)
-            new_cap = SC_COST_MAX_RECORDS;
-        sc_cost_record_t *nrec = (sc_cost_record_t *)t->alloc->realloc(
-            t->alloc->ctx, t->records, t->record_cap * sizeof(sc_cost_record_t),
-            new_cap * sizeof(sc_cost_record_t));
+        if (new_cap > HU_COST_MAX_RECORDS)
+            new_cap = HU_COST_MAX_RECORDS;
+        hu_cost_record_t *nrec = (hu_cost_record_t *)t->alloc->realloc(
+            t->alloc->ctx, t->records, t->record_cap * sizeof(hu_cost_record_t),
+            new_cap * sizeof(hu_cost_record_t));
         if (!nrec)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         t->records = nrec;
         t->record_cap = new_cap;
     }
 
-    sc_cost_record_t *rec = &t->records[t->record_count];
+    hu_cost_record_t *rec = &t->records[t->record_count];
     rec->usage = *usage;
     if (usage->model) {
         strncpy(rec->model_buf, usage->model, sizeof(rec->model_buf) - 1);
@@ -166,7 +166,7 @@ sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usa
     rec->job_id = job_id;
     t->record_count++;
 
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
     if (t->storage_path && t->storage_path[0]) {
         const char *dir_end = strrchr(t->storage_path, '/');
         if (dir_end && dir_end > t->storage_path) {
@@ -191,10 +191,10 @@ sc_error_t sc_cost_record_usage(sc_cost_tracker_t *t, const sc_cost_entry_t *usa
     }
 #endif
 
-    return SC_OK;
+    return HU_OK;
 }
 
-double sc_cost_session_total(const sc_cost_tracker_t *t) {
+double hu_cost_session_total(const hu_cost_tracker_t *t) {
     if (!t)
         return 0.0;
     double total = 0.0;
@@ -204,7 +204,7 @@ double sc_cost_session_total(const sc_cost_tracker_t *t) {
     return total;
 }
 
-uint64_t sc_cost_session_tokens(const sc_cost_tracker_t *t) {
+uint64_t hu_cost_session_tokens(const hu_cost_tracker_t *t) {
     if (!t)
         return 0;
     uint64_t total = 0;
@@ -214,7 +214,7 @@ uint64_t sc_cost_session_tokens(const sc_cost_tracker_t *t) {
     return total;
 }
 
-size_t sc_cost_request_count(const sc_cost_tracker_t *t) {
+size_t hu_cost_request_count(const hu_cost_tracker_t *t) {
     return t ? t->record_count : 0;
 }
 
@@ -239,7 +239,7 @@ static bool same_month(int64_t a_secs, int64_t b_secs) {
     return ta.tm_year == tb.tm_year && ta.tm_mon == tb.tm_mon;
 }
 
-static double sum_cost_for_period(const sc_cost_tracker_t *t, int64_t at_secs,
+static double sum_cost_for_period(const hu_cost_tracker_t *t, int64_t at_secs,
                                   bool (*pred)(int64_t, int64_t)) {
     double total = 0.0;
     for (size_t i = 0; i < t->record_count; i++) {
@@ -253,13 +253,13 @@ static double sum_cost_for_period(const sc_cost_tracker_t *t, int64_t at_secs,
     return total;
 }
 
-void sc_cost_get_summary(const sc_cost_tracker_t *t, int64_t at_secs, sc_cost_summary_t *out) {
+void hu_cost_get_summary(const hu_cost_tracker_t *t, int64_t at_secs, hu_cost_summary_t *out) {
     if (!t || !out)
         return;
     memset(out, 0, sizeof(*out));
-    out->session_cost_usd = sc_cost_session_total(t);
+    out->session_cost_usd = hu_cost_session_total(t);
     out->request_count = t->record_count;
-    out->total_tokens = sc_cost_session_tokens(t);
+    out->total_tokens = hu_cost_session_tokens(t);
     if (at_secs == 0)
         at_secs = (int64_t)time(NULL);
     out->daily_cost_usd = sum_cost_for_period(t, at_secs, same_day);
@@ -270,31 +270,31 @@ void sc_cost_get_summary(const sc_cost_tracker_t *t, int64_t at_secs, sc_cost_su
     }
 }
 
-#if !defined(SC_IS_TEST)
-static sc_error_t parse_cost_line(sc_allocator_t *alloc, const char *line, size_t len,
-                                  sc_cost_record_t *out) {
-    sc_json_value_t *root = NULL;
-    sc_error_t err = sc_json_parse(alloc, line, len, &root);
-    if (err != SC_OK)
+#if !defined(HU_IS_TEST)
+static hu_error_t parse_cost_line(hu_allocator_t *alloc, const char *line, size_t len,
+                                  hu_cost_record_t *out) {
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, line, len, &root);
+    if (err != HU_OK)
         return err;
-    if (!root || root->type != SC_JSON_OBJECT) {
+    if (!root || root->type != HU_JSON_OBJECT) {
         if (root)
-            sc_json_free(alloc, root);
-        return SC_ERR_JSON_PARSE;
+            hu_json_free(alloc, root);
+        return HU_ERR_JSON_PARSE;
     }
 
-    const char *model = sc_json_get_string(root, "model");
-    double cost = sc_json_get_number(root, "cost_usd", 0.0);
-    double ts = sc_json_get_number(root, "timestamp", 0.0);
-    uint64_t job_id = (uint64_t)sc_json_get_number(root, "job_id", 0.0);
-    uint64_t inp = (uint64_t)sc_json_get_number(root, "input_tokens", 0.0);
-    uint64_t out_tok = (uint64_t)sc_json_get_number(root, "output_tokens", 0.0);
-    uint64_t total = (uint64_t)sc_json_get_number(root, "tokens", 0.0);
+    const char *model = hu_json_get_string(root, "model");
+    double cost = hu_json_get_number(root, "cost_usd", 0.0);
+    double ts = hu_json_get_number(root, "timestamp", 0.0);
+    uint64_t job_id = (uint64_t)hu_json_get_number(root, "job_id", 0.0);
+    uint64_t inp = (uint64_t)hu_json_get_number(root, "input_tokens", 0.0);
+    uint64_t out_tok = (uint64_t)hu_json_get_number(root, "output_tokens", 0.0);
+    uint64_t total = (uint64_t)hu_json_get_number(root, "tokens", 0.0);
     if (total == 0)
         total = inp + out_tok;
 
     memset(out, 0, sizeof(*out));
-    out->usage.model = model ? sc_strdup(alloc, model) : NULL;
+    out->usage.model = model ? hu_strdup(alloc, model) : NULL;
     out->usage.input_tokens = inp;
     out->usage.output_tokens = out_tok;
     out->usage.total_tokens = total;
@@ -304,24 +304,24 @@ static sc_error_t parse_cost_line(sc_allocator_t *alloc, const char *line, size_
     out->session_id[sizeof(out->session_id) - 1] = '\0';
     out->job_id = job_id;
 
-    sc_json_free(alloc, root);
-    return SC_OK;
+    hu_json_free(alloc, root);
+    return HU_OK;
 }
 #endif
 
-sc_error_t sc_cost_load_history(sc_cost_tracker_t *t) {
+hu_error_t hu_cost_load_history(hu_cost_tracker_t *t) {
     if (!t || !t->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#ifdef SC_IS_TEST
-    return SC_OK;
+#ifdef HU_IS_TEST
+    return HU_OK;
 #else
     if (!t->storage_path || !t->storage_path[0])
-        return SC_OK;
+        return HU_OK;
 
     FILE *f = fopen(t->storage_path, "r");
     if (!f)
-        return SC_OK;
+        return HU_OK;
 
     char line[8192];
     while (fgets(line, sizeof(line), f)) {
@@ -331,49 +331,49 @@ sc_error_t sc_cost_load_history(sc_cost_tracker_t *t) {
         }
         if (len == 0)
             continue;
-        if (t->history_count >= SC_COST_MAX_RECORDS)
+        if (t->history_count >= HU_COST_MAX_RECORDS)
             break;
 
         if (t->history_count >= t->history_cap) {
             size_t new_cap = t->history_cap ? t->history_cap * 2 : 64;
-            if (new_cap > SC_COST_MAX_RECORDS)
-                new_cap = SC_COST_MAX_RECORDS;
-            sc_cost_record_t *n = (sc_cost_record_t *)t->alloc->realloc(
-                t->alloc->ctx, t->history, t->history_cap * sizeof(sc_cost_record_t),
-                new_cap * sizeof(sc_cost_record_t));
+            if (new_cap > HU_COST_MAX_RECORDS)
+                new_cap = HU_COST_MAX_RECORDS;
+            hu_cost_record_t *n = (hu_cost_record_t *)t->alloc->realloc(
+                t->alloc->ctx, t->history, t->history_cap * sizeof(hu_cost_record_t),
+                new_cap * sizeof(hu_cost_record_t));
             if (!n) {
                 fclose(f);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             t->history = n;
             t->history_cap = new_cap;
         }
 
-        sc_cost_record_t rec = {0};
-        if (parse_cost_line(t->alloc, line, len, &rec) == SC_OK) {
+        hu_cost_record_t rec = {0};
+        if (parse_cost_line(t->alloc, line, len, &rec) == HU_OK) {
             t->history[t->history_count++] = rec;
         } else if (rec.usage.model) {
             t->alloc->free(t->alloc->ctx, (void *)rec.usage.model, strlen(rec.usage.model) + 1);
         }
     }
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-sc_error_t sc_cost_get_usage_json(sc_allocator_t *alloc, const sc_cost_tracker_t *t,
+hu_error_t hu_cost_get_usage_json(hu_allocator_t *alloc, const hu_cost_tracker_t *t,
                                   int64_t at_secs, char **out_json) {
     if (!alloc || !t || !out_json)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_json = NULL;
 
-    sc_cost_summary_t s = {0};
-    sc_cost_get_summary(t, at_secs, &s);
+    hu_cost_summary_t s = {0};
+    hu_cost_get_summary(t, at_secs, &s);
 
     size_t cap = 256;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     int n = snprintf(buf, cap,
                      "{\"session_cost_usd\":%.6f,\"daily_cost_usd\":%.6f,\"monthly_cost_usd\":%.6f,"
@@ -382,8 +382,8 @@ sc_error_t sc_cost_get_usage_json(sc_allocator_t *alloc, const sc_cost_tracker_t
                      (unsigned long long)s.total_tokens, s.request_count);
     if (n < 0 || (size_t)n >= cap) {
         alloc->free(alloc->ctx, buf, cap);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     *out_json = buf;
-    return SC_OK;
+    return HU_OK;
 }

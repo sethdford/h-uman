@@ -1,7 +1,7 @@
-#include "seaclaw/memory/retrieval/llm_reranker.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/retrieval/llm_reranker.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,14 +9,14 @@
 
 #define SNIPPET_MAX 200
 
-char *sc_llm_reranker_build_prompt(sc_allocator_t *alloc, const char *query, size_t query_len,
-                                   const sc_memory_entry_t *entries, size_t count,
+char *hu_llm_reranker_build_prompt(hu_allocator_t *alloc, const char *query, size_t query_len,
+                                   const hu_memory_entry_t *entries, size_t count,
                                    unsigned max_candidates) {
     if (!alloc || !query || !entries)
         return NULL;
     size_t limit = count < max_candidates ? count : (size_t)max_candidates;
     if (limit == 0)
-        return sc_sprintf(alloc, "%s", "");
+        return hu_sprintf(alloc, "%s", "");
 
     size_t cap = 512 + (size_t)query_len + limit * (SNIPPET_MAX + 32);
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
@@ -53,7 +53,7 @@ char *sc_llm_reranker_build_prompt(sc_allocator_t *alloc, const char *query, siz
     return buf;
 }
 
-size_t sc_llm_reranker_parse_response(const char *response, size_t response_len,
+size_t hu_llm_reranker_parse_response(const char *response, size_t response_len,
                                       size_t *out_indices, size_t max_indices) {
     if (!response || !out_indices || max_indices == 0)
         return 0;

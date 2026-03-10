@@ -1,0 +1,91 @@
+.\" Manual page for human gateway subcommand
+.\"
+.TH HUMAN-GATEWAY 1 "March 2026" "human 0.1.0" "User Commands"
+.SH NAME
+human gateway \- start webhook gateway server
+.SH SYNOPSIS
+.B human gateway
+[\fIoptions\fR]
+.PP
+.B human gateway
+\fB--with-agent\fR
+.SH DESCRIPTION
+.B human gateway
+starts the HTTP webhook gateway server. It listens for incoming webhooks,
+serves the control UI (if configured), and provides WebSocket connections
+for real-time messaging.
+.PP
+In gateway-only mode, the server handles webhooks and tools but does not
+run the full agent loop. Use
+.B \-\-with-agent
+to enable the agent for chat and autonomous turns.
+.SH OPTIONS
+.TP
+.B \-\-with-agent
+Run the gateway with the full agent integrated. Enables chat and
+autonomous tool execution in response to WebSocket messages.
+.SH CONFIGURATION
+Gateway settings are read from
+.IR ~/.human/config.json
+under the
+.B gateway
+key, and from environment variables.
+.PP
+Configurable via config.json:
+.RS
+.TP
+.I host
+Bind address (default: 127.0.0.1).
+.TP
+.I port
+Listen port (default: 3000).
+.TP
+.I require_pairing
+Require device pairing for webhooks.
+.TP
+.I allow_public_bind
+Allow binding to 0.0.0.0 (use with caution).
+.TP
+.I pair_rate_limit_per_minute
+Rate limit for pairing requests.
+.TP
+.I webhook_hmac_secret
+HMAC secret for webhook signature verification.
+.TP
+.I control_ui_dir
+Directory containing static files for the control UI (SPA).
+.RE
+.SH ENVIRONMENT
+.TP
+.B HUMAN_GATEWAY_HOST
+Override config bind address.
+.TP
+.B HUMAN_GATEWAY_PORT
+Override config port.
+.TP
+.B HUMAN_WEBHOOK_HMAC_SECRET
+HMAC secret for webhook verification.
+.TP
+.B HUMAN_ALLOW_PUBLIC_BIND
+Set to
+.B 1
+or
+.B true
+to allow binding to 0.0.0.0.
+.SH DEFAULTS
+.TP
+.B Host
+127.0.0.1 (config) or 0.0.0.0 when serving
+.TP
+.B Port
+3000
+.TP
+.B Max body size
+64 KiB
+.TP
+.B Rate limit
+60 requests per minute per IP (configurable)
+.SH SEE ALSO
+.BR human (1)
+.PP
+Homepage: https://human.ai

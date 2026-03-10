@@ -1,15 +1,15 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_HARDWARE_INFO_NAME "hardware_info"
-#define SC_HARDWARE_INFO_DESC "Get hardware board information and capabilities."
-#define SC_HARDWARE_INFO_PARAMS \
+#define HU_HARDWARE_INFO_NAME "hardware_info"
+#define HU_HARDWARE_INFO_DESC "Get hardware board information and capabilities."
+#define HU_HARDWARE_INFO_PARAMS \
     "{\"type\":\"object\",\"properties\":{\"board\":{\"type\":\"string\"}},\"required\":[]}"
 
 static const struct {
@@ -36,18 +36,18 @@ static const struct {
 };
 #define BOARDS_COUNT (sizeof(boards) / sizeof(boards[0]))
 
-typedef struct sc_hardware_info_ctx {
+typedef struct hu_hardware_info_ctx {
     bool enabled;
-} sc_hardware_info_ctx_t;
+} hu_hardware_info_ctx_t;
 
-static sc_error_t hardware_info_execute(void *ctx, sc_allocator_t *alloc,
-                                        const sc_json_value_t *args, sc_tool_result_t *out) {
+static hu_error_t hardware_info_execute(void *ctx, hu_allocator_t *alloc,
+                                        const hu_json_value_t *args, hu_tool_result_t *out) {
     (void)ctx;
     if (!args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *board = sc_json_get_string(args, "board");
+    const char *board = hu_json_get_string(args, "board");
     if (board && board[0]) {
         for (size_t i = 0; i < BOARDS_COUNT; i++) {
             if (strcmp(boards[i].name, board) == 0) {
@@ -56,8 +56,8 @@ static sc_error_t hardware_info_execute(void *ctx, sc_allocator_t *alloc,
                               (boards[i].mem_map ? strlen(boards[i].mem_map) + 20 : 0);
                 char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
                 if (!msg) {
-                    *out = sc_tool_result_fail("out of memory", 12);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    *out = hu_tool_result_fail("out of memory", 12);
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 int n;
                 if (boards[i].mem_map) {
@@ -71,79 +71,79 @@ static sc_error_t hardware_info_execute(void *ctx, sc_allocator_t *alloc,
                 }
                 size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
                 msg[len] = '\0';
-                *out = sc_tool_result_ok_owned(msg, len);
-                return SC_OK;
+                *out = hu_tool_result_ok_owned(msg, len);
+                return HU_OK;
             }
         }
         size_t blen = strlen(board);
         size_t need = 52 + blen;
         char *msg = (char *)alloc->alloc(alloc->ctx, need + 1);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         int n = snprintf(msg, need + 1, "Board '%s' configured. No static info available.", board);
         size_t len = (n > 0 && (size_t)n <= need) ? (size_t)n : need;
         msg[len] = '\0';
-        *out = sc_tool_result_ok_owned(msg, len);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, len);
+        return HU_OK;
     }
-    sc_json_buf_t buf;
-    if (sc_json_buf_init(&buf, alloc) != SC_OK) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+    hu_json_buf_t buf;
+    if (hu_json_buf_init(&buf, alloc) != HU_OK) {
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    if (sc_json_buf_append_raw(&buf, "[", 1) != SC_OK)
+    if (hu_json_buf_append_raw(&buf, "[", 1) != HU_OK)
         goto fail;
     for (size_t i = 0; i < BOARDS_COUNT; i++) {
         if (i > 0)
-            sc_json_buf_append_raw(&buf, ",", 1);
-        if (sc_json_buf_append_raw(&buf, "{\"name\":\"", 9) != SC_OK)
+            hu_json_buf_append_raw(&buf, ",", 1);
+        if (hu_json_buf_append_raw(&buf, "{\"name\":\"", 9) != HU_OK)
             goto fail;
-        sc_json_append_string(&buf, boards[i].name, strlen(boards[i].name));
-        if (sc_json_buf_append_raw(&buf, "\",\"chip\":\"", 10) != SC_OK)
+        hu_json_append_string(&buf, boards[i].name, strlen(boards[i].name));
+        if (hu_json_buf_append_raw(&buf, "\",\"chip\":\"", 10) != HU_OK)
             goto fail;
-        sc_json_append_string(&buf, boards[i].chip, strlen(boards[i].chip));
-        if (sc_json_buf_append_raw(&buf, "\",\"description\":\"", 17) != SC_OK)
+        hu_json_append_string(&buf, boards[i].chip, strlen(boards[i].chip));
+        if (hu_json_buf_append_raw(&buf, "\",\"description\":\"", 17) != HU_OK)
             goto fail;
-        sc_json_append_string(&buf, boards[i].desc, strlen(boards[i].desc));
-        if (sc_json_buf_append_raw(&buf, "\"}", 2) != SC_OK)
+        hu_json_append_string(&buf, boards[i].desc, strlen(boards[i].desc));
+        if (hu_json_buf_append_raw(&buf, "\"}", 2) != HU_OK)
             goto fail;
     }
-    if (sc_json_buf_append_raw(&buf, "]", 1) != SC_OK)
+    if (hu_json_buf_append_raw(&buf, "]", 1) != HU_OK)
         goto fail;
     char *msg = (char *)alloc->alloc(alloc->ctx, buf.len + 1);
     if (!msg) {
     fail:
-        sc_json_buf_free(&buf);
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        hu_json_buf_free(&buf);
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(msg, buf.ptr, buf.len);
     msg[buf.len] = '\0';
-    sc_json_buf_free(&buf);
-    *out = sc_tool_result_ok_owned(msg, buf.len);
-    return SC_OK;
+    hu_json_buf_free(&buf);
+    *out = hu_tool_result_ok_owned(msg, buf.len);
+    return HU_OK;
 }
 
 static const char *hardware_info_name(void *ctx) {
     (void)ctx;
-    return SC_HARDWARE_INFO_NAME;
+    return HU_HARDWARE_INFO_NAME;
 }
 static const char *hardware_info_description(void *ctx) {
     (void)ctx;
-    return SC_HARDWARE_INFO_DESC;
+    return HU_HARDWARE_INFO_DESC;
 }
 static const char *hardware_info_parameters_json(void *ctx) {
     (void)ctx;
-    return SC_HARDWARE_INFO_PARAMS;
+    return HU_HARDWARE_INFO_PARAMS;
 }
-static void hardware_info_deinit(void *ctx, sc_allocator_t *alloc) {
+static void hardware_info_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx)
-        alloc->free(alloc->ctx, ctx, sizeof(sc_hardware_info_ctx_t));
+        alloc->free(alloc->ctx, ctx, sizeof(hu_hardware_info_ctx_t));
 }
 
-static const sc_tool_vtable_t hardware_info_vtable = {
+static const hu_tool_vtable_t hardware_info_vtable = {
     .execute = hardware_info_execute,
     .name = hardware_info_name,
     .description = hardware_info_description,
@@ -151,13 +151,13 @@ static const sc_tool_vtable_t hardware_info_vtable = {
     .deinit = hardware_info_deinit,
 };
 
-sc_error_t sc_hardware_info_create(sc_allocator_t *alloc, bool enabled, sc_tool_t *out) {
-    sc_hardware_info_ctx_t *c = (sc_hardware_info_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+hu_error_t hu_hardware_info_create(hu_allocator_t *alloc, bool enabled, hu_tool_t *out) {
+    hu_hardware_info_ctx_t *c = (hu_hardware_info_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->enabled = enabled;
     out->ctx = c;
     out->vtable = &hardware_info_vtable;
-    return SC_OK;
+    return HU_OK;
 }

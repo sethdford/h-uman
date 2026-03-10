@@ -9,16 +9,16 @@ import {
   ANIMATION_SETTLE_MS,
 } from "./helpers.js";
 
-const VIEW = "sc-voice-view";
+const VIEW = "hu-voice-view";
 
 /**
  * Set the voice view's transcript and trigger send via evaluate.
  * This is more reliable than simulating keyboard events across
- * nested shadow DOM boundaries (sc-app > sc-voice-view > sc-textarea > textarea).
+ * nested shadow DOM boundaries (hu-app > hu-voice-view > hu-textarea > textarea).
  */
 function sendVoiceMessage(text: string): string {
   return `(async () => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${VIEW}");
     if (!view) return "no-view";
 
@@ -32,9 +32,9 @@ function sendVoiceMessage(text: string): string {
 
 function clickStatusBarButton(label: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${VIEW}");
-    const buttons = view?.shadowRoot?.querySelectorAll(".status-bar sc-button");
+    const buttons = view?.shadowRoot?.querySelectorAll(".status-bar hu-button");
     for (const btn of buttons ?? []) {
       const text = btn.textContent?.trim() ?? "";
       const aria = btn.getAttribute("aria-label") ?? "";
@@ -59,7 +59,7 @@ test.describe("Voice Interactions", () => {
       expect(await page.evaluate(shadowExists(VIEW, ".status-bar"))).toBe(true);
       const text: string = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
           const bar = view?.shadowRoot?.querySelector(".status-bar");
           return bar?.textContent ?? "";
@@ -74,7 +74,7 @@ test.describe("Voice Interactions", () => {
     await expect(async () => {
       const text: string = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
           const bar = view?.shadowRoot?.querySelector(".status-bar");
           return bar?.textContent ?? "";
@@ -88,7 +88,7 @@ test.describe("Voice Interactions", () => {
   test("shows empty conversation state on fresh load", async ({ page }) => {
     await expect(async () => {
       const hasEmpty = await page.evaluate(
-        shadowExistsIn(VIEW, "sc-voice-conversation", "sc-empty-state"),
+        shadowExistsIn(VIEW, "hu-voice-conversation", "hu-empty-state"),
       );
       expect(hasEmpty).toBe(true);
     }).toPass({ timeout: POLL });
@@ -96,7 +96,7 @@ test.describe("Voice Interactions", () => {
 
   test("mic orb is present and clickable", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists(VIEW, "sc-voice-orb"))).toBe(true);
+      expect(await page.evaluate(shadowExists(VIEW, "hu-voice-orb"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
@@ -130,7 +130,7 @@ test.describe("Voice Interactions", () => {
 
     await expect(async () => {
       const hasEmpty = await page.evaluate(
-        shadowExistsIn(VIEW, "sc-voice-conversation", "sc-empty-state"),
+        shadowExistsIn(VIEW, "hu-voice-conversation", "hu-empty-state"),
       );
       expect(hasEmpty).toBe(true);
     }).toPass({ timeout: POLL });
@@ -140,9 +140,9 @@ test.describe("Voice Interactions", () => {
     await expect(async () => {
       const disabled = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
-          const buttons = view?.shadowRoot?.querySelectorAll(".status-bar sc-button");
+          const buttons = view?.shadowRoot?.querySelectorAll(".status-bar hu-button");
           for (const btn of buttons ?? []) {
             if (btn.textContent?.trim() === "Export" || btn.getAttribute("aria-label") === "Export conversation") {
               return btn.hasAttribute("disabled");
@@ -167,9 +167,9 @@ test.describe("Voice Interactions", () => {
     await expect(async () => {
       const disabled = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
-          const buttons = view?.shadowRoot?.querySelectorAll(".status-bar sc-button");
+          const buttons = view?.shadowRoot?.querySelectorAll(".status-bar hu-button");
           for (const btn of buttons ?? []) {
             if (btn.textContent?.trim() === "Export" || btn.getAttribute("aria-label") === "Export conversation") {
               return btn.hasAttribute("disabled");
@@ -186,9 +186,9 @@ test.describe("Voice Interactions", () => {
     await expect(async () => {
       const flexGrow = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
-          const conv = view?.shadowRoot?.querySelector("sc-voice-conversation");
+          const conv = view?.shadowRoot?.querySelector("hu-voice-conversation");
           if (!conv) return "0";
           return getComputedStyle(conv).flexGrow;
         })()`,
@@ -201,7 +201,7 @@ test.describe("Voice Interactions", () => {
     await expect(async () => {
       const exists = await page.evaluate(shadowExists(VIEW, ".controls-zone"));
       expect(exists).toBe(true);
-      const hasOrb = await page.evaluate(shadowExists(VIEW, ".controls-zone sc-voice-orb"));
+      const hasOrb = await page.evaluate(shadowExists(VIEW, ".controls-zone hu-voice-orb"));
       expect(hasOrb).toBe(true);
       const hasInput = await page.evaluate(shadowExists(VIEW, ".controls-zone .input-row"));
       expect(hasInput).toBe(true);
@@ -236,7 +236,7 @@ test.describe("Voice Interactions", () => {
     await expect(async () => {
       const barText: string = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
           const bar = view?.shadowRoot?.querySelector(".status-bar");
           return bar?.textContent ?? "";

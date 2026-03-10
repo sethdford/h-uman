@@ -169,7 +169,7 @@ export function generateDynamicColorCSS(sourceHex: string = "#7AB648"): string {
     lines.push(`  /* ${group} */`);
     for (const [step, value] of Object.entries(scale)) {
       if (!step.endsWith("-p3")) {
-        lines.push(`  --sc-dynamic-${group}-${step}: ${value};`);
+        lines.push(`  --hu-dynamic-${group}-${step}: ${value};`);
       }
     }
   }
@@ -189,7 +189,7 @@ export function generateDynamicColorCSS(sourceHex: string = "#7AB648"): string {
     for (const [step, value] of Object.entries(scale)) {
       if (step.endsWith("-p3")) {
         const baseStep = step.replace("-p3", "");
-        lines.push(`    --sc-dynamic-${group}-${baseStep}: ${value};`);
+        lines.push(`    --hu-dynamic-${group}-${baseStep}: ${value};`);
       }
     }
   }

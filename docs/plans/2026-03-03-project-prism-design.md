@@ -20,38 +20,38 @@ Core principle: **restraint creates luxury**. Glass on 1-2 layers max. Shadows d
 
 | Token                | Value                    | Usage                             |
 | -------------------- | ------------------------ | --------------------------------- |
-| `--sc-bg`            | `#0c0e14`                | Page background — deep navy-black |
-| `--sc-bg-surface`    | `#12151e`                | Cards, panels, message bubbles    |
-| `--sc-bg-elevated`   | `#1a1e2a`                | Hover, popovers, active states    |
-| `--sc-border`        | `rgba(148,163,194,0.08)` | Hairline borders                  |
-| `--sc-border-subtle` | `rgba(148,163,194,0.04)` | Dividers                          |
-| `--sc-text`          | `#e2e8f0`                | Primary text — cool white         |
-| `--sc-text-muted`    | `#64748b`                | Secondary text — slate-500        |
-| `--sc-accent`        | `#3b82f6`                | Blue-500 — single accent          |
-| `--sc-accent-hover`  | `#60a5fa`                | Blue-400 — luminous hover         |
-| `--sc-accent-subtle` | `rgba(59,130,246,0.10)`  | Glow backgrounds                  |
-| `--sc-accent-text`   | `#93c5fd`                | Blue-300 — text on dark           |
+| `--hu-bg`            | `#0c0e14`                | Page background — deep navy-black |
+| `--hu-bg-surface`    | `#12151e`                | Cards, panels, message bubbles    |
+| `--hu-bg-elevated`   | `#1a1e2a`                | Hover, popovers, active states    |
+| `--hu-border`        | `rgba(148,163,194,0.08)` | Hairline borders                  |
+| `--hu-border-subtle` | `rgba(148,163,194,0.04)` | Dividers                          |
+| `--hu-text`          | `#e2e8f0`                | Primary text — cool white         |
+| `--hu-text-muted`    | `#64748b`                | Secondary text — slate-500        |
+| `--hu-accent`        | `#3b82f6`                | Blue-500 — single accent          |
+| `--hu-accent-hover`  | `#60a5fa`                | Blue-400 — luminous hover         |
+| `--hu-accent-subtle` | `rgba(59,130,246,0.10)`  | Glow backgrounds                  |
+| `--hu-accent-text`   | `#93c5fd`                | Blue-300 — text on dark           |
 
 ### Light Mode
 
 | Token              | Value                 |
 | ------------------ | --------------------- |
-| `--sc-bg`          | `#f8fafc`             |
-| `--sc-bg-surface`  | `#f1f5f9`             |
-| `--sc-bg-elevated` | `#e2e8f0`             |
-| `--sc-border`      | `rgba(15,23,42,0.06)` |
-| `--sc-text`        | `#0f172a`             |
-| `--sc-text-muted`  | `#64748b`             |
+| `--hu-bg`          | `#f8fafc`             |
+| `--hu-bg-surface`  | `#f1f5f9`             |
+| `--hu-bg-elevated` | `#e2e8f0`             |
+| `--hu-border`      | `rgba(15,23,42,0.06)` |
+| `--hu-text`        | `#0f172a`             |
+| `--hu-text-muted`  | `#64748b`             |
 | Same blue accent   | —                     |
 
 ### Shadows (layered depth)
 
 | Token              | Value                                                      |
 | ------------------ | ---------------------------------------------------------- |
-| `--sc-shadow-sm`   | `0 1px 2px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.15)`    |
-| `--sc-shadow-md`   | `0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.2)`    |
-| `--sc-shadow-lg`   | `0 12px 40px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.25)` |
-| `--sc-shadow-glow` | `0 0 30px rgba(59,130,246,0.08)`                           |
+| `--hu-shadow-sm`   | `0 1px 2px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.15)`    |
+| `--hu-shadow-md`   | `0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.2)`    |
+| `--hu-shadow-lg`   | `0 12px 40px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.25)` |
+| `--hu-shadow-glow` | `0 0 30px rgba(59,130,246,0.08)`                           |
 
 ### Glass Treatments
 
@@ -67,8 +67,8 @@ Current: flat textarea with text "Send" button.
 
 Target:
 
-- Rounded container (`--sc-radius-lg`) with `--sc-bg-surface` background
-- 1px border transitions to `--sc-accent` + glow on focus
+- Rounded container (`--hu-radius-lg`) with `--hu-bg-surface` background
+- 1px border transitions to `--hu-accent` + glow on focus
 - **Send button**: solid accent circle (36px), Phosphor "arrow-up" icon — like iMessage
 - **Attach button**: ghost icon, accent on hover
 - Inner shadow on textarea for depth
@@ -85,7 +85,7 @@ Empty state:
 
 - 2x2 bento grid of suggestion cards (not flat pills)
 - Each card: Phosphor icon (24px) + title + one-line description
-- Cards: `--sc-bg-surface`, hover → `--sc-bg-elevated` + `--sc-shadow-glow`
+- Cards: `--hu-bg-surface`, hover → `--hu-bg-elevated` + `--hu-shadow-glow`
 - Stagger entrance (100ms per card)
 - Above grid: centered brand mark + "How can I help?" in large light weight
 
@@ -94,8 +94,8 @@ Empty state:
 ### Message Bubbles
 
 - **User**: gradient `#1e40af` → `#2563eb` (deep → vibrant blue), white text, right-aligned, max-width 75%
-- **Assistant**: `--sc-bg-surface` background, 1px cool border, left-aligned, max-width 85%
-- Both: `--sc-radius-lg` on all corners except tail corner (`--sc-radius-sm`) — directional
+- **Assistant**: `--hu-bg-surface` background, 1px cool border, left-aligned, max-width 85%
+- Both: `--hu-radius-lg` on all corners except tail corner (`--hu-radius-sm`) — directional
 - Timestamp: appears on hover, slides down 150ms
 - Stagger entrance: 50ms \* index (capped at 300ms)
 
@@ -113,7 +113,7 @@ Empty state:
 
 ### Scroll Pill
 
-- Glass pill with `--sc-shadow-md`
+- Glass pill with `--hu-shadow-md`
 - Blue accent left border + arrow-down icon
 - Spring bounce entrance
 
@@ -123,9 +123,9 @@ Current: basic list.
 
 Target:
 
-- 280px, glass background, `--sc-shadow-lg` on right edge
+- 280px, glass background, `--hu-shadow-lg` on right edge
 - Slide-in: translateX + opacity (spring easing), not just width
-- **Time groups**: "Today", "Yesterday", "This Week", "Older" — uppercase `--sc-text-2xs`, letter-spacing 0.05em
+- **Time groups**: "Today", "Yesterday", "This Week", "Older" — uppercase `--hu-text-2xs`, letter-spacing 0.05em
 - Active session: left accent border + accent-subtle background
 - Hover: elevated background, delete button fades in
 - **Inline rename**: double-click to edit title (contenteditable)
@@ -141,7 +141,7 @@ Target:
 - 150ms fade + `translateY(-4px)` entrance
 - **Copy feedback**: icon swaps to checkmark for 1.5s, green tint
 - **Tooltips**: glass tooltip with pointer, 100ms delay
-- Buttons: 28px squares, `--sc-radius-sm`, hover → `--sc-bg-elevated`
+- Buttons: 28px squares, `--hu-radius-sm`, hover → `--hu-bg-elevated`
 
 ## 6. Status Bar — "The HUD"
 
@@ -158,21 +158,21 @@ Target:
 
 ## 7. Focus & Interaction States
 
-Global focus ring: `0 0 0 2px var(--sc-accent), 0 0 12px rgba(59,130,246,0.2)` — glow, not just outline.
+Global focus ring: `0 0 0 2px var(--hu-accent), 0 0 12px rgba(59,130,246,0.2)` — glow, not just outline.
 
 Active states: accent-subtle background + left accent border.
 
-Custom scrollbar: thin (`6px`), `--sc-bg-elevated` thumb, transparent track, rounded.
+Custom scrollbar: thin (`6px`), `--hu-bg-elevated` thumb, transparent track, rounded.
 
 ## 8. Animation Tokens
 
 | Token                    | Value                                  | Usage            |
 | ------------------------ | -------------------------------------- | ---------------- |
-| `--sc-spring-micro`      | `cubic-bezier(0.34,1.56,0.64,1)`       | Button press     |
-| `--sc-spring-standard`   | `cubic-bezier(0.22,1,0.36,1)`          | Panel slide      |
-| `--sc-spring-expressive` | `cubic-bezier(0.175,0.885,0.32,1.275)` | Entrance         |
-| `--sc-stagger-delay`     | `50ms`                                 | Per-item stagger |
-| `--sc-stagger-max`       | `300ms`                                | Stagger cap      |
+| `--hu-spring-micro`      | `cubic-bezier(0.34,1.56,0.64,1)`       | Button press     |
+| `--hu-spring-standard`   | `cubic-bezier(0.22,1,0.36,1)`          | Panel slide      |
+| `--hu-spring-expressive` | `cubic-bezier(0.175,0.885,0.32,1.275)` | Entrance         |
+| `--hu-stagger-delay`     | `50ms`                                 | Per-item stagger |
+| `--hu-stagger-max`       | `300ms`                                | Stagger cap      |
 
 All animations: `prefers-reduced-motion: reduce` → `transition: none; animation: none;`
 
@@ -181,14 +181,14 @@ All animations: `prefers-reduced-motion: reduce` → `transition: none; animatio
 | Component                | Changes                                                                |
 | ------------------------ | ---------------------------------------------------------------------- |
 | `design-tokens/`         | New Deep Steel palette, shadow tokens, glass tokens                    |
-| `sc-composer`            | Command bar styling, circle send button, bento suggestions, focus glow |
-| `sc-message-list`        | Directional bubbles, user gradient, stagger, hover timestamps          |
-| `sc-message-actions`     | Copy feedback, tooltips, blue-tinted glass                             |
-| `sc-chat-sessions-panel` | Time groups, inline rename, spring entrance, shadow-lg                 |
+| `hu-composer`            | Command bar styling, circle send button, bento suggestions, focus glow |
+| `hu-message-list`        | Directional bubbles, user gradient, stagger, hover timestamps          |
+| `hu-message-actions`     | Copy feedback, tooltips, blue-tinted glass                             |
+| `hu-chat-sessions-panel` | Time groups, inline rename, spring entrance, shadow-lg                 |
 | `chat-view.ts`           | HUD status bar, editable title, keyboard hints                         |
-| `sc-file-preview`        | Glass cards, shadow depth                                              |
-| `sc-thinking`            | Blue-tinted dots, stagger bounce                                       |
-| `sc-tool-result`         | Left border accent states, collapse animation                          |
+| `hu-file-preview`        | Glass cards, shadow depth                                              |
+| `hu-thinking`            | Blue-tinted dots, stagger bounce                                       |
+| `hu-tool-result`         | Left border accent states, collapse animation                          |
 
 ## Success Criteria
 

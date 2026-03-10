@@ -1,203 +1,203 @@
-#ifndef SC_CP_INTERNAL_H
-#define SC_CP_INTERNAL_H
+#ifndef HU_CP_INTERNAL_H
+#define HU_CP_INTERNAL_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/gateway/control_protocol.h"
-#include "seaclaw/gateway/ws_server.h"
+#include "human/core/allocator.h"
+#include "human/core/json.h"
+#include "human/gateway/control_protocol.h"
+#include "human/gateway/ws_server.h"
 #include <stddef.h>
 #include <string.h>
 
 /* Shared JSON helper for control protocol handlers */
-static inline void cp_json_set_str(sc_allocator_t *a, sc_json_value_t *obj, const char *key,
+static inline void cp_json_set_str(hu_allocator_t *a, hu_json_value_t *obj, const char *key,
                                    const char *val) {
     if (!val)
         val = "";
-    sc_json_object_set(a, obj, key, sc_json_string_new(a, val, strlen(val)));
+    hu_json_object_set(a, obj, key, hu_json_string_new(a, val, strlen(val)));
 }
 
-typedef sc_error_t (*sc_cp_handler_fn)(sc_allocator_t *alloc, sc_app_context_t *app,
-                                       sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                       const sc_json_value_t *root, char **out, size_t *out_len);
+typedef hu_error_t (*hu_cp_handler_fn)(hu_allocator_t *alloc, hu_app_context_t *app,
+                                       hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                       const hu_json_value_t *root, char **out, size_t *out_len);
 
 /* Chat handlers */
-sc_error_t cp_chat_send(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                        const sc_control_protocol_t *proto, const sc_json_value_t *root, char **out,
+hu_error_t cp_chat_send(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                        const hu_control_protocol_t *proto, const hu_json_value_t *root, char **out,
                         size_t *out_len);
-sc_error_t cp_chat_history(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                           const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_chat_history(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                           const hu_control_protocol_t *proto, const hu_json_value_t *root,
                            char **out, size_t *out_len);
-sc_error_t cp_chat_abort(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                         const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_chat_abort(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                         const hu_control_protocol_t *proto, const hu_json_value_t *root,
                          char **out, size_t *out_len);
 
 /* Config handlers */
-sc_error_t cp_config_get(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                         const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_config_get(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                         const hu_control_protocol_t *proto, const hu_json_value_t *root,
                          char **out, size_t *out_len);
-sc_error_t cp_config_schema(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                            const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_config_schema(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                            const hu_control_protocol_t *proto, const hu_json_value_t *root,
                             char **out, size_t *out_len);
-sc_error_t cp_config_set(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                         const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_config_set(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                         const hu_control_protocol_t *proto, const hu_json_value_t *root,
                          char **out, size_t *out_len);
-sc_error_t cp_config_apply(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                           const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_config_apply(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                           const hu_control_protocol_t *proto, const hu_json_value_t *root,
                            char **out, size_t *out_len);
 
 /* Admin handlers - declared in cp_admin.h or here */
-sc_error_t cp_admin_connect(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                            const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_connect(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                            const hu_control_protocol_t *proto, const hu_json_value_t *root,
                             char **out, size_t *out_len);
-sc_error_t cp_admin_health(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                           const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_health(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                           const hu_control_protocol_t *proto, const hu_json_value_t *root,
                            char **out, size_t *out_len);
-sc_error_t cp_admin_capabilities(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                 const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_capabilities(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                 const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                  char **out, size_t *out_len);
-sc_error_t cp_admin_sessions_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_sessions_list(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
-sc_error_t cp_admin_sessions_patch(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                   const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_sessions_patch(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                   const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                    char **out, size_t *out_len);
-sc_error_t cp_admin_sessions_delete(sc_allocator_t *alloc, sc_app_context_t *app,
-                                    sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                    const sc_json_value_t *root, char **out, size_t *out_len);
-sc_error_t cp_admin_persona_set(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_sessions_delete(hu_allocator_t *alloc, hu_app_context_t *app,
+                                    hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                    const hu_json_value_t *root, char **out, size_t *out_len);
+hu_error_t cp_admin_persona_set(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                 char **out, size_t *out_len);
-sc_error_t cp_admin_tools_catalog(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_tools_catalog(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
-sc_error_t cp_admin_channels_status(sc_allocator_t *alloc, sc_app_context_t *app,
-                                    sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                    const sc_json_value_t *root, char **out, size_t *out_len);
-sc_error_t cp_admin_models_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_channels_status(hu_allocator_t *alloc, hu_app_context_t *app,
+                                    hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                    const hu_json_value_t *root, char **out, size_t *out_len);
+hu_error_t cp_admin_models_list(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                 char **out, size_t *out_len);
-sc_error_t cp_admin_nodes_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                               const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_nodes_list(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                               const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                char **out, size_t *out_len);
-sc_error_t cp_admin_usage_summary(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_usage_summary(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
-sc_error_t cp_admin_metrics_snapshot(sc_allocator_t *alloc, sc_app_context_t *app,
-                                     sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                     const sc_json_value_t *root, char **out, size_t *out_len);
-sc_error_t cp_admin_activity_recent(sc_allocator_t *alloc, sc_app_context_t *app,
-                                    sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                    const sc_json_value_t *root, char **out, size_t *out_len);
-sc_error_t cp_admin_exec_approval(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_metrics_snapshot(hu_allocator_t *alloc, hu_app_context_t *app,
+                                     hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                     const hu_json_value_t *root, char **out, size_t *out_len);
+hu_error_t cp_admin_activity_recent(hu_allocator_t *alloc, hu_app_context_t *app,
+                                    hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                    const hu_json_value_t *root, char **out, size_t *out_len);
+hu_error_t cp_admin_exec_approval(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
 
 /* Auth handlers */
-sc_error_t cp_admin_auth_token(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                               const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_auth_token(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                               const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                char **out, size_t *out_len);
-sc_error_t cp_admin_oauth_start(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_oauth_start(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                 char **out, size_t *out_len);
-sc_error_t cp_admin_oauth_callback(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                   const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_oauth_callback(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                   const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                    char **out, size_t *out_len);
-sc_error_t cp_admin_oauth_refresh(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_oauth_refresh(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
 
-#ifdef SC_HAS_CRON
-sc_error_t cp_admin_cron_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                              const sc_control_protocol_t *proto, const sc_json_value_t *root,
+#ifdef HU_HAS_CRON
+hu_error_t cp_admin_cron_list(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                              const hu_control_protocol_t *proto, const hu_json_value_t *root,
                               char **out, size_t *out_len);
-sc_error_t cp_admin_cron_add(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                             const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_cron_add(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                             const hu_control_protocol_t *proto, const hu_json_value_t *root,
                              char **out, size_t *out_len);
-sc_error_t cp_admin_cron_remove(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_cron_remove(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                 char **out, size_t *out_len);
-sc_error_t cp_admin_cron_run(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                             const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_cron_run(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                             const hu_control_protocol_t *proto, const hu_json_value_t *root,
                              char **out, size_t *out_len);
-sc_error_t cp_admin_cron_update(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_cron_update(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                 char **out, size_t *out_len);
-sc_error_t cp_admin_cron_runs(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                              const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_cron_runs(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                              const hu_control_protocol_t *proto, const hu_json_value_t *root,
                               char **out, size_t *out_len);
 #endif
 
-#ifdef SC_HAS_SKILLS
-sc_error_t cp_admin_skills_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                const sc_control_protocol_t *proto, const sc_json_value_t *root,
+#ifdef HU_HAS_SKILLS
+hu_error_t cp_admin_skills_list(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                 char **out, size_t *out_len);
-sc_error_t cp_admin_skills_enable(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_skills_enable(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
-sc_error_t cp_admin_skills_disable(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                   const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_skills_disable(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                   const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                    char **out, size_t *out_len);
-sc_error_t cp_admin_skills_install(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                   const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_skills_install(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                   const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                    char **out, size_t *out_len);
-sc_error_t cp_admin_skills_search(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_skills_search(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
-sc_error_t cp_admin_skills_uninstall(sc_allocator_t *alloc, sc_app_context_t *app,
-                                     sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                     const sc_json_value_t *root, char **out, size_t *out_len);
-sc_error_t cp_admin_skills_update(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_skills_uninstall(hu_allocator_t *alloc, hu_app_context_t *app,
+                                     hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                     const hu_json_value_t *root, char **out, size_t *out_len);
+hu_error_t cp_admin_skills_update(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
 #endif
 
-#ifdef SC_HAS_UPDATE
-sc_error_t cp_admin_update_check(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                 const sc_control_protocol_t *proto, const sc_json_value_t *root,
+#ifdef HU_HAS_UPDATE
+hu_error_t cp_admin_update_check(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                 const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                  char **out, size_t *out_len);
-sc_error_t cp_admin_update_run(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                               const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_admin_update_run(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                               const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                char **out, size_t *out_len);
 #endif
 
-#ifdef SC_HAS_PUSH
-sc_error_t cp_admin_push_register(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                  const sc_control_protocol_t *proto, const sc_json_value_t *root,
+#ifdef HU_HAS_PUSH
+hu_error_t cp_admin_push_register(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                  const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                   char **out, size_t *out_len);
-sc_error_t cp_admin_push_unregister(sc_allocator_t *alloc, sc_app_context_t *app,
-                                    sc_ws_conn_t *conn, const sc_control_protocol_t *proto,
-                                    const sc_json_value_t *root, char **out, size_t *out_len);
+hu_error_t cp_admin_push_unregister(hu_allocator_t *alloc, hu_app_context_t *app,
+                                    hu_ws_conn_t *conn, const hu_control_protocol_t *proto,
+                                    const hu_json_value_t *root, char **out, size_t *out_len);
 #endif
 
 /* Voice handlers */
-sc_error_t cp_voice_transcribe(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                               const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_voice_transcribe(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                               const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                char **out, size_t *out_len);
 
 /* Memory handlers */
-sc_error_t cp_memory_status(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                            const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_status(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                            const hu_control_protocol_t *proto, const hu_json_value_t *root,
                             char **out, size_t *out_len);
-sc_error_t cp_memory_list(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                          const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_list(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                          const hu_control_protocol_t *proto, const hu_json_value_t *root,
                           char **out, size_t *out_len);
-sc_error_t cp_memory_recall(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                            const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_recall(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                            const hu_control_protocol_t *proto, const hu_json_value_t *root,
                             char **out, size_t *out_len);
-sc_error_t cp_memory_store(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                           const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_store(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                           const hu_control_protocol_t *proto, const hu_json_value_t *root,
                            char **out, size_t *out_len);
-sc_error_t cp_memory_forget(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                            const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_forget(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                            const hu_control_protocol_t *proto, const hu_json_value_t *root,
                             char **out, size_t *out_len);
-sc_error_t cp_memory_ingest(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                            const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_ingest(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                            const hu_control_protocol_t *proto, const hu_json_value_t *root,
                             char **out, size_t *out_len);
-sc_error_t cp_memory_consolidate(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                                 const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_consolidate(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                                 const hu_control_protocol_t *proto, const hu_json_value_t *root,
                                  char **out, size_t *out_len);
-sc_error_t cp_memory_graph(sc_allocator_t *alloc, sc_app_context_t *app, sc_ws_conn_t *conn,
-                           const sc_control_protocol_t *proto, const sc_json_value_t *root,
+hu_error_t cp_memory_graph(hu_allocator_t *alloc, hu_app_context_t *app, hu_ws_conn_t *conn,
+                           const hu_control_protocol_t *proto, const hu_json_value_t *root,
                            char **out, size_t *out_len);
 
-#endif /* SC_CP_INTERNAL_H */
+#endif /* HU_CP_INTERNAL_H */

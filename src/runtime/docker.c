@@ -1,19 +1,19 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/runtime.h"
+#include "human/core/error.h"
+#include "human/runtime.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct sc_docker_ctx {
+typedef struct hu_docker_ctx {
     bool mount_workspace;
     uint64_t memory_limit_mb;
     char image[256];
     char workspace[1024];
-} sc_docker_ctx_t;
+} hu_docker_ctx_t;
 
-static sc_docker_ctx_t *get_ctx(void *ctx) {
-    return (sc_docker_ctx_t *)ctx;
+static hu_docker_ctx_t *get_ctx(void *ctx) {
+    return (hu_docker_ctx_t *)ctx;
 }
 
 static const char *impl_name(void *ctx) {
@@ -31,7 +31,7 @@ static bool impl_has_filesystem_access(void *ctx) {
 }
 
 static const char *impl_storage_path(void *ctx) {
-    return get_ctx(ctx)->mount_workspace ? "/workspace/.seaclaw" : "/tmp/.seaclaw";
+    return get_ctx(ctx)->mount_workspace ? "/workspace/.human" : "/tmp/.human";
 }
 
 static bool impl_supports_long_running(void *ctx) {
@@ -40,19 +40,19 @@ static bool impl_supports_long_running(void *ctx) {
 }
 
 static uint64_t impl_memory_budget(void *ctx) {
-    sc_docker_ctx_t *d = get_ctx(ctx);
+    hu_docker_ctx_t *d = get_ctx(ctx);
     if (d->memory_limit_mb > 0)
         return d->memory_limit_mb * 1024 * 1024;
     return 0;
 }
 
-static sc_error_t docker_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
+static hu_error_t docker_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
                                       const char **argv_out, size_t max_out, size_t *argc_out) {
-    sc_docker_ctx_t *d = (sc_docker_ctx_t *)ctx;
+    hu_docker_ctx_t *d = (hu_docker_ctx_t *)ctx;
     if (!d->image[0])
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
     if (!argv_out || !argc_out || max_out < 5)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t idx = 0;
     argv_out[idx++] = "docker";
@@ -69,7 +69,7 @@ static sc_error_t docker_wrap_command(void *ctx, const char **argv_in, size_t ar
     static char mount_arg[2048];
     if (d->mount_workspace && d->workspace[0]) {
         if (strchr(d->workspace, ':'))
-            return SC_ERR_INVALID_ARGUMENT;
+            return HU_ERR_INVALID_ARGUMENT;
         snprintf(mount_arg, sizeof(mount_arg), "%s:/workspace", d->workspace);
         argv_out[idx++] = "-v";
         argv_out[idx++] = mount_arg;
@@ -84,10 +84,10 @@ static sc_error_t docker_wrap_command(void *ctx, const char **argv_in, size_t ar
 
     argv_out[idx] = NULL;
     *argc_out = idx;
-    return SC_OK;
+    return HU_OK;
 }
 
-static const sc_runtime_vtable_t docker_vtable = {
+static const hu_runtime_vtable_t docker_vtable = {
     .name = impl_name,
     .has_shell_access = impl_has_shell_access,
     .has_filesystem_access = impl_has_filesystem_access,
@@ -97,9 +97,9 @@ static const sc_runtime_vtable_t docker_vtable = {
     .wrap_command = docker_wrap_command,
 };
 
-sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb, const char *image,
+hu_runtime_t hu_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb, const char *image,
                                const char *workspace) {
-    static sc_docker_ctx_t s_docker = {false, 0, {0}, {0}};
+    static hu_docker_ctx_t s_docker = {false, 0, {0}, {0}};
     s_docker.mount_workspace = mount_workspace;
     s_docker.memory_limit_mb = memory_limit_mb;
     if (image) {
@@ -120,7 +120,7 @@ sc_runtime_t sc_runtime_docker(bool mount_workspace, uint64_t memory_limit_mb, c
     } else {
         s_docker.workspace[0] = '\0';
     }
-    return (sc_runtime_t){
+    return (hu_runtime_t){
         .ctx = &s_docker,
         .vtable = &docker_vtable,
     };

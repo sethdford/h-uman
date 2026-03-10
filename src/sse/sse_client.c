@@ -1,25 +1,25 @@
-#include "seaclaw/sse/sse_client.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/sse/sse_client.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_SSE_MAX_EVENT_SIZE  (256 * 1024)
-#define SC_SSE_MAX_BUFFER_SIZE 8192
+#define HU_SSE_MAX_EVENT_SIZE  (256 * 1024)
+#define HU_SSE_MAX_BUFFER_SIZE 8192
 
-#if SC_IS_TEST
-static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
+#if HU_IS_TEST
+static hu_error_t hu_sse_connect_impl(hu_allocator_t *alloc, const char *url,
                                       const char *auth_header, const char *extra_headers,
-                                      sc_sse_callback_t callback, void *callback_ctx) {
+                                      hu_sse_callback_t callback, void *callback_ctx) {
     (void)url;
     (void)auth_header;
     (void)extra_headers;
 
     if (!alloc || !url || !callback)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* Emit one mock event */
-    sc_sse_event_t ev = {0};
+    hu_sse_event_t ev = {0};
     const char *et = "message";
     const char *data = "{\"mock\":\"sse_connect\"}";
     size_t et_len = strlen(et);
@@ -27,14 +27,14 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
 
     ev.event_type = (char *)alloc->alloc(alloc->ctx, et_len + 1);
     if (!ev.event_type)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(ev.event_type, et, et_len + 1);
     ev.event_type_len = et_len;
 
     ev.data = (char *)alloc->alloc(alloc->ctx, data_len + 1);
     if (!ev.data) {
         alloc->free(alloc->ctx, ev.event_type, et_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(ev.data, data, data_len + 1);
     ev.data_len = data_len;
@@ -43,20 +43,20 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
 
     alloc->free(alloc->ctx, ev.event_type, et_len + 1);
     alloc->free(alloc->ctx, ev.data, data_len + 1);
-    return SC_OK;
+    return HU_OK;
 }
 #else
-#if defined(SC_HTTP_CURL)
+#if defined(HU_HTTP_CURL)
 #include <curl/curl.h>
 
 typedef struct sse_ctx {
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
     char *buf;
     size_t len;
     size_t cap;
-    sc_sse_callback_t callback;
+    hu_sse_callback_t callback;
     void *callback_ctx;
-    sc_error_t last_error;
+    hu_error_t last_error;
 } sse_ctx_t;
 
 static void parse_field(const char *line, size_t line_len, const char **field_out,
@@ -88,7 +88,7 @@ static int field_eq(const char *a, size_t alen, const char *b) {
 
 static void flush_event(sse_ctx_t *ctx, char *event_type, size_t event_type_len, char *data,
                         size_t data_len) {
-    sc_sse_event_t ev = {0};
+    hu_sse_event_t ev = {0};
     ev.event_type = event_type;
     ev.event_type_len = event_type_len;
     ev.data = data;
@@ -100,11 +100,11 @@ static void flush_event(sse_ctx_t *ctx, char *event_type, size_t event_type_len,
         ctx->alloc->free(ctx->alloc->ctx, data, data_len + 1);
 }
 
-static sc_error_t process_buffer(sse_ctx_t *ctx) {
+static hu_error_t process_buffer(sse_ctx_t *ctx) {
     char *buf = ctx->buf;
     size_t len = ctx->len;
     if (len == 0)
-        return SC_OK;
+        return HU_OK;
 
     char *event_type = NULL;
     size_t event_type_len = 0;
@@ -137,7 +137,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                                 ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
                             if (data)
                                 ctx->alloc->free(ctx->alloc->ctx, data, data_cap);
-                            return SC_ERR_OUT_OF_MEMORY;
+                            return HU_ERR_OUT_OF_MEMORY;
                         }
                         memcpy(data_copy, data, data_len);
                         data_copy[data_len] = '\0';
@@ -150,7 +150,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                         et_copy = (char *)ctx->alloc->alloc(ctx->alloc->ctx, et_copy_len + 1);
                         if (!et_copy) {
                             ctx->alloc->free(ctx->alloc->ctx, data_copy, data_copy_len + 1);
-                            return SC_ERR_OUT_OF_MEMORY;
+                            return HU_ERR_OUT_OF_MEMORY;
                         }
                         memcpy(et_copy, event_type, et_copy_len + 1);
                         ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
@@ -159,7 +159,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                         et_copy = (char *)ctx->alloc->alloc(ctx->alloc->ctx, 8);
                         if (!et_copy) {
                             ctx->alloc->free(ctx->alloc->ctx, data_copy, data_copy_len + 1);
-                            return SC_ERR_OUT_OF_MEMORY;
+                            return HU_ERR_OUT_OF_MEMORY;
                         }
                         memcpy(et_copy, "message", 8);
                         et_copy_len = 7;
@@ -180,7 +180,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
 
                 if (field_eq(field, field_len, "data")) {
                     size_t new_size = total_event_size + value_len + (has_data ? 1 : 0);
-                    if (new_size > SC_SSE_MAX_EVENT_SIZE) {
+                    if (new_size > HU_SSE_MAX_EVENT_SIZE) {
                         if (event_type) {
                             ctx->alloc->free(ctx->alloc->ctx, event_type, event_type_len + 1);
                             event_type = NULL;
@@ -200,7 +200,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                             char *nd = (char *)ctx->alloc->realloc(
                                 ctx->alloc->ctx, data, data_cap ? data_cap : 0, new_cap);
                             if (!nd)
-                                return SC_ERR_OUT_OF_MEMORY;
+                                return HU_ERR_OUT_OF_MEMORY;
                             data = nd;
                             data_cap = new_cap;
                         }
@@ -220,7 +220,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
                     if (!event_type) {
                         if (data)
                             ctx->alloc->free(ctx->alloc->ctx, data, data_cap);
-                        return SC_ERR_OUT_OF_MEMORY;
+                        return HU_ERR_OUT_OF_MEMORY;
                     }
                     memcpy(event_type, value, value_len);
                     event_type[value_len] = '\0';
@@ -252,7 +252,7 @@ static sc_error_t process_buffer(sse_ctx_t *ctx) {
         ctx->alloc->free(ctx->alloc->ctx, data, data_cap);
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
 static size_t sse_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -276,8 +276,8 @@ static size_t sse_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     ctx->len += n;
     ctx->buf[ctx->len] = '\0';
 
-    sc_error_t err = process_buffer(ctx);
-    if (err != SC_OK) {
+    hu_error_t err = process_buffer(ctx);
+    if (err != HU_OK) {
         ctx->last_error = err;
         return 0; /* abort curl */
     }
@@ -289,15 +289,15 @@ static void add_header(struct curl_slist **list, const char *header) {
         *list = curl_slist_append(*list, header);
 }
 
-static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
+static hu_error_t hu_sse_connect_impl(hu_allocator_t *alloc, const char *url,
                                       const char *auth_header, const char *extra_headers,
-                                      sc_sse_callback_t callback, void *callback_ctx) {
+                                      hu_sse_callback_t callback, void *callback_ctx) {
     if (!alloc || !url || !callback)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     CURL *curl = curl_easy_init();
     if (!curl)
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
 
     sse_ctx_t ctx = {0};
     ctx.alloc = alloc;
@@ -306,7 +306,7 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
     ctx.buf = (char *)alloc->alloc(alloc->ctx, 4096);
     if (!ctx.buf) {
         curl_easy_cleanup(curl);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     ctx.cap = 4096;
 
@@ -353,32 +353,32 @@ static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
 
     alloc->free(alloc->ctx, ctx.buf, ctx.cap);
 
-    if (ctx.last_error != SC_OK)
+    if (ctx.last_error != HU_OK)
         return ctx.last_error;
     if (res != CURLE_OK) {
         if (res == CURLE_OPERATION_TIMEDOUT)
-            return SC_ERR_TIMEOUT;
-        return SC_ERR_IO;
+            return HU_ERR_TIMEOUT;
+        return HU_ERR_IO;
     }
-    return SC_OK;
+    return HU_OK;
 }
 #else
-static sc_error_t sc_sse_connect_impl(sc_allocator_t *alloc, const char *url,
+static hu_error_t hu_sse_connect_impl(hu_allocator_t *alloc, const char *url,
                                       const char *auth_header, const char *extra_headers,
-                                      sc_sse_callback_t callback, void *callback_ctx) {
+                                      hu_sse_callback_t callback, void *callback_ctx) {
     (void)alloc;
     (void)url;
     (void)auth_header;
     (void)extra_headers;
     (void)callback;
     (void)callback_ctx;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 #endif
 #endif
 
-sc_error_t sc_sse_connect(sc_allocator_t *alloc, const char *url, const char *auth_header,
-                          const char *extra_headers, sc_sse_callback_t callback,
+hu_error_t hu_sse_connect(hu_allocator_t *alloc, const char *url, const char *auth_header,
+                          const char *extra_headers, hu_sse_callback_t callback,
                           void *callback_ctx) {
-    return sc_sse_connect_impl(alloc, url, auth_header, extra_headers, callback, callback_ctx);
+    return hu_sse_connect_impl(alloc, url, auth_header, extra_headers, callback, callback_ctx);
 }

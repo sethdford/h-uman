@@ -1,8 +1,8 @@
-#include "seaclaw/websocket/websocket.h"
+#include "human/websocket/websocket.h"
 #include "synthetic_harness.h"
 
-static const char SC_SYNTH_WS_PROMPT[] =
-    "You are a test case generator for the seaclaw WebSocket control protocol.\n"
+static const char HU_SYNTH_WS_PROMPT[] =
+    "You are a test case generator for the human WebSocket control protocol.\n"
     "Generate %d diverse test cases for JSON-RPC over WebSocket.\n\n"
     "Return a JSON array where each element has:\n"
     "- \"name\": test name\n"
@@ -15,108 +15,108 @@ static const char SC_SYNTH_WS_PROMPT[] =
     "Scenarios: public calls, auth flow, unauth access (ok:false), unknown method.\n"
     "Mix: 40%% public, 30%% auth, 30%% error.\nReturn ONLY a JSON array.";
 
-sc_error_t sc_synth_run_ws(sc_allocator_t *alloc, const sc_synth_config_t *cfg,
-                           sc_synth_gemini_ctx_t *gemini, sc_synth_metrics_t *metrics) {
-    SC_SYNTH_LOG("=== WebSocket Tests ===");
-    sc_synth_metrics_init(metrics);
+hu_error_t hu_synth_run_ws(hu_allocator_t *alloc, const hu_synth_config_t *cfg,
+                           hu_synth_gemini_ctx_t *gemini, hu_synth_metrics_t *metrics) {
+    HU_SYNTH_LOG("=== WebSocket Tests ===");
+    hu_synth_metrics_init(metrics);
     int count = cfg->tests_per_category > 0 ? cfg->tests_per_category : 15;
     char prompt[4096];
-    snprintf(prompt, sizeof(prompt), SC_SYNTH_WS_PROMPT, count);
-    SC_SYNTH_LOG("generating %d WS test cases via Gemini...", count);
+    snprintf(prompt, sizeof(prompt), HU_SYNTH_WS_PROMPT, count);
+    HU_SYNTH_LOG("generating %d WS test cases via Gemini...", count);
     char *response = NULL;
     size_t response_len = 0;
-    sc_error_t err =
-        sc_synth_gemini_generate(alloc, gemini, prompt, strlen(prompt), &response, &response_len);
-    if (err != SC_OK) {
-        SC_SYNTH_LOG("Gemini generation failed: %s", sc_error_string(err));
+    hu_error_t err =
+        hu_synth_gemini_generate(alloc, gemini, prompt, strlen(prompt), &response, &response_len);
+    if (err != HU_OK) {
+        HU_SYNTH_LOG("Gemini generation failed: %s", hu_error_string(err));
         return err;
     }
-    sc_json_value_t *root = NULL;
-    err = sc_json_parse(alloc, response, response_len, &root);
-    sc_synth_strfree(alloc, response, response_len);
-    if (err != SC_OK || !root || root->type != SC_JSON_ARRAY) {
-        SC_SYNTH_LOG("failed to parse test cases");
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(alloc, response, response_len, &root);
+    hu_synth_strfree(alloc, response, response_len);
+    if (err != HU_OK || !root || root->type != HU_JSON_ARRAY) {
+        HU_SYNTH_LOG("failed to parse test cases");
         if (root)
-            sc_json_free(alloc, root);
-        return SC_ERR_PARSE;
+            hu_json_free(alloc, root);
+        return HU_ERR_PARSE;
     }
     size_t n = root->data.array.len;
-    SC_SYNTH_LOG("executing %zu WS tests...", n);
+    HU_SYNTH_LOG("executing %zu WS tests...", n);
     char ws_url[128];
     snprintf(ws_url, sizeof(ws_url), "ws://127.0.0.1:%u/ws", cfg->gateway_port);
     for (size_t i = 0; i < n; i++) {
-        sc_json_value_t *item = root->data.array.items[i];
-        const char *name = sc_json_get_string(item, "name");
-        sc_json_value_t *messages = sc_json_object_get(item, "messages");
-        sc_json_value_t *exp_ok = sc_json_object_get(item, "expected_ok");
-        if (!messages || messages->type != SC_JSON_ARRAY)
+        hu_json_value_t *item = root->data.array.items[i];
+        const char *name = hu_json_get_string(item, "name");
+        hu_json_value_t *messages = hu_json_object_get(item, "messages");
+        hu_json_value_t *exp_ok = hu_json_object_get(item, "expected_ok");
+        if (!messages || messages->type != HU_JSON_ARRAY)
             continue;
-        sc_ws_client_t *ws = NULL;
-        double t0 = sc_synth_now_ms();
-        err = sc_ws_connect(alloc, ws_url, &ws);
-        if (err != SC_OK) {
-            sc_synth_metrics_record(alloc, metrics, sc_synth_now_ms() - t0, SC_SYNTH_ERROR);
-            SC_SYNTH_LOG("ERROR %s: ws connect failed", name ? name : "?");
+        hu_ws_client_t *ws = NULL;
+        double t0 = hu_synth_now_ms();
+        err = hu_ws_connect(alloc, ws_url, &ws);
+        if (err != HU_OK) {
+            hu_synth_metrics_record(alloc, metrics, hu_synth_now_ms() - t0, HU_SYNTH_ERROR);
+            HU_SYNTH_LOG("ERROR %s: ws connect failed", name ? name : "?");
             continue;
         }
-        sc_synth_verdict_t v = SC_SYNTH_PASS;
+        hu_synth_verdict_t v = HU_SYNTH_PASS;
         for (size_t j = 0; j < messages->data.array.len; j++) {
-            sc_json_value_t *msg = messages->data.array.items[j];
+            hu_json_value_t *msg = messages->data.array.items[j];
             char *ms = NULL;
             size_t ml = 0;
-            (void)sc_json_stringify(alloc, msg, &ms, &ml);
+            (void)hu_json_stringify(alloc, msg, &ms, &ml);
             if (!ms)
                 continue;
-            err = sc_ws_send(ws, ms, ml);
+            err = hu_ws_send(ws, ms, ml);
             alloc->free(alloc->ctx, ms, ml);
-            if (err != SC_OK) {
-                v = SC_SYNTH_ERROR;
+            if (err != HU_OK) {
+                v = HU_SYNTH_ERROR;
                 break;
             }
             char *rd = NULL;
             size_t rl = 0;
-            err = sc_ws_recv(ws, alloc, &rd, &rl);
-            if (err != SC_OK) {
-                v = SC_SYNTH_ERROR;
+            err = hu_ws_recv(ws, alloc, &rd, &rl);
+            if (err != HU_OK) {
+                v = HU_SYNTH_ERROR;
                 break;
             }
-            if (exp_ok && exp_ok->type == SC_JSON_ARRAY && j < exp_ok->data.array.len) {
-                sc_json_value_t *ej = exp_ok->data.array.items[j];
-                bool expected = (ej->type == SC_JSON_BOOL) ? ej->data.boolean : true;
-                sc_json_value_t *rj = NULL;
-                if (sc_json_parse(alloc, rd, rl, &rj) == SC_OK) {
-                    bool actual = sc_json_get_bool(rj, "ok", false);
+            if (exp_ok && exp_ok->type == HU_JSON_ARRAY && j < exp_ok->data.array.len) {
+                hu_json_value_t *ej = exp_ok->data.array.items[j];
+                bool expected = (ej->type == HU_JSON_BOOL) ? ej->data.boolean : true;
+                hu_json_value_t *rj = NULL;
+                if (hu_json_parse(alloc, rd, rl, &rj) == HU_OK) {
+                    bool actual = hu_json_get_bool(rj, "ok", false);
                     if (actual != expected)
-                        v = SC_SYNTH_FAIL;
-                    sc_json_free(alloc, rj);
+                        v = HU_SYNTH_FAIL;
+                    hu_json_free(alloc, rj);
                 }
             }
             alloc->free(alloc->ctx, rd, rl);
-            if (v != SC_SYNTH_PASS)
+            if (v != HU_SYNTH_PASS)
                 break;
         }
-        double lat = sc_synth_now_ms() - t0;
-        sc_synth_metrics_record(alloc, metrics, lat, v);
-        if (v == SC_SYNTH_PASS) {
-            SC_SYNTH_VERBOSE(cfg, "PASS  %s (%.1fms)", name ? name : "?", lat);
+        double lat = hu_synth_now_ms() - t0;
+        hu_synth_metrics_record(alloc, metrics, lat, v);
+        if (v == HU_SYNTH_PASS) {
+            HU_SYNTH_VERBOSE(cfg, "PASS  %s (%.1fms)", name ? name : "?", lat);
         } else {
-            SC_SYNTH_LOG("%-5s %s", sc_synth_verdict_str(v), name ? name : "?");
+            HU_SYNTH_LOG("%-5s %s", hu_synth_verdict_str(v), name ? name : "?");
             if (cfg->regression_dir) {
                 char *ij = NULL;
                 size_t il = 0;
-                (void)sc_json_stringify(alloc, item, &ij, &il);
-                sc_synth_test_case_t tc = {.name = (char *)(name ? name : "ws_test"),
+                (void)hu_json_stringify(alloc, item, &ij, &il);
+                hu_synth_test_case_t tc = {.name = (char *)(name ? name : "ws_test"),
                                            .category = (char *)"websocket",
                                            .input_json = ij,
                                            .verdict = v,
                                            .latency_ms = lat};
-                sc_synth_regression_save(alloc, cfg->regression_dir, &tc);
+                hu_synth_regression_save(alloc, cfg->regression_dir, &tc);
                 if (ij)
                     alloc->free(alloc->ctx, ij, il);
             }
         }
-        sc_ws_close(ws, alloc);
+        hu_ws_close(ws, alloc);
     }
-    sc_json_free(alloc, root);
-    return SC_OK;
+    hu_json_free(alloc, root);
+    return HU_OK;
 }

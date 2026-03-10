@@ -1,5 +1,5 @@
-#include "seaclaw/agent/preferences.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/preferences.h"
+#include "human/core/string.h"
 #include <string.h>
 
 static bool starts_with_ci(const char *s, size_t slen, const char *prefix, size_t plen) {
@@ -18,7 +18,7 @@ static bool starts_with_ci(const char *s, size_t slen, const char *prefix, size_
     return true;
 }
 
-bool sc_preferences_is_correction(const char *message, size_t message_len) {
+bool hu_preferences_is_correction(const char *message, size_t message_len) {
     if (!message || message_len < 3)
         return false;
 
@@ -39,7 +39,7 @@ bool sc_preferences_is_correction(const char *message, size_t message_len) {
     return false;
 }
 
-char *sc_preferences_extract(sc_allocator_t *alloc, const char *user_msg, size_t user_msg_len,
+char *hu_preferences_extract(hu_allocator_t *alloc, const char *user_msg, size_t user_msg_len,
                              size_t *out_len) {
     if (!alloc || !user_msg || user_msg_len == 0)
         return NULL;
@@ -56,21 +56,21 @@ char *sc_preferences_extract(sc_allocator_t *alloc, const char *user_msg, size_t
     if (plen == 0)
         return NULL;
 
-    char *result = sc_strndup(alloc, user_msg + start, plen);
+    char *result = hu_strndup(alloc, user_msg + start, plen);
     if (result && out_len)
         *out_len = plen;
     return result;
 }
 
-sc_error_t sc_preferences_store(sc_memory_t *memory, sc_allocator_t *alloc, const char *preference,
+hu_error_t hu_preferences_store(hu_memory_t *memory, hu_allocator_t *alloc, const char *preference,
                                 size_t preference_len) {
     (void)alloc;
     if (!memory || !memory->vtable || !memory->vtable->store || !preference)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char key[64];
-    size_t klen = SC_PREF_KEY_PREFIX_LEN;
-    memcpy(key, SC_PREF_KEY_PREFIX, klen);
+    size_t klen = HU_PREF_KEY_PREFIX_LEN;
+    memcpy(key, HU_PREF_KEY_PREFIX, klen);
     size_t copy = preference_len > 40 ? 40 : preference_len;
     memcpy(key + klen, preference, copy);
     klen += copy;
@@ -79,24 +79,24 @@ sc_error_t sc_preferences_store(sc_memory_t *memory, sc_allocator_t *alloc, cons
     return memory->vtable->store(memory->ctx, key, klen, preference, preference_len, NULL, "", 0);
 }
 
-sc_error_t sc_preferences_load(sc_memory_t *memory, sc_allocator_t *alloc, char **out,
+hu_error_t hu_preferences_load(hu_memory_t *memory, hu_allocator_t *alloc, char **out,
                                size_t *out_len) {
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     if (out_len)
         *out_len = 0;
 
     if (!memory || !memory->vtable || !memory->vtable->recall)
-        return SC_OK;
+        return HU_OK;
 
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err =
-        memory->vtable->recall(memory->ctx, alloc, SC_PREF_KEY_PREFIX, SC_PREF_KEY_PREFIX_LEN,
-                               SC_PREF_MAX_LOAD, "", 0, &entries, &count);
-    if (err != SC_OK || !entries || count == 0)
-        return SC_OK;
+    hu_error_t err =
+        memory->vtable->recall(memory->ctx, alloc, HU_PREF_KEY_PREFIX, HU_PREF_KEY_PREFIX_LEN,
+                               HU_PREF_MAX_LOAD, "", 0, &entries, &count);
+    if (err != HU_OK || !entries || count == 0)
+        return HU_OK;
 
     /* Format preferences as bullet list */
     size_t total = 0;
@@ -118,8 +118,8 @@ sc_error_t sc_preferences_load(sc_memory_t *memory, sc_allocator_t *alloc, char 
                 alloc->free(alloc->ctx, (void *)entries[i].session_id,
                             entries[i].session_id_len + 1);
         }
-        alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+        alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     size_t pos = 0;
@@ -147,10 +147,10 @@ sc_error_t sc_preferences_load(sc_memory_t *memory, sc_allocator_t *alloc, char 
         if (entries[i].session_id)
             alloc->free(alloc->ctx, (void *)entries[i].session_id, entries[i].session_id_len + 1);
     }
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
 
     *out = buf;
     if (out_len)
         *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="seaclaw.svg" alt="seaclaw" width="200" />
+  <img src="human.svg" alt="human" width="200" />
 </p>
 
-<h1 align="center">SeaClaw</h1>
+<h1 align="center">Human</h1>
 
 <p align="center">
   <strong>Bring AI to every device on Earth.</strong><br>
@@ -10,15 +10,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sethdford/seaclaw/actions/workflows/ci.yml"><img src="https://github.com/sethdford/seaclaw/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://sethdford.github.io/seaclaw"><img src="https://img.shields.io/badge/docs-sethdford.github.io/seaclaw-informational" alt="Documentation" /></a>
+  <a href="https://github.com/sethdford/human/actions/workflows/ci.yml"><img src="https://github.com/sethdford/human/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://sethdford.github.io/human"><img src="https://img.shields.io/badge/docs-sethdford.github.io/human-informational" alt="Documentation" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
 </p>
 
 The smallest fully autonomous AI assistant infrastructure — a static C binary that fits on any $5 board, boots in milliseconds, and requires nothing but libc.
 
 ```
-~1679 KB binary · <30 ms startup · 3788+ tests · 50+ providers · 34 channels · 67+ tools · Pluggable everything
+~1679 KB binary · <30 ms startup · 3795+ tests · 50+ providers · 34 channels · 67+ tools · Pluggable everything
 ```
 
 ### Features
@@ -31,7 +31,7 @@ The smallest fully autonomous AI assistant infrastructure — a static C binary 
 - **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DSC_ENABLE_TUI=ON` and run with `--tui`.
 - **Performance-Optimized:** Per-turn arena allocator, HTTP connection pooling, HTTP/2, system prompt caching — all benefiting from C-level control.
 
-### Why seaclaw
+### Why human
 
 - **Lean by default:** C11 compiles to a tiny static binary. No runtime overhead, no garbage collector, no framework.
 - **Secure by design:** pairing, strict sandboxing (landlock, firejail, bubblewrap, docker), explicit allowlists, workspace scoping, encrypted secrets.
@@ -42,22 +42,22 @@ The smallest fully autonomous AI assistant infrastructure — a static C binary 
 
 Similar projects in the autonomous AI assistant space (data sourced from each project's own documentation):
 
-|                   | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **SeaClaw**       |
+|                   | [OpenClaw](https://github.com/openclaw/openclaw) | [NanoBot](https://github.com/HKUDS/nanobot) | [PicoClaw](https://github.com/sipeed/picoclaw) | [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | **Human**       |
 | ----------------- | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------- |
 | **Language**      | TypeScript                                       | Python                                      | Go                                             | Rust                                                  | **C**             |
 | **RAM** ¹         | —                                                | —                                           | < 10 MB                                        | < 5 MB                                                | **< 6 MB**        |
 | **Binary Size** ¹ | ~28 MB (npm dist)                                | N/A (Python)                                | ~8 MB                                          | ~8.8 MB                                               | **~1679 KB**      |
 | **Runtime Deps**  | Node.js ≥22                                      | Python ≥3.11                                | None (static)                                  | None (static)                                         | **None (static)** |
 
-> ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. SeaClaw's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
+> ¹ RAM and binary size figures for other projects are self-reported from their respective READMEs. Human's numbers are measured locally with `/usr/bin/time -l` on a MinSizeRel + LTO build.
 
-SeaClaw's verified numbers (measured on macOS arm64, March 2026):
+Human's verified numbers (measured on macOS arm64, March 2026):
 
 ```
 Binary size:   ~1679 KB (MinSizeRel + LTO, all channels)
 Peak RSS:      ~5.7 MB (--version), ~5.9 MB (test suite)
 Startup:       6–27 ms avg (Apple Silicon M4 Max)
-Tests:         3788 passing, 0 ASan errors
+Tests:         3795 passing, 0 ASan errors
 ```
 
 ### Why Switch from OpenClaw?
@@ -73,10 +73,10 @@ Reproduce locally:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
 cmake --build .
-ls -lh seaclaw
+ls -lh human
 
-/usr/bin/time -l ./seaclaw --help
-/usr/bin/time -l ./seaclaw status
+/usr/bin/time -l ./human --help
+/usr/bin/time -l ./human status
 ```
 
 ## Installation
@@ -85,39 +85,39 @@ ls -lh seaclaw
 
 ```bash
 # Head-only (from source)
-brew install --HEAD ./Formula/seaclaw.rb
+brew install --HEAD ./Formula/human.rb
 
 # With curl support
-brew install --HEAD ./Formula/seaclaw.rb --with-curl
+brew install --HEAD ./Formula/human.rb --with-curl
 ```
 
 ### Docker
 
 ```bash
-docker pull ghcr.io/sethdford/seaclaw:latest
-docker run --rm ghcr.io/sethdford/seaclaw:latest --version
+docker pull ghcr.io/sethdford/human:latest
+docker run --rm ghcr.io/sethdford/human:latest --version
 ```
 
 ### Nix
 
 ```bash
-nix run github:sethdford/seaclaw
+nix run github:sethdford/human
 # Or add to flake inputs
-nix build github:sethdford/seaclaw
+nix build github:sethdford/human
 ```
 
 ### Debian / Ubuntu
 
-Download the `.deb` from [Releases](https://github.com/sethdford/seaclaw/releases):
+Download the `.deb` from [Releases](https://github.com/sethdford/human/releases):
 
 ```bash
-sudo dpkg -i seaclaw_*.deb
+sudo dpkg -i human_*.deb
 ```
 
 ### Install Script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sethdford/seaclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sethdford/human/main/install.sh | bash
 ```
 
 ### From Source
@@ -126,7 +126,7 @@ curl -fsSL https://raw.githubusercontent.com/sethdford/seaclaw/main/install.sh |
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
 cmake --build . -j$(nproc)
-sudo cp seaclaw /usr/local/bin/
+sudo cp human /usr/local/bin/
 ```
 
 ## Quick Start
@@ -136,53 +136,53 @@ sudo cp seaclaw /usr/local/bin/
 > Linux: `sudo apt-get install cmake libsqlite3-dev libcurl4-openssl-dev`
 
 ```bash
-git clone https://github.com/sethdford/seaclaw.git
-cd seaclaw
+git clone https://github.com/sethdford/human.git
+cd human
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .
 cd ..
 
 # Quick setup
-seaclaw onboard --api-key sk-... --provider openrouter
+human onboard --api-key sk-... --provider openrouter
 
 # Or interactive wizard
-seaclaw onboard --interactive
+human onboard --interactive
 
 # Chat
-seaclaw agent -m "Hello, seaclaw!"
+human agent -m "Hello, human!"
 
 # Interactive mode
-seaclaw agent
+human agent
 
 # Start gateway runtime (gateway + all configured channels/accounts + heartbeat + scheduler)
-seaclaw gateway                # default: 127.0.0.1:3000
-seaclaw gateway --port 4000    # custom port
+human gateway                # default: 127.0.0.1:3000
+human gateway --port 4000    # custom port
 
 # Check status
-seaclaw status
+human status
 
 # Run system diagnostics
-seaclaw doctor
+human doctor
 
 # Check channel health
-seaclaw channel status
+human channel status
 
 # Start specific channels
-seaclaw channel start telegram
-seaclaw channel start discord
-seaclaw channel start signal
+human channel start telegram
+human channel start discord
+human channel start signal
 
 # Manage background service
-seaclaw service install
-seaclaw service status
+human service install
+human service status
 
 # Migrate memory from SQLite or Markdown
-seaclaw migrate sqlite /path/to/brain.db
-seaclaw migrate markdown /path/to/memories/
+human migrate sqlite /path/to/brain.db
+human migrate markdown /path/to/memories/
 ```
 
-> **Dev fallback (no global install):** prefix commands with `build/` (example: `build/seaclaw status`).
+> **Dev fallback (no global install):** prefix commands with `build/` (example: `build/human status`).
 
 ## Edge MVP (Hybrid Host + WASM Logic)
 
@@ -245,11 +245,11 @@ All custom, zero external dependencies:
 
 ### Persona System
 
-Data-driven personality cloning — seaclaw can adopt a user's real communication style by analyzing their message history.
+Data-driven personality cloning — human can adopt a user's real communication style by analyzing their message history.
 
 | Component            | Description                                                                                                |
 | -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Profile**          | JSON persona file (`~/.seaclaw/personas/<name>.json`) with traits, vocabulary, communication rules, values |
+| **Profile**          | JSON persona file (`~/.human/personas/<name>.json`) with traits, vocabulary, communication rules, values |
 | **Channel Overlays** | Per-channel style overrides (formality, message length, emoji usage, style notes)                          |
 | **Example Banks**    | Curated message examples per channel for few-shot style matching                                           |
 | **Prompt Builder**   | Generates system prompt injection from persona + overlay + examples                                        |
@@ -259,20 +259,20 @@ Data-driven personality cloning — seaclaw can adopt a user's real communicatio
 
 ```bash
 # Create a persona from your iMessage history
-seaclaw persona create myname --from-imessage
+human persona create myname --from-imessage
 
 # Show persona profile
-seaclaw persona show myname
+human persona show myname
 
 # Use in config
-# ~/.seaclaw/config.json: { "agent": { "persona": "myname" } }
+# ~/.human/config.json: { "agent": { "persona": "myname" } }
 ```
 
 The persona tool is also available in-conversation for agents to manage personas dynamically.
 
 ## Security
 
-seaclaw enforces security at **every layer**.
+human enforces security at **every layer**.
 
 | #   | Item                             | Status | How                                                                                                  |
 | --- | -------------------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
@@ -295,14 +295,14 @@ Nostr additionally: the `owner_pubkey` is **always** allowed regardless of `dm_a
 
 ### Nostr Channel Setup
 
-`seaclaw` speaks Nostr natively via NIP-17 (gift-wrapped private DMs) and NIP-04 (legacy DMs), using [`nak`](https://github.com/fiatjaf/nak).
+`human` speaks Nostr natively via NIP-17 (gift-wrapped private DMs) and NIP-04 (legacy DMs), using [`nak`](https://github.com/fiatjaf/nak).
 
 **Prerequisites:** Install `nak` and ensure it's in your `$PATH`.
 
 **Setup via onboarding wizard:**
 
 ```bash
-seaclaw onboard --interactive   # Step 7 configures Nostr
+human onboard --interactive   # Step 7 configures Nostr
 ```
 
 The wizard will:
@@ -314,13 +314,13 @@ The wizard will:
 
 Or configure manually in the [config](#configuration).
 
-**How it works:** On startup, seaclaw announces its DM inbox relays (kind:10050), then listens for incoming NIP-17 gift wraps and NIP-04 encrypted DMs. Outbound messages mirror the sender's protocol. Multi-relay rumor deduplication prevents duplicate responses when the same message is delivered via multiple relays.
+**How it works:** On startup, human announces its DM inbox relays (kind:10050), then listens for incoming NIP-17 gift wraps and NIP-04 encrypted DMs. Outbound messages mirror the sender's protocol. Multi-relay rumor deduplication prevents duplicate responses when the same message is delivered via multiple relays.
 
 ## Configuration
 
-Config: `~/.seaclaw/config.json` (created by `onboard`)
+Config: `~/.human/config.json` (created by `onboard`)
 
-> **Config structure:** seaclaw uses top-level `providers` (array), `default_provider`, and `default_model`. Channels use `accounts` wrappers under `channels.<name>.accounts`.
+> **Config structure:** human uses top-level `providers` (array), `default_provider`, and `default_model`. Channels use `accounts` wrappers under `channels.<name>.accounts`.
 
 ```json
 {
@@ -365,7 +365,7 @@ Config: `~/.seaclaw/config.json` (created by `onboard`)
     "discord": {
       "accounts": {
         "main": {
-          "token": "disc-token",
+          "token": "dihu-token",
           "guild_id": "12345",
           "allow_from": ["user1"],
           "allow_bots": false
@@ -377,8 +377,8 @@ Config: `~/.seaclaw/config.json` (created by `onboard`)
         "main": {
           "host": "irc.libera.chat",
           "port": 6697,
-          "nick": "seaclaw",
-          "channel": "#seaclaw",
+          "nick": "human",
+          "channel": "#human",
           "tls": true,
           "allow_from": ["user1"]
         }
@@ -402,9 +402,9 @@ Config: `~/.seaclaw/config.json` (created by `onboard`)
         "wss://relay.nostr.band"
       ],
       "dm_allowed_pubkeys": ["*"],
-      "display_name": "SeaClaw",
+      "display_name": "Human",
       "about": "AI assistant on Nostr",
-      "nip05": "seaclaw@yourdomain.com",
+      "nip05": "human@yourdomain.com",
       "lnurl": "lnurl1..."
     }
   },
@@ -542,7 +542,7 @@ Use `channels.web` for browser UI events (WebChannel v1):
       "accounts": {
         "default": {
           "transport": "relay",
-          "relay_url": "wss://relay.seaclaw.io/ws/agent",
+          "relay_url": "wss://relay.human.io/ws/agent",
           "relay_agent_id": "default",
           "relay_token": "replace-with-relay-token",
           "relay_token_ttl_secs": 2592000,
@@ -556,7 +556,7 @@ Use `channels.web` for browser UI events (WebChannel v1):
 }
 ```
 
-- Relay token lifecycle (dedicated): `relay_token` (config) -> `SEACLAW_RELAY_TOKEN` (env) -> persisted `web-relay-<account_id>` credential -> generated token.
+- Relay token lifecycle (dedicated): `relay_token` (config) -> `HUMAN_RELAY_TOKEN` (env) -> persisted `web-relay-<account_id>` credential -> generated token.
 - Relay UI handshake: send `pairing_request` with one-time `pairing_code`, receive `pairing_result` with UI `access_token` JWT (and optional `set_cookie` string for relay HTTP layer).
 - Relay `user_message` must include valid UI JWT in `access_token` (top-level or `payload.access_token`).
 - If E2E is enabled (`relay_e2e_required=true`), UI and agent exchange X25519 keys during pairing and send encrypted payloads in `payload.e2e`.
@@ -611,7 +611,7 @@ Build and tests require a C11 compiler and CMake 3.16+. One-time setup:
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
-./seaclaw_tests                             # 3788+ tests
+./human_tests                             # 3795+ tests
 cd ..
 ```
 
@@ -620,7 +620,7 @@ cd ..
 ```bash
 cmake -B build -DSC_ENABLE_ASAN=ON
 cmake --build build
-./build/seaclaw_tests
+./build/human_tests
 ```
 
 Release build (~1679 KB):
@@ -649,7 +649,7 @@ Language: C11 + ASM (aarch64, x86_64)
 Source files: 715
 Lines of code: ~138K
 Test files: 128
-Tests: 3788
+Tests: 3795
 Binary: ~1679 KB (MinSizeRel + LTO, all channels)
 Peak RSS: ~5.7 MB
 Startup: 6–27 ms avg (Apple Silicon)
@@ -674,17 +674,17 @@ core/ Allocator, arena, error, json, http, string, slice
 observability/ Log + metrics observers
 gateway/ HTTP gateway server
 persona/ Persona profiles, prompt builder, example banks
-config.c Config loading/merging (~/.seaclaw/config.json)
+config.c Config loading/merging (~/.human/config.json)
 ...
 
-include/seaclaw/ Public C headers
-tests/ 128 test files, 3788 tests
+include/human/ Public C headers
+tests/ 128 test files, 3795 tests
 asm/ Platform-specific assembly (aarch64, x86_64, generic C)
 
 ui/ Web UI (LitElement + Vite)
 apps/ios/ Native iOS app (SwiftUI)
 apps/android/ Native Android app (Kotlin + Jetpack Compose)
-apps/shared/ Shared packages (SeaClawKit for iOS)
+apps/shared/ Shared packages (HumanKit for iOS)
 
 ```
 
@@ -701,7 +701,7 @@ npm test             # vitest unit tests
 npx playwright test  # E2E tests
 ```
 
-Design system tokens live in `ui/src/styles/_tokens.css`. Components use the `sc-` prefix (e.g., `sc-card`, `sc-button`, `sc-badge`).
+Design system tokens live in `ui/src/styles/_tokens.css`. Components use the `hu-` prefix (e.g., `hu-card`, `hu-button`, `hu-badge`).
 
 ### Web UI Dashboard
 
@@ -750,11 +750,11 @@ Both apps persist the gateway URL, show real-time connection status, and support
 
 ## Versioning
 
-seaclaw uses **CalVer** (`YYYY.M.D`) for releases — e.g. `v2026.2.20`.
+human uses **CalVer** (`YYYY.M.D`) for releases — e.g. `v2026.2.20`.
 
 - **Tag format:** `vYYYY.M.D` (one release per day max; patch suffix `vYYYY.M.D.N` if needed)
 - **No stability guarantees yet** — the project is pre-1.0, config and CLI may change between releases
-- **`seaclaw --version`** prints the current version
+- **`human --version`** prints the current version
 
 ## Contributing
 
@@ -767,11 +767,11 @@ Implement a vtable interface, submit a PR:
 - New `Tunnel` -> `src/tunnel/`
 - New `Sandbox` backend -> `src/security/`
 - New `Peripheral` -> `src/peripherals/`
-- New `Skill` -> `skills/` directory or submit to the [skill registry](https://github.com/seaclaw/skill-registry)
+- New `Skill` -> `skills/` directory or submit to the [skill registry](https://github.com/human/skill-registry)
 
 ## Disclaimer
 
-seaclaw is a pure open-source software project. It has **no token, no cryptocurrency, no blockchain component, and no financial instrument** of any kind. This project is not affiliated with any token or financial product.
+human is a pure open-source software project. It has **no token, no cryptocurrency, no blockchain component, and no financial instrument** of any kind. This project is not affiliated with any token or financial product.
 
 ## License
 
@@ -779,11 +779,11 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-**seaclaw** — Bring AI to every device on Earth.
+**human** — Bring AI to every device on Earth.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=sethdford/seaclaw&type=date&legend=top-left)](https://www.star-history.com/#sethdford/seaclaw&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=sethdford/human&type=date&legend=top-left)](https://www.star-history.com/#sethdford/human&type=date&legend=top-left)
 
 ```
 

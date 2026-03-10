@@ -1,10 +1,10 @@
-#include "seaclaw/channels/line.h"
-#include "seaclaw/channel.h"
-#include "seaclaw/channel_loop.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
+#include "human/channels/line.h"
+#include "human/channel.h"
+#include "human/channel_loop.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,23 +15,23 @@
 #define LINE_SESSION_KEY_MAX 127
 #define LINE_CONTENT_MAX     4095
 
-typedef struct sc_line_queued_msg {
+typedef struct hu_line_queued_msg {
     char session_key[128];
     char content[4096];
-} sc_line_queued_msg_t;
+} hu_line_queued_msg_t;
 
-typedef struct sc_line_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_line_ctx {
+    hu_allocator_t *alloc;
     char *channel_token;
     size_t channel_token_len;
     char *user_id;
     size_t user_id_len;
     bool running;
-    sc_line_queued_msg_t queue[LINE_QUEUE_MAX];
+    hu_line_queued_msg_t queue[LINE_QUEUE_MAX];
     size_t queue_head;
     size_t queue_tail;
     size_t queue_count;
-#if SC_IS_TEST
+#if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
     struct {
@@ -40,27 +40,27 @@ typedef struct sc_line_ctx {
     } mock_msgs[8];
     size_t mock_count;
 #endif
-} sc_line_ctx_t;
+} hu_line_ctx_t;
 
-static sc_error_t line_start(void *ctx) {
-    sc_line_ctx_t *c = (sc_line_ctx_t *)ctx;
+static hu_error_t line_start(void *ctx) {
+    hu_line_ctx_t *c = (hu_line_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void line_stop(void *ctx) {
-    sc_line_ctx_t *c = (sc_line_ctx_t *)ctx;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)ctx;
     if (c)
         c->running = false;
 }
 
-static void line_queue_push(sc_line_ctx_t *c, const char *from, size_t from_len, const char *body,
+static void line_queue_push(hu_line_ctx_t *c, const char *from, size_t from_len, const char *body,
                             size_t body_len) {
     if (c->queue_count >= LINE_QUEUE_MAX)
         return;
-    sc_line_queued_msg_t *slot = &c->queue[c->queue_tail];
+    hu_line_queued_msg_t *slot = &c->queue[c->queue_tail];
     size_t sk = from_len < LINE_SESSION_KEY_MAX ? from_len : LINE_SESSION_KEY_MAX;
     memcpy(slot->session_key, from, sk);
     slot->session_key[sk] = '\0';
@@ -71,60 +71,60 @@ static void line_queue_push(sc_line_ctx_t *c, const char *from, size_t from_len,
     c->queue_count++;
 }
 
-static sc_error_t line_send(void *ctx, const char *target, size_t target_len, const char *message,
+static hu_error_t line_send(void *ctx, const char *target, size_t target_len, const char *message,
                             size_t message_len, const char *const *media, size_t media_count) {
-    sc_line_ctx_t *c = (sc_line_ctx_t *)ctx;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)ctx;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        return SC_OK;
+        return HU_OK;
     }
 #else
     const char *to = (target && target_len > 0) ? target : c->user_id;
     size_t to_len = (target && target_len > 0) ? target_len : c->user_id_len;
 
     if (!c || !c->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!c->channel_token || c->channel_token_len == 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
+        return HU_ERR_CHANNEL_NOT_CONFIGURED;
     if (!to || to_len == 0 || !message)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_json_buf_t jbuf;
-    sc_error_t err = sc_json_buf_init(&jbuf, c->alloc);
+    hu_json_buf_t jbuf;
+    hu_error_t err = hu_json_buf_init(&jbuf, c->alloc);
     if (err)
         return err;
 
-    err = sc_json_append_key_value(&jbuf, "to", 2, to, to_len);
+    err = hu_json_append_key_value(&jbuf, "to", 2, to, to_len);
     if (err)
         goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, ",\"messages\":[{\"type\":\"text\",", 28);
+    err = hu_json_buf_append_raw(&jbuf, ",\"messages\":[{\"type\":\"text\",", 28);
     if (err)
         goto jfail;
-    err = sc_json_append_key_value(&jbuf, "text", 4, message, message_len);
+    err = hu_json_append_key_value(&jbuf, "text", 4, message, message_len);
     if (err)
         goto jfail;
     for (size_t i = 0; i < media_count && media && media[i]; i++) {
         size_t url_len = strlen(media[i]);
-        err = sc_json_buf_append_raw(&jbuf, "},{\"type\":\"image\",", 17);
+        err = hu_json_buf_append_raw(&jbuf, "},{\"type\":\"image\",", 17);
         if (err)
             goto jfail;
-        err = sc_json_append_key_value(&jbuf, "originalContentUrl", 17, media[i], url_len);
+        err = hu_json_append_key_value(&jbuf, "originalContentUrl", 17, media[i], url_len);
         if (err)
             goto jfail;
-        err = sc_json_buf_append_raw(&jbuf, ",", 1);
+        err = hu_json_buf_append_raw(&jbuf, ",", 1);
         if (err)
             goto jfail;
-        err = sc_json_append_key_value(&jbuf, "previewImageUrl", 14, media[i], url_len);
+        err = hu_json_append_key_value(&jbuf, "previewImageUrl", 14, media[i], url_len);
         if (err)
             goto jfail;
     }
-    err = sc_json_buf_append_raw(&jbuf, media_count > 0 ? "}}]}" : "}]}", media_count > 0 ? 4 : 3);
+    err = hu_json_buf_append_raw(&jbuf, media_count > 0 ? "}}]}" : "}]}", media_count > 0 ? 4 : 3);
     if (err)
         goto jfail;
 
@@ -132,25 +132,25 @@ static sc_error_t line_send(void *ctx, const char *target, size_t target_len, co
     int n = snprintf(auth_buf, sizeof(auth_buf), "Bearer %.*s", (int)c->channel_token_len,
                      c->channel_token);
     if (n <= 0 || (size_t)n >= sizeof(auth_buf)) {
-        sc_json_buf_free(&jbuf);
-        return SC_ERR_INTERNAL;
+        hu_json_buf_free(&jbuf);
+        return HU_ERR_INTERNAL;
     }
 
-    sc_http_response_t resp = {0};
-    err = sc_http_post_json(c->alloc, LINE_PUSH_URL, auth_buf, jbuf.ptr, jbuf.len, &resp);
-    sc_json_buf_free(&jbuf);
-    if (err != SC_OK) {
+    hu_http_response_t resp = {0};
+    err = hu_http_post_json(c->alloc, LINE_PUSH_URL, auth_buf, jbuf.ptr, jbuf.len, &resp);
+    hu_json_buf_free(&jbuf);
+    if (err != HU_OK) {
         if (resp.owned && resp.body)
-            sc_http_response_free(c->alloc, &resp);
-        return SC_ERR_CHANNEL_SEND;
+            hu_http_response_free(c->alloc, &resp);
+        return HU_ERR_CHANNEL_SEND;
     }
     if (resp.owned && resp.body)
-        sc_http_response_free(c->alloc, &resp);
+        hu_http_response_free(c->alloc, &resp);
     if (resp.status_code < 200 || resp.status_code >= 300)
-        return SC_ERR_CHANNEL_SEND;
-    return SC_OK;
+        return HU_ERR_CHANNEL_SEND;
+    return HU_OK;
 jfail:
-    sc_json_buf_free(&jbuf);
+    hu_json_buf_free(&jbuf);
     return err;
 #endif
 }
@@ -164,7 +164,7 @@ static bool line_health_check(void *ctx) {
     return true;
 }
 
-static const sc_channel_vtable_t line_vtable = {
+static const hu_channel_vtable_t line_vtable = {
     .start = line_start,
     .stop = line_stop,
     .send = line_send,
@@ -175,57 +175,57 @@ static const sc_channel_vtable_t line_vtable = {
     .stop_typing = NULL,
 };
 
-sc_error_t sc_line_on_webhook(void *channel_ctx, sc_allocator_t *alloc, const char *body,
+hu_error_t hu_line_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const char *body,
                               size_t body_len) {
-    sc_line_ctx_t *c = (sc_line_ctx_t *)channel_ctx;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)channel_ctx;
     if (!c || !body || body_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
-#if SC_IS_TEST
+        return HU_ERR_INVALID_ARGUMENT;
+#if HU_IS_TEST
     (void)alloc;
     line_queue_push(c, "test-sender", 11, body, body_len);
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_json_value_t *parsed = NULL;
-    sc_error_t err = sc_json_parse(alloc, body, body_len, &parsed);
-    if (err != SC_OK || !parsed)
-        return SC_OK;
-    sc_json_value_t *events = sc_json_object_get(parsed, "events");
-    if (events && events->type == SC_JSON_ARRAY) {
+    hu_json_value_t *parsed = NULL;
+    hu_error_t err = hu_json_parse(alloc, body, body_len, &parsed);
+    if (err != HU_OK || !parsed)
+        return HU_OK;
+    hu_json_value_t *events = hu_json_object_get(parsed, "events");
+    if (events && events->type == HU_JSON_ARRAY) {
         for (size_t i = 0; i < events->data.array.len; i++) {
-            sc_json_value_t *ev = events->data.array.items[i];
-            if (!ev || ev->type != SC_JSON_OBJECT)
+            hu_json_value_t *ev = events->data.array.items[i];
+            if (!ev || ev->type != HU_JSON_OBJECT)
                 continue;
-            const char *ev_type = sc_json_get_string(ev, "type");
+            const char *ev_type = hu_json_get_string(ev, "type");
             if (!ev_type || strcmp(ev_type, "message") != 0)
                 continue;
-            sc_json_value_t *source = sc_json_object_get(ev, "source");
-            const char *user_id = source ? sc_json_get_string(source, "userId") : NULL;
+            hu_json_value_t *source = hu_json_object_get(ev, "source");
+            const char *user_id = source ? hu_json_get_string(source, "userId") : NULL;
             if (!user_id)
                 continue;
-            sc_json_value_t *msg = sc_json_object_get(ev, "message");
-            if (!msg || msg->type != SC_JSON_OBJECT)
+            hu_json_value_t *msg = hu_json_object_get(ev, "message");
+            if (!msg || msg->type != HU_JSON_OBJECT)
                 continue;
-            const char *msg_type = sc_json_get_string(msg, "type");
+            const char *msg_type = hu_json_get_string(msg, "type");
             if (!msg_type || strcmp(msg_type, "text") != 0)
                 continue;
-            const char *text = sc_json_get_string(msg, "text");
+            const char *text = hu_json_get_string(msg, "text");
             if (text && strlen(text) > 0)
                 line_queue_push(c, user_id, strlen(user_id), text, strlen(text));
         }
     }
-    sc_json_free(alloc, parsed);
-    return SC_OK;
+    hu_json_free(alloc, parsed);
+    return HU_OK;
 #endif
 }
 
-sc_error_t sc_line_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
+hu_error_t hu_line_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                         size_t max_msgs, size_t *out_count) {
     (void)alloc;
-    sc_line_ctx_t *c = (sc_line_ctx_t *)channel_ctx;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)channel_ctx;
     if (!c || !msgs || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (c->mock_count > 0) {
         size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
         for (size_t i = 0; i < n; i++) {
@@ -234,12 +234,12 @@ sc_error_t sc_line_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loo
         }
         *out_count = n;
         c->mock_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 #endif
     size_t cnt = 0;
     while (c->queue_count > 0 && cnt < max_msgs) {
-        sc_line_queued_msg_t *slot = &c->queue[c->queue_head];
+        hu_line_queued_msg_t *slot = &c->queue[c->queue_head];
         memcpy(msgs[cnt].session_key, slot->session_key, sizeof(slot->session_key));
         memcpy(msgs[cnt].content, slot->content, sizeof(slot->content));
         c->queue_head = (c->queue_head + 1) % LINE_QUEUE_MAX;
@@ -247,29 +247,29 @@ sc_error_t sc_line_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loo
         cnt++;
     }
     *out_count = cnt;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_line_create(sc_allocator_t *alloc, const char *channel_token,
-                          size_t channel_token_len, sc_channel_t *out) {
-    return sc_line_create_ex(alloc, channel_token, channel_token_len, NULL, 0, out);
+hu_error_t hu_line_create(hu_allocator_t *alloc, const char *channel_token,
+                          size_t channel_token_len, hu_channel_t *out) {
+    return hu_line_create_ex(alloc, channel_token, channel_token_len, NULL, 0, out);
 }
 
-sc_error_t sc_line_create_ex(sc_allocator_t *alloc, const char *channel_token,
+hu_error_t hu_line_create_ex(hu_allocator_t *alloc, const char *channel_token,
                              size_t channel_token_len, const char *user_id, size_t user_id_len,
-                             sc_channel_t *out) {
+                             hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_line_ctx_t *c = (sc_line_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     if (channel_token && channel_token_len > 0) {
         c->channel_token = (char *)malloc(channel_token_len + 1);
         if (!c->channel_token) {
             free(c);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->channel_token, channel_token, channel_token_len);
         c->channel_token[channel_token_len] = '\0';
@@ -281,7 +281,7 @@ sc_error_t sc_line_create_ex(sc_allocator_t *alloc, const char *channel_token,
             if (c->channel_token)
                 free(c->channel_token);
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->user_id, user_id, user_id_len);
         c->user_id[user_id_len] = '\0';
@@ -289,21 +289,21 @@ sc_error_t sc_line_create_ex(sc_allocator_t *alloc, const char *channel_token,
     }
     out->ctx = c;
     out->vtable = &line_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_line_is_configured(sc_channel_t *ch) {
+bool hu_line_is_configured(hu_channel_t *ch) {
     if (!ch || !ch->ctx)
         return false;
-    sc_line_ctx_t *c = (sc_line_ctx_t *)ch->ctx;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)ch->ctx;
     return c->channel_token != NULL && c->channel_token_len > 0 &&
            (c->user_id != NULL && c->user_id_len > 0);
 }
 
-void sc_line_destroy(sc_channel_t *ch) {
+void hu_line_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_line_ctx_t *c = (sc_line_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
+        hu_line_ctx_t *c = (hu_line_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
         if (c->channel_token)
             free(c->channel_token);
         if (c->user_id)
@@ -314,15 +314,15 @@ void sc_line_destroy(sc_channel_t *ch) {
     }
 }
 
-#if SC_IS_TEST
-sc_error_t sc_line_test_inject_mock(sc_channel_t *ch, const char *session_key,
+#if HU_IS_TEST
+hu_error_t hu_line_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                     size_t session_key_len, const char *content,
                                     size_t content_len) {
     if (!ch || !ch->ctx)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_line_ctx_t *c = (sc_line_ctx_t *)ch->ctx;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)ch->ctx;
     if (c->mock_count >= 8)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t i = c->mock_count++;
     size_t sk = session_key_len > 127 ? 127 : session_key_len;
     size_t ct = content_len > 4095 ? 4095 : content_len;
@@ -332,12 +332,12 @@ sc_error_t sc_line_test_inject_mock(sc_channel_t *ch, const char *session_key,
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
-const char *sc_line_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+const char *hu_line_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
-    sc_line_ctx_t *c = (sc_line_ctx_t *)ch->ctx;
+    hu_line_ctx_t *c = (hu_line_ctx_t *)ch->ctx;
     if (out_len)
         *out_len = c->last_message_len;
     return c->last_message;

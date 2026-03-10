@@ -1,21 +1,21 @@
-#include "seaclaw/memory/vector/store_qdrant.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/vector/store_qdrant.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct qdrant_ctx {
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
     char *url;
     char *api_key;
     char *collection_name;
     size_t dimensions;
 } qdrant_ctx_t;
 
-#if SC_IS_TEST
-static sc_error_t qdrant_upsert(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len,
+#if HU_IS_TEST
+static hu_error_t qdrant_upsert(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len,
                                 const float *embedding, size_t dims, const char *metadata,
                                 size_t metadata_len) {
     (void)ctx;
@@ -26,11 +26,11 @@ static sc_error_t qdrant_upsert(void *ctx, sc_allocator_t *alloc, const char *id
     (void)dims;
     (void)metadata;
     (void)metadata_len;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t qdrant_search(void *ctx, sc_allocator_t *alloc, const float *query_embedding,
-                                size_t dims, size_t limit, sc_vector_search_result_t **results,
+static hu_error_t qdrant_search(void *ctx, hu_allocator_t *alloc, const float *query_embedding,
+                                size_t dims, size_t limit, hu_vector_search_result_t **results,
                                 size_t *result_count) {
     (void)ctx;
     (void)alloc;
@@ -39,15 +39,15 @@ static sc_error_t qdrant_search(void *ctx, sc_allocator_t *alloc, const float *q
     (void)limit;
     *results = NULL;
     *result_count = 0;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t qdrant_delete(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len) {
+static hu_error_t qdrant_delete(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len) {
     (void)ctx;
     (void)alloc;
     (void)id;
     (void)id_len;
-    return SC_OK;
+    return HU_OK;
 }
 
 static size_t qdrant_count(void *ctx) {
@@ -55,12 +55,12 @@ static size_t qdrant_count(void *ctx) {
     return 0;
 }
 #else
-static sc_error_t qdrant_upsert(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len,
+static hu_error_t qdrant_upsert(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len,
                                 const float *embedding, size_t dims, const char *metadata,
                                 size_t metadata_len) {
     qdrant_ctx_t *q = (qdrant_ctx_t *)ctx;
     if (!q || !embedding)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     (void)metadata;
     (void)metadata_len;
 
@@ -78,22 +78,22 @@ static sc_error_t qdrant_upsert(void *ctx, sc_allocator_t *alloc, const char *id
     snprintf(body + pos, sizeof(body) - pos, "],\"payload\":{\"key\":\"%.*s\"}}]}", (int)id_len,
              id);
 
-    sc_http_response_t resp = {0};
+    hu_http_response_t resp = {0};
     const char *auth = q->api_key && q->api_key[0] ? q->api_key : NULL;
-    sc_error_t err = sc_http_post_json(alloc, url, auth, body, strlen(body), &resp);
-    if (err != SC_OK)
+    hu_error_t err = hu_http_post_json(alloc, url, auth, body, strlen(body), &resp);
+    if (err != HU_OK)
         return err;
     long status = resp.status_code;
-    sc_http_response_free(alloc, &resp);
-    return status == 200 ? SC_OK : SC_ERR_MEMORY_BACKEND;
+    hu_http_response_free(alloc, &resp);
+    return status == 200 ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
-static sc_error_t qdrant_search(void *ctx, sc_allocator_t *alloc, const float *query_embedding,
-                                size_t dims, size_t limit, sc_vector_search_result_t **results,
+static hu_error_t qdrant_search(void *ctx, hu_allocator_t *alloc, const float *query_embedding,
+                                size_t dims, size_t limit, hu_vector_search_result_t **results,
                                 size_t *result_count) {
     qdrant_ctx_t *q = (qdrant_ctx_t *)ctx;
     if (!q || !query_embedding || !results || !result_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char url[512];
     snprintf(url, sizeof(url), "%s/collections/%s/points/search", q->url, q->collection_name);
@@ -107,90 +107,90 @@ static sc_error_t qdrant_search(void *ctx, sc_allocator_t *alloc, const float *q
     }
     snprintf(body + pos, sizeof(body) - pos, "],\"limit\":%zu,\"with_payload\":true}", limit);
 
-    sc_http_response_t resp = {0};
+    hu_http_response_t resp = {0};
     const char *auth = q->api_key && q->api_key[0] ? q->api_key : NULL;
-    sc_error_t err = sc_http_post_json(alloc, url, auth, body, strlen(body), &resp);
-    if (err != SC_OK) {
+    hu_error_t err = hu_http_post_json(alloc, url, auth, body, strlen(body), &resp);
+    if (err != HU_OK) {
         *results = NULL;
         *result_count = 0;
         return err;
     }
     if (resp.status_code != 200 || !resp.body || resp.body_len == 0) {
-        sc_http_response_free(alloc, &resp);
+        hu_http_response_free(alloc, &resp);
         *results = NULL;
         *result_count = 0;
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
 
-    sc_json_value_t *parsed = NULL;
-    sc_error_t parse_err = sc_json_parse(alloc, resp.body, resp.body_len, &parsed);
-    sc_http_response_free(alloc, &resp);
-    if (parse_err != SC_OK || !parsed) {
+    hu_json_value_t *parsed = NULL;
+    hu_error_t parse_err = hu_json_parse(alloc, resp.body, resp.body_len, &parsed);
+    hu_http_response_free(alloc, &resp);
+    if (parse_err != HU_OK || !parsed) {
         *results = NULL;
         *result_count = 0;
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
 
-    sc_json_value_t *result_arr = sc_json_object_get(parsed, "result");
-    if (!result_arr || result_arr->type != SC_JSON_ARRAY || result_arr->data.array.len == 0) {
-        sc_json_free(alloc, parsed);
+    hu_json_value_t *result_arr = hu_json_object_get(parsed, "result");
+    if (!result_arr || result_arr->type != HU_JSON_ARRAY || result_arr->data.array.len == 0) {
+        hu_json_free(alloc, parsed);
         *results = NULL;
         *result_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
     size_t n = result_arr->data.array.len;
-    sc_vector_search_result_t *arr = (sc_vector_search_result_t *)alloc->alloc(
-        alloc->ctx, n * sizeof(sc_vector_search_result_t));
+    hu_vector_search_result_t *arr = (hu_vector_search_result_t *)alloc->alloc(
+        alloc->ctx, n * sizeof(hu_vector_search_result_t));
     if (!arr) {
-        sc_json_free(alloc, parsed);
+        hu_json_free(alloc, parsed);
         *results = NULL;
         *result_count = 0;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(arr, 0, n * sizeof(sc_vector_search_result_t));
+    memset(arr, 0, n * sizeof(hu_vector_search_result_t));
 
     size_t out = 0;
     for (size_t i = 0; i < n; i++) {
-        sc_json_value_t *item = result_arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
+        hu_json_value_t *item = result_arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
             continue;
-        float score = (float)sc_json_get_number(item, "score", 0.0);
-        sc_json_value_t *payload = sc_json_object_get(item, "payload");
+        float score = (float)hu_json_get_number(item, "score", 0.0);
+        hu_json_value_t *payload = hu_json_object_get(item, "payload");
         const char *key = NULL;
-        if (payload && payload->type == SC_JSON_OBJECT)
-            key = sc_json_get_string(payload, "key");
+        if (payload && payload->type == HU_JSON_OBJECT)
+            key = hu_json_get_string(payload, "key");
         if (!key)
-            key = sc_json_get_string(item, "id");
+            key = hu_json_get_string(item, "id");
         if (!key)
             key = "";
-        arr[out].id = sc_strdup(alloc, key);
+        arr[out].id = hu_strdup(alloc, key);
         arr[out].score = score;
         out++;
     }
-    sc_json_free(alloc, parsed);
+    hu_json_free(alloc, parsed);
     if (out == 0) {
-        alloc->free(alloc->ctx, arr, n * sizeof(sc_vector_search_result_t));
+        alloc->free(alloc->ctx, arr, n * sizeof(hu_vector_search_result_t));
         *results = NULL;
         *result_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
     if (out < n) {
-        sc_vector_search_result_t *shrunk = (sc_vector_search_result_t *)alloc->realloc(
-            alloc->ctx, arr, n * sizeof(sc_vector_search_result_t),
-            out * sizeof(sc_vector_search_result_t));
+        hu_vector_search_result_t *shrunk = (hu_vector_search_result_t *)alloc->realloc(
+            alloc->ctx, arr, n * sizeof(hu_vector_search_result_t),
+            out * sizeof(hu_vector_search_result_t));
         if (shrunk)
             arr = shrunk;
     }
     *results = arr;
     *result_count = out;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t qdrant_delete(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len) {
+static hu_error_t qdrant_delete(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len) {
     qdrant_ctx_t *q = (qdrant_ctx_t *)ctx;
     if (!q || !alloc || !id)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char url[512];
     snprintf(url, sizeof(url), "%s/collections/%s/points/delete?wait=true", q->url,
@@ -213,16 +213,16 @@ static sc_error_t qdrant_delete(void *ctx, sc_allocator_t *alloc, const char *id
                       "{\"filter\":{\"must\":[{\"key\":\"key\",\"match\":{\"value\":\"%s\"}}]}}",
                       id_esc);
     if (bn <= 0 || (size_t)bn >= sizeof(body))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_http_response_t resp = {0};
+    hu_http_response_t resp = {0};
     const char *auth = q->api_key && q->api_key[0] ? q->api_key : NULL;
-    sc_error_t err = sc_http_post_json(alloc, url, auth, body, (size_t)bn, &resp);
-    if (err != SC_OK)
+    hu_error_t err = hu_http_post_json(alloc, url, auth, body, (size_t)bn, &resp);
+    if (err != HU_OK)
         return err;
     long status = resp.status_code;
-    sc_http_response_free(alloc, &resp);
-    return status == 200 ? SC_OK : SC_ERR_MEMORY_BACKEND;
+    hu_http_response_free(alloc, &resp);
+    return status == 200 ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
 static size_t qdrant_count(void *ctx) {
@@ -234,30 +234,30 @@ static size_t qdrant_count(void *ctx) {
     snprintf(url, sizeof(url), "%s/collections/%s/points/count", q->url, q->collection_name);
 
     const char *body = "{\"exact\":true}";
-    sc_http_response_t resp = {0};
+    hu_http_response_t resp = {0};
     const char *auth = q->api_key && q->api_key[0] ? q->api_key : NULL;
-    sc_error_t err = sc_http_post_json(q->alloc, url, auth, body, 15, &resp);
-    if (err != SC_OK || resp.status_code != 200 || !resp.body) {
-        sc_http_response_free(q->alloc, &resp);
+    hu_error_t err = hu_http_post_json(q->alloc, url, auth, body, 15, &resp);
+    if (err != HU_OK || resp.status_code != 200 || !resp.body) {
+        hu_http_response_free(q->alloc, &resp);
         return 0;
     }
 
-    sc_json_value_t *parsed = NULL;
-    err = sc_json_parse(q->alloc, resp.body, resp.body_len, &parsed);
-    sc_http_response_free(q->alloc, &resp);
-    if (err != SC_OK || !parsed)
+    hu_json_value_t *parsed = NULL;
+    err = hu_json_parse(q->alloc, resp.body, resp.body_len, &parsed);
+    hu_http_response_free(q->alloc, &resp);
+    if (err != HU_OK || !parsed)
         return 0;
 
-    sc_json_value_t *result_obj = sc_json_object_get(parsed, "result");
+    hu_json_value_t *result_obj = hu_json_object_get(parsed, "result");
     size_t n = 0;
-    if (result_obj && result_obj->type == SC_JSON_OBJECT)
-        n = (size_t)sc_json_get_number(result_obj, "count", 0);
-    sc_json_free(q->alloc, parsed);
+    if (result_obj && result_obj->type == HU_JSON_OBJECT)
+        n = (size_t)hu_json_get_number(result_obj, "count", 0);
+    hu_json_free(q->alloc, parsed);
     return n;
 }
 #endif
 
-static void qdrant_deinit(void *ctx, sc_allocator_t *alloc) {
+static void qdrant_deinit(void *ctx, hu_allocator_t *alloc) {
     qdrant_ctx_t *q = (qdrant_ctx_t *)ctx;
     if (!q || !alloc)
         return;
@@ -270,7 +270,7 @@ static void qdrant_deinit(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, q, sizeof(qdrant_ctx_t));
 }
 
-static const sc_vector_store_vtable_t qdrant_vtable = {
+static const hu_vector_store_vtable_t qdrant_vtable = {
     .upsert = qdrant_upsert,
     .search = qdrant_search,
     .delete = qdrant_delete,
@@ -278,9 +278,9 @@ static const sc_vector_store_vtable_t qdrant_vtable = {
     .deinit = qdrant_deinit,
 };
 
-sc_vector_store_t sc_vector_store_qdrant_create(sc_allocator_t *alloc,
-                                                const sc_qdrant_config_t *config) {
-    sc_vector_store_t s = {.ctx = NULL, .vtable = &qdrant_vtable};
+hu_vector_store_t hu_vector_store_qdrant_create(hu_allocator_t *alloc,
+                                                const hu_qdrant_config_t *config) {
+    hu_vector_store_t s = {.ctx = NULL, .vtable = &qdrant_vtable};
     if (!alloc || !config)
         return s;
 
@@ -289,9 +289,9 @@ sc_vector_store_t sc_vector_store_qdrant_create(sc_allocator_t *alloc,
         return s;
     memset(q, 0, sizeof(*q));
     q->alloc = alloc;
-    q->url = config->url ? sc_strdup(alloc, config->url) : NULL;
-    q->api_key = config->api_key ? sc_strdup(alloc, config->api_key) : NULL;
-    q->collection_name = config->collection_name ? sc_strdup(alloc, config->collection_name) : NULL;
+    q->url = config->url ? hu_strdup(alloc, config->url) : NULL;
+    q->api_key = config->api_key ? hu_strdup(alloc, config->api_key) : NULL;
+    q->collection_name = config->collection_name ? hu_strdup(alloc, config->collection_name) : NULL;
     q->dimensions = config->dimensions;
 
     if (!q->url || !q->collection_name) {

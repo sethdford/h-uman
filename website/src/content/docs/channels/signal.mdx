@@ -5,7 +5,7 @@ description: Set up Signal via signal-cli.
 
 # Signal Channel
 
-SeaClaw uses [signal-cli](https://github.com/AsamK/signal-cli) to send and receive Signal messages. signal-cli runs as a daemon with an HTTP/JSON-RPC API.
+Human uses [signal-cli](https://github.com/AsamK/signal-cli) to send and receive Signal messages. signal-cli runs as a daemon with an HTTP/JSON-RPC API.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ The daemon exposes:
 
 ## 3. Configuration
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -78,4 +78,4 @@ Add to `~/.seaclaw/config.json`:
 
 ## 5. Run
 
-Start the SeaClaw gateway or agent with the Signal channel enabled. The channel connects to the signal-cli daemon and receives events via SSE.
+Start the Human gateway or agent with the Signal channel enabled. The channel connects to the signal-cli daemon and receives events via SSE.

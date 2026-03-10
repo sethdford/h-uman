@@ -1,6 +1,6 @@
 ---
 title: Tunnel Providers
-description: Expose your local SeaClaw gateway to the internet for webhook integrations.
+description: Expose your local Human gateway to the internet for webhook integrations.
 ---
 
 Tunnels let you expose your local gateway to the internet, enabling webhooks from services like Telegram, Discord, and Slack.
@@ -27,19 +27,19 @@ Tunnels let you expose your local gateway to the internet, enabling webhooks fro
 
 ## Cloudflare Tunnel (recommended)
 
-Install `cloudflared` and SeaClaw handles the rest:
+Install `cloudflared` and Human handles the rest:
 
 ```bash
 brew install cloudflared     # macOS
 # or download from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
 
-seaclaw gateway --tunnel cloudflared
+human gateway --tunnel cloudflared
 ```
 
 ## ngrok
 
 ```bash
-seaclaw gateway --tunnel ngrok
+human gateway --tunnel ngrok
 ```
 
 Requires `ngrok` in your PATH. Set your auth token via `NGROK_AUTHTOKEN` or in the config.
@@ -47,7 +47,7 @@ Requires `ngrok` in your PATH. Set your auth token via `NGROK_AUTHTOKEN` or in t
 ## Tailscale Funnel
 
 ```bash
-seaclaw gateway --tunnel tailscale
+human gateway --tunnel tailscale
 ```
 
 Requires Tailscale to be running with Funnel enabled on your account.
@@ -64,4 +64,4 @@ Requires Tailscale to be running with Funnel enabled on your account.
 }
 ```
 
-The `{port}` placeholder is replaced with the gateway port. SeaClaw parses stdout for the public URL.
+The `{port}` placeholder is replaced with the gateway port. Human parses stdout for the public URL.

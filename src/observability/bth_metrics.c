@@ -1,14 +1,14 @@
-#include "seaclaw/observability/bth_metrics.h"
+#include "human/observability/bth_metrics.h"
 #include <stdio.h>
 #include <string.h>
 
-void sc_bth_metrics_init(sc_bth_metrics_t *m) {
+void hu_bth_metrics_init(hu_bth_metrics_t *m) {
     if (!m)
         return;
     memset(m, 0, sizeof(*m));
 }
 
-void sc_bth_metrics_log(const sc_bth_metrics_t *m) {
+void hu_bth_metrics_log(const hu_bth_metrics_t *m) {
     if (!m)
         return;
 
@@ -61,10 +61,10 @@ void sc_bth_metrics_log(const sc_bth_metrics_t *m) {
         fprintf(stderr, "[bth] total_turns=%u\n", m->total_turns);
 }
 
-#define SC_BTH_SUMMARY_LINE(field, name) \
+#define HU_BTH_SUMMARY_LINE(field, name) \
     pos += (size_t)snprintf(buf + pos, cap > pos ? cap - pos : 0, "%s=%u\n", name, m->field)
 
-char *sc_bth_metrics_summary(sc_allocator_t *alloc, const sc_bth_metrics_t *m, size_t *out_len) {
+char *hu_bth_metrics_summary(hu_allocator_t *alloc, const hu_bth_metrics_t *m, size_t *out_len) {
     if (!alloc || !alloc->alloc || !m || !out_len)
         return NULL;
 
@@ -75,29 +75,29 @@ char *sc_bth_metrics_summary(sc_allocator_t *alloc, const sc_bth_metrics_t *m, s
         return NULL;
 
     size_t pos = 0;
-    SC_BTH_SUMMARY_LINE(emotions_surfaced, "emotions_surfaced");
-    SC_BTH_SUMMARY_LINE(facts_extracted, "facts_extracted");
-    SC_BTH_SUMMARY_LINE(commitment_followups, "commitment_followups");
-    SC_BTH_SUMMARY_LINE(pattern_insights, "pattern_insights");
-    SC_BTH_SUMMARY_LINE(emotions_promoted, "emotions_promoted");
-    SC_BTH_SUMMARY_LINE(events_extracted, "events_extracted");
-    SC_BTH_SUMMARY_LINE(mood_contexts_built, "mood_contexts_built");
-    SC_BTH_SUMMARY_LINE(silence_checkins, "silence_checkins");
-    SC_BTH_SUMMARY_LINE(event_followups, "event_followups");
-    SC_BTH_SUMMARY_LINE(starters_built, "starters_built");
-    SC_BTH_SUMMARY_LINE(typos_applied, "typos_applied");
-    SC_BTH_SUMMARY_LINE(corrections_sent, "corrections_sent");
-    SC_BTH_SUMMARY_LINE(thinking_responses, "thinking_responses");
-    SC_BTH_SUMMARY_LINE(callbacks_triggered, "callbacks_triggered");
-    SC_BTH_SUMMARY_LINE(reactions_sent, "reactions_sent");
-    SC_BTH_SUMMARY_LINE(link_contexts, "link_contexts");
-    SC_BTH_SUMMARY_LINE(attachment_contexts, "attachment_contexts");
-    SC_BTH_SUMMARY_LINE(ab_evaluations, "ab_evaluations");
-    SC_BTH_SUMMARY_LINE(ab_alternates_chosen, "ab_alternates_chosen");
-    SC_BTH_SUMMARY_LINE(replay_analyses, "replay_analyses");
-    SC_BTH_SUMMARY_LINE(egraph_contexts, "egraph_contexts");
-    SC_BTH_SUMMARY_LINE(vision_descriptions, "vision_descriptions");
-    SC_BTH_SUMMARY_LINE(total_turns, "total_turns");
+    HU_BTH_SUMMARY_LINE(emotions_surfaced, "emotions_surfaced");
+    HU_BTH_SUMMARY_LINE(facts_extracted, "facts_extracted");
+    HU_BTH_SUMMARY_LINE(commitment_followups, "commitment_followups");
+    HU_BTH_SUMMARY_LINE(pattern_insights, "pattern_insights");
+    HU_BTH_SUMMARY_LINE(emotions_promoted, "emotions_promoted");
+    HU_BTH_SUMMARY_LINE(events_extracted, "events_extracted");
+    HU_BTH_SUMMARY_LINE(mood_contexts_built, "mood_contexts_built");
+    HU_BTH_SUMMARY_LINE(silence_checkins, "silence_checkins");
+    HU_BTH_SUMMARY_LINE(event_followups, "event_followups");
+    HU_BTH_SUMMARY_LINE(starters_built, "starters_built");
+    HU_BTH_SUMMARY_LINE(typos_applied, "typos_applied");
+    HU_BTH_SUMMARY_LINE(corrections_sent, "corrections_sent");
+    HU_BTH_SUMMARY_LINE(thinking_responses, "thinking_responses");
+    HU_BTH_SUMMARY_LINE(callbacks_triggered, "callbacks_triggered");
+    HU_BTH_SUMMARY_LINE(reactions_sent, "reactions_sent");
+    HU_BTH_SUMMARY_LINE(link_contexts, "link_contexts");
+    HU_BTH_SUMMARY_LINE(attachment_contexts, "attachment_contexts");
+    HU_BTH_SUMMARY_LINE(ab_evaluations, "ab_evaluations");
+    HU_BTH_SUMMARY_LINE(ab_alternates_chosen, "ab_alternates_chosen");
+    HU_BTH_SUMMARY_LINE(replay_analyses, "replay_analyses");
+    HU_BTH_SUMMARY_LINE(egraph_contexts, "egraph_contexts");
+    HU_BTH_SUMMARY_LINE(vision_descriptions, "vision_descriptions");
+    HU_BTH_SUMMARY_LINE(total_turns, "total_turns");
 
     *out_len = cap; /* must match allocation size for free() */
     return buf;

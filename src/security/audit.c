@@ -1,7 +1,7 @@
-#include "seaclaw/security/audit.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/crypto.h"
-#include "seaclaw/security.h"
+#include "human/security/audit.h"
+#include "human/core/error.h"
+#include "human/crypto.h"
+#include "human/security.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,9 +9,9 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define SC_AUDIT_JSON_BUF_SIZE 4096
-#define SC_AUDIT_MAX_PATH      1024
-#define SC_AUDIT_HMAC_LEN      32
+#define HU_AUDIT_JSON_BUF_SIZE 4096
+#define HU_AUDIT_MAX_PATH      1024
+#define HU_AUDIT_HMAC_LEN      32
 
 static void build_key_path(char *out, size_t cap, const char *base, size_t blen);
 
@@ -30,43 +30,43 @@ static void audit_secure_zero(void *p, size_t n) {
 #endif
 }
 
-const char *sc_audit_event_type_string(sc_audit_event_type_t t) {
+const char *hu_audit_event_type_string(hu_audit_event_type_t t) {
     switch (t) {
-    case SC_AUDIT_COMMAND_EXECUTION:
+    case HU_AUDIT_COMMAND_EXECUTION:
         return "command_execution";
-    case SC_AUDIT_FILE_ACCESS:
+    case HU_AUDIT_FILE_ACCESS:
         return "file_access";
-    case SC_AUDIT_CONFIG_CHANGE:
+    case HU_AUDIT_CONFIG_CHANGE:
         return "config_change";
-    case SC_AUDIT_AUTH_SUCCESS:
+    case HU_AUDIT_AUTH_SUCCESS:
         return "auth_success";
-    case SC_AUDIT_AUTH_FAILURE:
+    case HU_AUDIT_AUTH_FAILURE:
         return "auth_failure";
-    case SC_AUDIT_POLICY_VIOLATION:
+    case HU_AUDIT_POLICY_VIOLATION:
         return "policy_violation";
-    case SC_AUDIT_SECURITY_EVENT:
+    case HU_AUDIT_SECURITY_EVENT:
         return "security_event";
     default:
         return "unknown";
     }
 }
 
-sc_audit_severity_t sc_audit_event_severity(sc_audit_event_type_t t) {
+hu_audit_severity_t hu_audit_event_severity(hu_audit_event_type_t t) {
     switch (t) {
-    case SC_AUDIT_AUTH_FAILURE:
-    case SC_AUDIT_POLICY_VIOLATION:
-        return SC_AUDIT_SEV_HIGH;
-    case SC_AUDIT_COMMAND_EXECUTION:
-    case SC_AUDIT_FILE_ACCESS:
-    case SC_AUDIT_CONFIG_CHANGE:
-        return SC_AUDIT_SEV_MEDIUM;
+    case HU_AUDIT_AUTH_FAILURE:
+    case HU_AUDIT_POLICY_VIOLATION:
+        return HU_AUDIT_SEV_HIGH;
+    case HU_AUDIT_COMMAND_EXECUTION:
+    case HU_AUDIT_FILE_ACCESS:
+    case HU_AUDIT_CONFIG_CHANGE:
+        return HU_AUDIT_SEV_MEDIUM;
     default:
-        return SC_AUDIT_SEV_LOW;
+        return HU_AUDIT_SEV_LOW;
     }
 }
 
-bool sc_audit_should_log(sc_audit_event_type_t type, sc_audit_severity_t min_sev) {
-    return sc_audit_event_severity(type) >= min_sev;
+bool hu_audit_should_log(hu_audit_event_type_t type, hu_audit_severity_t min_sev) {
+    return hu_audit_event_severity(type) >= min_sev;
 }
 
 static size_t escape_json_string(const char *s, char *out, size_t out_cap) {
@@ -86,7 +86,7 @@ static size_t escape_json_string(const char *s, char *out, size_t out_cap) {
     return n;
 }
 
-void sc_audit_event_init(sc_audit_event_t *ev, sc_audit_event_type_t type) {
+void hu_audit_event_init(hu_audit_event_t *ev, hu_audit_event_type_t type) {
     if (!ev)
         return;
     ev->timestamp_s = (int64_t)time(NULL);
@@ -119,7 +119,7 @@ void sc_audit_event_init(sc_audit_event_t *ev, sc_audit_event_type_t type) {
     ev->reasoning.context_tokens = 0;
 }
 
-void sc_audit_event_with_actor(sc_audit_event_t *ev, const char *channel, const char *user_id,
+void hu_audit_event_with_actor(hu_audit_event_t *ev, const char *channel, const char *user_id,
                                const char *username) {
     if (!ev)
         return;
@@ -128,7 +128,7 @@ void sc_audit_event_with_actor(sc_audit_event_t *ev, const char *channel, const 
     ev->actor.username = username;
 }
 
-void sc_audit_event_with_action(sc_audit_event_t *ev, const char *command, const char *risk_level,
+void hu_audit_event_with_action(hu_audit_event_t *ev, const char *command, const char *risk_level,
                                 bool approved, bool allowed) {
     if (!ev)
         return;
@@ -138,7 +138,7 @@ void sc_audit_event_with_action(sc_audit_event_t *ev, const char *command, const
     ev->action.allowed = allowed;
 }
 
-void sc_audit_event_with_result(sc_audit_event_t *ev, bool success, int32_t exit_code,
+void hu_audit_event_with_result(hu_audit_event_t *ev, bool success, int32_t exit_code,
                                 uint64_t duration_ms, const char *err_msg) {
     if (!ev)
         return;
@@ -148,13 +148,13 @@ void sc_audit_event_with_result(sc_audit_event_t *ev, bool success, int32_t exit
     ev->result.err_msg = err_msg;
 }
 
-void sc_audit_event_with_security(sc_audit_event_t *ev, const char *sandbox_backend) {
+void hu_audit_event_with_security(hu_audit_event_t *ev, const char *sandbox_backend) {
     if (!ev)
         return;
     ev->security.sandbox_backend = sandbox_backend;
 }
 
-void sc_audit_event_with_identity(sc_audit_event_t *ev, uint64_t agent_id,
+void hu_audit_event_with_identity(hu_audit_event_t *ev, uint64_t agent_id,
                                   const char *model_version, const char *auth_token_hash) {
     if (!ev)
         return;
@@ -163,7 +163,7 @@ void sc_audit_event_with_identity(sc_audit_event_t *ev, uint64_t agent_id,
     ev->identity.auth_token_hash = auth_token_hash;
 }
 
-void sc_audit_event_with_input(sc_audit_event_t *ev, const char *trigger_type,
+void hu_audit_event_with_input(hu_audit_event_t *ev, const char *trigger_type,
                                const char *trigger_source, const char *prompt_hash,
                                size_t prompt_length) {
     if (!ev)
@@ -174,7 +174,7 @@ void sc_audit_event_with_input(sc_audit_event_t *ev, const char *trigger_type,
     ev->input.prompt_length = prompt_length;
 }
 
-void sc_audit_event_with_reasoning(sc_audit_event_t *ev, const char *decision,
+void hu_audit_event_with_reasoning(hu_audit_event_t *ev, const char *decision,
                                    const char *rule_name, float confidence,
                                    uint32_t context_tokens) {
     if (!ev)
@@ -185,13 +185,13 @@ void sc_audit_event_with_reasoning(sc_audit_event_t *ev, const char *decision,
     ev->reasoning.context_tokens = context_tokens;
 }
 
-size_t sc_audit_event_write_json(const sc_audit_event_t *ev, char *buf, size_t buf_size) {
+size_t hu_audit_event_write_json(const hu_audit_event_t *ev, char *buf, size_t buf_size) {
     if (!ev || !buf || buf_size < 64)
         return 0;
 
     int n = snprintf(buf, buf_size, "{\"timestamp_s\":%ld,\"event_id\":%lu,\"event_type\":\"%s\"",
                      (long)ev->timestamp_s, (unsigned long)ev->event_id,
-                     sc_audit_event_type_string(ev->event_type));
+                     hu_audit_event_type_string(ev->event_type));
     if (n < 0 || (size_t)n >= buf_size)
         return 0;
     size_t pos = (size_t)n;
@@ -443,17 +443,17 @@ size_t sc_audit_event_write_json(const sc_audit_event_t *ev, char *buf, size_t b
     return pos;
 }
 
-#define SC_AUDIT_MAX_KEY_HISTORY  64
-#define SC_AUDIT_KEY_HISTORY_LINE 128
+#define HU_AUDIT_MAX_KEY_HISTORY  64
+#define HU_AUDIT_KEY_HISTORY_LINE 128
 
-struct sc_audit_logger {
+struct hu_audit_logger {
     char *log_path;
     char *key_path;
-    unsigned char prev_hmac[SC_AUDIT_HMAC_LEN];
-    unsigned char audit_key[SC_AUDIT_HMAC_LEN];
+    unsigned char prev_hmac[HU_AUDIT_HMAC_LEN];
+    unsigned char audit_key[HU_AUDIT_HMAC_LEN];
     bool chain_initialized;
-    sc_audit_config_t config;
-    sc_allocator_t *alloc;
+    hu_audit_config_t config;
+    hu_allocator_t *alloc;
     uint32_t rotation_interval_hours;
     time_t last_rotation_time;
 };
@@ -473,29 +473,29 @@ static void get_key_history_path(const char *key_path, char *out, size_t out_cap
         out[0] = '\0';
 }
 
-static sc_error_t append_key_to_history(const char *key_path, int64_t timestamp_s,
+static hu_error_t append_key_to_history(const char *key_path, int64_t timestamp_s,
                                         const unsigned char *key, size_t key_len) {
-    char hist_path[SC_AUDIT_MAX_PATH];
+    char hist_path[HU_AUDIT_MAX_PATH];
     get_key_history_path(key_path, hist_path, sizeof(hist_path));
     if (hist_path[0] == '\0')
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     char hex_key[128];
     if (key_len * 2 + 1 >= sizeof(hex_key))
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_hex_encode(key, key_len, hex_key);
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_hex_encode(key, key_len, hex_key);
 
     FILE *f = fopen(hist_path, "a");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     int n = fprintf(f, "%ld %s\n", (long)timestamp_s, hex_key);
     fclose(f);
-    return (n > 0) ? SC_OK : SC_ERR_IO;
+    return (n > 0) ? HU_OK : HU_ERR_IO;
 }
 
-static sc_error_t load_or_create_audit_key(const char *key_path,
-                                           unsigned char key[SC_AUDIT_HMAC_LEN],
-                                           sc_allocator_t *alloc) {
+static hu_error_t load_or_create_audit_key(const char *key_path,
+                                           unsigned char key[HU_AUDIT_HMAC_LEN],
+                                           hu_allocator_t *alloc) {
     (void)alloc;
     FILE *f = fopen(key_path, "rb");
     if (f) {
@@ -508,25 +508,25 @@ static sc_error_t load_or_create_audit_key(const char *key_path,
             n--;
         hex_buf[n] = '\0';
         size_t dlen;
-        sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf), key, SC_AUDIT_HMAC_LEN, &dlen);
-        if (err != SC_OK || dlen != SC_AUDIT_HMAC_LEN)
-            return SC_ERR_CRYPTO_DECRYPT;
-        return SC_OK;
+        hu_error_t err = hu_hex_decode(hex_buf, strlen(hex_buf), key, HU_AUDIT_HMAC_LEN, &dlen);
+        if (err != HU_OK || dlen != HU_AUDIT_HMAC_LEN)
+            return HU_ERR_CRYPTO_DECRYPT;
+        return HU_OK;
     }
 
     /* Create new key from /dev/urandom */
     f = fopen("/dev/urandom", "rb");
     if (!f)
-        return SC_ERR_CRYPTO_ENCRYPT;
-    size_t n = fread(key, 1, SC_AUDIT_HMAC_LEN, f);
+        return HU_ERR_CRYPTO_ENCRYPT;
+    size_t n = fread(key, 1, HU_AUDIT_HMAC_LEN, f);
     fclose(f);
-    if (n != SC_AUDIT_HMAC_LEN)
-        return SC_ERR_CRYPTO_ENCRYPT;
+    if (n != HU_AUDIT_HMAC_LEN)
+        return HU_ERR_CRYPTO_ENCRYPT;
 
 #ifndef _WIN32
     const char *slash = strrchr(key_path, '/');
     if (slash && slash > key_path) {
-        char dir[SC_AUDIT_MAX_PATH];
+        char dir[HU_AUDIT_MAX_PATH];
         size_t dlen = (size_t)(slash - key_path);
         if (dlen < sizeof(dir)) {
             memcpy(dir, key_path, dlen);
@@ -537,25 +537,25 @@ static sc_error_t load_or_create_audit_key(const char *key_path,
 #endif
     f = fopen(key_path, "wb");
     if (!f) {
-        audit_secure_zero(key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_IO;
+        audit_secure_zero(key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_IO;
     }
-    char hex_out[SC_AUDIT_HMAC_LEN * 2 + 1];
-    sc_hex_encode(key, SC_AUDIT_HMAC_LEN, hex_out);
-    fwrite(hex_out, 1, SC_AUDIT_HMAC_LEN * 2, f);
+    char hex_out[HU_AUDIT_HMAC_LEN * 2 + 1];
+    hu_hex_encode(key, HU_AUDIT_HMAC_LEN, hex_out);
+    fwrite(hex_out, 1, HU_AUDIT_HMAC_LEN * 2, f);
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }
 
-static void bootstrap_prev_hmac_from_log(sc_audit_logger_t *logger) {
+static void bootstrap_prev_hmac_from_log(hu_audit_logger_t *logger) {
     FILE *f = fopen(logger->log_path, "rb");
     if (!f) {
-        memset(logger->prev_hmac, 0, SC_AUDIT_HMAC_LEN);
+        memset(logger->prev_hmac, 0, HU_AUDIT_HMAC_LEN);
         logger->chain_initialized = true;
         return;
     }
-    char line[SC_AUDIT_JSON_BUF_SIZE];
-    char last_with_hmac[SC_AUDIT_JSON_BUF_SIZE];
+    char line[HU_AUDIT_JSON_BUF_SIZE];
+    char last_with_hmac[HU_AUDIT_JSON_BUF_SIZE];
     size_t last_len = 0;
     bool has_hmac = false;
     while (fgets(line, sizeof(line), f)) {
@@ -578,47 +578,47 @@ static void bootstrap_prev_hmac_from_log(sc_audit_logger_t *logger) {
         if (p) {
             p += 8;
             size_t hex_len;
-            sc_error_t err = sc_hex_decode(p, 64, logger->prev_hmac, SC_AUDIT_HMAC_LEN, &hex_len);
-            if (err == SC_OK && hex_len == SC_AUDIT_HMAC_LEN) {
+            hu_error_t err = hu_hex_decode(p, 64, logger->prev_hmac, HU_AUDIT_HMAC_LEN, &hex_len);
+            if (err == HU_OK && hex_len == HU_AUDIT_HMAC_LEN) {
                 logger->chain_initialized = true;
                 return;
             }
         }
     }
-    memset(logger->prev_hmac, 0, SC_AUDIT_HMAC_LEN);
+    memset(logger->prev_hmac, 0, HU_AUDIT_HMAC_LEN);
     logger->chain_initialized = true;
 }
 
-sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc, const sc_audit_config_t *config,
+hu_audit_logger_t *hu_audit_logger_create(hu_allocator_t *alloc, const hu_audit_config_t *config,
                                           const char *base_dir) {
     if (!alloc || !config || !base_dir)
         return NULL;
 
     size_t base_len = strlen(base_dir);
     size_t path_len = strlen(config->log_path);
-    if (base_len + path_len + 3 > SC_AUDIT_MAX_PATH)
+    if (base_len + path_len + 3 > HU_AUDIT_MAX_PATH)
         return NULL;
 
-    char path[SC_AUDIT_MAX_PATH];
+    char path[HU_AUDIT_MAX_PATH];
     if (base_len > 0 && base_dir[base_len - 1] == '/')
         snprintf(path, sizeof(path), "%s%s", base_dir, config->log_path);
     else
         snprintf(path, sizeof(path), "%s/%s", base_dir, config->log_path);
 
-    char key_path[SC_AUDIT_MAX_PATH];
+    char key_path[HU_AUDIT_MAX_PATH];
     if (base_len + 17 >= sizeof(key_path))
         return NULL;
     build_key_path(key_path, sizeof(key_path), base_dir, base_len);
 
-    sc_audit_logger_t *logger =
-        (sc_audit_logger_t *)alloc->alloc(alloc->ctx, sizeof(sc_audit_logger_t));
+    hu_audit_logger_t *logger =
+        (hu_audit_logger_t *)alloc->alloc(alloc->ctx, sizeof(hu_audit_logger_t));
     if (!logger)
         return NULL;
     memset(logger, 0, sizeof(*logger));
 
     logger->log_path = (char *)alloc->alloc(alloc->ctx, strlen(path) + 1);
     if (!logger->log_path) {
-        alloc->free(alloc->ctx, logger, sizeof(sc_audit_logger_t));
+        alloc->free(alloc->ctx, logger, sizeof(hu_audit_logger_t));
         return NULL;
     }
     memcpy(logger->log_path, path, strlen(path) + 1);
@@ -626,16 +626,16 @@ sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc, const sc_audit_
     logger->key_path = (char *)alloc->alloc(alloc->ctx, strlen(key_path) + 1);
     if (!logger->key_path) {
         alloc->free(alloc->ctx, logger->log_path, strlen(path) + 1);
-        alloc->free(alloc->ctx, logger, sizeof(sc_audit_logger_t));
+        alloc->free(alloc->ctx, logger, sizeof(hu_audit_logger_t));
         return NULL;
     }
     memcpy(logger->key_path, key_path, strlen(key_path) + 1);
 
-    sc_error_t err = load_or_create_audit_key(key_path, logger->audit_key, alloc);
-    if (err != SC_OK) {
+    hu_error_t err = load_or_create_audit_key(key_path, logger->audit_key, alloc);
+    if (err != HU_OK) {
         alloc->free(alloc->ctx, logger->key_path, strlen(key_path) + 1);
         alloc->free(alloc->ctx, logger->log_path, strlen(path) + 1);
-        alloc->free(alloc->ctx, logger, sizeof(sc_audit_logger_t));
+        alloc->free(alloc->ctx, logger, sizeof(hu_audit_logger_t));
         return NULL;
     }
     bootstrap_prev_hmac_from_log(logger);
@@ -645,7 +645,7 @@ sc_audit_logger_t *sc_audit_logger_create(sc_allocator_t *alloc, const sc_audit_
     return logger;
 }
 
-void sc_audit_logger_destroy(sc_audit_logger_t *logger, sc_allocator_t *alloc) {
+void hu_audit_logger_destroy(hu_audit_logger_t *logger, hu_allocator_t *alloc) {
     if (!logger || !alloc)
         return;
     if (logger->log_path) {
@@ -656,50 +656,50 @@ void sc_audit_logger_destroy(sc_audit_logger_t *logger, sc_allocator_t *alloc) {
         size_t len = strlen(logger->key_path) + 1;
         alloc->free(alloc->ctx, logger->key_path, len);
     }
-    audit_secure_zero(logger->audit_key, SC_AUDIT_HMAC_LEN);
-    audit_secure_zero(logger->prev_hmac, SC_AUDIT_HMAC_LEN);
-    alloc->free(alloc->ctx, logger, sizeof(sc_audit_logger_t));
+    audit_secure_zero(logger->audit_key, HU_AUDIT_HMAC_LEN);
+    audit_secure_zero(logger->prev_hmac, HU_AUDIT_HMAC_LEN);
+    alloc->free(alloc->ctx, logger, sizeof(hu_audit_logger_t));
 }
 
-sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger, const sc_audit_event_t *event) {
+hu_error_t hu_audit_logger_log(hu_audit_logger_t *logger, const hu_audit_event_t *event) {
     if (!logger || !event)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!logger->config.enabled)
-        return SC_OK;
+        return HU_OK;
 
     /* Check scheduled rotation */
     if (logger->rotation_interval_hours > 0) {
         time_t now = time(NULL);
         if (now - logger->last_rotation_time >= (time_t)(logger->rotation_interval_hours * 3600)) {
-            sc_error_t rerr = sc_audit_rotate_key(logger);
-            if (rerr != SC_OK)
+            hu_error_t rerr = hu_audit_rotate_key(logger);
+            if (rerr != HU_OK)
                 return rerr;
         }
     }
 
-    char json_buf[SC_AUDIT_JSON_BUF_SIZE];
-    size_t json_len = sc_audit_event_write_json(event, json_buf, sizeof(json_buf));
+    char json_buf[HU_AUDIT_JSON_BUF_SIZE];
+    size_t json_len = hu_audit_event_write_json(event, json_buf, sizeof(json_buf));
     if (json_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* HMAC chain: HMAC(prev_hmac || entry_json without hmac) */
-    unsigned char hmac_input[32 + SC_AUDIT_JSON_BUF_SIZE];
-    if (sizeof(hmac_input) < SC_AUDIT_HMAC_LEN + json_len)
-        return SC_ERR_INVALID_ARGUMENT;
-    memcpy(hmac_input, logger->prev_hmac, SC_AUDIT_HMAC_LEN);
-    memcpy(hmac_input + SC_AUDIT_HMAC_LEN, json_buf, json_len);
-    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN, hmac_input, SC_AUDIT_HMAC_LEN + json_len,
+    unsigned char hmac_input[32 + HU_AUDIT_JSON_BUF_SIZE];
+    if (sizeof(hmac_input) < HU_AUDIT_HMAC_LEN + json_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    memcpy(hmac_input, logger->prev_hmac, HU_AUDIT_HMAC_LEN);
+    memcpy(hmac_input + HU_AUDIT_HMAC_LEN, json_buf, json_len);
+    hu_hmac_sha256(logger->audit_key, HU_AUDIT_HMAC_LEN, hmac_input, HU_AUDIT_HMAC_LEN + json_len,
                    logger->prev_hmac);
 
     /* Replace trailing }} with },"hmac":"<64hex>"} */
     char hmac_hex[65];
-    sc_hex_encode(logger->prev_hmac, SC_AUDIT_HMAC_LEN, hmac_hex);
+    hu_hex_encode(logger->prev_hmac, HU_AUDIT_HMAC_LEN, hmac_hex);
     if (json_len < 2)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t base = json_len - 1; /* position of final } */
     size_t needed = 9 + 64 + 2; /* ,"hmac":" + hex + "} */
     if (base + needed >= sizeof(json_buf))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memcpy(json_buf + base, ",\"hmac\":\"", 9);
     memcpy(json_buf + base + 9, hmac_hex, 64);
     json_buf[base + 9 + 64] = '"';
@@ -709,37 +709,37 @@ sc_error_t sc_audit_logger_log(sc_audit_logger_t *logger, const sc_audit_event_t
 
     FILE *f = fopen(logger->log_path, "a");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     size_t written = fwrite(json_buf, 1, json_len, f);
     if (written != json_len) {
         fclose(f);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     if (fputc('\n', f) == EOF) {
         fclose(f);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     fflush(f);
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_audit_logger_log_command(sc_audit_logger_t *logger, const sc_audit_cmd_log_t *entry) {
+hu_error_t hu_audit_logger_log_command(hu_audit_logger_t *logger, const hu_audit_cmd_log_t *entry) {
     if (!logger || !entry)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_audit_event_t ev;
-    sc_audit_event_init(&ev, SC_AUDIT_COMMAND_EXECUTION);
-    sc_audit_event_with_actor(&ev, entry->channel, NULL, NULL);
-    sc_audit_event_with_action(&ev, entry->command, entry->risk_level, entry->approved,
+    hu_audit_event_t ev;
+    hu_audit_event_init(&ev, HU_AUDIT_COMMAND_EXECUTION);
+    hu_audit_event_with_actor(&ev, entry->channel, NULL, NULL);
+    hu_audit_event_with_action(&ev, entry->command, entry->risk_level, entry->approved,
                                entry->allowed);
-    sc_audit_event_with_result(&ev, entry->success, -1, entry->duration_ms, NULL);
+    hu_audit_event_with_result(&ev, entry->success, -1, entry->duration_ms, NULL);
 
-    return sc_audit_logger_log(logger, &ev);
+    return hu_audit_logger_log(logger, &ev);
 }
 
-void sc_audit_set_rotation_interval(sc_audit_logger_t *logger, uint32_t hours) {
+void hu_audit_set_rotation_interval(hu_audit_logger_t *logger, uint32_t hours) {
     if (!logger)
         return;
     logger->rotation_interval_hours = hours;
@@ -747,42 +747,42 @@ void sc_audit_set_rotation_interval(sc_audit_logger_t *logger, uint32_t hours) {
         logger->last_rotation_time = time(NULL);
 }
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-void sc_audit_test_set_last_rotation_epoch(sc_audit_logger_t *logger, time_t epoch) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+void hu_audit_test_set_last_rotation_epoch(hu_audit_logger_t *logger, time_t epoch) {
     if (logger)
         logger->last_rotation_time = epoch;
 }
 #endif
 
-sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
+hu_error_t hu_audit_rotate_key(hu_audit_logger_t *logger) {
     if (!logger)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* 1. Generate new key from /dev/urandom */
-    unsigned char new_key[SC_AUDIT_HMAC_LEN];
+    unsigned char new_key[HU_AUDIT_HMAC_LEN];
     FILE *frand = fopen("/dev/urandom", "rb");
     if (!frand)
-        return SC_ERR_CRYPTO_ENCRYPT;
-    size_t n = fread(new_key, 1, SC_AUDIT_HMAC_LEN, frand);
+        return HU_ERR_CRYPTO_ENCRYPT;
+    size_t n = fread(new_key, 1, HU_AUDIT_HMAC_LEN, frand);
     fclose(frand);
-    if (n != SC_AUDIT_HMAC_LEN) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_CRYPTO_ENCRYPT;
+    if (n != HU_AUDIT_HMAC_LEN) {
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_CRYPTO_ENCRYPT;
     }
 
     /* 2. Append OLD key to history before overwriting */
-    sc_error_t err = append_key_to_history(logger->key_path, (int64_t)time(NULL), logger->audit_key,
-                                           SC_AUDIT_HMAC_LEN);
-    if (err != SC_OK) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+    hu_error_t err = append_key_to_history(logger->key_path, (int64_t)time(NULL), logger->audit_key,
+                                           HU_AUDIT_HMAC_LEN);
+    if (err != HU_OK) {
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
         return err;
     }
 
     /* 3. Compute old_key_hash = SHA256(old key) */
     unsigned char old_key_hash[32];
-    sc_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN, old_key_hash);
+    hu_sha256(logger->audit_key, HU_AUDIT_HMAC_LEN, old_key_hash);
     char old_hash_hex[65];
-    sc_hex_encode(old_key_hash, 32, old_hash_hex);
+    hu_hex_encode(old_key_hash, 32, old_hash_hex);
     old_hash_hex[64] = '\0';
 
     /* 4. Build key_rotation entry (without hmac) */
@@ -792,83 +792,83 @@ sc_error_t sc_audit_rotate_key(sc_audit_logger_t *logger) {
                       "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\"}",
                       (long)now, old_hash_hex);
     if (rn < 0 || (size_t)rn >= sizeof(rotation_json)) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_INVALID_ARGUMENT;
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_INVALID_ARGUMENT;
     }
     size_t rotation_len = (size_t)rn;
 
     /* 5. Compute HMAC with OLD key: HMAC(prev_hmac || rotation_json) */
     unsigned char hmac_input[32 + 512];
-    if (sizeof(hmac_input) < SC_AUDIT_HMAC_LEN + rotation_len) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_INVALID_ARGUMENT;
+    if (sizeof(hmac_input) < HU_AUDIT_HMAC_LEN + rotation_len) {
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    memcpy(hmac_input, logger->prev_hmac, SC_AUDIT_HMAC_LEN);
-    memcpy(hmac_input + SC_AUDIT_HMAC_LEN, rotation_json, rotation_len);
-    unsigned char rotation_hmac[SC_AUDIT_HMAC_LEN];
-    sc_hmac_sha256(logger->audit_key, SC_AUDIT_HMAC_LEN, hmac_input,
-                   SC_AUDIT_HMAC_LEN + rotation_len, rotation_hmac);
+    memcpy(hmac_input, logger->prev_hmac, HU_AUDIT_HMAC_LEN);
+    memcpy(hmac_input + HU_AUDIT_HMAC_LEN, rotation_json, rotation_len);
+    unsigned char rotation_hmac[HU_AUDIT_HMAC_LEN];
+    hu_hmac_sha256(logger->audit_key, HU_AUDIT_HMAC_LEN, hmac_input,
+                   HU_AUDIT_HMAC_LEN + rotation_len, rotation_hmac);
 
     /* 6. Append HMAC to rotation entry */
     char hmac_hex[65];
-    sc_hex_encode(rotation_hmac, SC_AUDIT_HMAC_LEN, hmac_hex);
+    hu_hex_encode(rotation_hmac, HU_AUDIT_HMAC_LEN, hmac_hex);
     char full_entry[600];
     rn = snprintf(
         full_entry, sizeof(full_entry),
         "{\"type\":\"key_rotation\",\"timestamp_s\":%ld,\"old_key_hash\":\"%s\",\"hmac\":\"%s\"}\n",
         (long)now, old_hash_hex, hmac_hex);
     if (rn < 0 || (size_t)rn >= sizeof(full_entry)) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_INVALID_ARGUMENT;
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     /* 7. Write rotation entry to log */
     FILE *flog = fopen(logger->log_path, "a");
     if (!flog) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_IO;
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_IO;
     }
     size_t written = fwrite(full_entry, 1, (size_t)rn, flog);
     fflush(flog);
     fclose(flog);
     if (written != (size_t)rn) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_IO;
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_IO;
     }
 
     /* 8. Update prev_hmac for next entry (rotation entry's hmac becomes new chain head) */
-    memcpy(logger->prev_hmac, rotation_hmac, SC_AUDIT_HMAC_LEN);
+    memcpy(logger->prev_hmac, rotation_hmac, HU_AUDIT_HMAC_LEN);
 
     /* 9. Save new key to key file */
     FILE *fkey = fopen(logger->key_path, "wb");
     if (!fkey) {
-        audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
-        return SC_ERR_IO;
+        audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
+        return HU_ERR_IO;
     }
-    char hex_out[SC_AUDIT_HMAC_LEN * 2 + 1];
-    sc_hex_encode(new_key, SC_AUDIT_HMAC_LEN, hex_out);
-    fwrite(hex_out, 1, SC_AUDIT_HMAC_LEN * 2, fkey);
+    char hex_out[HU_AUDIT_HMAC_LEN * 2 + 1];
+    hu_hex_encode(new_key, HU_AUDIT_HMAC_LEN, hex_out);
+    fwrite(hex_out, 1, HU_AUDIT_HMAC_LEN * 2, fkey);
     fclose(fkey);
 
     /* 10. Clear old key and update logger */
-    audit_secure_zero(logger->audit_key, SC_AUDIT_HMAC_LEN);
-    memcpy(logger->audit_key, new_key, SC_AUDIT_HMAC_LEN);
-    audit_secure_zero(new_key, SC_AUDIT_HMAC_LEN);
+    audit_secure_zero(logger->audit_key, HU_AUDIT_HMAC_LEN);
+    memcpy(logger->audit_key, new_key, HU_AUDIT_HMAC_LEN);
+    audit_secure_zero(new_key, HU_AUDIT_HMAC_LEN);
     logger->last_rotation_time = now;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]) {
+hu_error_t hu_audit_load_key(const char *base_dir, unsigned char key[32]) {
     if (!base_dir || !key)
-        return SC_ERR_INVALID_ARGUMENT;
-    char key_path[SC_AUDIT_MAX_PATH];
+        return HU_ERR_INVALID_ARGUMENT;
+    char key_path[HU_AUDIT_MAX_PATH];
     size_t base_len = strlen(base_dir);
     if (base_len + 17 >= sizeof(key_path))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     build_key_path(key_path, sizeof(key_path), base_dir, base_len);
     FILE *f = fopen(key_path, "rb");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     char hex_buf[80];
     size_t n = fread(hex_buf, 1, sizeof(hex_buf) - 1, f);
     fclose(f);
@@ -878,10 +878,10 @@ sc_error_t sc_audit_load_key(const char *base_dir, unsigned char key[32]) {
         n--;
     hex_buf[n] = '\0';
     size_t dlen;
-    sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf), key, 32, &dlen);
-    if (err != SC_OK || dlen != 32)
-        return SC_ERR_CRYPTO_DECRYPT;
-    return SC_OK;
+    hu_error_t err = hu_hex_decode(hex_buf, strlen(hex_buf), key, 32, &dlen);
+    if (err != HU_OK || dlen != 32)
+        return HU_ERR_CRYPTO_DECRYPT;
+    return HU_OK;
 }
 
 static void build_key_path(char *out, size_t cap, const char *base, size_t blen) {
@@ -897,17 +897,17 @@ static void build_key_path(char *out, size_t cap, const char *base, size_t blen)
     (void)cap;
 }
 
-static sc_error_t
+static hu_error_t
 load_keys_from_base_dir(const char *base_dir,
-                        unsigned char keys[SC_AUDIT_MAX_KEY_HISTORY][SC_AUDIT_HMAC_LEN],
+                        unsigned char keys[HU_AUDIT_MAX_KEY_HISTORY][HU_AUDIT_HMAC_LEN],
                         size_t *out_count) {
-    char key_path[SC_AUDIT_MAX_PATH];
+    char key_path[HU_AUDIT_MAX_PATH];
     size_t base_len = strlen(base_dir);
     if (base_len + 17 >= sizeof(key_path))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     build_key_path(key_path, sizeof(key_path), base_dir, base_len);
 
-    char hist_path[SC_AUDIT_MAX_PATH];
+    char hist_path[HU_AUDIT_MAX_PATH];
     get_key_history_path(key_path, hist_path, sizeof(hist_path));
 
     size_t idx = 0;
@@ -915,8 +915,8 @@ load_keys_from_base_dir(const char *base_dir,
     /* Load keys from history first (oldest first) */
     FILE *fh = fopen(hist_path, "rb");
     if (fh) {
-        char hist_line[SC_AUDIT_KEY_HISTORY_LINE];
-        while (fgets(hist_line, sizeof(hist_line), fh) && idx < SC_AUDIT_MAX_KEY_HISTORY) {
+        char hist_line[HU_AUDIT_KEY_HISTORY_LINE];
+        while (fgets(hist_line, sizeof(hist_line), fh) && idx < HU_AUDIT_MAX_KEY_HISTORY) {
             size_t ll = strlen(hist_line);
             while (ll > 0 && (hist_line[ll - 1] == '\n' || hist_line[ll - 1] == '\r'))
                 hist_line[--ll] = '\0';
@@ -927,8 +927,8 @@ load_keys_from_base_dir(const char *base_dir,
                 continue;
             const char *hex = space + 1;
             size_t dlen;
-            sc_error_t err = sc_hex_decode(hex, strlen(hex), keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
-            if (err == SC_OK && dlen == SC_AUDIT_HMAC_LEN)
+            hu_error_t err = hu_hex_decode(hex, strlen(hex), keys[idx], HU_AUDIT_HMAC_LEN, &dlen);
+            if (err == HU_OK && dlen == HU_AUDIT_HMAC_LEN)
                 idx++;
         }
         fclose(fh);
@@ -937,7 +937,7 @@ load_keys_from_base_dir(const char *base_dir,
     /* Add current key from .audit_hmac_key */
     FILE *fk = fopen(key_path, "rb");
     if (!fk)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     char hex_buf[80];
     size_t n = fread(hex_buf, 1, sizeof(hex_buf) - 1, fk);
     fclose(fk);
@@ -946,12 +946,12 @@ load_keys_from_base_dir(const char *base_dir,
                      hex_buf[n - 1] == '\r'))
         hex_buf[--n] = '\0';
     size_t dlen;
-    sc_error_t err = sc_hex_decode(hex_buf, strlen(hex_buf), keys[idx], SC_AUDIT_HMAC_LEN, &dlen);
-    if (err != SC_OK || dlen != SC_AUDIT_HMAC_LEN)
-        return SC_ERR_CRYPTO_DECRYPT;
+    hu_error_t err = hu_hex_decode(hex_buf, strlen(hex_buf), keys[idx], HU_AUDIT_HMAC_LEN, &dlen);
+    if (err != HU_OK || dlen != HU_AUDIT_HMAC_LEN)
+        return HU_ERR_CRYPTO_DECRYPT;
     idx++;
     *out_count = idx;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void derive_base_dir_from_log_path(const char *audit_file_path, char *base_dir, size_t cap) {
@@ -968,39 +968,39 @@ static void derive_base_dir_from_log_path(const char *audit_file_path, char *bas
         base_dir[0] = '\0';
 }
 
-sc_error_t sc_audit_verify_chain(const char *audit_file_path, const unsigned char *key) {
+hu_error_t hu_audit_verify_chain(const char *audit_file_path, const unsigned char *key) {
     if (!audit_file_path)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* Single-key mode when key provided */
-    unsigned char single_key[SC_AUDIT_HMAC_LEN];
+    unsigned char single_key[HU_AUDIT_HMAC_LEN];
     const unsigned char *cur_key;
     size_t key_count = 1;
     size_t key_index = 0;
-    unsigned char key_ring[SC_AUDIT_MAX_KEY_HISTORY][SC_AUDIT_HMAC_LEN];
+    unsigned char key_ring[HU_AUDIT_MAX_KEY_HISTORY][HU_AUDIT_HMAC_LEN];
 
     if (key) {
-        memcpy(single_key, key, SC_AUDIT_HMAC_LEN);
+        memcpy(single_key, key, HU_AUDIT_HMAC_LEN);
         cur_key = single_key;
     } else {
-        char base_dir[SC_AUDIT_MAX_PATH];
+        char base_dir[HU_AUDIT_MAX_PATH];
         derive_base_dir_from_log_path(audit_file_path, base_dir, sizeof(base_dir));
         if (base_dir[0] == '\0')
-            return SC_ERR_INVALID_ARGUMENT;
-        sc_error_t lerr = load_keys_from_base_dir(base_dir, key_ring, &key_count);
-        if (lerr != SC_OK)
+            return HU_ERR_INVALID_ARGUMENT;
+        hu_error_t lerr = load_keys_from_base_dir(base_dir, key_ring, &key_count);
+        if (lerr != HU_OK)
             return lerr;
         cur_key = key_ring[0];
     }
 
     FILE *f = fopen(audit_file_path, "rb");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
-    unsigned char prev_hmac[SC_AUDIT_HMAC_LEN];
-    memset(prev_hmac, 0, SC_AUDIT_HMAC_LEN);
+    unsigned char prev_hmac[HU_AUDIT_HMAC_LEN];
+    memset(prev_hmac, 0, HU_AUDIT_HMAC_LEN);
 
-    char line[SC_AUDIT_JSON_BUF_SIZE];
+    char line[HU_AUDIT_JSON_BUF_SIZE];
     while (fgets(line, sizeof(line), f)) {
         size_t len = strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
@@ -1011,7 +1011,7 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path, const unsigned cha
         const char *hmac_start = strstr(line, "\"hmac\":\"");
         if (!hmac_start) {
             fclose(f);
-            return SC_ERR_PARSE; /* Entry without hmac - chain broken */
+            return HU_ERR_PARSE; /* Entry without hmac - chain broken */
         }
         const char *hmac_hex = hmac_start + 8;
         if (len < (size_t)(hmac_hex - line) + 64)
@@ -1020,18 +1020,18 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path, const unsigned cha
         /* Build entry without hmac: everything before ,"hmac":" plus } */
         if (hmac_start <= line + 1) {
             fclose(f);
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         }
         size_t prefix_len = (size_t)(hmac_start - line - 1);
         if (prefix_len == 0) {
             fclose(f);
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         }
 
-        char entry_without_hmac[SC_AUDIT_JSON_BUF_SIZE];
+        char entry_without_hmac[HU_AUDIT_JSON_BUF_SIZE];
         if (prefix_len >= sizeof(entry_without_hmac) - 2) {
             fclose(f);
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         }
         memcpy(entry_without_hmac, line, prefix_len);
         entry_without_hmac[prefix_len] = '}';
@@ -1039,33 +1039,33 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path, const unsigned cha
         size_t entry_len = prefix_len + 1;
 
         /* Compute HMAC(prev_hmac || entry_without_hmac) */
-        unsigned char hmac_input[32 + SC_AUDIT_JSON_BUF_SIZE];
-        if (sizeof(hmac_input) < SC_AUDIT_HMAC_LEN + entry_len) {
+        unsigned char hmac_input[32 + HU_AUDIT_JSON_BUF_SIZE];
+        if (sizeof(hmac_input) < HU_AUDIT_HMAC_LEN + entry_len) {
             fclose(f);
-            return SC_ERR_INVALID_ARGUMENT;
+            return HU_ERR_INVALID_ARGUMENT;
         }
-        memcpy(hmac_input, prev_hmac, SC_AUDIT_HMAC_LEN);
-        memcpy(hmac_input + SC_AUDIT_HMAC_LEN, entry_without_hmac, entry_len);
-        unsigned char computed[SC_AUDIT_HMAC_LEN];
-        sc_hmac_sha256(cur_key, SC_AUDIT_HMAC_LEN, hmac_input, SC_AUDIT_HMAC_LEN + entry_len,
+        memcpy(hmac_input, prev_hmac, HU_AUDIT_HMAC_LEN);
+        memcpy(hmac_input + HU_AUDIT_HMAC_LEN, entry_without_hmac, entry_len);
+        unsigned char computed[HU_AUDIT_HMAC_LEN];
+        hu_hmac_sha256(cur_key, HU_AUDIT_HMAC_LEN, hmac_input, HU_AUDIT_HMAC_LEN + entry_len,
                        computed);
 
         /* Decode stored hmac and compare */
-        unsigned char stored[SC_AUDIT_HMAC_LEN];
+        unsigned char stored[HU_AUDIT_HMAC_LEN];
         size_t stored_len;
-        sc_error_t err = sc_hex_decode(hmac_hex, 64, stored, SC_AUDIT_HMAC_LEN, &stored_len);
-        if (err != SC_OK || stored_len != SC_AUDIT_HMAC_LEN) {
+        hu_error_t err = hu_hex_decode(hmac_hex, 64, stored, HU_AUDIT_HMAC_LEN, &stored_len);
+        if (err != HU_OK || stored_len != HU_AUDIT_HMAC_LEN) {
             fclose(f);
-            return SC_ERR_CRYPTO_DECRYPT;
+            return HU_ERR_CRYPTO_DECRYPT;
         }
         unsigned char diff = 0;
-        for (int i = 0; i < SC_AUDIT_HMAC_LEN; i++)
+        for (int i = 0; i < HU_AUDIT_HMAC_LEN; i++)
             diff |= computed[i] ^ stored[i];
         if (diff != 0) {
             fclose(f);
-            return SC_ERR_CRYPTO_DECRYPT; /* Tampering detected */
+            return HU_ERR_CRYPTO_DECRYPT; /* Tampering detected */
         }
-        memcpy(prev_hmac, computed, SC_AUDIT_HMAC_LEN);
+        memcpy(prev_hmac, computed, HU_AUDIT_HMAC_LEN);
 
         /* If key_rotation entry and multi-key mode, advance to next key */
         if (!key && key_index + 1 < key_count &&
@@ -1075,5 +1075,5 @@ sc_error_t sc_audit_verify_chain(const char *audit_file_path, const unsigned cha
         }
     }
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }

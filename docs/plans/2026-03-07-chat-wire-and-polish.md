@@ -18,18 +18,18 @@ Set `status` on user messages in `ChatController`:
 - `sent` on first assistant response or ack
 - `failed` on error
 
-`sc-delivery-status` is already rendered by `sc-message-thread` when status is set.
+`hu-delivery-status` is already rendered by `hu-message-thread` when status is set.
 
 ### 2. Wire grouped timestamps
 
 Show centered timestamp dividers between message groups separated by >5 minutes.
-`sc-message-thread` already has time divider logic; ensure it's active and styled.
+`hu-message-thread` already has time divider logic; ensure it's active and styled.
 
 ### 3. Polish chat-view layout
 
 - Glassmorphic status bar matching overview aesthetic
 - Spring entrance animations on new messages (staggered)
-- Refined spacing: `--sc-space-lg` between sender groups, `--sc-space-xs` within
+- Refined spacing: `--hu-space-lg` between sender groups, `--hu-space-xs` within
 - Smooth scroll-to-bottom on new message
 
 ### 4. Wire retry on failed sends
@@ -39,10 +39,10 @@ Show centered timestamp dividers between message groups separated by >5 minutes.
 
 ### 5. Clean up dead code
 
-Remove unused components replaced by `sc-message-thread`:
+Remove unused components replaced by `hu-message-thread`:
 
-- `sc-message-list.ts`
-- `sc-message-stream.ts`
+- `hu-message-list.ts`
+- `hu-message-stream.ts`
 
 Update imports in any file that references them.
 

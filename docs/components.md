@@ -5,7 +5,7 @@ title: Component API Reference
 
 Auto-generated from `ui/src/components/`
 
-## `<sc-avatar>`
+## `<hu-avatar>`
 
 ### Properties
 
@@ -18,7 +18,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-badge>`
+## `<hu-badge>`
 
 ### Properties
 
@@ -33,7 +33,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-button>`
+## `<hu-button>`
 
 ### Properties
 
@@ -51,7 +51,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-card>`
+## `<hu-card>`
 
 ### Properties
 
@@ -66,7 +66,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-empty-state>`
+## `<hu-empty-state>`
 
 ### Properties
 
@@ -82,7 +82,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-modal>`
+## `<hu-modal>`
 
 ### Properties
 
@@ -97,7 +97,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-progress>`
+## `<hu-progress>`
 
 ### Properties
 
@@ -111,7 +111,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-sheet>`
+## `<hu-sheet>`
 
 ### Properties
 
@@ -129,7 +129,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-skeleton>`
+## `<hu-skeleton>`
 
 ### Properties
 
@@ -141,7 +141,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-tabs>`
+## `<hu-tabs>`
 
 ### Properties
 
@@ -158,7 +158,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-toast>`
+## `<hu-toast>`
 
 ### Properties
 
@@ -168,7 +168,7 @@ Auto-generated from `ui/src/components/`
 
 ---
 
-## `<sc-tooltip>`
+## `<hu-tooltip>`
 
 ### Properties
 

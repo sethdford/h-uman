@@ -1,8 +1,8 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,58 +22,58 @@ typedef struct {
     char _unused;
 } broadcast_ctx_t;
 
-static sc_error_t broadcast_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                    sc_tool_result_t *out) {
+static hu_error_t broadcast_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                    hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *message = sc_json_get_string(args, "message");
+    const char *message = hu_json_get_string(args, "message");
     if (!message || strlen(message) == 0) {
-        *out = sc_tool_result_fail("missing message", 15);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing message", 15);
+        return HU_OK;
     }
-    sc_json_value_t *channels = sc_json_object_get((sc_json_value_t *)args, "channels");
-    if (!channels || channels->type != SC_JSON_ARRAY || channels->data.array.len == 0) {
-        *out = sc_tool_result_fail("missing channels array", 22);
-        return SC_OK;
+    hu_json_value_t *channels = hu_json_object_get((hu_json_value_t *)args, "channels");
+    if (!channels || channels->type != HU_JSON_ARRAY || channels->data.array.len == 0) {
+        *out = hu_tool_result_fail("missing channels array", 22);
+        return HU_OK;
     }
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     size_t buf_sz = 256 + channels->data.array.len * 128;
     char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
     if (!msg) {
-        *out = sc_tool_result_fail("out of memory", 13);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 13);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     int n = snprintf(msg, buf_sz, "Broadcast to %zu channels:\n", channels->data.array.len);
     for (size_t i = 0; i < channels->data.array.len; i++) {
-        sc_json_value_t *entry = channels->data.array.items[i];
-        if (!entry || entry->type != SC_JSON_OBJECT)
+        hu_json_value_t *entry = channels->data.array.items[i];
+        if (!entry || entry->type != HU_JSON_OBJECT)
             continue;
-        const char *ch = sc_json_get_string(entry, "channel");
-        const char *tgt = sc_json_get_string(entry, "target");
+        const char *ch = hu_json_get_string(entry, "channel");
+        const char *tgt = hu_json_get_string(entry, "target");
         n += snprintf(msg + n, buf_sz - (size_t)n, "- %s -> %s: delivered (test)\n",
                       ch ? ch : "unknown", tgt ? tgt : "default");
     }
-    *out = sc_tool_result_ok_owned(msg, (size_t)n);
+    *out = hu_tool_result_ok_owned(msg, (size_t)n);
 #else
     size_t buf_sz = 256 + channels->data.array.len * 128;
     char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
     if (!msg) {
-        *out = sc_tool_result_fail("out of memory", 13);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 13);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     int n = snprintf(msg, buf_sz,
                      "Broadcast queued for %zu channels. Use the 'message' tool to send to "
                      "each channel individually.",
                      channels->data.array.len);
-    *out = sc_tool_result_ok_owned(msg, (size_t)n);
+    *out = hu_tool_result_ok_owned(msg, (size_t)n);
 #endif
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *broadcast_name(void *ctx) {
@@ -88,12 +88,12 @@ static const char *broadcast_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void broadcast_deinit(void *ctx, sc_allocator_t *alloc) {
+static void broadcast_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
         alloc->free(alloc->ctx, ctx, sizeof(broadcast_ctx_t));
 }
 
-static const sc_tool_vtable_t broadcast_vtable = {
+static const hu_tool_vtable_t broadcast_vtable = {
     .execute = broadcast_execute,
     .name = broadcast_name,
     .description = broadcast_desc,
@@ -101,14 +101,14 @@ static const sc_tool_vtable_t broadcast_vtable = {
     .deinit = broadcast_deinit,
 };
 
-sc_error_t sc_broadcast_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_broadcast_create(hu_allocator_t *alloc, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     void *ctx = alloc->alloc(alloc->ctx, sizeof(broadcast_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(broadcast_ctx_t));
     out->ctx = ctx;
     out->vtable = &broadcast_vtable;
-    return SC_OK;
+    return HU_OK;
 }

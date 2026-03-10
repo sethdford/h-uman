@@ -1,7 +1,7 @@
-#include "seaclaw/tools/apply_patch.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tools/validation.h"
+#include "human/tools/apply_patch.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tools/validation.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,60 +15,60 @@
     "},\"required\":[\"file\",\"patch\"]}"
 
 typedef struct {
-    sc_allocator_t *alloc;
-    sc_security_policy_t *policy;
+    hu_allocator_t *alloc;
+    hu_security_policy_t *policy;
 } apply_patch_ctx_t;
 
-static sc_error_t apply_patch_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                      sc_tool_result_t *out) {
+static hu_error_t apply_patch_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                      hu_tool_result_t *out) {
     apply_patch_ctx_t *c = (apply_patch_ctx_t *)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *file = sc_json_get_string(args, "file");
-    const char *patch = sc_json_get_string(args, "patch");
+    const char *file = hu_json_get_string(args, "file");
+    const char *patch = hu_json_get_string(args, "patch");
     if (!file || !patch) {
-        *out = sc_tool_result_fail("missing file or patch", 21);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing file or patch", 21);
+        return HU_OK;
     }
     const char *ws = (c && c->policy && c->policy->workspace_dir) ? c->policy->workspace_dir : NULL;
     size_t ws_len = ws ? strlen(ws) : 0;
-    sc_error_t path_err = sc_tool_validate_path(file, ws, ws_len);
-    if (path_err != SC_OK) {
-        *out = sc_tool_result_fail("path traversal or invalid path", 30);
-        return SC_OK;
+    hu_error_t path_err = hu_tool_validate_path(file, ws, ws_len);
+    if (path_err != HU_OK) {
+        *out = hu_tool_result_fail("path traversal or invalid path", 30);
+        return HU_OK;
     }
     if (strlen(patch) > 1048576) {
-        *out = sc_tool_result_fail("patch too large (max 1MB)", 25);
-        return SC_OK;
+        *out = hu_tool_result_fail("patch too large (max 1MB)", 25);
+        return HU_OK;
     }
 
-#if SC_IS_TEST
-    char *msg = sc_sprintf(alloc, "applied patch to %s (%zu bytes)", file, strlen(patch));
-    *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+#if HU_IS_TEST
+    char *msg = hu_sprintf(alloc, "applied patch to %s (%zu bytes)", file, strlen(patch));
+    *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
 #else
     FILE *f = fopen(file, "r");
     if (!f) {
-        *out = sc_tool_result_fail("file not found", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("file not found", 14);
+        return HU_OK;
     }
     fseek(f, 0, SEEK_END);
     long flen = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (flen < 0 || flen > 10485760) {
         fclose(f);
-        *out = sc_tool_result_fail("file too large", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("file too large", 14);
+        return HU_OK;
     }
     size_t cap = (size_t)flen + strlen(patch) + 4096;
     char *lines_buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!lines_buf) {
         fclose(f);
-        *out = sc_tool_result_fail("oom", 3);
-        return SC_OK;
+        *out = hu_tool_result_fail("oom", 3);
+        return HU_OK;
     }
     size_t line_count = 0, max_lines = 65536;
     char **lines = (char **)alloc->alloc(alloc->ctx, max_lines * sizeof(char *));
@@ -80,8 +80,8 @@ static sc_error_t apply_patch_execute(void *ctx, sc_allocator_t *alloc, const sc
             alloc->free(alloc->ctx, lens, max_lines * sizeof(size_t));
         alloc->free(alloc->ctx, lines_buf, cap);
         fclose(f);
-        *out = sc_tool_result_fail("oom", 3);
-        return SC_OK;
+        *out = hu_tool_result_fail("oom", 3);
+        return HU_OK;
     }
     size_t buf_off = 0, line_start = 0;
     int ch;
@@ -188,8 +188,8 @@ static sc_error_t apply_patch_execute(void *ctx, sc_allocator_t *alloc, const sc
         alloc->free(alloc->ctx, lines, max_lines * sizeof(char *));
         alloc->free(alloc->ctx, lens, max_lines * sizeof(size_t));
         alloc->free(alloc->ctx, lines_buf, cap);
-        *out = sc_tool_result_fail("cannot write file", 17);
-        return SC_OK;
+        *out = hu_tool_result_fail("cannot write file", 17);
+        return HU_OK;
     }
     for (size_t i = 0; i < line_count; i++) {
         fwrite(lines[i], 1, lens[i], f);
@@ -200,11 +200,11 @@ static sc_error_t apply_patch_execute(void *ctx, sc_allocator_t *alloc, const sc
     alloc->free(alloc->ctx, lines, max_lines * sizeof(char *));
     alloc->free(alloc->ctx, lens, max_lines * sizeof(size_t));
     alloc->free(alloc->ctx, lines_buf, cap);
-    char *msg = sc_sprintf(alloc, "patch applied: %d hunk(s) succeeded, %d failed", hunks_applied,
+    char *msg = hu_sprintf(alloc, "patch applied: %d hunk(s) succeeded, %d failed", hunks_applied,
                            hunks_failed);
-    *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+    *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
 #endif
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *apply_patch_name(void *ctx) {
@@ -219,27 +219,27 @@ static const char *apply_patch_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void apply_patch_deinit(void *ctx, sc_allocator_t *alloc) {
+static void apply_patch_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx)
         alloc->free(alloc->ctx, ctx, sizeof(apply_patch_ctx_t));
 }
-static const sc_tool_vtable_t apply_patch_vtable = {.execute = apply_patch_execute,
+static const hu_tool_vtable_t apply_patch_vtable = {.execute = apply_patch_execute,
                                                     .name = apply_patch_name,
                                                     .description = apply_patch_desc,
                                                     .parameters_json = apply_patch_params,
                                                     .deinit = apply_patch_deinit};
 
-sc_error_t sc_apply_patch_create(sc_allocator_t *alloc, sc_security_policy_t *policy,
-                                 sc_tool_t *out) {
+hu_error_t hu_apply_patch_create(hu_allocator_t *alloc, hu_security_policy_t *policy,
+                                 hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     apply_patch_ctx_t *c = (apply_patch_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     c->policy = policy;
     out->ctx = c;
     out->vtable = &apply_patch_vtable;
-    return SC_OK;
+    return HU_OK;
 }

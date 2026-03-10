@@ -2,15 +2,15 @@
 @import "./_dynamic-color.css";
 
 :root {
-  --sc-surface: var(--sc-bg-surface);
-  --sc-overlay: var(--sc-color-overlay, rgb(0 0 0 / 0.6));
-  --sc-focus-glow: rgb(59 130 246 / 0.15);
-  --sc-glass-text-shadow-color: rgb(0 0 0 / 0.5);
-  --sc-glass-hover-border: rgb(255 255 255 / 0.08);
-  --sc-accent-glow: rgb(122 182 72 / 0.35);
+  --hu-surface: var(--hu-bg-surface);
+  --hu-overlay: var(--hu-color-overlay, rgb(0 0 0 / 0.6));
+  --hu-focus-glow: rgb(59 130 246 / 0.15);
+  --hu-glass-text-shadow-color: rgb(0 0 0 / 0.5);
+  --hu-glass-hover-border: rgb(255 255 255 / 0.08);
+  --hu-accent-glow: rgb(122 182 72 / 0.35);
   /* Spring easing — cubic-bezier approximations for physics motion */
-  --sc-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --sc-ease-spring-gentle: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --hu-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --hu-ease-spring-gentle: cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 @font-face {
@@ -57,17 +57,17 @@ a,
 input,
 textarea,
 select {
-  transition: all var(--sc-duration-fast) var(--sc-ease-out);
+  transition: all var(--hu-duration-fast) var(--hu-ease-out);
 }
 
 body {
   margin: 0;
   padding: 0;
-  font-family: var(--sc-font);
-  font-size: var(--sc-text-base);
-  line-height: var(--sc-leading-normal);
-  background: var(--sc-bg);
-  color: var(--sc-text);
+  font-family: var(--hu-font);
+  font-size: var(--hu-text-base);
+  line-height: var(--hu-leading-normal);
+  background: var(--hu-bg);
+  color: var(--hu-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -88,135 +88,135 @@ body {
 }
 
 :focus-visible {
-  outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
-  outline-offset: var(--sc-focus-ring-offset, 2px);
-  box-shadow: 0 0 12px var(--sc-focus-glow);
+  outline: var(--hu-focus-ring-width, 2px) solid var(--hu-focus-ring);
+  outline-offset: var(--hu-focus-ring-offset, 2px);
+  box-shadow: 0 0 12px var(--hu-focus-glow);
 }
 
 /* ─── Selection ───────────────────────────────────────────────────── */
 ::selection {
-  background: var(--sc-accent-subtle);
-  color: var(--sc-text);
+  background: var(--hu-accent-subtle);
+  color: var(--hu-text);
 }
 
 /* ─── Layout Utilities ────────────────────────────────────────────── */
-.sc-stagger > * {
-  animation: sc-slide-up var(--sc-duration-normal) var(--sc-ease-out) backwards;
+.hu-stagger > * {
+  animation: hu-slide-up var(--hu-duration-normal) var(--hu-ease-out) backwards;
 }
-.sc-stagger > *:nth-child(1) {
+.hu-stagger > *:nth-child(1) {
   animation-delay: 0ms;
 }
-.sc-stagger > *:nth-child(2) {
+.hu-stagger > *:nth-child(2) {
   animation-delay: 40ms;
 }
-.sc-stagger > *:nth-child(3) {
+.hu-stagger > *:nth-child(3) {
   animation-delay: 80ms;
 }
-.sc-stagger > *:nth-child(4) {
+.hu-stagger > *:nth-child(4) {
   animation-delay: 120ms;
 }
-.sc-stagger > *:nth-child(5) {
+.hu-stagger > *:nth-child(5) {
   animation-delay: 160ms;
 }
-.sc-stagger > *:nth-child(6) {
+.hu-stagger > *:nth-child(6) {
   animation-delay: 200ms;
 }
-.sc-stagger > *:nth-child(7) {
+.hu-stagger > *:nth-child(7) {
   animation-delay: 240ms;
 }
-.sc-stagger > *:nth-child(8) {
+.hu-stagger > *:nth-child(8) {
   animation-delay: 280ms;
 }
-.sc-stagger > *:nth-child(9) {
+.hu-stagger > *:nth-child(9) {
   animation-delay: 320ms;
 }
-.sc-stagger > *:nth-child(10) {
+.hu-stagger > *:nth-child(10) {
   animation-delay: 360ms;
 }
-.sc-stagger > *:nth-child(11) {
+.hu-stagger > *:nth-child(11) {
   animation-delay: 400ms;
 }
-.sc-stagger > *:nth-child(12) {
+.hu-stagger > *:nth-child(12) {
   animation-delay: 440ms;
 }
 
 /* Hover lift — subtle card elevation on hover */
-.sc-hover-lift {
+.hu-hover-lift {
   transition:
-    transform var(--sc-duration-normal, 200ms)
-      var(--sc-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
-    box-shadow var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease-out);
+    transform var(--hu-duration-normal, 200ms)
+      var(--hu-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
+    box-shadow var(--hu-duration-normal, 200ms) var(--hu-ease-out, ease-out);
 }
 
-.sc-hover-lift:hover {
+.hu-hover-lift:hover {
   transform: translateY(-2px);
-  box-shadow: var(--sc-shadow-lg);
+  box-shadow: var(--hu-shadow-lg);
 }
 
-.sc-hover-lift:active {
+.hu-hover-lift:active {
   transform: translateY(0) scale(0.98);
 }
 
 /* Press squash — button feedback */
-.sc-press {
-  transition: transform var(--sc-duration-fast, 100ms) var(--sc-ease-out, ease-out);
+.hu-press {
+  transition: transform var(--hu-duration-fast, 100ms) var(--hu-ease-out, ease-out);
 }
 
-.sc-press:active {
+.hu-press:active {
   transform: scale(0.97);
 }
 
 /* Cascade entrance — staggered slide for timeline/list items */
-.sc-cascade > * {
-  animation: sc-slide-up var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease-out) both;
+.hu-cascade > * {
+  animation: hu-slide-up var(--hu-duration-normal, 200ms) var(--hu-ease-out, ease-out) both;
 }
 
-.sc-cascade > :nth-child(1) {
+.hu-cascade > :nth-child(1) {
   animation-delay: 0ms;
 }
-.sc-cascade > :nth-child(2) {
+.hu-cascade > :nth-child(2) {
   animation-delay: 50ms;
 }
-.sc-cascade > :nth-child(3) {
+.hu-cascade > :nth-child(3) {
   animation-delay: 100ms;
 }
-.sc-cascade > :nth-child(4) {
+.hu-cascade > :nth-child(4) {
   animation-delay: 150ms;
 }
-.sc-cascade > :nth-child(5) {
+.hu-cascade > :nth-child(5) {
   animation-delay: 200ms;
 }
-.sc-cascade > :nth-child(6) {
+.hu-cascade > :nth-child(6) {
   animation-delay: 250ms;
 }
-.sc-cascade > :nth-child(7) {
+.hu-cascade > :nth-child(7) {
   animation-delay: 300ms;
 }
-.sc-cascade > :nth-child(8) {
+.hu-cascade > :nth-child(8) {
   animation-delay: 350ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sc-hover-lift,
-  .sc-press {
+  .hu-hover-lift,
+  .hu-press {
     transition: none;
   }
-  .sc-hover-lift:hover {
+  .hu-hover-lift:hover {
     transform: none;
   }
-  .sc-hover-lift:active,
-  .sc-press:active {
+  .hu-hover-lift:active,
+  .hu-press:active {
     transform: none;
   }
-  .sc-cascade > * {
+  .hu-cascade > * {
     animation: none;
   }
 }
 
 .view-enter {
   animation:
-    sc-fade-in var(--sc-duration-normal) var(--sc-ease-out),
-    sc-slide-up var(--sc-duration-normal) var(--sc-ease-out);
+    hu-fade-in var(--hu-duration-normal) var(--hu-ease-out),
+    hu-slide-up var(--hu-duration-normal) var(--hu-ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -227,32 +227,32 @@ body {
 
 /* ─── @starting-style Entry Animations ─────────────────────────────── */
 @supports (selector(:popover-open)) {
-  .sc-entry-fade {
+  .hu-entry-fade {
     opacity: 1;
-    transition: opacity var(--sc-duration-normal) var(--sc-ease-out);
+    transition: opacity var(--hu-duration-normal) var(--hu-ease-out);
     @starting-style {
       opacity: 0;
     }
   }
 
-  .sc-entry-slide-up {
+  .hu-entry-slide-up {
     opacity: 1;
     transform: translateY(0);
     transition:
-      opacity var(--sc-duration-normal) var(--sc-ease-out),
-      transform var(--sc-duration-normal) var(--sc-ease-out);
+      opacity var(--hu-duration-normal) var(--hu-ease-out),
+      transform var(--hu-duration-normal) var(--hu-ease-out);
     @starting-style {
       opacity: 0;
-      transform: translateY(var(--sc-space-sm, 8px));
+      transform: translateY(var(--hu-space-sm, 8px));
     }
   }
 
-  .sc-entry-scale {
+  .hu-entry-scale {
     opacity: 1;
     transform: scale(1);
     transition:
-      opacity var(--sc-duration-normal) var(--sc-ease-out),
-      transform var(--sc-duration-normal) var(--sc-spring-out, cubic-bezier(0.34, 1.56, 0.64, 1));
+      opacity var(--hu-duration-normal) var(--hu-ease-out),
+      transform var(--hu-duration-normal) var(--hu-spring-out, cubic-bezier(0.34, 1.56, 0.64, 1));
     @starting-style {
       opacity: 0;
       transform: scale(0.95);
@@ -260,9 +260,9 @@ body {
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .sc-entry-fade,
-    .sc-entry-slide-up,
-    .sc-entry-scale {
+    .hu-entry-fade,
+    .hu-entry-slide-up,
+    .hu-entry-scale {
       transition: none;
     }
   }
@@ -279,16 +279,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--sc-bg-elevated);
-  border-radius: var(--sc-radius-full);
+  background: var(--hu-bg-elevated);
+  border-radius: var(--hu-radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--sc-border);
+  background: var(--hu-border);
 }
 
 /* ─── Keyframes ────────────────────────────────────────────────────── */
-@keyframes sc-shimmer {
+@keyframes hu-shimmer {
   0% {
     background-position: -200% 0;
   }
@@ -297,7 +297,7 @@ body {
   }
 }
 
-@keyframes sc-fade-in {
+@keyframes hu-fade-in {
   from {
     opacity: 0;
   }
@@ -306,7 +306,7 @@ body {
   }
 }
 
-@keyframes sc-fade-out {
+@keyframes hu-fade-out {
   from {
     opacity: 1;
   }
@@ -315,21 +315,10 @@ body {
   }
 }
 
-@keyframes sc-slide-up {
+@keyframes hu-slide-up {
   from {
     opacity: 0;
-    transform: translateY(var(--sc-space-sm));
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes sc-slide-down {
-  from {
-    opacity: 0;
-    transform: translateY(calc(-1 * var(--sc-space-sm)));
+    transform: translateY(var(--hu-space-sm));
   }
   to {
     opacity: 1;
@@ -337,7 +326,18 @@ body {
   }
 }
 
-@keyframes sc-scale-in {
+@keyframes hu-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--hu-space-sm)));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hu-scale-in {
   from {
     opacity: 0;
     transform: scale(0.95);
@@ -348,10 +348,10 @@ body {
   }
 }
 
-@keyframes sc-modal-enter {
+@keyframes hu-modal-enter {
   from {
     opacity: 0;
-    transform: scale(0.9) translateY(var(--sc-space-md));
+    transform: scale(0.9) translateY(var(--hu-space-md));
   }
   50% {
     transform: scale(1.02) translateY(0);
@@ -362,7 +362,7 @@ body {
   }
 }
 
-@keyframes sc-sheet-enter {
+@keyframes hu-sheet-enter {
   from {
     transform: translateY(100%);
   }
@@ -374,7 +374,7 @@ body {
   }
 }
 
-@keyframes sc-scale-out {
+@keyframes hu-scale-out {
   from {
     opacity: 1;
     transform: scale(1);
@@ -385,7 +385,7 @@ body {
   }
 }
 
-@keyframes sc-pulse {
+@keyframes hu-pulse {
   0%,
   100% {
     opacity: 1;
@@ -395,7 +395,7 @@ body {
   }
 }
 
-@keyframes sc-bounce-dot {
+@keyframes hu-bounce-dot {
   0%,
   80%,
   100% {
@@ -406,7 +406,7 @@ body {
   }
 }
 
-@keyframes sc-ripple {
+@keyframes hu-ripple {
   from {
     transform: scale(0);
     opacity: 0.35;
@@ -417,17 +417,17 @@ body {
   }
 }
 
-@keyframes sc-accent-glow {
+@keyframes hu-accent-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc-accent) 0%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--hu-accent) 0%, transparent);
   }
   50% {
-    box-shadow: 0 0 12px 2px color-mix(in srgb, var(--sc-accent) 15%, transparent);
+    box-shadow: 0 0 12px 2px color-mix(in srgb, var(--hu-accent) 15%, transparent);
   }
 }
 
-@keyframes sc-spring-scale {
+@keyframes hu-spring-scale {
   0% {
     transform: scale(1);
   }
@@ -443,7 +443,7 @@ body {
 }
 
 /* ─── Pixar Principles (Animation) ─────────────────────────────────────── */
-@keyframes sc-anticipate {
+@keyframes hu-anticipate {
   0% {
     transform: scale(1);
   }
@@ -455,7 +455,7 @@ body {
   }
 }
 
-@keyframes sc-squash {
+@keyframes hu-squash {
   0% {
     transform: scaleY(1) scaleX(1);
   }
@@ -470,7 +470,7 @@ body {
   }
 }
 
-@keyframes sc-overshoot-in {
+@keyframes hu-overshoot-in {
   0% {
     transform: translateY(16px);
     opacity: 0;
@@ -488,7 +488,7 @@ body {
   }
 }
 
-@keyframes sc-wiggle {
+@keyframes hu-wiggle {
   0%,
   100% {
     transform: rotate(0deg);
@@ -501,19 +501,19 @@ body {
   }
 }
 
-@keyframes sc-spotlight {
+@keyframes hu-spotlight {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc-accent) 0%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--hu-accent) 0%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--sc-accent) 20%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--hu-accent) 20%, transparent);
   }
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc-accent) 0%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--hu-accent) 0%, transparent);
   }
 }
 
-@keyframes sc-bounce-in {
+@keyframes hu-bounce-in {
   0% {
     transform: scale(0);
     opacity: 0;
@@ -533,7 +533,7 @@ body {
   }
 }
 
-@keyframes sc-slide-out-down {
+@keyframes hu-slide-out-down {
   from {
     opacity: 1;
     transform: translateY(0);
@@ -544,7 +544,7 @@ body {
   }
 }
 
-@keyframes sc-thumb-slide-on {
+@keyframes hu-thumb-slide-on {
   0% {
     transform: translateX(0);
   }
@@ -559,7 +559,7 @@ body {
   }
 }
 
-@keyframes sc-thumb-slide-off {
+@keyframes hu-thumb-slide-off {
   0% {
     transform: translateX(1rem);
   }
@@ -577,11 +577,11 @@ body {
 /* ─── View Transitions ─────────────────────────────────────────────── */
 @supports (view-transition-name: none) {
   ::view-transition-old(main-content) {
-    animation: var(--sc-duration-normal) var(--sc-spring-out) both sc-fade-out;
+    animation: var(--hu-duration-normal) var(--hu-spring-out) both hu-fade-out;
   }
 
   ::view-transition-new(main-content) {
-    animation: var(--sc-duration-normal) var(--sc-spring-out) both sc-slide-up;
+    animation: var(--hu-duration-normal) var(--hu-spring-out) both hu-slide-up;
   }
 }
 
@@ -598,166 +598,166 @@ body {
 
 /* ── Liquid Glass tiers (Liquid Motion design system) ── */
 
-/* SVG refraction filter — applied to prominent glass via filter: url(#sc-refract) */
-.sc-glass-refraction-svg {
+/* SVG refraction filter — applied to prominent glass via filter: url(#hu-refract) */
+.hu-glass-refraction-svg {
   position: absolute;
   width: 0;
   height: 0;
   pointer-events: none;
 }
 
-.sc-glass-subtle {
+.hu-glass-subtle {
   background: color-mix(
     in srgb,
-    var(--sc-surface) var(--sc-glass-subtle-bg-opacity, 4%),
+    var(--hu-surface) var(--hu-glass-subtle-bg-opacity, 4%),
     transparent
   );
-  backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
-    saturate(var(--sc-glass-subtle-saturate, 120%));
-  -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
-    saturate(var(--sc-glass-subtle-saturate, 120%));
+  backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px))
+    saturate(var(--hu-glass-subtle-saturate, 120%));
+  -webkit-backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px))
+    saturate(var(--hu-glass-subtle-saturate, 120%));
   border: 1px solid
-    color-mix(in srgb, var(--sc-border) var(--sc-glass-subtle-border-opacity, 5%), transparent);
-  border-radius: var(--sc-radius-lg);
+    color-mix(in srgb, var(--hu-border) var(--hu-glass-subtle-border-opacity, 5%), transparent);
+  border-radius: var(--hu-radius-lg);
 }
 
-.sc-glass,
-.sc-glass-standard {
+.hu-glass,
+.hu-glass-standard {
   background: color-mix(
     in srgb,
-    var(--sc-surface) var(--sc-glass-standard-bg-opacity, 6%),
+    var(--hu-surface) var(--hu-glass-standard-bg-opacity, 6%),
     transparent
   );
-  backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-    saturate(var(--sc-glass-standard-saturate, 180%));
-  -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-    saturate(var(--sc-glass-standard-saturate, 180%));
+  backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+    saturate(var(--hu-glass-standard-saturate, 180%));
+  -webkit-backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+    saturate(var(--hu-glass-standard-saturate, 180%));
   border: 1px solid
-    color-mix(in srgb, var(--sc-border) var(--sc-glass-standard-border-opacity, 8%), transparent);
-  border-radius: var(--sc-radius-lg);
+    color-mix(in srgb, var(--hu-border) var(--hu-glass-standard-border-opacity, 8%), transparent);
+  border-radius: var(--hu-radius-lg);
   box-shadow:
-    var(--sc-elevation-1),
-    inset 0 1px 0 color-mix(in srgb, white var(--sc-glass-standard-inset-opacity, 6%), transparent);
+    var(--hu-elevation-1),
+    inset 0 1px 0 color-mix(in srgb, white var(--hu-glass-standard-inset-opacity, 6%), transparent);
 }
 
-.sc-glass-prominent {
+.hu-glass-prominent {
   background: color-mix(
     in srgb,
-    var(--sc-surface) var(--sc-glass-prominent-bg-opacity, 8%),
+    var(--hu-surface) var(--hu-glass-prominent-bg-opacity, 8%),
     transparent
   );
-  backdrop-filter: blur(var(--sc-glass-prominent-blur, 32px))
-    saturate(var(--sc-glass-prominent-saturate, 200%));
-  -webkit-backdrop-filter: blur(var(--sc-glass-prominent-blur, 32px))
-    saturate(var(--sc-glass-prominent-saturate, 200%));
+  backdrop-filter: blur(var(--hu-glass-prominent-blur, 32px))
+    saturate(var(--hu-glass-prominent-saturate, 200%));
+  -webkit-backdrop-filter: blur(var(--hu-glass-prominent-blur, 32px))
+    saturate(var(--hu-glass-prominent-saturate, 200%));
   border: 1px solid
-    color-mix(in srgb, var(--sc-border) var(--sc-glass-prominent-border-opacity, 12%), transparent);
-  border-radius: var(--sc-radius-lg);
+    color-mix(in srgb, var(--hu-border) var(--hu-glass-prominent-border-opacity, 12%), transparent);
+  border-radius: var(--hu-radius-lg);
   box-shadow:
-    var(--sc-elevation-3),
+    var(--hu-elevation-3),
     inset 0 1px 0
-      color-mix(in srgb, white var(--sc-glass-prominent-inset-opacity, 10%), transparent),
+      color-mix(in srgb, white var(--hu-glass-prominent-inset-opacity, 10%), transparent),
     inset 0 -1px 0 color-mix(in srgb, white 3%, transparent);
-  filter: url(#sc-refract);
+  filter: url(#hu-refract);
 }
 
 /* Depth layers — surface, elevated, floating */
-.sc-glass-surface {
+.hu-glass-surface {
   background: color-mix(
     in srgb,
-    var(--sc-bg-surface) var(--sc-glass-subtle-bg-opacity, 4%),
+    var(--hu-bg-surface) var(--hu-glass-subtle-bg-opacity, 4%),
     transparent
   );
-  backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
-    saturate(var(--sc-glass-subtle-saturate, 150%));
-  -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
-    saturate(var(--sc-glass-subtle-saturate, 150%));
+  backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px))
+    saturate(var(--hu-glass-subtle-saturate, 150%));
+  -webkit-backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px))
+    saturate(var(--hu-glass-subtle-saturate, 150%));
   border: 1px solid
-    color-mix(in srgb, var(--sc-border) var(--sc-glass-subtle-border-opacity, 6%), transparent);
-  border-radius: var(--sc-radius-lg);
+    color-mix(in srgb, var(--hu-border) var(--hu-glass-subtle-border-opacity, 6%), transparent);
+  border-radius: var(--hu-radius-lg);
 }
 
-.sc-glass-elevated {
+.hu-glass-elevated {
   background: color-mix(
     in srgb,
-    var(--sc-bg-surface) var(--sc-glass-standard-bg-opacity, 8%),
+    var(--hu-bg-surface) var(--hu-glass-standard-bg-opacity, 8%),
     transparent
   );
-  backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-    saturate(var(--sc-glass-standard-saturate, 180%));
-  -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-    saturate(var(--sc-glass-standard-saturate, 180%));
+  backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+    saturate(var(--hu-glass-standard-saturate, 180%));
+  -webkit-backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+    saturate(var(--hu-glass-standard-saturate, 180%));
   border: 1px solid
-    color-mix(in srgb, var(--sc-border) var(--sc-glass-standard-border-opacity, 10%), transparent);
-  box-shadow: var(--sc-shadow-sm);
-  border-radius: var(--sc-radius-lg);
+    color-mix(in srgb, var(--hu-border) var(--hu-glass-standard-border-opacity, 10%), transparent);
+  box-shadow: var(--hu-shadow-sm);
+  border-radius: var(--hu-radius-lg);
 }
 
-.sc-glass-floating {
+.hu-glass-floating {
   background: color-mix(
     in srgb,
-    var(--sc-bg-surface) var(--sc-glass-prominent-bg-opacity, 12%),
+    var(--hu-bg-surface) var(--hu-glass-prominent-bg-opacity, 12%),
     transparent
   );
-  backdrop-filter: blur(var(--sc-blur-xl, 40px)) saturate(var(--sc-glass-prominent-saturate, 200%));
-  -webkit-backdrop-filter: blur(var(--sc-blur-xl, 40px))
-    saturate(var(--sc-glass-prominent-saturate, 200%));
+  backdrop-filter: blur(var(--hu-blur-xl, 40px)) saturate(var(--hu-glass-prominent-saturate, 200%));
+  -webkit-backdrop-filter: blur(var(--hu-blur-xl, 40px))
+    saturate(var(--hu-glass-prominent-saturate, 200%));
   border: 1px solid
-    color-mix(in srgb, var(--sc-border) var(--sc-glass-prominent-border-opacity, 15%), transparent);
-  box-shadow: var(--sc-shadow-md);
-  border-radius: var(--sc-radius-lg);
+    color-mix(in srgb, var(--hu-border) var(--hu-glass-prominent-border-opacity, 15%), transparent);
+  box-shadow: var(--hu-shadow-md);
+  border-radius: var(--hu-radius-lg);
 }
 
 /* Environment-aware tinting — glass absorbs a hint of accent color */
-.sc-glass-tinted.sc-glass-subtle {
+.hu-glass-tinted.hu-glass-subtle {
   background: color-mix(
     in srgb,
-    var(--sc-accent) var(--sc-glass-subtle-tint-opacity, 2%),
-    color-mix(in srgb, var(--sc-surface) var(--sc-glass-subtle-bg-opacity, 4%), transparent)
+    var(--hu-accent) var(--hu-glass-subtle-tint-opacity, 2%),
+    color-mix(in srgb, var(--hu-surface) var(--hu-glass-subtle-bg-opacity, 4%), transparent)
   );
 }
 
-.sc-glass-tinted.sc-glass-standard,
-.sc-glass-tinted.sc-glass {
+.hu-glass-tinted.hu-glass-standard,
+.hu-glass-tinted.hu-glass {
   background: color-mix(
     in srgb,
-    var(--sc-accent) var(--sc-glass-standard-tint-opacity, 4%),
-    color-mix(in srgb, var(--sc-surface) var(--sc-glass-standard-bg-opacity, 6%), transparent)
+    var(--hu-accent) var(--hu-glass-standard-tint-opacity, 4%),
+    color-mix(in srgb, var(--hu-surface) var(--hu-glass-standard-bg-opacity, 6%), transparent)
   );
 }
 
-.sc-glass-tinted.sc-glass-prominent {
+.hu-glass-tinted.hu-glass-prominent {
   background: color-mix(
     in srgb,
-    var(--sc-accent) var(--sc-glass-prominent-tint-opacity, 6%),
-    color-mix(in srgb, var(--sc-surface) var(--sc-glass-prominent-bg-opacity, 8%), transparent)
+    var(--hu-accent) var(--hu-glass-prominent-tint-opacity, 6%),
+    color-mix(in srgb, var(--hu-surface) var(--hu-glass-prominent-bg-opacity, 8%), transparent)
   );
 }
 
 /* position: relative on all glass classes (needed for ::after) */
-.sc-glass-subtle,
-.sc-glass,
-.sc-glass-standard,
-.sc-glass-prominent,
-.sc-glass-surface,
-.sc-glass-elevated,
-.sc-glass-floating {
+.hu-glass-subtle,
+.hu-glass,
+.hu-glass-standard,
+.hu-glass-prominent,
+.hu-glass-surface,
+.hu-glass-elevated,
+.hu-glass-floating {
   position: relative;
 }
 
 /* Dynamic light specular overlay — pointer-responsive highlight */
-.sc-glass-subtle::after,
-.sc-glass::after,
-.sc-glass-standard::after,
-.sc-glass-prominent::after,
-.sc-glass-elevated::after,
-.sc-glass-floating::after {
+.hu-glass-subtle::after,
+.hu-glass::after,
+.hu-glass-standard::after,
+.hu-glass-prominent::after,
+.hu-glass-elevated::after,
+.hu-glass-floating::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background: radial-gradient(
-    circle at var(--sc-light-x, 50%) var(--sc-light-y, 50%),
+    circle at var(--hu-light-x, 50%) var(--hu-light-y, 50%),
     color-mix(in srgb, white 4%, transparent),
     transparent 60%
   );
@@ -767,14 +767,14 @@ body {
 }
 
 @media (prefers-color-scheme: light) {
-  .sc-glass-subtle::after,
-  .sc-glass::after,
-  .sc-glass-standard::after,
-  .sc-glass-prominent::after,
-  .sc-glass-elevated::after,
-  .sc-glass-floating::after {
+  .hu-glass-subtle::after,
+  .hu-glass::after,
+  .hu-glass-standard::after,
+  .hu-glass-prominent::after,
+  .hu-glass-elevated::after,
+  .hu-glass-floating::after {
     background: radial-gradient(
-      circle at var(--sc-light-x, 50%) var(--sc-light-y, 50%),
+      circle at var(--hu-light-x, 50%) var(--hu-light-y, 50%),
       color-mix(in srgb, white 6%, transparent),
       transparent 60%
     );
@@ -782,122 +782,122 @@ body {
 }
 
 /* Vibrancy — auto-contrast on glass */
-.sc-glass-subtle,
-.sc-glass,
-.sc-glass-standard,
-.sc-glass-prominent,
-.sc-glass-surface,
-.sc-glass-elevated,
-.sc-glass-floating {
-  --sc-vibrancy-active: 1;
+.hu-glass-subtle,
+.hu-glass,
+.hu-glass-standard,
+.hu-glass-prominent,
+.hu-glass-surface,
+.hu-glass-elevated,
+.hu-glass-floating {
+  --hu-vibrancy-active: 1;
 }
 
-.sc-glass-subtle :is(h1, h2, h3, h4, h5, h6),
-.sc-glass :is(h1, h2, h3, h4, h5, h6),
-.sc-glass-standard :is(h1, h2, h3, h4, h5, h6),
-.sc-glass-prominent :is(h1, h2, h3, h4, h5, h6),
-.sc-glass-surface :is(h1, h2, h3, h4, h5, h6),
-.sc-glass-elevated :is(h1, h2, h3, h4, h5, h6),
-.sc-glass-floating :is(h1, h2, h3, h4, h5, h6) {
-  text-shadow: var(--sc-glass-vibrancy-text-shadow, 0 0 8px var(--sc-glass-text-shadow-color));
+.hu-glass-subtle :is(h1, h2, h3, h4, h5, h6),
+.hu-glass :is(h1, h2, h3, h4, h5, h6),
+.hu-glass-standard :is(h1, h2, h3, h4, h5, h6),
+.hu-glass-prominent :is(h1, h2, h3, h4, h5, h6),
+.hu-glass-surface :is(h1, h2, h3, h4, h5, h6),
+.hu-glass-elevated :is(h1, h2, h3, h4, h5, h6),
+.hu-glass-floating :is(h1, h2, h3, h4, h5, h6) {
+  text-shadow: var(--hu-glass-vibrancy-text-shadow, 0 0 8px var(--hu-glass-text-shadow-color));
 }
 
 /* Glass choreography — blur/saturation animate on state changes */
-.sc-glass-subtle,
-.sc-glass,
-.sc-glass-standard,
-.sc-glass-prominent,
-.sc-glass-surface,
-.sc-glass-elevated,
-.sc-glass-floating {
+.hu-glass-subtle,
+.hu-glass,
+.hu-glass-standard,
+.hu-glass-prominent,
+.hu-glass-surface,
+.hu-glass-elevated,
+.hu-glass-floating {
   transition:
-    backdrop-filter var(--sc-glass-choreography-state-duration, 200ms)
-      var(--sc-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
-    -webkit-backdrop-filter var(--sc-glass-choreography-state-duration, 200ms)
-      var(--sc-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
-    background var(--sc-glass-choreography-state-duration, 200ms)
-      var(--sc-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
-    border-color var(--sc-glass-choreography-state-duration, 200ms)
-      var(--sc-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1));
+    backdrop-filter var(--hu-glass-choreography-state-duration, 200ms)
+      var(--hu-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
+    -webkit-backdrop-filter var(--hu-glass-choreography-state-duration, 200ms)
+      var(--hu-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
+    background var(--hu-glass-choreography-state-duration, 200ms)
+      var(--hu-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
+    border-color var(--hu-glass-choreography-state-duration, 200ms)
+      var(--hu-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1));
 }
 
 /* Glass enter animation — blur builds from 0 to tier value */
-.sc-glass-enter {
-  animation: sc-glass-reveal var(--sc-glass-choreography-enter-duration, 350ms)
-    var(--sc-glass-choreography-enter-easing, cubic-bezier(0.2, 0, 0, 1)) both;
+.hu-glass-enter {
+  animation: hu-glass-reveal var(--hu-glass-choreography-enter-duration, 350ms)
+    var(--hu-glass-choreography-enter-easing, cubic-bezier(0.2, 0, 0, 1)) both;
 }
 
-.sc-glass-exit {
-  animation: sc-glass-dismiss var(--sc-glass-choreography-exit-duration, 200ms)
-    var(--sc-glass-choreography-exit-easing, cubic-bezier(0.55, 0, 1, 0.45)) both;
+.hu-glass-exit {
+  animation: hu-glass-dismiss var(--hu-glass-choreography-exit-duration, 200ms)
+    var(--hu-glass-choreography-exit-easing, cubic-bezier(0.55, 0, 1, 0.45)) both;
 }
 
 /* Interactive glass — press, hover, focus */
-.sc-glass-interactive {
+.hu-glass-interactive {
   cursor: pointer;
   transition:
-    transform var(--sc-glass-interactive-transition-duration, 200ms) var(--sc-spring-out, ease-out),
-    box-shadow var(--sc-glass-interactive-transition-duration, 200ms) var(--sc-ease-out, ease-out),
-    backdrop-filter var(--sc-glass-choreography-state-duration, 200ms)
-      var(--sc-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
-    -webkit-backdrop-filter var(--sc-glass-choreography-state-duration, 200ms)
-      var(--sc-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1));
+    transform var(--hu-glass-interactive-transition-duration, 200ms) var(--hu-spring-out, ease-out),
+    box-shadow var(--hu-glass-interactive-transition-duration, 200ms) var(--hu-ease-out, ease-out),
+    backdrop-filter var(--hu-glass-choreography-state-duration, 200ms)
+      var(--hu-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1)),
+    -webkit-backdrop-filter var(--hu-glass-choreography-state-duration, 200ms)
+      var(--hu-glass-choreography-state-easing, cubic-bezier(0.2, 0, 0, 1));
 }
 
-.sc-glass-interactive:hover {
-  box-shadow: var(--sc-glass-interactive-hover-border-glow, 0 0 0 1px var(--sc-glass-hover-border));
+.hu-glass-interactive:hover {
+  box-shadow: var(--hu-glass-interactive-hover-border-glow, 0 0 0 1px var(--hu-glass-hover-border));
 }
 
-.sc-glass-interactive:hover::after {
+.hu-glass-interactive:hover::after {
   opacity: calc(
-    var(--sc-glass-dynamic-light-intensity, 0.15) *
-      var(--sc-glass-interactive-hover-specular-boost, 1.4)
+    var(--hu-glass-dynamic-light-intensity, 0.15) *
+      var(--hu-glass-interactive-hover-specular-boost, 1.4)
   );
 }
 
-.sc-glass-interactive:active {
-  transform: scale(var(--sc-glass-interactive-press-scale, 0.98));
+.hu-glass-interactive:active {
+  transform: scale(var(--hu-glass-interactive-press-scale, 0.98));
 }
 
-.sc-glass-interactive:focus-visible {
+.hu-glass-interactive:focus-visible {
   box-shadow:
-    0 0 0 var(--sc-focus-ring-width, 2px)
-      var(--sc-glass-interactive-focus-glow-color, var(--sc-accent-glow)),
-    0 0 var(--sc-glass-interactive-focus-glow-spread, 8px)
-      var(--sc-glass-interactive-focus-glow-color, var(--sc-accent-glow));
+    0 0 0 var(--hu-focus-ring-width, 2px)
+      var(--hu-glass-interactive-focus-glow-color, var(--hu-accent-glow)),
+    0 0 var(--hu-glass-interactive-focus-glow-spread, 8px)
+      var(--hu-glass-interactive-focus-glow-color, var(--hu-accent-glow));
   outline: none;
 }
 
 /* @supports fallback for browsers without backdrop-filter */
 @supports not (backdrop-filter: blur(1px)) {
-  .sc-glass-subtle,
-  .sc-glass-surface {
-    background: var(--sc-bg-surface);
-    border: 1px solid var(--sc-border-subtle);
+  .hu-glass-subtle,
+  .hu-glass-surface {
+    background: var(--hu-bg-surface);
+    border: 1px solid var(--hu-border-subtle);
   }
-  .sc-glass,
-  .sc-glass-standard,
-  .sc-glass-elevated {
-    background: var(--sc-bg-surface);
-    border: 1px solid var(--sc-border-subtle);
+  .hu-glass,
+  .hu-glass-standard,
+  .hu-glass-elevated {
+    background: var(--hu-bg-surface);
+    border: 1px solid var(--hu-border-subtle);
   }
-  .sc-glass-prominent,
-  .sc-glass-floating {
-    background: var(--sc-bg-elevated);
-    border: 1px solid var(--sc-border);
+  .hu-glass-prominent,
+  .hu-glass-floating {
+    background: var(--hu-bg-elevated);
+    border: 1px solid var(--hu-border);
     filter: none;
   }
 }
 
 /* ── Pixar micro-physics (Liquid Motion design system) ── */
-@keyframes sc-squash-press {
+@keyframes hu-squash-press {
   0% {
     transform: scale(1, 1);
   }
   50% {
     transform: scale(
-      var(--sc-physics-button-press-scaleX, 1.01),
-      var(--sc-physics-button-press-scaleY, 0.97)
+      var(--hu-physics-button-press-scaleX, 1.01),
+      var(--hu-physics-button-press-scaleY, 0.97)
     );
   }
   100% {
@@ -905,11 +905,11 @@ body {
   }
 }
 
-@keyframes sc-squash-release {
+@keyframes hu-squash-release {
   0% {
     transform: scale(
-      var(--sc-physics-button-release-scaleX, 0.99),
-      var(--sc-physics-button-release-scaleY, 1.02)
+      var(--hu-physics-button-release-scaleX, 0.99),
+      var(--hu-physics-button-release-scaleY, 1.02)
     );
   }
   100% {
@@ -917,13 +917,13 @@ body {
   }
 }
 
-@keyframes sc-anticipate-in {
+@keyframes hu-anticipate-in {
   0% {
-    transform: scale(var(--sc-physics-modal-anticipate-scale, 0.97));
+    transform: scale(var(--hu-physics-modal-anticipate-scale, 0.97));
     opacity: 0;
   }
   15% {
-    transform: scale(var(--sc-physics-modal-anticipate-scale, 0.97));
+    transform: scale(var(--hu-physics-modal-anticipate-scale, 0.97));
     opacity: 0;
   }
   100% {
@@ -932,71 +932,71 @@ body {
   }
 }
 
-.sc-physics-press:active {
-  animation: sc-squash-press var(--sc-duration-fast)
-    var(--sc-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) forwards;
+.hu-physics-press:active {
+  animation: hu-squash-press var(--hu-duration-fast)
+    var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) forwards;
 }
 
-.sc-physics-hover {
+.hu-physics-hover {
   transition:
-    transform var(--sc-duration-normal, 200ms) var(--sc-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
-    box-shadow var(--sc-duration-normal, 200ms) var(--sc-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+    transform var(--hu-duration-normal, 200ms) var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+    box-shadow var(--hu-duration-normal, 200ms) var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
 }
 
-.sc-physics-hover:hover {
-  transform: translateY(var(--sc-physics-card-hover-translateY, -2px));
+.hu-physics-hover:hover {
+  transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
 }
 
 /* ── Pixar anticipation for modals/sheets ── */
-.sc-anticipate-enter {
-  animation: sc-anticipate-in var(--sc-duration-slow, 350ms)
-    var(--sc-spring-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+.hu-anticipate-enter {
+  animation: hu-anticipate-in var(--hu-duration-slow, 350ms)
+    var(--hu-spring-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 /* ── View Transitions API (container transforms) ── */
 @supports (view-transition-name: none) {
   ::view-transition-old(root) {
-    animation-duration: var(--sc-duration-fast, 100ms);
-    animation-timing-function: var(--sc-ease-in, ease-in);
+    animation-duration: var(--hu-duration-fast, 100ms);
+    animation-timing-function: var(--hu-ease-in, ease-in);
   }
 
   ::view-transition-new(root) {
-    animation-duration: var(--sc-duration-moderate, 300ms);
-    animation-timing-function: var(--sc-ease-out, ease-out);
+    animation-duration: var(--hu-duration-moderate, 300ms);
+    animation-timing-function: var(--hu-ease-out, ease-out);
   }
 
   ::view-transition-old(main-content) {
-    animation: sc-vt-slide-out var(--sc-duration-fast, 100ms) var(--sc-ease-in, ease-in) forwards;
+    animation: hu-vt-slide-out var(--hu-duration-fast, 100ms) var(--hu-ease-in, ease-in) forwards;
   }
 
   ::view-transition-new(main-content) {
-    animation: sc-vt-slide-in var(--sc-duration-moderate, 300ms) var(--sc-ease-out, ease-out)
+    animation: hu-vt-slide-in var(--hu-duration-moderate, 300ms) var(--hu-ease-out, ease-out)
       forwards;
   }
 }
 
 /* ─── Glass choreography keyframes ─────────────────────────────────── */
-@keyframes sc-glass-reveal {
+@keyframes hu-glass-reveal {
   from {
     backdrop-filter: blur(0px) saturate(100%);
     -webkit-backdrop-filter: blur(0px) saturate(100%);
     opacity: 0;
   }
   to {
-    backdrop-filter: blur(var(--sc-glass-target-blur, 24px))
-      saturate(var(--sc-glass-target-saturate, 180%));
-    -webkit-backdrop-filter: blur(var(--sc-glass-target-blur, 24px))
-      saturate(var(--sc-glass-target-saturate, 180%));
+    backdrop-filter: blur(var(--hu-glass-target-blur, 24px))
+      saturate(var(--hu-glass-target-saturate, 180%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-target-blur, 24px))
+      saturate(var(--hu-glass-target-saturate, 180%));
     opacity: 1;
   }
 }
 
-@keyframes sc-glass-dismiss {
+@keyframes hu-glass-dismiss {
   from {
-    backdrop-filter: blur(var(--sc-glass-target-blur, 24px))
-      saturate(var(--sc-glass-target-saturate, 180%));
-    -webkit-backdrop-filter: blur(var(--sc-glass-target-blur, 24px))
-      saturate(var(--sc-glass-target-saturate, 180%));
+    backdrop-filter: blur(var(--hu-glass-target-blur, 24px))
+      saturate(var(--hu-glass-target-saturate, 180%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-target-blur, 24px))
+      saturate(var(--hu-glass-target-saturate, 180%));
     opacity: 1;
   }
   to {
@@ -1006,7 +1006,7 @@ body {
   }
 }
 
-@keyframes sc-vt-slide-out {
+@keyframes hu-vt-slide-out {
   from {
     opacity: 1;
     transform: translateX(0);
@@ -1017,7 +1017,7 @@ body {
   }
 }
 
-@keyframes sc-vt-slide-in {
+@keyframes hu-vt-slide-in {
   from {
     opacity: 0;
     transform: translateX(20px);
@@ -1029,25 +1029,25 @@ body {
 }
 
 /* Container transform: card morphing to detail */
-.sc-container-transform {
-  view-transition-name: var(--sc-vt-name, auto);
+.hu-container-transform {
+  view-transition-name: var(--hu-vt-name, auto);
 }
 
 /* Secondary action — cascading child animations */
-.sc-secondary-action > * {
+.hu-secondary-action > * {
   transition-delay: calc(
-    var(--sc-physics-micro-physics-secondary-delay, 60ms) * var(--sc-child-index, 0)
+    var(--hu-physics-micro-physics-secondary-delay, 60ms) * var(--hu-child-index, 0)
   );
 }
 
 /* Path-based motion with CSS offset-path */
-.sc-path-motion {
-  offset-path: var(--sc-motion-path, none);
-  animation: sc-path-traverse var(--sc-duration-moderate, 300ms) var(--sc-ease-out, ease-out)
+.hu-path-motion {
+  offset-path: var(--hu-motion-path, none);
+  animation: hu-path-traverse var(--hu-duration-moderate, 300ms) var(--hu-ease-out, ease-out)
     forwards;
 }
 
-@keyframes sc-path-traverse {
+@keyframes hu-path-traverse {
   from {
     offset-distance: 0%;
   }
@@ -1057,30 +1057,30 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sc-physics-press:active,
-  .sc-physics-hover:hover,
-  .sc-anticipate-enter,
-  .sc-path-motion {
+  .hu-physics-press:active,
+  .hu-physics-hover:hover,
+  .hu-anticipate-enter,
+  .hu-path-motion {
     animation: none !important;
     transform: none !important;
   }
 
-  .sc-glass-interactive {
+  .hu-glass-interactive {
     transition: none;
   }
 
-  .sc-glass-enter,
-  .sc-glass-exit {
+  .hu-glass-enter,
+  .hu-glass-exit {
     animation: none !important;
   }
 
-  .sc-glass-subtle,
-  .sc-glass,
-  .sc-glass-standard,
-  .sc-glass-prominent,
-  .sc-glass-surface,
-  .sc-glass-elevated,
-  .sc-glass-floating {
+  .hu-glass-subtle,
+  .hu-glass,
+  .hu-glass-standard,
+  .hu-glass-prominent,
+  .hu-glass-surface,
+  .hu-glass-elevated,
+  .hu-glass-floating {
     transition: none;
   }
 
@@ -1094,13 +1094,13 @@ body {
 
 /* ── Forced Colors Mode (Windows High Contrast) ── */
 @media (forced-colors: active) {
-  .sc-glass-subtle,
-  .sc-glass,
-  .sc-glass-standard,
-  .sc-glass-prominent,
-  .sc-glass-surface,
-  .sc-glass-elevated,
-  .sc-glass-floating {
+  .hu-glass-subtle,
+  .hu-glass,
+  .hu-glass-standard,
+  .hu-glass-prominent,
+  .hu-glass-surface,
+  .hu-glass-elevated,
+  .hu-glass-floating {
     background: Canvas;
     border: 1px solid CanvasText;
     backdrop-filter: none;
@@ -1109,8 +1109,8 @@ body {
     box-shadow: none;
   }
 
-  .sc-physics-press:active,
-  .sc-physics-hover:hover {
+  .hu-physics-press:active,
+  .hu-physics-hover:hover {
     outline: 2px solid Highlight;
   }
 
@@ -1122,48 +1122,48 @@ body {
 
 /* ── Reduced Transparency ── */
 @media (prefers-reduced-transparency: reduce) {
-  .sc-glass-surface,
-  .sc-glass-elevated,
-  .sc-glass-floating,
-  .sc-glass-subtle,
-  .sc-glass,
-  .sc-glass-standard,
-  .sc-glass-prominent {
+  .hu-glass-surface,
+  .hu-glass-elevated,
+  .hu-glass-floating,
+  .hu-glass-subtle,
+  .hu-glass,
+  .hu-glass-standard,
+  .hu-glass-prominent {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--sc-bg-surface);
+    background: var(--hu-bg-surface);
     filter: none;
-    border: 1px solid var(--sc-border);
+    border: 1px solid var(--hu-border);
   }
 
-  .sc-glass-subtle::after,
-  .sc-glass::after,
-  .sc-glass-standard::after,
-  .sc-glass-prominent::after,
-  .sc-glass-elevated::after,
-  .sc-glass-floating::after {
+  .hu-glass-subtle::after,
+  .hu-glass::after,
+  .hu-glass-standard::after,
+  .hu-glass-prominent::after,
+  .hu-glass-elevated::after,
+  .hu-glass-floating::after {
     display: none;
   }
 
-  .sc-glass-tinted.sc-glass-subtle,
-  .sc-glass-tinted.sc-glass-standard,
-  .sc-glass-tinted.sc-glass,
-  .sc-glass-tinted.sc-glass-prominent {
-    background: var(--sc-bg-surface);
+  .hu-glass-tinted.hu-glass-subtle,
+  .hu-glass-tinted.hu-glass-standard,
+  .hu-glass-tinted.hu-glass,
+  .hu-glass-tinted.hu-glass-prominent {
+    background: var(--hu-bg-surface);
   }
 }
 
 /* ── Focus Management Utilities ── */
 
 /* Visible focus ring for all interactive elements */
-.sc-focus-ring:focus-visible,
-[data-sc-focusable]:focus-visible {
-  outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring, currentColor);
-  outline-offset: var(--sc-focus-ring-offset, 2px);
+.hu-focus-ring:focus-visible,
+[data-hu-focusable]:focus-visible {
+  outline: var(--hu-focus-ring-width, 2px) solid var(--hu-focus-ring, currentColor);
+  outline-offset: var(--hu-focus-ring-offset, 2px);
 }
 
 /* Focus trap sentinel — visually hidden but focusable */
-.sc-focus-sentinel {
+.hu-focus-sentinel {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1180,25 +1180,25 @@ body {
 [role="toolbar"] [role="button"]:focus-visible,
 [role="menu"] [role="menuitem"]:focus-visible,
 [role="listbox"] [role="option"]:focus-visible {
-  outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring, currentColor);
-  outline-offset: var(--sc-focus-ring-offset, 2px);
+  outline: var(--hu-focus-ring-width, 2px) solid var(--hu-focus-ring, currentColor);
+  outline-offset: var(--hu-focus-ring-offset, 2px);
   z-index: 1;
 }
 
 /* Skip link — screen reader / keyboard navigation */
-.sc-skip-link {
+.hu-skip-link {
   position: absolute;
   top: -100%;
-  left: var(--sc-space-md, 1rem);
+  left: var(--hu-space-md, 1rem);
   z-index: 9999;
-  padding: var(--sc-space-xs, 0.5rem) var(--sc-space-md, 1rem);
-  background: var(--sc-accent);
-  color: var(--sc-on-accent);
-  border-radius: var(--sc-radius-sm, 6px);
+  padding: var(--hu-space-xs, 0.5rem) var(--hu-space-md, 1rem);
+  background: var(--hu-accent);
+  color: var(--hu-on-accent);
+  border-radius: var(--hu-radius-sm, 6px);
   text-decoration: none;
   font-weight: 600;
 }
 
-.sc-skip-link:focus {
-  top: var(--sc-space-md, 1rem);
+.hu-skip-link:focus {
+  top: var(--hu-space-md, 1rem);
 }

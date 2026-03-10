@@ -1,13 +1,13 @@
 /*
  * Secure secrets vault — key-value store with XOR/base64 obfuscation.
- * Uses SEACLAW_VAULT_KEY env var for XOR key; falls back to base64 (obfuscation only).
- * SC_IS_TEST: in-memory storage only, no file I/O.
+ * Uses HUMAN_VAULT_KEY env var for XOR key; falls back to base64 (obfuscation only).
+ * HU_IS_TEST: in-memory storage only, no file I/O.
  */
-#include "seaclaw/security/vault.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/security/vault.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
@@ -20,14 +20,14 @@
 #endif
 
 #if defined(__STDC_LIB_EXT1__)
-#define sc_vault_secure_zero(p, n) memset_s((p), (n), 0, (n))
+#define hu_vault_secure_zero(p, n) memset_s((p), (n), 0, (n))
 #elif defined(__GNUC__) || defined(__clang__)
-static void sc_vault_secure_zero(void *p, size_t n) {
+static void hu_vault_secure_zero(void *p, size_t n) {
     memset(p, 0, n);
     __asm__ __volatile__("" : : "r"(p) : "memory");
 }
 #else
-static void sc_vault_secure_zero(void *p, size_t n) {
+static void hu_vault_secure_zero(void *p, size_t n) {
     volatile unsigned char *vp = (volatile unsigned char *)p;
     while (n--)
         *vp++ = 0;
@@ -37,14 +37,14 @@ static void sc_vault_secure_zero(void *p, size_t n) {
 #define VAULT_KEY_MAX  64
 #define VAULT_PATH_MAX 1024
 
-struct sc_vault {
-    sc_allocator_t *alloc;
+struct hu_vault {
+    hu_allocator_t *alloc;
     char vault_path[VAULT_PATH_MAX];
     unsigned char key[VAULT_KEY_MAX];
     size_t key_len;
     bool has_key;
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_json_value_t *in_memory;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_json_value_t *in_memory;
 #endif
 };
 
@@ -94,13 +94,13 @@ static int b64_char_val(char c) {
     return -1;
 }
 
-static sc_error_t base64_decode(const char *in, size_t in_len, unsigned char *out, size_t out_cap,
+static hu_error_t base64_decode(const char *in, size_t in_len, unsigned char *out, size_t out_cap,
                                 size_t *out_len) {
     while (in_len > 0 && in[in_len - 1] == '=')
         in_len--;
     size_t byte_len = (in_len * 3) / 4;
     if (out_cap < byte_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t j = 0;
     for (size_t i = 0; i + 4 <= in_len; i += 4) {
         int a = b64_char_val(in[i]);
@@ -108,7 +108,7 @@ static sc_error_t base64_decode(const char *in, size_t in_len, unsigned char *ou
         int c = b64_char_val(in[i + 2]);
         int d = b64_char_val(in[i + 3]);
         if (a < 0 || b < 0 || c < 0 || d < 0)
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         uint32_t val = (uint32_t)(a << 18) | (b << 12) | (c << 6) | d;
         out[j++] = (unsigned char)(val >> 16);
         out[j++] = (unsigned char)(val >> 8);
@@ -118,7 +118,7 @@ static sc_error_t base64_decode(const char *in, size_t in_len, unsigned char *ou
         int a = b64_char_val(in[in_len - 2]);
         int b = b64_char_val(in[in_len - 1]);
         if (a < 0 || b < 0)
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         uint32_t val = (uint32_t)(a << 18) | (b << 12);
         out[j++] = (unsigned char)(val >> 16);
     } else if (in_len % 4 == 3) {
@@ -126,13 +126,13 @@ static sc_error_t base64_decode(const char *in, size_t in_len, unsigned char *ou
         int b = b64_char_val(in[in_len - 2]);
         int c = b64_char_val(in[in_len - 1]);
         if (a < 0 || b < 0 || c < 0)
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         uint32_t val = (uint32_t)(a << 18) | (b << 12) | (c << 6);
         out[j++] = (unsigned char)(val >> 16);
         out[j++] = (unsigned char)(val >> 8);
     }
     *out_len = j;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void xor_crypt(const unsigned char *key, size_t key_len, const unsigned char *in,
@@ -153,93 +153,93 @@ static void derive_key(const char *env_val, unsigned char *key_out, size_t *key_
     *key_len_out = len;
 }
 
-#if !(defined(SC_IS_TEST) && SC_IS_TEST)
-static sc_error_t ensure_parent_dir(const char *path) {
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+static hu_error_t ensure_parent_dir(const char *path) {
     char *slash = strrchr(path, '/');
     if (!slash || slash <= path)
-        return SC_OK;
+        return HU_OK;
     char dir[VAULT_PATH_MAX];
     size_t dlen = (size_t)(slash - path);
     if (dlen >= sizeof(dir))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memcpy(dir, path, dlen);
     dir[dlen] = '\0';
 #ifdef _WIN32
     (void)dir;
     (void)dlen;
-    return SC_OK;
+    return HU_OK;
 #else
     if (mkdir(dir, 0700) != 0 && errno != EEXIST)
-        return SC_ERR_IO;
-    return SC_OK;
+        return HU_ERR_IO;
+    return HU_OK;
 #endif
 }
 
-static sc_error_t vault_load(sc_vault_t *v, sc_json_value_t **out) {
+static hu_error_t vault_load(hu_vault_t *v, hu_json_value_t **out) {
     FILE *f = fopen(v->vault_path, "rb");
     if (!f) {
-        *out = sc_json_object_new(v->alloc);
-        return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        *out = hu_json_object_new(v->alloc);
+        return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (sz <= 0 || sz > 1024 * 1024) {
         fclose(f);
-        *out = sc_json_object_new(v->alloc);
-        return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        *out = hu_json_object_new(v->alloc);
+        return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
     char *buf = (char *)v->alloc->alloc(v->alloc->ctx, (size_t)sz + 1);
     if (!buf) {
         fclose(f);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t n = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[n] = '\0';
-    sc_error_t err = sc_json_parse(v->alloc, buf, n, out);
+    hu_error_t err = hu_json_parse(v->alloc, buf, n, out);
     v->alloc->free(v->alloc->ctx, buf, (size_t)sz + 1);
-    if (err != SC_OK) {
-        *out = sc_json_object_new(v->alloc);
-        return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+    if (err != HU_OK) {
+        *out = hu_json_object_new(v->alloc);
+        return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
-    if (!*out || (*out)->type != SC_JSON_OBJECT) {
+    if (!*out || (*out)->type != HU_JSON_OBJECT) {
         if (*out)
-            sc_json_free(v->alloc, *out);
-        *out = sc_json_object_new(v->alloc);
-        return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+            hu_json_free(v->alloc, *out);
+        *out = hu_json_object_new(v->alloc);
+        return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t vault_save(sc_vault_t *v, sc_json_value_t *obj) {
+static hu_error_t vault_save(hu_vault_t *v, hu_json_value_t *obj) {
     char *json = NULL;
     size_t json_len = 0;
-    sc_error_t err = sc_json_stringify(v->alloc, obj, &json, &json_len);
-    if (err != SC_OK)
+    hu_error_t err = hu_json_stringify(v->alloc, obj, &json, &json_len);
+    if (err != HU_OK)
         return err;
     err = ensure_parent_dir(v->vault_path);
-    if (err != SC_OK) {
+    if (err != HU_OK) {
         v->alloc->free(v->alloc->ctx, json, json_len + 1);
         return err;
     }
     FILE *f = fopen(v->vault_path, "wb");
     if (!f) {
         v->alloc->free(v->alloc->ctx, json, json_len + 1);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     size_t written = fwrite(json, 1, json_len, f);
     fclose(f);
     v->alloc->free(v->alloc->ctx, json, json_len + 1);
-    return (written == json_len) ? SC_OK : SC_ERR_IO;
+    return (written == json_len) ? HU_OK : HU_ERR_IO;
 }
 #endif
 
-sc_vault_t *sc_vault_create(sc_allocator_t *alloc, const char *vault_path) {
+hu_vault_t *hu_vault_create(hu_allocator_t *alloc, const char *vault_path) {
     if (!alloc)
         return NULL;
 
-    sc_vault_t *v = (sc_vault_t *)alloc->alloc(alloc->ctx, sizeof(sc_vault_t));
+    hu_vault_t *v = (hu_vault_t *)alloc->alloc(alloc->ctx, sizeof(hu_vault_t));
     if (!v)
         return NULL;
     memset(v, 0, sizeof(*v));
@@ -255,29 +255,29 @@ sc_vault_t *sc_vault_create(sc_allocator_t *alloc, const char *vault_path) {
         const char *home = getenv("HOME");
         if (!home)
             home = ".";
-        int n = snprintf(v->vault_path, sizeof(v->vault_path), "%s/.seaclaw/vault.json", home);
+        int n = snprintf(v->vault_path, sizeof(v->vault_path), "%s/.human/vault.json", home);
         if (n <= 0 || (size_t)n >= sizeof(v->vault_path))
             v->vault_path[0] = '\0';
     }
 
-    const char *key_env = getenv("SEACLAW_VAULT_KEY");
+    const char *key_env = getenv("HUMAN_VAULT_KEY");
     if (key_env && key_env[0]) {
         derive_key(key_env, v->key, &v->key_len);
         v->has_key = (v->key_len > 0);
     } else {
         v->has_key = false;
         v->key_len = 0;
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
         fprintf(
             stderr,
-            "[vault] SEACLAW_VAULT_KEY not set — secrets stored as base64 (obfuscation only)\n");
+            "[vault] HUMAN_VAULT_KEY not set — secrets stored as base64 (obfuscation only)\n");
 #endif
     }
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    v->in_memory = sc_json_object_new(alloc);
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    v->in_memory = hu_json_object_new(alloc);
     if (!v->in_memory) {
-        alloc->free(alloc->ctx, v, sizeof(sc_vault_t));
+        alloc->free(alloc->ctx, v, sizeof(hu_vault_t));
         return NULL;
     }
 #endif
@@ -285,68 +285,68 @@ sc_vault_t *sc_vault_create(sc_allocator_t *alloc, const char *vault_path) {
     return v;
 }
 
-sc_error_t sc_vault_set(sc_vault_t *vault, const char *key, const char *value) {
+hu_error_t hu_vault_set(hu_vault_t *vault, const char *key, const char *value) {
     if (!vault || !key || !value)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t val_len = strlen(value);
-    sc_json_value_t *val_json = NULL;
+    hu_json_value_t *val_json = NULL;
 
     if (vault->has_key && vault->key_len > 0) {
         unsigned char *enc = (unsigned char *)vault->alloc->alloc(vault->alloc->ctx, val_len);
         if (!enc)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         xor_crypt(vault->key, vault->key_len, (const unsigned char *)value, val_len, enc);
         char b64[4096];
         size_t b64_len = base64_encode(enc, val_len, b64, sizeof(b64));
         vault->alloc->free(vault->alloc->ctx, enc, val_len);
         if (b64_len == 0)
-            return SC_ERR_INVALID_ARGUMENT;
-        val_json = sc_json_string_new(vault->alloc, b64, b64_len);
+            return HU_ERR_INVALID_ARGUMENT;
+        val_json = hu_json_string_new(vault->alloc, b64, b64_len);
     } else {
         char b64[4096];
         size_t b64_len = base64_encode((const unsigned char *)value, val_len, b64, sizeof(b64));
         if (b64_len == 0)
-            return SC_ERR_INVALID_ARGUMENT;
-        val_json = sc_json_string_new(vault->alloc, b64, b64_len);
+            return HU_ERR_INVALID_ARGUMENT;
+        val_json = hu_json_string_new(vault->alloc, b64, b64_len);
     }
     if (!val_json)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_json_object_set(vault->alloc, vault->in_memory, key, val_json);
-    return SC_OK;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_json_object_set(vault->alloc, vault->in_memory, key, val_json);
+    return HU_OK;
 #else
-    sc_json_value_t *obj = NULL;
-    sc_error_t err = vault_load(vault, &obj);
-    if (err != SC_OK)
+    hu_json_value_t *obj = NULL;
+    hu_error_t err = vault_load(vault, &obj);
+    if (err != HU_OK)
         return err;
-    sc_json_object_set(vault->alloc, obj, key, val_json);
+    hu_json_object_set(vault->alloc, obj, key, val_json);
     err = vault_save(vault, obj);
-    sc_json_free(vault->alloc, obj);
+    hu_json_free(vault->alloc, obj);
     return err;
 #endif
 }
 
-sc_error_t sc_vault_get(sc_vault_t *vault, const char *key, char *out, size_t out_size) {
+hu_error_t hu_vault_get(hu_vault_t *vault, const char *key, char *out, size_t out_size) {
     if (!vault || !key || !out || out_size == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_json_value_t *val = sc_json_object_get(vault->in_memory, key);
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_json_value_t *val = hu_json_object_get(vault->in_memory, key);
 #else
-    sc_json_value_t *obj = NULL;
-    sc_error_t err = vault_load(vault, &obj);
-    if (err != SC_OK)
+    hu_json_value_t *obj = NULL;
+    hu_error_t err = vault_load(vault, &obj);
+    if (err != HU_OK)
         return err;
-    sc_json_value_t *val = sc_json_object_get(obj, key);
+    hu_json_value_t *val = hu_json_object_get(obj, key);
 #endif
 
-    if (!val || val->type != SC_JSON_STRING) {
-#if !(defined(SC_IS_TEST) && SC_IS_TEST)
-        sc_json_free(vault->alloc, obj);
+    if (!val || val->type != HU_JSON_STRING) {
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+        hu_json_free(vault->alloc, obj);
 #endif
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     }
 
     const char *stored = val->data.string.ptr;
@@ -354,96 +354,96 @@ sc_error_t sc_vault_get(sc_vault_t *vault, const char *key, char *out, size_t ou
 
     unsigned char decoded[4096];
     size_t decoded_len = 0;
-    sc_error_t decode_err =
+    hu_error_t decode_err =
         base64_decode(stored, stored_len, decoded, sizeof(decoded), &decoded_len);
-#if !(defined(SC_IS_TEST) && SC_IS_TEST)
-    sc_json_free(vault->alloc, obj);
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+    hu_json_free(vault->alloc, obj);
 #endif
-    if (decode_err != SC_OK)
+    if (decode_err != HU_OK)
         return decode_err;
     if (decoded_len >= out_size) {
-        sc_vault_secure_zero(decoded, decoded_len);
-        return SC_ERR_INVALID_ARGUMENT;
+        hu_vault_secure_zero(decoded, decoded_len);
+        return HU_ERR_INVALID_ARGUMENT;
     }
     if (vault->has_key && vault->key_len > 0) {
         xor_crypt(vault->key, vault->key_len, decoded, decoded_len, decoded);
     }
     memcpy(out, decoded, decoded_len);
     out[decoded_len] = '\0';
-    sc_vault_secure_zero(decoded, decoded_len);
-    return SC_OK;
+    hu_vault_secure_zero(decoded, decoded_len);
+    return HU_OK;
 }
 
-sc_error_t sc_vault_delete(sc_vault_t *vault, const char *key) {
+hu_error_t hu_vault_delete(hu_vault_t *vault, const char *key) {
     if (!vault || !key)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    if (!sc_json_object_remove(vault->alloc, vault->in_memory, key))
-        return SC_ERR_NOT_FOUND;
-    return SC_OK;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    if (!hu_json_object_remove(vault->alloc, vault->in_memory, key))
+        return HU_ERR_NOT_FOUND;
+    return HU_OK;
 #else
-    sc_json_value_t *obj = NULL;
-    sc_error_t err = vault_load(vault, &obj);
-    if (err != SC_OK)
+    hu_json_value_t *obj = NULL;
+    hu_error_t err = vault_load(vault, &obj);
+    if (err != HU_OK)
         return err;
-    if (!sc_json_object_remove(vault->alloc, obj, key)) {
-        sc_json_free(vault->alloc, obj);
-        return SC_ERR_NOT_FOUND;
+    if (!hu_json_object_remove(vault->alloc, obj, key)) {
+        hu_json_free(vault->alloc, obj);
+        return HU_ERR_NOT_FOUND;
     }
     err = vault_save(vault, obj);
-    sc_json_free(vault->alloc, obj);
+    hu_json_free(vault->alloc, obj);
     return err;
 #endif
 }
 
-sc_error_t sc_vault_list_keys(sc_vault_t *vault, char **keys, size_t max_keys, size_t *count) {
+hu_error_t hu_vault_list_keys(hu_vault_t *vault, char **keys, size_t max_keys, size_t *count) {
     if (!vault || !keys || !count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *count = 0;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_json_value_t *obj = vault->in_memory;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_json_value_t *obj = vault->in_memory;
 #else
-    sc_json_value_t *obj = NULL;
-    sc_error_t err = vault_load(vault, &obj);
-    if (err != SC_OK)
+    hu_json_value_t *obj = NULL;
+    hu_error_t err = vault_load(vault, &obj);
+    if (err != HU_OK)
         return err;
 #endif
 
     size_t n = 0;
     for (size_t i = 0; i < obj->data.object.len && n < max_keys; i++) {
-        sc_json_pair_t *pair = &obj->data.object.pairs[i];
+        hu_json_pair_t *pair = &obj->data.object.pairs[i];
         if (pair->key && pair->key_len > 0) {
-            keys[n] = sc_strndup(vault->alloc, pair->key, pair->key_len);
+            keys[n] = hu_strndup(vault->alloc, pair->key, pair->key_len);
             if (!keys[n]) {
-#if !(defined(SC_IS_TEST) && SC_IS_TEST)
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
                 for (size_t j = 0; j < n; j++)
                     vault->alloc->free(vault->alloc->ctx, keys[j], strlen(keys[j]) + 1);
-                sc_json_free(vault->alloc, obj);
+                hu_json_free(vault->alloc, obj);
 #endif
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             n++;
         }
     }
     *count = n;
 
-#if !(defined(SC_IS_TEST) && SC_IS_TEST)
-    sc_json_free(vault->alloc, obj);
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+    hu_json_free(vault->alloc, obj);
 #endif
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_vault_destroy(sc_vault_t *vault) {
+void hu_vault_destroy(hu_vault_t *vault) {
     if (!vault)
         return;
-    sc_vault_secure_zero(vault->key, sizeof(vault->key));
-#if defined(SC_IS_TEST) && SC_IS_TEST
+    hu_vault_secure_zero(vault->key, sizeof(vault->key));
+#if defined(HU_IS_TEST) && HU_IS_TEST
     if (vault->in_memory)
-        sc_json_free(vault->alloc, vault->in_memory);
+        hu_json_free(vault->alloc, vault->in_memory);
 #endif
-    vault->alloc->free(vault->alloc->ctx, vault, sizeof(sc_vault_t));
+    vault->alloc->free(vault->alloc->ctx, vault, sizeof(hu_vault_t));
 }
 
 static void env_key_for_provider(const char *provider, char *buf, size_t buf_size) {
@@ -457,23 +457,23 @@ static void env_key_for_provider(const char *provider, char *buf, size_t buf_siz
         snprintf(buf + i, buf_size - i, "_API_KEY");
 }
 
-sc_error_t sc_vault_get_api_key(sc_vault_t *vault, sc_allocator_t *alloc, const char *provider_name,
+hu_error_t hu_vault_get_api_key(hu_vault_t *vault, hu_allocator_t *alloc, const char *provider_name,
                                 const char *config_api_key, char **out) {
     if (!alloc || !provider_name || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
 
     char vault_key[128];
     int n = snprintf(vault_key, sizeof(vault_key), "%s_api_key", provider_name);
     if (n <= 0 || (size_t)n >= sizeof(vault_key))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (vault) {
         char tmp[512];
-        if (sc_vault_get(vault, vault_key, tmp, sizeof(tmp)) == SC_OK) {
-            *out = sc_strdup(alloc, tmp);
-            sc_vault_secure_zero(tmp, sizeof(tmp));
-            return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        if (hu_vault_get(vault, vault_key, tmp, sizeof(tmp)) == HU_OK) {
+            *out = hu_strdup(alloc, tmp);
+            hu_vault_secure_zero(tmp, sizeof(tmp));
+            return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
         }
     }
 
@@ -481,14 +481,14 @@ sc_error_t sc_vault_get_api_key(sc_vault_t *vault, sc_allocator_t *alloc, const 
     env_key_for_provider(provider_name, env_name, sizeof(env_name));
     const char *env_val = getenv(env_name);
     if (env_val && env_val[0]) {
-        *out = sc_strdup(alloc, env_val);
-        return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        *out = hu_strdup(alloc, env_val);
+        return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
 
     if (config_api_key && config_api_key[0]) {
-        *out = sc_strdup(alloc, config_api_key);
-        return *out ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        *out = hu_strdup(alloc, config_api_key);
+        return *out ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
 
-    return SC_ERR_NOT_FOUND;
+    return HU_ERR_NOT_FOUND;
 }

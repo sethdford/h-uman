@@ -1,4 +1,4 @@
-#include "seaclaw/tools/validation.h"
+#include "human/tools/validation.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -14,7 +14,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     memcpy(buf, data, size);
     buf[size] = '\0';
 
-    (void)sc_tool_validate_url(buf);
+    (void)hu_tool_validate_url(buf);
 
     free(buf);
     return 0;

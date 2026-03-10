@@ -1,26 +1,26 @@
-#include "seaclaw/gateway.h"
-#include "seaclaw/config.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/crypto.h"
-#include "seaclaw/gateway/control_protocol.h"
-#include "seaclaw/gateway/event_bridge.h"
-#include "seaclaw/gateway/oauth.h"
-#include "seaclaw/gateway/openai_compat.h"
-#include "seaclaw/gateway/rate_limit.h"
-#include "seaclaw/gateway/thread_pool.h"
-#include "seaclaw/gateway/ws_server.h"
-#include "seaclaw/health.h"
-#include "seaclaw/security.h"
+#include "human/gateway.h"
+#include "human/config.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/crypto.h"
+#include "human/gateway/control_protocol.h"
+#include "human/gateway/event_bridge.h"
+#include "human/gateway/oauth.h"
+#include "human/gateway/openai_compat.h"
+#include "human/gateway/rate_limit.h"
+#include "human/gateway/thread_pool.h"
+#include "human/gateway/ws_server.h"
+#include "human/health.h"
+#include "human/security.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -33,19 +33,19 @@
 #include <unistd.h>
 #endif
 
-#define SC_GATEWAY_DEFAULT_PORT    3000
-#define SC_GATEWAY_POLL_TIMEOUT_MS 100
+#define HU_GATEWAY_DEFAULT_PORT    3000
+#define HU_GATEWAY_POLL_TIMEOUT_MS 100
 
-void sc_gateway_config_from_cfg(const sc_config_gateway_t *cfg_gw, sc_gateway_config_t *out) {
+void hu_gateway_config_from_cfg(const hu_config_gateway_t *cfg_gw, hu_gateway_config_t *out) {
     if (!cfg_gw || !out)
         return;
     memset(out, 0, sizeof(*out));
     out->host = cfg_gw->host && cfg_gw->host[0] ? cfg_gw->host : "0.0.0.0";
-    out->port = cfg_gw->port > 0 ? cfg_gw->port : SC_GATEWAY_DEFAULT_PORT;
-    out->max_body_size = SC_GATEWAY_MAX_BODY_SIZE;
+    out->port = cfg_gw->port > 0 ? cfg_gw->port : HU_GATEWAY_DEFAULT_PORT;
+    out->max_body_size = HU_GATEWAY_MAX_BODY_SIZE;
     out->rate_limit_per_minute = cfg_gw->pair_rate_limit_per_minute > 0
                                      ? cfg_gw->pair_rate_limit_per_minute
-                                     : SC_GATEWAY_RATE_LIMIT_PER_MIN;
+                                     : HU_GATEWAY_RATE_LIMIT_PER_MIN;
     out->rate_limit_requests = cfg_gw->rate_limit_requests > 0 ? cfg_gw->rate_limit_requests : 60;
     out->rate_limit_window = cfg_gw->rate_limit_window > 0 ? cfg_gw->rate_limit_window : 60;
     out->hmac_secret = cfg_gw->webhook_hmac_secret && cfg_gw->webhook_hmac_secret[0]
@@ -53,7 +53,7 @@ void sc_gateway_config_from_cfg(const sc_config_gateway_t *cfg_gw, sc_gateway_co
                            : NULL;
     out->hmac_secret_len = out->hmac_secret ? strlen(out->hmac_secret) : 0;
     if (cfg_gw->require_pairing && !out->hmac_secret) {
-        const char *v = getenv("SEACLAW_WEBHOOK_HMAC_SECRET");
+        const char *v = getenv("HUMAN_WEBHOOK_HMAC_SECRET");
         if (v && v[0]) {
             out->hmac_secret = v;
             out->hmac_secret_len = strlen(v);
@@ -78,52 +78,52 @@ typedef struct rate_entry {
     time_t window_start;
 } rate_entry_t;
 
-#define SC_OAUTH_PENDING_MAX  64
-#define SC_OAUTH_STATE_LEN    48
-#define SC_OAUTH_VERIFIER_LEN 64
+#define HU_OAUTH_PENDING_MAX  64
+#define HU_OAUTH_STATE_LEN    48
+#define HU_OAUTH_VERIFIER_LEN 64
 
-typedef struct sc_oauth_pending_entry {
-    char state[SC_OAUTH_STATE_LEN];
-    char verifier[SC_OAUTH_VERIFIER_LEN];
+typedef struct hu_oauth_pending_entry {
+    char state[HU_OAUTH_STATE_LEN];
+    char verifier[HU_OAUTH_VERIFIER_LEN];
     time_t created_at;
-} sc_oauth_pending_entry_t;
+} hu_oauth_pending_entry_t;
 
-typedef struct sc_gateway_state {
-    sc_allocator_t *alloc;
-    sc_gateway_config_t config;
+typedef struct hu_gateway_state {
+    hu_allocator_t *alloc;
+    hu_gateway_config_t config;
     int listen_fd;
     bool running;
     rate_entry_t rate_entries[256];
     size_t rate_count;
-    sc_rate_limiter_t *rate_limiter;
-    sc_ws_server_t ws;
-    sc_pairing_guard_t *pairing_guard;
-    sc_oauth_pending_entry_t oauth_pending[SC_OAUTH_PENDING_MAX];
+    hu_rate_limiter_t *rate_limiter;
+    hu_ws_server_t ws;
+    hu_pairing_guard_t *pairing_guard;
+    hu_oauth_pending_entry_t oauth_pending[HU_OAUTH_PENDING_MAX];
     size_t oauth_pending_count;
     pthread_mutex_t oauth_mutex;
-    sc_thread_pool_t *http_pool;
-} sc_gateway_state_t;
+    hu_thread_pool_t *http_pool;
+} hu_gateway_state_t;
 
 /* ── OAuth pending state (PKCE verifier storage) ───────────────────────── */
 
 static void oauth_pending_store(void *ctx, const char *state, const char *verifier) {
-    sc_gateway_state_t *gw = (sc_gateway_state_t *)ctx;
+    hu_gateway_state_t *gw = (hu_gateway_state_t *)ctx;
     if (!gw)
         return;
     pthread_mutex_lock(&gw->oauth_mutex);
-    if (gw->oauth_pending_count >= SC_OAUTH_PENDING_MAX) {
+    if (gw->oauth_pending_count >= HU_OAUTH_PENDING_MAX) {
         (void)fprintf(stderr, "[oauth] pending store buffer full, state dropped (max: %d)\n",
-                      SC_OAUTH_PENDING_MAX);
+                      HU_OAUTH_PENDING_MAX);
         pthread_mutex_unlock(&gw->oauth_mutex);
         return;
     }
-    sc_oauth_pending_entry_t *e = &gw->oauth_pending[gw->oauth_pending_count++];
+    hu_oauth_pending_entry_t *e = &gw->oauth_pending[gw->oauth_pending_count++];
     size_t sl = strlen(state);
     size_t vl = strlen(verifier);
-    if (sl >= SC_OAUTH_STATE_LEN)
-        sl = SC_OAUTH_STATE_LEN - 1;
-    if (vl >= SC_OAUTH_VERIFIER_LEN)
-        vl = SC_OAUTH_VERIFIER_LEN - 1;
+    if (sl >= HU_OAUTH_STATE_LEN)
+        sl = HU_OAUTH_STATE_LEN - 1;
+    if (vl >= HU_OAUTH_VERIFIER_LEN)
+        vl = HU_OAUTH_VERIFIER_LEN - 1;
     memcpy(e->state, state, sl);
     e->state[sl] = '\0';
     memcpy(e->verifier, verifier, vl);
@@ -133,14 +133,14 @@ static void oauth_pending_store(void *ctx, const char *state, const char *verifi
 }
 
 static const char *oauth_pending_lookup(void *ctx, const char *state) {
-    sc_gateway_state_t *gw = (sc_gateway_state_t *)ctx;
+    hu_gateway_state_t *gw = (hu_gateway_state_t *)ctx;
     if (!gw || !state)
         return NULL;
     pthread_mutex_lock(&gw->oauth_mutex);
     time_t now = time(NULL);
     const char *result = NULL;
     for (size_t i = 0; i < gw->oauth_pending_count; i++) {
-        sc_oauth_pending_entry_t *e = &gw->oauth_pending[i];
+        hu_oauth_pending_entry_t *e = &gw->oauth_pending[i];
         if (strcmp(e->state, state) == 0) {
             if (now - e->created_at <= 600)
                 result = e->verifier;
@@ -152,17 +152,17 @@ static const char *oauth_pending_lookup(void *ctx, const char *state) {
 }
 
 static void oauth_pending_remove(void *ctx, const char *state) {
-    sc_gateway_state_t *gw = (sc_gateway_state_t *)ctx;
+    hu_gateway_state_t *gw = (hu_gateway_state_t *)ctx;
     if (!gw || !state)
         return;
     pthread_mutex_lock(&gw->oauth_mutex);
     for (size_t i = 0; i < gw->oauth_pending_count; i++) {
         if (strcmp(gw->oauth_pending[i].state, state) == 0) {
             memmove(&gw->oauth_pending[i], &gw->oauth_pending[i + 1],
-                    (gw->oauth_pending_count - 1 - i) * sizeof(sc_oauth_pending_entry_t));
+                    (gw->oauth_pending_count - 1 - i) * sizeof(hu_oauth_pending_entry_t));
             gw->oauth_pending_count--;
             memset(&gw->oauth_pending[gw->oauth_pending_count], 0,
-                   sizeof(sc_oauth_pending_entry_t));
+                   sizeof(hu_oauth_pending_entry_t));
             pthread_mutex_unlock(&gw->oauth_mutex);
             return;
         }
@@ -252,11 +252,11 @@ static bool path_starts_with(const char *path, const char *base) {
     return path[n] == '\0' || path[n] == '?';
 }
 
-bool sc_gateway_path_is(const char *path, const char *base) {
+bool hu_gateway_path_is(const char *path, const char *base) {
     return path_is(path, base);
 }
 
-bool sc_gateway_path_has_traversal(const char *path) {
+bool hu_gateway_path_has_traversal(const char *path) {
     if (!path)
         return false;
     return strstr(path, "..") != NULL || strstr(path, "%2e%2e") != NULL ||
@@ -265,10 +265,10 @@ bool sc_gateway_path_has_traversal(const char *path) {
            strstr(path, "%252e%252e") != NULL || strstr(path, "%252E%252E") != NULL;
 }
 
-bool sc_gateway_is_webhook_path(const char *path) {
+bool hu_gateway_is_webhook_path(const char *path) {
     if (!path)
         return false;
-    if (sc_gateway_path_has_traversal(path))
+    if (hu_gateway_path_has_traversal(path))
         return false;
     return path_is(path, "/webhook") || strncmp(path, "/webhook/", 9) == 0 ||
            path_is(path, "/telegram") || path_is(path, "/slack/events") ||
@@ -280,7 +280,7 @@ bool sc_gateway_is_webhook_path(const char *path) {
            path_is(path, "/tiktok");
 }
 
-bool sc_gateway_is_allowed_origin(const char *origin, const char *const *allowed, size_t n) {
+bool hu_gateway_is_allowed_origin(const char *origin, const char *const *allowed, size_t n) {
     if (!origin || !origin[0])
         return true;
     if (strchr(origin, '\r') || strchr(origin, '\n') || strlen(origin) > 256)
@@ -295,25 +295,25 @@ bool sc_gateway_is_allowed_origin(const char *origin, const char *const *allowed
     return false;
 }
 
-sc_error_t sc_gateway_parse_content_length(const char *value, size_t max_body, size_t *out_len) {
+hu_error_t hu_gateway_parse_content_length(const char *value, size_t max_body, size_t *out_len) {
     if (!value || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     while (*value == ' ')
         value++;
     if (*value == '\0')
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     char *end;
     long v = strtol(value, &end, 10);
     if (v < 0 || end == value)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if ((size_t)v > max_body)
-        return SC_ERR_GATEWAY_BODY_TOO_LARGE;
+        return HU_ERR_GATEWAY_BODY_TOO_LARGE;
     *out_len = (size_t)v;
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool is_webhook_path(const char *path) {
-    return sc_gateway_is_webhook_path(path);
+    return hu_gateway_is_webhook_path(path);
 }
 
 static const char *webhook_path_to_channel(const char *path, char *buf, size_t buf_len) {
@@ -351,7 +351,7 @@ static bool verify_hmac(const char *body, size_t body_len, const char *sig_heade
     if (!sig_header)
         return false;
     uint8_t computed[32];
-    sc_hmac_sha256((const uint8_t *)secret, secret_len, (const uint8_t *)body, body_len, computed);
+    hu_hmac_sha256((const uint8_t *)secret, secret_len, (const uint8_t *)body, body_len, computed);
     char hex[65];
     for (int i = 0; i < 32; i++)
         snprintf(hex + i * 2, 3, "%02x", computed[i]);
@@ -369,7 +369,7 @@ static bool verify_hmac(const char *body, size_t body_len, const char *sig_heade
 
 static const char *const *s_cors_origins = NULL;
 static size_t s_cors_origins_len = 0;
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 static _Thread_local const char *s_request_origin = NULL;
 #endif
 
@@ -378,7 +378,7 @@ static _Thread_local const char *s_request_origin = NULL;
 static const char *get_cors_origin_for_response(void) {
     const char *cors = "";
     if (s_request_origin &&
-        sc_gateway_is_allowed_origin(s_request_origin, s_cors_origins, s_cors_origins_len))
+        hu_gateway_is_allowed_origin(s_request_origin, s_cors_origins, s_cors_origins_len))
         cors = s_request_origin;
     return cors;
 }
@@ -528,11 +528,11 @@ static const char *mime_for_ext(const char *path) {
     return "application/octet-stream";
 }
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 static bool serve_static_file(int fd, const char *base_dir, const char *url_path) {
     if (!base_dir || !url_path)
         return false;
-    if (sc_gateway_path_has_traversal(url_path))
+    if (hu_gateway_path_has_traversal(url_path))
         return false;
 
     char filepath[1024];
@@ -595,35 +595,35 @@ static bool serve_static_file(int fd, const char *base_dir, const char *url_path
 
 /* ── HTTP request handling (thread pool worker) ───────────────────────────── */
 
-#ifdef SC_GATEWAY_POSIX
-static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *method,
+#ifdef HU_GATEWAY_POSIX
+static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *method,
                                 const char *path, const char *body, size_t body_len,
                                 const char *client_ip, const char *sig_header,
                                 const char *cookie_header, const char *auth_header);
 
-#define SC_HTTP_WORK_ORIGIN_MAX 256
-#define SC_HTTP_WORK_SIG_MAX    128
-#define SC_HTTP_WORK_COOKIE_MAX 512
-#define SC_HTTP_WORK_AUTH_MAX   384
+#define HU_HTTP_WORK_ORIGIN_MAX 256
+#define HU_HTTP_WORK_SIG_MAX    128
+#define HU_HTTP_WORK_COOKIE_MAX 512
+#define HU_HTTP_WORK_AUTH_MAX   384
 
 typedef struct {
-    sc_gateway_state_t *gw;
+    hu_gateway_state_t *gw;
     int fd;
     char method[16];
     char path[256];
     char *body;
     size_t body_len;
     char client_ip[64];
-    char sig_header[SC_HTTP_WORK_SIG_MAX];
-    char origin[SC_HTTP_WORK_ORIGIN_MAX];
-    char cookie[SC_HTTP_WORK_COOKIE_MAX];
-    char auth_header[SC_HTTP_WORK_AUTH_MAX];
-} sc_http_work_t;
+    char sig_header[HU_HTTP_WORK_SIG_MAX];
+    char origin[HU_HTTP_WORK_ORIGIN_MAX];
+    char cookie[HU_HTTP_WORK_COOKIE_MAX];
+    char auth_header[HU_HTTP_WORK_AUTH_MAX];
+} hu_http_work_t;
 
 static void http_worker_fn(void *arg) {
-    sc_http_work_t *work = (sc_http_work_t *)arg;
-    sc_gateway_state_t *gw = work->gw;
-    sc_allocator_t *alloc = gw->alloc;
+    hu_http_work_t *work = (hu_http_work_t *)arg;
+    hu_gateway_state_t *gw = work->gw;
+    hu_allocator_t *alloc = gw->alloc;
 
     s_request_origin = work->origin[0] != '\0' ? work->origin : NULL;
     handle_http_request(gw, work->fd, work->method, work->path, work->body, work->body_len,
@@ -645,11 +645,11 @@ static void http_worker_fn(void *arg) {
 
     if (work->body)
         alloc->free(alloc->ctx, work->body, work->body_len + 1);
-    alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+    alloc->free(alloc->ctx, work, sizeof(hu_http_work_t));
 }
 
 /* Constant-time comparison that does not leak length via timing. */
-static bool sc_secure_token_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
+static bool hu_secure_token_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
     volatile unsigned char d = (a_len != b_len) ? 1 : 0;
     size_t cmp_len = a_len < b_len ? a_len : b_len;
     for (size_t i = 0; i < cmp_len; i++)
@@ -661,7 +661,7 @@ static bool sc_secure_token_eq(const char *a, size_t a_len, const char *b, size_
 }
 
 /* Returns true if request is authenticated (or auth not required). */
-static bool v1_auth_ok(const sc_gateway_config_t *cfg, const char *auth_header) {
+static bool v1_auth_ok(const hu_gateway_config_t *cfg, const char *auth_header) {
     if (!cfg->auth_token || !cfg->auth_token[0])
         return true;
     if (!auth_header || !auth_header[0])
@@ -669,10 +669,10 @@ static bool v1_auth_ok(const sc_gateway_config_t *cfg, const char *auth_header) 
     if (strncmp(auth_header, "Bearer ", 7) != 0)
         return false;
     const char *tok = auth_header + 7;
-    return sc_secure_token_eq(tok, strlen(tok), cfg->auth_token, strlen(cfg->auth_token));
+    return hu_secure_token_eq(tok, strlen(tok), cfg->auth_token, strlen(cfg->auth_token));
 }
 
-static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *method,
+static void handle_http_request(hu_gateway_state_t *gw, int fd, const char *method,
                                 const char *path, const char *body, size_t body_len,
                                 const char *client_ip, const char *sig_header,
                                 const char *cookie_header, const char *auth_header) {
@@ -682,7 +682,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
                 client_ip ? client_ip : "unknown", body_len);
     }
 
-    if (gw->rate_limiter && !sc_rate_limiter_allow(gw->rate_limiter, client_ip)) {
+    if (gw->rate_limiter && !hu_rate_limiter_allow(gw->rate_limiter, client_ip)) {
         send_json_rate_limited(fd, "{\"error\":\"rate limited\"}",
                                gw->config.rate_limit_window > 0 ? gw->config.rate_limit_window
                                                                 : 60);
@@ -690,15 +690,15 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
     }
 
     if (path_is(path, "/ready") || path_is(path, "/readyz")) {
-        sc_allocator_t alloc = sc_system_allocator();
-        sc_readiness_result_t r = sc_health_check_readiness(&alloc);
-        char *json = sc_sprintf(&alloc, "{\"status\":\"%s\",\"checks\":[]}",
-                                r.status == SC_READINESS_READY ? "ready" : "not_ready");
+        hu_allocator_t alloc = hu_system_allocator();
+        hu_readiness_result_t r = hu_health_check_readiness(&alloc);
+        char *json = hu_sprintf(&alloc, "{\"status\":\"%s\",\"checks\":[]}",
+                                r.status == HU_READINESS_READY ? "ready" : "not_ready");
         send_json(fd, 200, json);
         if (json)
             alloc.free(alloc.ctx, json, strlen(json) + 1);
         if (r.checks)
-            alloc.free(alloc.ctx, (void *)r.checks, r.check_count * sizeof(sc_component_check_t));
+            alloc.free(alloc.ctx, (void *)r.checks, r.check_count * sizeof(hu_component_check_t));
         return;
     }
 
@@ -717,7 +717,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         char *resp_body = NULL;
         size_t resp_len = 0;
         const char *content_type = "application/json";
-        sc_openai_compat_handle_chat_completions(body, body_len, gw->alloc, gw->config.app_ctx,
+        hu_openai_compat_handle_chat_completions(body, body_len, gw->alloc, gw->config.app_ctx,
                                                  &status, &resp_body, &resp_len, &content_type);
         send_response(fd, status, content_type, resp_body ? resp_body : "{}",
                       resp_body ? resp_len : 2, 0);
@@ -733,7 +733,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         int status = 500;
         char *resp_body = NULL;
         size_t resp_len = 0;
-        sc_openai_compat_handle_models(gw->alloc, gw->config.app_ctx, &status, &resp_body,
+        hu_openai_compat_handle_models(gw->alloc, gw->config.app_ctx, &status, &resp_body,
                                        &resp_len);
         send_response(fd, status, "application/json",
                       resp_body ? resp_body : "{\"object\":\"list\",\"data\":[]}",
@@ -760,13 +760,13 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         }
         char *code = NULL;
         if (body_len > 0 && body_len <= gw->config.max_body_size) {
-            sc_json_value_t *root = NULL;
-            if (sc_json_parse(gw->alloc, body, body_len, &root) == SC_OK && root &&
-                root->type == SC_JSON_OBJECT) {
-                const char *raw = sc_json_get_string(root, "code");
+            hu_json_value_t *root = NULL;
+            if (hu_json_parse(gw->alloc, body, body_len, &root) == HU_OK && root &&
+                root->type == HU_JSON_OBJECT) {
+                const char *raw = hu_json_get_string(root, "code");
                 if (raw && raw[0])
-                    code = sc_strndup(gw->alloc, raw, strlen(raw));
-                sc_json_free(gw->alloc, root);
+                    code = hu_strndup(gw->alloc, raw, strlen(raw));
+                hu_json_free(gw->alloc, root);
             }
         }
         if (!code || !code[0]) {
@@ -774,9 +774,9 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
             return;
         }
         char *token = NULL;
-        sc_pair_attempt_result_t result =
-            sc_pairing_guard_attempt_pair(gw->pairing_guard, code, &token);
-        if (result == SC_PAIR_PAIRED && token) {
+        hu_pair_attempt_result_t result =
+            hu_pairing_guard_attempt_pair(gw->pairing_guard, code, &token);
+        if (result == HU_PAIR_PAIRED && token) {
             size_t tok_len = strlen(token);
             size_t cap = 32 + tok_len * 2;
             char *resp_buf = (char *)gw->alloc->alloc(gw->alloc->ctx, cap);
@@ -796,11 +796,11 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
                 send_json(fd, 500, "{\"error\":\"internal\"}");
             }
             gw->alloc->free(gw->alloc->ctx, token, tok_len + 1);
-        } else if (result == SC_PAIR_INVALID_CODE) {
+        } else if (result == HU_PAIR_INVALID_CODE) {
             send_json(fd, 401, "{\"error\":\"invalid_code\"}");
-        } else if (result == SC_PAIR_LOCKED_OUT) {
+        } else if (result == HU_PAIR_LOCKED_OUT) {
             send_json(fd, 429, "{\"error\":\"locked_out\"}");
-        } else if (result == SC_PAIR_ALREADY_PAIRED) {
+        } else if (result == HU_PAIR_ALREADY_PAIRED) {
             send_json(fd, 400, "{\"error\":\"already_paired\"}");
         } else {
             send_json(fd, 400, "{\"error\":\"pairing_failed\"}");
@@ -809,15 +809,15 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         return;
     }
 
-    /* OAuth routes (require oauth_ctx and SC_HTTP_CURL unless SC_IS_TEST) */
-    sc_oauth_ctx_t *oauth_ctx = (sc_oauth_ctx_t *)gw->config.oauth_ctx;
+    /* OAuth routes (require oauth_ctx and HU_HTTP_CURL unless HU_IS_TEST) */
+    hu_oauth_ctx_t *oauth_ctx = (hu_oauth_ctx_t *)gw->config.oauth_ctx;
     if (oauth_ctx && path_starts_with(path, "/api/auth/oauth/start") && method &&
         strcmp(method, "GET") == 0) {
         char verifier[64];
         char challenge[64];
         char state[48];
-        if (sc_oauth_generate_pkce(oauth_ctx, verifier, sizeof(verifier), challenge,
-                                   sizeof(challenge)) != SC_OK) {
+        if (hu_oauth_generate_pkce(oauth_ctx, verifier, sizeof(verifier), challenge,
+                                   sizeof(challenge)) != HU_OK) {
             send_json(fd, 500, "{\"error\":\"internal\"}");
             return;
         }
@@ -848,27 +848,27 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
         }
         oauth_pending_store(gw, state, verifier);
         char url[1024];
-        if (sc_oauth_build_auth_url(oauth_ctx, challenge, strlen(challenge), state, strlen(state),
-                                    url, sizeof(url)) != SC_OK) {
+        if (hu_oauth_build_auth_url(oauth_ctx, challenge, strlen(challenge), state, strlen(state),
+                                    url, sizeof(url)) != HU_OK) {
             oauth_pending_remove(gw, state);
             send_json(fd, 500, "{\"error\":\"internal\"}");
             return;
         }
-        sc_json_value_t *obj = sc_json_object_new(gw->alloc);
+        hu_json_value_t *obj = hu_json_object_new(gw->alloc);
         if (obj) {
-            sc_json_object_set(gw->alloc, obj, "url",
-                               sc_json_string_new(gw->alloc, url, strlen(url)));
-            sc_json_object_set(gw->alloc, obj, "state",
-                               sc_json_string_new(gw->alloc, state, strlen(state)));
+            hu_json_object_set(gw->alloc, obj, "url",
+                               hu_json_string_new(gw->alloc, url, strlen(url)));
+            hu_json_object_set(gw->alloc, obj, "state",
+                               hu_json_string_new(gw->alloc, state, strlen(state)));
             char *json = NULL;
             size_t json_len = 0;
-            if (sc_json_stringify(gw->alloc, obj, &json, &json_len) == SC_OK && json) {
+            if (hu_json_stringify(gw->alloc, obj, &json, &json_len) == HU_OK && json) {
                 send_json_with_cookie(fd, 200, json, "oauth_state", state);
                 gw->alloc->free(gw->alloc->ctx, json, json_len + 1);
             } else {
                 send_json(fd, 500, "{\"error\":\"internal\"}");
             }
-            sc_json_free(gw->alloc, obj);
+            hu_json_free(gw->alloc, obj);
         } else {
             send_json(fd, 500, "{\"error\":\"internal\"}");
         }
@@ -891,7 +891,7 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
             send_json(fd, 401, "{\"error\":\"invalid state\"}");
             return;
         }
-        char state_buf[SC_OAUTH_STATE_LEN];
+        char state_buf[HU_OAUTH_STATE_LEN];
         if (state_len >= sizeof(state_buf))
             state_len = sizeof(state_buf) - 1;
         memcpy(state_buf, state, state_len);
@@ -907,34 +907,34 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
             code_len = sizeof(code_buf) - 1;
         memcpy(code_buf, code, code_len);
         code_buf[code_len] = '\0';
-        sc_oauth_session_t session = {0};
-        sc_error_t err = sc_oauth_exchange_code(oauth_ctx, code_buf, code_len, verifier,
+        hu_oauth_session_t session = {0};
+        hu_error_t err = hu_oauth_exchange_code(oauth_ctx, code_buf, code_len, verifier,
                                                 strlen(verifier), &session);
-        if (err != SC_OK) {
+        if (err != HU_OK) {
             send_json(fd, 401, "{\"error\":\"token exchange failed\"}");
             return;
         }
-        sc_json_value_t *obj = sc_json_object_new(gw->alloc);
+        hu_json_value_t *obj = hu_json_object_new(gw->alloc);
         if (obj) {
-            sc_json_object_set(
+            hu_json_object_set(
                 gw->alloc, obj, "token",
-                sc_json_string_new(gw->alloc, session.access_token, strlen(session.access_token)));
-            sc_json_value_t *user = sc_json_object_new(gw->alloc);
+                hu_json_string_new(gw->alloc, session.access_token, strlen(session.access_token)));
+            hu_json_value_t *user = hu_json_object_new(gw->alloc);
             if (user) {
-                sc_json_object_set(
+                hu_json_object_set(
                     gw->alloc, user, "id",
-                    sc_json_string_new(gw->alloc, session.user_id, strlen(session.user_id)));
-                sc_json_object_set(gw->alloc, obj, "user", user);
+                    hu_json_string_new(gw->alloc, session.user_id, strlen(session.user_id)));
+                hu_json_object_set(gw->alloc, obj, "user", user);
             }
             char *json = NULL;
             size_t json_len = 0;
-            if (sc_json_stringify(gw->alloc, obj, &json, &json_len) == SC_OK && json) {
+            if (hu_json_stringify(gw->alloc, obj, &json, &json_len) == HU_OK && json) {
                 send_json(fd, 200, json);
                 gw->alloc->free(gw->alloc->ctx, json, json_len + 1);
             } else {
                 send_json(fd, 500, "{\"error\":\"internal\"}");
             }
-            sc_json_free(gw->alloc, obj);
+            hu_json_free(gw->alloc, obj);
         } else {
             send_json(fd, 500, "{\"error\":\"internal\"}");
         }
@@ -980,44 +980,44 @@ static void handle_http_request(sc_gateway_state_t *gw, int fd, const char *meth
 }
 #endif
 
-#if SC_IS_TEST
+#if HU_IS_TEST
 /* Test-only: process POST /api/pair body, return HTTP status and JSON body.
  * out_body is allocated via alloc; caller must free. */
-int sc_gateway_test_pair_request(sc_allocator_t *alloc, void *guard, size_t max_body,
+int hu_gateway_test_pair_request(hu_allocator_t *alloc, void *guard, size_t max_body,
                                  const char *body, size_t body_len, char **out_body,
                                  size_t *out_len) {
-    sc_pairing_guard_t *g = (sc_pairing_guard_t *)guard;
+    hu_pairing_guard_t *g = (hu_pairing_guard_t *)guard;
     if (!alloc || !out_body || !out_len)
         return 400;
     *out_body = NULL;
     *out_len = 0;
 
     if (!g) {
-        *out_body = sc_strndup(alloc, "{\"error\":\"pairing not required\"}", 35);
+        *out_body = hu_strndup(alloc, "{\"error\":\"pairing not required\"}", 35);
         *out_len = *out_body ? 35 : 0;
         return 400;
     }
     char *code = NULL;
     if (body_len > 0 && body_len <= max_body) {
-        sc_json_value_t *root = NULL;
-        if (sc_json_parse(alloc, body, body_len, &root) == SC_OK && root &&
-            root->type == SC_JSON_OBJECT) {
-            const char *raw = sc_json_get_string(root, "code");
+        hu_json_value_t *root = NULL;
+        if (hu_json_parse(alloc, body, body_len, &root) == HU_OK && root &&
+            root->type == HU_JSON_OBJECT) {
+            const char *raw = hu_json_get_string(root, "code");
             if (raw && raw[0])
-                code = sc_strndup(alloc, raw, strlen(raw));
-            sc_json_free(alloc, root);
+                code = hu_strndup(alloc, raw, strlen(raw));
+            hu_json_free(alloc, root);
         }
     }
     if (!code || !code[0]) {
-        *out_body = sc_strndup(alloc, "{\"error\":\"missing code\"}", 24);
+        *out_body = hu_strndup(alloc, "{\"error\":\"missing code\"}", 24);
         *out_len = *out_body ? 24 : 0;
         return 400;
     }
     char *token = NULL;
-    sc_pair_attempt_result_t result = sc_pairing_guard_attempt_pair(g, code, &token);
+    hu_pair_attempt_result_t result = hu_pairing_guard_attempt_pair(g, code, &token);
     alloc->free(alloc->ctx, code, strlen(code) + 1);
 
-    if (result == SC_PAIR_PAIRED && token) {
+    if (result == HU_PAIR_PAIRED && token) {
         size_t tok_len = strlen(token);
         size_t cap = 32 + tok_len * 2;
         char *resp_buf = (char *)alloc->alloc(alloc->ctx, cap);
@@ -1032,7 +1032,7 @@ int sc_gateway_test_pair_request(sc_allocator_t *alloc, void *guard, size_t max_
             }
             pos += (size_t)snprintf(resp_buf + pos, cap - pos, "\"}");
             /* Copy to exact-size buffer so caller can free(out_body, out_len+1) */
-            char *copy = sc_strndup(alloc, resp_buf, pos);
+            char *copy = hu_strndup(alloc, resp_buf, pos);
             alloc->free(alloc->ctx, resp_buf, cap);
             *out_body = copy;
             *out_len = pos;
@@ -1040,75 +1040,75 @@ int sc_gateway_test_pair_request(sc_allocator_t *alloc, void *guard, size_t max_
             return 200;
         }
         alloc->free(alloc->ctx, token, tok_len + 1);
-        *out_body = sc_strndup(alloc, "{\"error\":\"internal\"}", 21);
+        *out_body = hu_strndup(alloc, "{\"error\":\"internal\"}", 21);
         *out_len = *out_body ? 21 : 0;
         return 500;
     }
-    if (result == SC_PAIR_INVALID_CODE) {
-        *out_body = sc_strndup(alloc, "{\"error\":\"invalid_code\"}", 25);
+    if (result == HU_PAIR_INVALID_CODE) {
+        *out_body = hu_strndup(alloc, "{\"error\":\"invalid_code\"}", 25);
         *out_len = *out_body ? 25 : 0;
         return 401;
     }
-    if (result == SC_PAIR_LOCKED_OUT) {
-        *out_body = sc_strndup(alloc, "{\"error\":\"locked_out\"}", 23);
+    if (result == HU_PAIR_LOCKED_OUT) {
+        *out_body = hu_strndup(alloc, "{\"error\":\"locked_out\"}", 23);
         *out_len = *out_body ? 23 : 0;
         return 429;
     }
-    if (result == SC_PAIR_ALREADY_PAIRED) {
-        *out_body = sc_strndup(alloc, "{\"error\":\"already_paired\"}", 27);
+    if (result == HU_PAIR_ALREADY_PAIRED) {
+        *out_body = hu_strndup(alloc, "{\"error\":\"already_paired\"}", 27);
         *out_len = *out_body ? 27 : 0;
         return 400;
     }
-    *out_body = sc_strndup(alloc, "{\"error\":\"pairing_failed\"}", 26);
+    *out_body = hu_strndup(alloc, "{\"error\":\"pairing_failed\"}", 26);
     *out_len = *out_body ? 26 : 0;
     return 400;
 }
-#endif /* SC_IS_TEST */
+#endif /* HU_IS_TEST */
 
 /* ── Main gateway run loop (poll-based) ─────────────────────────────────── */
 
-sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port,
-                          const sc_gateway_config_t *config) {
+hu_error_t hu_gateway_run(hu_allocator_t *alloc, const char *host, uint16_t port,
+                          const hu_gateway_config_t *config) {
     (void)host;
     (void)port;
     if (!alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_gateway_config_t cfg = {0};
+    hu_gateway_config_t cfg = {0};
     if (config)
         memcpy(&cfg, config, sizeof(cfg));
     if (!cfg.host)
         cfg.host = "0.0.0.0";
     if (cfg.port == 0)
-        cfg.port = SC_GATEWAY_DEFAULT_PORT;
+        cfg.port = HU_GATEWAY_DEFAULT_PORT;
     if (cfg.max_body_size == 0)
-        cfg.max_body_size = SC_GATEWAY_MAX_BODY_SIZE;
+        cfg.max_body_size = HU_GATEWAY_MAX_BODY_SIZE;
     if (cfg.rate_limit_per_minute == 0)
-        cfg.rate_limit_per_minute = SC_GATEWAY_RATE_LIMIT_PER_MIN;
+        cfg.rate_limit_per_minute = HU_GATEWAY_RATE_LIMIT_PER_MIN;
 
     if (cfg.test_mode) {
-        sc_health_mark_ok("gateway");
-        return SC_OK;
+        hu_health_mark_ok("gateway");
+        return HU_OK;
     }
 
     s_cors_origins = cfg.cors_origins;
     s_cors_origins_len = cfg.cors_origins_len;
 
-#ifdef SC_GATEWAY_POSIX
-    sc_gateway_state_t *gw = NULL;
+#ifdef HU_GATEWAY_POSIX
+    hu_gateway_state_t *gw = NULL;
     int fd = -1;
     char *body_buf = NULL;
-    sc_error_t err = SC_OK;
-    sc_control_protocol_t *ctrl = NULL;
-    sc_control_protocol_t proto_local;
-    sc_event_bridge_t event_bridge;
+    hu_error_t err = HU_OK;
+    hu_control_protocol_t *ctrl = NULL;
+    hu_control_protocol_t proto_local;
+    hu_event_bridge_t event_bridge;
     bool bridge_active = false;
 
     memset(&event_bridge, 0, sizeof(event_bridge));
 
-    gw = (sc_gateway_state_t *)alloc->alloc(alloc->ctx, sizeof(sc_gateway_state_t));
+    gw = (hu_gateway_state_t *)alloc->alloc(alloc->ctx, sizeof(hu_gateway_state_t));
     if (!gw) {
-        err = SC_ERR_OUT_OF_MEMORY;
+        err = HU_ERR_OUT_OF_MEMORY;
         goto cleanup;
     }
     memset(gw, 0, sizeof(*gw));
@@ -1117,46 +1117,46 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     pthread_mutex_init(&gw->oauth_mutex, NULL);
 
     ctrl = cfg.control ? cfg.control : &proto_local;
-    sc_control_protocol_init(ctrl, alloc, &gw->ws);
-    sc_ws_server_init(&gw->ws, alloc, sc_control_on_message, sc_control_on_close, ctrl);
+    hu_control_protocol_init(ctrl, alloc, &gw->ws);
+    hu_ws_server_init(&gw->ws, alloc, hu_control_on_message, hu_control_on_close, ctrl);
     gw->ws.auth_token = cfg.auth_token;
 
     if (cfg.app_ctx) {
-        sc_control_set_app_ctx(ctrl, cfg.app_ctx);
+        hu_control_set_app_ctx(ctrl, cfg.app_ctx);
         if (cfg.app_ctx->bus) {
-            sc_event_bridge_init(&event_bridge, ctrl, cfg.app_ctx->bus);
+            hu_event_bridge_init(&event_bridge, ctrl, cfg.app_ctx->bus);
             bridge_active = true;
         }
     }
 
     if (cfg.require_pairing) {
-        gw->pairing_guard = sc_pairing_guard_create(alloc, true, NULL, 0);
+        gw->pairing_guard = hu_pairing_guard_create(alloc, true, NULL, 0);
         if (gw->pairing_guard) {
-            const char *code = sc_pairing_guard_pairing_code(gw->pairing_guard);
+            const char *code = hu_pairing_guard_pairing_code(gw->pairing_guard);
             if (code)
                 fprintf(stderr,
                         "[gateway] Pairing code ready (use /pair endpoint or UI to view)\n");
             (void)code;
         }
     }
-    sc_control_set_auth(ctrl, cfg.require_pairing, gw->pairing_guard, cfg.auth_token);
+    hu_control_set_auth(ctrl, cfg.require_pairing, gw->pairing_guard, cfg.auth_token);
     if (cfg.oauth_ctx) {
-        sc_control_set_oauth(ctrl, cfg.oauth_ctx);
-        sc_control_set_oauth_pending(ctrl, gw, oauth_pending_store, oauth_pending_lookup,
+        hu_control_set_oauth(ctrl, cfg.oauth_ctx);
+        hu_control_set_oauth_pending(ctrl, gw, oauth_pending_store, oauth_pending_lookup,
                                      oauth_pending_remove);
     }
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
-        sc_health_mark_error("gateway", "socket failed");
-        err = SC_ERR_IO;
+        hu_health_mark_error("gateway", "socket failed");
+        err = HU_ERR_IO;
         goto cleanup;
     }
 
     int opt = 1;
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        sc_health_mark_error("gateway", "setsockopt SO_REUSEADDR failed");
-        err = SC_ERR_IO;
+        hu_health_mark_error("gateway", "setsockopt SO_REUSEADDR failed");
+        err = HU_ERR_IO;
         goto cleanup;
     }
 
@@ -1166,14 +1166,14 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     inet_pton(AF_INET, cfg.host, &addr.sin_addr);
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        sc_health_mark_error("gateway", "bind failed");
-        err = SC_ERR_IO;
+        hu_health_mark_error("gateway", "bind failed");
+        err = HU_ERR_IO;
         goto cleanup;
     }
 
     if (listen(fd, 64) < 0) {
-        sc_health_mark_error("gateway", "listen failed");
-        err = SC_ERR_IO;
+        hu_health_mark_error("gateway", "listen failed");
+        err = HU_ERR_IO;
         goto cleanup;
     }
 
@@ -1181,8 +1181,8 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     {
         int flags = fcntl(fd, F_GETFL, 0);
         if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-            sc_health_mark_error("gateway", "fcntl non-blocking failed");
-            err = SC_ERR_IO;
+            hu_health_mark_error("gateway", "fcntl non-blocking failed");
+            err = HU_ERR_IO;
             goto cleanup;
         }
     }
@@ -1190,18 +1190,18 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
     gw->listen_fd = fd;
     gw->running = true;
     gw->rate_limiter =
-        sc_rate_limiter_create(alloc, cfg.rate_limit_requests > 0 ? cfg.rate_limit_requests : 60,
+        hu_rate_limiter_create(alloc, cfg.rate_limit_requests > 0 ? cfg.rate_limit_requests : 60,
                                cfg.rate_limit_window > 0 ? cfg.rate_limit_window : 60);
-    gw->http_pool = sc_thread_pool_create(4);
+    gw->http_pool = hu_thread_pool_create(4);
     if (!gw->http_pool) {
-        err = SC_ERR_OUT_OF_MEMORY;
+        err = HU_ERR_OUT_OF_MEMORY;
         goto cleanup;
     }
-    sc_health_mark_ok("gateway");
+    hu_health_mark_ok("gateway");
 
     body_buf = (char *)alloc->alloc(alloc->ctx, cfg.max_body_size + 1);
     if (!body_buf) {
-        err = SC_ERR_OUT_OF_MEMORY;
+        err = HU_ERR_OUT_OF_MEMORY;
         goto cleanup;
     }
 
@@ -1210,7 +1210,7 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
 
     /* Poll-based event loop: listen socket + WebSocket connections */
     while (gw->running) {
-        struct pollfd fds[1 + SC_WS_SERVER_MAX_CONNS];
+        struct pollfd fds[1 + HU_WS_SERVER_MAX_CONNS];
         int nfds = 0;
 
         fds[nfds].fd = fd;
@@ -1218,9 +1218,9 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
         fds[nfds].revents = 0;
         int listen_idx = nfds++;
 
-        int ws_indices[SC_WS_SERVER_MAX_CONNS];
+        int ws_indices[HU_WS_SERVER_MAX_CONNS];
         int ws_count = 0;
-        for (int i = 0; i < SC_WS_SERVER_MAX_CONNS; i++) {
+        for (int i = 0; i < HU_WS_SERVER_MAX_CONNS; i++) {
             if (gw->ws.conns[i].active) {
                 ws_indices[ws_count] = i;
                 fds[nfds].fd = gw->ws.conns[i].fd;
@@ -1231,7 +1231,7 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
             }
         }
 
-        int ready = poll(fds, (nfds_t)nfds, SC_GATEWAY_POLL_TIMEOUT_MS);
+        int ready = poll(fds, (nfds_t)nfds, HU_GATEWAY_POLL_TIMEOUT_MS);
         if (ready < 0) {
             if (errno == EINTR)
                 continue;
@@ -1245,7 +1245,7 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
             int poll_idx = listen_idx + 1 + w;
             if (fds[poll_idx].revents & (POLLIN | POLLERR | POLLHUP)) {
                 int ci = ws_indices[w];
-                sc_ws_server_read_and_process(&gw->ws, &gw->ws.conns[ci]);
+                hu_ws_server_read_and_process(&gw->ws, &gw->ws.conns[ci]);
             }
         }
 
@@ -1293,22 +1293,22 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
             }
 
             /* Check for WebSocket upgrade */
-            if (sc_ws_server_is_upgrade(req, (size_t)n)) {
-                sc_ws_conn_t *conn = NULL;
-                sc_error_t ws_err = sc_ws_server_upgrade(&gw->ws, client, req, (size_t)n, &conn);
-                if (ws_err != SC_OK) {
+            if (hu_ws_server_is_upgrade(req, (size_t)n)) {
+                hu_ws_conn_t *conn = NULL;
+                hu_error_t ws_err = hu_ws_server_upgrade(&gw->ws, client, req, (size_t)n, &conn);
+                if (ws_err != HU_OK) {
                     int status = 503;
                     const char *msg = "{\"error\":\"websocket upgrade failed\"}";
-                    if (ws_err == SC_ERR_ALREADY_EXISTS) {
+                    if (ws_err == HU_ERR_ALREADY_EXISTS) {
                         status = 429;
                         msg = "{\"error\":\"too many connections\"}";
-                    } else if (ws_err == SC_ERR_PERMISSION_DENIED) {
+                    } else if (ws_err == HU_ERR_PERMISSION_DENIED) {
                         status = 401;
                         msg = "{\"error\":\"unauthorized\"}";
-                    } else if (ws_err == SC_ERR_INVALID_ARGUMENT) {
+                    } else if (ws_err == HU_ERR_INVALID_ARGUMENT) {
                         status = 400;
                         msg = "{\"error\":\"bad request\"}";
-                    } else if (ws_err == SC_ERR_NOT_SUPPORTED) {
+                    } else if (ws_err == HU_ERR_NOT_SUPPORTED) {
                         status = 501;
                         msg = "{\"error\":\"not supported\"}";
                     }
@@ -1350,8 +1350,8 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
 
             size_t body_len = 0;
             char *sig_header = NULL;
-            char cookie_header[SC_HTTP_WORK_COOKIE_MAX] = {0};
-            char auth_header[SC_HTTP_WORK_AUTH_MAX] = {0};
+            char cookie_header[HU_HTTP_WORK_COOKIE_MAX] = {0};
+            char auth_header[HU_HTTP_WORK_AUTH_MAX] = {0};
             bool rejected = false;
             while ((line = strtok(NULL, "\n")) != NULL) {
                 trim_crlf(line);
@@ -1392,8 +1392,8 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                     while (*v == ' ')
                         v++;
                     size_t len = strlen(v);
-                    if (len >= SC_HTTP_WORK_COOKIE_MAX)
-                        len = SC_HTTP_WORK_COOKIE_MAX - 1;
+                    if (len >= HU_HTTP_WORK_COOKIE_MAX)
+                        len = HU_HTTP_WORK_COOKIE_MAX - 1;
                     memcpy(cookie_header, v, len);
                     cookie_header[len] = '\0';
                 }
@@ -1402,8 +1402,8 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                     while (*v == ' ')
                         v++;
                     size_t len = strlen(v);
-                    if (len >= SC_HTTP_WORK_AUTH_MAX)
-                        len = SC_HTTP_WORK_AUTH_MAX - 1;
+                    if (len >= HU_HTTP_WORK_AUTH_MAX)
+                        len = HU_HTTP_WORK_AUTH_MAX - 1;
                     memcpy(auth_header, v, len);
                     auth_header[len] = '\0';
                 }
@@ -1424,8 +1424,8 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                     body_buf[got < body_len ? got : body_len] = '\0';
                 }
 
-                sc_http_work_t *work =
-                    (sc_http_work_t *)alloc->alloc(alloc->ctx, sizeof(sc_http_work_t));
+                hu_http_work_t *work =
+                    (hu_http_work_t *)alloc->alloc(alloc->ctx, sizeof(hu_http_work_t));
                 if (!work) {
                     send_json(client, 503, "{\"error\":\"service unavailable\"}");
                     close(client);
@@ -1450,24 +1450,24 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
                     if (body_len > 0) {
                         work->body = (char *)alloc->alloc(alloc->ctx, body_len + 1);
                         if (!work->body) {
-                            alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+                            alloc->free(alloc->ctx, work, sizeof(hu_http_work_t));
                             send_json(client, 503, "{\"error\":\"service unavailable\"}");
                             close(client);
                             s_request_origin = NULL;
                         } else {
                             memcpy(work->body, body_buf, body_len);
                             work->body[body_len] = '\0';
-                            if (!sc_thread_pool_submit(gw->http_pool, http_worker_fn, work)) {
+                            if (!hu_thread_pool_submit(gw->http_pool, http_worker_fn, work)) {
                                 alloc->free(alloc->ctx, work->body, body_len + 1);
-                                alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+                                alloc->free(alloc->ctx, work, sizeof(hu_http_work_t));
                                 send_json(client, 503, "{\"error\":\"service unavailable\"}");
                                 close(client);
                             }
                             s_request_origin = NULL;
                         }
                     } else {
-                        if (!sc_thread_pool_submit(gw->http_pool, http_worker_fn, work)) {
-                            alloc->free(alloc->ctx, work, sizeof(sc_http_work_t));
+                        if (!hu_thread_pool_submit(gw->http_pool, http_worker_fn, work)) {
+                            alloc->free(alloc->ctx, work, sizeof(hu_http_work_t));
                             send_json(client, 503, "{\"error\":\"service unavailable\"}");
                             close(client);
                         }
@@ -1480,23 +1480,23 @@ sc_error_t sc_gateway_run(sc_allocator_t *alloc, const char *host, uint16_t port
 
 cleanup:
     if (bridge_active)
-        sc_event_bridge_deinit(&event_bridge);
+        hu_event_bridge_deinit(&event_bridge);
     if (gw && gw->pairing_guard) {
-        sc_pairing_guard_destroy(gw->pairing_guard);
+        hu_pairing_guard_destroy(gw->pairing_guard);
         gw->pairing_guard = NULL;
     }
     if (gw && gw->rate_limiter) {
-        sc_rate_limiter_destroy(gw->rate_limiter);
+        hu_rate_limiter_destroy(gw->rate_limiter);
         gw->rate_limiter = NULL;
     }
     if (gw && gw->http_pool) {
-        sc_thread_pool_destroy(gw->http_pool);
+        hu_thread_pool_destroy(gw->http_pool);
         gw->http_pool = NULL;
     }
     if (gw)
-        sc_ws_server_deinit(&gw->ws);
+        hu_ws_server_deinit(&gw->ws);
     if (ctrl == &proto_local)
-        sc_control_protocol_deinit(ctrl);
+        hu_control_protocol_deinit(ctrl);
     if (body_buf)
         alloc->free(alloc->ctx, body_buf, cfg.max_body_size + 1);
     if (fd >= 0)
@@ -1506,10 +1506,10 @@ cleanup:
     return err;
 #endif
 
-#ifndef SC_GATEWAY_POSIX
+#ifndef HU_GATEWAY_POSIX
     (void)host;
     (void)port;
     (void)config;
 #endif
-    return SC_OK;
+    return HU_OK;
 }

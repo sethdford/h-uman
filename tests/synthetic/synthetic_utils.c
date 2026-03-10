@@ -1,16 +1,16 @@
 #include "synthetic_harness.h"
 
-void sc_synth_test_case_free(sc_allocator_t *alloc, sc_synth_test_case_t *tc) {
+void hu_synth_test_case_free(hu_allocator_t *alloc, hu_synth_test_case_t *tc) {
     if (!tc)
         return;
     if (tc->name)
-        sc_synth_strfree(alloc, tc->name, strlen(tc->name));
+        hu_synth_strfree(alloc, tc->name, strlen(tc->name));
     if (tc->category)
-        sc_synth_strfree(alloc, tc->category, strlen(tc->category));
+        hu_synth_strfree(alloc, tc->category, strlen(tc->category));
     if (tc->actual_output)
-        sc_synth_strfree(alloc, tc->actual_output, strlen(tc->actual_output));
+        hu_synth_strfree(alloc, tc->actual_output, strlen(tc->actual_output));
     if (tc->verdict_reason)
-        sc_synth_strfree(alloc, tc->verdict_reason, strlen(tc->verdict_reason));
+        hu_synth_strfree(alloc, tc->verdict_reason, strlen(tc->verdict_reason));
     if (tc->input_json)
         alloc->free(alloc->ctx, tc->input_json, strlen(tc->input_json));
     if (tc->expected_json)
@@ -18,24 +18,24 @@ void sc_synth_test_case_free(sc_allocator_t *alloc, sc_synth_test_case_t *tc) {
     memset(tc, 0, sizeof(*tc));
 }
 
-void sc_synth_metrics_init(sc_synth_metrics_t *m) {
+void hu_synth_metrics_init(hu_synth_metrics_t *m) {
     memset(m, 0, sizeof(*m));
 }
 
-void sc_synth_metrics_record(sc_allocator_t *alloc, sc_synth_metrics_t *m, double lat,
-                             sc_synth_verdict_t v) {
+void hu_synth_metrics_record(hu_allocator_t *alloc, hu_synth_metrics_t *m, double lat,
+                             hu_synth_verdict_t v) {
     m->total++;
     switch (v) {
-    case SC_SYNTH_PASS:
+    case HU_SYNTH_PASS:
         m->passed++;
         break;
-    case SC_SYNTH_FAIL:
+    case HU_SYNTH_FAIL:
         m->failed++;
         break;
-    case SC_SYNTH_ERROR:
+    case HU_SYNTH_ERROR:
         m->errors++;
         break;
-    case SC_SYNTH_SKIP:
+    case HU_SYNTH_SKIP:
         m->skipped++;
         break;
     }
@@ -54,7 +54,7 @@ void sc_synth_metrics_record(sc_allocator_t *alloc, sc_synth_metrics_t *m, doubl
     m->latencies[m->latency_count++] = lat;
 }
 
-void sc_synth_metrics_free(sc_allocator_t *alloc, sc_synth_metrics_t *m) {
+void hu_synth_metrics_free(hu_allocator_t *alloc, hu_synth_metrics_t *m) {
     if (m->latencies)
         alloc->free(alloc->ctx, m->latencies, m->latency_cap * sizeof(double));
     memset(m, 0, sizeof(*m));
@@ -65,7 +65,7 @@ static int dbl_cmp(const void *a, const void *b) {
     return (da > db) - (da < db);
 }
 
-double sc_synth_metrics_avg(const sc_synth_metrics_t *m) {
+double hu_synth_metrics_avg(const hu_synth_metrics_t *m) {
     if (!m->latency_count)
         return 0;
     double s = 0;
@@ -74,7 +74,7 @@ double sc_synth_metrics_avg(const sc_synth_metrics_t *m) {
     return s / (double)m->latency_count;
 }
 
-double sc_synth_metrics_percentile(const sc_synth_metrics_t *m, double pct) {
+double hu_synth_metrics_percentile(const hu_synth_metrics_t *m, double pct) {
     if (!m->latency_count)
         return 0;
     double *s = (double *)malloc(m->latency_count * sizeof(double));
@@ -90,7 +90,7 @@ double sc_synth_metrics_percentile(const sc_synth_metrics_t *m, double pct) {
     return v;
 }
 
-double sc_synth_metrics_max(const sc_synth_metrics_t *m) {
+double hu_synth_metrics_max(const hu_synth_metrics_t *m) {
     if (!m->latency_count)
         return 0;
     double mx = m->latencies[0];
@@ -100,18 +100,18 @@ double sc_synth_metrics_max(const sc_synth_metrics_t *m) {
     return mx;
 }
 
-void sc_synth_report_category(const char *name, const sc_synth_metrics_t *m) {
+void hu_synth_report_category(const char *name, const hu_synth_metrics_t *m) {
     printf("[synth] %-12s %d/%d passed", name, m->passed, m->total);
     if (m->failed > 0)
         printf(", %d FAILED", m->failed);
     if (m->errors > 0)
         printf(", %d errors", m->errors);
     if (m->latency_count > 0)
-        printf("  (avg %.1fms, p99 %.1fms)", sc_synth_metrics_avg(m),
-               sc_synth_metrics_percentile(m, 99));
+        printf("  (avg %.1fms, p99 %.1fms)", hu_synth_metrics_avg(m),
+               hu_synth_metrics_percentile(m, 99));
     printf("\n");
 }
 
-void sc_synth_report_final(void) {
+void hu_synth_report_final(void) {
     printf("\n");
 }

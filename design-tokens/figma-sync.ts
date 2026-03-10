@@ -2,7 +2,7 @@
 /**
  * Figma Variables API Sync
  *
- * Pushes SeaClaw design tokens to Figma Variables, keeping the design file
+ * Pushes Human design tokens to Figma Variables, keeping the design file
  * in sync with code. Also exports Tokens Studio-compatible format.
  *
  * Usage:
@@ -155,7 +155,7 @@ async function pushToFigma(fileKey: string, token: string): Promise<void> {
       {
         action: "CREATE",
         id: "",
-        name: "SeaClaw Design Tokens",
+        name: "Human Design Tokens",
         initialModeId: "",
         modes: [{ action: "CREATE" as const, id: "", name: "Default" }],
       },

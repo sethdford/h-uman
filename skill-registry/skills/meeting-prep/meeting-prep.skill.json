@@ -2,7 +2,7 @@
   "name": "meeting-prep",
   "version": "1.0.0",
   "description": "Prepare meeting briefs from calendar events and related documents",
-  "author": "seaclaw",
+  "author": "human",
   "tags": ["meetings", "calendar", "productivity"],
   "parameters": {
     "lookahead_hours": { "type": "integer", "default": 24 },

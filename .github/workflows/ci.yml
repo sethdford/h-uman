@@ -1,4 +1,4 @@
-name: SeaClaw CI
+name: Human CI
 
 on: [push, pull_request]
 
@@ -27,14 +27,14 @@ jobs:
           asan-options: ${{ runner.os == 'Linux' && 'detect_leaks=0:detect_stack_use_after_return=0' || '' }}
       - name: Persona CLI smoke test
         run: |
-          ./build/seaclaw persona list
-          mkdir -p "$HOME/.seaclaw/personas"
-          echo '{"version":1,"name":"ci_test","core":{"identity":"CI test persona","traits":["direct"]}}' > "$HOME/.seaclaw/personas/ci_test.json"
-          ./build/seaclaw persona validate ci_test
-          ./build/seaclaw persona show ci_test
+          ./build/human persona list
+          mkdir -p "$HOME/.human/personas"
+          echo '{"version":1,"name":"ci_test","core":{"identity":"CI test persona","traits":["direct"]}}' > "$HOME/.human/personas/ci_test.json"
+          ./build/human persona validate ci_test
+          ./build/human persona show ci_test
       - name: Test count regression guard
         run: |
-          COUNT=$(./build/seaclaw_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
+          COUNT=$(./build/human_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
           echo "Test count: $COUNT"
           # macOS has 2 more platform-specific tests than Linux (3199 vs 3197)
           BASELINE=3197
@@ -62,7 +62,7 @@ jobs:
       - name: Build (ARM64)
         run: cmake --build build-arm64 -j$(nproc)
       - name: Verify binary
-        run: file build-arm64/seaclaw | grep -i "aarch64\|ARM"
+        run: file build-arm64/human | grep -i "aarch64\|ARM"
 
   minimal-build:
     runs-on: ubuntu-latest
@@ -75,7 +75,7 @@ jobs:
       - name: Build
         run: cmake --build build-minimal -j$(nproc)
       - name: Run tests
-        run: ./build-minimal/seaclaw_tests
+        run: ./build-minimal/human_tests
 
   release-size:
     runs-on: macos-latest
@@ -86,10 +86,10 @@ jobs:
           build-type: MinSizeRel
           enable-lto: "true"
           enable-all-channels: "true"
-      - run: ls -lh build/seaclaw
+      - run: ls -lh build/human
       - name: Enforce binary size budget (750KB)
         run: |
-          SIZE=$(stat -f%z build/seaclaw)
+          SIZE=$(stat -f%z build/human)
           BUDGET=768000
           KB=$((SIZE / 1024))
           PCT=$((SIZE * 100 / BUDGET))
@@ -103,13 +103,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
-      - run: cd apps/shared/SeaClawKit && swift test
+      - run: cd apps/shared/HumanKit && swift test
       - run: cd apps/ios && swift build
       - name: iOS simulator test
         run: |
           cd apps/ios
           xcodebuild test \
-            -scheme SeaClaw \
+            -scheme Human \
             -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -resultBundlePath TestResults \
             CODE_SIGNING_ALLOWED=NO 2>&1 || echo "Simulator tests skipped (no Xcode project)"
@@ -184,7 +184,7 @@ jobs:
           cmake --build build -j$(nproc)
       - name: Start gateway
         run: |
-          nohup ./build/seaclaw gateway --port 3000 &>/dev/null &
+          nohup ./build/human gateway --port 3000 &>/dev/null &
           sleep 2
       - name: Install
         run: cd ui && npm ci
@@ -252,13 +252,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Verify completions are parseable
-        run: bash -n completions/seaclaw.bash
+        run: bash -n completions/human.bash
       - name: Verify completions cover all subcommands
         run: |
           CMDS=$(grep -oP '\{"[a-z-]+", "' src/main.c | sed 's/{"//;s/", "//' | sort)
           for cmd in $CMDS; do
-            grep -q "$cmd" completions/seaclaw.bash || { echo "MISSING in bash: $cmd"; exit 1; }
-            grep -q "$cmd" completions/_seaclaw || { echo "MISSING in zsh: $cmd"; exit 1; }
+            grep -q "$cmd" completions/human.bash || { echo "MISSING in bash: $cmd"; exit 1; }
+            grep -q "$cmd" completions/_human || { echo "MISSING in zsh: $cmd"; exit 1; }
           done
 
   local-check:
@@ -274,7 +274,7 @@ jobs:
             sudo ln -sf $(which clang-format-18) /usr/local/bin/clang-format
           fi
       - name: Run scripts/check.sh
-        run: SC_SKIP_FORMAT=1 scripts/check.sh
+        run: HU_SKIP_FORMAT=1 scripts/check.sh
 
   benchmark:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -288,9 +288,9 @@ jobs:
           enable-all-channels: "true"
           extra-cmake-flags: -DSC_ENABLE_BENCH=ON
       - name: Run benchmark
-        run: scripts/benchmark.sh build/seaclaw --save-history
+        run: scripts/benchmark.sh build/human --save-history
       - name: Run core benchmarks
-        run: ./build/seaclaw_bench 2>&1 | tee benchmark-core.txt
+        run: ./build/human_bench 2>&1 | tee benchmark-core.txt
       - name: Upload benchmark results
         uses: actions/upload-artifact@v7
         with:
@@ -355,8 +355,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker build --target release -t seaclaw:ci-test .
-      - run: docker run --rm seaclaw:ci-test --version
+      - run: docker build --target release -t human:ci-test .
+      - run: docker run --rm human:ci-test --version
 
   website:
     runs-on: ubuntu-latest
@@ -436,7 +436,7 @@ jobs:
           cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
           cmake --build build -j$(nproc)
       - name: Run integration tests
-        run: ./build/seaclaw_tests
+        run: ./build/human_tests
 
   docs:
     runs-on: ubuntu-latest
@@ -445,7 +445,7 @@ jobs:
       - name: Check for stale branding
         run: |
           if grep -ri "nullclaw" docs/ skills/ sdk/ --include='*.md' -l 2>/dev/null | grep -v plans/; then
-            echo "Found 'NullClaw' references — update to 'SeaClaw'"
+            echo "Found 'NullClaw' references — update to 'Human'"
             exit 1
           fi
       - name: Verify docs have frontmatter

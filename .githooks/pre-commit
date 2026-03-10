@@ -27,12 +27,12 @@ if [ -d "src" ] && [ -f "CMakeLists.txt" ]; then
 fi
 
 # Check for declared-but-undefined symbols in staged headers
-if [ -d "build" ] && [ -f "build/libseaclaw_core.a" ]; then
-    staged_h=$(git diff --cached --name-only --diff-filter=ACM -- 'include/seaclaw/*.h' 'include/seaclaw/**/*.h')
+if [ -d "build" ] && [ -f "build/libhuman_core.a" ]; then
+    staged_h=$(git diff --cached --name-only --diff-filter=ACM -- 'include/human/*.h' 'include/human/**/*.h')
     if [ -n "$staged_h" ]; then
-        UNDEFS=$(nm -u build/libseaclaw_core.a 2>/dev/null | grep ' U _sc_' | sort -u || true)
+        UNDEFS=$(nm -u build/libhuman_core.a 2>/dev/null | grep ' U _sc_' | sort -u || true)
         if [ -n "$UNDEFS" ]; then
-            echo "Warning: possibly undefined sc_* symbols in library:"
+            echo "Warning: possibly undefined hu_* symbols in library:"
             echo "$UNDEFS" | head -10
         fi
     fi
@@ -52,7 +52,7 @@ if [ -n "$staged_tokens" ]; then
 fi
 
 # Regenerate website assets when SVG sources or generate script change
-staged_assets=$(git diff --cached --name-only --diff-filter=ACM -- 'website/public/seaclaw.svg' 'website/public/og-image.svg' 'website/scripts/generate-assets.mjs')
+staged_assets=$(git diff --cached --name-only --diff-filter=ACM -- 'website/public/human.svg' 'website/public/og-image.svg' 'website/scripts/generate-assets.mjs')
 if [ -n "$staged_assets" ]; then
   if command -v node >/dev/null 2>&1 && [ -f "website/scripts/generate-assets.mjs" ]; then
     echo "Regenerating website favicon/OG assets..."
@@ -67,7 +67,7 @@ if [ -x "scripts/lint-raw-colors.sh" ]; then
     if [ -n "$staged_style" ]; then
         ./scripts/lint-raw-colors.sh
         if [ $? -ne 0 ]; then
-            echo "Raw hex color lint failed. Use --sc-* or --sc-web-* design tokens instead."
+            echo "Raw hex color lint failed. Use --hu-* or --hu-web-* design tokens instead."
             exit 1
         fi
     fi
@@ -81,7 +81,7 @@ if [ -n "$staged_ui_ts" ] && [ -x "ui/scripts/lint-raw-values.sh" ]; then
     stripped=$(echo "$staged_ui_ts" | sed 's|^ui/||')
     (cd ui && bash scripts/lint-raw-values.sh $stripped)
     if [ $? -ne 0 ]; then
-        echo "Token lint failed. Use --sc-* design tokens instead of raw hex/rgba/durations."
+        echo "Token lint failed. Use --hu-* design tokens instead of raw hex/rgba/durations."
         exit 1
     fi
 fi

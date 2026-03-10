@@ -1,9 +1,9 @@
 ---
 title: Memory Overview
-description: Memory backends, embeddings, and session storage in SeaClaw.
+description: Memory backends, embeddings, and session storage in Human.
 ---
 
-SeaClaw maintains memory for facts, conversation context, and session continuity. The memory system uses a vtable interface with pluggable backends.
+Human maintains memory for facts, conversation context, and session continuity. The memory system uses a vtable interface with pluggable backends.
 
 ## Memory vtable
 
@@ -20,7 +20,7 @@ The `sc_memory_t` interface provides:
 
 - FTS5 full-text search
 - Vector cosine similarity for semantic recall (when embeddings available)
-- Config: `"memory": { "backend": "sqlite", "sqlite_path": "~/.seaclaw/memory.db" }`
+- Config: `"memory": { "backend": "sqlite", "sqlite_path": "~/.human/memory.db" }`
 - Requires `SC_ENABLE_SQLITE=ON` (default)
 
 ### Markdown

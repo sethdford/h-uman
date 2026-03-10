@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "SeaClaw",
+    name: "Human",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "SeaClaw",
-            path: "Sources/SeaClawApp"
+            name: "Human",
+            path: "Sources/HumanApp"
         ),
     ]
 )

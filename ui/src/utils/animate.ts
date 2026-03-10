@@ -1,5 +1,5 @@
 /**
- * SeaClaw UI animation engine.
+ * Human UI animation engine.
  * Uses Web Animations API; respects prefers-reduced-motion.
  */
 
@@ -19,11 +19,11 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Matches --sc-duration-normal (200ms). */
+/** Matches --hu-duration-normal (200ms). */
 const DURATION_NORMAL = 200;
-/** Matches --sc-duration-slow (350ms). */
+/** Matches --hu-duration-slow (350ms). */
 const DURATION_SLOW = 350;
-/** Matches --sc-duration-moderate (300ms). */
+/** Matches --hu-duration-moderate (300ms). */
 const DURATION_MODERATE = 300;
 const DEFAULT_DURATION = DURATION_NORMAL;
 
@@ -143,7 +143,7 @@ export function staggerEntrance(
       {
         duration: prefersReducedMotion() ? 0 : 200,
         delay: prefersReducedMotion() ? 0 : delay,
-        easing: "cubic-bezier(0.16, 1, 0.3, 1)" /* --sc-ease-out */,
+        easing: "cubic-bezier(0.16, 1, 0.3, 1)" /* --hu-ease-out */,
         fill: "forwards",
       },
     );

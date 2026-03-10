@@ -3,11 +3,11 @@ title: Cloud Providers
 description: Configure cloud AI providers (OpenAI, Anthropic, Gemini, etc.).
 ---
 
-SeaClaw supports major cloud AI providers. Configure each with an API key in `~/.seaclaw/config.json` or via environment variables. Get API keys from each provider's dashboard.
+Human supports major cloud AI providers. Configure each with an API key in `~/.human/config.json` or via environment variables. Get API keys from each provider's dashboard.
 
 ## OpenAI
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -26,13 +26,13 @@ Or use the environment variable (no config needed):
 
 ```bash
 export OPENAI_API_KEY="sk-proj-your-key-here"
-seaclaw agent -m "hello"
+human agent -m "hello"
 ```
 
-Verify with `seaclaw doctor`:
+Verify with `human doctor`:
 
 ```
-[doctor] config: ok (loaded from /Users/you/.seaclaw/config.json)
+[doctor] config: ok (loaded from /Users/you/.human/config.json)
 [doctor] provider (openai): ok (API key configured)
 [doctor] memory engine: sqlite
 ```
@@ -41,7 +41,7 @@ Models: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-4`, `o1`, etc.
 
 ## Anthropic
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -60,14 +60,14 @@ Environment variable (overrides config):
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-your-key-here"
-seaclaw agent -m "Explain recursion briefly"
+human agent -m "Explain recursion briefly"
 ```
 
 Models: `claude-sonnet-4-20250514`, `claude-opus-4`, `claude-3-5-haiku`, `claude-3-5-sonnet`, etc.
 
 ## Google Gemini
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -86,7 +86,7 @@ Environment variable:
 
 ```bash
 export GEMINI_API_KEY="AIzaSy-your-key-here"
-seaclaw agent -m "What is 2 + 2?"
+human agent -m "What is 2 + 2?"
 ```
 
 Models: `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`.

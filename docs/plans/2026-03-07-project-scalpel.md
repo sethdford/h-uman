@@ -4,9 +4,9 @@
 
 **Goal:** Decompose the 1,179-line chat-view.ts god object into 6 focused components + a reactive controller, fix critical bugs, and add SOTA features matching Claude.ai/ChatGPT UX.
 
-**Architecture:** Extract a `ChatController` (Lit ReactiveController) that owns all gateway/streaming/cache logic. Decompose rendering into `sc-composer` (input), `sc-message-list` (scroll + rendering), `sc-message-actions` (hover toolbar). Add `sc-chat-sessions-panel` for inline session management. chat-view.ts becomes a ~200-line orchestrator.
+**Architecture:** Extract a `ChatController` (Lit ReactiveController) that owns all gateway/streaming/cache logic. Decompose rendering into `hu-composer` (input), `hu-message-list` (scroll + rendering), `hu-message-actions` (hover toolbar). Add `hu-chat-sessions-panel` for inline session management. chat-view.ts becomes a ~200-line orchestrator.
 
-**Tech Stack:** Lit 3, TypeScript, Vitest, Playwright, `--sc-*` design tokens, Phosphor icons
+**Tech Stack:** Lit 3, TypeScript, Vitest, Playwright, `--hu-*` design tokens, Phosphor icons
 
 ---
 
@@ -467,7 +467,7 @@ export class ChatController implements ReactiveController {
   cacheMessages(sessionKey: string): void {
     try {
       sessionStorage.setItem(
-        `sc-chat-${sessionKey}`,
+        `hu-chat-${sessionKey}`,
         JSON.stringify(this.items),
       );
     } catch {
@@ -477,7 +477,7 @@ export class ChatController implements ReactiveController {
 
   restoreFromCache(sessionKey: string): boolean {
     try {
-      const raw = sessionStorage.getItem(`sc-chat-${sessionKey}`);
+      const raw = sessionStorage.getItem(`hu-chat-${sessionKey}`);
       if (!raw) return false;
       const cached = JSON.parse(raw) as unknown;
       if (!Array.isArray(cached) || cached.length === 0) return false;
@@ -562,13 +562,13 @@ Find the `render()` method return, and after `${this._renderInputBar()}` add:
 ```typescript
 ${this._contextMenu.open
   ? html`
-      <sc-context-menu
+      <hu-context-menu
         .open=${this._contextMenu.open}
         .x=${this._contextMenu.x}
         .y=${this._contextMenu.y}
         .items=${this._contextMenu.items}
         @close=${() => (this._contextMenu = { ...this._contextMenu, open: false })}
-      ></sc-context-menu>
+      ></hu-context-menu>
     `
   : nothing}
 ```
@@ -588,7 +588,7 @@ Expected: All pass
 git add ui/src/views/chat-view.ts
 git commit -m "fix(chat): wire context menu into template, remove dead CSS
 
-Context menu was set in _onMessageContextMenu but sc-context-menu
+Context menu was set in _onMessageContextMenu but hu-context-menu
 was never rendered. Right-click copy/retry now works.
 Removed ~60 lines of unused .tool-card CSS."
 ```
@@ -641,29 +641,29 @@ ChatController. View is now ~800 lines (down from 1,179)."
 
 ## Phase 2: Component Decomposition
 
-### Task 4: Extract sc-composer
+### Task 4: Extract hu-composer
 
 **Files:**
 
-- Create: `ui/src/components/sc-composer.ts`
-- Create: `ui/src/components/sc-composer.test.ts`
+- Create: `ui/src/components/hu-composer.ts`
+- Create: `ui/src/components/hu-composer.test.ts`
 - Modify: `ui/src/views/chat-view.ts`
 
 **Step 1: Write test**
 
-Create `ui/src/components/sc-composer.test.ts`:
+Create `ui/src/components/hu-composer.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi } from "vitest";
-import "./sc-composer.js";
+import "./hu-composer.js";
 
-describe("sc-composer", () => {
+describe("hu-composer", () => {
   it("registers as custom element", () => {
-    expect(customElements.get("sc-composer")).toBeDefined();
+    expect(customElements.get("hu-composer")).toBeDefined();
   });
 
   it("renders textarea and send button", async () => {
-    const el = document.createElement("sc-composer") as HTMLElement & {
+    const el = document.createElement("hu-composer") as HTMLElement & {
       updateComplete: Promise<boolean>;
     };
     document.body.appendChild(el);
@@ -676,7 +676,7 @@ describe("sc-composer", () => {
   });
 
   it("disables send when empty", async () => {
-    const el = document.createElement("sc-composer") as any;
+    const el = document.createElement("hu-composer") as any;
     document.body.appendChild(el);
     await el.updateComplete;
     const sendBtn = el.shadowRoot?.querySelector(
@@ -686,13 +686,13 @@ describe("sc-composer", () => {
     el.remove();
   });
 
-  it("fires sc-send event on Enter", async () => {
-    const el = document.createElement("sc-composer") as any;
+  it("fires hu-send event on Enter", async () => {
+    const el = document.createElement("hu-composer") as any;
     el.value = "hello";
     document.body.appendChild(el);
     await el.updateComplete;
     const sent = vi.fn();
-    el.addEventListener("sc-send", sent);
+    el.addEventListener("hu-send", sent);
     const textarea = el.shadowRoot?.querySelector(
       "textarea",
     ) as HTMLTextAreaElement;
@@ -704,7 +704,7 @@ describe("sc-composer", () => {
   });
 
   it("shows file attachment button", async () => {
-    const el = document.createElement("sc-composer") as any;
+    const el = document.createElement("hu-composer") as any;
     document.body.appendChild(el);
     await el.updateComplete;
     const attachBtn = el.shadowRoot?.querySelector(".attach-btn");
@@ -713,7 +713,7 @@ describe("sc-composer", () => {
   });
 
   it("renders suggested prompts when showSuggestions is true", async () => {
-    const el = document.createElement("sc-composer") as any;
+    const el = document.createElement("hu-composer") as any;
     el.showSuggestions = true;
     document.body.appendChild(el);
     await el.updateComplete;
@@ -724,9 +724,9 @@ describe("sc-composer", () => {
 });
 ```
 
-**Step 2: Implement sc-composer**
+**Step 2: Implement hu-composer**
 
-Create `ui/src/components/sc-composer.ts`. This component handles:
+Create `ui/src/components/hu-composer.ts`. This component handles:
 
 - Auto-resizing textarea
 - Send button (disabled when empty/waiting/disconnected)
@@ -734,13 +734,13 @@ Create `ui/src/components/sc-composer.ts`. This component handles:
 - Drag-and-drop zone
 - Suggested prompt pills (when `showSuggestions` property is true)
 - Character count
-- Events: `sc-send` (detail: { message: string }), `sc-abort`, `sc-use-suggestion` (detail: { text: string }), `sc-files` (detail: { files: File[] })
+- Events: `hu-send` (detail: { message: string }), `hu-abort`, `hu-use-suggestion` (detail: { text: string }), `hu-files` (detail: { files: File[] })
 
 Properties: `value`, `waiting`, `disabled`, `showSuggestions`, `streamElapsed`
 
 **Step 3: Wire into chat-view**
 
-Replace `_renderInputBar()`, `_renderEmptyState()` prompt pills, `handleInput()`, `handleKeyDown()`, `resizeTextarea()`, drag-and-drop handlers with `<sc-composer>`.
+Replace `_renderInputBar()`, `_renderEmptyState()` prompt pills, `handleInput()`, `handleKeyDown()`, `resizeTextarea()`, drag-and-drop handlers with `<hu-composer>`.
 
 **Step 4: Run tests**
 
@@ -749,46 +749,46 @@ Run: `cd ui && npm run typecheck && npm run test && npx playwright test`
 **Step 5: Commit**
 
 ```bash
-git add ui/src/components/sc-composer.ts ui/src/components/sc-composer.test.ts ui/src/views/chat-view.ts
-git commit -m "feat(chat): extract sc-composer — input bar, file attach, suggestions
+git add ui/src/components/hu-composer.ts ui/src/components/hu-composer.test.ts ui/src/views/chat-view.ts
+git commit -m "feat(chat): extract hu-composer — input bar, file attach, suggestions
 
 Moves textarea, send button, file attachment, drag-drop, and prompt
-pills into a reusable sc-composer component. chat-view.ts shrinks
+pills into a reusable hu-composer component. chat-view.ts shrinks
 by ~150 lines."
 ```
 
 ---
 
-### Task 5: Extract sc-message-list
+### Task 5: Extract hu-message-list
 
 **Files:**
 
-- Create: `ui/src/components/sc-message-list.ts`
-- Create: `ui/src/components/sc-message-list.test.ts`
+- Create: `ui/src/components/hu-message-list.ts`
+- Create: `ui/src/components/hu-message-list.test.ts`
 - Modify: `ui/src/views/chat-view.ts`
 
 **Step 1: Write test**
 
-Create `ui/src/components/sc-message-list.test.ts` with tests for:
+Create `ui/src/components/hu-message-list.test.ts` with tests for:
 
 - Custom element registration
 - Renders messages from `items` array
 - Has `role="log"` and `aria-live="polite"`
 - Shows scroll-to-bottom pill when not at bottom
 - Groups consecutive same-role messages within 2-minute window
-- Renders `sc-message-stream` for message items
-- Renders `sc-tool-result` for tool_call items
-- Renders `sc-reasoning-block` for thinking items
+- Renders `hu-message-stream` for message items
+- Renders `hu-tool-result` for tool_call items
+- Renders `hu-reasoning-block` for thinking items
 
-**Step 2: Implement sc-message-list**
+**Step 2: Implement hu-message-list**
 
 Properties: `items: ChatItem[]`, `isWaiting`, `streamElapsed`
-Events: `sc-scroll-bottom`, `sc-context-menu` (detail: { event, item }), `sc-abort`
+Events: `hu-scroll-bottom`, `hu-context-menu` (detail: { event, item }), `hu-abort`
 Internal: scroll handler, message grouping logic, stagger animation
 
 **Step 3: Wire into chat-view**
 
-Replace the `#message-list` div, `_renderMessages()`, `_renderThinking()`, `_renderScrollPill()`, `scrollToBottom()`, `_scrollHandler`, scroll state with `<sc-message-list>`.
+Replace the `#message-list` div, `_renderMessages()`, `_renderThinking()`, `_renderScrollPill()`, `scrollToBottom()`, `_scrollHandler`, scroll state with `<hu-message-list>`.
 
 **Step 4: Run tests and commit**
 
@@ -805,7 +805,7 @@ After Tasks 3-5, chat-view.ts should be ~200 lines:
 - Imports and registers sub-components
 - Owns `ChatController`
 - Owns session key, connection status, search state, context menu state
-- Renders: `<sc-chat-search>`, `<sc-message-list>`, `<sc-composer>`, `<sc-context-menu>`, status bar, error banner
+- Renders: `<hu-chat-search>`, `<hu-message-list>`, `<hu-composer>`, `<hu-context-menu>`, status bar, error banner
 - Wires events between components
 
 **Step 1: Verify final line count < 300**
@@ -821,8 +821,8 @@ git commit -m "refactor(chat): chat-view.ts is now a thin orchestrator (~200 lin
 
 Decomposed from 1,179-line god object into:
 - ChatController (gateway/streaming/cache)
-- sc-composer (input/send/file attach)
-- sc-message-list (scroll/rendering/grouping)
+- hu-composer (input/send/file attach)
+- hu-message-list (scroll/rendering/grouping)
 All tests pass."
 ```
 
@@ -830,13 +830,13 @@ All tests pass."
 
 ## Phase 3: SOTA Features
 
-### Task 7: Add sc-message-actions
+### Task 7: Add hu-message-actions
 
 **Files:**
 
-- Create: `ui/src/components/sc-message-actions.ts`
-- Create: `ui/src/components/sc-message-actions.test.ts`
-- Modify: `ui/src/components/sc-message-list.ts` (integrate)
+- Create: `ui/src/components/hu-message-actions.ts`
+- Create: `ui/src/components/hu-message-actions.test.ts`
+- Modify: `ui/src/components/hu-message-list.ts` (integrate)
 
 Hover toolbar on each message with:
 
@@ -846,16 +846,16 @@ Hover toolbar on each message with:
 - Edit (user messages — replaces content)
 
 Uses Phosphor icons: `copy`, `arrow-clockwise`, `refresh`, `file-text`
-Events: `sc-copy`, `sc-retry`, `sc-regenerate`, `sc-edit`
+Events: `hu-copy`, `hu-retry`, `hu-regenerate`, `hu-edit`
 
 ---
 
-### Task 8: Add sc-chat-sessions-panel
+### Task 8: Add hu-chat-sessions-panel
 
 **Files:**
 
-- Create: `ui/src/components/sc-chat-sessions-panel.ts`
-- Create: `ui/src/components/sc-chat-sessions-panel.test.ts`
+- Create: `ui/src/components/hu-chat-sessions-panel.ts`
+- Create: `ui/src/components/hu-chat-sessions-panel.test.ts`
 - Modify: `ui/src/views/chat-view.ts` (integrate)
 
 Collapsible panel (left side on desktop, drawer on mobile):
@@ -863,23 +863,23 @@ Collapsible panel (left side on desktop, drawer on mobile):
 - "New Chat" button at top
 - Session list with titles, timestamps, active highlight
 - Rename and delete per session
-- Events: `sc-session-select`, `sc-session-new`, `sc-session-rename`, `sc-session-delete`
+- Events: `hu-session-select`, `hu-session-new`, `hu-session-rename`, `hu-session-delete`
 
 ---
 
-### Task 9: Add sc-file-preview + real file attachment
+### Task 9: Add hu-file-preview + real file attachment
 
 **Files:**
 
-- Create: `ui/src/components/sc-file-preview.ts`
-- Modify: `ui/src/components/sc-composer.ts` (integrate)
+- Create: `ui/src/components/hu-file-preview.ts`
+- Modify: `ui/src/components/hu-composer.ts` (integrate)
 
 Thumbnail grid:
 
 - Image files show preview (FileReader.readAsDataURL)
 - Other files show icon + name + size
 - Remove button per file
-- Events: `sc-file-remove`
+- Events: `hu-file-remove`
 
 ---
 
@@ -887,12 +887,12 @@ Thumbnail grid:
 
 **Files:**
 
-- Modify: `ui/src/components/sc-message-list.ts`
-- Modify: `ui/src/components/sc-code-block.ts`
+- Modify: `ui/src/components/hu-message-list.ts`
+- Modify: `ui/src/components/hu-code-block.ts`
 
 1. Message grouping: consecutive same-sender messages within 2-minute window share a group container. Only first message shows role indicator; subsequent messages are "connected" visually.
 
-2. Adaptive code theme: sc-code-block detects `prefers-color-scheme` and uses `github-dark-default` or `github-light-default` accordingly.
+2. Adaptive code theme: hu-code-block detects `prefers-color-scheme` and uses `github-dark-default` or `github-light-default` accordingly.
 
 ---
 
@@ -913,7 +913,7 @@ cd ui && npx playwright test e2e/visual.spec.ts --update-snapshots
 **Step 3: Run C tests**
 
 ```bash
-cd /Users/sethford/Documents/nullclaw && cmake --build build -j$(sysctl -n hw.ncpu) && ./build/seaclaw_tests
+cd /Users/sethford/Documents/nullclaw && cmake --build build -j$(sysctl -n hw.ncpu) && ./build/human_tests
 ```
 
 **Step 4: Final commit and push**
@@ -924,11 +924,11 @@ git commit -m "feat: Project Scalpel — chat page architectural rewrite
 
 Decomposed 1,179-line god object into 6 focused components:
 - ChatController: gateway/streaming/cache (ReactiveController)
-- sc-composer: input bar, file attachment, suggestions
-- sc-message-list: scroll container, message grouping, rendering
-- sc-message-actions: hover copy/retry/regenerate/edit
-- sc-chat-sessions-panel: inline session list + new chat
-- sc-file-preview: attachment thumbnails
+- hu-composer: input bar, file attachment, suggestions
+- hu-message-list: scroll container, message grouping, rendering
+- hu-message-actions: hover copy/retry/regenerate/edit
+- hu-chat-sessions-panel: inline session list + new chat
+- hu-file-preview: attachment thumbnails
 
 Fixed: context menu never rendered, dead CSS, double bubble styling.
 Added: per-message hover actions, inline sessions, file previews,

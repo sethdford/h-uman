@@ -9,7 +9,7 @@ import {
   POLL,
 } from "./helpers.js";
 
-const VIEW = "sc-memory-view";
+const VIEW = "hu-memory-view";
 
 test.describe("Memory View", () => {
   test.beforeEach(async ({ page }) => {
@@ -19,9 +19,9 @@ test.describe("Memory View", () => {
   });
 
   test("renders page hero with Memory heading", async ({ page }) => {
-    await waitForShadowSelector(page, VIEW, "sc-stat-card");
+    await waitForShadowSelector(page, VIEW, "hu-stat-card");
     await expect(async () => {
-      expect(await page.evaluate(shadowExists(VIEW, "sc-page-hero"))).toBe(true);
+      expect(await page.evaluate(shadowExists(VIEW, "hu-page-hero"))).toBe(true);
       const text: string = await page.evaluate(deepText(VIEW));
       expect(text).toMatch(/Memor/i);
     }).toPass({ timeout: POLL });
@@ -29,15 +29,15 @@ test.describe("Memory View", () => {
 
   test("shows stat cards on load", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists(VIEW, "sc-stats-row"))).toBe(true);
-      const count = await page.evaluate(shadowCount(VIEW, "sc-stat-card"));
+      expect(await page.evaluate(shadowExists(VIEW, "hu-stats-row"))).toBe(true);
+      const count = await page.evaluate(shadowCount(VIEW, "hu-stat-card"));
       expect(count).toBeGreaterThanOrEqual(3);
     }).toPass({ timeout: POLL });
   });
 
   test("displays memory entries as cards", async ({ page }) => {
     await expect(async () => {
-      const count = await page.evaluate(shadowCount(VIEW, ".memory-grid sc-card"));
+      const count = await page.evaluate(shadowCount(VIEW, ".memory-grid hu-card"));
       expect(count).toBeGreaterThan(0);
     }).toPass({ timeout: POLL });
   });
@@ -46,23 +46,23 @@ test.describe("Memory View", () => {
     await expect(async () => {
       const hasKey = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
           return !!view?.shadowRoot?.querySelector(".memory-card .key");
         })()`,
       );
       const hasContent = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
           return !!view?.shadowRoot?.querySelector(".memory-card .content");
         })()`,
       );
       const hasBadge = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
-          return !!view?.shadowRoot?.querySelector(".memory-card sc-badge");
+          return !!view?.shadowRoot?.querySelector(".memory-card hu-badge");
         })()`,
       );
       expect(hasKey).toBe(true);
@@ -73,13 +73,13 @@ test.describe("Memory View", () => {
 
   test("search input is present", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists(VIEW, "sc-input"))).toBe(true);
+      expect(await page.evaluate(shadowExists(VIEW, "hu-input"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
   test("category filter is present with segments", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists(VIEW, "sc-segmented-control"))).toBe(true);
+      expect(await page.evaluate(shadowExists(VIEW, "hu-segmented-control"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
@@ -87,9 +87,9 @@ test.describe("Memory View", () => {
     await expect(async () => {
       const hasConsolidate = await page.evaluate(
         `(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${VIEW}");
-          const buttons = view?.shadowRoot?.querySelectorAll("sc-button");
+          const buttons = view?.shadowRoot?.querySelectorAll("hu-button");
           for (const btn of buttons ?? []) {
             if (btn.textContent?.trim().includes("Consolidate")) return true;
           }
@@ -102,9 +102,9 @@ test.describe("Memory View", () => {
 
   test("clicking consolidate triggers reload", async ({ page }) => {
     const clicked = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
+      const app = document.querySelector("hu-app");
       const view = app?.shadowRoot?.querySelector("${VIEW}");
-      const buttons = view?.shadowRoot?.querySelectorAll("sc-button");
+      const buttons = view?.shadowRoot?.querySelectorAll("hu-button");
       for (const btn of buttons ?? []) {
         if (btn.textContent?.trim().includes("Consolidate")) {
           const inner = btn.shadowRoot?.querySelector("button");
@@ -116,8 +116,8 @@ test.describe("Memory View", () => {
     expect(clicked).toBe(true);
 
     await expect(async () => {
-      expect(await page.evaluate(shadowExists(VIEW, "sc-stats-row"))).toBe(true);
-      const count = await page.evaluate(shadowCount(VIEW, "sc-stat-card"));
+      expect(await page.evaluate(shadowExists(VIEW, "hu-stats-row"))).toBe(true);
+      const count = await page.evaluate(shadowCount(VIEW, "hu-stat-card"));
       expect(count).toBeGreaterThanOrEqual(3);
     }).toPass({ timeout: POLL });
   });

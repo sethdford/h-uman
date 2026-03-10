@@ -123,7 +123,7 @@ function main(): void {
   for (const name of [...colorNames].sort()) {
     const dark = tokens[`dark.${name}`] as string | undefined;
     const light = tokens[`light.${name}`] as string | undefined;
-    sections.push(`| \`--sc-${name}\` | ${dark ?? "—"} | ${light ?? "—"} |`);
+    sections.push(`| \`--hu-${name}\` | ${dark ?? "—"} | ${light ?? "—"} |`);
   }
 
   sections.push(
@@ -141,7 +141,7 @@ function main(): void {
   for (const k of spacingKeys) {
     const v = tokens[k];
     const name = k.replace("spacing.", "");
-    sections.push(`| \`--sc-space-${name}\` | ${v} |`);
+    sections.push(`| \`--hu-space-${name}\` | ${v} |`);
   }
 
   sections.push(
@@ -159,7 +159,7 @@ function main(): void {
   for (const k of radiusKeys) {
     const v = tokens[k];
     const name = k.replace("radius.", "");
-    sections.push(`| \`--sc-radius-${name}\` | ${v} |`);
+    sections.push(`| \`--hu-radius-${name}\` | ${v} |`);
   }
 
   sections.push(
@@ -182,15 +182,15 @@ function main(): void {
     const v = tokens[k];
     let cssName = k;
     if (k.startsWith("fontFamily."))
-      cssName = `--sc-font` + (k.endsWith(".mono") ? "-mono" : "");
+      cssName = `--hu-font` + (k.endsWith(".mono") ? "-mono" : "");
     else if (k.startsWith("fontSize."))
-      cssName = `--sc-text-${k.replace("fontSize.", "")}`;
+      cssName = `--hu-text-${k.replace("fontSize.", "")}`;
     else if (k.startsWith("fontWeight."))
-      cssName = `--sc-weight-${k.replace("fontWeight.", "")}`;
+      cssName = `--hu-weight-${k.replace("fontWeight.", "")}`;
     else if (k.startsWith("lineHeight."))
-      cssName = `--sc-leading-${k.replace("lineHeight.", "")}`;
+      cssName = `--hu-leading-${k.replace("lineHeight.", "")}`;
     else if (k.startsWith("letterSpacing."))
-      cssName = `--sc-tracking-${k.replace("letterSpacing.", "")}`;
+      cssName = `--hu-tracking-${k.replace("letterSpacing.", "")}`;
     sections.push(`| \`${cssName}\` | ${v} |`);
   }
 
@@ -212,10 +212,10 @@ function main(): void {
     const v = tokens[k];
     let cssName = k;
     if (k.startsWith("duration."))
-      cssName = `--sc-duration-${k.replace("duration.", "")}`;
+      cssName = `--hu-duration-${k.replace("duration.", "")}`;
     else if (k.startsWith("easing."))
-      cssName = `--sc-${k.replace("easing.", "")}`;
-    else if (k.startsWith("transition.")) cssName = "--sc-transition";
+      cssName = `--hu-${k.replace("easing.", "")}`;
+    else if (k.startsWith("transition.")) cssName = "--hu-transition";
     sections.push(`| \`${cssName}\` | ${String(v).replace(/\|/g, "\\|")} |`);
   }
   const springKeys = Object.keys(tokens).filter((k) =>
@@ -229,7 +229,7 @@ function main(): void {
     const damp = tokens[`spring.${name}.damping`];
     const mass = tokens[`spring.${name}.mass`] ?? 1;
     sections.push(
-      `| \`--sc-spring-${name}\` | stiffness: ${stiff}, damping: ${damp}, mass: ${mass} |`,
+      `| \`--hu-spring-${name}\` | stiffness: ${stiff}, damping: ${damp}, mass: ${mass} |`,
     );
   }
 
@@ -253,7 +253,7 @@ function main(): void {
   );
   for (const k of compKeys.sort()) {
     const v = tokens[k];
-    const cssName = `--sc-${k.replace(".", "-")}`;
+    const cssName = `--hu-${k.replace(".", "-")}`;
     sections.push(`| \`${cssName}\` | ${v} |`);
   }
 

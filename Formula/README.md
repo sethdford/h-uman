@@ -1,6 +1,6 @@
-# SeaClaw Homebrew Formula
+# Human Homebrew Formula
 
-SeaClaw is an autonomous AI assistant runtime written in C11. This directory contains a Homebrew formula for local installation.
+Human is an autonomous AI assistant runtime written in C11. This directory contains a Homebrew formula for local installation.
 
 ## Installation
 
@@ -10,14 +10,14 @@ Since there is no stable release tag yet, the formula is **head-only** and insta
 
 ```bash
 # Install directly from the local formula file
-brew install --HEAD /path/to/seaclaw/Formula/seaclaw.rb
+brew install --HEAD /path/to/human/Formula/human.rb
 ```
 
 Or, using the repo path relative to your clone:
 
 ```bash
-cd /path/to/seaclaw
-brew install --HEAD ./Formula/seaclaw.rb
+cd /path/to/human
+brew install --HEAD ./Formula/human.rb
 ```
 
 ### Optional: curl support
@@ -25,7 +25,7 @@ brew install --HEAD ./Formula/seaclaw.rb
 The formula builds with SQLite enabled by default. HTTP provider support via curl is optional:
 
 ```bash
-brew install --HEAD --with-curl ./Formula/seaclaw.rb
+brew install --HEAD --with-curl ./Formula/human.rb
 ```
 
 ## Requirements
@@ -39,6 +39,6 @@ brew install --HEAD --with-curl ./Formula/seaclaw.rb
 After installation, run:
 
 ```bash
-seaclaw --help
-seaclaw --version
+human --help
+human --version
 ```

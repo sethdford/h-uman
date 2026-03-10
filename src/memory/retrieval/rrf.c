@@ -1,7 +1,7 @@
-#include "seaclaw/memory/retrieval/rrf.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/retrieval/rrf.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,13 +36,13 @@ static rrf_map_node_t *map_find(rrf_map_t *m, const char *key, size_t key_len) {
     return NULL;
 }
 
-static rrf_map_node_t *map_put(rrf_map_t *m, sc_allocator_t *alloc, const char *key, size_t key_len,
+static rrf_map_node_t *map_put(rrf_map_t *m, hu_allocator_t *alloc, const char *key, size_t key_len,
                                double score, size_t merged_idx) {
     unsigned i = hash_key(key, key_len);
     rrf_map_node_t *n = (rrf_map_node_t *)alloc->alloc(alloc->ctx, sizeof(rrf_map_node_t));
     if (!n)
         return NULL;
-    n->key = sc_strndup(alloc, key, key_len);
+    n->key = hu_strndup(alloc, key, key_len);
     if (!n->key) {
         alloc->free(alloc->ctx, n, sizeof(rrf_map_node_t));
         return NULL;
@@ -55,7 +55,7 @@ static rrf_map_node_t *map_put(rrf_map_t *m, sc_allocator_t *alloc, const char *
     return n;
 }
 
-static void map_clear(rrf_map_t *m, sc_allocator_t *alloc) {
+static void map_clear(rrf_map_t *m, hu_allocator_t *alloc) {
     for (int i = 0; i < RRF_MAP_CAP; i++) {
         rrf_map_node_t *n = m->buckets[i];
         while (n) {
@@ -69,79 +69,79 @@ static void map_clear(rrf_map_t *m, sc_allocator_t *alloc) {
     }
 }
 
-static sc_error_t entry_dup(sc_allocator_t *alloc, const sc_memory_entry_t *src,
-                            sc_memory_entry_t *dst, double score) {
+static hu_error_t entry_dup(hu_allocator_t *alloc, const hu_memory_entry_t *src,
+                            hu_memory_entry_t *dst, double score) {
     memset(dst, 0, sizeof(*dst));
     if (src->id && src->id_len > 0) {
-        dst->id = sc_strndup(alloc, src->id, src->id_len);
+        dst->id = hu_strndup(alloc, src->id, src->id_len);
         if (!dst->id)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         dst->id_len = src->id_len;
     }
     if (src->key && src->key_len > 0) {
-        dst->key = sc_strndup(alloc, src->key, src->key_len);
+        dst->key = hu_strndup(alloc, src->key, src->key_len);
         if (!dst->key) {
-            sc_memory_entry_free_fields(alloc, dst);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, dst);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         dst->key_len = src->key_len;
     }
     if (src->content && src->content_len > 0) {
-        dst->content = sc_strndup(alloc, src->content, src->content_len);
+        dst->content = hu_strndup(alloc, src->content, src->content_len);
         if (!dst->content) {
-            sc_memory_entry_free_fields(alloc, dst);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, dst);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         dst->content_len = src->content_len;
     }
     dst->category = src->category;
     if (src->category.data.custom.name && src->category.data.custom.name_len > 0) {
         dst->category.data.custom.name =
-            sc_strndup(alloc, src->category.data.custom.name, src->category.data.custom.name_len);
+            hu_strndup(alloc, src->category.data.custom.name, src->category.data.custom.name_len);
         if (!dst->category.data.custom.name) {
-            sc_memory_entry_free_fields(alloc, dst);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, dst);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         dst->category.data.custom.name_len = src->category.data.custom.name_len;
     }
     if (src->timestamp && src->timestamp_len > 0) {
-        dst->timestamp = sc_strndup(alloc, src->timestamp, src->timestamp_len);
+        dst->timestamp = hu_strndup(alloc, src->timestamp, src->timestamp_len);
         if (!dst->timestamp) {
-            sc_memory_entry_free_fields(alloc, dst);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, dst);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         dst->timestamp_len = src->timestamp_len;
     }
     if (src->session_id && src->session_id_len > 0) {
-        dst->session_id = sc_strndup(alloc, src->session_id, src->session_id_len);
+        dst->session_id = hu_strndup(alloc, src->session_id, src->session_id_len);
         if (!dst->session_id) {
-            sc_memory_entry_free_fields(alloc, dst);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, dst);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         dst->session_id_len = src->session_id_len;
     }
     if (src->source && src->source_len > 0) {
-        dst->source = sc_strndup(alloc, src->source, src->source_len);
+        dst->source = hu_strndup(alloc, src->source, src->source_len);
         if (!dst->source) {
-            sc_memory_entry_free_fields(alloc, dst);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, dst);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         dst->source_len = src->source_len;
     }
     dst->score = score;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_rrf_merge(sc_allocator_t *alloc, const sc_memory_entry_t **source_lists,
+hu_error_t hu_rrf_merge(hu_allocator_t *alloc, const hu_memory_entry_t **source_lists,
                         const size_t *source_lens, size_t num_sources, unsigned k, size_t limit,
-                        sc_memory_entry_t **out, size_t *out_count) {
+                        hu_memory_entry_t **out, size_t *out_count) {
     *out = NULL;
     *out_count = 0;
     if (!alloc || !source_lists || !source_lens)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (num_sources == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Single source: passthrough with RRF scores */
     if (num_sources == 1) {
@@ -149,47 +149,47 @@ sc_error_t sc_rrf_merge(sc_allocator_t *alloc, const sc_memory_entry_t **source_
         if (n > limit)
             n = limit;
         if (n == 0)
-            return SC_OK;
-        const sc_memory_entry_t *src = source_lists[0];
-        sc_memory_entry_t *res =
-            (sc_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_memory_entry_t));
+            return HU_OK;
+        const hu_memory_entry_t *src = source_lists[0];
+        hu_memory_entry_t *res =
+            (hu_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_memory_entry_t));
         if (!res)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         for (size_t i = 0; i < n; i++) {
             double rrf_score = 1.0 / (double)(i + 1 + k);
-            if (entry_dup(alloc, &src[i], &res[i], rrf_score) != SC_OK) {
+            if (entry_dup(alloc, &src[i], &res[i], rrf_score) != HU_OK) {
                 for (size_t j = 0; j < i; j++)
-                    sc_memory_entry_free_fields(alloc, &res[j]);
-                alloc->free(alloc->ctx, res, n * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    hu_memory_entry_free_fields(alloc, &res[j]);
+                alloc->free(alloc->ctx, res, n * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
         }
         *out = res;
         *out_count = n;
-        return SC_OK;
+        return HU_OK;
     }
 
     rrf_map_t map = {{0}};
-    sc_memory_entry_t *merged = NULL;
+    hu_memory_entry_t *merged = NULL;
     size_t merged_cap = 128, merged_count = 0;
     double *scores = NULL;
     size_t scores_cap = 128;
 
-    merged = (sc_memory_entry_t *)alloc->alloc(alloc->ctx, merged_cap * sizeof(sc_memory_entry_t));
+    merged = (hu_memory_entry_t *)alloc->alloc(alloc->ctx, merged_cap * sizeof(hu_memory_entry_t));
     scores = (double *)alloc->alloc(alloc->ctx, scores_cap * sizeof(double));
     if (!merged || !scores) {
         if (merged)
-            alloc->free(alloc->ctx, merged, merged_cap * sizeof(sc_memory_entry_t));
+            alloc->free(alloc->ctx, merged, merged_cap * sizeof(hu_memory_entry_t));
         if (scores)
             alloc->free(alloc->ctx, scores, scores_cap * sizeof(double));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     for (size_t s = 0; s < num_sources; s++) {
-        const sc_memory_entry_t *list = source_lists[s];
+        const hu_memory_entry_t *list = source_lists[s];
         size_t len = source_lens[s];
         for (size_t i = 0; i < len; i++) {
-            const sc_memory_entry_t *c = &list[i];
+            const hu_memory_entry_t *c = &list[i];
             const char *key = c->key && c->key_len > 0 ? c->key : c->id;
             size_t key_len = c->key && c->key_len > 0 ? c->key_len : (c->id ? c->id_len : 0);
             if (!key || key_len == 0)
@@ -203,9 +203,9 @@ sc_error_t sc_rrf_merge(sc_allocator_t *alloc, const sc_memory_entry_t **source_
                 if (merged_count >= merged_cap) {
                     merged_cap *= 2;
                     scores_cap *= 2;
-                    sc_memory_entry_t *nm = (sc_memory_entry_t *)alloc->realloc(
-                        alloc->ctx, merged, merged_count * sizeof(sc_memory_entry_t),
-                        merged_cap * sizeof(sc_memory_entry_t));
+                    hu_memory_entry_t *nm = (hu_memory_entry_t *)alloc->realloc(
+                        alloc->ctx, merged, merged_count * sizeof(hu_memory_entry_t),
+                        merged_cap * sizeof(hu_memory_entry_t));
                     double *ns =
                         (double *)alloc->realloc(alloc->ctx, scores, merged_count * sizeof(double),
                                                  scores_cap * sizeof(double));
@@ -214,11 +214,11 @@ sc_error_t sc_rrf_merge(sc_allocator_t *alloc, const sc_memory_entry_t **source_
                     merged = nm;
                     scores = ns;
                 }
-                if (entry_dup(alloc, c, &merged[merged_count], 0.0) != SC_OK)
+                if (entry_dup(alloc, c, &merged[merged_count], 0.0) != HU_OK)
                     break;
                 scores[merged_count] = rrf_term;
                 if (!map_put(&map, alloc, key, key_len, rrf_term, merged_count)) {
-                    sc_memory_entry_free_fields(alloc, &merged[merged_count]);
+                    hu_memory_entry_free_fields(alloc, &merged[merged_count]);
                     break;
                 }
                 merged_count++;
@@ -245,7 +245,7 @@ sc_error_t sc_rrf_merge(sc_allocator_t *alloc, const sc_memory_entry_t **source_
         for (size_t j = i + 1; j < merged_count; j++) {
             if (scores[j] > scores[i] ||
                 (scores[j] == scores[i] && merged[j].score > merged[i].score)) {
-                sc_memory_entry_t te = merged[i];
+                hu_memory_entry_t te = merged[i];
                 merged[i] = merged[j];
                 merged[j] = te;
                 double td = scores[i];
@@ -258,18 +258,18 @@ sc_error_t sc_rrf_merge(sc_allocator_t *alloc, const sc_memory_entry_t **source_
     size_t out_len = merged_count > limit ? limit : merged_count;
     if (out_len < merged_count) {
         for (size_t i = out_len; i < merged_count; i++)
-            sc_memory_entry_free_fields(alloc, &merged[i]);
+            hu_memory_entry_free_fields(alloc, &merged[i]);
     }
     alloc->free(alloc->ctx, scores, scores_cap * sizeof(double));
     *out = merged;
     *out_count = out_len;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_rrf_free_result(sc_allocator_t *alloc, sc_memory_entry_t *entries, size_t count) {
+void hu_rrf_free_result(hu_allocator_t *alloc, hu_memory_entry_t *entries, size_t count) {
     if (!alloc || !entries)
         return;
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
 }

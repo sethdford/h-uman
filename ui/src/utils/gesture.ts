@@ -16,7 +16,7 @@ export function prefersReducedMotion(): boolean {
 
 /**
  * Creates an expanding circle ripple animation from the pointer position.
- * Uses sc-ripple keyframe (defined in theme.css). Self-cleaning: removes the ripple element after animation.
+ * Uses hu-ripple keyframe (defined in theme.css). Self-cleaning: removes the ripple element after animation.
  */
 export function rippleEffect(element: HTMLElement, event: PointerEvent): void {
   if (prefersReducedMotion()) return;
@@ -33,14 +33,14 @@ export function rippleEffect(element: HTMLElement, event: PointerEvent): void {
     top: ${y}px;
     width: 1.25rem;
     height: 1.25rem;
-    margin-left: calc(-1 * var(--sc-space-md));
-    margin-top: calc(-1 * var(--sc-space-md));
+    margin-left: calc(-1 * var(--hu-space-md));
+    margin-top: calc(-1 * var(--hu-space-md));
     border-radius: 50%;
     background: currentColor;
     opacity: 0.4;
     pointer-events: none;
     transform: scale(0);
-    animation: sc-ripple var(--sc-duration-slow) var(--sc-ease-out, ease-out) forwards;
+    animation: hu-ripple var(--hu-duration-slow) var(--hu-ease-out, ease-out) forwards;
   `;
 
   const pos = element.style.position;
@@ -48,7 +48,7 @@ export function rippleEffect(element: HTMLElement, event: PointerEvent): void {
   element.style.overflow = "hidden";
   element.appendChild(ripple);
 
-  const duration = 350; // fallback if --sc-duration-slow unavailable
+  const duration = 350; // fallback if --hu-duration-slow unavailable
   setTimeout(() => {
     ripple.remove();
   }, duration);
@@ -162,7 +162,7 @@ export class DragDismissController implements ReactiveController {
       this.host.style.transition = "";
       return;
     }
-    this.host.style.transition = `transform var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease-out)`;
+    this.host.style.transition = `transform var(--hu-duration-normal, 200ms) var(--hu-ease-out, ease-out)`;
     this.host.style.transform = "";
   }
 }
@@ -371,11 +371,11 @@ export class PullRefreshController implements ReactiveController {
       top: 0;
       left: 50%;
       transform: translate(-50%, -100%);
-      padding: var(--sc-space-md, 1rem);
-      font-size: var(--sc-text-sm, 0.8125rem);
-      color: var(--sc-text-muted);
+      padding: var(--hu-space-md, 1rem);
+      font-size: var(--hu-text-sm, 0.8125rem);
+      color: var(--hu-text-muted);
       opacity: 0;
-      transition: opacity var(--sc-duration-fast, 100ms) var(--sc-ease-out);
+      transition: opacity var(--hu-duration-fast, 100ms) var(--hu-ease-out);
       pointer-events: none;
     `;
     indicator.textContent = "Pull to refresh";
@@ -407,7 +407,7 @@ export class PullRefreshController implements ReactiveController {
     if (this.indicatorElement) {
       this.indicatorElement.style.opacity = "0";
       this.indicatorElement.style.transform = "translate(-50%, -100%)";
-      this.indicatorElement.style.transition = `opacity var(--sc-duration-fast, 100ms) var(--sc-ease-out), transform var(--sc-duration-normal, 200ms) var(--sc-ease-out, ease-out)`;
+      this.indicatorElement.style.transition = `opacity var(--hu-duration-fast, 100ms) var(--hu-ease-out), transform var(--hu-duration-normal, 200ms) var(--hu-ease-out, ease-out)`;
       setTimeout(() => {
         this.indicatorElement?.remove();
         this.indicatorElement = null;

@@ -1,8 +1,8 @@
 ---
-title: SeaClaw UX Patterns & Layout Architecture
+title: Human UX Patterns & Layout Architecture
 ---
 
-# SeaClaw UX Patterns & Layout Architecture
+# Human UX Patterns & Layout Architecture
 
 > Normative reference for view composition, layout archetypes, responsive adaptation,
 > and interaction patterns. All views must conform to one of the archetypes below.
@@ -34,14 +34,14 @@ Visual layers communicate importance and interactivity:
 
 | Layer    | Z-Index | Token              | Content                                |
 | -------- | ------- | ------------------ | -------------------------------------- |
-| Base     | 0       | `--sc-bg`          | Page background                        |
-| Surface  | 1       | `--sc-bg-surface`  | Cards, panels, conversation areas      |
-| Elevated | 2       | `--sc-bg-elevated` | Dropdowns, popovers, floating controls |
-| Overlay  | 3       | `--sc-bg-overlay`  | Modals, sheets, toasts                 |
+| Base     | 0       | `--hu-bg`          | Page background                        |
+| Surface  | 1       | `--hu-bg-surface`  | Cards, panels, conversation areas      |
+| Elevated | 2       | `--hu-bg-elevated` | Dropdowns, popovers, floating controls |
+| Overlay  | 3       | `--hu-bg-overlay`  | Modals, sheets, toasts                 |
 | System   | 4       | —                  | Skip links, disconnect banners         |
 
-Shadows must match elevation: `--sc-shadow-sm` for surface, `--sc-shadow-md` for elevated,
-`--sc-shadow-lg` for overlay. Never use shadows without corresponding elevation context.
+Shadows must match elevation: `--hu-shadow-sm` for surface, `--hu-shadow-md` for elevated,
+`--hu-shadow-lg` for overlay. Never use shadows without corresponding elevation context.
 
 ### 1.3 Responsive Adaptation (Material 3: Window Size Classes)
 
@@ -56,10 +56,10 @@ Views must adapt across four breakpoints. Use Material 3's window size class mod
 
 Rules:
 
-- Navigation collapses to bottom bar below `--sc-breakpoint-md` (768px)
+- Navigation collapses to bottom bar below `--hu-breakpoint-md` (768px)
 - Grid columns reduce: 3→2→1 as width decreases
 - Touch targets minimum 44×44px on all breakpoints (Apple HIG)
-- Content padding reduces: `--sc-space-2xl` → `--sc-space-md` on compact
+- Content padding reduces: `--hu-space-2xl` → `--hu-space-md` on compact
 
 ---
 
@@ -109,7 +109,7 @@ Rules:
 - Detail pane: flex-grow, min-width 0
 - Selection in list highlights row and loads detail
 - On compact: list→detail is a forward navigation; back button returns to list
-- Empty detail state shows `sc-empty-state` with guidance text
+- Empty detail state shows `hu-empty-state` with guidance text
 
 ### 2.3 Conversational (Voice, Chat)
 
@@ -216,7 +216,7 @@ Rules:
 
 Rules:
 
-- Log area uses `--sc-font-mono`
+- Log area uses `--hu-font-mono`
 - Auto-scroll to bottom (with scroll-lock toggle)
 - Controls anchored at top
 - Color-coded log levels using semantic tokens
@@ -248,11 +248,11 @@ Every interaction must provide immediate feedback:
 
 | Interaction  | Feedback                          | Timing                   |
 | ------------ | --------------------------------- | ------------------------ |
-| Button click | Visual depress + state change     | `--sc-duration-fast`     |
+| Button click | Visual depress + state change     | `--hu-duration-fast`     |
 | Form submit  | Loading state → success/error     | Immediate → result       |
-| Navigation   | View transition animation         | `--sc-duration-moderate` |
+| Navigation   | View transition animation         | `--hu-duration-moderate` |
 | Drag         | Shadow elevation + cursor change  | Immediate                |
-| Error        | Inline message + border highlight | `--sc-duration-fast`     |
+| Error        | Inline message + border highlight | `--hu-duration-fast`     |
 | Delete       | Confirmation dialog → toast       | Before → after           |
 
 ### 3.4 Loading States (Apple HIG: Skeleton)
@@ -260,15 +260,15 @@ Every interaction must provide immediate feedback:
 Never show a blank screen. Every view must have a loading skeleton:
 
 - Skeleton shapes mirror the final content layout exactly
-- Use `sc-skeleton` component with appropriate `variant` (card, text, circle)
-- Skeleton animates with a shimmer using `--sc-duration-slower`
-- Transition from skeleton → content uses `--sc-duration-normal` fade
+- Use `hu-skeleton` component with appropriate `variant` (card, text, circle)
+- Skeleton animates with a shimmer using `--hu-duration-slower`
+- Transition from skeleton → content uses `--hu-duration-normal` fade
 
 ### 3.5 Empty States
 
 Every list/collection view must handle the empty case:
 
-- Show `sc-empty-state` with: icon + heading + description + optional CTA
+- Show `hu-empty-state` with: icon + heading + description + optional CTA
 - Description tells the user how to populate the empty state
 - CTA provides a direct path to the first item creation
 - Never show a blank white box
@@ -279,9 +279,9 @@ Errors follow a severity hierarchy:
 
 | Severity | Treatment                        | Example                |
 | -------- | -------------------------------- | ---------------------- |
-| Field    | Inline below input, `--sc-error` | "Required field"       |
+| Field    | Inline below input, `--hu-error` | "Required field"       |
 | Section  | Banner within section            | "Could not load data"  |
-| Page     | `sc-error-boundary` fallback     | Render crash           |
+| Page     | `hu-error-boundary` fallback     | Render crash           |
 | System   | Top-level disconnect banner      | WebSocket disconnected |
 
 ### 3.7 Category-Defining Interaction Principles
@@ -352,7 +352,7 @@ Every interaction type has an explicit latency budget, measured and enforced.
 
 ### 4.1 Primary Navigation
 
-- **Desktop**: Persistent sidebar (`sc-sidebar`), collapsible to icon-only
+- **Desktop**: Persistent sidebar (`hu-sidebar`), collapsible to icon-only
 - **Mobile**: Bottom tab bar with 5 primary tabs + "More" sheet for secondary
 - Active tab indicated by accent color + bold weight
 
@@ -369,7 +369,7 @@ All views must be fully keyboard-navigable:
 - Tab order follows visual reading order (top→bottom, left→right)
 - Arrow keys navigate within grids and lists
 - Escape closes modals, sheets, dropdowns
-- Focus ring visible on all interactive elements (`--sc-focus-ring`)
+- Focus ring visible on all interactive elements (`--hu-focus-ring`)
 - Skip link (`#main-content`) at document start
 
 ---
@@ -408,15 +408,15 @@ These perceptual principles govern layout decisions:
 
 Related elements are close together; unrelated elements have clear separation.
 
-- Group form fields by section with `--sc-space-2xl` between sections
-- Within a group, use `--sc-space-md` between elements
-- Card grids use consistent gap (`--sc-space-lg`)
+- Group form fields by section with `--hu-space-2xl` between sections
+- Within a group, use `--hu-space-md` between elements
+- Card grids use consistent gap (`--hu-space-lg`)
 
 ### Similarity
 
 Elements that look alike are perceived as related.
 
-- All cards in a grid use the same component (`sc-card`)
+- All cards in a grid use the same component (`hu-card`)
 - Status indicators use consistent shape (dot) + semantic color
 - Action buttons within a context use consistent sizing and style
 
@@ -440,7 +440,7 @@ The mind completes incomplete shapes.
 
 Clear distinction between foreground content and background.
 
-- Modals dim background with overlay (`--sc-bg-overlay`)
+- Modals dim background with overlay (`--hu-bg-overlay`)
 - Active/selected items elevated above siblings
 - Focus ring distinguishes interactive element from surrounding content
 

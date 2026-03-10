@@ -1,18 +1,18 @@
 ---
-title: Security Comparison — SeaClaw vs OpenClaw
-description: Security posture comparison between SeaClaw and OpenClaw runtimes
+title: Security Comparison — Human vs OpenClaw
+description: Security posture comparison between Human and OpenClaw runtimes
 updated: 2026-03-02
 ---
 
-# Security Comparison: SeaClaw vs OpenClaw
+# Security Comparison: Human vs OpenClaw
 
 ## 1. Executive Summary
 
-**SeaClaw** is a zero-dependency, single-binary AI assistant runtime with encrypted secrets storage, multiple sandbox backends, and secure-by-default configuration. **OpenClaw** is a Node.js-based implementation with 1,200+ npm dependencies, plain-text configuration for API keys, and no built-in sandboxing for tool execution.
+**Human** is a zero-dependency, single-binary AI assistant runtime with encrypted secrets storage, multiple sandbox backends, and secure-by-default configuration. **OpenClaw** is a Node.js-based implementation with 1,200+ npm dependencies, plain-text configuration for API keys, and no built-in sandboxing for tool execution.
 
 ## 2. Supply Chain Risk
 
-### SeaClaw
+### Human
 
 - **0 third-party dependencies** for the minimal core build (libc only). Optional SQLite and libcurl are system libraries.
 - Single static binary. No package manager supply chain at runtime.
@@ -30,7 +30,7 @@ updated: 2026-03-02
 
 ## 3. Secrets Management
 
-### SeaClaw
+### Human
 
 - ChaCha20-Poly1305 encrypted secrets store (`src/security/secrets.c`). API keys never stored in plain text.
 - AEAD-style encryption (ChaCha20 + HMAC-SHA256) with hardware-derived or file-based key. Non-FIPS builds use in-tree ChaCha20; FIPS builds use AES-256-GCM via OpenSSL.
@@ -43,7 +43,7 @@ updated: 2026-03-02
 
 ## 4. Sandboxing
 
-### SeaClaw
+### Human
 
 - **7 sandbox backends** for tool execution:
   - **Landlock** (Linux): Kernel LSM filesystem ACLs.
@@ -61,7 +61,7 @@ updated: 2026-03-02
 
 ## 5. Network Security
 
-### SeaClaw
+### Human
 
 - HTTPS-only enforcement. HTTP URLs rejected at the tool layer.
 - TLS certificate validation for outbound connections.
@@ -74,7 +74,7 @@ updated: 2026-03-02
 
 ## 6. Audit and Observability
 
-### SeaClaw
+### Human
 
 - Built-in audit logging (`src/security/audit.c`). Event types: command execution, file access, config change, auth success/failure, policy violation, security events.
 - Observer pattern for instrumentation. Severity levels; configurable minimum severity.
@@ -86,7 +86,7 @@ updated: 2026-03-02
 
 ## 7. Skill/Plugin Security
 
-### SeaClaw
+### Human
 
 - **SkillForge**: Skill discovery from local directories; install from URL. Skills execute within the sandbox when invoked. Explicit enable/disable. No npm-like package supply chain for skills.
 - Skills run in the same sandbox as tools (Landlock, Firejail, etc.).
@@ -97,7 +97,7 @@ updated: 2026-03-02
 
 ## 8. Binary Integrity
 
-### SeaClaw
+### Human
 
 - Single static binary. SHA-256 checksums for releases.
 - Reproducible builds supported. SBOM documents components.
@@ -108,7 +108,7 @@ updated: 2026-03-02
 
 ## 9. Attack Surface Comparison
 
-| Aspect          | SeaClaw                            | OpenClaw                 |
+| Aspect          | Human                            | OpenClaw                 |
 | --------------- | ---------------------------------- | ------------------------ |
 | Dependencies    | 0 (core); 2–3 optional system libs | 1,200+ npm packages      |
 | Secrets at rest | Encrypted (ChaCha20/AES-GCM)       | Plain text               |
@@ -120,4 +120,4 @@ updated: 2026-03-02
 
 ## 10. Recommendation
 
-For security-conscious deployments, SeaClaw provides significantly stronger defaults with zero additional configuration: encrypted secrets, sandboxed tool execution, HTTPS enforcement, and audit logging out of the box. OpenClaw offers flexibility and a large ecosystem at the cost of a wider attack surface and manual hardening.
+For security-conscious deployments, Human provides significantly stronger defaults with zero additional configuration: encrypted secrets, sandboxed tool execution, HTTPS enforcement, and audit logging out of the box. OpenClaw offers flexibility and a large ecosystem at the cost of a wider attack surface and manual hardening.

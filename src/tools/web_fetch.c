@@ -2,36 +2,36 @@
  * Web fetch tool — HTTP GET + HTML-to-text extraction.
  * Strips script/style tags, converts to readable text with basic markdown.
  */
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/validation.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
+#include "human/tools/validation.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_WEB_FETCH_NAME "web_fetch"
-#define SC_WEB_FETCH_DESC                                                                        \
+#define HU_WEB_FETCH_NAME "web_fetch"
+#define HU_WEB_FETCH_DESC                                                                        \
     "Fetch a web page by URL and extract its text content. Converts HTML to readable text. Use " \
     "this to read the content of a specific URL. Preferred over browser for retrieving page "    \
     "content."
-#define SC_WEB_FETCH_PARAMS                                                                       \
+#define HU_WEB_FETCH_PARAMS                                                                       \
     "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"},\"max_chars\":{\"type\":" \
     "\"integer\",\"default\":50000}},\"required\":[\"url\"]}"
-#define SC_WEB_FETCH_DEFAULT_MAX 50000
-#define SC_WEB_FETCH_MIN_MAX     100
-#define SC_WEB_FETCH_MAX_MAX     200000
+#define HU_WEB_FETCH_DEFAULT_MAX 50000
+#define HU_WEB_FETCH_MIN_MAX     100
+#define HU_WEB_FETCH_MAX_MAX     200000
 
-typedef struct sc_web_fetch_ctx {
+typedef struct hu_web_fetch_ctx {
     uint32_t max_chars;
-} sc_web_fetch_ctx_t;
+} hu_web_fetch_ctx_t;
 
-#if !SC_IS_TEST
+#if !HU_IS_TEST
 static int tag_eq(const char *a, const char *b, size_t n) {
     for (size_t i = 0; i < n; i++) {
         if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i]))
@@ -41,9 +41,9 @@ static int tag_eq(const char *a, const char *b, size_t n) {
 }
 #endif
 
-#if !SC_IS_TEST
+#if !HU_IS_TEST
 /* Simple HTML-to-text: strip script/style, decode entities */
-static char *html_to_text(sc_allocator_t *alloc, const char *html, size_t html_len,
+static char *html_to_text(hu_allocator_t *alloc, const char *html, size_t html_len,
                           size_t *out_len) {
     size_t cap = html_len + 256;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
@@ -213,58 +213,58 @@ static char *html_to_text(sc_allocator_t *alloc, const char *html, size_t html_l
 }
 #endif
 
-static sc_error_t web_fetch_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                    sc_tool_result_t *out) {
-    sc_web_fetch_ctx_t *c = (sc_web_fetch_ctx_t *)ctx;
+static hu_error_t web_fetch_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                    hu_tool_result_t *out) {
+    hu_web_fetch_ctx_t *c = (hu_web_fetch_ctx_t *)ctx;
     if (!c || !args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *url = sc_json_get_string(args, "url");
+    const char *url = hu_json_get_string(args, "url");
     if (!url || strlen(url) == 0) {
-        *out = sc_tool_result_fail("Missing required 'url' parameter", 30);
-        return SC_OK;
+        *out = hu_tool_result_fail("Missing required 'url' parameter", 30);
+        return HU_OK;
     }
-    if (sc_tool_validate_url(url) != SC_OK) {
-        *out = sc_tool_result_fail("invalid url: HTTPS only, no private IPs", 37);
-        return SC_OK;
+    if (hu_tool_validate_url(url) != HU_OK) {
+        *out = hu_tool_result_fail("invalid url: HTTPS only, no private IPs", 37);
+        return HU_OK;
     }
 
     uint32_t max_chars = c->max_chars;
-    double mc = sc_json_get_number(args, "max_chars", max_chars);
-    if (mc < SC_WEB_FETCH_MIN_MAX)
-        mc = SC_WEB_FETCH_MIN_MAX;
-    if (mc > SC_WEB_FETCH_MAX_MAX)
-        mc = SC_WEB_FETCH_MAX_MAX;
+    double mc = hu_json_get_number(args, "max_chars", max_chars);
+    if (mc < HU_WEB_FETCH_MIN_MAX)
+        mc = HU_WEB_FETCH_MIN_MAX;
+    if (mc > HU_WEB_FETCH_MAX_MAX)
+        mc = HU_WEB_FETCH_MAX_MAX;
     max_chars = (uint32_t)mc;
 
-#if SC_IS_TEST
-    char *msg = sc_strndup(alloc, "(web_fetch stub in test)", 24);
+#if HU_IS_TEST
+    char *msg = hu_strndup(alloc, "(web_fetch stub in test)", 24);
     if (!msg) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    *out = sc_tool_result_ok_owned(msg, 24);
-    return SC_OK;
+    *out = hu_tool_result_ok_owned(msg, 24);
+    return HU_OK;
 #else
-    sc_http_response_t resp = {0};
-    sc_error_t err = sc_http_get(alloc, url, NULL, &resp);
-    if (err != SC_OK) {
-        *out = sc_tool_result_fail("Fetch failed", 12);
-        return SC_OK;
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_get(alloc, url, NULL, &resp);
+    if (err != HU_OK) {
+        *out = hu_tool_result_fail("Fetch failed", 12);
+        return HU_OK;
     }
     if (resp.status_code < 200 || resp.status_code >= 300) {
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_fail("HTTP request failed", 18);
-        return SC_OK;
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_fail("HTTP request failed", 18);
+        return HU_OK;
     }
 
     size_t text_len = 0;
     char *text = html_to_text(alloc, resp.body, resp.body_len, &text_len);
-    sc_http_response_free(alloc, &resp);
+    hu_http_response_free(alloc, &resp);
     if (!text) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     if (text_len > max_chars) {
@@ -276,8 +276,8 @@ static sc_error_t web_fetch_execute(void *ctx, sc_allocator_t *alloc, const sc_j
         char *trunc = (char *)alloc->alloc(alloc->ctx, max_chars + suffix_len + 1);
         if (!trunc) {
             alloc->free(alloc->ctx, text, text_len + 1);
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(trunc, text, max_chars);
         if (suffix_len > 0)
@@ -289,29 +289,29 @@ static sc_error_t web_fetch_execute(void *ctx, sc_allocator_t *alloc, const sc_j
         text_len = max_chars + suffix_len;
     }
 
-    *out = sc_tool_result_ok_owned(text, text_len);
-    return SC_OK;
+    *out = hu_tool_result_ok_owned(text, text_len);
+    return HU_OK;
 #endif
 }
 
 static const char *web_fetch_name(void *ctx) {
     (void)ctx;
-    return SC_WEB_FETCH_NAME;
+    return HU_WEB_FETCH_NAME;
 }
 static const char *web_fetch_description(void *ctx) {
     (void)ctx;
-    return SC_WEB_FETCH_DESC;
+    return HU_WEB_FETCH_DESC;
 }
 static const char *web_fetch_parameters_json(void *ctx) {
     (void)ctx;
-    return SC_WEB_FETCH_PARAMS;
+    return HU_WEB_FETCH_PARAMS;
 }
-static void web_fetch_deinit(void *ctx, sc_allocator_t *alloc) {
+static void web_fetch_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
-        alloc->free(alloc->ctx, ctx, sizeof(sc_web_fetch_ctx_t));
+        alloc->free(alloc->ctx, ctx, sizeof(hu_web_fetch_ctx_t));
 }
 
-static const sc_tool_vtable_t web_fetch_vtable = {
+static const hu_tool_vtable_t web_fetch_vtable = {
     .execute = web_fetch_execute,
     .name = web_fetch_name,
     .description = web_fetch_description,
@@ -319,13 +319,13 @@ static const sc_tool_vtable_t web_fetch_vtable = {
     .deinit = web_fetch_deinit,
 };
 
-sc_error_t sc_web_fetch_create(sc_allocator_t *alloc, uint32_t max_chars, sc_tool_t *out) {
-    sc_web_fetch_ctx_t *c = (sc_web_fetch_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+hu_error_t hu_web_fetch_create(hu_allocator_t *alloc, uint32_t max_chars, hu_tool_t *out) {
+    hu_web_fetch_ctx_t *c = (hu_web_fetch_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
-    c->max_chars = max_chars > 0 ? max_chars : SC_WEB_FETCH_DEFAULT_MAX;
+    c->max_chars = max_chars > 0 ? max_chars : HU_WEB_FETCH_DEFAULT_MAX;
     out->ctx = c;
     out->vtable = &web_fetch_vtable;
-    return SC_OK;
+    return HU_OK;
 }

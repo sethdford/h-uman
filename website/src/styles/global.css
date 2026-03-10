@@ -42,33 +42,33 @@
   :root {
     /* Website-specific warm neutrals — accent colors come from _tokens.css.
      * NEVER set accent hex values here — edit design-tokens/*.json instead. */
-    --sc-web-bg: #fafaf9;
-    --sc-web-surface: #ffffff;
-    --sc-web-surface-elevated: rgba(255, 255, 255, 0.6);
-    --sc-web-border: rgba(0, 0, 0, 0.06);
-    --sc-web-border-strong: rgba(0, 0, 0, 0.12);
-    --sc-web-text: #1d1d1f;
-    --sc-web-text-secondary: #6e6e73;
-    --sc-web-text-tertiary: #86868b;
-    --sc-web-code-bg: #f5f5f4;
-    --sc-web-terminal-bg: #1d1d1f;
-    --sc-web-terminal-chrome: #2c2c2e;
+    --hu-web-bg: #fafaf9;
+    --hu-web-surface: #ffffff;
+    --hu-web-surface-elevated: rgba(255, 255, 255, 0.6);
+    --hu-web-border: rgba(0, 0, 0, 0.06);
+    --hu-web-border-strong: rgba(0, 0, 0, 0.12);
+    --hu-web-text: #1d1d1f;
+    --hu-web-text-secondary: #6e6e73;
+    --hu-web-text-tertiary: #86868b;
+    --hu-web-code-bg: #f5f5f4;
+    --hu-web-terminal-bg: #1d1d1f;
+    --hu-web-terminal-chrome: #2c2c2e;
 
     /* ── Pill tokens ── */
-    --sc-web-pill-provider: #3b72c4;
-    --sc-web-pill-provider-bg: rgba(59, 130, 246, 0.06);
-    --sc-web-pill-provider-border: rgba(59, 130, 246, 0.15);
-    --sc-web-pill-channel: #16874d;
-    --sc-web-pill-channel-bg: rgba(34, 197, 94, 0.06);
-    --sc-web-pill-channel-border: rgba(34, 197, 94, 0.15);
-    --sc-web-pill-tool: #a37e12;
-    --sc-web-pill-tool-bg: rgba(234, 179, 8, 0.06);
-    --sc-web-pill-tool-border: rgba(234, 179, 8, 0.15);
+    --hu-web-pill-provider: #3b72c4;
+    --hu-web-pill-provider-bg: rgba(59, 130, 246, 0.06);
+    --hu-web-pill-provider-border: rgba(59, 130, 246, 0.15);
+    --hu-web-pill-channel: #16874d;
+    --hu-web-pill-channel-bg: rgba(34, 197, 94, 0.06);
+    --hu-web-pill-channel-border: rgba(34, 197, 94, 0.15);
+    --hu-web-pill-tool: #a37e12;
+    --hu-web-pill-tool-bg: rgba(234, 179, 8, 0.06);
+    --hu-web-pill-tool-border: rgba(234, 179, 8, 0.15);
 
     /* ── SVG/arch tokens ── */
-    --sc-web-node-fill: rgba(255, 255, 255, 0.8);
-    --sc-web-node-stroke: rgba(0, 0, 0, 0.08);
-    --sc-web-line-stroke: #d4d4d8;
+    --hu-web-node-fill: rgba(255, 255, 255, 0.8);
+    --hu-web-node-stroke: rgba(0, 0, 0, 0.08);
+    --hu-web-line-stroke: #d4d4d8;
 
     /* ── Typography ── */
     --font-serif: "Avenir", "Avenir Next", -apple-system, sans-serif;
@@ -77,36 +77,36 @@
       sans-serif;
     --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
 
-    /* Spacing, radius, shadows, motion, transitions: use --sc-* from _tokens.css */
+    /* Spacing, radius, shadows, motion, transitions: use --hu-* from _tokens.css */
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --sc-web-bg: #0a0a0a;
-      --sc-web-surface: #1c1c1e;
-      --sc-web-surface-elevated: rgba(28, 28, 30, 0.7);
-      --sc-web-border: rgba(255, 255, 255, 0.08);
-      --sc-web-border-strong: rgba(255, 255, 255, 0.15);
-      --sc-web-text: #f5f5f7;
-      --sc-web-text-secondary: #a1a1a6;
-      --sc-web-text-tertiary: #86868b;
-      --sc-web-code-bg: #1c1c1e;
-      --sc-web-terminal-bg: #0f0f0f;
-      --sc-web-terminal-chrome: #1c1c1e;
+      --hu-web-bg: #0a0a0a;
+      --hu-web-surface: #1c1c1e;
+      --hu-web-surface-elevated: rgba(28, 28, 30, 0.7);
+      --hu-web-border: rgba(255, 255, 255, 0.08);
+      --hu-web-border-strong: rgba(255, 255, 255, 0.15);
+      --hu-web-text: #f5f5f7;
+      --hu-web-text-secondary: #a1a1a6;
+      --hu-web-text-tertiary: #86868b;
+      --hu-web-code-bg: #1c1c1e;
+      --hu-web-terminal-bg: #0f0f0f;
+      --hu-web-terminal-chrome: #1c1c1e;
 
-      --sc-web-pill-provider: #93bbfd;
-      --sc-web-pill-provider-bg: rgba(59, 130, 246, 0.1);
-      --sc-web-pill-provider-border: rgba(59, 130, 246, 0.25);
-      --sc-web-pill-channel: #86efac;
-      --sc-web-pill-channel-bg: rgba(34, 197, 94, 0.1);
-      --sc-web-pill-channel-border: rgba(34, 197, 94, 0.25);
-      --sc-web-pill-tool: #fde68a;
-      --sc-web-pill-tool-bg: rgba(234, 179, 8, 0.1);
-      --sc-web-pill-tool-border: rgba(234, 179, 8, 0.25);
+      --hu-web-pill-provider: #93bbfd;
+      --hu-web-pill-provider-bg: rgba(59, 130, 246, 0.1);
+      --hu-web-pill-provider-border: rgba(59, 130, 246, 0.25);
+      --hu-web-pill-channel: #86efac;
+      --hu-web-pill-channel-bg: rgba(34, 197, 94, 0.1);
+      --hu-web-pill-channel-border: rgba(34, 197, 94, 0.25);
+      --hu-web-pill-tool: #fde68a;
+      --hu-web-pill-tool-bg: rgba(234, 179, 8, 0.1);
+      --hu-web-pill-tool-border: rgba(234, 179, 8, 0.25);
 
-      --sc-web-node-fill: rgba(28, 28, 30, 0.8);
-      --sc-web-node-stroke: rgba(255, 255, 255, 0.1);
-      --sc-web-line-stroke: #3a3a3c;
+      --hu-web-node-fill: rgba(28, 28, 30, 0.8);
+      --hu-web-node-stroke: rgba(255, 255, 255, 0.1);
+      --hu-web-line-stroke: #3a3a3c;
     }
   }
 
@@ -118,13 +118,13 @@
 
   body {
     font-family: var(--font-sans);
-    color: var(--sc-web-text);
-    background: var(--sc-web-bg);
+    color: var(--hu-web-text);
+    background: var(--hu-web-bg);
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--sc-accent) 20%, transparent);
-    color: var(--sc-web-text);
+    background: color-mix(in srgb, var(--hu-accent) 20%, transparent);
+    color: var(--hu-web-text);
   }
 
   code,
@@ -135,14 +135,14 @@
 
   /* ── Focus visible ── */
   :focus-visible {
-    outline: 2px solid var(--sc-accent);
+    outline: 2px solid var(--hu-accent);
     outline-offset: 2px;
-    border-radius: var(--sc-radius-md);
+    border-radius: var(--hu-radius-md);
   }
 
   a:focus-visible,
   button:focus-visible {
-    outline: 2px solid var(--sc-accent);
+    outline: 2px solid var(--hu-accent);
     outline-offset: 2px;
   }
 }
@@ -152,65 +152,65 @@
   .skip-link {
     position: absolute;
     top: -100%;
-    left: var(--sc-space-md);
+    left: var(--hu-space-md);
     z-index: 200;
-    padding: var(--sc-space-sm) var(--sc-space-md);
-    background: var(--sc-accent);
-    color: var(--sc-on-accent);
+    padding: var(--hu-space-sm) var(--hu-space-md);
+    background: var(--hu-accent);
+    color: var(--hu-on-accent);
     font-size: 0.875rem;
     font-weight: 600;
-    border-radius: var(--sc-radius-md);
-    transition: top var(--sc-duration-fast);
+    border-radius: var(--hu-radius-md);
+    transition: top var(--hu-duration-fast);
   }
 
   .skip-link:focus {
-    top: var(--sc-space-md);
+    top: var(--hu-space-md);
   }
 
   /* ── Liquid Glass tiers ── */
   .glass-subtle {
     background: color-mix(
       in srgb,
-      var(--sc-web-surface) var(--sc-glass-subtle-bg-opacity, 4%),
+      var(--hu-web-surface) var(--hu-glass-subtle-bg-opacity, 4%),
       transparent
     );
-    backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
-      saturate(var(--sc-glass-subtle-saturate, 120%));
-    -webkit-backdrop-filter: blur(var(--sc-glass-subtle-blur, 12px))
-      saturate(var(--sc-glass-subtle-saturate, 120%));
+    backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px))
+      saturate(var(--hu-glass-subtle-saturate, 120%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-subtle-blur, 12px))
+      saturate(var(--hu-glass-subtle-saturate, 120%));
     border: 1px solid
       color-mix(
         in srgb,
-        var(--sc-web-border-strong) var(--sc-glass-subtle-border-opacity, 5%),
+        var(--hu-web-border-strong) var(--hu-glass-subtle-border-opacity, 5%),
         transparent
       );
-    border-radius: var(--sc-radius-xl);
+    border-radius: var(--hu-radius-xl);
   }
 
   .glass,
   .glass-standard {
     background: color-mix(
       in srgb,
-      var(--sc-web-surface) var(--sc-glass-standard-bg-opacity, 6%),
+      var(--hu-web-surface) var(--hu-glass-standard-bg-opacity, 6%),
       transparent
     );
-    backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-      saturate(var(--sc-glass-standard-saturate, 180%));
-    -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-      saturate(var(--sc-glass-standard-saturate, 180%));
+    backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+      saturate(var(--hu-glass-standard-saturate, 180%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+      saturate(var(--hu-glass-standard-saturate, 180%));
     border: 1px solid
       color-mix(
         in srgb,
-        var(--sc-web-border-strong) var(--sc-glass-standard-border-opacity, 8%),
+        var(--hu-web-border-strong) var(--hu-glass-standard-border-opacity, 8%),
         transparent
       );
-    border-radius: var(--sc-radius-xl);
+    border-radius: var(--hu-radius-xl);
     box-shadow:
-      var(--sc-shadow-md),
+      var(--hu-shadow-md),
       inset 0 1px 0
         color-mix(
           in srgb,
-          var(--sc-web-surface) var(--sc-glass-standard-inset-opacity, 6%),
+          var(--hu-web-surface) var(--hu-glass-standard-inset-opacity, 6%),
           transparent
         );
   }
@@ -218,65 +218,65 @@
   .glass-prominent {
     background: color-mix(
       in srgb,
-      var(--sc-web-surface) var(--sc-glass-prominent-bg-opacity, 8%),
+      var(--hu-web-surface) var(--hu-glass-prominent-bg-opacity, 8%),
       transparent
     );
-    backdrop-filter: blur(var(--sc-glass-prominent-blur, 32px))
-      saturate(var(--sc-glass-prominent-saturate, 200%));
-    -webkit-backdrop-filter: blur(var(--sc-glass-prominent-blur, 32px))
-      saturate(var(--sc-glass-prominent-saturate, 200%));
+    backdrop-filter: blur(var(--hu-glass-prominent-blur, 32px))
+      saturate(var(--hu-glass-prominent-saturate, 200%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-prominent-blur, 32px))
+      saturate(var(--hu-glass-prominent-saturate, 200%));
     border: 1px solid
       color-mix(
         in srgb,
-        var(--sc-web-border-strong)
-          var(--sc-glass-prominent-border-opacity, 12%),
+        var(--hu-web-border-strong)
+          var(--hu-glass-prominent-border-opacity, 12%),
         transparent
       );
-    border-radius: var(--sc-radius-xl);
+    border-radius: var(--hu-radius-xl);
     box-shadow:
-      var(--sc-shadow-lg),
+      var(--hu-shadow-lg),
       inset 0 1px 0
         color-mix(
           in srgb,
-          var(--sc-web-surface) var(--sc-glass-prominent-inset-opacity, 10%),
+          var(--hu-web-surface) var(--hu-glass-prominent-inset-opacity, 10%),
           transparent
         ),
-      inset 0 -1px 0 color-mix(in srgb, var(--sc-web-surface) 3%, transparent);
+      inset 0 -1px 0 color-mix(in srgb, var(--hu-web-surface) 3%, transparent);
   }
 
   .glass-premium {
     background: color-mix(
       in srgb,
-      var(--sc-bg-surface) var(--sc-glass-prominent-bg-opacity, 8%),
+      var(--hu-bg-surface) var(--hu-glass-prominent-bg-opacity, 8%),
       transparent
     );
-    backdrop-filter: blur(var(--sc-glass-prominent-blur, 32px))
-      saturate(var(--sc-glass-prominent-saturate, 200%));
-    -webkit-backdrop-filter: blur(var(--sc-glass-prominent-blur, 32px))
-      saturate(var(--sc-glass-prominent-saturate, 200%));
+    backdrop-filter: blur(var(--hu-glass-prominent-blur, 32px))
+      saturate(var(--hu-glass-prominent-saturate, 200%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-prominent-blur, 32px))
+      saturate(var(--hu-glass-prominent-saturate, 200%));
     border: 1px solid
       color-mix(
         in srgb,
-        white var(--sc-glass-prominent-border-opacity, 12%),
+        white var(--hu-glass-prominent-border-opacity, 12%),
         transparent
       );
     box-shadow:
-      var(--sc-shadow-lg),
+      var(--hu-shadow-lg),
       inset 0 1px 0
         color-mix(
           in srgb,
-          white var(--sc-glass-prominent-inset-opacity, 10%),
+          white var(--hu-glass-prominent-inset-opacity, 10%),
           transparent
         );
-    filter: url(#sc-refract);
+    filter: url(#hu-refract);
   }
 
   @media (prefers-color-scheme: light) {
     .glass-premium {
-      background: color-mix(in srgb, var(--sc-bg-surface) 70%, transparent);
+      background: color-mix(in srgb, var(--hu-bg-surface) 70%, transparent);
       border-color: color-mix(in srgb, black 8%, transparent);
       box-shadow:
-        var(--sc-shadow-md),
+        var(--hu-shadow-md),
         inset 0 1px 0 color-mix(in srgb, white 50%, transparent);
       filter: none;
     }
@@ -284,8 +284,8 @@
 
   @supports not (backdrop-filter: blur(1px)) {
     .glass-premium {
-      background: var(--sc-bg-elevated);
-      border: 1px solid var(--sc-border);
+      background: var(--hu-bg-elevated);
+      border: 1px solid var(--hu-border);
       filter: none;
     }
   }
@@ -308,26 +308,26 @@
     background:
       conic-gradient(
         from 0deg at 50% 50%,
-        color-mix(in srgb, var(--sc-accent) 18%, transparent) 0deg,
+        color-mix(in srgb, var(--hu-accent) 18%, transparent) 0deg,
         transparent 60deg,
-        color-mix(in srgb, var(--sc-accent-tertiary, #6366f1) 14%, transparent)
+        color-mix(in srgb, var(--hu-accent-tertiary, #6366f1) 14%, transparent)
           120deg,
         transparent 180deg,
-        color-mix(in srgb, var(--sc-accent-secondary, #f59e0b) 12%, transparent)
+        color-mix(in srgb, var(--hu-accent-secondary, #f59e0b) 12%, transparent)
           240deg,
         transparent 300deg,
-        color-mix(in srgb, var(--sc-accent-tertiary, #6366f1) 10%, transparent)
+        color-mix(in srgb, var(--hu-accent-tertiary, #6366f1) 10%, transparent)
           340deg,
-        color-mix(in srgb, var(--sc-accent) 18%, transparent) 360deg
+        color-mix(in srgb, var(--hu-accent) 18%, transparent) 360deg
       ),
       radial-gradient(
         ellipse at 20% 50%,
-        color-mix(in srgb, var(--sc-accent) 12%, transparent) 0%,
+        color-mix(in srgb, var(--hu-accent) 12%, transparent) 0%,
         transparent 50%
       ),
       radial-gradient(
         ellipse at 80% 20%,
-        color-mix(in srgb, var(--sc-accent-tertiary, #6366f1) 10%, transparent)
+        color-mix(in srgb, var(--hu-accent-tertiary, #6366f1) 10%, transparent)
           0%,
         transparent 50%
       );
@@ -364,11 +364,11 @@
   .text-gradient {
     background: linear-gradient(
       135deg,
-      var(--sc-accent) 0%,
-      var(--sc-accent-secondary) 25%,
-      var(--sc-accent) 50%,
-      var(--sc-accent-tertiary) 75%,
-      var(--sc-accent) 100%
+      var(--hu-accent) 0%,
+      var(--hu-accent-secondary) 25%,
+      var(--hu-accent) 50%,
+      var(--hu-accent-tertiary) 75%,
+      var(--hu-accent) 100%
     );
     background-size: 200% auto;
     -webkit-background-clip: text;
@@ -395,8 +395,8 @@
     height: 2px;
     background: linear-gradient(
       90deg,
-      var(--sc-accent),
-      var(--sc-accent-hover)
+      var(--hu-accent),
+      var(--hu-accent-hover)
     );
     z-index: 9999;
     transform-origin: left;
@@ -418,12 +418,12 @@
     border-radius: inherit;
     background: linear-gradient(
       135deg,
-      var(--sc-accent-subtle),
+      var(--hu-accent-subtle),
       transparent 50%,
-      var(--sc-accent-tertiary-subtle)
+      var(--hu-accent-tertiary-subtle)
     );
     opacity: 0;
-    transition: opacity var(--sc-duration-slow) var(--sc-ease-out);
+    transition: opacity var(--hu-duration-slow) var(--hu-ease-out);
     z-index: -1;
   }
 
@@ -446,12 +446,12 @@
     height: 300px;
     background: radial-gradient(
       circle,
-      var(--sc-accent-subtle) 0%,
+      var(--hu-accent-subtle) 0%,
       transparent 70%
     );
     transform: translate(-50%, -50%);
     opacity: 0;
-    transition: opacity var(--sc-duration-slow) var(--sc-ease-out);
+    transition: opacity var(--hu-duration-slow) var(--hu-ease-out);
     pointer-events: none;
     z-index: 0;
   }
@@ -466,13 +466,13 @@
   }
 
   .glass-nav {
-    background: var(--sc-web-surface-elevated);
+    background: var(--hu-web-surface-elevated);
     backdrop-filter: blur(24px) saturate(1.8);
     -webkit-backdrop-filter: blur(24px) saturate(1.8);
-    border-bottom: 1px solid var(--sc-web-border);
+    border-bottom: 1px solid var(--hu-web-border);
     box-shadow: var(
-      --sc-shadow-sm,
-      0 1px 3px color-mix(in srgb, var(--sc-web-text) 4%, transparent)
+      --hu-shadow-sm,
+      0 1px 3px color-mix(in srgb, var(--hu-web-text) 4%, transparent)
     );
   }
 
@@ -483,12 +483,12 @@
 
   /* ── Hero fade-in (CSS-only LCP optimization — visible before JS loads) ── */
   .hero-fade-in {
-    animation: sc-hero-fade 0.8s var(--sc-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+    animation: hu-hero-fade 0.8s var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
   }
   .hero-logo {
-    animation: sc-hero-fade 0.6s var(--sc-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+    animation: hu-hero-fade 0.6s var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
   }
-  @keyframes sc-hero-fade {
+  @keyframes hu-hero-fade {
     from { opacity: 0; transform: translateY(12px); }
     to { opacity: 1; transform: translateY(0); }
   }
@@ -537,28 +537,28 @@
 
   /* ── Scroll-driven animation (CSS animation-timeline) ── */
   @supports (animation-timeline: view()) {
-    .sc-scroll-reveal {
-      animation: sc-scroll-fade-in linear both;
+    .hu-scroll-reveal {
+      animation: hu-scroll-fade-in linear both;
       animation-timeline: view();
       animation-range: entry 10% cover 30%;
     }
-    .sc-scroll-scale {
-      animation: sc-scroll-scale-in linear both;
+    .hu-scroll-scale {
+      animation: hu-scroll-scale-in linear both;
       animation-timeline: view();
       animation-range: entry 10% cover 35%;
     }
-    @keyframes sc-scroll-fade-in {
+    @keyframes hu-scroll-fade-in {
       from { opacity: 0; transform: translateY(30px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    @keyframes sc-scroll-scale-in {
+    @keyframes hu-scroll-scale-in {
       from { opacity: 0; transform: scale(0.92); }
       to { opacity: 1; transform: scale(1); }
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .sc-scroll-reveal,
-    .sc-scroll-scale {
+    .hu-scroll-reveal,
+    .hu-scroll-scale {
       animation: none !important;
       opacity: 1 !important;
       transform: none !important;
@@ -573,7 +573,7 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      color-mix(in srgb, var(--sc-accent-secondary, #f59e0b) 15%, transparent) 0%,
+      color-mix(in srgb, var(--hu-accent-secondary, #f59e0b) 15%, transparent) 0%,
       transparent 70%
     );
     pointer-events: none;
@@ -587,7 +587,7 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      color-mix(in srgb, var(--sc-accent-tertiary, #6366f1) 12%, transparent) 0%,
+      color-mix(in srgb, var(--hu-accent-tertiary, #6366f1) 12%, transparent) 0%,
       transparent 70%
     );
     pointer-events: none;
@@ -601,7 +601,7 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      var(--sc-accent-subtle) 0%,
+      var(--hu-accent-subtle) 0%,
       transparent 70%
     );
     pointer-events: none;
@@ -615,7 +615,7 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      var(--sc-accent-tertiary-subtle) 0%,
+      var(--hu-accent-tertiary-subtle) 0%,
       transparent 70%
     );
     pointer-events: none;
@@ -627,19 +627,19 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.75rem var(--sc-space-xl);
-    border-radius: var(--sc-radius-full);
+    padding: 0.75rem var(--hu-space-xl);
+    border-radius: var(--hu-radius-full);
     font-size: 0.9375rem;
     font-weight: 600;
     background: linear-gradient(
       135deg,
-      var(--sc-accent),
-      var(--sc-accent-hover)
+      var(--hu-accent),
+      var(--hu-accent-hover)
     );
-    color: var(--sc-on-accent);
-    transition: all var(--sc-duration-normal) var(--sc-ease-out);
+    color: var(--hu-on-accent);
+    transition: all var(--hu-duration-normal) var(--hu-ease-out);
     box-shadow:
-      0 1px 2px color-mix(in srgb, var(--sc-web-text) 10%, transparent),
+      0 1px 2px color-mix(in srgb, var(--hu-web-text) 10%, transparent),
       inset 0 1px 0 color-mix(in srgb, white 15%, transparent);
   }
   .btn-primary:hover,
@@ -650,19 +650,19 @@
   .btn-primary:hover {
     background: linear-gradient(
       135deg,
-      var(--sc-accent-hover),
-      var(--sc-accent)
+      var(--hu-accent-hover),
+      var(--hu-accent)
     );
     box-shadow:
-      var(--sc-shadow-glow-accent),
-      0 4px 12px color-mix(in srgb, var(--sc-web-text) 15%, transparent);
+      var(--hu-shadow-glow-accent),
+      0 4px 12px color-mix(in srgb, var(--hu-web-text) 15%, transparent);
     transform: translateY(-1px);
   }
 
   .btn-primary:active {
     transform: translateY(0) scale(0.98);
     box-shadow: 0 1px 2px
-      color-mix(in srgb, var(--sc-web-text) 10%, transparent);
+      color-mix(in srgb, var(--hu-web-text) 10%, transparent);
     transition-duration: 50ms;
   }
 
@@ -670,18 +670,18 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.75rem var(--sc-space-xl);
-    border-radius: var(--sc-radius-full);
+    padding: 0.75rem var(--hu-space-xl);
+    border-radius: var(--hu-radius-full);
     font-size: 0.9375rem;
     font-weight: 500;
-    color: var(--sc-web-text-secondary);
-    border: 1px solid var(--sc-web-border-strong);
-    transition: all var(--sc-duration-normal) var(--sc-ease-out);
+    color: var(--hu-web-text-secondary);
+    border: 1px solid var(--hu-web-border-strong);
+    transition: all var(--hu-duration-normal) var(--hu-ease-out);
   }
 
   .btn-outline:hover {
-    border-color: var(--sc-web-text-secondary);
-    color: var(--sc-web-text);
+    border-color: var(--hu-web-text-secondary);
+    color: var(--hu-web-text);
   }
 
   /* ── Terminal cursor blink ── */
@@ -689,7 +689,7 @@
     display: inline-block;
     width: 8px;
     height: 1.1em;
-    background: var(--sc-accent);
+    background: var(--hu-accent);
     vertical-align: text-bottom;
     animation: blink 1s step-end infinite;
   }
@@ -702,32 +702,32 @@
 
   /* ── Comparison table ── */
   .comparison-table {
-    border-radius: var(--sc-radius-xl);
+    border-radius: var(--hu-radius-xl);
     overflow: hidden;
   }
   .comparison-table th,
   .comparison-table td {
-    border-bottom: 1px solid var(--sc-web-border);
+    border-bottom: 1px solid var(--hu-web-border);
   }
   .comparison-table thead th {
     border-bottom-width: 2px;
-    border-color: var(--sc-web-border-strong);
+    border-color: var(--hu-web-border-strong);
     font-weight: 700;
     font-size: 0.875rem;
-    padding: var(--sc-space-md);
+    padding: var(--hu-space-md);
   }
   .comparison-table tbody tr {
-    transition: background var(--sc-duration-fast);
+    transition: background var(--hu-duration-fast);
   }
   .comparison-table tbody tr:hover {
-    background: var(--sc-accent-subtle);
+    background: var(--hu-accent-subtle);
   }
   .comparison-table tbody tr:last-child td {
     border-bottom: none;
   }
   .comparison-table td:first-child {
     font-weight: 500;
-    color: var(--sc-web-text);
+    color: var(--hu-web-text);
   }
 
   /* ── Logo float ── */
@@ -748,8 +748,8 @@
     }
     50% {
       transform: scale(
-        var(--sc-physics-button-press-scaleX, 1.01),
-        var(--sc-physics-button-press-scaleY, 0.97)
+        var(--hu-physics-button-press-scaleX, 1.01),
+        var(--hu-physics-button-press-scaleY, 0.97)
       );
     }
     100% {
@@ -760,8 +760,8 @@
   @keyframes squash-release {
     0% {
       transform: scale(
-        var(--sc-physics-button-release-scaleX, 0.99),
-        var(--sc-physics-button-release-scaleY, 1.02)
+        var(--hu-physics-button-release-scaleX, 0.99),
+        var(--hu-physics-button-release-scaleY, 1.02)
       );
     }
     100% {
@@ -771,11 +771,11 @@
 
   @keyframes anticipate-in {
     0% {
-      transform: scale(var(--sc-physics-modal-anticipate-scale, 0.97));
+      transform: scale(var(--hu-physics-modal-anticipate-scale, 0.97));
       opacity: 0;
     }
     15% {
-      transform: scale(var(--sc-physics-modal-anticipate-scale, 0.97));
+      transform: scale(var(--hu-physics-modal-anticipate-scale, 0.97));
       opacity: 0;
     }
     100% {
@@ -785,16 +785,16 @@
   }
 
   .physics-press:active {
-    animation: squash-press var(--sc-duration-fast) var(--sc-ease-out) forwards;
+    animation: squash-press var(--hu-duration-fast) var(--hu-ease-out) forwards;
   }
 
   .physics-hover {
     transition:
-      transform var(--sc-duration-normal) var(--sc-ease-out),
-      box-shadow var(--sc-duration-normal) var(--sc-ease-out);
+      transform var(--hu-duration-normal) var(--hu-ease-out),
+      box-shadow var(--hu-duration-normal) var(--hu-ease-out);
   }
   .physics-hover:hover {
-    transform: translateY(var(--sc-physics-card-hover-translateY, -2px));
+    transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
   }
 
   /* ── Architecture node pulse ── */
@@ -804,19 +804,19 @@
       filter: drop-shadow(0 0 0 transparent);
     }
     50% {
-      filter: drop-shadow(0 0 8px var(--sc-accent-subtle));
+      filter: drop-shadow(0 0 8px var(--hu-accent-subtle));
     }
   }
 
   .arch-node:hover circle {
-    stroke: var(--sc-accent) !important;
+    stroke: var(--hu-accent) !important;
     stroke-width: 2;
-    transition: all var(--sc-duration-moderate) var(--sc-ease-out);
+    transition: all var(--hu-duration-moderate) var(--hu-ease-out);
   }
 
   .arch-node:hover text {
-    fill: var(--sc-web-text) !important;
-    transition: fill var(--sc-duration-moderate) var(--sc-ease-out);
+    fill: var(--hu-web-text) !important;
+    transition: fill var(--hu-duration-moderate) var(--hu-ease-out);
   }
 
   #arch-core circle {
@@ -969,7 +969,7 @@
   .glass-premium {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    background: var(--sc-bg-surface);
+    background: var(--hu-bg-surface);
     filter: none;
     opacity: 1;
   }
@@ -988,8 +988,8 @@
     display: none !important;
   }
   body {
-    background: var(--sc-web-surface, #fff) !important;
-    color: var(--sc-web-text, #000) !important;
+    background: var(--hu-web-surface, #fff) !important;
+    color: var(--hu-web-text, #000) !important;
   }
   section {
     page-break-inside: avoid;
@@ -998,7 +998,7 @@
   .glass {
     background: transparent;
     backdrop-filter: none;
-    border: 1px solid var(--sc-web-border, #ccc);
+    border: 1px solid var(--hu-web-border, #ccc);
     box-shadow: none;
   }
 }

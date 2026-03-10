@@ -1,10 +1,10 @@
-#ifdef SC_ENABLE_SQLITE
+#ifdef HU_ENABLE_SQLITE
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/platform.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/platform.h"
 #include <math.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -12,14 +12,14 @@
 #include <string.h>
 #include <time.h>
 
-#include "seaclaw/memory/sql_common.h"
+#include "human/memory/sql_common.h"
 
-#define SC_SQLITE_BUSY_TIMEOUT_MS 5000
+#define HU_SQLITE_BUSY_TIMEOUT_MS 5000
 
-typedef struct sc_sqlite_memory {
+typedef struct hu_sqlite_memory {
     sqlite3 *db;
-    sc_allocator_t *alloc;
-} sc_sqlite_memory_t;
+    hu_allocator_t *alloc;
+} hu_sqlite_memory_t;
 
 static const char *const schema_parts[] = {
     "CREATE TABLE IF NOT EXISTS memories("
@@ -52,7 +52,7 @@ static const char *const schema_parts[] = {
 static void get_timestamp(char *buf, size_t buf_size) {
     time_t t = time(NULL);
     struct tm tm_buf;
-    struct tm *tm = sc_platform_gmtime_r(&t, &tm_buf);
+    struct tm *tm = hu_platform_gmtime_r(&t, &tm_buf);
     if (tm) {
         strftime(buf, buf_size, "%Y-%m-%dT%H:%M:%SZ", tm);
     } else {
@@ -60,26 +60,26 @@ static void get_timestamp(char *buf, size_t buf_size) {
     }
 }
 
-static char *generate_id(sc_allocator_t *alloc) {
+static char *generate_id(hu_allocator_t *alloc) {
     static unsigned long counter = 0;
     char ts[32];
     get_timestamp(ts, sizeof(ts));
-    return sc_sprintf(alloc, "mem_%ld_%lu_%s", (long)time(NULL), ++counter, ts);
+    return hu_sprintf(alloc, "mem_%ld_%lu_%s", (long)time(NULL), ++counter, ts);
 }
 
-static const char *category_to_string(const sc_memory_category_t *cat) {
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -88,8 +88,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
     }
 }
 
-static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
-                                      sc_memory_entry_t *out) {
+static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
+                                      hu_memory_entry_t *out) {
     const char *id_p = (const char *)sqlite3_column_text(stmt, 0);
     const char *key_p = (const char *)sqlite3_column_text(stmt, 1);
     const char *content_p = (const char *)sqlite3_column_text(stmt, 2);
@@ -105,23 +105,23 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     size_t session_id_len = session_id_p ? (size_t)sqlite3_column_bytes(stmt, 5) : 0;
     size_t source_len = source_p ? (size_t)sqlite3_column_bytes(stmt, 6) : 0;
 
-    out->id = id_p ? sc_strndup(alloc, id_p, id_len) : NULL;
+    out->id = id_p ? hu_strndup(alloc, id_p, id_len) : NULL;
     out->id_len = id_len;
-    out->key = key_p ? sc_strndup(alloc, key_p, key_len) : NULL;
+    out->key = key_p ? hu_strndup(alloc, key_p, key_len) : NULL;
     out->key_len = key_len;
-    out->content = content_p ? sc_strndup(alloc, content_p, content_len) : NULL;
+    out->content = content_p ? hu_strndup(alloc, content_p, content_len) : NULL;
     out->content_len = content_len;
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     out->category.data.custom.name =
         category_p
-            ? sc_strndup(alloc, category_p, category_p ? (size_t)sqlite3_column_bytes(stmt, 3) : 0)
+            ? hu_strndup(alloc, category_p, category_p ? (size_t)sqlite3_column_bytes(stmt, 3) : 0)
             : NULL;
     out->category.data.custom.name_len = category_p ? (size_t)sqlite3_column_bytes(stmt, 3) : 0;
-    out->timestamp = timestamp_p ? sc_strndup(alloc, timestamp_p, timestamp_len) : NULL;
+    out->timestamp = timestamp_p ? hu_strndup(alloc, timestamp_p, timestamp_len) : NULL;
     out->timestamp_len = timestamp_len;
-    out->session_id = session_id_p ? sc_strndup(alloc, session_id_p, session_id_len) : NULL;
+    out->session_id = session_id_p ? hu_strndup(alloc, session_id_p, session_id_len) : NULL;
     out->session_id_len = session_id_len;
-    out->source = source_p ? sc_strndup(alloc, source_p, source_len) : NULL;
+    out->source = source_p ? hu_strndup(alloc, source_p, source_len) : NULL;
     out->source_len = source_len;
 
     if (sqlite3_column_count(stmt) > 7) {
@@ -129,11 +129,11 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     } else {
         out->score = NAN;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-static void free_entry(sc_allocator_t *alloc, sc_memory_entry_t *e) {
-    sc_memory_entry_free_fields(alloc, e);
+static void free_entry(hu_allocator_t *alloc, hu_memory_entry_t *e) {
+    hu_memory_entry_free_fields(alloc, e);
 }
 
 static const char *impl_name(void *ctx) {
@@ -141,16 +141,16 @@ static const char *impl_name(void *ctx) {
     return "sqlite";
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     char ts[64];
     get_timestamp(ts, sizeof(ts));
 
     char *id = generate_id(self->alloc);
     if (!id)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     const char *cat_str = category_to_string(category);
     const char *sql =
@@ -163,8 +163,8 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
-        sc_str_free(self->alloc, id);
-        return SC_ERR_MEMORY_STORE;
+        hu_str_free(self->alloc, id);
+        return HU_ERR_MEMORY_STORE;
     }
 
     sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
@@ -180,23 +180,23 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    sc_str_free(self->alloc, id);
+    hu_str_free(self->alloc, id);
 
     if (rc != SQLITE_DONE)
-        return SC_ERR_MEMORY_STORE;
-    return SC_OK;
+        return HU_ERR_MEMORY_STORE;
+    return HU_OK;
 }
 
-static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, const char *content,
-                                size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, const char *content,
+                                size_t content_len, const hu_memory_category_t *category,
                                 const char *session_id, size_t session_id_len,
-                                const sc_memory_store_opts_t *opts) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+                                const hu_memory_store_opts_t *opts) {
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     char ts[64];
     get_timestamp(ts, sizeof(ts));
     char *id = generate_id(self->alloc);
     if (!id)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     const char *cat_str = category_to_string(category);
     const char *sql = "INSERT INTO memories (id, key, content, category, session_id, source, "
                       "created_at, updated_at) "
@@ -208,8 +208,8 @@ static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
-        sc_str_free(self->alloc, id);
-        return SC_ERR_MEMORY_STORE;
+        hu_str_free(self->alloc, id);
+        return HU_ERR_MEMORY_STORE;
     }
     sqlite3_bind_text(stmt, 1, id, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, key, (int)key_len, SQLITE_STATIC);
@@ -227,22 +227,22 @@ static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     sqlite3_bind_text(stmt, 8, ts, -1, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    sc_str_free(self->alloc, id);
+    hu_str_free(self->alloc, id);
     if (rc != SQLITE_DONE)
-        return SC_ERR_MEMORY_STORE;
-    return SC_OK;
+        return HU_ERR_MEMORY_STORE;
+    return HU_OK;
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
 
     if (!query || query_len == 0) {
         *out = NULL;
-        return SC_OK;
+        return HU_OK;
     }
 
     /* FTS5 BM25 search - build query from words */
@@ -297,16 +297,16 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
             sqlite3_bind_text(stmt, 1, fts_buf, (int)fts_len, SQLITE_STATIC);
             sqlite3_bind_int64(stmt, 2, (sqlite3_int64)limit);
 
-            sc_memory_entry_t *entries =
-                (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *entries =
+                (hu_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(hu_memory_entry_t));
             if (!entries) {
                 sqlite3_finalize(stmt);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             size_t count = 0;
 
             while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
-                sc_memory_entry_t *e = &entries[count];
+                hu_memory_entry_t *e = &entries[count];
                 read_entry_from_row(stmt, alloc, e);
                 if (session_id && session_id_len > 0 && e->session_id &&
                     (e->session_id_len != session_id_len ||
@@ -320,9 +320,9 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
             if (count > 0) {
                 *out = entries;
                 *out_count = count;
-                return SC_OK;
+                return HU_OK;
             }
-            alloc->free(alloc->ctx, entries, limit * sizeof(sc_memory_entry_t));
+            alloc->free(alloc->ctx, entries, limit * sizeof(hu_memory_entry_t));
         } else {
             if (stmt)
                 sqlite3_finalize(stmt);
@@ -332,7 +332,7 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     /* Fallback: LIKE search */
     char *like_pattern = (char *)alloc->alloc(alloc->ctx, query_len + 3);
     if (!like_pattern)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     like_pattern[0] = '%';
     memcpy(like_pattern + 1, query, query_len);
     like_pattern[query_len + 1] = '%';
@@ -345,18 +345,18 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         alloc->free(alloc->ctx, like_pattern, query_len + 3);
-        return SC_ERR_MEMORY_RECALL;
+        return HU_ERR_MEMORY_RECALL;
     }
 
     sqlite3_bind_text(stmt, 1, like_pattern, -1, SQLITE_STATIC);
     sqlite3_bind_int64(stmt, 2, (sqlite3_int64)limit);
 
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(hu_memory_entry_t));
     if (!entries) {
         sqlite3_finalize(stmt);
         alloc->free(alloc->ctx, like_pattern, query_len + 3);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
@@ -373,12 +373,12 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     alloc->free(alloc->ctx, like_pattern, query_len + 3);
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     *found = false;
 
     const char *sql = "SELECT id, key, content, category, created_at, session_id, source "
@@ -386,7 +386,7 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
 
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -394,13 +394,13 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
         *found = true;
     }
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql;
     if (category) {
         sql = "SELECT id, key, content, category, created_at, session_id, source "
@@ -413,25 +413,25 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
 
     if (category)
         sqlite3_bind_text(stmt, 1, category_to_string(category), -1, SQLITE_STATIC);
 
     size_t cap = 64;
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_memory_entry_t));
     if (!entries) {
         sqlite3_finalize(stmt);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t count = 0;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         if (count >= cap) {
-            sc_memory_entry_t *n = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, entries, cap * sizeof(sc_memory_entry_t),
-                (cap * 2) * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *n = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, entries, cap * sizeof(hu_memory_entry_t),
+                (cap * 2) * sizeof(hu_memory_entry_t));
             if (!n)
                 break;
             entries = n;
@@ -449,44 +449,44 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     sqlite3_finalize(stmt);
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql = "DELETE FROM memories WHERE key = ?1";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     int step_rc = sqlite3_step(stmt);
     if (step_rc != SQLITE_DONE) {
         sqlite3_finalize(stmt);
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
     *deleted = sqlite3_changes(self->db) > 0;
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql = "SELECT COUNT(*) FROM memories";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (sqlite3_step(stmt) == SQLITE_ROW)
         *out = (size_t)sqlite3_column_int64(stmt, 0);
     else
         *out = 0;
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool impl_health_check(void *ctx) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     char *err = NULL;
     int rc = sqlite3_exec(self->db, "SELECT 1", NULL, NULL, &err);
     if (err)
@@ -495,13 +495,13 @@ static bool impl_health_check(void *ctx) {
 }
 
 static void impl_deinit(void *ctx) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     if (self->db)
         sqlite3_close(self->db);
-    self->alloc->free(self->alloc->ctx, self, sizeof(sc_sqlite_memory_t));
+    self->alloc->free(self->alloc->ctx, self, sizeof(hu_sqlite_memory_t));
 }
 
-static const sc_memory_vtable_t sqlite_vtable = {
+static const hu_memory_vtable_t sqlite_vtable = {
     .name = impl_name,
     .store = impl_store,
     .store_ex = impl_store_ex,
@@ -515,49 +515,49 @@ static const sc_memory_vtable_t sqlite_vtable = {
 };
 
 /* Session store implementation */
-static sc_error_t impl_session_save_message(void *ctx, const char *session_id,
+static hu_error_t impl_session_save_message(void *ctx, const char *session_id,
                                             size_t session_id_len, const char *role,
                                             size_t role_len, const char *content,
                                             size_t content_len) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql = "INSERT INTO messages (session_id, role, content) VALUES (?1, ?2, ?3)";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     sqlite3_bind_text(stmt, 1, session_id, (int)session_id_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, role, (int)role_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, content, (int)content_len, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return rc == SQLITE_DONE ? SC_OK : SC_ERR_MEMORY_STORE;
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
-static sc_error_t impl_session_load_messages(void *ctx, sc_allocator_t *alloc,
+static hu_error_t impl_session_load_messages(void *ctx, hu_allocator_t *alloc,
                                              const char *session_id, size_t session_id_len,
-                                             sc_message_entry_t **out, size_t *out_count) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+                                             hu_message_entry_t **out, size_t *out_count) {
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql = "SELECT role, content FROM messages WHERE session_id = ?1 ORDER BY id ASC";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, session_id, (int)session_id_len, SQLITE_STATIC);
 
     size_t cap = 32;
-    sc_message_entry_t *entries =
-        (sc_message_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_message_entry_t));
+    hu_message_entry_t *entries =
+        (hu_message_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_message_entry_t));
     if (!entries) {
         sqlite3_finalize(stmt);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t count = 0;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         if (count >= cap) {
-            sc_message_entry_t *n = (sc_message_entry_t *)alloc->realloc(
-                alloc->ctx, entries, cap * sizeof(sc_message_entry_t),
-                (cap * 2) * sizeof(sc_message_entry_t));
+            hu_message_entry_t *n = (hu_message_entry_t *)alloc->realloc(
+                alloc->ctx, entries, cap * sizeof(hu_message_entry_t),
+                (cap * 2) * sizeof(hu_message_entry_t));
             if (!n)
                 break;
             entries = n;
@@ -567,35 +567,35 @@ static sc_error_t impl_session_load_messages(void *ctx, sc_allocator_t *alloc,
         const char *content_p = (const char *)sqlite3_column_text(stmt, 1);
         size_t rl = role_p ? (size_t)sqlite3_column_bytes(stmt, 0) : 0;
         size_t cl = content_p ? (size_t)sqlite3_column_bytes(stmt, 1) : 0;
-        entries[count].role = role_p ? sc_strndup(alloc, role_p, rl) : NULL;
+        entries[count].role = role_p ? hu_strndup(alloc, role_p, rl) : NULL;
         entries[count].role_len = rl;
-        entries[count].content = content_p ? sc_strndup(alloc, content_p, cl) : NULL;
+        entries[count].content = content_p ? hu_strndup(alloc, content_p, cl) : NULL;
         entries[count].content_len = cl;
         count++;
     }
     sqlite3_finalize(stmt);
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_session_clear_messages(void *ctx, const char *session_id,
+static hu_error_t impl_session_clear_messages(void *ctx, const char *session_id,
                                               size_t session_id_len) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql = "DELETE FROM messages WHERE session_id = ?1";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, session_id, (int)session_id_len, SQLITE_STATIC);
     int step_rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (step_rc == SQLITE_DONE) ? SC_OK : SC_ERR_MEMORY_BACKEND;
+    return (step_rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
-static sc_error_t impl_session_clear_auto_saved(void *ctx, const char *session_id,
+static hu_error_t impl_session_clear_auto_saved(void *ctx, const char *session_id,
                                                 size_t session_id_len) {
-    sc_sqlite_memory_t *self = (sc_sqlite_memory_t *)ctx;
+    hu_sqlite_memory_t *self = (hu_sqlite_memory_t *)ctx;
     const char *sql;
     if (session_id && session_id_len > 0)
         sql = "DELETE FROM memories WHERE key LIKE 'autosave_%' AND session_id = ?1";
@@ -604,31 +604,31 @@ static sc_error_t impl_session_clear_auto_saved(void *ctx, const char *session_i
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (session_id && session_id_len > 0)
         sqlite3_bind_text(stmt, 1, session_id, (int)session_id_len, SQLITE_STATIC);
     int step_rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (step_rc == SQLITE_DONE) ? SC_OK : SC_ERR_MEMORY_BACKEND;
+    return (step_rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
 }
 
-static const sc_session_store_vtable_t sqlite_session_vtable = {
+static const hu_session_store_vtable_t sqlite_session_vtable = {
     .save_message = impl_session_save_message,
     .load_messages = impl_session_load_messages,
     .clear_messages = impl_session_clear_messages,
     .clear_auto_saved = impl_session_clear_auto_saved,
 };
 
-sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path) {
+hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
     sqlite3 *db = NULL;
     int rc = sqlite3_open(db_path ? db_path : ":memory:", &db);
     if (rc != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
-    sqlite3_busy_timeout(db, SC_SQLITE_BUSY_TIMEOUT_MS);
-    sqlite3_exec(db, SC_SQL_PRAGMA_INIT, NULL, NULL, NULL);
+    sqlite3_busy_timeout(db, HU_SQLITE_BUSY_TIMEOUT_MS);
+    sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
 
     for (const char *const *part = schema_parts; *part; part++) {
         char *err = NULL;
@@ -637,7 +637,7 @@ sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path) 
             if (err)
                 sqlite3_free(err);
             sqlite3_close(db);
-            return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+            return (hu_memory_t){.ctx = NULL, .vtable = NULL};
         }
     }
 
@@ -648,45 +648,45 @@ sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path) 
             sqlite3_free(err);
     }
 
-    sc_sqlite_memory_t *self =
-        (sc_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_sqlite_memory_t));
+    hu_sqlite_memory_t *self =
+        (hu_sqlite_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_sqlite_memory_t));
     if (!self) {
         sqlite3_close(db);
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
     self->db = db;
     self->alloc = alloc;
-    return (sc_memory_t){
+    return (hu_memory_t){
         .ctx = self,
         .vtable = &sqlite_vtable,
     };
 }
 
-sc_session_store_t sc_sqlite_memory_get_session_store(sc_memory_t *mem) {
+hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     if (!mem || !mem->ctx || !mem->vtable)
-        return (sc_session_store_t){.ctx = NULL, .vtable = NULL};
+        return (hu_session_store_t){.ctx = NULL, .vtable = NULL};
     const char *n = mem->vtable->name(mem->ctx);
     if (!n || strcmp(n, "sqlite") != 0)
-        return (sc_session_store_t){.ctx = NULL, .vtable = NULL};
-    return (sc_session_store_t){
+        return (hu_session_store_t){.ctx = NULL, .vtable = NULL};
+    return (hu_session_store_t){
         .ctx = mem->ctx,
         .vtable = &sqlite_session_vtable,
     };
 }
 
-#else /* !SC_ENABLE_SQLITE */
+#else /* !HU_ENABLE_SQLITE */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/memory.h"
+#include "human/core/allocator.h"
+#include "human/memory.h"
 
-sc_memory_t sc_sqlite_memory_create(sc_allocator_t *alloc, const char *db_path) {
+hu_memory_t hu_sqlite_memory_create(hu_allocator_t *alloc, const char *db_path) {
     (void)db_path;
-    return sc_none_memory_create(alloc);
+    return hu_none_memory_create(alloc);
 }
 
-sc_session_store_t sc_sqlite_memory_get_session_store(sc_memory_t *mem) {
+hu_session_store_t hu_sqlite_memory_get_session_store(hu_memory_t *mem) {
     (void)mem;
-    return (sc_session_store_t){.ctx = NULL, .vtable = NULL};
+    return (hu_session_store_t){.ctx = NULL, .vtable = NULL};
 }
 
 #endif

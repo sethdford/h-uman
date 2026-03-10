@@ -1,0 +1,7 @@
+#!/bin/sh
+BINARY="$(dirname "$0")/human.bin"
+if [ -x "$BINARY" ]; then
+  exec "$BINARY" "$@"
+fi
+echo "human binary not found. Run 'node install.js' in the package directory." >&2
+exit 1

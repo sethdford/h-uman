@@ -809,7 +809,7 @@
         "$type": "shadow"
       },
       "shadow-glow-accent": {
-        "$value": "0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
+        "$value": "0 0 0 1px var(--hu-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
         "$type": "shadow"
       },
       "shadow-inset": {

@@ -1,21 +1,21 @@
-#include "seaclaw/memory/consolidation.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory/connections.h"
+#include "human/memory/consolidation.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory/connections.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#define SC_CONS_MAX_TOKENS 64
+#define HU_CONS_MAX_TOKENS 64
 
 static void tokenize(const char *s, size_t len, const char **tokens, size_t *count) {
     *count = 0;
     if (!s || len == 0)
         return;
     size_t i = 0;
-    while (i < len && *count < SC_CONS_MAX_TOKENS) {
+    while (i < len && *count < HU_CONS_MAX_TOKENS) {
         while (i < len && (unsigned char)s[i] <= ' ')
             i++;
         if (i >= len)
@@ -33,14 +33,14 @@ static size_t token_len(const char *token, const char *end) {
     return n;
 }
 
-uint32_t sc_similarity_score(const char *a, size_t a_len, const char *b, size_t b_len) {
+uint32_t hu_similarity_score(const char *a, size_t a_len, const char *b, size_t b_len) {
     if (!a || !b)
         return 0;
     if (a_len == 0 && b_len == 0)
         return 100;
 
-    const char *a_tokens[SC_CONS_MAX_TOKENS];
-    const char *b_tokens[SC_CONS_MAX_TOKENS];
+    const char *a_tokens[HU_CONS_MAX_TOKENS];
+    const char *b_tokens[HU_CONS_MAX_TOKENS];
     size_t a_count = 0, b_count = 0;
     tokenize(a, a_len, a_tokens, &a_count);
     tokenize(b, b_len, b_tokens, &b_count);
@@ -104,27 +104,27 @@ static int compare_timestamp(const char *ts_a, size_t ts_a_len, const char *ts_b
     return 0;
 }
 
-sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
-                                 const sc_consolidation_config_t *config) {
+hu_error_t hu_memory_consolidate(hu_allocator_t *alloc, hu_memory_t *memory,
+                                 const hu_consolidation_config_t *config) {
     if (!alloc || !memory || !memory->vtable || !config)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!memory->vtable->list || !memory->vtable->forget)
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
 
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
-    if (err != SC_OK)
+    hu_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
+    if (err != HU_OK)
         return err;
     if (!entries || count == 0)
-        return SC_OK;
+        return HU_OK;
 
     bool *to_forget = (bool *)alloc->alloc(alloc->ctx, count * sizeof(bool));
     if (!to_forget) {
         for (size_t i = 0; i < count; i++)
-            sc_memory_entry_free_fields(alloc, &entries[i]);
-        alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, &entries[i]);
+        alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memset(to_forget, 0, count * sizeof(bool));
 
@@ -134,7 +134,7 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
         for (size_t j = i + 1; j < count; j++) {
             if (to_forget[j])
                 continue;
-            uint32_t sim = sc_similarity_score(entries[i].content, entries[i].content_len,
+            uint32_t sim = hu_similarity_score(entries[i].content, entries[i].content_len,
                                                entries[j].content, entries[j].content_len);
             if (sim >= config->dedup_threshold) {
                 int cmp = compare_timestamp(entries[i].timestamp, entries[i].timestamp_len,
@@ -163,7 +163,7 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
         }
     }
 
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
     if (config->provider && config->provider->vtable &&
         config->provider->vtable->chat_with_system) {
         size_t surviving = 0;
@@ -172,8 +172,8 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
                 surviving++;
 
         if (surviving >= 2) {
-            sc_memory_entry_t *surv = (sc_memory_entry_t *)alloc->alloc(
-                alloc->ctx, surviving * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *surv = (hu_memory_entry_t *)alloc->alloc(
+                alloc->ctx, surviving * sizeof(hu_memory_entry_t));
             if (surv) {
                 size_t si = 0;
                 for (size_t i = 0; i < count; i++)
@@ -182,29 +182,29 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
 
                 char *prompt = NULL;
                 size_t prompt_len = 0;
-                if (sc_connections_build_prompt(alloc, surv, surviving, &prompt, &prompt_len) ==
-                        SC_OK &&
+                if (hu_connections_build_prompt(alloc, surv, surviving, &prompt, &prompt_len) ==
+                        HU_OK &&
                     prompt) {
                     char *response = NULL;
                     size_t response_len = 0;
                     const char *sys = "Return JSON only.";
-                    sc_error_t chat_err = config->provider->vtable->chat_with_system(
+                    hu_error_t chat_err = config->provider->vtable->chat_with_system(
                         config->provider->ctx, alloc, sys, 17, prompt, prompt_len, config->model,
                         config->model_len, 0.2, &response, &response_len);
-                    alloc->free(alloc->ctx, prompt, SC_CONN_PROMPT_CAP);
+                    alloc->free(alloc->ctx, prompt, HU_CONN_PROMPT_CAP);
 
-                    if (chat_err == SC_OK && response) {
-                        sc_connection_result_t conn_result = {0};
-                        if (sc_connections_parse(alloc, response, response_len, surviving,
-                                                 &conn_result) == SC_OK) {
-                            (void)sc_connections_store_insights(alloc, memory, &conn_result, surv,
+                    if (chat_err == HU_OK && response) {
+                        hu_connection_result_t conn_result = {0};
+                        if (hu_connections_parse(alloc, response, response_len, surviving,
+                                                 &conn_result) == HU_OK) {
+                            (void)hu_connections_store_insights(alloc, memory, &conn_result, surv,
                                                                 surviving);
-                            sc_connection_result_deinit(&conn_result, alloc);
+                            hu_connection_result_deinit(&conn_result, alloc);
                         }
                         alloc->free(alloc->ctx, response, response_len + 1);
                     }
                 }
-                alloc->free(alloc->ctx, surv, surviving * sizeof(sc_memory_entry_t));
+                alloc->free(alloc->ctx, surv, surviving * sizeof(hu_memory_entry_t));
             }
         }
     }
@@ -213,9 +213,9 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
     for (size_t i = 0; i < count; i++) {
         if (to_forget[i] && entries[i].key) {
             bool deleted = false;
-            sc_error_t ferr =
+            hu_error_t ferr =
                 memory->vtable->forget(memory->ctx, entries[i].key, entries[i].key_len, &deleted);
-            if (ferr != SC_OK)
+            if (ferr != HU_OK)
                 fprintf(stderr, "[consolidation] forget key '%.*s' failed: %d\n",
                         (int)entries[i].key_len, entries[i].key, (int)ferr);
         }
@@ -224,27 +224,27 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
     alloc->free(alloc->ctx, to_forget, count * sizeof(bool));
 
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
 
     size_t new_count = 0;
     err = memory->vtable->count(memory->ctx, &new_count);
-    if (err != SC_OK)
-        return SC_OK;
+    if (err != HU_OK)
+        return HU_OK;
 
     if (new_count <= config->max_entries)
-        return SC_OK;
+        return HU_OK;
 
     err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
-    if (err != SC_OK || !entries || count <= config->max_entries)
-        return SC_OK;
+    if (err != HU_OK || !entries || count <= config->max_entries)
+        return HU_OK;
 
     for (size_t i = 0; i < count; i++) {
         for (size_t j = i + 1; j < count; j++) {
             int cmp = compare_timestamp(entries[i].timestamp, entries[i].timestamp_len,
                                         entries[j].timestamp, entries[j].timestamp_len);
             if (cmp > 0) {
-                sc_memory_entry_t tmp = entries[i];
+                hu_memory_entry_t tmp = entries[i];
                 entries[i] = entries[j];
                 entries[j] = tmp;
             }
@@ -255,17 +255,17 @@ sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
     for (size_t i = 0; i < to_remove && i < count; i++) {
         if (entries[i].key) {
             bool deleted = false;
-            sc_error_t ferr =
+            hu_error_t ferr =
                 memory->vtable->forget(memory->ctx, entries[i].key, entries[i].key_len, &deleted);
-            if (ferr != SC_OK)
+            if (ferr != HU_OK)
                 fprintf(stderr, "[consolidation] evict key '%.*s' failed: %d\n",
                         (int)entries[i].key_len, entries[i].key, (int)ferr);
         }
     }
 
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
 
-    return SC_OK;
+    return HU_OK;
 }

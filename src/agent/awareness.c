@@ -1,10 +1,10 @@
-#include "seaclaw/agent/awareness.h"
+#include "human/agent/awareness.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 static uint64_t now_ms(void) {
-#ifdef SC_IS_TEST
+#ifdef HU_IS_TEST
     return 1000000;
 #else
     struct timespec ts;
@@ -13,49 +13,49 @@ static uint64_t now_ms(void) {
 #endif
 }
 
-static void track_channel(sc_awareness_state_t *s, const char *channel) {
+static void track_channel(hu_awareness_state_t *s, const char *channel) {
     if (!channel || channel[0] == '\0')
         return;
     for (size_t i = 0; i < s->active_channel_count; i++) {
-        if (strncmp(s->active_channels[i], channel, SC_AWARENESS_CHANNEL_NAME_LEN - 1) == 0)
+        if (strncmp(s->active_channels[i], channel, HU_AWARENESS_CHANNEL_NAME_LEN - 1) == 0)
             return;
     }
-    if (s->active_channel_count < SC_AWARENESS_MAX_ACTIVE_CHANNELS) {
+    if (s->active_channel_count < HU_AWARENESS_MAX_ACTIVE_CHANNELS) {
         strncpy(s->active_channels[s->active_channel_count], channel,
-                SC_AWARENESS_CHANNEL_NAME_LEN - 1);
-        s->active_channels[s->active_channel_count][SC_AWARENESS_CHANNEL_NAME_LEN - 1] = '\0';
+                HU_AWARENESS_CHANNEL_NAME_LEN - 1);
+        s->active_channels[s->active_channel_count][HU_AWARENESS_CHANNEL_NAME_LEN - 1] = '\0';
         s->active_channel_count++;
     }
 }
 
-static bool awareness_bus_cb(sc_bus_event_type_t type, const sc_bus_event_t *ev, void *user_ctx) {
-    sc_awareness_t *aw = (sc_awareness_t *)user_ctx;
+static bool awareness_bus_cb(hu_bus_event_type_t type, const hu_bus_event_t *ev, void *user_ctx) {
+    hu_awareness_t *aw = (hu_awareness_t *)user_ctx;
     if (!aw)
         return false;
-    sc_awareness_state_t *s = &aw->state;
+    hu_awareness_state_t *s = &aw->state;
 
     switch (type) {
-    case SC_BUS_MESSAGE_RECEIVED:
+    case HU_BUS_MESSAGE_RECEIVED:
         s->messages_received++;
         track_channel(s, ev->channel);
         break;
-    case SC_BUS_MESSAGE_SENT:
+    case HU_BUS_MESSAGE_SENT:
         s->messages_sent++;
         track_channel(s, ev->channel);
         break;
-    case SC_BUS_TOOL_CALL:
+    case HU_BUS_TOOL_CALL:
         s->tool_calls++;
         break;
-    case SC_BUS_ERROR: {
-        size_t idx = s->error_write_idx % SC_AWARENESS_MAX_RECENT_ERRORS;
-        strncpy(s->recent_errors[idx].text, ev->message, SC_BUS_MSG_LEN - 1);
-        s->recent_errors[idx].text[SC_BUS_MSG_LEN - 1] = '\0';
+    case HU_BUS_ERROR: {
+        size_t idx = s->error_write_idx % HU_AWARENESS_MAX_RECENT_ERRORS;
+        strncpy(s->recent_errors[idx].text, ev->message, HU_BUS_MSG_LEN - 1);
+        s->recent_errors[idx].text[HU_BUS_MSG_LEN - 1] = '\0';
         s->recent_errors[idx].timestamp_ms = now_ms();
         s->error_write_idx++;
         s->total_errors++;
         break;
     }
-    case SC_BUS_HEALTH_CHANGE:
+    case HU_BUS_HEALTH_CHANGE:
         if (ev->message[0] != '\0')
             s->health_degraded = true;
         else
@@ -67,25 +67,25 @@ static bool awareness_bus_cb(sc_bus_event_type_t type, const sc_bus_event_t *ev,
     return true;
 }
 
-sc_error_t sc_awareness_init(sc_awareness_t *aw, sc_bus_t *bus) {
+hu_error_t hu_awareness_init(hu_awareness_t *aw, hu_bus_t *bus) {
     if (!aw || !bus)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(&aw->state, 0, sizeof(aw->state));
     aw->bus = bus;
-    return sc_bus_subscribe(bus, awareness_bus_cb, aw, SC_BUS_EVENT_COUNT);
+    return hu_bus_subscribe(bus, awareness_bus_cb, aw, HU_BUS_EVENT_COUNT);
 }
 
-void sc_awareness_deinit(sc_awareness_t *aw) {
+void hu_awareness_deinit(hu_awareness_t *aw) {
     if (!aw || !aw->bus)
         return;
-    sc_bus_unsubscribe(aw->bus, awareness_bus_cb, aw);
+    hu_bus_unsubscribe(aw->bus, awareness_bus_cb, aw);
     aw->bus = NULL;
 }
 
-char *sc_awareness_context(const sc_awareness_t *aw, sc_allocator_t *alloc, size_t *out_len) {
+char *hu_awareness_context(const hu_awareness_t *aw, hu_allocator_t *alloc, size_t *out_len) {
     if (!aw || !alloc)
         return NULL;
-    const sc_awareness_state_t *s = &aw->state;
+    const hu_awareness_state_t *s = &aw->state;
 
     bool has_errors = s->total_errors > 0;
     bool has_stats = s->messages_received > 0 || s->tool_calls > 0;
@@ -120,12 +120,12 @@ char *sc_awareness_context(const sc_awareness_t *aw, sc_allocator_t *alloc, size
     if (has_errors) {
         pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "- Recent errors (%llu total):\n",
                                 (unsigned long long)s->total_errors);
-        size_t nerr = s->total_errors < SC_AWARENESS_MAX_RECENT_ERRORS
+        size_t nerr = s->total_errors < HU_AWARENESS_MAX_RECENT_ERRORS
                           ? s->total_errors
-                          : SC_AWARENESS_MAX_RECENT_ERRORS;
+                          : HU_AWARENESS_MAX_RECENT_ERRORS;
         for (size_t i = 0; i < nerr && pos < sizeof(buf) - 300; i++) {
-            size_t idx = (s->error_write_idx + SC_AWARENESS_MAX_RECENT_ERRORS - nerr + i) %
-                        SC_AWARENESS_MAX_RECENT_ERRORS;
+            size_t idx = (s->error_write_idx + HU_AWARENESS_MAX_RECENT_ERRORS - nerr + i) %
+                        HU_AWARENESS_MAX_RECENT_ERRORS;
             pos += (size_t)snprintf(buf + pos, sizeof(buf) - pos, "  - %s\n",
                                     s->recent_errors[idx].text);
         }

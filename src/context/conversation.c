@@ -1,7 +1,7 @@
-#include "seaclaw/context/conversation.h"
-#include "seaclaw/core/string.h"
-#ifdef SC_HAS_PERSONA
-#include "seaclaw/persona.h"
+#include "human/context/conversation.h"
+#include "human/core/string.h"
+#ifdef HU_HAS_PERSONA
+#include "human/persona.h"
 #endif
 #include <ctype.h>
 #include <stdbool.h>
@@ -50,27 +50,27 @@ static bool str_contains_ci(const char *haystack, size_t hlen, const char *needl
     return false;
 }
 
-#define SC_CALLBACK_MAX_TOPICS 32
-#define SC_CALLBACK_TOPIC_BUF  64
-#define SC_CALLBACK_SCORE_MIN  3
+#define HU_CALLBACK_MAX_TOPICS 32
+#define HU_CALLBACK_TOPIC_BUF  64
+#define HU_CALLBACK_SCORE_MIN  3
 
 typedef struct {
-    char phrase[SC_CALLBACK_TOPIC_BUF];
+    char phrase[HU_CALLBACK_TOPIC_BUF];
     size_t phrase_len;
     size_t first_idx;
     size_t last_idx;
     int turn_count;
     bool has_unresolved_question;
     int score;
-} sc_callback_topic_t;
+} hu_callback_topic_t;
 
-static void extract_topics_from_text(const char *text, size_t text_len, sc_callback_topic_t *topics,
+static void extract_topics_from_text(const char *text, size_t text_len, hu_callback_topic_t *topics,
                                      size_t *topic_count) {
-    if (!text || text_len == 0 || !topics || !topic_count || *topic_count >= SC_CALLBACK_MAX_TOPICS)
+    if (!text || text_len == 0 || !topics || !topic_count || *topic_count >= HU_CALLBACK_MAX_TOPICS)
         return;
     const char *p = text;
     const char *end = text + text_len;
-    while (p < end && *topic_count < SC_CALLBACK_MAX_TOPICS) {
+    while (p < end && *topic_count < HU_CALLBACK_MAX_TOPICS) {
         while (p < end && !isalnum((unsigned char)*p) && *p != '"' && *p != '\'')
             p++;
         if (p >= end)
@@ -80,7 +80,7 @@ static void extract_topics_from_text(const char *text, size_t text_len, sc_callb
             const char *start = p;
             while (p < end && *p != q)
                 p++;
-            if (p > start && p - start < SC_CALLBACK_TOPIC_BUF - 1) {
+            if (p > start && p - start < HU_CALLBACK_TOPIC_BUF - 1) {
                 size_t len = (size_t)(p - start);
                 memcpy(topics[*topic_count].phrase, start, len);
                 topics[*topic_count].phrase[len] = '\0';
@@ -96,7 +96,7 @@ static void extract_topics_from_text(const char *text, size_t text_len, sc_callb
             p = trigger;
             while (p < end && (isalnum((unsigned char)*p) || *p == '_' || *p == '-'))
                 p++;
-            if (p > trigger && (size_t)(p - trigger) < SC_CALLBACK_TOPIC_BUF - 1) {
+            if (p > trigger && (size_t)(p - trigger) < HU_CALLBACK_TOPIC_BUF - 1) {
                 size_t len = (size_t)(p - trigger);
                 memcpy(topics[*topic_count].phrase, trigger, len);
                 topics[*topic_count].phrase[len] = '\0';
@@ -110,7 +110,7 @@ static void extract_topics_from_text(const char *text, size_t text_len, sc_callb
             p = trigger;
             while (p < end && (isalnum((unsigned char)*p) || *p == '_' || *p == '-'))
                 p++;
-            if (p > trigger && (size_t)(p - trigger) < SC_CALLBACK_TOPIC_BUF - 1) {
+            if (p > trigger && (size_t)(p - trigger) < HU_CALLBACK_TOPIC_BUF - 1) {
                 size_t len = (size_t)(p - trigger);
                 memcpy(topics[*topic_count].phrase, trigger, len);
                 topics[*topic_count].phrase[len] = '\0';
@@ -124,7 +124,7 @@ static void extract_topics_from_text(const char *text, size_t text_len, sc_callb
             while (p < end && (isalnum((unsigned char)*p) || *p == '_' || *p == '-'))
                 p++;
             if (p > start && (size_t)(p - start) >= 2 &&
-                (size_t)(p - start) < SC_CALLBACK_TOPIC_BUF - 1) {
+                (size_t)(p - start) < HU_CALLBACK_TOPIC_BUF - 1) {
                 size_t len = (size_t)(p - start);
                 memcpy(topics[*topic_count].phrase, start, len);
                 topics[*topic_count].phrase[len] = '\0';
@@ -137,7 +137,7 @@ static void extract_topics_from_text(const char *text, size_t text_len, sc_callb
     }
 }
 
-static bool topic_in_recent(const sc_callback_topic_t *t, const sc_channel_history_entry_t *entries,
+static bool topic_in_recent(const hu_callback_topic_t *t, const hu_channel_history_entry_t *entries,
                             size_t count, size_t recent_start) {
     for (size_t i = recent_start; i < count; i++) {
         const char *text = entries[i].text;
@@ -156,8 +156,8 @@ static bool topic_in_recent(const sc_callback_topic_t *t, const sc_channel_histo
     return false;
 }
 
-char *sc_conversation_build_callback(sc_allocator_t *alloc,
-                                     const sc_channel_history_entry_t *entries, size_t count,
+char *hu_conversation_build_callback(hu_allocator_t *alloc,
+                                     const hu_channel_history_entry_t *entries, size_t count,
                                      size_t *out_len) {
     if (!alloc || !out_len)
         return NULL;
@@ -166,7 +166,7 @@ char *sc_conversation_build_callback(sc_allocator_t *alloc,
         return NULL;
 
     /* ~20% probability: use hash of last message as seed (avoids count%5 restriction) */
-    const sc_channel_history_entry_t *last = &entries[count - 1];
+    const hu_channel_history_entry_t *last = &entries[count - 1];
     uint32_t hash = 0;
     for (size_t i = 0; i < 20 && i < strlen(last->text); i++)
         hash = hash * 31u + (uint32_t)(unsigned char)last->text[i];
@@ -176,18 +176,18 @@ char *sc_conversation_build_callback(sc_allocator_t *alloc,
     size_t half = count / 2;
     size_t recent_start = count > 3 ? count - 3 : 0;
 
-    sc_callback_topic_t all_topics[SC_CALLBACK_MAX_TOPICS];
+    hu_callback_topic_t all_topics[HU_CALLBACK_MAX_TOPICS];
     size_t num_topics = 0;
     memset(all_topics, 0, sizeof(all_topics));
 
-    for (size_t i = 0; i < half && num_topics < SC_CALLBACK_MAX_TOPICS; i++) {
+    for (size_t i = 0; i < half && num_topics < HU_CALLBACK_MAX_TOPICS; i++) {
         const char *text = entries[i].text;
         size_t tl = strlen(text);
-        sc_callback_topic_t local[8];
+        hu_callback_topic_t local[8];
         size_t nlocal = 0;
         memset(local, 0, sizeof(local));
         extract_topics_from_text(text, tl, local, &nlocal);
-        for (size_t k = 0; k < nlocal && num_topics < SC_CALLBACK_MAX_TOPICS; k++) {
+        for (size_t k = 0; k < nlocal && num_topics < HU_CALLBACK_MAX_TOPICS; k++) {
             bool found = false;
             for (size_t j = 0; j < num_topics; j++) {
                 if (all_topics[j].phrase_len == local[k].phrase_len &&
@@ -211,8 +211,8 @@ char *sc_conversation_build_callback(sc_allocator_t *alloc,
         }
     }
 
-    sc_callback_topic_t *best = NULL;
-    int best_score = SC_CALLBACK_SCORE_MIN - 1;
+    hu_callback_topic_t *best = NULL;
+    int best_score = HU_CALLBACK_SCORE_MIN - 1;
     for (size_t i = 0; i < num_topics; i++) {
         if (topic_in_recent(&all_topics[i], entries, count, recent_start))
             continue;
@@ -233,7 +233,7 @@ char *sc_conversation_build_callback(sc_allocator_t *alloc,
         }
     }
 
-    if (!best || best_score < SC_CALLBACK_SCORE_MIN)
+    if (!best || best_score < HU_CALLBACK_SCORE_MIN)
         return NULL;
 
     size_t msgs_ago = count - 1 - best->last_idx;
@@ -250,7 +250,7 @@ char *sc_conversation_build_callback(sc_allocator_t *alloc,
     if (w <= 0 || (size_t)w >= sizeof(buf))
         return NULL;
 
-    char *result = sc_strndup(alloc, buf, (size_t)w);
+    char *result = hu_strndup(alloc, buf, (size_t)w);
     if (result)
         *out_len = (size_t)w;
     return result;
@@ -278,10 +278,10 @@ typedef struct {
     bool recent_shorter_than_earlier;
     char repeated_word[32];
     int repeated_word_hits;
-} sc_convo_metrics_t;
+} hu_convo_metrics_t;
 
-static void compute_convo_metrics(const sc_channel_history_entry_t *entries, size_t count,
-                                  sc_convo_metrics_t *m) {
+static void compute_convo_metrics(const hu_channel_history_entry_t *entries, size_t count,
+                                  hu_convo_metrics_t *m) {
     memset(m, 0, sizeof(*m));
     if (!entries || count == 0)
         return;
@@ -403,9 +403,9 @@ static const char *day_name(int wday) {
     return (wday >= 0 && wday < 7) ? days[wday] : "?";
 }
 
-char *sc_conversation_build_awareness(sc_allocator_t *alloc,
-                                      const sc_channel_history_entry_t *entries, size_t count,
-                                      const sc_persona_t *persona, size_t *out_len) {
+char *hu_conversation_build_awareness(hu_allocator_t *alloc,
+                                      const hu_channel_history_entry_t *entries, size_t count,
+                                      const hu_persona_t *persona, size_t *out_len) {
     if (!alloc || !out_len)
         return NULL;
     *out_len = 0;
@@ -435,7 +435,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
 
     /* ── Data-driven conversation awareness ─────────────────────────── */
     {
-        sc_convo_metrics_t m;
+        hu_convo_metrics_t m;
         compute_convo_metrics(entries, count, &m);
 
         w = snprintf(buf + pos, CTX_BUF_CAP - pos, "--- Conversation awareness ---\n");
@@ -605,7 +605,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
 
     /* Anti-AI style: prompt-level guidance so LLM produces natural output the first time.
      * Use persona style_rules when available; otherwise fallback to built-in rules. */
-#ifdef SC_HAS_PERSONA
+#ifdef HU_HAS_PERSONA
     if (persona && persona->style_rules && persona->style_rules_count > 0) {
         w = snprintf(buf + pos, CTX_BUF_CAP - pos, "\n--- CRITICAL STYLE RULES ---\n");
         POS_ADVANCE(w, pos, CTX_BUF_CAP);
@@ -640,7 +640,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
             }
         }
         if (last_their_msg && last_their_len > 0) {
-            size_t cal_len = sc_conversation_calibrate_length(
+            size_t cal_len = hu_conversation_calibrate_length(
                 last_their_msg, last_their_len, entries, count, buf + pos, CTX_BUF_CAP - pos);
             pos += cal_len;
         }
@@ -653,7 +653,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
 
 /* ── Conversation Quality Evaluator (qualitative, context-driven) ─────── */
 
-static void compute_their_avg_len(const sc_channel_history_entry_t *entries, size_t count,
+static void compute_their_avg_len(const hu_channel_history_entry_t *entries, size_t count,
                                   size_t *out_avg, size_t *out_recent_avg) {
     *out_avg = 0;
     *out_recent_avg = 0;
@@ -683,10 +683,10 @@ static void compute_their_avg_len(const sc_channel_history_entry_t *entries, siz
         *out_recent_avg = recent_chars / recent_n;
 }
 
-sc_quality_score_t sc_conversation_evaluate_quality(const char *response, size_t response_len,
-                                                    const sc_channel_history_entry_t *entries,
+hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t response_len,
+                                                    const hu_channel_history_entry_t *entries,
                                                     size_t count, uint32_t max_chars) {
-    sc_quality_score_t score = {0, 0, 0, 0, 0, false, {0}};
+    hu_quality_score_t score = {0, 0, 0, 0, 0, false, {0}};
     if (!response || response_len == 0)
         return score;
 
@@ -841,7 +841,7 @@ static bool detect_action_commitment_query(const char *message, size_t message_l
            str_contains_ci(message, message_len, "have you");
 }
 
-char *sc_conversation_honesty_check(sc_allocator_t *alloc, const char *message,
+char *hu_conversation_honesty_check(hu_allocator_t *alloc, const char *message,
                                     size_t message_len) {
     if (!alloc || !message || message_len == 0)
         return NULL;
@@ -867,10 +867,10 @@ char *sc_conversation_honesty_check(sc_allocator_t *alloc, const char *message,
 
 /* ── Narrative Arc Detection ────────────────────────────────────────── */
 
-sc_narrative_phase_t sc_conversation_detect_narrative(const sc_channel_history_entry_t *entries,
+hu_narrative_phase_t hu_conversation_detect_narrative(const hu_channel_history_entry_t *entries,
                                                       size_t count) {
     if (!entries || count == 0)
-        return SC_NARRATIVE_OPENING;
+        return HU_NARRATIVE_OPENING;
 
     /* Count exchanges (direction changes) */
     size_t exchanges = 0;
@@ -914,29 +914,29 @@ sc_narrative_phase_t sc_conversation_detect_narrative(const sc_channel_history_e
              str_contains_ci(last, ll, "bye") || str_contains_ci(last, ll, "night") ||
              str_contains_ci(last, ll, "ttyl") || str_contains_ci(last, ll, "heading out") ||
              (ll < 10 && (str_contains_ci(last, ll, "ok") || str_contains_ci(last, ll, "k")))))
-            return SC_NARRATIVE_CLOSING;
+            return HU_NARRATIVE_CLOSING;
     }
 
     /* Map to phases */
     if (exchanges <= 2)
-        return SC_NARRATIVE_OPENING;
+        return HU_NARRATIVE_OPENING;
     if (exchanges <= 5)
-        return SC_NARRATIVE_BUILDING;
+        return HU_NARRATIVE_BUILDING;
     if (emotional_words >= 2 || exclamation_marks >= 3)
-        return SC_NARRATIVE_PEAK;
+        return HU_NARRATIVE_PEAK;
     if (exchanges > 5 && emotional_words >= 1)
-        return SC_NARRATIVE_APPROACHING_CLIMAX;
+        return HU_NARRATIVE_APPROACHING_CLIMAX;
     if (exchanges > 10)
-        return SC_NARRATIVE_RELEASE;
-    return SC_NARRATIVE_BUILDING;
+        return HU_NARRATIVE_RELEASE;
+    return HU_NARRATIVE_BUILDING;
 }
 
 /* ── Engagement Scoring ─────────────────────────────────────────────── */
 
-sc_engagement_level_t sc_conversation_detect_engagement(const sc_channel_history_entry_t *entries,
+hu_engagement_level_t hu_conversation_detect_engagement(const hu_channel_history_entry_t *entries,
                                                         size_t count) {
     if (!entries || count == 0)
-        return SC_ENGAGEMENT_MODERATE;
+        return HU_ENGAGEMENT_MODERATE;
 
     size_t their_msgs = 0;
     size_t total_their_len = 0;
@@ -961,30 +961,30 @@ sc_engagement_level_t sc_conversation_detect_engagement(const sc_channel_history
     }
 
     if (their_msgs == 0)
-        return SC_ENGAGEMENT_DISTRACTED;
+        return HU_ENGAGEMENT_DISTRACTED;
 
     size_t avg_len = total_their_len / their_msgs;
 
     /* High: asking questions, longer messages, engaged */
     if (questions_to_us >= 2 || avg_len > 60)
-        return SC_ENGAGEMENT_HIGH;
+        return HU_ENGAGEMENT_HIGH;
 
     /* Low: very short responses, no questions */
     if (avg_len < 15 && very_short >= 2 && questions_to_us == 0)
-        return SC_ENGAGEMENT_LOW;
+        return HU_ENGAGEMENT_LOW;
 
     /* Distracted: single-word or empty responses */
     if (their_msgs >= 2 && very_short == their_msgs)
-        return SC_ENGAGEMENT_DISTRACTED;
+        return HU_ENGAGEMENT_DISTRACTED;
 
-    return SC_ENGAGEMENT_MODERATE;
+    return HU_ENGAGEMENT_MODERATE;
 }
 
 /* ── Emotional State Detection ──────────────────────────────────────── */
 
-sc_emotional_state_t sc_conversation_detect_emotion(const sc_channel_history_entry_t *entries,
+hu_emotional_state_t hu_conversation_detect_emotion(const hu_channel_history_entry_t *entries,
                                                     size_t count) {
-    sc_emotional_state_t state = {0.0f, 0.0f, false, "neutral"};
+    hu_emotional_state_t state = {0.0f, 0.0f, false, "neutral"};
     if (!entries || count == 0)
         return state;
 
@@ -1082,7 +1082,7 @@ sc_emotional_state_t sc_conversation_detect_emotion(const sc_channel_history_ent
 
 /* ── Typo correction fragment (*meant) ─────────────────────────────────── */
 
-size_t sc_conversation_generate_correction(const char *original, size_t original_len,
+size_t hu_conversation_generate_correction(const char *original, size_t original_len,
                                            const char *typo_applied, size_t typo_applied_len,
                                            char *out_buf, size_t out_cap, uint32_t seed,
                                            uint32_t correction_chance) {
@@ -1169,8 +1169,8 @@ static bool is_split_starter(const char *s, size_t len) {
     return false;
 }
 
-size_t sc_conversation_split_response(sc_allocator_t *alloc, const char *response,
-                                      size_t response_len, sc_message_fragment_t *fragments,
+size_t hu_conversation_split_response(hu_allocator_t *alloc, const char *response,
+                                      size_t response_len, hu_message_fragment_t *fragments,
                                       size_t max_fragments) {
     if (!alloc || !response || response_len == 0 || !fragments || max_fragments == 0)
         return 0;
@@ -1313,8 +1313,8 @@ size_t sc_conversation_split_response(sc_allocator_t *alloc, const char *respons
  * and produces a directive that mimics human instinct.
  */
 
-size_t sc_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
-                                        const sc_channel_history_entry_t *entries, size_t count,
+size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_len,
+                                        const hu_channel_history_entry_t *entries, size_t count,
                                         char *buf, size_t cap) {
     if (!last_msg || last_msg_len == 0 || !buf || cap < 64)
         return 0;
@@ -1322,7 +1322,7 @@ size_t sc_conversation_calibrate_length(const char *last_msg, size_t last_msg_le
     size_t pos = 0;
     int w;
 
-    sc_convo_metrics_t m;
+    hu_convo_metrics_t m;
     compute_convo_metrics(entries, count, &m);
 
     w = snprintf(buf + pos, cap - pos, "\n--- Response calibration ---\n");
@@ -1411,9 +1411,9 @@ size_t sc_conversation_calibrate_length(const char *last_msg, size_t last_msg_le
 
 /* ── Texting style analysis ───────────────────────────────────────────── */
 
-char *sc_conversation_analyze_style(sc_allocator_t *alloc,
-                                    const sc_channel_history_entry_t *entries, size_t count,
-                                    const sc_persona_t *persona, size_t *out_len) {
+char *hu_conversation_analyze_style(hu_allocator_t *alloc,
+                                    const hu_channel_history_entry_t *entries, size_t count,
+                                    const hu_persona_t *persona, size_t *out_len) {
     if (!alloc || !entries || count == 0 || !out_len)
         return NULL;
     *out_len = 0;
@@ -1553,7 +1553,7 @@ char *sc_conversation_analyze_style(sc_allocator_t *alloc,
     }
 
     /* Anti-AI warnings: use persona anti_patterns when available; otherwise fallback. */
-#ifdef SC_HAS_PERSONA
+#ifdef HU_HAS_PERSONA
     if (persona && persona->anti_patterns && persona->anti_patterns_count > 0) {
         w = snprintf(buf + pos, STYLE_BUF_CAP - pos,
                      "\n--- Anti-patterns (NEVER do these in texts) ---\n");
@@ -1599,7 +1599,7 @@ static bool quirk_enabled(const char *const *quirks, size_t count, const char *n
     return false;
 }
 
-size_t sc_conversation_apply_typing_quirks(char *buf, size_t len, const char *const *quirks,
+size_t hu_conversation_apply_typing_quirks(char *buf, size_t len, const char *const *quirks,
                                            size_t quirks_count) {
     if (!buf || len == 0 || !quirks || quirks_count == 0)
         return len;
@@ -1726,7 +1726,7 @@ static bool is_word_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
-size_t sc_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t seed) {
+size_t hu_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t seed) {
     if (!buf || len == 0)
         return len;
     if (len >= cap)
@@ -1826,12 +1826,12 @@ size_t sc_conversation_apply_typos(char *buf, size_t len, size_t cap, uint32_t s
 /* ── Two-phase "let me think" thinking response classifier ─────────────── */
 
 typedef enum {
-    SC_THINK_DECISION = 0,  /* advice/complex decision */
-    SC_THINK_EMOTIONAL = 1, /* emotional support */
-    SC_THINK_COMPLEX = 2,   /* philosophical/factual */
-} sc_think_type_t;
+    HU_THINK_DECISION = 0,  /* advice/complex decision */
+    HU_THINK_EMOTIONAL = 1, /* emotional support */
+    HU_THINK_COMPLEX = 2,   /* philosophical/factual */
+} hu_think_type_t;
 
-static sc_think_type_t classify_think_type(const char *msg, size_t msg_len) {
+static hu_think_type_t classify_think_type(const char *msg, size_t msg_len) {
     size_t excl = 0;
     size_t words = 0;
     for (size_t i = 0; i < msg_len; i++) {
@@ -1845,17 +1845,17 @@ static sc_think_type_t classify_think_type(const char *msg, size_t msg_len) {
 
     /* Emotional: high exclamation density or short + intense */
     if (excl >= 2 || (excl >= 1 && msg_len < 60))
-        return SC_THINK_EMOTIONAL;
+        return HU_THINK_EMOTIONAL;
     /* Complex: long message, often philosophical or multi-part */
     if (msg_len > 120 && words > 15)
-        return SC_THINK_COMPLEX;
+        return HU_THINK_COMPLEX;
     /* Decision: medium-length question (advice-seeking) */
-    return SC_THINK_DECISION;
+    return HU_THINK_DECISION;
 }
 
-bool sc_conversation_classify_thinking(const char *msg, size_t msg_len,
-                                       const sc_channel_history_entry_t *entries,
-                                       size_t entry_count, sc_thinking_response_t *out,
+bool hu_conversation_classify_thinking(const char *msg, size_t msg_len,
+                                       const hu_channel_history_entry_t *entries,
+                                       size_t entry_count, hu_thinking_response_t *out,
                                        uint32_t seed) {
     (void)entries;
     (void)entry_count;
@@ -1885,23 +1885,23 @@ bool sc_conversation_classify_thinking(const char *msg, size_t msg_len,
     if (!triggered)
         return false;
 
-    sc_think_type_t t = classify_think_type(msg, msg_len);
+    hu_think_type_t t = classify_think_type(msg, msg_len);
     const char *fillers[4];
     size_t filler_count;
     switch (t) {
-    case SC_THINK_EMOTIONAL:
+    case HU_THINK_EMOTIONAL:
         fillers[0] = "hmm";
         fillers[1] = "oh wow";
         fillers[2] = "oh";
         filler_count = 3;
         break;
-    case SC_THINK_DECISION:
+    case HU_THINK_DECISION:
         fillers[0] = "ooh that's a tough one";
         fillers[1] = "let me think about that for a sec";
         fillers[2] = "hm good question";
         filler_count = 3;
         break;
-    case SC_THINK_COMPLEX:
+    case HU_THINK_COMPLEX:
         fillers[0] = "that's a really good question";
         fillers[1] = "okay give me a sec";
         fillers[2] = "let me think about that";
@@ -1972,16 +1972,16 @@ static bool is_tapback_reaction(const char *norm, size_t ni) {
     return false;
 }
 
-sc_response_action_t sc_conversation_classify_response(const char *msg, size_t msg_len,
-                                                       const sc_channel_history_entry_t *entries,
+hu_response_action_t hu_conversation_classify_response(const char *msg, size_t msg_len,
+                                                       const hu_channel_history_entry_t *entries,
                                                        size_t entry_count,
                                                        uint32_t *delay_extra_ms) {
     if (!delay_extra_ms)
-        return SC_RESPONSE_FULL;
+        return HU_RESPONSE_FULL;
     *delay_extra_ms = 0;
 
     if (!msg || msg_len == 0)
-        return SC_RESPONSE_SKIP;
+        return HU_RESPONSE_SKIP;
 
     /* Normalize for comparison */
     char norm[128];
@@ -2000,7 +2000,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
 
     /* Skip: tapbacks (system vocabulary) */
     if (is_tapback_reaction(norm, ni))
-        return SC_RESPONSE_SKIP;
+        return HU_RESPONSE_SKIP;
 
     /* Greetings: always respond even if short */
     if (ni >= 2 && (memcmp(norm, "hi", 2) == 0 || (ni >= 3 && memcmp(norm, "hey", 3) == 0) ||
@@ -2008,12 +2008,12 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                     (ni >= 5 && memcmp(norm, "hello", 5) == 0) ||
                     (ni >= 5 && memcmp(norm, "howdy", 5) == 0))) {
         *delay_extra_ms = 2000;
-        return SC_RESPONSE_BRIEF;
+        return HU_RESPONSE_BRIEF;
     }
 
     /* Skip: very short non-greeting (single char, emoji reactions) */
     if (msg_len <= 1)
-        return SC_RESPONSE_SKIP;
+        return HU_RESPONSE_SKIP;
 
     /* ok/k/okay: skip unless answering our question */
     if ((ni == 1 && norm[0] == 'k') || (ni == 2 && memcmp(norm, "ok", 2) == 0) ||
@@ -2027,12 +2027,12 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                     size_t tl = strlen(t);
                     for (size_t j = 0; j < tl; j++) {
                         if (t[j] == '?')
-                            return SC_RESPONSE_SKIP;
+                            return HU_RESPONSE_SKIP;
                     }
                 }
             }
         }
-        return SC_RESPONSE_SKIP;
+        return HU_RESPONSE_SKIP;
     }
 
     /* ── Keep Silent: conversation fade-out detection ────────────────── */
@@ -2066,13 +2066,13 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                         str_contains_ci(t, tl, "gn") || str_contains_ci(t, tl, "peace") ||
                         str_contains_ci(t, tl, "take care");
                     if (our_was_farewell)
-                        return SC_RESPONSE_SKIP;
+                        return HU_RESPONSE_SKIP;
                     break;
                 }
             }
             /* Not mutual — respond briefly */
             *delay_extra_ms = 1500;
-            return SC_RESPONSE_BRIEF;
+            return HU_RESPONSE_BRIEF;
         }
 
         /* Trailing off = SKIP: if last 2-3 exchanges are all brief acks,
@@ -2089,7 +2089,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                     break;
             }
             if (brief_streak >= 2)
-                return SC_RESPONSE_SKIP;
+                return HU_RESPONSE_SKIP;
         }
 
         /* Last-word avoidance: if our last message was a statement (not a question)
@@ -2107,7 +2107,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                         }
                     }
                     if (!our_was_question)
-                        return SC_RESPONSE_SKIP;
+                        return HU_RESPONSE_SKIP;
                     break;
                 }
             }
@@ -2122,20 +2122,20 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
             str_contains_ci(msg, msg_len, "catch you later") ||
             str_contains_ci(msg, msg_len, "i'm out")) {
             *delay_extra_ms = 1500;
-            return SC_RESPONSE_BRIEF;
+            return HU_RESPONSE_BRIEF;
         }
         if (msg_len <= 10 &&
             (str_contains_ci(msg, msg_len, "bye") || str_contains_ci(msg, msg_len, "night") ||
              str_contains_ci(msg, msg_len, "later") || str_contains_ci(msg, msg_len, "gn") ||
              str_contains_ci(msg, msg_len, "cya"))) {
             *delay_extra_ms = 1500;
-            return SC_RESPONSE_BRIEF;
+            return HU_RESPONSE_BRIEF;
         }
     }
 
     /* Brief: short acknowledgment by properties (length, word count, no question) */
     if (msg_len < 15 && word_count <= 2 && !has_question)
-        return SC_RESPONSE_BRIEF;
+        return HU_RESPONSE_BRIEF;
 
     /* Bad news: extended pause — show you're absorbing it */
     if (str_contains_ci(msg, msg_len, "passed away") ||
@@ -2144,7 +2144,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
         str_contains_ci(msg, msg_len, "didn't make it") ||
         str_contains_ci(msg, msg_len, "got rejected") || str_contains_ci(msg, msg_len, "lost my")) {
         *delay_extra_ms = 12000;
-        return SC_RESPONSE_DELAY;
+        return HU_RESPONSE_DELAY;
     }
 
     /* Good news: short pause then celebrate */
@@ -2154,7 +2154,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
         str_contains_ci(msg, msg_len, "good news") || str_contains_ci(msg, msg_len, "i did it") ||
         str_contains_ci(msg, msg_len, "we did it")) {
         *delay_extra_ms = 3000;
-        return SC_RESPONSE_DELAY;
+        return HU_RESPONSE_DELAY;
     }
 
     /* Vulnerability: deliberate pause */
@@ -2164,7 +2164,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
         str_contains_ci(msg, msg_len, "this is hard to say") ||
         str_contains_ci(msg, msg_len, "i never told")) {
         *delay_extra_ms = 8000;
-        return SC_RESPONSE_DELAY;
+        return HU_RESPONSE_DELAY;
     }
 
     /* Emotional/heavy messages: full response but delayed (showing you're thinking) */
@@ -2188,7 +2188,7 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
             }
             if (match) {
                 *delay_extra_ms = 8000;
-                return SC_RESPONSE_DELAY;
+                return HU_RESPONSE_DELAY;
             }
         }
     }
@@ -2210,14 +2210,14 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
             }
         }
         if (getting_shorter >= 2 && msg_len < 30) {
-            return SC_RESPONSE_BRIEF;
+            return HU_RESPONSE_BRIEF;
         }
     }
 
     /* Question: normal response, moderate thinking delay */
     if (has_question) {
         *delay_extra_ms = 2000;
-        return SC_RESPONSE_FULL;
+        return HU_RESPONSE_FULL;
     }
 
     /* Consecutive response limit: if we have responded to the last 3+
@@ -2232,23 +2232,23 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
                 break;
         }
         if (consecutive_ours >= 3)
-            return SC_RESPONSE_SKIP;
+            return HU_RESPONSE_SKIP;
     }
 
     /* Narrative statement: no question, not short, not emotional — the sender
      * is sharing something but not necessarily expecting a reply.  Respond
      * briefly rather than generating a full AI-essay response. */
     if (msg_len > 20 && word_count >= 4)
-        return SC_RESPONSE_BRIEF;
+        return HU_RESPONSE_BRIEF;
 
-    return SC_RESPONSE_FULL;
+    return HU_RESPONSE_FULL;
 }
 
 /* ── URL extraction ──────────────────────────────────────────────────── */
 
 /* Utility for future use. Not currently wired into production; link-sharing
- * logic uses sc_conversation_should_share_link with pattern matching instead. */
-size_t sc_conversation_extract_urls(const char *text, size_t text_len, sc_url_extract_t *urls,
+ * logic uses hu_conversation_should_share_link with pattern matching instead. */
+size_t hu_conversation_extract_urls(const char *text, size_t text_len, hu_url_extract_t *urls,
                                     size_t max_urls) {
     if (!text || !urls || max_urls == 0)
         return 0;
@@ -2310,8 +2310,8 @@ static bool msg_contains_recommendation_pattern(const char *msg, size_t msg_len)
     return false;
 }
 
-bool sc_conversation_should_share_link(const char *msg, size_t msg_len,
-                                       const sc_channel_history_entry_t *entries,
+bool hu_conversation_should_share_link(const char *msg, size_t msg_len,
+                                       const hu_channel_history_entry_t *entries,
                                        size_t entry_count) {
     if (!msg || msg_len == 0)
         return false;
@@ -2358,8 +2358,8 @@ static bool is_attachment_placeholder(const char *text, size_t len) {
     return false;
 }
 
-char *sc_conversation_attachment_context(sc_allocator_t *alloc,
-                                         const sc_channel_history_entry_t *entries, size_t count,
+char *hu_conversation_attachment_context(hu_allocator_t *alloc,
+                                         const hu_channel_history_entry_t *entries, size_t count,
                                          size_t *out_len) {
     if (!alloc || !out_len || !entries || count == 0)
         return NULL;
@@ -2384,7 +2384,7 @@ char *sc_conversation_attachment_context(sc_allocator_t *alloc,
         "\"love that!\", \"that looks great\", etc. Don't say \"I can see the image\" "
         "if you can't actually analyze it.";
     size_t ctx_len = strlen(ctx);
-    char *result = sc_strndup(alloc, ctx, ctx_len);
+    char *result = hu_strndup(alloc, ctx, ctx_len);
     if (result)
         *out_len = ctx_len;
     return result;
@@ -2392,7 +2392,7 @@ char *sc_conversation_attachment_context(sc_allocator_t *alloc,
 
 /* ── Anti-repetition detection ────────────────────────────────────────── */
 
-size_t sc_conversation_detect_repetition(const sc_channel_history_entry_t *entries, size_t count,
+size_t hu_conversation_detect_repetition(const hu_channel_history_entry_t *entries, size_t count,
                                          char *buf, size_t cap) {
     if (!entries || count < 4 || !buf || cap < 64)
         return 0;
@@ -2509,7 +2509,7 @@ size_t sc_conversation_detect_repetition(const sc_channel_history_entry_t *entri
 
 /* ── Relationship-tier calibration ────────────────────────────────────── */
 
-size_t sc_conversation_calibrate_relationship(const char *relationship_stage,
+size_t hu_conversation_calibrate_relationship(const char *relationship_stage,
                                               const char *warmth_level,
                                               const char *vulnerability_level, char *buf,
                                               size_t cap) {
@@ -2591,16 +2591,16 @@ size_t sc_conversation_calibrate_relationship(const char *relationship_stage,
 
 /* ── Group chat classifier ────────────────────────────────────────────── */
 
-sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_len,
+hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_len,
                                                    const char *bot_name, size_t bot_name_len,
-                                                   const sc_channel_history_entry_t *entries,
+                                                   const hu_channel_history_entry_t *entries,
                                                    size_t count) {
     if (!msg || msg_len == 0)
-        return SC_GROUP_SKIP;
+        return HU_GROUP_SKIP;
 
     /* Always respond if directly addressed */
     if (bot_name && bot_name_len > 0 && str_contains_ci(msg, msg_len, bot_name))
-        return SC_GROUP_RESPOND;
+        return HU_GROUP_RESPOND;
 
     /* Always respond to direct questions (contains "?" and is short) */
     bool has_question = false;
@@ -2611,11 +2611,11 @@ sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_l
         }
     }
     if (has_question && msg_len < 100)
-        return SC_GROUP_RESPOND;
+        return HU_GROUP_RESPOND;
 
     /* Skip tapbacks and reactions */
     if (msg_len <= 3)
-        return SC_GROUP_SKIP;
+        return HU_GROUP_SKIP;
 
     /* Skip if we responded to the last 2 messages already (don't dominate) */
     if (entries && count >= 3) {
@@ -2627,7 +2627,7 @@ sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_l
                 break;
         }
         if (consecutive_mine >= 2)
-            return SC_GROUP_SKIP;
+            return HU_GROUP_SKIP;
     }
 
     /* Count how much of the recent conversation we've participated in.
@@ -2640,7 +2640,7 @@ sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_l
                 my_msgs++;
         }
         if (my_msgs * 100 / window > 40)
-            return SC_GROUP_SKIP;
+            return HU_GROUP_SKIP;
     }
 
     /* Emotional content or someone asking for help → respond */
@@ -2649,19 +2649,19 @@ sc_group_response_t sc_conversation_classify_group(const char *msg, size_t msg_l
     };
     for (int i = 0; engage_words[i]; i++) {
         if (str_contains_ci(msg, msg_len, engage_words[i]))
-            return SC_GROUP_RESPOND;
+            return HU_GROUP_RESPOND;
     }
 
     /* Short message with no clear prompt → skip */
     if (msg_len < 30 && !has_question)
-        return SC_GROUP_SKIP;
+        return HU_GROUP_SKIP;
 
     /* Default: brief acknowledgment for medium messages, skip for long ones
      * (long messages in group chats are usually directed at specific people) */
     if (msg_len > 100)
-        return SC_GROUP_SKIP;
+        return HU_GROUP_SKIP;
 
-    return SC_GROUP_BRIEF;
+    return HU_GROUP_BRIEF;
 }
 
 /* ── Reaction classifier ───────────────────────────────────────────────── */
@@ -2671,18 +2671,18 @@ static uint32_t reaction_prng_next(uint32_t *s) {
     return (*s >> 16u) & 0x7fffu;
 }
 
-sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg_len, bool from_me,
-                                                     const sc_channel_history_entry_t *entries,
+hu_reaction_type_t hu_conversation_classify_reaction(const char *msg, size_t msg_len, bool from_me,
+                                                     const hu_channel_history_entry_t *entries,
                                                      size_t entry_count, uint32_t seed) {
     (void)entries;
     (void)entry_count;
 
     if (!msg || msg_len == 0)
-        return SC_REACTION_NONE;
+        return HU_REACTION_NONE;
 
     /* Only react to messages from others, not our own */
     if (from_me)
-        return SC_REACTION_NONE;
+        return HU_REACTION_NONE;
 
     uint32_t s = seed;
 
@@ -2690,8 +2690,8 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
     if (str_contains_ci(msg, msg_len, "[image") || str_contains_ci(msg, msg_len, "[attachment")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 50u)
-            return SC_REACTION_HEART;
-        return SC_REACTION_NONE;
+            return HU_REACTION_HEART;
+        return HU_REACTION_NONE;
     }
 
     /* Funny messages → HAHA */
@@ -2702,8 +2702,8 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         str_contains_ci(msg, msg_len, "so funny")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 30u)
-            return SC_REACTION_HAHA;
-        return SC_REACTION_NONE;
+            return HU_REACTION_HAHA;
+        return HU_REACTION_NONE;
     }
 
     /* Short message with exclamations (e.g. "omg!!", "yes!!!") → HAHA or EMPHASIS */
@@ -2718,7 +2718,7 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         if (has_excl) {
             uint32_t roll = reaction_prng_next(&s) % 100u;
             if (roll < 30u)
-                return SC_REACTION_HAHA;
+                return HU_REACTION_HAHA;
         }
     }
 
@@ -2731,8 +2731,8 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         str_contains_ci(msg, msg_len, "so sweet")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 30u)
-            return SC_REACTION_HEART;
-        return SC_REACTION_NONE;
+            return HU_REACTION_HEART;
+        return HU_REACTION_NONE;
     }
 
     /* Agreement/affirmation → THUMBS_UP */
@@ -2741,8 +2741,8 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         str_contains_ci(msg, msg_len, "for sure") || str_contains_ci(msg, msg_len, "definitely")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 30u)
-            return SC_REACTION_THUMBS_UP;
-        return SC_REACTION_NONE;
+            return HU_REACTION_THUMBS_UP;
+        return HU_REACTION_NONE;
     }
 
     /* Impressive/exciting news → EMPHASIS */
@@ -2753,8 +2753,8 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         str_contains_ci(msg, msg_len, "got promoted")) {
         uint32_t roll = reaction_prng_next(&s) % 100u;
         if (roll < 30u)
-            return SC_REACTION_EMPHASIS;
-        return SC_REACTION_NONE;
+            return HU_REACTION_EMPHASIS;
+        return HU_REACTION_NONE;
     }
 
     /* Messages that need a real text response → NONE */
@@ -2762,9 +2762,9 @@ sc_reaction_type_t sc_conversation_classify_reaction(const char *msg, size_t msg
         str_contains_ci(msg, msg_len, "how do") || str_contains_ci(msg, msg_len, "can you") ||
         str_contains_ci(msg, msg_len, "could you") || str_contains_ci(msg, msg_len, "why") ||
         str_contains_ci(msg, msg_len, "when") || str_contains_ci(msg, msg_len, "?"))
-        return SC_REACTION_NONE;
+        return HU_REACTION_NONE;
 
-    return SC_REACTION_NONE;
+    return HU_REACTION_NONE;
 }
 
 /* ── Filler word injection ────────────────────────────────────────────── */
@@ -2774,7 +2774,7 @@ static uint32_t filler_lcg(uint32_t *s) {
     return (*s >> 16) & 0x7fff;
 }
 
-size_t sc_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t seed,
+size_t hu_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t seed,
                                      const char *channel_type, size_t channel_type_len) {
     if (!buf || len == 0 || cap <= len)
         return len;
@@ -2816,7 +2816,7 @@ size_t sc_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t
 
 /* ── Stylometric variance ─────────────────────────────────────────────── */
 
-size_t sc_conversation_vary_complexity(char *buf, size_t len, uint32_t seed) {
+size_t hu_conversation_vary_complexity(char *buf, size_t len, uint32_t seed) {
     if (!buf || len == 0)
         return len;
 
@@ -2890,8 +2890,8 @@ size_t sc_conversation_vary_complexity(char *buf, size_t len, uint32_t seed) {
 
 /* ── Bidirectional sentiment momentum ─────────────────────────────────── */
 
-char *sc_conversation_build_sentiment_momentum(sc_allocator_t *alloc,
-                                               const sc_channel_history_entry_t *entries,
+char *hu_conversation_build_sentiment_momentum(hu_allocator_t *alloc,
+                                               const hu_channel_history_entry_t *entries,
                                                size_t count, size_t *out_len) {
     *out_len = 0;
     if (!alloc || !out_len || !entries || count < 3)
@@ -2971,8 +2971,8 @@ char *sc_conversation_build_sentiment_momentum(sc_allocator_t *alloc,
 
 /* ── Conversation depth signal ────────────────────────────────────────── */
 
-char *sc_conversation_build_depth_signal(sc_allocator_t *alloc,
-                                         const sc_channel_history_entry_t *entries, size_t count,
+char *hu_conversation_build_depth_signal(hu_allocator_t *alloc,
+                                         const hu_channel_history_entry_t *entries, size_t count,
                                          size_t *out_len) {
     *out_len = 0;
     if (!alloc || !out_len || !entries || count < 5)
@@ -3022,8 +3022,8 @@ char *sc_conversation_build_depth_signal(sc_allocator_t *alloc,
 
 /* ── Topic tangent/callback engine ────────────────────────────────────── */
 
-char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
-                                             const sc_channel_history_entry_t *entries,
+char *hu_conversation_build_tangent_callback(hu_allocator_t *alloc,
+                                             const hu_channel_history_entry_t *entries,
                                              size_t count, uint32_t seed, size_t *out_len) {
     *out_len = 0;
     if (!alloc || !out_len || !entries || count < 6)
@@ -3035,7 +3035,7 @@ char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
         return NULL;
 
     /* Find topics from the EARLIER part of conversation (not last 3 messages) */
-    sc_callback_topic_t topics[SC_CALLBACK_MAX_TOPICS];
+    hu_callback_topic_t topics[HU_CALLBACK_MAX_TOPICS];
     size_t topic_count = 0;
     memset(topics, 0, sizeof(topics));
 
@@ -3053,7 +3053,7 @@ char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
     /* Pick a random earlier topic */
     s = s * 1103515245u + 12345u;
     size_t pick = ((s >> 16) & 0x7fff) % topic_count;
-    sc_callback_topic_t *t = &topics[pick];
+    hu_callback_topic_t *t = &topics[pick];
 
     /* Skip if topic is too short or too generic */
     if (t->phrase_len < 3)
@@ -3087,7 +3087,7 @@ char *sc_conversation_build_tangent_callback(sc_allocator_t *alloc,
 
 /* ── AI disclosure detection ──────────────────────────────────────────── */
 
-bool sc_conversation_check_ai_disclosure(const char *response, size_t response_len) {
+bool hu_conversation_check_ai_disclosure(const char *response, size_t response_len) {
     if (!response || response_len == 0)
         return false;
 
@@ -3145,7 +3145,7 @@ bool sc_conversation_check_ai_disclosure(const char *response, size_t response_l
 
 /* ── Banned AI phrases post-processor ─────────────────────────────────── */
 
-size_t sc_conversation_strip_ai_phrases(char *buf, size_t len) {
+size_t hu_conversation_strip_ai_phrases(char *buf, size_t len) {
     if (!buf || len == 0)
         return len;
 
@@ -3240,8 +3240,8 @@ size_t sc_conversation_strip_ai_phrases(char *buf, size_t len) {
 
 /* ── Media-type awareness ─────────────────────────────────────────────── */
 
-bool sc_conversation_is_media_message(const char *msg, size_t msg_len,
-                                      const sc_channel_history_entry_t *entries, size_t count) {
+bool hu_conversation_is_media_message(const char *msg, size_t msg_len,
+                                      const hu_channel_history_entry_t *entries, size_t count) {
     static const char *markers[] = {
         "[image or attachment]",
         "[Photo shared]",
@@ -3262,7 +3262,7 @@ bool sc_conversation_is_media_message(const char *msg, size_t msg_len,
     }
 
     if (entries && count > 0) {
-        const sc_channel_history_entry_t *last = &entries[count - 1];
+        const hu_channel_history_entry_t *last = &entries[count - 1];
         if (!last->from_me) {
             const char *t = last->text;
             size_t tl = strlen(t);

@@ -1,16 +1,16 @@
-#include "seaclaw/memory/lifecycle/diagnostics.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory/lifecycle.h"
+#include "human/memory/lifecycle/diagnostics.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory/lifecycle.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-void sc_diagnostics_diagnose(sc_memory_t *memory, void *vector_store, void *outbox,
-                             void *response_cache, const sc_backend_capabilities_t *capabilities,
+void hu_diagnostics_diagnose(hu_memory_t *memory, void *vector_store, void *outbox,
+                             void *response_cache, const hu_backend_capabilities_t *capabilities,
                              size_t retrieval_sources, const char *rollout_mode,
-                             size_t rollout_mode_len, sc_diagnostic_report_t *out) {
+                             size_t rollout_mode_len, hu_diagnostic_report_t *out) {
     memset(out, 0, sizeof(*out));
     if (!memory || !out)
         return;
@@ -20,7 +20,7 @@ void sc_diagnostics_diagnose(sc_memory_t *memory, void *vector_store, void *outb
     out->backend_healthy = memory->vtable->health_check(memory->ctx);
 
     size_t count = 0;
-    if (memory->vtable->count(memory->ctx, &count) == SC_OK)
+    if (memory->vtable->count(memory->ctx, &count) == HU_OK)
         out->entry_count = count;
 
     if (capabilities)
@@ -32,15 +32,15 @@ void sc_diagnostics_diagnose(sc_memory_t *memory, void *vector_store, void *outb
     out->retrieval_sources = retrieval_sources;
     out->rollout_mode = rollout_mode ? rollout_mode : "off";
     out->rollout_mode_len = rollout_mode_len ? rollout_mode_len : 3;
-    out->session_store_active = false; /* SeaClaw doesn't expose session store in this path */
+    out->session_store_active = false; /* Human doesn't expose session store in this path */
 
     if (response_cache) {
-        out->cache_stats.count = sc_memory_cache_count((sc_memory_cache_t *)response_cache);
+        out->cache_stats.count = hu_memory_cache_count((hu_memory_cache_t *)response_cache);
         /* hits and tokens_saved would need cache API extension */
     }
 }
 
-char *sc_diagnostics_format_report(sc_allocator_t *alloc, const sc_diagnostic_report_t *report) {
+char *hu_diagnostics_format_report(hu_allocator_t *alloc, const hu_diagnostic_report_t *report) {
     if (!alloc || !report)
         return NULL;
 

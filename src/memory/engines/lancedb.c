@@ -1,7 +1,7 @@
 /* LanceDB memory backend — SQLite + optional vector. Text-based search without embeddings.
- * SC_IS_TEST: in-memory mock.
- * When SC_ENABLE_SQLITE is not set (production build), all operations return
- * SC_ERR_NOT_SUPPORTED. This is intentional, documented stub behavior. */
+ * HU_IS_TEST: in-memory mock.
+ * When HU_ENABLE_SQLITE is not set (production build), all operations return
+ * HU_ERR_NOT_SUPPORTED. This is intentional, documented stub behavior. */
 
 /*
  * Name suggests: native LanceDB vector DB backend.
@@ -9,19 +9,19 @@
  * A native implementation would require the actual LanceDB libraries.
  */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-/* ── Mock implementation (SC_IS_TEST) ───────────────────────────────────── */
+#if defined(HU_IS_TEST) && HU_IS_TEST
+/* ── Mock implementation (HU_IS_TEST) ───────────────────────────────────── */
 
 #define MOCK_MAX_ENTRIES 32
 
@@ -33,13 +33,13 @@ typedef struct mock_entry {
     char *timestamp;
 } mock_entry_t;
 
-typedef struct sc_lancedb_memory {
-    sc_allocator_t *alloc;
+typedef struct hu_lancedb_memory {
+    hu_allocator_t *alloc;
     mock_entry_t entries[MOCK_MAX_ENTRIES];
     size_t count;
-} sc_lancedb_memory_t;
+} hu_lancedb_memory_t;
 
-static void mock_free_entry(sc_lancedb_memory_t *self, mock_entry_t *e) {
+static void mock_free_entry(hu_lancedb_memory_t *self, mock_entry_t *e) {
     if (!self->alloc || !e)
         return;
     if (e->key) {
@@ -64,7 +64,7 @@ static void mock_free_entry(sc_lancedb_memory_t *self, mock_entry_t *e) {
     }
 }
 
-static mock_entry_t *mock_find(sc_lancedb_memory_t *self, const char *key, size_t key_len) {
+static mock_entry_t *mock_find(hu_lancedb_memory_t *self, const char *key, size_t key_len) {
     for (size_t i = 0; i < self->count; i++) {
         mock_entry_t *e = &self->entries[i];
         if (e->key && strlen(e->key) == key_len && memcmp(e->key, key, key_len) == 0)
@@ -85,19 +85,19 @@ static int mock_contains(const char *haystack, size_t hlen, const char *needle, 
     return 0;
 }
 
-static const char *category_to_string(const sc_memory_category_t *cat) {
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -106,22 +106,22 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
     }
 }
 
-static void fill_entry_from_mock(sc_allocator_t *alloc, const mock_entry_t *m,
-                                 sc_memory_entry_t *out) {
-    out->id = m->key ? sc_strndup(alloc, m->key, strlen(m->key)) : NULL;
+static void fill_entry_from_mock(hu_allocator_t *alloc, const mock_entry_t *m,
+                                 hu_memory_entry_t *out) {
+    out->id = m->key ? hu_strndup(alloc, m->key, strlen(m->key)) : NULL;
     out->id_len = m->key ? strlen(m->key) : 0;
-    out->key = m->key ? sc_strndup(alloc, m->key, strlen(m->key)) : NULL;
+    out->key = m->key ? hu_strndup(alloc, m->key, strlen(m->key)) : NULL;
     out->key_len = m->key ? strlen(m->key) : 0;
-    out->content = m->content ? sc_strndup(alloc, m->content, strlen(m->content)) : NULL;
+    out->content = m->content ? hu_strndup(alloc, m->content, strlen(m->content)) : NULL;
     out->content_len = m->content ? strlen(m->content) : 0;
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     out->category.data.custom.name =
-        m->category ? sc_strndup(alloc, m->category, strlen(m->category)) : NULL;
+        m->category ? hu_strndup(alloc, m->category, strlen(m->category)) : NULL;
     out->category.data.custom.name_len = m->category ? strlen(m->category) : 0;
-    out->timestamp = m->timestamp ? sc_strndup(alloc, m->timestamp, strlen(m->timestamp)) : NULL;
+    out->timestamp = m->timestamp ? hu_strndup(alloc, m->timestamp, strlen(m->timestamp)) : NULL;
     out->timestamp_len = m->timestamp ? strlen(m->timestamp) : 0;
     out->session_id =
-        m->session_id ? sc_strndup(alloc, m->session_id, strlen(m->session_id)) : NULL;
+        m->session_id ? hu_strndup(alloc, m->session_id, strlen(m->session_id)) : NULL;
     out->session_id_len = m->session_id ? strlen(m->session_id) : 0;
     out->score = NAN;
 }
@@ -131,39 +131,39 @@ static const char *impl_name(void *ctx) {
     return "lancedb";
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     mock_entry_t *e = mock_find(self, key, key_len);
     if (e)
         mock_free_entry(self, e);
     else {
         if (self->count >= MOCK_MAX_ENTRIES)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         e = &self->entries[self->count++];
     }
-    e->key = sc_strndup(self->alloc, key, key_len);
+    e->key = hu_strndup(self->alloc, key, key_len);
     if (!e->key)
-        return SC_ERR_OUT_OF_MEMORY;
-    e->content = sc_strndup(self->alloc, content, content_len);
+        return HU_ERR_OUT_OF_MEMORY;
+    e->content = hu_strndup(self->alloc, content, content_len);
     if (!e->content) {
         self->alloc->free(self->alloc->ctx, e->key, key_len + 1);
         e->key = NULL;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     {
         const char *cat_str = category_to_string(category);
-        e->category = sc_strndup(self->alloc, cat_str, strlen(cat_str));
+        e->category = hu_strndup(self->alloc, cat_str, strlen(cat_str));
         if (!e->category) {
             self->alloc->free(self->alloc->ctx, e->content, content_len + 1);
             self->alloc->free(self->alloc->ctx, e->key, key_len + 1);
             e->key = e->content = NULL;
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
     }
     e->session_id = (session_id && session_id_len > 0)
-                        ? sc_strndup(self->alloc, session_id, session_id_len)
+                        ? hu_strndup(self->alloc, session_id, session_id_len)
                         : NULL;
     {
         char ts[32];
@@ -174,23 +174,23 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
                      tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
         else
             snprintf(ts, sizeof(ts), "%ld", (long)t);
-        e->timestamp = sc_strndup(self->alloc, ts, strlen(ts));
+        e->timestamp = hu_strndup(self->alloc, ts, strlen(ts));
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     if (!query || query_len == 0)
-        return SC_OK;
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+        return HU_OK;
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(hu_memory_entry_t));
     if (!entries)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t count = 0;
     for (size_t i = 0; i < self->count && count < limit; i++) {
         mock_entry_t *m = &self->entries[i];
@@ -209,33 +209,33 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     }
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *found = false;
     mock_entry_t *m = mock_find(self, key, key_len);
     if (!m)
-        return SC_OK;
+        return HU_OK;
     fill_entry_from_mock(alloc, m, out);
     *found = true;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     const char *cat_str = category ? category_to_string(category) : NULL;
     size_t cap = 64;
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_memory_entry_t));
     if (!entries)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t count = 0;
     for (size_t i = 0; i < self->count; i++) {
         mock_entry_t *m = &self->entries[i];
@@ -249,9 +249,9 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
                 continue;
         }
         if (count >= cap) {
-            sc_memory_entry_t *n = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, entries, cap * sizeof(sc_memory_entry_t),
-                (cap * 2) * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *n = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, entries, cap * sizeof(hu_memory_entry_t),
+                (cap * 2) * sizeof(hu_memory_entry_t));
             if (!n)
                 break;
             entries = n;
@@ -261,11 +261,11 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     }
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *deleted = false;
     for (size_t i = 0; i < self->count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -276,16 +276,16 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
             memset(&self->entries[self->count - 1], 0, sizeof(mock_entry_t));
             self->count--;
             *deleted = true;
-            return SC_OK;
+            return HU_OK;
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *out = self->count;
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool impl_health_check(void *ctx) {
@@ -294,17 +294,17 @@ static bool impl_health_check(void *ctx) {
 }
 
 static void impl_deinit(void *ctx) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     if (!self)
         return;
     for (size_t i = 0; i < self->count; i++)
         mock_free_entry(self, &self->entries[i]);
     self->count = 0;
     if (self->alloc)
-        self->alloc->free(self->alloc->ctx, self, sizeof(sc_lancedb_memory_t));
+        self->alloc->free(self->alloc->ctx, self, sizeof(hu_lancedb_memory_t));
 }
 
-static const sc_memory_vtable_t lancedb_vtable = {
+static const hu_memory_vtable_t lancedb_vtable = {
     .name = impl_name,
     .store = impl_store,
     .recall = impl_recall,
@@ -316,24 +316,24 @@ static const sc_memory_vtable_t lancedb_vtable = {
     .deinit = impl_deinit,
 };
 
-sc_memory_t sc_lancedb_memory_create(sc_allocator_t *alloc, const char *db_path) {
+hu_memory_t hu_lancedb_memory_create(hu_allocator_t *alloc, const char *db_path) {
     (void)db_path;
     if (!alloc)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    sc_lancedb_memory_t *self =
-        (sc_lancedb_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_lancedb_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    hu_lancedb_memory_t *self =
+        (hu_lancedb_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_lancedb_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_lancedb_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_lancedb_memory_t));
     self->alloc = alloc;
-    return (sc_memory_t){.ctx = self, .vtable = &lancedb_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &lancedb_vtable};
 }
 
-#else /* !SC_IS_TEST — production: SQLite or stub */
+#else /* !HU_IS_TEST — production: SQLite or stub */
 
-#ifdef SC_ENABLE_SQLITE
+#ifdef HU_ENABLE_SQLITE
 
-#include "seaclaw/memory/sql_common.h"
+#include "human/memory/sql_common.h"
 #include <sqlite3.h>
 #include <stdbool.h>
 
@@ -347,13 +347,13 @@ static bool fts5_available(sqlite3 *db) {
     return false;
 }
 
-typedef struct sc_lancedb_memory_prod {
-    sc_allocator_t *alloc;
+typedef struct hu_lancedb_memory_prod {
+    hu_allocator_t *alloc;
     sqlite3 *db;
     bool has_fts5;
-} sc_lancedb_memory_t;
+} hu_lancedb_memory_t;
 
-#define SC_SQLITE_BUSY_TIMEOUT_MS 5000
+#define HU_SQLITE_BUSY_TIMEOUT_MS 5000
 
 static const char *schema_sql =
     "CREATE TABLE IF NOT EXISTS lancedb_memories ("
@@ -376,19 +376,19 @@ static void get_timestamp(char *buf, size_t buf_size) {
         snprintf(buf, buf_size, "%ld", (long)t);
 }
 
-static const char *category_to_string(const sc_memory_category_t *cat) {
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -397,8 +397,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
     }
 }
 
-static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
-                                      sc_memory_entry_t *out) {
+static hu_error_t read_entry_from_row(sqlite3_stmt *stmt, hu_allocator_t *alloc,
+                                      hu_memory_entry_t *out) {
     const char *key_p = (const char *)sqlite3_column_text(stmt, 0);
     const char *text_p = (const char *)sqlite3_column_text(stmt, 1);
     const char *category_p = (const char *)sqlite3_column_text(stmt, 2);
@@ -411,26 +411,26 @@ static sc_error_t read_entry_from_row(sqlite3_stmt *stmt, sc_allocator_t *alloc,
     size_t session_id_len = session_id_p ? (size_t)sqlite3_column_bytes(stmt, 3) : 0;
     size_t timestamp_len = timestamp_p ? (size_t)sqlite3_column_bytes(stmt, 4) : 0;
     size_t source_len = source_p ? (size_t)sqlite3_column_bytes(stmt, 5) : 0;
-    out->id = key_p ? sc_strndup(alloc, key_p, key_len) : NULL;
+    out->id = key_p ? hu_strndup(alloc, key_p, key_len) : NULL;
     out->id_len = key_len;
-    out->key = key_p ? sc_strndup(alloc, key_p, key_len) : NULL;
+    out->key = key_p ? hu_strndup(alloc, key_p, key_len) : NULL;
     out->key_len = key_len;
-    out->content = text_p ? sc_strndup(alloc, text_p, text_len) : NULL;
+    out->content = text_p ? hu_strndup(alloc, text_p, text_len) : NULL;
     out->content_len = text_len;
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-    out->category.data.custom.name = category_p ? sc_strndup(alloc, category_p, cat_len) : NULL;
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+    out->category.data.custom.name = category_p ? hu_strndup(alloc, category_p, cat_len) : NULL;
     out->category.data.custom.name_len = cat_len;
-    out->timestamp = timestamp_p ? sc_strndup(alloc, timestamp_p, timestamp_len) : NULL;
+    out->timestamp = timestamp_p ? hu_strndup(alloc, timestamp_p, timestamp_len) : NULL;
     out->timestamp_len = timestamp_len;
-    out->session_id = session_id_p ? sc_strndup(alloc, session_id_p, session_id_len) : NULL;
+    out->session_id = session_id_p ? hu_strndup(alloc, session_id_p, session_id_len) : NULL;
     out->session_id_len = session_id_len;
-    out->source = source_p ? sc_strndup(alloc, source_p, source_len) : NULL;
+    out->source = source_p ? hu_strndup(alloc, source_p, source_len) : NULL;
     out->source_len = source_len;
     if (sqlite3_column_count(stmt) > 6)
         out->score = sqlite3_column_double(stmt, 6);
     else
         out->score = NAN;
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *impl_name_prod(void *ctx) {
@@ -438,10 +438,10 @@ static const char *impl_name_prod(void *ctx) {
     return "lancedb";
 }
 
-static sc_error_t impl_store_prod(void *ctx, const char *key, size_t key_len, const char *content,
-                                  size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store_prod(void *ctx, const char *key, size_t key_len, const char *content,
+                                  size_t content_len, const hu_memory_category_t *category,
                                   const char *session_id, size_t session_id_len) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     char ts[64];
     get_timestamp(ts, sizeof(ts));
     const char *cat_str = category_to_string(category);
@@ -451,7 +451,7 @@ static sc_error_t impl_store_prod(void *ctx, const char *key, size_t key_len, co
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, content, (int)content_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, cat_str, -1, SQLITE_STATIC);
@@ -464,15 +464,15 @@ static sc_error_t impl_store_prod(void *ctx, const char *key, size_t key_len, co
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE)
-        return SC_ERR_MEMORY_STORE;
-    return SC_OK;
+        return HU_ERR_MEMORY_STORE;
+    return HU_OK;
 }
 
-static sc_error_t impl_store_ex_prod(void *ctx, const char *key, size_t key_len,
+static hu_error_t impl_store_ex_prod(void *ctx, const char *key, size_t key_len,
                                      const char *content, size_t content_len,
-                                     const sc_memory_category_t *category, const char *session_id,
-                                     size_t session_id_len, const sc_memory_store_opts_t *opts) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+                                     const hu_memory_category_t *category, const char *session_id,
+                                     size_t session_id_len, const hu_memory_store_opts_t *opts) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     char ts[64];
     get_timestamp(ts, sizeof(ts));
     const char *source = (opts && opts->source && opts->source_len > 0) ? opts->source : NULL;
@@ -484,7 +484,7 @@ static sc_error_t impl_store_ex_prod(void *ctx, const char *key, size_t key_len,
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, content, (int)content_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, cat_str, -1, SQLITE_STATIC);
@@ -501,19 +501,19 @@ static sc_error_t impl_store_ex_prod(void *ctx, const char *key, size_t key_len,
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE)
-        return SC_ERR_MEMORY_STORE;
-    return SC_OK;
+        return HU_ERR_MEMORY_STORE;
+    return HU_OK;
 }
 
-static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char *query,
+static hu_error_t impl_recall_prod(void *ctx, hu_allocator_t *alloc, const char *query,
                                    size_t query_len, size_t limit, const char *session_id,
-                                   size_t session_id_len, sc_memory_entry_t **out,
+                                   size_t session_id_len, hu_memory_entry_t **out,
                                    size_t *out_count) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     if (!query || query_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* FTS5 BM25 search - build query from words (escape quotes, wrap in "", join with OR) */
     char fts_buf[512];
@@ -562,11 +562,11 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
         if (rc == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, fts_buf, (int)fts_len, SQLITE_STATIC);
             sqlite3_bind_int64(stmt, 2, (sqlite3_int64)limit);
-            sc_memory_entry_t *entries =
-                (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *entries =
+                (hu_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(hu_memory_entry_t));
             if (!entries) {
                 sqlite3_finalize(stmt);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             size_t count = 0;
             while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
@@ -574,7 +574,7 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
                 if (session_id && session_id_len > 0 && entries[count].session_id &&
                     (entries[count].session_id_len != session_id_len ||
                      memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
-                    sc_memory_entry_free_fields(alloc, &entries[count]);
+                    hu_memory_entry_free_fields(alloc, &entries[count]);
                     continue;
                 }
                 count++;
@@ -583,9 +583,9 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
             if (count > 0) {
                 *out = entries;
                 *out_count = count;
-                return SC_OK;
+                return HU_OK;
             }
-            alloc->free(alloc->ctx, entries, limit * sizeof(sc_memory_entry_t));
+            alloc->free(alloc->ctx, entries, limit * sizeof(hu_memory_entry_t));
         } else if (stmt)
             sqlite3_finalize(stmt);
     }
@@ -593,7 +593,7 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
     /* Fallback: LIKE search */
     char *like_pattern = (char *)alloc->alloc(alloc->ctx, query_len + 3);
     if (!like_pattern)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     like_pattern[0] = '%';
     memcpy(like_pattern + 1, query, query_len);
     like_pattern[query_len + 1] = '%';
@@ -605,16 +605,16 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         alloc->free(alloc->ctx, like_pattern, query_len + 3);
-        return SC_ERR_MEMORY_RECALL;
+        return HU_ERR_MEMORY_RECALL;
     }
     sqlite3_bind_text(stmt, 1, like_pattern, -1, SQLITE_STATIC);
     sqlite3_bind_int64(stmt, 2, (sqlite3_int64)limit);
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(hu_memory_entry_t));
     if (!entries) {
         sqlite3_finalize(stmt);
         alloc->free(alloc->ctx, like_pattern, query_len + 3);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && count < limit) {
@@ -622,7 +622,7 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
         if (session_id && session_id_len > 0 && entries[count].session_id &&
             (entries[count].session_id_len != session_id_len ||
              memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
-            sc_memory_entry_free_fields(alloc, &entries[count]);
+            hu_memory_entry_free_fields(alloc, &entries[count]);
             continue;
         }
         count++;
@@ -631,33 +631,33 @@ static sc_error_t impl_recall_prod(void *ctx, sc_allocator_t *alloc, const char 
     alloc->free(alloc->ctx, like_pattern, query_len + 3);
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_get_prod(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                                sc_memory_entry_t *out, bool *found) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+static hu_error_t impl_get_prod(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                                hu_memory_entry_t *out, bool *found) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     *found = false;
     const char *sql = "SELECT key, text, category, session_id, updated_at, source "
                       "FROM lancedb_memories WHERE key = ?1";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         read_entry_from_row(stmt, alloc, out);
         *found = true;
     }
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_list_prod(void *ctx, sc_allocator_t *alloc,
-                                 const sc_memory_category_t *category, const char *session_id,
-                                 size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list_prod(void *ctx, hu_allocator_t *alloc,
+                                 const hu_memory_category_t *category, const char *session_id,
+                                 size_t session_id_len, hu_memory_entry_t **out,
                                  size_t *out_count) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     const char *sql;
     if (category)
         sql = "SELECT key, text, category, session_id, updated_at, source "
@@ -668,22 +668,22 @@ static sc_error_t impl_list_prod(void *ctx, sc_allocator_t *alloc,
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (category)
         sqlite3_bind_text(stmt, 1, category_to_string(category), -1, SQLITE_STATIC);
     size_t cap = 64;
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_memory_entry_t));
     if (!entries) {
         sqlite3_finalize(stmt);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         if (count >= cap) {
-            sc_memory_entry_t *n = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, entries, cap * sizeof(sc_memory_entry_t),
-                (cap * 2) * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *n = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, entries, cap * sizeof(hu_memory_entry_t),
+                (cap * 2) * sizeof(hu_memory_entry_t));
             if (!n)
                 break;
             entries = n;
@@ -693,7 +693,7 @@ static sc_error_t impl_list_prod(void *ctx, sc_allocator_t *alloc,
         if (session_id && session_id_len > 0 && entries[count].session_id &&
             (entries[count].session_id_len != session_id_len ||
              memcmp(entries[count].session_id, session_id, session_id_len) != 0)) {
-            sc_memory_entry_free_fields(alloc, &entries[count]);
+            hu_memory_entry_free_fields(alloc, &entries[count]);
             continue;
         }
         count++;
@@ -701,41 +701,41 @@ static sc_error_t impl_list_prod(void *ctx, sc_allocator_t *alloc,
     sqlite3_finalize(stmt);
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_forget_prod(void *ctx, const char *key, size_t key_len, bool *deleted) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+static hu_error_t impl_forget_prod(void *ctx, const char *key, size_t key_len, bool *deleted) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     const char *sql = "DELETE FROM lancedb_memories WHERE key = ?1";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     sqlite3_bind_text(stmt, 1, key, (int)key_len, SQLITE_STATIC);
     int step_rc = sqlite3_step(stmt);
     if (step_rc != SQLITE_DONE) {
         sqlite3_finalize(stmt);
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
     *deleted = sqlite3_changes(self->db) > 0;
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_count_prod(void *ctx, size_t *out) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+static hu_error_t impl_count_prod(void *ctx, size_t *out) {
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     const char *sql = "SELECT COUNT(*) FROM lancedb_memories";
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(self->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     *out = sqlite3_step(stmt) == SQLITE_ROW ? (size_t)sqlite3_column_int64(stmt, 0) : 0;
     sqlite3_finalize(stmt);
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool impl_health_check_prod(void *ctx) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     char *err = NULL;
     int rc = sqlite3_exec(self->db, "SELECT 1", NULL, NULL, &err);
     if (err)
@@ -744,13 +744,13 @@ static bool impl_health_check_prod(void *ctx) {
 }
 
 static void impl_deinit_prod(void *ctx) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     if (self->db)
         sqlite3_close(self->db);
-    self->alloc->free(self->alloc->ctx, self, sizeof(sc_lancedb_memory_t));
+    self->alloc->free(self->alloc->ctx, self, sizeof(hu_lancedb_memory_t));
 }
 
-static const sc_memory_vtable_t lancedb_vtable_prod = {
+static const hu_memory_vtable_t lancedb_vtable_prod = {
     .name = impl_name_prod,
     .store = impl_store_prod,
     .store_ex = impl_store_ex_prod,
@@ -763,25 +763,25 @@ static const sc_memory_vtable_t lancedb_vtable_prod = {
     .deinit = impl_deinit_prod,
 };
 
-sc_memory_t sc_lancedb_memory_create(sc_allocator_t *alloc, const char *db_path) {
+hu_memory_t hu_lancedb_memory_create(hu_allocator_t *alloc, const char *db_path) {
     if (!alloc)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     sqlite3 *db = NULL;
     int rc = sqlite3_open(db_path ? db_path : ":memory:", &db);
     if (rc != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
-    sqlite3_busy_timeout(db, SC_SQLITE_BUSY_TIMEOUT_MS);
-    sqlite3_exec(db, SC_SQL_PRAGMA_INIT, NULL, NULL, NULL);
+    sqlite3_busy_timeout(db, HU_SQLITE_BUSY_TIMEOUT_MS);
+    sqlite3_exec(db, HU_SQL_PRAGMA_INIT, NULL, NULL, NULL);
     char *err = NULL;
     rc = sqlite3_exec(db, schema_sql, NULL, NULL, &err);
     if (rc != SQLITE_OK) {
         if (err)
             sqlite3_free(err);
         sqlite3_close(db);
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
     {
         char *alter_err = NULL;
@@ -819,27 +819,27 @@ sc_memory_t sc_lancedb_memory_create(sc_allocator_t *alloc, const char *db_path)
             "(new.rowid, new.key, new.text); END",
             NULL, NULL, NULL);
     }
-    sc_lancedb_memory_t *self =
-        (sc_lancedb_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_lancedb_memory_t));
+    hu_lancedb_memory_t *self =
+        (hu_lancedb_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_lancedb_memory_t));
     if (!self) {
         sqlite3_close(db);
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
-    memset(self, 0, sizeof(sc_lancedb_memory_t));
+    memset(self, 0, sizeof(hu_lancedb_memory_t));
     self->alloc = alloc;
     self->db = db;
     self->has_fts5 = has_fts5;
-    return (sc_memory_t){.ctx = self, .vtable = &lancedb_vtable_prod};
+    return (hu_memory_t){.ctx = self, .vtable = &lancedb_vtable_prod};
 }
 
-#else /* !SC_ENABLE_SQLITE — stub */
+#else /* !HU_ENABLE_SQLITE — stub */
 
 static const char *impl_name_stub(void *ctx) {
     (void)ctx;
     return "lancedb";
 }
-static sc_error_t impl_store_stub(void *ctx, const char *k, size_t kl, const char *c, size_t cl,
-                                  const sc_memory_category_t *cat, const char *sid, size_t sidl) {
+static hu_error_t impl_store_stub(void *ctx, const char *k, size_t kl, const char *c, size_t cl,
+                                  const hu_memory_category_t *cat, const char *sid, size_t sidl) {
     (void)ctx;
     (void)k;
     (void)kl;
@@ -848,10 +848,10 @@ static sc_error_t impl_store_stub(void *ctx, const char *k, size_t kl, const cha
     (void)cat;
     (void)sid;
     (void)sidl;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
-static sc_error_t impl_recall_stub(void *ctx, sc_allocator_t *a, const char *q, size_t ql,
-                                   size_t lim, const char *sid, size_t sidl, sc_memory_entry_t **o,
+static hu_error_t impl_recall_stub(void *ctx, hu_allocator_t *a, const char *q, size_t ql,
+                                   size_t lim, const char *sid, size_t sidl, hu_memory_entry_t **o,
                                    size_t *oc) {
     (void)ctx;
     (void)a;
@@ -862,20 +862,20 @@ static sc_error_t impl_recall_stub(void *ctx, sc_allocator_t *a, const char *q, 
     (void)sidl;
     *o = NULL;
     *oc = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
-static sc_error_t impl_get_stub(void *ctx, sc_allocator_t *a, const char *k, size_t kl,
-                                sc_memory_entry_t *o, bool *f) {
+static hu_error_t impl_get_stub(void *ctx, hu_allocator_t *a, const char *k, size_t kl,
+                                hu_memory_entry_t *o, bool *f) {
     (void)ctx;
     (void)a;
     (void)k;
     (void)kl;
     (void)o;
     *f = false;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
-static sc_error_t impl_list_stub(void *ctx, sc_allocator_t *a, const sc_memory_category_t *c,
-                                 const char *sid, size_t sidl, sc_memory_entry_t **o, size_t *oc) {
+static hu_error_t impl_list_stub(void *ctx, hu_allocator_t *a, const hu_memory_category_t *c,
+                                 const char *sid, size_t sidl, hu_memory_entry_t **o, size_t *oc) {
     (void)ctx;
     (void)a;
     (void)c;
@@ -883,36 +883,36 @@ static sc_error_t impl_list_stub(void *ctx, sc_allocator_t *a, const sc_memory_c
     (void)sidl;
     *o = NULL;
     *oc = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
-static sc_error_t impl_forget_stub(void *ctx, const char *k, size_t kl, bool *d) {
+static hu_error_t impl_forget_stub(void *ctx, const char *k, size_t kl, bool *d) {
     (void)ctx;
     (void)k;
     (void)kl;
     *d = false;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
-static sc_error_t impl_count_stub(void *ctx, size_t *o) {
+static hu_error_t impl_count_stub(void *ctx, size_t *o) {
     (void)ctx;
     *o = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 static bool impl_health_check_stub(void *ctx) {
     (void)ctx;
     return false;
 }
 
-typedef struct sc_lancedb_memory_stub {
-    sc_allocator_t *alloc;
-} sc_lancedb_memory_t;
+typedef struct hu_lancedb_memory_stub {
+    hu_allocator_t *alloc;
+} hu_lancedb_memory_t;
 
 static void impl_deinit_stub(void *ctx) {
-    sc_lancedb_memory_t *self = (sc_lancedb_memory_t *)ctx;
+    hu_lancedb_memory_t *self = (hu_lancedb_memory_t *)ctx;
     if (self && self->alloc)
-        self->alloc->free(self->alloc->ctx, self, sizeof(sc_lancedb_memory_t));
+        self->alloc->free(self->alloc->ctx, self, sizeof(hu_lancedb_memory_t));
 }
 
-static const sc_memory_vtable_t lancedb_vtable_stub = {
+static const hu_memory_vtable_t lancedb_vtable_stub = {
     .name = impl_name_stub,
     .store = impl_store_stub,
     .recall = impl_recall_stub,
@@ -924,18 +924,18 @@ static const sc_memory_vtable_t lancedb_vtable_stub = {
     .deinit = impl_deinit_stub,
 };
 
-sc_memory_t sc_lancedb_memory_create(sc_allocator_t *alloc, const char *db_path) {
+hu_memory_t hu_lancedb_memory_create(hu_allocator_t *alloc, const char *db_path) {
     (void)db_path;
     if (!alloc)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    sc_lancedb_memory_t *self =
-        (sc_lancedb_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_lancedb_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    hu_lancedb_memory_t *self =
+        (hu_lancedb_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_lancedb_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_lancedb_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_lancedb_memory_t));
     self->alloc = alloc;
-    return (sc_memory_t){.ctx = self, .vtable = &lancedb_vtable_stub};
+    return (hu_memory_t){.ctx = self, .vtable = &lancedb_vtable_stub};
 }
 
-#endif /* SC_ENABLE_SQLITE */
-#endif /* SC_IS_TEST */
+#endif /* HU_ENABLE_SQLITE */
+#endif /* HU_IS_TEST */

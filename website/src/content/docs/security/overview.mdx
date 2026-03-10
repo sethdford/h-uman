@@ -1,9 +1,9 @@
 ---
 title: Security Overview
-description: Pairing, sandboxing, encryption, and access control in SeaClaw.
+description: Pairing, sandboxing, encryption, and access control in Human.
 ---
 
-SeaClaw is designed secure-by-default: pairing for gateway access, sandboxed tool execution, encrypted secrets, and workspace scoping.
+Human is designed secure-by-default: pairing for gateway access, sandboxed tool execution, encrypted secrets, and workspace scoping.
 
 ## Pairing (6-digit code → bearer token)
 
@@ -73,7 +73,7 @@ API keys and sensitive config can be stored encrypted:
 | 1 (supervised) | Allowlisted commands, require approval for medium risk |
 | 2+ (full)      | Broader autonomy                                       |
 
-Config: `security.autonomy_level` or `SEACLAW_AUTONOMY` env.
+Config: `security.autonomy_level` or `HUMAN_AUTONOMY` env.
 
 ## Rate limiting
 

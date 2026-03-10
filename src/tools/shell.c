@@ -1,12 +1,12 @@
-#include "seaclaw/config.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/process_util.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/security.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/tool.h"
+#include "human/config.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/process_util.h"
+#include "human/core/string.h"
+#include "human/security.h"
+#include "human/security/sandbox.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,96 +18,96 @@
 #include <unistd.h>
 #endif
 
-#define SC_SHELL_NAME "shell"
-#define SC_SHELL_DESC "Execute shell commands. Use with caution."
-#define SC_SHELL_PARAMS                                                                      \
+#define HU_SHELL_NAME "shell"
+#define HU_SHELL_DESC "Execute shell commands. Use with caution."
+#define HU_SHELL_PARAMS                                                                      \
     "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[" \
     "\"command\"]}"
-#define SC_SHELL_CMD_MAX 4096
+#define HU_SHELL_CMD_MAX 4096
 
-typedef struct sc_shell_ctx {
+typedef struct hu_shell_ctx {
     const char *workspace_dir;
     size_t workspace_dir_len;
-    sc_security_policy_t *policy;
-} sc_shell_ctx_t;
+    hu_security_policy_t *policy;
+} hu_shell_ctx_t;
 
 /*
  * SECURITY WARNING: This tool passes commands directly to /bin/sh -c.
  * Shell metacharacters in cmd are interpreted by the shell.
  * This tool should be restricted or disabled in high-assurance deployments.
- * Use sc_policy_validate_command and sandbox wrapping for mitigation.
+ * Use hu_policy_validate_command and sandbox wrapping for mitigation.
  *
- * RUNTIME WRAP: The sc_runtime_vtable_t has an optional wrap_command method
+ * RUNTIME WRAP: The hu_runtime_vtable_t has an optional wrap_command method
  * (e.g. Docker runtime wraps as "docker run ..."). Shell tool does not yet
  * use it; integration left for later. Callers that have a runtime can invoke
  * wrap_command to wrap argv before exec.
  */
-static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                sc_tool_result_t *out) {
-    sc_shell_ctx_t *s = (sc_shell_ctx_t *)ctx;
+static hu_error_t shell_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                hu_tool_result_t *out) {
+    hu_shell_ctx_t *s = (hu_shell_ctx_t *)ctx;
     if (!s || !args || !out) {
-        *out = sc_tool_result_fail("invalid args", 13);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 13);
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
         const char *stub = "(shell disabled in test mode)";
         size_t stub_len = strlen(stub);
-        char *msg = sc_strndup(alloc, stub, stub_len);
+        char *msg = hu_strndup(alloc, stub, stub_len);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 13);
-            return SC_OK;
+            *out = hu_tool_result_fail("out of memory", 13);
+            return HU_OK;
         }
-        *out = sc_tool_result_ok_owned(msg, stub_len);
+        *out = hu_tool_result_ok_owned(msg, stub_len);
     }
-    return SC_OK;
+    return HU_OK;
 #else
 #ifndef _WIN32
-    if (s->policy && !sc_security_shell_allowed(s->policy)) {
-        *out = sc_tool_result_fail("shell execution not allowed by policy", 38);
-        return SC_OK;
+    if (s->policy && !hu_security_shell_allowed(s->policy)) {
+        *out = hu_tool_result_fail("shell execution not allowed by policy", 38);
+        return HU_OK;
     }
 
-    const char *cmd = sc_json_get_string(args, "command");
+    const char *cmd = hu_json_get_string(args, "command");
     if (!cmd || strlen(cmd) == 0) {
-        *out = sc_tool_result_fail("missing command", 15);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing command", 15);
+        return HU_OK;
     }
     size_t cmd_len = strlen(cmd);
-    if (cmd_len > SC_SHELL_CMD_MAX) {
-        *out = sc_tool_result_fail("command too long", 16);
-        return SC_OK;
+    if (cmd_len > HU_SHELL_CMD_MAX) {
+        *out = hu_tool_result_fail("command too long", 16);
+        return HU_OK;
     }
 
     if (s->policy) {
         bool approved = s->policy->pre_approved;
         s->policy->pre_approved = false;
-        sc_command_risk_level_t risk;
-        sc_error_t perr = sc_policy_validate_command(s->policy, cmd, approved, &risk);
-        if (perr == SC_ERR_SECURITY_APPROVAL_REQUIRED) {
-            *out = sc_tool_result_fail("approval required", 17);
+        hu_command_risk_level_t risk;
+        hu_error_t perr = hu_policy_validate_command(s->policy, cmd, approved, &risk);
+        if (perr == HU_ERR_SECURITY_APPROVAL_REQUIRED) {
+            *out = hu_tool_result_fail("approval required", 17);
             out->needs_approval = true;
-            return SC_OK;
+            return HU_OK;
         }
-        if (perr != SC_OK) {
-            *out = sc_tool_result_fail("command blocked by policy", 25);
-            return SC_OK;
+        if (perr != HU_OK) {
+            *out = hu_tool_result_fail("command blocked by policy", 25);
+            return HU_OK;
         }
     }
 
     int fds[2];
     if (pipe(fds) != 0) {
-        *out = sc_tool_result_fail("pipe failed", 11);
-        return SC_OK;
+        *out = hu_tool_result_fail("pipe failed", 11);
+        return HU_OK;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
         close(fds[0]);
         close(fds[1]);
-        *out = sc_tool_result_fail("fork failed", 11);
-        return SC_OK;
+        *out = hu_tool_result_fail("fork failed", 11);
+        return HU_OK;
     }
 
     if (pid == 0) {
@@ -170,18 +170,18 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc, const sc_json_
         /* Apply kernel-level sandbox (Landlock, seccomp) */
         if (s->policy && s->policy->sandbox && s->policy->sandbox->vtable &&
             s->policy->sandbox->vtable->apply) {
-            sc_error_t serr = s->policy->sandbox->vtable->apply(s->policy->sandbox->ctx);
-            if (serr != SC_OK && serr != SC_ERR_NOT_SUPPORTED)
+            hu_error_t serr = s->policy->sandbox->vtable->apply(s->policy->sandbox->ctx);
+            if (serr != HU_OK && serr != HU_ERR_NOT_SUPPORTED)
                 _exit(125);
         }
 
         /* Wrap command with sandbox if available (argv-wrapping backends) */
-        if (s->policy && s->policy->sandbox && sc_sandbox_is_available(s->policy->sandbox)) {
+        if (s->policy && s->policy->sandbox && hu_sandbox_is_available(s->policy->sandbox)) {
             const char *orig_argv[] = {"/bin/sh", "-c", cmd, NULL};
             const char *wrapped[16];
             size_t wrapped_count = 0;
-            if (sc_sandbox_wrap_command(s->policy->sandbox, orig_argv, 3, wrapped, 15,
-                                        &wrapped_count) == SC_OK &&
+            if (hu_sandbox_wrap_command(s->policy->sandbox, orig_argv, 3, wrapped, 15,
+                                        &wrapped_count) == HU_OK &&
                 wrapped_count > 0) {
                 wrapped[wrapped_count] = NULL;
                 execvp(wrapped[0], (char *const *)wrapped);
@@ -198,8 +198,8 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc, const sc_json_
     if (!buf) {
         close(fds[0]);
         waitpid(pid, NULL, 0);
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_OK;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_OK;
     }
     size_t len = 0;
     for (;;) {
@@ -217,68 +217,68 @@ static sc_error_t shell_execute(void *ctx, sc_allocator_t *alloc, const sc_json_
     waitpid(pid, &status, 0);
 
     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        char *out_copy = sc_strndup(alloc, buf, len);
+        char *out_copy = hu_strndup(alloc, buf, len);
         alloc->free(alloc->ctx, buf, cap);
         if (!out_copy) {
-            *out = sc_tool_result_fail("out of memory", 12);
-            return SC_OK;
+            *out = hu_tool_result_fail("out of memory", 12);
+            return HU_OK;
         }
-        *out = sc_tool_result_ok_owned(out_copy, len);
+        *out = hu_tool_result_ok_owned(out_copy, len);
     } else if (WIFSIGNALED(status)) {
         alloc->free(alloc->ctx, buf, cap);
         char err[64];
         int n = snprintf(err, sizeof(err), "killed by signal %d", WTERMSIG(status));
-        char *err_dup = sc_strndup(alloc, err, (size_t)n);
+        char *err_dup = hu_strndup(alloc, err, (size_t)n);
         if (err_dup)
-            *out = sc_tool_result_fail_owned(err_dup, (size_t)n);
+            *out = hu_tool_result_fail_owned(err_dup, (size_t)n);
         else
-            *out = sc_tool_result_fail("killed by signal", 16);
+            *out = hu_tool_result_fail("killed by signal", 16);
     } else {
         int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
         alloc->free(alloc->ctx, buf, cap);
         char err[64];
         int n = snprintf(err, sizeof(err), "exit code %d", code);
-        char *err_dup = sc_strndup(alloc, err, (size_t)n);
+        char *err_dup = hu_strndup(alloc, err, (size_t)n);
         if (err_dup)
-            *out = sc_tool_result_fail_owned(err_dup, (size_t)n);
+            *out = hu_tool_result_fail_owned(err_dup, (size_t)n);
         else
-            *out = sc_tool_result_fail("command failed", 14);
+            *out = hu_tool_result_fail("command failed", 14);
     }
-    return SC_OK;
+    return HU_OK;
 #else
     (void)alloc;
-    *out = sc_tool_result_fail("shell not supported on this platform", 38);
-    return SC_OK;
+    *out = hu_tool_result_fail("shell not supported on this platform", 38);
+    return HU_OK;
 #endif
 #endif
 }
 
 static const char *shell_name(void *ctx) {
     (void)ctx;
-    return SC_SHELL_NAME;
+    return HU_SHELL_NAME;
 }
 
 static const char *shell_description(void *ctx) {
     (void)ctx;
-    return SC_SHELL_DESC;
+    return HU_SHELL_DESC;
 }
 
 static const char *shell_parameters_json(void *ctx) {
     (void)ctx;
-    return SC_SHELL_PARAMS;
+    return HU_SHELL_PARAMS;
 }
 
-static void shell_deinit(void *ctx, sc_allocator_t *alloc) {
+static void shell_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!ctx)
         return;
-    sc_shell_ctx_t *s = (sc_shell_ctx_t *)ctx;
+    hu_shell_ctx_t *s = (hu_shell_ctx_t *)ctx;
     if (s->workspace_dir && alloc)
         alloc->free(alloc->ctx, (void *)s->workspace_dir, s->workspace_dir_len + 1);
     if (alloc)
         alloc->free(alloc->ctx, s, sizeof(*s));
 }
 
-static const sc_tool_vtable_t shell_vtable = {
+static const hu_tool_vtable_t shell_vtable = {
     .execute = shell_execute,
     .name = shell_name,
     .description = shell_description,
@@ -286,18 +286,18 @@ static const sc_tool_vtable_t shell_vtable = {
     .deinit = shell_deinit,
 };
 
-sc_error_t sc_shell_create(sc_allocator_t *alloc, const char *workspace_dir,
-                           size_t workspace_dir_len, sc_security_policy_t *policy, sc_tool_t *out) {
-    sc_shell_ctx_t *s = (sc_shell_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*s));
+hu_error_t hu_shell_create(hu_allocator_t *alloc, const char *workspace_dir,
+                           size_t workspace_dir_len, hu_security_policy_t *policy, hu_tool_t *out) {
+    hu_shell_ctx_t *s = (hu_shell_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*s));
     if (!s)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(s, 0, sizeof(*s));
 
     if (workspace_dir && workspace_dir_len > 0) {
-        s->workspace_dir = sc_strndup(alloc, workspace_dir, workspace_dir_len);
+        s->workspace_dir = hu_strndup(alloc, workspace_dir, workspace_dir_len);
         if (!s->workspace_dir) {
             alloc->free(alloc->ctx, s, sizeof(*s));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         s->workspace_dir_len = workspace_dir_len;
     }
@@ -305,5 +305,5 @@ sc_error_t sc_shell_create(sc_allocator_t *alloc, const char *workspace_dir,
 
     out->ctx = s;
     out->vtable = &shell_vtable;
-    return SC_OK;
+    return HU_OK;
 }

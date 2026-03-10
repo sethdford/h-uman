@@ -1,14 +1,14 @@
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
 #endif
-#include "seaclaw/platform.h"
+#include "human/platform.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
 #include <windows.h>
-#define SC_IS_WIN 1
+#define HU_IS_WIN 1
 #if defined(_WIN32) && !defined(__CYGWIN__)
 #include <direct.h>
 #include <stdio.h>
@@ -18,13 +18,13 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#define SC_IS_WIN 0
+#define HU_IS_WIN 0
 #endif
 
-char *sc_platform_get_env(sc_allocator_t *alloc, const char *name) {
+char *hu_platform_get_env(hu_allocator_t *alloc, const char *name) {
     if (!alloc || !name)
         return NULL;
-#if SC_IS_WIN
+#if HU_IS_WIN
     (void)alloc;
     /* Windows getenv returns pointer to process env block; dupe for ownership */
     const char *v = getenv(name);
@@ -49,17 +49,17 @@ char *sc_platform_get_env(sc_allocator_t *alloc, const char *name) {
 #endif
 }
 
-char *sc_platform_get_home_dir(sc_allocator_t *alloc) {
+char *hu_platform_get_home_dir(hu_allocator_t *alloc) {
     if (!alloc)
         return NULL;
-#if SC_IS_WIN
-    char *prof = sc_platform_get_env(alloc, "USERPROFILE");
+#if HU_IS_WIN
+    char *prof = hu_platform_get_env(alloc, "USERPROFILE");
     if (prof)
         return prof;
-    char *drive = sc_platform_get_env(alloc, "HOMEDRIVE");
+    char *drive = hu_platform_get_env(alloc, "HOMEDRIVE");
     if (!drive)
         return NULL;
-    char *path = sc_platform_get_env(alloc, "HOMEPATH");
+    char *path = hu_platform_get_env(alloc, "HOMEPATH");
     if (!path) {
         alloc->free(alloc->ctx, drive, strlen(drive) + 1);
         return NULL;
@@ -77,18 +77,18 @@ char *sc_platform_get_home_dir(sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, path, strlen(path) + 1);
     return out;
 #else
-    return sc_platform_get_env(alloc, "HOME");
+    return hu_platform_get_env(alloc, "HOME");
 #endif
 }
 
-char *sc_platform_get_temp_dir(sc_allocator_t *alloc) {
+char *hu_platform_get_temp_dir(hu_allocator_t *alloc) {
     if (!alloc)
         return NULL;
-#if SC_IS_WIN
-    char *v = sc_platform_get_env(alloc, "TEMP");
+#if HU_IS_WIN
+    char *v = hu_platform_get_env(alloc, "TEMP");
     if (v)
         return v;
-    v = sc_platform_get_env(alloc, "TMP");
+    v = hu_platform_get_env(alloc, "TMP");
     if (v)
         return v;
     {
@@ -100,7 +100,7 @@ char *sc_platform_get_temp_dir(sc_allocator_t *alloc) {
         return out;
     }
 #else
-    char *v = sc_platform_get_env(alloc, "TMPDIR");
+    char *v = hu_platform_get_env(alloc, "TMPDIR");
     if (v)
         return v;
     {
@@ -114,32 +114,32 @@ char *sc_platform_get_temp_dir(sc_allocator_t *alloc) {
 #endif
 }
 
-const char *sc_platform_get_shell(void) {
-#if SC_IS_WIN
+const char *hu_platform_get_shell(void) {
+#if HU_IS_WIN
     return "cmd.exe";
 #else
     return "/bin/sh";
 #endif
 }
 
-const char *sc_platform_get_shell_flag(void) {
-#if SC_IS_WIN
+const char *hu_platform_get_shell_flag(void) {
+#if HU_IS_WIN
     return "/c";
 #else
     return "-c";
 #endif
 }
 
-bool sc_platform_is_windows(void) {
-    return SC_IS_WIN ? true : false;
+bool hu_platform_is_windows(void) {
+    return HU_IS_WIN ? true : false;
 }
-bool sc_platform_is_unix(void) {
-    return SC_IS_WIN ? false : true;
+bool hu_platform_is_unix(void) {
+    return HU_IS_WIN ? false : true;
 }
 
 /* ─── Cross-platform time, sleep, filesystem ─────────────────────────────── */
 
-struct tm *sc_platform_localtime_r(const time_t *t, struct tm *out) {
+struct tm *hu_platform_localtime_r(const time_t *t, struct tm *out) {
     if (!t || !out)
         return NULL;
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -149,7 +149,7 @@ struct tm *sc_platform_localtime_r(const time_t *t, struct tm *out) {
 #endif
 }
 
-struct tm *sc_platform_gmtime_r(const time_t *t, struct tm *out) {
+struct tm *hu_platform_gmtime_r(const time_t *t, struct tm *out) {
     if (!t || !out)
         return NULL;
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -159,7 +159,7 @@ struct tm *sc_platform_gmtime_r(const time_t *t, struct tm *out) {
 #endif
 }
 
-void sc_platform_sleep_ms(unsigned int ms) {
+void hu_platform_sleep_ms(unsigned int ms) {
 #if defined(_WIN32) && !defined(__CYGWIN__)
     Sleep(ms);
 #else
@@ -175,7 +175,7 @@ void sc_platform_sleep_ms(unsigned int ms) {
 #endif
 }
 
-int sc_platform_mkdir(const char *path, unsigned int mode) {
+int hu_platform_mkdir(const char *path, unsigned int mode) {
     (void)mode;
 #if defined(_WIN32) && !defined(__CYGWIN__)
     return _mkdir(path);
@@ -184,7 +184,7 @@ int sc_platform_mkdir(const char *path, unsigned int mode) {
 #endif
 }
 
-char *sc_platform_realpath(sc_allocator_t *alloc, const char *path) {
+char *hu_platform_realpath(hu_allocator_t *alloc, const char *path) {
     if (!alloc || !path)
         return NULL;
 #if defined(_WIN32) && !defined(__CYGWIN__)
@@ -220,7 +220,7 @@ char *sc_platform_realpath(sc_allocator_t *alloc, const char *path) {
 #endif
 }
 
-bool sc_platform_parse_datetime(const char *ts, struct tm *out) {
+bool hu_platform_parse_datetime(const char *ts, struct tm *out) {
     if (!ts || !ts[0] || !out)
         return false;
     memset(out, 0, sizeof(*out));
@@ -238,7 +238,7 @@ bool sc_platform_parse_datetime(const char *ts, struct tm *out) {
     if (sscanf(ts, "%d:%d", &h, &mi) == 2) {
         time_t now = time(NULL);
         struct tm now_tm;
-        if (sc_platform_localtime_r(&now, &now_tm)) {
+        if (hu_platform_localtime_r(&now, &now_tm)) {
             out->tm_year = now_tm.tm_year;
             out->tm_mon = now_tm.tm_mon;
             out->tm_mday = now_tm.tm_mday;
@@ -256,7 +256,7 @@ bool sc_platform_parse_datetime(const char *ts, struct tm *out) {
     memset(out, 0, sizeof(*out));
     time_t now = time(NULL);
     struct tm now_tm;
-    if (!sc_platform_localtime_r(&now, &now_tm))
+    if (!hu_platform_localtime_r(&now, &now_tm))
         return false;
     out->tm_year = now_tm.tm_year;
     out->tm_mon = now_tm.tm_mon;
@@ -266,7 +266,7 @@ bool sc_platform_parse_datetime(const char *ts, struct tm *out) {
 #endif
 }
 
-const char *sc_platform_get_home_env(void) {
+const char *hu_platform_get_home_env(void) {
 #if defined(_WIN32) && !defined(__CYGWIN__)
     return getenv("USERPROFILE") ? getenv("USERPROFILE") : getenv("HOME");
 #else

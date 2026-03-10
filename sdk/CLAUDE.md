@@ -1,6 +1,6 @@
 # sdk/ — Plugin SDK
 
-Templates and scaffolding for building seaclaw plugins.
+Templates and scaffolding for building human plugins.
 
 ## Structure
 
@@ -11,10 +11,10 @@ Templates and scaffolding for building seaclaw plugins.
 ## Rules
 
 - All plugins implement the vtable pattern (`void *ctx` + function pointers)
-- Templates must compile standalone against `include/seaclaw/` headers
-- Use `SC_IS_TEST` guards for side effects in test harnesses
+- Templates must compile standalone against `include/human/` headers
+- Use `HU_IS_TEST` guards for side effects in test harnesses
 - Registration keys: stable, lowercase, user-facing (e.g., `"my_provider"`)
-- Follow naming: `sc_<name>_t` for types, `sc_<module>_<action>` for functions
+- Follow naming: `hu_<name>_t` for types, `hu_<module>_<action>` for functions
 
 ## Adding a New Template
 

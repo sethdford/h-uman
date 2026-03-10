@@ -1,8 +1,8 @@
 {
-  "name": "seaclaw-control-ui",
+  "name": "human-control-ui",
   "version": "0.3.0",
-  "description": "SeaClaw Control — real-time AI assistant dashboard",
-  "author": "SeaClaw Contributors",
+  "description": "Human Control — real-time AI assistant dashboard",
+  "author": "Human Contributors",
   "private": true,
   "type": "module",
   "scripts": {

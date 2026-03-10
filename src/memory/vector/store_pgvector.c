@@ -1,9 +1,9 @@
-#include "seaclaw/memory/vector/store_pgvector.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/vector/store_pgvector.h"
+#include "human/core/string.h"
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(SC_ENABLE_POSTGRES)
+#if defined(HU_ENABLE_POSTGRES)
 #include <libpq-fe.h>
 
 static bool is_safe_identifier(const char *id) {
@@ -18,25 +18,25 @@ static bool is_safe_identifier(const char *id) {
 }
 
 typedef struct pgvector_ctx {
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
     PGconn *conn;
     char *connection_url;
     char *table_name;
     size_t dimensions;
 } pgvector_ctx_t;
 
-static sc_error_t pgvector_upsert_impl(void *ctx, sc_allocator_t *alloc, const char *id,
+static hu_error_t pgvector_upsert_impl(void *ctx, hu_allocator_t *alloc, const char *id,
                                        size_t id_len, const float *embedding, size_t dims,
                                        const char *metadata, size_t metadata_len) {
     (void)metadata;
     (void)metadata_len;
     pgvector_ctx_t *p = (pgvector_ctx_t *)ctx;
     if (!p || !p->conn || !embedding)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    char *key_z = sc_strndup(alloc, id, id_len);
+    char *key_z = hu_strndup(alloc, id, id_len);
     if (!key_z)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     char vec_buf[4096];
     size_t pos = 0;
@@ -57,7 +57,7 @@ static sc_error_t pgvector_upsert_impl(void *ctx, sc_allocator_t *alloc, const c
                  p->table_name);
     if (slen >= (int)sizeof(sql) || slen < 0) {
         alloc->free(alloc->ctx, key_z, id_len + 1);
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     const char *params[2] = {key_z, vec_buf};
@@ -66,18 +66,18 @@ static sc_error_t pgvector_upsert_impl(void *ctx, sc_allocator_t *alloc, const c
     if (!res || PQresultStatus(res) != PGRES_COMMAND_OK) {
         if (res)
             PQclear(res);
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
     PQclear(res);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t pgvector_search_impl(void *ctx, sc_allocator_t *alloc,
+static hu_error_t pgvector_search_impl(void *ctx, hu_allocator_t *alloc,
                                        const float *query_embedding, size_t dims, size_t limit,
-                                       sc_vector_search_result_t **results, size_t *result_count) {
+                                       hu_vector_search_result_t **results, size_t *result_count) {
     pgvector_ctx_t *p = (pgvector_ctx_t *)ctx;
     if (!p || !p->conn || !query_embedding || !results || !result_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char vec_buf[4096];
     size_t pos = 0;
@@ -97,7 +97,7 @@ static sc_error_t pgvector_search_impl(void *ctx, sc_allocator_t *alloc,
                         "ORDER BY embedding <=> $1::vector LIMIT %zu",
                         p->table_name, lim);
     if (slen >= (int)sizeof(sql) || slen < 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     const char *params[1] = {vec_buf};
     PGresult *res = PQexecParams(p->conn, sql, 1, NULL, params, NULL, NULL, 0);
@@ -106,7 +106,7 @@ static sc_error_t pgvector_search_impl(void *ctx, sc_allocator_t *alloc,
             PQclear(res);
         *results = NULL;
         *result_count = 0;
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
 
     int nrows = PQntuples(res);
@@ -114,38 +114,38 @@ static sc_error_t pgvector_search_impl(void *ctx, sc_allocator_t *alloc,
         PQclear(res);
         *results = NULL;
         *result_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
-    sc_vector_search_result_t *arr = (sc_vector_search_result_t *)alloc->alloc(
-        alloc->ctx, (size_t)nrows * sizeof(sc_vector_search_result_t));
+    hu_vector_search_result_t *arr = (hu_vector_search_result_t *)alloc->alloc(
+        alloc->ctx, (size_t)nrows * sizeof(hu_vector_search_result_t));
     if (!arr) {
         PQclear(res);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(arr, 0, (size_t)nrows * sizeof(sc_vector_search_result_t));
+    memset(arr, 0, (size_t)nrows * sizeof(hu_vector_search_result_t));
 
     for (int i = 0; i < nrows; i++) {
         const char *key = PQgetvalue(res, i, 0);
         const char *sim = PQgetvalue(res, i, 1);
         if (key)
-            arr[i].id = sc_strdup(alloc, key);
+            arr[i].id = hu_strdup(alloc, key);
         arr[i].score = (float)atof(sim ? sim : "0");
     }
     PQclear(res);
     *results = arr;
     *result_count = (size_t)nrows;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t pgvector_delete_impl(void *ctx, sc_allocator_t *alloc, const char *id,
+static hu_error_t pgvector_delete_impl(void *ctx, hu_allocator_t *alloc, const char *id,
                                        size_t id_len) {
     pgvector_ctx_t *p = (pgvector_ctx_t *)ctx;
     if (!p || !p->conn)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    char *key_z = sc_strndup(alloc, id, id_len);
+    char *key_z = hu_strndup(alloc, id, id_len);
     if (!key_z)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     char sql[512];
     snprintf(sql, sizeof(sql), "DELETE FROM %s WHERE key = $1", p->table_name);
@@ -155,10 +155,10 @@ static sc_error_t pgvector_delete_impl(void *ctx, sc_allocator_t *alloc, const c
     if (!res || PQresultStatus(res) != PGRES_COMMAND_OK) {
         if (res)
             PQclear(res);
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
     PQclear(res);
-    return SC_OK;
+    return HU_OK;
 }
 
 static size_t pgvector_count_impl(void *ctx) {
@@ -180,7 +180,7 @@ static size_t pgvector_count_impl(void *ctx) {
     return n;
 }
 
-static void pgvector_deinit_impl(void *ctx, sc_allocator_t *alloc) {
+static void pgvector_deinit_impl(void *ctx, hu_allocator_t *alloc) {
     pgvector_ctx_t *p = (pgvector_ctx_t *)ctx;
     if (!p || !alloc)
         return;
@@ -193,7 +193,7 @@ static void pgvector_deinit_impl(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, p, sizeof(pgvector_ctx_t));
 }
 
-static const sc_vector_store_vtable_t pgvector_vtable = {
+static const hu_vector_store_vtable_t pgvector_vtable = {
     .upsert = pgvector_upsert_impl,
     .search = pgvector_search_impl,
     .delete = pgvector_delete_impl,
@@ -204,14 +204,14 @@ static const sc_vector_store_vtable_t pgvector_vtable = {
 #else
 
 typedef struct pgvector_ctx {
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
     void *conn;
     char *connection_url;
     char *table_name;
     size_t dimensions;
 } pgvector_ctx_t;
 
-static sc_error_t pgvector_upsert_impl(void *ctx, sc_allocator_t *alloc, const char *id,
+static hu_error_t pgvector_upsert_impl(void *ctx, hu_allocator_t *alloc, const char *id,
                                        size_t id_len, const float *embedding, size_t dims,
                                        const char *metadata, size_t metadata_len) {
     (void)ctx;
@@ -222,12 +222,12 @@ static sc_error_t pgvector_upsert_impl(void *ctx, sc_allocator_t *alloc, const c
     (void)dims;
     (void)metadata;
     (void)metadata_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
-static sc_error_t pgvector_search_impl(void *ctx, sc_allocator_t *alloc,
+static hu_error_t pgvector_search_impl(void *ctx, hu_allocator_t *alloc,
                                        const float *query_embedding, size_t dims, size_t limit,
-                                       sc_vector_search_result_t **results, size_t *result_count) {
+                                       hu_vector_search_result_t **results, size_t *result_count) {
     (void)ctx;
     (void)alloc;
     (void)query_embedding;
@@ -235,16 +235,16 @@ static sc_error_t pgvector_search_impl(void *ctx, sc_allocator_t *alloc,
     (void)limit;
     *results = NULL;
     *result_count = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
-static sc_error_t pgvector_delete_impl(void *ctx, sc_allocator_t *alloc, const char *id,
+static hu_error_t pgvector_delete_impl(void *ctx, hu_allocator_t *alloc, const char *id,
                                        size_t id_len) {
     (void)ctx;
     (void)alloc;
     (void)id;
     (void)id_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
 static size_t pgvector_count_impl(void *ctx) {
@@ -252,7 +252,7 @@ static size_t pgvector_count_impl(void *ctx) {
     return 0;
 }
 
-static void pgvector_deinit_impl(void *ctx, sc_allocator_t *alloc) {
+static void pgvector_deinit_impl(void *ctx, hu_allocator_t *alloc) {
     pgvector_ctx_t *p = (pgvector_ctx_t *)ctx;
     if (!p || !alloc)
         return;
@@ -263,7 +263,7 @@ static void pgvector_deinit_impl(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, p, sizeof(pgvector_ctx_t));
 }
 
-static const sc_vector_store_vtable_t pgvector_vtable = {
+static const hu_vector_store_vtable_t pgvector_vtable = {
     .upsert = pgvector_upsert_impl,
     .search = pgvector_search_impl,
     .delete = pgvector_delete_impl,
@@ -272,15 +272,15 @@ static const sc_vector_store_vtable_t pgvector_vtable = {
 };
 #endif
 
-sc_vector_store_t sc_vector_store_pgvector_create(sc_allocator_t *alloc,
-                                                  const sc_pgvector_config_t *config) {
-    sc_vector_store_t s = {.ctx = NULL, .vtable = &pgvector_vtable};
+hu_vector_store_t hu_vector_store_pgvector_create(hu_allocator_t *alloc,
+                                                  const hu_pgvector_config_t *config) {
+    hu_vector_store_t s = {.ctx = NULL, .vtable = &pgvector_vtable};
     if (!alloc || !config)
         return s;
 
     const char *table_val =
         (config->table_name && config->table_name[0]) ? config->table_name : "memory_vectors";
-#if defined(SC_ENABLE_POSTGRES)
+#if defined(HU_ENABLE_POSTGRES)
     if (!is_safe_identifier(table_val))
         return s;
 #endif
@@ -290,11 +290,11 @@ sc_vector_store_t sc_vector_store_pgvector_create(sc_allocator_t *alloc,
         return s;
     memset(p, 0, sizeof(*p));
     p->alloc = alloc;
-    p->connection_url = config->connection_url ? sc_strdup(alloc, config->connection_url) : NULL;
-    p->table_name = sc_strdup(alloc, table_val);
+    p->connection_url = config->connection_url ? hu_strdup(alloc, config->connection_url) : NULL;
+    p->table_name = hu_strdup(alloc, table_val);
     p->dimensions = config->dimensions;
 
-#if defined(SC_ENABLE_POSTGRES)
+#if defined(HU_ENABLE_POSTGRES)
     if (p->connection_url) {
         p->conn = PQconnectdb(p->connection_url);
         if (!p->conn || PQstatus(p->conn) != CONNECTION_OK) {

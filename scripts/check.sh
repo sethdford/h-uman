@@ -1,5 +1,5 @@
 #!/bin/sh
-# SeaClaw local validation script — single source of truth for pre-commit/pre-push style.
+# Human local validation script — single source of truth for pre-commit/pre-push style.
 # Usage: ./scripts/check.sh [--help]
 
 set -eu
@@ -16,7 +16,7 @@ Runs local validation steps:
   1. clang-format --dry-run -Werror on all .c/.h in src/ and include/
   2. cmake configure (Debug, all channels) in build-check/
   3. cmake build
-  4. run seaclaw_tests
+  4. run human_tests
 
 Exit 0 if all pass, 1 otherwise.
 EOF
@@ -30,7 +30,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || die "cannot cd to $ROOT"
 
 if [ ! -f "CMakeLists.txt" ]; then
-    die "not in SeaClaw root (no CMakeLists.txt)"
+    die "not in Human root (no CMakeLists.txt)"
 fi
 
 CLANG_FMT="clang-format"
@@ -43,10 +43,10 @@ fi
 PASS=0
 FAIL=0
 
-# 1. clang-format (skippable via SC_SKIP_FORMAT=1 for cross-version tolerance)
+# 1. clang-format (skippable via HU_SKIP_FORMAT=1 for cross-version tolerance)
 info "Step 1/4: clang-format check..."
-if [ "${SC_SKIP_FORMAT:-0}" = "1" ]; then
-    info "  clang-format: skipped (SC_SKIP_FORMAT=1)"
+if [ "${HU_SKIP_FORMAT:-0}" = "1" ]; then
+    info "  clang-format: skipped (HU_SKIP_FORMAT=1)"
     PASS=$((PASS + 1))
 elif find src include \( -name '*.c' -o -name '*.h' \) 2>/dev/null | xargs "$CLANG_FMT" --dry-run -Werror 2>/dev/null; then
     info "  clang-format: pass"
@@ -85,17 +85,17 @@ else
 fi
 
 # 4. run tests
-info "Step 4/4: seaclaw_tests..."
-if [ -x "$BUILD_DIR/seaclaw_tests" ]; then
-    if "$BUILD_DIR/seaclaw_tests" >/dev/null 2>&1; then
-        info "  seaclaw_tests: pass"
+info "Step 4/4: human_tests..."
+if [ -x "$BUILD_DIR/human_tests" ]; then
+    if "$BUILD_DIR/human_tests" >/dev/null 2>&1; then
+        info "  human_tests: pass"
         PASS=$((PASS + 1))
     else
-        warn "  seaclaw_tests: fail"
+        warn "  human_tests: fail"
         FAIL=$((FAIL + 1))
     fi
 else
-    warn "  seaclaw_tests: binary not found"
+    warn "  human_tests: binary not found"
     FAIL=$((FAIL + 1))
 fi
 

@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug in seaclaw
+description: Report a bug in human
 labels: [bug]
 body:
   - type: textarea
@@ -26,7 +26,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "seaclaw version or commit hash"
+      description: "human version or commit hash"
       placeholder: "v2026.2.19"
 
   - type: dropdown

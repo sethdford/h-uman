@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-07
 **Status:** Approved
-**Scope:** Dynamic synthetic conversations, pressure testing, and chaos testing across all 33 seaclaw channels
+**Scope:** Dynamic synthetic conversations, pressure testing, and chaos testing across all 33 human channels
 
 ## Motivation
 
@@ -14,19 +14,19 @@ Two layers: **loopback simulation** (all channels, in-process) and **real iMessa
 
 ### Layer 1: Mock Inject Infrastructure
 
-Add `sc_<channel>_test_inject_mock` and `sc_<channel>_test_get_last_message` APIs to all channels missing them. Four channels already have this pattern: MQTT, IMAP, Nostr, Email.
+Add `hu_<channel>_test_inject_mock` and `hu_<channel>_test_get_last_message` APIs to all channels missing them. Four channels already have this pattern: MQTT, IMAP, Nostr, Email.
 
 **Pattern (per channel, ~30 LOC each):**
 
 ```c
-#if SC_IS_TEST
-typedef struct sc_<name>_mock_msg {
+#if HU_IS_TEST
+typedef struct hu_<name>_mock_msg {
     char session_key[128];
     char content[4096];
-} sc_<name>_mock_msg_t;
+} hu_<name>_mock_msg_t;
 
 // In context struct:
-sc_<name>_mock_msg_t mock_msgs[8];
+hu_<name>_mock_msg_t mock_msgs[8];
 size_t mock_count;
 char last_message[4096];
 size_t last_message_len;
@@ -34,7 +34,7 @@ size_t last_message_len;
 ```
 
 - `test_inject_mock`: appends to ring buffer
-- Poll function: under `SC_IS_TEST`, returns mocks instead of doing real I/O
+- Poll function: under `HU_IS_TEST`, returns mocks instead of doing real I/O
 - `test_get_last_message`: returns last message passed to `send()`
 
 **Channels to add (all tiers):**
@@ -86,7 +86,7 @@ Gemini generates scenario
 
 **Execution:**
 
-1. Create channel via `sc_<name>_create` with test config
+1. Create channel via `hu_<name>_create` with test config
 2. For each turn: inject → poll → dispatch → send → capture → verify
 3. Record latency, verdict, save failures to regression dir
 
@@ -128,7 +128,7 @@ Activated via `--real-imessage <phone_or_email>`:
 - Polls `~/Library/Messages/chat.db` for response
 - 30-second timeout per turn
 - Reports send success, poll success, round-trip latency
-- Guarded behind `__APPLE__` and `SC_ENABLE_SQLITE`
+- Guarded behind `__APPLE__` and `HU_ENABLE_SQLITE`
 
 ### Layer 5: Pressure Testing
 
@@ -164,13 +164,13 @@ src/channels/
   line.c                     — +mock inject, +get_last_message
   (... remaining channels)
 
-CMakeLists.txt               — new seaclaw_channel_tests target
+CMakeLists.txt               — new human_channel_tests target
 ```
 
 ## Build
 
 ```cmake
-option(SC_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
+option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" OFF)
 ```
 
 ```bash
@@ -183,24 +183,24 @@ cmake --build build -j$(nproc)
 
 ```bash
 # All channels, full chaos, pressure
-./build/seaclaw_channel_tests \
-  --binary ./build/seaclaw \
+./build/human_channel_tests \
+  --binary ./build/human \
   --channels all \
   --count 5 \
   --chaos all \
   --concurrency 4 \
   --duration 10 \
-  --regression-dir /tmp/sc_channel_regressions \
+  --regression-dir /tmp/hu_channel_regressions \
   --verbose
 
 # Single channel
-./build/seaclaw_channel_tests --channels imessage --count 3
+./build/human_channel_tests --channels imessage --count 3
 
 # Real iMessage
-./build/seaclaw_channel_tests --real-imessage +15551234567 --count 2
+./build/human_channel_tests --real-imessage +15551234567 --count 2
 
 # Chaos only
-./build/seaclaw_channel_tests --channels telegram,slack --chaos message --count 10
+./build/human_channel_tests --channels telegram,slack --chaos message --count 10
 ```
 
 ## Metrics Output
@@ -223,4 +223,4 @@ cmake --build build -j$(nproc)
 - Real iMessage requires explicit opt-in flag
 - All mock data uses neutral placeholders
 - Chaos tests never weaken security policy — they test resilience
-- `SC_IS_TEST` guards prevent accidental network/process side effects
+- `HU_IS_TEST` guards prevent accidental network/process side effects

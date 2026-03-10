@@ -2,17 +2,17 @@ import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import type { DataTableColumnV2 } from "../components/sc-data-table-v2.js";
-import "../components/sc-badge.js";
-import "../components/sc-button.js";
-import "../components/sc-data-table-v2.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-sheet.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
+import type { DataTableColumnV2 } from "../components/hu-data-table-v2.js";
+import "../components/hu-badge.js";
+import "../components/hu-button.js";
+import "../components/hu-data-table-v2.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-sheet.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
 
 interface NodeItem {
   id?: string;
@@ -48,7 +48,7 @@ function formatUptime(secs: number | undefined): string {
   return parts.join(" ");
 }
 
-@customElement("sc-nodes-view")
+@customElement("hu-nodes-view")
 export class ScNodesView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
 
@@ -61,40 +61,40 @@ export class ScNodesView extends GatewayAwareLitElement {
     .header-actions {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-lg);
+      gap: var(--hu-space-md);
+      margin-bottom: var(--hu-space-lg);
     }
     .staleness {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
     }
     .table-section {
-      margin-top: var(--sc-space-md);
+      margin-top: var(--hu-space-md);
     }
     .sheet-detail-row {
       display: flex;
       justify-content: space-between;
-      padding: var(--sc-space-sm) 0;
-      border-bottom: 1px solid var(--sc-border-subtle);
+      padding: var(--hu-space-sm) 0;
+      border-bottom: 1px solid var(--hu-border-subtle);
     }
     .sheet-detail-row:last-child {
       border-bottom: none;
     }
     .sheet-detail-label {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
     }
     .sheet-detail-value {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text);
-      font-family: var(--sc-font-mono);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text);
+      font-family: var(--hu-font-mono);
     }
     .sheet-title {
-      font-weight: var(--sc-weight-semibold);
-      font-size: var(--sc-text-lg);
-      color: var(--sc-text);
-      margin-bottom: var(--sc-space-lg);
-      font-family: var(--sc-font-mono);
+      font-weight: var(--hu-weight-semibold);
+      font-size: var(--hu-text-lg);
+      color: var(--hu-text);
+      margin-bottom: var(--hu-space-lg);
+      font-family: var(--hu-font-mono);
     }
     @media (prefers-reduced-motion: reduce) {
       * {
@@ -153,7 +153,7 @@ export class ScNodesView extends GatewayAwareLitElement {
       render: (_v, row) => {
         const variant = row.statusVariant as "success" | "warning" | "neutral";
         const label = String(row.status ?? "");
-        return html`<sc-badge variant=${variant}>${label}</sc-badge>`;
+        return html`<hu-badge variant=${variant}>${label}</hu-badge>`;
       },
     },
     {
@@ -181,84 +181,84 @@ export class ScNodesView extends GatewayAwareLitElement {
 
   private _renderSkeleton(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Nodes overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Nodes overview">
+        <hu-section-header
           heading="Nodes"
           description="Connected node instances and their status"
-        ></sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
+        ></hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
       <div class="table-section">
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
+        <hu-skeleton variant="card" height="200px"></hu-skeleton>
       </div>
     `;
   }
 
   private _renderContent(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Nodes overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Nodes overview">
+        <hu-section-header
           heading="Nodes"
           description="Connected node instances and their status"
-        ></sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-stat-card
+        ></hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-stat-card
           .value=${this.nodes.length}
           label="Total Nodes"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.nodes.filter((n) =>
             ["ok", "healthy", "connected", "online"].includes((n.status ?? "").toLowerCase()),
           ).length}
           label="Healthy"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+      </hu-stats-row>
       <div class="header-actions">
         ${this.lastLoadedAt
           ? html`<span class="staleness">Last updated ${this.stalenessLabel}</span>`
           : nothing}
-        <sc-button
+        <hu-button
           size="sm"
           .loading=${this.loading}
           @click=${() => this.load()}
           aria-label="Refresh nodes"
         >
           Refresh
-        </sc-button>
+        </hu-button>
       </div>
       ${this.error
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.warning}
             heading="Error"
             .description=${this.error}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : nothing}
       <div class="table-section" role="region" aria-label="Nodes table">
         ${this.nodes.length === 0 && !this.loading
           ? html`
-              <sc-empty-state
+              <hu-empty-state
                 .icon=${icons.monitor}
                 heading="No nodes connected"
                 description="Connected devices and gateways will appear here."
-              ></sc-empty-state>
+              ></hu-empty-state>
             `
           : this.nodes.length > 0
             ? html`
-                <sc-data-table-v2
+                <hu-data-table-v2
                   .columns=${this.columns}
                   .rows=${this.tableRows}
-                  @sc-row-click=${this._onRowClick}
-                ></sc-data-table-v2>
+                  @hu-row-click=${this._onRowClick}
+                ></hu-data-table-v2>
               `
             : nothing}
       </div>
-      <sc-sheet ?open=${this._sheetNode != null} @close=${this._onSheetClose}>
+      <hu-sheet ?open=${this._sheetNode != null} @close=${this._onSheetClose}>
         ${this._sheetNode
           ? html`
               <div class="sheet-title">${this._sheetNode.id ?? "Node"}</div>
@@ -296,7 +296,7 @@ export class ScNodesView extends GatewayAwareLitElement {
                 : nothing}
             `
           : nothing}
-      </sc-sheet>
+      </hu-sheet>
     `;
   }
 

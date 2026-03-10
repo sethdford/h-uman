@@ -77,16 +77,16 @@ esac
 
 **1. No Path Validation / Allowed-Directory Check**
 
-**Issue:** `sc_vision_read_image` accepts any path. It checks:
+**Issue:** `hu_vision_read_image` accepts any path. It checks:
 
 - `path_len < 4096`
 - File exists (`stat`)
 - Regular file (`S_ISREG`)
-- Size ≤ `SC_MULTIMODAL_MAX_IMAGE_SIZE` (5 MB)
+- Size ≤ `HU_MULTIMODAL_MAX_IMAGE_SIZE` (5 MB)
 
 It does **not** verify the path is under an allowed directory (e.g. `~/Library/Messages/Attachments`).
 
-**Threat model:** Attachment paths come from `sc_imessage_get_latest_attachment_path`, which reads `a.filename` from the iMessage SQLite database. Under normal operation, macOS stores attachments under `~/Library/Messages/Attachments/`. If the database is compromised (malware, manual edit), a malicious `filename` could point to `/etc/passwd`, `~/.ssh/id_rsa`, etc.
+**Threat model:** Attachment paths come from `hu_imessage_get_latest_attachment_path`, which reads `a.filename` from the iMessage SQLite database. Under normal operation, macOS stores attachments under `~/Library/Messages/Attachments/`. If the database is compromised (malware, manual edit), a malicious `filename` could point to `/etc/passwd`, `~/.ssh/id_rsa`, etc.
 
 **Fix:** Add path canonicalization and allowlist:
 
@@ -94,7 +94,7 @@ It does **not** verify the path is under an allowed directory (e.g. `~/Library/M
 /* After path_buf is built, canonicalize and verify */
 char real[4096];
 if (realpath(path_buf, real) == NULL)
-    return SC_ERR_NOT_FOUND;
+    return HU_ERR_NOT_FOUND;
 /* Verify real starts with allowed prefix, e.g. ~/Library/Messages/ */
 ```
 
@@ -108,7 +108,7 @@ The path is derived from the database, not from user message content. A remote a
 
 #### Attachment Path Handling
 
-**`sc_imessage_get_attachment_path` / `sc_imessage_get_latest_attachment_path`:**
+**`hu_imessage_get_attachment_path` / `hu_imessage_get_latest_attachment_path`:**
 
 - Filenames come from `a.filename` in the attachment table.
 - `~` is expanded to `$HOME`; paths with `../` are not canonicalized.
@@ -130,8 +130,8 @@ The path is derived from the database, not from user message content. A remote a
 
 #### Vision Pipeline
 
-- Image path comes from `sc_imessage_get_latest_attachment_path` (contact-scoped).
-- `sc_vision_describe_image` sends the image to the provider; the description is used in the prompt.
+- Image path comes from `hu_imessage_get_latest_attachment_path` (contact-scoped).
+- `hu_vision_describe_image` sends the image to the provider; the description is used in the prompt.
 - No logging of raw file contents or image data.
 - Risk of reading sensitive files is tied to path validation in `vision.c` and `imessage.c`, not to daemon logic.
 
@@ -180,11 +180,11 @@ These are merged into `convo_ctx` and passed as `conversation_context` to the pr
 
 **Issue:** No explicit upper bound on total context size.
 
-- `sc_prompt_build_system` uses `append()` with unbounded realloc.
+- `hu_prompt_build_system` uses `append()` with unbounded realloc.
 - All BTH injections (emotion, mood, vision, proactive, etc.) can grow without limit.
 - Risk: Context window overflow, increased latency, higher token cost, or provider truncation.
 
-**Recommendation:** Add a configurable `SC_PROMPT_MAX_CONTEXT_BYTES` (or similar) and truncate/prioritize when exceeded.
+**Recommendation:** Add a configurable `HU_PROMPT_MAX_CONTEXT_BYTES` (or similar) and truncate/prioritize when exceeded.
 
 ### Prompt Injection via Context
 
@@ -218,7 +218,7 @@ These are merged into `convo_ctx` and passed as `conversation_context` to the pr
 
 | Concern                    | Recommendation                                               |
 | -------------------------- | ------------------------------------------------------------ |
-| Unbounded context size     | Add `SC_PROMPT_MAX_CONTEXT_BYTES` and truncation logic       |
+| Unbounded context size     | Add `HU_PROMPT_MAX_CONTEXT_BYTES` and truncation logic       |
 | Path validation for vision | Canonicalize and allowlist paths under `~/Library/Messages/` |
 
 ### DEPLOYMENT ISSUES

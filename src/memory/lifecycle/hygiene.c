@@ -1,7 +1,7 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/lifecycle.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
+#include "human/memory/lifecycle.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,7 +32,7 @@ static uint64_t parse_timestamp_epoch(const char *ts, size_t ts_len) {
 }
 
 /* Compare entries by content for deduplication */
-static bool content_equal(const sc_memory_entry_t *a, const sc_memory_entry_t *b) {
+static bool content_equal(const hu_memory_entry_t *a, const hu_memory_entry_t *b) {
     if (a->content_len != b->content_len)
         return false;
     if (!a->content || !b->content)
@@ -41,43 +41,43 @@ static bool content_equal(const sc_memory_entry_t *a, const sc_memory_entry_t *b
 }
 
 /* Compare timestamps; return true if a is newer than b */
-static bool timestamp_newer(const sc_memory_entry_t *a, const sc_memory_entry_t *b) {
+static bool timestamp_newer(const hu_memory_entry_t *a, const hu_memory_entry_t *b) {
     uint64_t ta = parse_timestamp_epoch(a->timestamp, a->timestamp_len);
     uint64_t tb = parse_timestamp_epoch(b->timestamp, b->timestamp_len);
     return ta > tb;
 }
 
-sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
-                                 const sc_hygiene_config_t *config, sc_hygiene_stats_t *stats) {
+hu_error_t hu_memory_hygiene_run(hu_allocator_t *alloc, hu_memory_t *memory,
+                                 const hu_hygiene_config_t *config, hu_hygiene_stats_t *stats) {
     if (!alloc || !memory || !memory->vtable || !config || !stats)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     memset(stats, 0, sizeof(*stats));
 
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
-    if (err != SC_OK)
+    hu_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
+    if (err != HU_OK)
         return err;
     if (!entries || count == 0) {
         stats->entries_scanned = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
     stats->entries_scanned = count;
     bool *to_remove = (bool *)alloc->alloc(alloc->ctx, count * sizeof(bool));
     if (!to_remove) {
         for (size_t i = 0; i < count; i++)
-            sc_memory_entry_free_fields(alloc, &entries[i]);
-        alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, &entries[i]);
+        alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memset(to_remove, 0, count * sizeof(bool));
 
     uint64_t now = (uint64_t)time(NULL);
 
     for (size_t i = 0; i < count; i++) {
-        sc_memory_entry_t *e = &entries[i];
+        hu_memory_entry_t *e = &entries[i];
         if (config->max_entry_size > 0 && e->content_len > config->max_entry_size) {
             to_remove[i] = true;
             stats->oversized_removed++;
@@ -148,9 +148,9 @@ sc_error_t sc_memory_hygiene_run(sc_allocator_t *alloc, sc_memory_t *memory,
     }
 
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
     alloc->free(alloc->ctx, to_remove, count * sizeof(bool));
 
-    return SC_OK;
+    return HU_OK;
 }

@@ -6,7 +6,7 @@
 
 ## Motivation
 
-seaclaw needs end-to-end validation beyond unit tests. The synthetic test harness:
+human needs end-to-end validation beyond unit tests. The synthetic test harness:
 
 - Exercises the real binary and gateway under realistic conditions
 - Uses Gemini to dynamically generate diverse test scenarios
@@ -17,7 +17,7 @@ seaclaw needs end-to-end validation beyond unit tests. The synthetic test harnes
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                seaclaw_synthetic                   │
+│                human_synthetic                   │
 │                                                    │
 │  main.c ── orchestrator                           │
 │    ├── gemini.c ── Gemini API client              │
@@ -34,9 +34,9 @@ seaclaw needs end-to-end validation beyond unit tests. The synthetic test harnes
 
 | Layer | What it tests | Method |
 |-------|---------------|--------|
-| CLI | Binary CLI commands (version, status, doctor, etc.) | `sc_process_run` subprocess |
-| Gateway HTTP | REST endpoints (health, models, status, chat) | `sc_http_get` / `sc_http_post_json` |
-| WebSocket | JSON-RPC control protocol | `sc_ws_connect` / `sc_ws_send` / `sc_ws_recv` |
+| CLI | Binary CLI commands (version, status, doctor, etc.) | `hu_process_run` subprocess |
+| Gateway HTTP | REST endpoints (health, models, status, chat) | `hu_http_get` / `hu_http_post_json` |
+| WebSocket | JSON-RPC control protocol | `hu_ws_connect` / `hu_ws_send` / `hu_ws_recv` |
 | Agent | `/v1/chat/completions` end-to-end | HTTP POST to gateway |
 | Pressure | Concurrent load on all endpoints | `fork()` worker processes |
 
@@ -51,7 +51,7 @@ Response format: Structured JSON via `responseMimeType: "application/json"`
 ## Gateway Lifecycle
 
 The harness manages the gateway as a child process:
-1. Writes a temp config to `/tmp/sc_synth_XXXXXX/.seaclaw/config.json` with the desired port
+1. Writes a temp config to `/tmp/hu_synth_XXXXXX/.human/config.json` with the desired port
 2. Forks and sets `HOME` to the temp dir before `execl`
 3. Polls `/health` until ready (up to 15s)
 4. Runs tests
@@ -86,22 +86,22 @@ cmake --build build -j$(nproc)
 
 ```bash
 # Full suite
-GEMINI_API_KEY=... ./build/seaclaw_synthetic --binary ./build/seaclaw
+GEMINI_API_KEY=... ./build/human_synthetic --binary ./build/human
 
 # CLI only (no gateway needed)
-GEMINI_API_KEY=... ./build/seaclaw_synthetic --binary ./build/seaclaw --cli-only
+GEMINI_API_KEY=... ./build/human_synthetic --binary ./build/human --cli-only
 
 # Custom port and count
-GEMINI_API_KEY=... ./build/seaclaw_synthetic --binary ./build/seaclaw --port 4000 --count 50
+GEMINI_API_KEY=... ./build/human_synthetic --binary ./build/human --port 4000 --count 50
 
 # With regression capture
-GEMINI_API_KEY=... ./build/seaclaw_synthetic --binary ./build/seaclaw --regression-dir ./failures
+GEMINI_API_KEY=... ./build/human_synthetic --binary ./build/human --regression-dir ./failures
 
 # Replay failures
-./build/seaclaw_synthetic --replay ./failures --verbose
+./build/human_synthetic --replay ./failures --verbose
 
 # Pressure only
-GEMINI_API_KEY=... ./build/seaclaw_synthetic --binary ./build/seaclaw --pressure-only --concurrency 8 --duration 30
+GEMINI_API_KEY=... ./build/human_synthetic --binary ./build/human --pressure-only --concurrency 8 --duration 30
 ```
 
 ## Metrics Output
@@ -124,7 +124,7 @@ GEMINI_API_KEY=... ./build/seaclaw_synthetic --binary ./build/seaclaw --pressure
 
 ## Design Decisions
 
-1. **Separate executable** (not part of `seaclaw_tests`): avoids network/Gemini dependency in unit tests
+1. **Separate executable** (not part of `human_tests`): avoids network/Gemini dependency in unit tests
 2. **Gemini for generation**: more diverse and realistic than hand-written test matrices
 3. **fork-based pressure**: lightweight, no thread library dependency, clean process isolation
 4. **Temp config via HOME**: avoids modifying the gateway's CLI arg parsing for a test-only feature

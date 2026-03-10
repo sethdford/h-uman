@@ -1,16 +1,16 @@
 ---
 title: Configuration
-description: Full configuration reference for SeaClaw.
+description: Full configuration reference for Human.
 ---
 
-SeaClaw reads configuration from `~/.seaclaw/config.json`. Environment variables override config values.
+Human reads configuration from `~/.human/config.json`. Environment variables override config values.
 
 ## Config location
 
 | Platform   | Path                                 |
 | ---------- | ------------------------------------ |
-| Unix/macOS | `~/.seaclaw/config.json`             |
-| Windows    | `%USERPROFILE%\.seaclaw\config.json` |
+| Unix/macOS | `~/.human/config.json`             |
+| Windows    | `%USERPROFILE%\.human\config.json` |
 
 ## Key sections
 
@@ -56,7 +56,7 @@ Config example:
 }
 ```
 
-Use `SEACLAW_AUTONOMY=0` (readonly) through `4` (full) to override via environment.
+Use `HUMAN_AUTONOMY=0` (readonly) through `4` (full) to override via environment.
 
 ## Environment variable overrides
 
@@ -64,18 +64,18 @@ These override config values when set:
 
 | Variable                      | Overrides                   |
 | ----------------------------- | --------------------------- |
-| `SEACLAW_PROVIDER`            | `default_provider`          |
-| `SEACLAW_MODEL`               | `default_model`             |
-| `SEACLAW_API_KEY`             | Default API key             |
-| `SEACLAW_TEMPERATURE`         | `default_temperature`       |
-| `SEACLAW_GATEWAY_PORT`        | `gateway.port`              |
-| `SEACLAW_GATEWAY_HOST`        | `gateway.host`              |
-| `SEACLAW_WORKSPACE`           | Workspace directory         |
-| `SEACLAW_ALLOW_PUBLIC_BIND`   | `gateway.allow_public_bind` |
-| `SEACLAW_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret         |
-| `SEACLAW_AUTONOMY`            | Autonomy level (0–4)        |
+| `HUMAN_PROVIDER`            | `default_provider`          |
+| `HUMAN_MODEL`               | `default_model`             |
+| `HUMAN_API_KEY`             | Default API key             |
+| `HUMAN_TEMPERATURE`         | `default_temperature`       |
+| `HUMAN_GATEWAY_PORT`        | `gateway.port`              |
+| `HUMAN_GATEWAY_HOST`        | `gateway.host`              |
+| `HUMAN_WORKSPACE`           | Workspace directory         |
+| `HUMAN_ALLOW_PUBLIC_BIND`   | `gateway.allow_public_bind` |
+| `HUMAN_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret         |
+| `HUMAN_AUTONOMY`            | Autonomy level (0–4)        |
 
-Provider-specific keys (used when no `SEACLAW_API_KEY` or provider-specific key in config):
+Provider-specific keys (used when no `HUMAN_API_KEY` or provider-specific key in config):
 
 - `OPENAI_API_KEY` — OpenAI
 - `ANTHROPIC_API_KEY` — Anthropic
@@ -86,7 +86,7 @@ Provider-specific keys (used when no `SEACLAW_API_KEY` or provider-specific key 
 
 ```json
 {
-  "workspace": "~/.seaclaw/workspace",
+  "workspace": "~/.human/workspace",
   "default_provider": "openai",
   "default_model": "gpt-4o",
   "default_temperature": 0.7,
@@ -211,7 +211,7 @@ Empty `enabled_tools` means all tools are enabled unless listed in `disabled_too
 
 ## MCP Servers
 
-Connect to external MCP (Model Context Protocol) servers. SeaClaw can act as both client and server:
+Connect to external MCP (Model Context Protocol) servers. Human can act as both client and server:
 
 **As client** — connect to external tool servers at startup:
 
@@ -228,22 +228,22 @@ Connect to external MCP (Model Context Protocol) servers. SeaClaw can act as bot
 
 MCP tools are automatically loaded and available to the agent as `mcp_0_<tool_name>`.
 
-**As server** — expose all SeaClaw tools over MCP:
+**As server** — expose all Human tools over MCP:
 
 ```bash
-seaclaw mcp
+human mcp
 ```
 
 This runs the JSON-RPC 2.0 server on stdin/stdout, compatible with Claude Code and other MCP clients.
 
 ## Service Mode
 
-Run SeaClaw as an always-on service:
+Run Human as an always-on service:
 
 ```bash
-seaclaw service          # Daemonize (background)
-seaclaw service-loop     # Foreground (for containers)
-seaclaw status           # Check if running
+human service          # Daemonize (background)
+human service-loop     # Foreground (for containers)
+human status           # Check if running
 ```
 
 The service loop executes cron jobs and will poll configured channels in future releases.
