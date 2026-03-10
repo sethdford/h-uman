@@ -525,6 +525,49 @@ static void superhuman_pattern_record_and_list(void) {
     alloc.free(alloc.ctx, json, len);
     mem.vtable->deinit(mem.ctx);
 }
+
+static void superhuman_memory_build_context_aggregates_sections(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_ctx";
+    HU_ASSERT_EQ(hu_superhuman_micro_moment_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+        "loves hiking", 12, "outdoor enthusiast", 18), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_inside_joke_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+        "remember when we laughed at X", 27, "that meme", 9), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_growth_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+        "fitness", 7, "sedentary", 9, "active runner", 12), HU_OK);
+
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    HU_ASSERT_EQ(hu_superhuman_memory_build_context(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+        true, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(ctx_len > 0);
+    HU_ASSERT_TRUE(strstr(ctx, "### Superhuman Memory") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Micro-moments") != NULL || strstr(ctx, "loves") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Inside jokes") != NULL || strstr(ctx, "remember when") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "Growth") != NULL || strstr(ctx, "fitness") != NULL);
+
+    alloc.free(alloc.ctx, ctx, ctx_len + 1);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void superhuman_memory_build_context_empty_contact_returns_ok(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    char *ctx = NULL;
+    size_t ctx_len = 0;
+    HU_ASSERT_EQ(hu_superhuman_memory_build_context(&mem, &alloc, "no_data_contact", 15,
+        false, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_NULL(ctx);
+    HU_ASSERT_EQ(ctx_len, 0u);
+
+    mem.vtable->deinit(mem.ctx);
+}
 #endif
 
 void run_superhuman_tests(void) {
@@ -551,5 +594,7 @@ void run_superhuman_tests(void) {
     HU_RUN_TEST(superhuman_topic_baseline_upsert_increments_mention_count);
     HU_RUN_TEST(superhuman_growth_store_and_list);
     HU_RUN_TEST(superhuman_pattern_record_and_list);
+    HU_RUN_TEST(superhuman_memory_build_context_aggregates_sections);
+    HU_RUN_TEST(superhuman_memory_build_context_empty_contact_returns_ok);
 #endif
 }

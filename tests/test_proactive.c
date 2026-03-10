@@ -686,6 +686,83 @@ static void proactive_backoff_hours_returns_correct_thresholds(void) {
     HU_ASSERT_EQ(hu_proactive_backoff_hours(10), UINT32_MAX);
 }
 
+#ifdef HU_ENABLE_SQLITE
+static void proactive_curiosity_returns_message_from_micro_moment(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_curiosity";
+    static const char FACT[] = "play the piano";
+    static const char SIG[] = "musician";
+    HU_ASSERT_EQ(hu_superhuman_micro_moment_store(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                 FACT, sizeof(FACT) - 1, SIG, sizeof(SIG) - 1),
+                 HU_OK);
+
+    char msg[384];
+    /* seed=0 triggers 12% probability (0 < 12) */
+    bool ok = hu_proactive_check_curiosity(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                           sizeof(msg));
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(strstr(msg, "piano") != NULL);
+    HU_ASSERT_TRUE(strstr(msg, "random question") != NULL || strstr(msg, "whatever happened") != NULL);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void proactive_curiosity_returns_false_without_micro_moments(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_empty";
+    char msg[384];
+    bool ok = hu_proactive_check_curiosity(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                           sizeof(msg));
+    HU_ASSERT_FALSE(ok);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void proactive_callbacks_returns_delayed_followup(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_cb";
+    static const char TOPIC[] = "that dinner thing";
+    int64_t past = 1000000;
+    HU_ASSERT_EQ(hu_superhuman_delayed_followup_schedule(&mem, &alloc, CONTACT, sizeof(CONTACT) - 1,
+                                                        TOPIC, sizeof(TOPIC) - 1, past),
+                 HU_OK);
+
+    char msg[512];
+    /* seed=0 triggers 30% probability */
+    bool ok = hu_proactive_check_callbacks(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                           sizeof(msg));
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_TRUE(strstr(msg, "CALLBACK") != NULL);
+    HU_ASSERT_TRUE(strstr(msg, "dinner") != NULL);
+    HU_ASSERT_TRUE(strstr(msg, "Only if natural") != NULL);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void proactive_callbacks_returns_false_without_due_items(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    static const char CONTACT[] = "contact_no_cb";
+    char msg[512];
+    bool ok = hu_proactive_check_callbacks(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+                                           sizeof(msg));
+    HU_ASSERT_FALSE(ok);
+
+    mem.vtable->deinit(mem.ctx);
+}
+#endif
+
 static void proactive_build_context_handles_new_action_types(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_proactive_result_t result;

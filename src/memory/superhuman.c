@@ -6,6 +6,7 @@
 #include "human/memory/superhuman.h"
 #include <sqlite3.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1260,6 +1261,16 @@ hu_error_t hu_superhuman_pattern_list(void *sqlite_ctx, hu_allocator_t *alloc,
     (void)sqlite_ctx; (void)alloc; (void)contact_id; (void)contact_id_len;
     (void)limit; (void)out_json; (void)out_len;
     return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_superhuman_memory_build_context(void *sqlite_ctx, hu_allocator_t *alloc,
+    const char *contact_id, size_t contact_id_len, bool include_avoidance,
+    char **out, size_t *out_len) {
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    (void)sqlite_ctx; (void)alloc; (void)contact_id; (void)contact_id_len;
+    (void)include_avoidance; (void)out; (void)out_len;
+    return HU_OK;
 }
 
 #endif /* HU_ENABLE_SQLITE */

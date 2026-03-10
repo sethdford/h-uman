@@ -369,6 +369,44 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         (void)hu_superhuman_build_context(&agent->superhuman, agent->alloc, &superhuman_ctx,
                                           &superhuman_ctx_len);
 #ifdef HU_ENABLE_SQLITE
+        /* Superhuman memory: micro-moments, inside jokes, avoidance, topic absences, growth, patterns */
+        if (agent->memory && agent->memory_session_id && agent->memory_session_id_len > 0) {
+            bool include_avoidance = false;
+#ifdef HU_HAS_PERSONA
+            include_avoidance =
+                (agent->relationship.stage == HU_REL_TRUSTED ||
+                 agent->relationship.stage == HU_REL_DEEP);
+#endif
+            char *memory_sh_ctx = NULL;
+            size_t memory_sh_len = 0;
+            if (hu_superhuman_memory_build_context(agent->memory, agent->alloc,
+                    agent->memory_session_id, agent->memory_session_id_len, include_avoidance,
+                    &memory_sh_ctx, &memory_sh_len) == HU_OK &&
+                memory_sh_ctx && memory_sh_len > 0) {
+                if (superhuman_ctx && superhuman_ctx_len > 0) {
+                    size_t merged_len = superhuman_ctx_len + 2 + memory_sh_len;
+                    char *merged = (char *)agent->alloc->alloc(agent->alloc->ctx, merged_len + 1);
+                    if (merged) {
+                        memcpy(merged, superhuman_ctx, superhuman_ctx_len);
+                        merged[superhuman_ctx_len] = '\n';
+                        merged[superhuman_ctx_len + 1] = '\n';
+                        memcpy(merged + superhuman_ctx_len + 2, memory_sh_ctx, memory_sh_len + 1);
+                        agent->alloc->free(agent->alloc->ctx, superhuman_ctx,
+                            superhuman_ctx_len + 1);
+                        agent->alloc->free(agent->alloc->ctx, memory_sh_ctx, memory_sh_len + 1);
+                        superhuman_ctx = merged;
+                        superhuman_ctx_len = merged_len;
+                    } else {
+                        agent->alloc->free(agent->alloc->ctx, memory_sh_ctx, memory_sh_len + 1);
+                    }
+                } else {
+                    superhuman_ctx = memory_sh_ctx;
+                    superhuman_ctx_len = memory_sh_len;
+                }
+            } else if (memory_sh_ctx) {
+                agent->alloc->free(agent->alloc->ctx, memory_sh_ctx, memory_sh_len + 1);
+            }
+        }
         /* F26: If they're quiet and it's during their usual quiet hours, inject hint */
         if (agent->memory && agent->memory_session_id && agent->memory_session_id_len > 0 &&
             superhuman_ctx) {

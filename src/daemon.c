@@ -1210,6 +1210,54 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     alloc->free(alloc->ctx, growth_pro, growth_pro_len);
                 }
             }
+            /* F30: Spontaneous curiosity — 10–15% chance, inject random question from micro-moments */
+            {
+                char curiosity_buf[384];
+                uint32_t seed_cur = (uint32_t)((uintptr_t)cp + (uintptr_t)now);
+                if (agent->memory &&
+                    hu_proactive_check_curiosity(alloc, agent->memory, cp->contact_id,
+                                                strlen(cp->contact_id), seed_cur, curiosity_buf,
+                                                sizeof(curiosity_buf))) {
+                    size_t cb_len = strlen(curiosity_buf);
+                    if (prompt && cb_len > 0) {
+                        size_t merged_len = prompt_len + 1 + cb_len + 1;
+                        char *merged = (char *)alloc->alloc(alloc->ctx, merged_len);
+                        if (merged) {
+                            memcpy(merged, prompt, prompt_len);
+                            merged[prompt_len] = '\n';
+                            memcpy(merged + prompt_len + 1, curiosity_buf, cb_len);
+                            merged[prompt_len + 1 + cb_len] = '\0';
+                            alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                            prompt = merged;
+                            prompt_len = merged_len - 1;
+                        }
+                    }
+                }
+            }
+            /* F31: Callback opportunities — 30% chance, inject follow-up from delayed/commitments */
+            {
+                char callback_buf[512];
+                uint32_t seed_cb = (uint32_t)((uintptr_t)cp + (uintptr_t)now + 1);
+                if (agent->memory &&
+                    hu_proactive_check_callbacks(alloc, agent->memory, cp->contact_id,
+                                                strlen(cp->contact_id), seed_cb, callback_buf,
+                                                sizeof(callback_buf))) {
+                    size_t cb_len = strlen(callback_buf);
+                    if (prompt && cb_len > 0) {
+                        size_t merged_len = prompt_len + 1 + cb_len + 1;
+                        char *merged = (char *)alloc->alloc(alloc->ctx, merged_len);
+                        if (merged) {
+                            memcpy(merged, prompt, prompt_len);
+                            merged[prompt_len] = '\n';
+                            memcpy(merged + prompt_len + 1, callback_buf, cb_len);
+                            merged[prompt_len + 1 + cb_len] = '\0';
+                            alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                            prompt = merged;
+                            prompt_len = merged_len - 1;
+                        }
+                    }
+                }
+            }
 #endif
             if (prompt && event_ctx && event_ctx_len > 0) {
                 size_t merged_len = prompt_len + 1 + event_ctx_len + 1;
