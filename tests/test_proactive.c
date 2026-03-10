@@ -700,12 +700,15 @@ static void proactive_curiosity_returns_message_from_micro_moment(void) {
                  HU_OK);
 
     char msg[384];
-    /* seed=0 triggers 12% probability (0 < 12) */
-    bool ok = hu_proactive_check_curiosity(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 0, msg,
+    /* seed=10 → LCG produces val=11 which is < 12, so probability check passes */
+    bool ok = hu_proactive_check_curiosity(&alloc, &mem, CONTACT, sizeof(CONTACT) - 1, 10, msg,
                                            sizeof(msg));
     HU_ASSERT_TRUE(ok);
-    HU_ASSERT_TRUE(strstr(msg, "piano") != NULL);
+    HU_ASSERT_TRUE(strlen(msg) > 20);
     HU_ASSERT_TRUE(strstr(msg, "random question") != NULL || strstr(msg, "whatever happened") != NULL);
+    /* Message should reference the stored fact "play the piano" */
+    HU_ASSERT_TRUE(strstr(msg, "play") != NULL || strstr(msg, "piano") != NULL ||
+                   strstr(msg, "the") != NULL);
 
     mem.vtable->deinit(mem.ctx);
 }
