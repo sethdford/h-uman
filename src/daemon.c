@@ -2481,6 +2481,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                {
+                    int calibrated = hu_conversation_max_response_chars(combined_len);
+                    if (calibrated > 0 && (max_chars == 0 || (uint32_t)calibrated < max_chars))
+                        max_chars = (uint32_t)calibrated;
+                }
+
                 /* Brief mode: force ultra-short response */
                 if (brief_mode && max_chars > 50)
                     max_chars = 50;
@@ -3861,8 +3867,6 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len, send_ptr,
                                                   send_len, NULL, 0);
                     }
-                    if (send_buf_ack)
-                        alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
 #ifdef HU_HAS_PERSONA
                     /* Send correction after main message (2.5–5s delay) */
                     if (original_response) {
