@@ -1045,7 +1045,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
             for (size_t i = 0; i < n; i++) {
                 memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
                 memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
-                msgs[i].message_id = -1;
+                msgs[i].message_id = (int64_t)(i + 1);
             }
             *out_count = n;
             c->mock_count = 0;
@@ -1169,6 +1169,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         msgs[count].session_key[handle_len] = '\0';
         memcpy(msgs[count].content, text, text_len);
         msgs[count].content[text_len] = '\0';
+        msgs[count].message_id = rowid;
         msgs[count].is_group = (participant_count > 2);
 
         c->last_rowid = rowid;

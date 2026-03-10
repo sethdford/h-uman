@@ -1127,6 +1127,29 @@ static void test_imessage_inject_and_poll(void) {
     HU_ASSERT_EQ(count, 1);
     HU_ASSERT_STR_EQ(msgs[0].content, "Hello from test!");
     HU_ASSERT_STR_EQ(msgs[0].session_key, "+15559876543");
+    HU_ASSERT_EQ(msgs[0].message_id, (int64_t)1);
+    hu_imessage_destroy(&ch);
+}
+
+static void test_imessage_inject_multiple_poll_message_ids(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_error_t err = hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch);
+    HU_ASSERT_EQ(err, HU_OK);
+    err = hu_imessage_test_inject_mock(&ch, "alice", 5, "First", 5);
+    HU_ASSERT_EQ(err, HU_OK);
+    err = hu_imessage_test_inject_mock(&ch, "bob", 3, "Second", 6);
+    HU_ASSERT_EQ(err, HU_OK);
+    err = hu_imessage_test_inject_mock(&ch, "carol", 5, "Third", 5);
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = hu_imessage_poll(ch.ctx, &alloc, msgs, 4, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 3);
+    HU_ASSERT_EQ(msgs[0].message_id, (int64_t)1);
+    HU_ASSERT_EQ(msgs[1].message_id, (int64_t)2);
+    HU_ASSERT_EQ(msgs[2].message_id, (int64_t)3);
     hu_imessage_destroy(&ch);
 }
 
@@ -2504,6 +2527,7 @@ void run_channel_all_tests(void) {
     HU_RUN_TEST(test_imessage_poll_null_args);
 #if HU_IS_TEST
     HU_RUN_TEST(test_imessage_inject_and_poll);
+    HU_RUN_TEST(test_imessage_inject_multiple_poll_message_ids);
     HU_RUN_TEST(test_imessage_send_captures_last_message);
 #endif
 #endif
