@@ -6,6 +6,7 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* ── Helper to build history entries ─────────────────────────────────── */
 
@@ -2165,6 +2166,47 @@ static void leave_on_read_ok_seed_over_2_returns_false(void) {
     HU_ASSERT_FALSE(r);
 }
 
+/* ── Inside joke detection (F19) ───────────────────────────────────────────── */
+
+static void detect_inside_joke_remember_when_true(void) {
+    const char *msg = "remember when we did that thing";
+    bool r = hu_conversation_detect_inside_joke(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_TRUE(r);
+}
+
+static void detect_inside_joke_whats_for_dinner_false(void) {
+    const char *msg = "what's for dinner";
+    bool r = hu_conversation_detect_inside_joke(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_FALSE(r);
+}
+
+static void detect_inside_joke_energy_pattern_true(void) {
+    const char *msg = "that's so alex energy";
+    bool r = hu_conversation_detect_inside_joke(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_TRUE(r);
+}
+
+static void detect_inside_joke_classic_true(void) {
+    const char *msg = "classic sarah";
+    bool r = hu_conversation_detect_inside_joke(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_TRUE(r);
+}
+
+static void detect_inside_joke_shared_phrase_from_history_true(void) {
+    hu_channel_history_entry_t entries[2];
+    memset(&entries[0], 0, sizeof(entries[0]));
+    entries[0].from_me = false;
+    memcpy(entries[0].text, "we always order the same thing at that place", 43);
+    entries[0].text[43] = '\0';
+    memset(&entries[1], 0, sizeof(entries[1]));
+    entries[1].from_me = true;
+    memcpy(entries[1].text, "haha yeah", 9);
+    entries[1].text[9] = '\0';
+    const char *msg = "we always order the same thing at that place";
+    bool r = hu_conversation_detect_inside_joke(msg, strlen(msg), entries, 2);
+    HU_ASSERT_TRUE(r);
+}
+
 /* ── First-time vulnerability detection (F17) ────────────────────────────── */
 
 static void vulnerability_cancer_extracts_illness(void) {
@@ -2380,6 +2422,13 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(energy_directive_calm_nonempty);
     HU_RUN_TEST(energy_directive_neutral_returns_zero);
 
+    /* Inside joke detection (F19) */
+    HU_RUN_TEST(detect_inside_joke_remember_when_true);
+    HU_RUN_TEST(detect_inside_joke_whats_for_dinner_false);
+    HU_RUN_TEST(detect_inside_joke_energy_pattern_true);
+    HU_RUN_TEST(detect_inside_joke_classic_true);
+    HU_RUN_TEST(detect_inside_joke_shared_phrase_from_history_true);
+
     /* First-time vulnerability detection (F17) */
     HU_RUN_TEST(vulnerability_cancer_extracts_illness);
     HU_RUN_TEST(vulnerability_whats_for_dinner_returns_null);
@@ -2417,6 +2466,13 @@ void run_conversation_tests(void) {
     /* Honesty guardrail */
     HU_RUN_TEST(honesty_detects_action_query);
     HU_RUN_TEST(honesty_null_for_normal_message);
+
+    /* Commitment detection and deadline parsing (F20) */
+    HU_RUN_TEST(parse_deadline_tomorrow);
+    HU_RUN_TEST(parse_deadline_in_three_days);
+    HU_RUN_TEST(parse_deadline_whats_up_returns_zero);
+    HU_RUN_TEST(detect_commitment_ill_call_dentist);
+    HU_RUN_TEST(detect_commitment_nice_weather_false);
 
     /* Length + tone calibration */
     HU_RUN_TEST(calibrate_greeting_short);

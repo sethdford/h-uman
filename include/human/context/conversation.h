@@ -15,6 +15,17 @@ struct hu_contact_profile; /* opaque when persona not available */
 #include <stddef.h>
 #include <stdint.h>
 
+/* ── Commitment detection with deadline parsing (F20) ───────────────────── */
+
+/* Parse deadline from message. Returns unix timestamp or 0 if no deadline found. */
+int64_t hu_conversation_parse_deadline(const char *msg, size_t msg_len, int64_t now_ts);
+
+/* Detect if message contains a commitment. Fills description_out, who_out ("me"/"them").
+ * from_me: true if speaker is the user/agent. Returns true if commitment detected. */
+bool hu_conversation_detect_commitment(const char *msg, size_t msg_len,
+                                       char *description_out, size_t desc_cap,
+                                       char *who_out, size_t who_cap, bool from_me);
+
 /* Group chat prompt hint — prepended to conversation_context when is_group is true */
 #define HU_GROUP_CHAT_PROMPT_HINT                     \
     "[GROUP CHAT] You are in a group conversation. "  \
@@ -116,6 +127,14 @@ hu_energy_level_t hu_conversation_detect_energy(const char *msg, size_t msg_len,
                                                 size_t count);
 
 size_t hu_conversation_build_energy_directive(hu_energy_level_t energy, char *buf, size_t cap);
+
+/* ── Inside joke detection (F19) ────────────────────────────────────────── */
+
+/* Returns true if message suggests an inside joke: "remember when", "that time we",
+ * "you always say", "[X] energy", "that's our thing", "classic [name]",
+ * or shared phrase from history. */
+bool hu_conversation_detect_inside_joke(const char *msg, size_t msg_len,
+                                        const hu_channel_history_entry_t *entries, size_t count);
 
 /* ── Emotional escalation detection (F14) ────────────────────────────────── */
 

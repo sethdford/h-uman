@@ -34,9 +34,11 @@
 #include "human/memory/inbox.h"
 #include "human/memory/promotion.h"
 #include "human/memory/retrieval.h"
+#include "human/memory/superhuman.h"
 #include "human/observability/bth_metrics.h"
 #include "human/persona/voice_maturity.h"
 #include "human/platform.h"
+#include "human/platform/calendar.h"
 #include <stdlib.h>
 #ifdef HU_HAS_PERSONA
 #include "human/persona.h"
@@ -604,6 +606,37 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
                                          "recent conversation topics", 24, &mem_ctx_len);
     }
 
+    /* Calendar awareness: inject today's events when calendar_enabled */
+    char *calendar_ctx = NULL;
+    size_t calendar_ctx_len = 0;
+    if (agent && agent->persona && agent->persona->context_awareness.calendar_enabled) {
+#if defined(__APPLE__)
+        char *events_json = NULL;
+        size_t events_len = 0;
+        if (hu_calendar_macos_get_events(alloc, 24, &events_json, &events_len) == HU_OK &&
+            events_json && events_len > 2) {
+            size_t prefix_len = sizeof("Your calendar today: ") - 1;
+            size_t suffix_len =
+                sizeof(". Use for context (e.g. 'in meetings', 'had dentist appointment').") - 1;
+            calendar_ctx_len = prefix_len + events_len + suffix_len;
+            calendar_ctx = (char *)alloc->alloc(alloc->ctx, calendar_ctx_len + 1);
+            if (calendar_ctx) {
+                memcpy(calendar_ctx, "Your calendar today: ", prefix_len);
+                memcpy(calendar_ctx + prefix_len, events_json, events_len);
+                memcpy(calendar_ctx + prefix_len + events_len,
+                       ". Use for context (e.g. 'in meetings', 'had dentist appointment').",
+                       suffix_len + 1);
+                alloc->free(alloc->ctx, events_json, events_len + 1);
+            } else {
+                alloc->free(alloc->ctx, events_json, events_len + 1);
+                calendar_ctx_len = 0;
+            }
+        } else if (events_json) {
+            alloc->free(alloc->ctx, events_json, events_len + 1);
+        }
+#endif
+    }
+
     static const char HU_DEFAULT_PROACTIVE_RULES[] =
         "\nRules: "
         "1. One short natural message (not 'hey how are you' — too generic). "
@@ -630,6 +663,8 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
         total += 2 + starter_len; /* "\n\n" + starter */
     if (mem_ctx && mem_ctx_len > 0)
         total += 2 + mem_ctx_len; /* "\n\n" + mem_ctx */
+    if (calendar_ctx && calendar_ctx_len > 0)
+        total += 2 + calendar_ctx_len; /* "\n\n" + calendar_ctx */
 
     char *result = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!result) {
@@ -637,6 +672,8 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
             alloc->free(alloc->ctx, starter, starter_len + 1);
         if (mem_ctx)
             alloc->free(alloc->ctx, mem_ctx, mem_ctx_len + 1);
+        if (calendar_ctx)
+            alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
         *out_len = 0;
         return NULL;
     }
@@ -658,6 +695,13 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
         memcpy(result + pos, mem_ctx, mem_ctx_len);
         pos += mem_ctx_len;
         alloc->free(alloc->ctx, mem_ctx, mem_ctx_len + 1);
+    }
+    if (calendar_ctx && calendar_ctx_len > 0) {
+        result[pos++] = '\n';
+        result[pos++] = '\n';
+        memcpy(result + pos, calendar_ctx, calendar_ctx_len);
+        pos += calendar_ctx_len;
+        alloc->free(alloc->ctx, calendar_ctx, calendar_ctx_len + 1);
     }
 
     memcpy(result + pos, rules, rules_len);
@@ -888,10 +932,67 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 hu_event_extract_result_deinit(&extract_result, alloc);
             }
 
+#ifdef HU_ENABLE_SQLITE
+            /* F20: Commitment follow-up — add due commitments for this contact */
+            char *commitment_ctx = NULL;
+            size_t commitment_ctx_len = 0;
+            int64_t commitment_ids[3];
+            size_t commitment_ids_count = 0;
+            if (agent && agent->memory && cp->contact_id) {
+                hu_superhuman_commitment_t *due = NULL;
+                size_t due_count = 0;
+                if (hu_superhuman_commitment_list_due(agent->memory, alloc, (int64_t)now, 3,
+                                                    &due, &due_count) == HU_OK &&
+                    due && due_count > 0) {
+                    size_t cid_len = strlen(cp->contact_id);
+                    char ctx_buf[1024];
+                    size_t ctx_pos = 0;
+                    for (size_t di = 0; di < due_count && ctx_pos < sizeof(ctx_buf) - 200; di++) {
+                        if (cid_len != strlen(due[di].contact_id) ||
+                            memcmp(due[di].contact_id, cp->contact_id, cid_len) != 0)
+                            continue;
+                        int n = snprintf(ctx_buf + ctx_pos, sizeof(ctx_buf) - ctx_pos,
+                                         "COMMITMENT FOLLOW-UP: %s was due. Ask if it happened: "
+                                         "'hey did you ever %s?'\n",
+                                         due[di].description, due[di].description);
+                        if (n > 0 && ctx_pos + (size_t)n < sizeof(ctx_buf)) {
+                            ctx_pos += (size_t)n;
+                            if (commitment_ids_count < 3)
+                                commitment_ids[commitment_ids_count++] = due[di].id;
+                        }
+                    }
+                    if (ctx_pos > 0) {
+                        commitment_ctx = (char *)alloc->alloc(alloc->ctx, ctx_pos + 1);
+                        if (commitment_ctx) {
+                            memcpy(commitment_ctx, ctx_buf, ctx_pos);
+                            commitment_ctx[ctx_pos] = '\0';
+                            commitment_ctx_len = ctx_pos;
+                        }
+                    }
+                    hu_superhuman_commitment_free(alloc, due, due_count);
+                }
+            }
+#endif
+
             /* Build and send the check-in */
             size_t prompt_len = 0;
             char *prompt =
                 proactive_prompt_for_contact(alloc, agent, agent->memory, cp, &prompt_len);
+#ifdef HU_ENABLE_SQLITE
+            if (prompt && commitment_ctx && commitment_ctx_len > 0) {
+                size_t merged_len = prompt_len + 1 + commitment_ctx_len + 1;
+                char *merged = (char *)alloc->alloc(alloc->ctx, merged_len);
+                if (merged) {
+                    memcpy(merged, prompt, prompt_len);
+                    merged[prompt_len] = '\n';
+                    memcpy(merged + prompt_len + 1, commitment_ctx, commitment_ctx_len);
+                    merged[prompt_len + 1 + commitment_ctx_len] = '\0';
+                    alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                    prompt = merged;
+                    prompt_len = prompt_len + 1 + commitment_ctx_len;
+                }
+            }
+#endif
             if (prompt && event_ctx && event_ctx_len > 0) {
                 size_t merged_len = prompt_len + 1 + event_ctx_len + 1;
                 char *merged = (char *)alloc->alloc(alloc->ctx, merged_len);
@@ -918,6 +1019,40 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     prompt_len = prompt_len + 1 + silence_ctx_len;
                 }
             }
+            /* F19: Inside joke callback — 10–15% chance, pick one and add to prompt */
+            int64_t joke_id_to_reference = -1;
+            if (agent->memory && (uint32_t)((uintptr_t)cp + (uintptr_t)now) % 100 < 12) {
+                hu_inside_joke_t *jokes_pro = NULL;
+                size_t jokes_pro_count = 0;
+                size_t cid_len = strlen(cp->contact_id);
+                if (hu_superhuman_inside_joke_list(agent->memory, alloc, cp->contact_id, cid_len,
+                                                   3, &jokes_pro, &jokes_pro_count) == HU_OK &&
+                    jokes_pro && jokes_pro_count > 0) {
+                    size_t idx = (uint32_t)((uintptr_t)cp + (uintptr_t)now + 1) % jokes_pro_count;
+                    joke_id_to_reference = jokes_pro[idx].id;
+                    char cb_buf[384];
+                    size_t ctx_pl = strnlen(jokes_pro[idx].context, 120);
+                    size_t pl_pl = strnlen(jokes_pro[idx].punchline, 80);
+                    int w = snprintf(cb_buf, sizeof(cb_buf),
+                                    "CALLBACK: Reference this inside joke naturally: [%.*s] %.*s",
+                                    (int)ctx_pl, jokes_pro[idx].context, (int)pl_pl,
+                                    jokes_pro[idx].punchline);
+                    if (w > 0 && (size_t)w < sizeof(cb_buf) && prompt) {
+                        size_t merged_len = prompt_len + 1 + (size_t)w + 1;
+                        char *merged = (char *)alloc->alloc(alloc->ctx, merged_len);
+                        if (merged) {
+                            memcpy(merged, prompt, prompt_len);
+                            merged[prompt_len] = '\n';
+                            memcpy(merged + prompt_len + 1, cb_buf, (size_t)w);
+                            merged[prompt_len + 1 + (size_t)w] = '\0';
+                            alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                            prompt = merged;
+                            prompt_len = merged_len - 1;
+                        }
+                    }
+                    hu_superhuman_inside_joke_free(alloc, jokes_pro, jokes_pro_count);
+                }
+            }
             if (prompt) {
                 hu_agent_clear_history(agent);
                 agent->active_channel = ch_part;
@@ -935,6 +1070,14 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                                           0);
                         fprintf(stderr, "[human] proactive check-in sent to %s: %.*s\n",
                                 cp->name ? cp->name : cp->contact_id, (int)response_len, response);
+                        if (joke_id_to_reference >= 0 && agent->memory)
+                            (void)hu_superhuman_inside_joke_reference(agent->memory,
+                                                                      joke_id_to_reference);
+#ifdef HU_ENABLE_SQLITE
+                        for (size_t mi = 0; mi < commitment_ids_count; mi++)
+                            (void)hu_superhuman_commitment_mark_followed_up(agent->memory,
+                                                                           commitment_ids[mi]);
+#endif
                     }
                 }
                 if (response)
@@ -1930,6 +2073,25 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     combined[combined_len] = '\0';
                 }
 
+#ifdef HU_ENABLE_SQLITE
+                /* F20: Commitment keeper — detect and store commitments from their message */
+                if (agent && agent->memory && combined_len > 0) {
+                    char desc_buf[512];
+                    char who_buf[64];
+                    if (hu_conversation_detect_commitment(combined, combined_len, desc_buf,
+                                                         sizeof(desc_buf), who_buf,
+                                                         sizeof(who_buf), false)) {
+                        int64_t deadline =
+                            hu_conversation_parse_deadline(combined, combined_len,
+                                                          (int64_t)time(NULL));
+                        (void)hu_superhuman_commitment_store(agent->memory, alloc, batch_key,
+                                                            key_len, desc_buf,
+                                                            (size_t)strlen(desc_buf), who_buf,
+                                                            (size_t)strlen(who_buf), deadline);
+                    }
+                }
+#endif
+
                 /* Real-user-response window: if the real user already replied to
                  * this contact during our delay, stay silent.  Only applies to
                  * iMessage where we impersonate the user. */
@@ -2883,6 +3045,59 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 size_t episodic_ctx_len = 0;
                 if (agent->memory) {
                     hu_episodic_load(agent->memory, alloc, &episodic_ctx, &episodic_ctx_len);
+                }
+                /* F19: Inside jokes — inject for natural callback opportunities */
+                hu_inside_joke_t *jokes_ctx = NULL;
+                size_t jokes_count = 0;
+                if (agent->memory &&
+                    hu_superhuman_inside_joke_list(agent->memory, alloc, batch_key, key_len, 5,
+                                                   &jokes_ctx, &jokes_count) == HU_OK &&
+                    jokes_ctx && jokes_count > 0) {
+                    char jokes_buf[768];
+                    size_t jokes_pos = snprintf(jokes_buf, sizeof(jokes_buf),
+                                                "Inside jokes with this contact: ");
+                    for (size_t j = 0; j < jokes_count && jokes_pos < 700; j++) {
+                        if (j > 0)
+                            jokes_pos += snprintf(jokes_buf + jokes_pos,
+                                                  sizeof(jokes_buf) - jokes_pos, "; ");
+                        size_t ctx_len = strnlen(jokes_ctx[j].context, 80);
+                        size_t pl_len = strnlen(jokes_ctx[j].punchline, 60);
+                        jokes_pos += snprintf(jokes_buf + jokes_pos,
+                                              sizeof(jokes_buf) - jokes_pos,
+                                              "[%.*s] %.*s", (int)ctx_len, jokes_ctx[j].context,
+                                              (int)pl_len, jokes_ctx[j].punchline);
+                    }
+                    if (jokes_pos < sizeof(jokes_buf) - 32)
+                        jokes_pos += snprintf(jokes_buf + jokes_pos,
+                                              sizeof(jokes_buf) - jokes_pos,
+                                              ". Use naturally when relevant.");
+                    if (jokes_pos > 0 && jokes_pos < sizeof(jokes_buf)) {
+                        char *jokes_str =
+                            (char *)alloc->alloc(alloc->ctx, jokes_pos + 1);
+                        if (jokes_str) {
+                            memcpy(jokes_str, jokes_buf, jokes_pos);
+                            jokes_str[jokes_pos] = '\0';
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + jokes_pos + 3;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, jokes_str, jokes_pos);
+                                    merged[convo_ctx_len + 1 + jokes_pos] = '\n';
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                                alloc->free(alloc->ctx, jokes_str, jokes_pos + 1);
+                            } else {
+                                convo_ctx = jokes_str;
+                                convo_ctx_len = jokes_pos;
+                            }
+                        }
+                    }
+                    hu_superhuman_inside_joke_free(alloc, jokes_ctx, jokes_count);
                 }
                 if (episodic_ctx && episodic_ctx_len > 0) {
                     if (convo_ctx) {

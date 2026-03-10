@@ -10,6 +10,7 @@
 #endif
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -847,6 +848,125 @@ hu_quality_score_t hu_conversation_evaluate_quality(const char *response, size_t
     return score;
 }
 
+/* ── Commitment detection with deadline parsing (F20) ───────────────────── */
+
+/* Parse deadline from message. Returns unix timestamp or 0 if no deadline found.
+ * Heuristics: tomorrow, next week, in X days/hours, tonight, this weekend. */
+int64_t hu_conversation_parse_deadline(const char *msg, size_t msg_len, int64_t now_ts) {
+    if (!msg || msg_len == 0)
+        return 0;
+    if (str_contains_ci(msg, msg_len, "tomorrow"))
+        return now_ts + 86400;
+    if (str_contains_ci(msg, msg_len, "next week"))
+        return now_ts + 604800;
+    if (str_contains_ci(msg, msg_len, "tonight")) {
+        struct tm tm_buf;
+        time_t t = (time_t)now_ts;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+        struct tm *lt = (localtime_s(&tm_buf, &t) == 0) ? &tm_buf : NULL;
+#else
+        struct tm *lt = localtime_r(&t, &tm_buf);
+#endif
+        if (lt && lt->tm_hour < 18)
+            return now_ts + (24 - lt->tm_hour) * 3600 - lt->tm_min * 60 - lt->tm_sec;
+        return now_ts + 12 * 3600;
+    }
+    if (str_contains_ci(msg, msg_len, "this weekend")) {
+        struct tm tm_buf;
+        time_t t = (time_t)now_ts;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+        struct tm *lt = (localtime_s(&tm_buf, &t) == 0) ? &tm_buf : NULL;
+#else
+        struct tm *lt = localtime_r(&t, &tm_buf);
+#endif
+        if (lt) {
+            int days = (6 - lt->tm_wday + 7) % 7;
+            return now_ts + (int64_t)days * 86400;
+        }
+        return now_ts + 86400 * 5; /* fallback: ~5 days */
+    }
+    /* "in X days" */
+    for (unsigned int d = 1; d <= 365; d++) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "in %u day", d);
+        if (n > 0 && (size_t)n < sizeof(buf) && str_contains_ci(msg, msg_len, buf))
+            return now_ts + (int64_t)d * 86400;
+        n = snprintf(buf, sizeof(buf), "in %u days", d);
+        if (n > 0 && (size_t)n < sizeof(buf) && str_contains_ci(msg, msg_len, buf))
+            return now_ts + (int64_t)d * 86400;
+    }
+    /* "in X hours" */
+    for (unsigned int h = 1; h <= 168; h++) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "in %u hour", h);
+        if (n > 0 && (size_t)n < sizeof(buf) && str_contains_ci(msg, msg_len, buf))
+            return now_ts + (int64_t)h * 3600;
+        n = snprintf(buf, sizeof(buf), "in %u hours", h);
+        if (n > 0 && (size_t)n < sizeof(buf) && str_contains_ci(msg, msg_len, buf))
+            return now_ts + (int64_t)h * 3600;
+    }
+    return 0;
+}
+
+/* Detect if message contains a commitment. Fills description_out with commitment text,
+ * who_out with "me" or "them" based on from_me. Returns true if commitment detected. */
+bool hu_conversation_detect_commitment(const char *msg, size_t msg_len,
+                                      char *description_out, size_t desc_cap,
+                                      char *who_out, size_t who_cap, bool from_me) {
+    if (!msg || msg_len == 0 || !description_out || desc_cap == 0 || !who_out || who_cap == 0)
+        return false;
+    description_out[0] = '\0';
+    who_out[0] = '\0';
+
+    static const char *KEYWORDS[] = {
+        "i'll", "i will", "i'm going to", "gonna", "promise", "let me",
+        "i'll call", "i'll text", "i'll send", "i'll check", "we should", NULL
+    };
+    bool found = false;
+    size_t best_start = msg_len;
+    size_t best_len = 0;
+    for (const char **kw = KEYWORDS; *kw; kw++) {
+        size_t nlen = strlen(*kw);
+        if (nlen > msg_len)
+            continue;
+        for (size_t i = 0; i + nlen <= msg_len; i++) {
+            bool wb_before = (i == 0) || isspace((unsigned char)msg[i - 1]);
+            if (!wb_before)
+                continue;
+            if (strncasecmp(msg + i, *kw, nlen) != 0)
+                continue;
+            found = true;
+            if (i < best_start) {
+                best_start = i;
+                size_t end = i + nlen;
+                while (end < msg_len && msg[end] != '.' && msg[end] != '!' &&
+                       msg[end] != '?' && msg[end] != '\n')
+                    end++;
+                best_len = end - best_start;
+            }
+        }
+    }
+    if (!found)
+        return false;
+
+    size_t copy_len = best_len < desc_cap - 1 ? best_len : desc_cap - 1;
+    memcpy(description_out, msg + best_start, copy_len);
+    description_out[copy_len] = '\0';
+    /* Trim trailing space */
+    while (copy_len > 0 && description_out[copy_len - 1] == ' ')
+        description_out[--copy_len] = '\0';
+
+    const char *who = from_me ? "me" : "them";
+    size_t who_len = strlen(who);
+    if (who_len < who_cap) {
+        memcpy(who_out, who, who_len + 1);
+    } else if (who_cap > 0) {
+        memcpy(who_out, who, who_cap - 1);
+        who_out[who_cap - 1] = '\0';
+    }
+    return true;
+}
+
 /* ── Honesty Guardrail (pattern-based, contextual output) ───────────────── */
 
 /* Detect if user is asking about a commitment or action: question + action-query pattern.
@@ -1197,6 +1317,54 @@ size_t hu_conversation_build_energy_directive(hu_energy_level_t energy, char *bu
     memcpy(buf, directive, len);
     buf[len] = '\0';
     return len;
+}
+
+/* ── Inside joke detection (F19) ───────────────────────────────────────── */
+
+bool hu_conversation_detect_inside_joke(const char *msg, size_t msg_len,
+                                        const hu_channel_history_entry_t *entries, size_t count) {
+    if (!msg || msg_len == 0)
+        return false;
+
+    /* Keyword heuristics: "remember when", "that time we", "you always say" */
+    if (str_contains_ci(msg, msg_len, "remember when") ||
+        str_contains_ci(msg, msg_len, "that time we") ||
+        str_contains_ci(msg, msg_len, "you always say"))
+        return true;
+
+    /* "[X] energy" pattern — e.g. "that's so [name] energy" */
+    if (str_contains_ci(msg, msg_len, " energy"))
+        return true;
+
+    /* Shared callback phrases */
+    if (str_contains_ci(msg, msg_len, "lol that's our thing") ||
+        str_contains_ci(msg, msg_len, "that's our thing") ||
+        str_contains_ci(msg, msg_len, "classic "))
+        return true;
+
+    /* Shared phrase: if msg contains a significant phrase from history (12+ chars) */
+    if (entries && count > 0) {
+        char phrase_buf[33];
+        for (size_t i = 0; i < count && i < 6; i++) {
+            const char *t = entries[i].text;
+            size_t tl = strlen(t);
+            if (tl < 12)
+                continue;
+            /* Try last 12-32 chars of entry (often the punchline) */
+            size_t start = (tl > 32) ? tl - 32 : 0;
+            size_t len = tl - start;
+            if (len < 12)
+                continue;
+            if (len > 32)
+                len = 32;
+            memcpy(phrase_buf, t + start, len);
+            phrase_buf[len] = '\0';
+            if (str_contains_ci(msg, msg_len, phrase_buf))
+                return true;
+        }
+    }
+
+    return false;
 }
 
 /* ── Emotional escalation detection (F14) ───────────────────────────────── */
