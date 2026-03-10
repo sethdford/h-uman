@@ -12,7 +12,7 @@ static void emotional_moment_record_and_get_due(void) {
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
     HU_ASSERT_NOT_NULL(mem.ctx);
 
-    hu_error_t err = hu_emotional_moment_record(&alloc, &mem, "contact_a", 9, "work stress", 10,
+    hu_error_t err = hu_emotional_moment_record(&alloc, &mem, "contact_a", 9, "work stress", 11,
                                                   "stressed", 8, 0.8f);
     HU_ASSERT_EQ(err, HU_OK);
 

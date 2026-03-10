@@ -142,8 +142,8 @@ hu_error_t hu_emotional_moment_get_due(hu_allocator_t *alloc, hu_memory_t *memor
             e->contact_id[copy] = '\0';
         }
         const char *top = (const char *)sqlite3_column_text(stmt, 2);
-        size_t top_len = top ? (size_t)sqlite3_column_bytes(stmt, 2) : 0;
-        if (top && top_len > 0) {
+        if (top) {
+            size_t top_len = strlen(top);
             size_t copy = top_len < sizeof(e->topic) - 1 ? top_len : sizeof(e->topic) - 1;
             memcpy(e->topic, top, copy);
             e->topic[copy] = '\0';
@@ -163,6 +163,10 @@ hu_error_t hu_emotional_moment_get_due(hu_allocator_t *alloc, hu_memory_t *memor
     }
     sqlite3_finalize(stmt);
 
+    if (count == 0 && arr) {
+        alloc->free(alloc->ctx, arr, cap * sizeof(hu_emotional_moment_t));
+        arr = NULL;
+    }
     *out = arr;
     *out_count = count;
     return HU_OK;
