@@ -116,6 +116,34 @@ hu_energy_level_t hu_conversation_detect_energy(const char *msg, size_t msg_len,
 
 size_t hu_conversation_build_energy_directive(hu_energy_level_t energy, char *buf, size_t cap);
 
+/* ── Emotional escalation detection (F14) ────────────────────────────────── */
+
+/* Track emotional trajectory across multiple messages. When 3+ messages show
+ * increasing negative sentiment, switch to de-escalation mode. */
+typedef struct hu_escalation_state {
+    bool escalating;
+    int consecutive_negative;
+    float trajectory; /* negative = worsening */
+} hu_escalation_state_t;
+
+hu_escalation_state_t hu_conversation_detect_escalation(const hu_channel_history_entry_t *entries,
+                                                        size_t count);
+
+size_t hu_conversation_build_deescalation_directive(char *buf, size_t cap);
+
+/* ── Context modifiers (F16) ─────────────────────────────────────────────── */
+
+/* Build [CONTEXT: ...] directives based on heavy topics, personal sharing,
+ * high emotion, and early-turn detection. Uses persona context_modifiers when
+ * non-NULL; otherwise defaults (0.4, 1.6, 1.5, 1.4). Writes into buf, returns
+ * bytes written. */
+#ifdef HU_HAS_PERSONA
+size_t hu_conversation_build_context_modifiers(const hu_channel_history_entry_t *entries,
+                                               size_t count, const hu_emotional_state_t *emo,
+                                               const hu_context_modifiers_t *mods, char *buf,
+                                               size_t cap);
+#endif
+
 /* ── Typo correction fragment (*meant) ─────────────────────────────────── */
 
 /* Check if a typo was introduced and generate a correction fragment.

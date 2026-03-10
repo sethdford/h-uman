@@ -2213,9 +2213,49 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* F14: Escalation detection — if 3+ consecutive negative messages,
+                 * use de-escalation directive (overrides energy). */
+                bool use_escalation = false;
+                if (history_entries && history_count > 0) {
+                    hu_escalation_state_t escalation =
+                        hu_conversation_detect_escalation(history_entries, history_count);
+                    if (escalation.escalating) {
+                        char deesc_buf[256];
+                        size_t deesc_len = hu_conversation_build_deescalation_directive(
+                            deesc_buf, sizeof(deesc_buf));
+                        if (deesc_len > 0) {
+                            use_escalation = true;
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + deesc_len + 3;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, deesc_buf, deesc_len);
+                                    merged[convo_ctx_len + 1 + deesc_len] = '\n';
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = (char *)alloc->alloc(alloc->ctx, deesc_len + 2);
+                                if (convo_ctx) {
+                                    memcpy(convo_ctx, deesc_buf, deesc_len);
+                                    convo_ctx[deesc_len] = '\n';
+                                    convo_ctx[deesc_len + 1] = '\0';
+                                    convo_ctx_len = deesc_len + 1;
+                                }
+                            }
+                            if (agent && agent->bth_metrics)
+                                agent->bth_metrics->emotions_surfaced++;
+                        }
+                    }
+                }
+
                 /* F13: Energy matching — detect emotional energy of incoming message,
-                 * inject [ENERGY: ...] directive when not neutral. */
-                if (combined_len > 0) {
+                 * inject [ENERGY: ...] directive when not neutral. De-escalation overrides. */
+                if (!use_escalation && combined_len > 0) {
                     hu_energy_level_t energy = hu_conversation_detect_energy(
                         combined, combined_len, history_entries, history_count);
                     if (energy != HU_ENERGY_NEUTRAL) {
@@ -2250,6 +2290,44 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                 }
+
+#ifdef HU_HAS_PERSONA
+                /* F16: Context modifiers — heavy topics, personal sharing, high emotion, early turn
+                 */
+                if (history_entries && history_count > 0) {
+                    hu_emotional_state_t emo_ctx =
+                        hu_conversation_detect_emotion(history_entries, history_count);
+                    const hu_context_modifiers_t *mods =
+                        (agent && agent->persona) ? &agent->persona->context_modifiers : NULL;
+                    char mod_buf[512];
+                    size_t mod_len = hu_conversation_build_context_modifiers(
+                        history_entries, history_count, &emo_ctx, mods, mod_buf, sizeof(mod_buf));
+                    if (mod_len > 0) {
+                        if (convo_ctx) {
+                            size_t total = convo_ctx_len + mod_len + 3;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                            if (merged) {
+                                memcpy(merged, convo_ctx, convo_ctx_len);
+                                merged[convo_ctx_len] = '\n';
+                                memcpy(merged + convo_ctx_len + 1, mod_buf, mod_len);
+                                merged[convo_ctx_len + 1 + mod_len] = '\n';
+                                merged[total - 1] = '\0';
+                                alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total - 1;
+                            }
+                        } else {
+                            convo_ctx = (char *)alloc->alloc(alloc->ctx, mod_len + 2);
+                            if (convo_ctx) {
+                                memcpy(convo_ctx, mod_buf, mod_len);
+                                convo_ctx[mod_len] = '\n';
+                                convo_ctx[mod_len + 1] = '\0';
+                                convo_ctx_len = mod_len + 1;
+                            }
+                        }
+                    }
+                }
+#endif
 
                 /* GraphRAG: inject knowledge graph context (cross-contact synthesis via batch_key)
                  */

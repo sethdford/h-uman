@@ -585,6 +585,65 @@ static void energy_directive_neutral_returns_zero(void) {
     HU_ASSERT_EQ(len, 0u);
 }
 
+/* ── Escalation detection tests (F14) ─────────────────────────────────── */
+
+static void escalation_three_negative_escalating(void) {
+    hu_channel_history_entry_t entries[6] = {
+        make_entry(true, "hey what's up", "12:00"),
+        make_entry(false, "i'm stressed", "12:01"),
+        make_entry(true, "sorry to hear", "12:02"),
+        make_entry(false, "it's getting worse", "12:03"),
+        make_entry(true, "hang in there", "12:04"),
+        make_entry(false, "i can't deal", "12:05"),
+    };
+    hu_escalation_state_t s = hu_conversation_detect_escalation(entries, 6);
+    HU_ASSERT_TRUE(s.escalating);
+    HU_ASSERT_TRUE(s.consecutive_negative >= 3);
+}
+
+static void escalation_three_negative_then_reset_not_escalating(void) {
+    hu_channel_history_entry_t entries[8] = {
+        make_entry(false, "i'm stressed", "12:00"),
+        make_entry(true, "oh no", "12:01"),
+        make_entry(false, "it's getting worse", "12:02"),
+        make_entry(true, "really?", "12:03"),
+        make_entry(false, "i can't deal", "12:04"),
+        make_entry(true, "aw", "12:05"),
+        make_entry(false, "lol jk", "12:06"),
+    };
+    hu_escalation_state_t s = hu_conversation_detect_escalation(entries, 7);
+    HU_ASSERT_FALSE(s.escalating);
+}
+
+static void escalation_two_negative_not_escalating(void) {
+    hu_channel_history_entry_t entries[4] = {
+        make_entry(false, "i'm stressed", "12:00"),
+        make_entry(true, "sorry", "12:01"),
+        make_entry(false, "it's getting worse", "12:02"),
+    };
+    hu_escalation_state_t s = hu_conversation_detect_escalation(entries, 3);
+    HU_ASSERT_FALSE(s.escalating);
+    HU_ASSERT_TRUE(s.consecutive_negative < 3);
+}
+
+static void escalation_mixed_positive_negative_not_escalating(void) {
+    hu_channel_history_entry_t entries[6] = {
+        make_entry(false, "i'm stressed", "12:00"),
+        make_entry(false, "actually feeling better now", "12:01"),
+        make_entry(false, "thanks for listening", "12:02"),
+    };
+    hu_escalation_state_t s = hu_conversation_detect_escalation(entries, 3);
+    HU_ASSERT_FALSE(s.escalating);
+}
+
+static void escalation_deescalation_directive_nonempty(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_deescalation_directive(buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "DE-ESCALATION"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "empathetic"));
+}
+
 /* ── Honesty guardrail tests ─────────────────────────────────────────── */
 
 static void honesty_detects_action_query(void) {
@@ -1781,6 +1840,13 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(energy_directive_anxious_nonempty);
     HU_RUN_TEST(energy_directive_calm_nonempty);
     HU_RUN_TEST(energy_directive_neutral_returns_zero);
+
+    /* Escalation detection (F14) */
+    HU_RUN_TEST(escalation_three_negative_escalating);
+    HU_RUN_TEST(escalation_three_negative_then_reset_not_escalating);
+    HU_RUN_TEST(escalation_two_negative_not_escalating);
+    HU_RUN_TEST(escalation_mixed_positive_negative_not_escalating);
+    HU_RUN_TEST(escalation_deescalation_directive_nonempty);
 
     /* Honesty guardrail */
     HU_RUN_TEST(honesty_detects_action_query);

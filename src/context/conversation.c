@@ -1176,6 +1176,236 @@ size_t hu_conversation_build_energy_directive(hu_energy_level_t energy, char *bu
     return len;
 }
 
+/* ── Emotional escalation detection (F14) ───────────────────────────────── */
+
+#define ESCALATION_LOOKBACK 8
+
+static float compute_valence(const char *text, size_t text_len) {
+    if (!text || text_len == 0)
+        return 0.0f;
+
+    /* Reset signals: "i'm fine", "just kidding", "lol", "haha" → reset consecutive */
+    if (str_contains_ci(text, text_len, "i'm fine") || str_contains_ci(text, text_len, "im fine") ||
+        str_contains_ci(text, text_len, "just kidding") || str_contains_ci(text, text_len, "jk") ||
+        str_contains_ci(text, text_len, "lol") || str_contains_ci(text, text_len, "haha"))
+        return 0.0f; /* neutral for reset purposes */
+
+    float valence = 0.0f;
+
+    /* Negative keywords */
+    if (str_contains_ci(text, text_len, "sad") || str_contains_ci(text, text_len, "angry") ||
+        str_contains_ci(text, text_len, "frustrated") || str_contains_ci(text, text_len, "upset") ||
+        str_contains_ci(text, text_len, "stressed") || str_contains_ci(text, text_len, "worse") ||
+        str_contains_ci(text, text_len, "can't deal") ||
+        str_contains_ci(text, text_len, "cant deal") || str_contains_ci(text, text_len, "hate") ||
+        str_contains_ci(text, text_len, "horrible") || str_contains_ci(text, text_len, "terrible"))
+        valence -= 1.0f;
+
+    /* Positive keywords */
+    if (str_contains_ci(text, text_len, "happy") || str_contains_ci(text, text_len, "great") ||
+        str_contains_ci(text, text_len, "amazing") || str_contains_ci(text, text_len, "love") ||
+        str_contains_ci(text, text_len, "thanks") || str_contains_ci(text, text_len, "better"))
+        valence += 1.0f;
+
+    return valence;
+}
+
+hu_escalation_state_t hu_conversation_detect_escalation(const hu_channel_history_entry_t *entries,
+                                                        size_t count) {
+    hu_escalation_state_t out = {false, 0, 0.0f};
+    if (!entries || count == 0)
+        return out;
+
+    /* Collect last 6–8 their messages (from_me=false), newest first */
+    const hu_channel_history_entry_t *their[ESCALATION_LOOKBACK];
+    size_t their_count = 0;
+    for (size_t i = count; i > 0 && their_count < ESCALATION_LOOKBACK; i--) {
+        if (!entries[i - 1].from_me) {
+            their[their_count++] = &entries[i - 1];
+        }
+    }
+
+    if (their_count == 0)
+        return out;
+
+    /* Process oldest to newest (reverse order) */
+    int consecutive = 0;
+    float traj_sum = 0.0f;
+
+    for (size_t i = their_count; i > 0; i--) {
+        const hu_channel_history_entry_t *e = their[i - 1];
+        size_t tl = strlen(e->text);
+        float v = compute_valence(e->text, tl);
+
+        if (v < 0.0f) {
+            consecutive++;
+        } else {
+            consecutive = 0;
+        }
+
+        /* trajectory: sum of valences of last 3 messages (most recent = i <= 3) */
+        if (i <= 3)
+            traj_sum += v;
+    }
+
+    /* trajectory: sum of valences of last 3 messages (negative = worsening) */
+    out.consecutive_negative = consecutive;
+    out.trajectory = traj_sum;
+    out.escalating = (consecutive >= 3);
+
+    return out;
+}
+
+size_t hu_conversation_build_deescalation_directive(char *buf, size_t cap) {
+    if (!buf || cap == 0)
+        return 0;
+    const char *directive =
+        "[DE-ESCALATION: Their mood is escalating negatively. Be shorter, more empathetic, fewer "
+        "jokes. \"hey you okay?\" energy.]";
+    size_t len = strlen(directive);
+    if (len >= cap)
+        len = cap - 1;
+    memcpy(buf, directive, len);
+    buf[len] = '\0';
+    return len;
+}
+
+/* ── Context modifiers (F16) ─────────────────────────────────────────── */
+
+#ifdef HU_HAS_PERSONA
+
+static bool detect_heavy_topic(const hu_channel_history_entry_t *entries, size_t count) {
+    if (!entries || count == 0)
+        return false;
+    static const char *keywords[] = {
+        "died",      "passed away", "passed",  "cancer",      "divorce",  "fired",    "laid off",
+        "diagnosis", "funeral",     "breakup", "lost my job", "terminal", "hospital", NULL,
+    };
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].from_me)
+            continue;
+        const char *t = entries[i].text;
+        size_t tl = strlen(t);
+        for (const char **kw = keywords; *kw; kw++) {
+            if (str_contains_ci(t, tl, *kw))
+                return true;
+        }
+    }
+    return false;
+}
+
+static bool detect_personal_sharing(const hu_channel_history_entry_t *entries, size_t count) {
+    if (!entries || count == 0)
+        return false;
+    static const char *phrases[] = {
+        "i need to tell you",
+        "can i be honest",
+        "don't judge me",
+        "this is hard to say",
+        "i never told",
+        "first time i'm saying",
+        "i've been meaning to tell",
+        "dont judge me",
+        "first time im saying",
+        "ive been meaning to tell",
+        NULL,
+    };
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].from_me)
+            continue;
+        const char *t = entries[i].text;
+        size_t tl = strlen(t);
+        for (const char **p = phrases; *p; p++) {
+            if (str_contains_ci(t, tl, *p))
+                return true;
+        }
+    }
+    return false;
+}
+
+static bool detect_early_turn(const hu_channel_history_entry_t *entries, size_t count) {
+    if (!entries || count == 0)
+        return false;
+    size_t from_me_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].from_me)
+            from_me_count++;
+    }
+    return count <= 6 && from_me_count <= 3;
+}
+
+size_t hu_conversation_build_context_modifiers(const hu_channel_history_entry_t *entries,
+                                               size_t count, const hu_emotional_state_t *emo,
+                                               const hu_context_modifiers_t *mods, char *buf,
+                                               size_t cap) {
+    if (!buf || cap == 0)
+        return 0;
+
+    float reduction = 0.4f;
+    float warmth_boost = 1.6f;
+    float breathing_boost = 1.5f;
+    float humanization_boost = 1.4f;
+    if (mods) {
+        reduction = mods->serious_topics_reduction > 0.0f ? mods->serious_topics_reduction : 0.4f;
+        warmth_boost =
+            mods->personal_sharing_warmth_boost > 0.0f ? mods->personal_sharing_warmth_boost : 1.6f;
+        breathing_boost =
+            mods->high_emotion_breathing_boost > 0.0f ? mods->high_emotion_breathing_boost : 1.5f;
+        humanization_boost =
+            mods->early_turn_humanization_boost > 0.0f ? mods->early_turn_humanization_boost : 1.4f;
+    }
+    (void)breathing_boost;
+
+    size_t pos = 0;
+    int w;
+
+    if (detect_heavy_topic(entries, count)) {
+        int pct = (int)(reduction * 100.0f);
+        if (pct < 0)
+            pct = 0;
+        if (pct > 100)
+            pct = 100;
+        w = snprintf(buf + pos, cap - pos,
+                     "[CONTEXT: Heavy topic detected. Reduce humor by %d%%.]\n", pct);
+        if (w > 0 && (size_t)w < cap - pos)
+            pos += (size_t)w;
+    }
+
+    if (detect_personal_sharing(entries, count)) {
+        int pct = (int)((warmth_boost - 1.0f) * 100.0f);
+        if (pct < 0)
+            pct = 0;
+        if (pct > 200)
+            pct = 200;
+        w = snprintf(buf + pos, cap - pos,
+                     "[CONTEXT: They're sharing something personal. Boost warmth %d%%.]\n", pct);
+        if (w > 0 && (size_t)w < cap - pos)
+            pos += (size_t)w;
+    }
+
+    if (emo && emo->intensity > 0.8f) {
+        w = snprintf(buf + pos, cap - pos,
+                     "[CONTEXT: High emotion. Use shorter sentences, more line breaks.]\n");
+        if (w > 0 && (size_t)w < cap - pos)
+            pos += (size_t)w;
+    }
+
+    if (detect_early_turn(entries, count)) {
+        (void)humanization_boost; /* used for future percentage if needed */
+        w = snprintf(buf + pos, cap - pos,
+                     "[CONTEXT: Early in conversation. Be warmer, more human.]\n");
+        if (w > 0 && (size_t)w < cap - pos)
+            pos += (size_t)w;
+    }
+
+    if (pos > 0 && buf[pos - 1] == '\n')
+        pos--; /* trim trailing newline for cleaner output */
+    buf[pos] = '\0';
+    return pos;
+}
+
+#endif /* HU_HAS_PERSONA */
+
 /* ── Typo correction fragment (*meant) ─────────────────────────────────── */
 
 size_t hu_conversation_generate_correction(const char *original, size_t original_len,
