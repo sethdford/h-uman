@@ -16,6 +16,11 @@ sc_error_t sc_daemon_start(void);
 sc_error_t sc_daemon_stop(void);
 bool sc_daemon_status(void);
 
+/* Write/remove PID file for foreground service-loop instances.
+ * Used by cmd_service_loop so sc_daemon_status() can detect running instances. */
+sc_error_t sc_daemon_write_pid(void);
+void sc_daemon_remove_pid(void);
+
 /* Cron schedule matching: 5-field expression (min hour dom month dow).
    Supports star, exact, step, range, range-step, and comma lists. */
 bool sc_cron_schedule_matches(const char *schedule, const struct tm *tm);

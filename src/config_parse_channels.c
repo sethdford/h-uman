@@ -108,6 +108,16 @@ static void parse_imessage_channel(sc_allocator_t *a, sc_config_t *cfg,
     }
     cfg->channels.imessage.poll_interval_sec =
         (int)sc_json_get_number(obj, "poll_interval_sec", 30.0);
+    cfg->channels.imessage.user_response_window_sec =
+        (int)sc_json_get_number(obj, "user_response_window_sec", 0.0);
+
+    const char *rm = sc_json_get_string(obj, "response_mode");
+    if (rm) {
+        if (cfg->channels.imessage.response_mode)
+            a->free(a->ctx, cfg->channels.imessage.response_mode,
+                    strlen(cfg->channels.imessage.response_mode) + 1);
+        cfg->channels.imessage.response_mode = sc_strdup(a, rm);
+    }
 }
 
 static void parse_gmail_channel(sc_allocator_t *a, sc_config_t *cfg, const sc_json_value_t *obj) {

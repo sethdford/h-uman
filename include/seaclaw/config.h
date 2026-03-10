@@ -144,6 +144,8 @@ typedef struct sc_imessage_channel_config {
     char **allow_from;
     size_t allow_from_count;
     int poll_interval_sec;
+    int user_response_window_sec; /* 0 = use default (45s); how long to wait for real user */
+    char *response_mode;          /* "selective" (default), "normal", "eager" */
 } sc_imessage_channel_config_t;
 
 typedef struct sc_gmail_channel_config {

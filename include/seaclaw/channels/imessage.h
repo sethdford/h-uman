@@ -26,6 +26,12 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
 const char *sc_imessage_reaction_to_tapback_name(sc_reaction_type_t reaction);
 
 #ifndef SC_IS_TEST
+/** Check if the real user sent a message to `handle` within the last
+ * `within_seconds` seconds.  Queries chat.db for is_from_me=1 rows.
+ * Returns true if the user responded recently (SeaClaw should stay silent). */
+bool sc_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
+                                         int within_seconds);
+
 /** Query the attachment path for a given message ROWID from chat.db.
  * Returns the attachment file path or NULL if not found. Caller owns. */
 char *sc_imessage_get_attachment_path(sc_allocator_t *alloc, int64_t message_id);
@@ -33,7 +39,7 @@ char *sc_imessage_get_attachment_path(sc_allocator_t *alloc, int64_t message_id)
 /** Get the attachment path for the most recent message with an attachment from
  * the given contact. Returns path or NULL. Caller owns. */
 char *sc_imessage_get_latest_attachment_path(sc_allocator_t *alloc, const char *contact_id,
-                                              size_t contact_id_len);
+                                             size_t contact_id_len);
 #endif
 
 #if SC_IS_TEST

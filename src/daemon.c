@@ -927,7 +927,7 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
     static size_t community_insights_len = 0;
 
     /* Per-contact Theory of Mind belief states */
-#define SC_TOM_MAX_CONTACTS 16
+#define SC_TOM_MAX_CONTACTS    16
     static sc_belief_state_t tom_states[SC_TOM_MAX_CONTACTS];
     static char tom_contact_keys[SC_TOM_MAX_CONTACTS][64];
     static size_t tom_contact_count = 0;
@@ -942,6 +942,16 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
     (void)voice_profiles;
     (void)voice_contact_keys;
     (void)voice_contact_count;
+
+    /* Per-contact consecutive response counter.
+     * Tracks how many times SeaClaw responded in a row without the real
+     * user stepping in.  Resets when user_responded_recently fires or
+     * when the real user sends a message (is_from_me=1 in history). */
+#define SC_CONSEC_MAX_CONTACTS 32
+    static uint8_t consec_response_count[SC_CONSEC_MAX_CONTACTS];
+    static char consec_contact_keys[SC_CONSEC_MAX_CONTACTS][64];
+    static size_t consec_contact_count = 0;
+
     static sc_bth_metrics_t bth_metrics;
     sc_bth_metrics_init(&bth_metrics);
     if (agent)
@@ -1220,6 +1230,22 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                 sc_response_action_t action = sc_conversation_classify_response(
                     combined, combined_len, early_history, early_history_count, &extra_delay_ms);
 
+                /* Apply response_mode override from iMessage config.
+                 * "selective" (default): FULL→BRIEF for non-questions.
+                 * "eager": BRIEF/SKIP→FULL (respond to almost everything).
+                 * "normal": no override. */
+                {
+                    const char *rmode = config ? config->channels.imessage.response_mode : NULL;
+                    if (!rmode || !rmode[0] || strcmp(rmode, "selective") == 0) {
+                        if (action == SC_RESPONSE_FULL && !memchr(combined, '?', combined_len))
+                            action = SC_RESPONSE_BRIEF;
+                    } else if (strcmp(rmode, "eager") == 0) {
+                        if (action == SC_RESPONSE_BRIEF)
+                            action = SC_RESPONSE_FULL;
+                    }
+                    /* "normal" = no change */
+                }
+
                 fprintf(stderr, "[seaclaw] classify result: action=%d delay=%u for %.*s\n",
                         (int)action, (unsigned)extra_delay_ms, (int)(key_len > 20 ? 20 : key_len),
                         batch_key);
@@ -1228,14 +1254,35 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     alloc->free(alloc->ctx, early_history,
                                 early_history_count * sizeof(sc_channel_history_entry_t));
 
-                /* Tapback-skip: for tapback-worthy messages, 40% chance to not respond */
+                /* Consecutive response limiter: if SeaClaw has responded to
+                 * this contact 3+ times in a row without the real user
+                 * stepping in, stay silent so we don't run away. */
+                size_t consec_idx = SIZE_MAX;
+                for (size_t ci = 0; ci < consec_contact_count; ci++) {
+                    if (key_len < sizeof(consec_contact_keys[0]) &&
+                        memcmp(consec_contact_keys[ci], batch_key, key_len) == 0 &&
+                        consec_contact_keys[ci][key_len] == '\0') {
+                        consec_idx = ci;
+                        break;
+                    }
+                }
+                if (consec_idx != SIZE_MAX && consec_response_count[consec_idx] >= 3 &&
+                    action != SC_RESPONSE_SKIP) {
+                    fprintf(stderr,
+                            "[seaclaw] consecutive limit (%u) reached for %.*s — staying silent\n",
+                            (unsigned)consec_response_count[consec_idx],
+                            (int)(key_len > 20 ? 20 : key_len), batch_key);
+                    action = SC_RESPONSE_SKIP;
+                }
+
+                /* Tapback-skip: for tapback-worthy messages, 70% chance to not respond */
                 bool tapback_skip = false;
 #ifndef SC_IS_TEST
                 if (action != SC_RESPONSE_SKIP && is_tapback_worthy(combined, combined_len)) {
                     uint32_t r = (uint32_t)time(NULL);
                     r = r * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
                     r = (r >> 16u) & 0x7fffu;
-                    if ((r % 100u) < 40u)
+                    if ((r % 100u) < 70u)
                         tapback_skip = true;
                 }
 #endif
@@ -1408,6 +1455,39 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     combined[combined_len] = '\0';
                 }
+
+                /* Real-user-response window: if the real user already replied to
+                 * this contact during our delay, stay silent.  Only applies to
+                 * iMessage where we impersonate the user. */
+#if defined(SC_ENABLE_IMESSAGE)
+                {
+                    const char *chn = ch->channel->vtable->name
+                                          ? ch->channel->vtable->name(ch->channel->ctx)
+                                          : NULL;
+                    if (chn && strcmp(chn, "imessage") == 0) {
+                        int window = 120;
+                        if (config && config->channels.imessage.user_response_window_sec > 0)
+                            window = config->channels.imessage.user_response_window_sec;
+                        if (sc_imessage_user_responded_recently(ch->channel->ctx, batch_key,
+                                                                key_len, window)) {
+                            fprintf(stderr,
+                                    "[seaclaw] real user responded to %.*s within %ds — "
+                                    "staying silent\n",
+                                    (int)(key_len > 20 ? 20 : key_len), batch_key, window);
+                            /* Reset consecutive counter — real user is active */
+                            for (size_t ci = 0; ci < consec_contact_count; ci++) {
+                                if (key_len < sizeof(consec_contact_keys[0]) &&
+                                    memcmp(consec_contact_keys[ci], batch_key, key_len) == 0 &&
+                                    consec_contact_keys[ci][key_len] == '\0') {
+                                    consec_response_count[ci] = 0;
+                                    break;
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
+#endif
 #else
                 bool brief_mode = false;
 #endif
@@ -3304,6 +3384,29 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 #endif
+                    /* ── Pre-send re-check: abort if real user responded while
+                     * we were generating.  Prevents piling onto a conversation
+                     * the user is actively handling. ─────────────────────────── */
+#if defined(SC_ENABLE_IMESSAGE) && !defined(SC_IS_TEST)
+                    {
+                        const char *chn_name = ch->channel->vtable->name
+                                                   ? ch->channel->vtable->name(ch->channel->ctx)
+                                                   : NULL;
+                        if (chn_name && strcmp(chn_name, "imessage") == 0) {
+                            int window = 120;
+                            if (config && config->channels.imessage.user_response_window_sec > 0)
+                                window = config->channels.imessage.user_response_window_sec;
+                            if (sc_imessage_user_responded_recently(ch->channel->ctx, batch_key,
+                                                                    key_len, window)) {
+                                fprintf(stderr,
+                                        "[seaclaw] pre-send abort: real user active "
+                                        "for %.*s — dropping generated response\n",
+                                        (int)(key_len > 20 ? 20 : key_len), batch_key);
+                                goto skip_send;
+                            }
+                        }
+                    }
+#endif
                     /* Split response into natural multi-message fragments */
                     sc_message_fragment_t fragments[4];
                     size_t frag_count =
@@ -3362,7 +3465,21 @@ sc_error_t sc_service_run(sc_allocator_t *alloc, uint32_t tick_interval_ms,
                                                   response_len, NULL, 0);
 #endif
                 }
+#if defined(SC_ENABLE_IMESSAGE) && !defined(SC_IS_TEST)
+            skip_send:
+#endif
                 if (response) {
+                    /* Bump consecutive response counter for this contact */
+                    if (consec_idx == SIZE_MAX && consec_contact_count < SC_CONSEC_MAX_CONTACTS &&
+                        key_len < sizeof(consec_contact_keys[0])) {
+                        consec_idx = consec_contact_count++;
+                        memcpy(consec_contact_keys[consec_idx], batch_key, key_len);
+                        consec_contact_keys[consec_idx][key_len] = '\0';
+                        consec_response_count[consec_idx] = 0;
+                    }
+                    if (consec_idx != SIZE_MAX)
+                        consec_response_count[consec_idx]++;
+
                     agent->alloc->free(agent->alloc->ctx, response, response_alloc_len + 1);
                 }
             }
@@ -3519,6 +3636,40 @@ bool sc_daemon_status(void) {
     return kill((pid_t)pid_val, 0) == 0;
 }
 #endif
+
+/* ── PID file for foreground service-loop ────────────────────────────── */
+
+sc_error_t sc_daemon_write_pid(void) {
+    char path[SC_MAX_PATH];
+    int n = get_pid_path(path, sizeof(path));
+    if (n <= 0 || (size_t)n >= sizeof(path))
+        return SC_ERR_INVALID_ARGUMENT;
+
+    const char *home = getenv("HOME");
+    if (!home)
+        home = ".";
+    char dir[SC_MAX_PATH];
+    n = snprintf(dir, sizeof(dir), "%s/%s", home, SC_DAEMON_PID_DIR);
+    if (n <= 0 || (size_t)n >= sizeof(dir))
+        return SC_ERR_INVALID_ARGUMENT;
+#ifndef SC_IS_TEST
+    mkdir(dir, 0700);
+#endif
+
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return SC_ERR_IO;
+    fprintf(f, "%d\n", (int)getpid());
+    fclose(f);
+    return SC_OK;
+}
+
+void sc_daemon_remove_pid(void) {
+    char path[SC_MAX_PATH];
+    int n = get_pid_path(path, sizeof(path));
+    if (n > 0 && (size_t)n < sizeof(path))
+        remove(path);
+}
 
 /* ── Platform service install/uninstall/logs ─────────────────────────── */
 

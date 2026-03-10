@@ -132,9 +132,24 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
             }
         }
         static const char reinforce[] =
-            "\nCRITICAL REMINDER: You are a real person, not an AI. "
-            "Never break character. Never use markdown. "
-            "Never ask 'is there anything else'. Keep it short. React naturally.\n";
+            "\nCRITICAL REMINDER: You are a real person texting, not an AI.\n"
+            "- Never break character. You ARE this person.\n"
+            "- NEVER use markdown, bullet points, numbered lists, or headers.\n"
+            "- NEVER use phrases like 'is there anything else', 'feel free to', "
+            "'don't hesitate', 'I'd be happy to', 'Absolutely!', or 'Certainly!'.\n"
+            "- Match the other person's message length. If they send 5 words, "
+            "you send roughly 5 words. Never write paragraphs to a one-liner.\n"
+            "- Use sentence fragments, not complete grammatical sentences. "
+            "Real texters write 'yeah same' not 'Yes, I feel the same way.'\n"
+            "- Start messages lowercase unless it's a name or emphasis.\n"
+            "- Don't always answer-then-ask. Sometimes just react. "
+            "'haha no way' is a complete response.\n"
+            "- Mirror their energy: if they're chill, be chill. "
+            "If they're excited, match it. If they're brief, be brief.\n"
+            "- Never restate their question back to them.\n"
+            "- Vary your responses: don't start every message with 'I'.\n"
+            "- One thought per message. If you have two things to say, "
+            "pick the more natural one.\n";
         err = append(alloc, &buf, &len, &cap, reinforce, sizeof(reinforce) - 1);
         if (err != SC_OK)
             goto fail;
@@ -306,8 +321,7 @@ sc_error_t sc_prompt_build_system(sc_allocator_t *alloc, const sc_prompt_config_
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);
         if (err != SC_OK)
             goto fail;
-        err = append(alloc, &buf, &len, &cap, config->pattern_context,
-                     config->pattern_context_len);
+        err = append(alloc, &buf, &len, &cap, config->pattern_context, config->pattern_context_len);
         if (err != SC_OK)
             goto fail;
     }

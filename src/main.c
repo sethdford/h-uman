@@ -554,6 +554,17 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
         if (strcmp(argv[i], "--with-gateway") == 0)
             with_gateway = true;
     }
+
+    if (sc_daemon_status()) {
+        fprintf(stderr,
+                "[%s] ERROR: another service-loop is already running. "
+                "Stop it with 'seaclaw service stop' before starting a new one.\n",
+                SC_CODENAME);
+        return SC_ERR_INVALID_ARGUMENT;
+    }
+
+    sc_daemon_write_pid();
+
     fprintf(stderr, "[%s] service loop started%s\n", SC_CODENAME,
             with_gateway ? " (with gateway)" : "");
 
@@ -703,6 +714,7 @@ static sc_error_t cmd_service_loop(sc_allocator_t *alloc, int argc, char **argv)
     sc_awareness_deinit(&svc_awareness);
     sc_app_teardown(&app_ctx);
     sc_plugin_unload_all();
+    sc_daemon_remove_pid();
     return err;
 }
 

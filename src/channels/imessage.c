@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 #if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
@@ -18,8 +19,8 @@
 #endif
 #endif
 
-#define SC_IMESSAGE_SENT_RING_SIZE  8
-#define SC_IMESSAGE_SENT_PREFIX_LEN 128
+#define SC_IMESSAGE_SENT_RING_SIZE  32
+#define SC_IMESSAGE_SENT_PREFIX_LEN 256
 
 typedef struct sc_imessage_ctx {
     sc_allocator_t *alloc;
@@ -31,6 +32,7 @@ typedef struct sc_imessage_ctx {
     size_t allow_from_count;
     char sent_ring[SC_IMESSAGE_SENT_RING_SIZE][SC_IMESSAGE_SENT_PREFIX_LEN];
     size_t sent_ring_len[SC_IMESSAGE_SENT_RING_SIZE];
+    uint32_t sent_ring_hash[SC_IMESSAGE_SENT_RING_SIZE];
     size_t sent_ring_idx;
 #if SC_IS_TEST
     char last_message[4096];
@@ -46,6 +48,13 @@ typedef struct sc_imessage_ctx {
 } sc_imessage_ctx_t;
 
 #if !SC_IS_TEST && defined(__APPLE__) && defined(__MACH__)
+static uint32_t imessage_hash(const char *s, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++)
+        h = (h ^ (uint8_t)s[i]) * 16777619u;
+    return h;
+}
+
 static void imessage_record_sent(sc_imessage_ctx_t *c, const char *msg, size_t msg_len) {
     size_t slot = c->sent_ring_idx % SC_IMESSAGE_SENT_RING_SIZE;
     size_t copy_len =
@@ -53,20 +62,78 @@ static void imessage_record_sent(sc_imessage_ctx_t *c, const char *msg, size_t m
     memcpy(c->sent_ring[slot], msg, copy_len);
     c->sent_ring[slot][copy_len] = '\0';
     c->sent_ring_len[slot] = copy_len;
+    c->sent_ring_hash[slot] = imessage_hash(msg, msg_len);
     c->sent_ring_idx++;
 }
 
 static bool imessage_was_sent_by_us(sc_imessage_ctx_t *c, const char *text, size_t text_len) {
+    uint32_t h = imessage_hash(text, text_len);
     for (size_t i = 0; i < SC_IMESSAGE_SENT_RING_SIZE; i++) {
         size_t slen = c->sent_ring_len[i];
         if (slen == 0)
             continue;
-        size_t cmp_len = text_len < slen ? text_len : slen;
-        if (cmp_len > 0 && memcmp(text, c->sent_ring[i], cmp_len) == 0)
-            return true;
+        if (c->sent_ring_hash[i] == h) {
+            size_t cmp_len = text_len < slen ? text_len : slen;
+            if (cmp_len > 0 && memcmp(text, c->sent_ring[i], cmp_len) == 0)
+                return true;
+        }
     }
     return false;
 }
+
+#ifdef SC_ENABLE_SQLITE
+bool sc_imessage_user_responded_recently(void *channel_ctx, const char *handle, size_t handle_len,
+                                         int within_seconds) {
+    (void)channel_ctx;
+    if (!handle || handle_len == 0 || within_seconds <= 0)
+        return false;
+
+    const char *home = getenv("HOME");
+    if (!home)
+        return false;
+
+    char db_path[512];
+    int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+    if (n < 0 || (size_t)n >= sizeof(db_path))
+        return false;
+
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        if (db)
+            sqlite3_close(db);
+        return false;
+    }
+
+    /*
+     * Check for is_from_me=1 messages to this handle within the time window.
+     * macOS Messages stores dates as nanoseconds since 2001-01-01 (Core Data epoch).
+     */
+    const char *sql = "SELECT COUNT(*) FROM message m "
+                      "JOIN handle h ON m.handle_id = h.ROWID "
+                      "WHERE h.id = ?1 AND m.is_from_me = 1 "
+                      "AND m.date > ((?2 - 978307200) * 1000000000)";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return false;
+    }
+
+    sqlite3_bind_text(stmt, 1, handle, (int)handle_len, NULL);
+
+    time_t cutoff = time(NULL) - within_seconds;
+    sqlite3_bind_int64(stmt, 2, (int64_t)cutoff);
+
+    bool found = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        found = sqlite3_column_int(stmt, 0) > 0;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return found;
+}
+#endif
 #endif
 
 static sc_error_t imessage_start(void *ctx) {
@@ -1024,7 +1091,11 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
         return SC_OK;
     }
 
-    const char *sql = "SELECT m.ROWID, m.text, h.id "
+    const char *sql = "SELECT m.ROWID, m.text, h.id, "
+                      "  COALESCE("
+                      "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
+                      "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
+                      "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count "
                       "FROM message m "
                       "JOIN handle h ON m.handle_id = h.ROWID "
                       "WHERE m.is_from_me = 0 AND m.text IS NOT NULL "
@@ -1049,6 +1120,7 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
         int64_t rowid = sqlite3_column_int64(stmt, 0);
         const char *text = (const char *)sqlite3_column_text(stmt, 1);
         const char *handle = (const char *)sqlite3_column_text(stmt, 2);
+        int participant_count = sqlite3_column_int(stmt, 3);
 
         if (!text || !handle)
             continue;
@@ -1085,12 +1157,13 @@ sc_error_t sc_imessage_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
         msgs[count].session_key[handle_len] = '\0';
         memcpy(msgs[count].content, text, text_len);
         msgs[count].content[text_len] = '\0';
+        msgs[count].is_group = (participant_count > 2);
 
         c->last_rowid = rowid;
         count++;
         if (getenv("SC_DEBUG"))
-            fprintf(stderr, "[imessage] received from %.20s: %.*s\n", handle,
-                    (int)(text_len > 80 ? 80 : text_len), text);
+            fprintf(stderr, "[imessage] received from %.20s (group=%d): %.*s\n", handle,
+                    (int)msgs[count - 1].is_group, (int)(text_len > 80 ? 80 : text_len), text);
     }
 
     sqlite3_finalize(stmt);

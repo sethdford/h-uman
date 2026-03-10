@@ -1,5 +1,6 @@
 #include "seaclaw/context/conversation.h"
 #include "seaclaw/core/allocator.h"
+#include "seaclaw/persona.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
@@ -240,11 +241,11 @@ static void classify_ok_after_distant_question_skips(void) {
     SC_ASSERT_EQ(a, SC_RESPONSE_SKIP);
 }
 
-static void classify_normal_statement_is_full(void) {
+static void classify_normal_statement_is_brief(void) {
     uint32_t delay = 0;
     sc_response_action_t a = sc_conversation_classify_response(
         "i just got back from the store and got us some stuff", 52, NULL, 0, &delay);
-    SC_ASSERT_EQ(a, SC_RESPONSE_FULL);
+    SC_ASSERT_EQ(a, SC_RESPONSE_BRIEF);
 }
 
 static void classify_farewell_goodnight_is_brief(void) {
@@ -1144,6 +1145,116 @@ static void calibrate_length_runs_without_crash(void) {
      * the function completes without crashing at any hour. */
 }
 
+/* ── Consecutive response limit tests ────────────────────────────────── */
+
+static void classify_consecutive_3_ours_skips(void) {
+    sc_channel_history_entry_t entries[4] = {
+        make_entry(false, "hey how are you", "12:00"),
+        make_entry(true, "good hbu", "12:01"),
+        make_entry(true, "just chilling", "12:02"),
+        make_entry(true, "yeah it's been a day", "12:03"),
+    };
+    uint32_t delay = 0;
+    sc_response_action_t a =
+        sc_conversation_classify_response("what are you up to tonight", 26, entries, 4, &delay);
+    SC_ASSERT_EQ(a, SC_RESPONSE_SKIP);
+}
+
+static void classify_consecutive_2_ours_still_responds(void) {
+    sc_channel_history_entry_t entries[3] = {
+        make_entry(false, "what's going on", "12:00"),
+        make_entry(true, "not much", "12:01"),
+        make_entry(true, "just chilling", "12:02"),
+    };
+    uint32_t delay = 0;
+    sc_response_action_t a =
+        sc_conversation_classify_response("want to grab dinner tonight?", 28, entries, 3, &delay);
+    SC_ASSERT_EQ(a, SC_RESPONSE_FULL);
+}
+
+static void classify_narrative_no_question_is_brief(void) {
+    uint32_t delay = 0;
+    sc_response_action_t a = sc_conversation_classify_response(
+        "just got done with work and heading to the gym now", 50, NULL, 0, &delay);
+    SC_ASSERT_EQ(a, SC_RESPONSE_BRIEF);
+}
+
+static void classify_question_still_full(void) {
+    uint32_t delay = 0;
+    sc_response_action_t a = sc_conversation_classify_response(
+        "do you want to grab dinner later tonight?", 41, NULL, 0, &delay);
+    SC_ASSERT_EQ(a, SC_RESPONSE_FULL);
+}
+
+/* ── Banned AI phrases expansion tests ──────────────────────────────── */
+
+static void strip_feel_free_to(void) {
+    char buf[256];
+    memcpy(buf, "Feel free to reach out anytime", 30);
+    buf[30] = '\0';
+    size_t len = sc_conversation_strip_ai_phrases(buf, 30);
+    SC_ASSERT_TRUE(len < 30);
+    SC_ASSERT_NULL(strstr(buf, "Feel free to"));
+}
+
+static void strip_dont_hesitate(void) {
+    char buf[256];
+    memcpy(buf, "Don't hesitate to ask me", 24);
+    buf[24] = '\0';
+    size_t len = sc_conversation_strip_ai_phrases(buf, 24);
+    SC_ASSERT_TRUE(len < 24);
+    SC_ASSERT_NULL(strstr(buf, "hesitate"));
+}
+
+static void strip_happy_to(void) {
+    char buf[256];
+    memcpy(buf, "I'd be happy to help with that", 30);
+    buf[30] = '\0';
+    size_t len = sc_conversation_strip_ai_phrases(buf, 30);
+    SC_ASSERT_TRUE(len < 30);
+    SC_ASSERT_NULL(strstr(buf, "happy to"));
+}
+
+static void strip_double_exclamation(void) {
+    char buf[256];
+    memcpy(buf, "That's awesome!! ", 17);
+    buf[17] = '\0';
+    size_t len = sc_conversation_strip_ai_phrases(buf, 17);
+    SC_ASSERT_TRUE(len <= 17);
+    SC_ASSERT_NULL(strstr(buf, "!!"));
+}
+
+/* ── Example bank format compatibility test ─────────────────────────── */
+
+static void examples_load_input_output_format(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{\"examples\":["
+                       "{\"input\":\"hey how are you\",\"output\":\"good hbu\"},"
+                       "{\"context\":\"morning\",\"incoming\":\"sup\",\"response\":\"nm\"}"
+                       "]}";
+    sc_persona_example_bank_t bank;
+    sc_error_t err =
+        sc_persona_examples_load_json(&alloc, "imessage", 8, json, strlen(json), &bank);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(bank.examples_count, 2);
+    SC_ASSERT_NOT_NULL(bank.examples[0].incoming);
+    SC_ASSERT_NOT_NULL(bank.examples[0].response);
+    SC_ASSERT_STR_EQ(bank.examples[0].incoming, "hey how are you");
+    SC_ASSERT_STR_EQ(bank.examples[0].response, "good hbu");
+    SC_ASSERT_STR_EQ(bank.examples[1].incoming, "sup");
+    SC_ASSERT_STR_EQ(bank.examples[1].response, "nm");
+    for (size_t i = 0; i < bank.examples_count; i++) {
+        if (bank.examples[i].context)
+            alloc.free(alloc.ctx, bank.examples[i].context, strlen(bank.examples[i].context) + 1);
+        if (bank.examples[i].incoming)
+            alloc.free(alloc.ctx, bank.examples[i].incoming, strlen(bank.examples[i].incoming) + 1);
+        if (bank.examples[i].response)
+            alloc.free(alloc.ctx, bank.examples[i].response, strlen(bank.examples[i].response) + 1);
+    }
+    alloc.free(alloc.ctx, bank.examples, 2 * sizeof(sc_persona_example_t));
+    alloc.free(alloc.ctx, bank.channel, 9);
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
@@ -1175,7 +1286,7 @@ void run_conversation_tests(void) {
     SC_RUN_TEST(classify_emotional_is_delayed);
     SC_RUN_TEST(classify_ok_after_question_skips);
     SC_RUN_TEST(classify_ok_after_distant_question_skips);
-    SC_RUN_TEST(classify_normal_statement_is_full);
+    SC_RUN_TEST(classify_normal_statement_is_brief);
     SC_RUN_TEST(classify_farewell_goodnight_is_brief);
     SC_RUN_TEST(classify_farewell_short_bye);
     SC_RUN_TEST(classify_farewell_ttyl);
@@ -1306,4 +1417,21 @@ void run_conversation_tests(void) {
     SC_RUN_TEST(should_share_link_case_insensitive);
     SC_RUN_TEST(attachment_context_with_photo);
     SC_RUN_TEST(attachment_context_with_imessage_placeholder);
+
+    /* Consecutive response limit */
+    SC_RUN_TEST(classify_consecutive_3_ours_skips);
+    SC_RUN_TEST(classify_consecutive_2_ours_still_responds);
+
+    /* Narrative/statement classification (post-tightening) */
+    SC_RUN_TEST(classify_narrative_no_question_is_brief);
+    SC_RUN_TEST(classify_question_still_full);
+
+    /* Expanded banned AI phrases */
+    SC_RUN_TEST(strip_feel_free_to);
+    SC_RUN_TEST(strip_dont_hesitate);
+    SC_RUN_TEST(strip_happy_to);
+    SC_RUN_TEST(strip_double_exclamation);
+
+    /* Example bank format compatibility */
+    SC_RUN_TEST(examples_load_input_output_format);
 }

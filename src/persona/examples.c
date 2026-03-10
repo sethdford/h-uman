@@ -53,7 +53,14 @@ sc_error_t sc_persona_examples_load_json(sc_allocator_t *alloc, const char *chan
         const char *ctx = sc_json_get_string(item, "context");
         const char *inc = sc_json_get_string(item, "incoming");
         const char *resp = sc_json_get_string(item, "response");
-        if (!ctx || !inc || !resp)
+        /* Accept input/output as alternate field names */
+        if (!inc)
+            inc = sc_json_get_string(item, "input");
+        if (!resp)
+            resp = sc_json_get_string(item, "output");
+        if (!ctx)
+            ctx = "";
+        if (!inc || !resp)
             continue;
         examples[count].context = sc_strdup(alloc, ctx);
         examples[count].incoming = sc_strdup(alloc, inc);

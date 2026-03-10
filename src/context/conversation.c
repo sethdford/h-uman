@@ -2185,6 +2185,27 @@ sc_response_action_t sc_conversation_classify_response(const char *msg, size_t m
         return SC_RESPONSE_FULL;
     }
 
+    /* Consecutive response limit: if we have responded to the last 3+
+     * messages in a row with no interleaving real-user messages, the
+     * conversation is running away — skip to let the real user step in. */
+    if (entries && entry_count >= 3) {
+        size_t consecutive_ours = 0;
+        for (size_t i = entry_count; i > 0; i--) {
+            if (entries[i - 1].from_me)
+                consecutive_ours++;
+            else
+                break;
+        }
+        if (consecutive_ours >= 3)
+            return SC_RESPONSE_SKIP;
+    }
+
+    /* Narrative statement: no question, not short, not emotional — the sender
+     * is sharing something but not necessarily expecting a reply.  Respond
+     * briefly rather than generating a full AI-essay response. */
+    if (msg_len > 20 && word_count >= 4)
+        return SC_RESPONSE_BRIEF;
+
     return SC_RESPONSE_FULL;
 }
 
@@ -3110,6 +3131,8 @@ size_t sc_conversation_strip_ai_phrases(char *buf, size_t len) {
         {"Here's the thing: ", 18, "", 0},
         {"Here's the thing, ", 18, "", 0},
         {"That's a fantastic ", 19, "That's a good ", 14},
+        {"I think that's a great ", 23, "", 0},
+        {"I think that's great! ", 22, "", 0},
         {"crucial", 7, "important", 9},
         {"comprehensive", 13, "thorough", 8},
         {"pivotal", 7, "key", 3},
@@ -3120,6 +3143,26 @@ size_t sc_conversation_strip_ai_phrases(char *buf, size_t len) {
         {"I completely understand", 23, "I get it", 8},
         {"Absolutely! ", 12, "", 0},
         {"Certainly! ", 11, "", 0},
+        {"Of course! ", 11, "", 0},
+        {"Feel free to ", 13, "", 0},
+        {"Don't hesitate to ", 18, "", 0},
+        {"I'd be happy to ", 16, "", 0},
+        {"I'm here to help", 16, "I'm here", 8},
+        {"I'm here for you! ", 18, "I'm here ", 9},
+        {"That said, ", 11, "", 0},
+        {"That being said, ", 17, "", 0},
+        {"It's worth noting ", 18, "", 0},
+        {"It's important to note ", 23, "", 0},
+        {"In any case, ", 13, "", 0},
+        {"At the end of the day, ", 23, "", 0},
+        {"To be honest, ", 14, "", 0},
+        {"I want you to know ", 19, "", 0},
+        {"navigating", 10, "handling", 8},
+        {"resonate", 8, "hit home", 8},
+        {"boundaries", 10, "limits", 6},
+        {"self-care", 9, "rest", 4},
+        {"impactful", 9, "big", 3},
+        {"!! ", 3, "! ", 2},
     };
     size_t n_rep = sizeof(replacements) / sizeof(replacements[0]);
 
