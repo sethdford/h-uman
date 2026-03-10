@@ -73,14 +73,14 @@ docker build -t human:local .
 
 ## Environment variables
 
-| Variable                      | Description                       | Default                   |
-| ----------------------------- | --------------------------------- | ------------------------- |
-| `HOME`                        | Home directory (config path base) | `/human-data`           |
+| Variable                    | Description                       | Default                 |
+| --------------------------- | --------------------------------- | ----------------------- |
+| `HOME`                      | Home directory (config path base) | `/human-data`           |
 | `HUMAN_WORKSPACE`           | Workspace directory               | `/human-data/workspace` |
-| `HUMAN_GATEWAY_PORT`        | Gateway port                      | `3000`                    |
-| `HUMAN_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret (optional)    | -                         |
-| `OPENAI_API_KEY`              | OpenAI API key (if using)         | -                         |
-| `ANTHROPIC_API_KEY`           | Anthropic API key (if using)      | -                         |
+| `HUMAN_GATEWAY_PORT`        | Gateway port                      | `3000`                  |
+| `HUMAN_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret (optional)    | -                       |
+| `OPENAI_API_KEY`            | OpenAI API key (if using)         | -                       |
+| `ANTHROPIC_API_KEY`         | Anthropic API key (if using)      | -                       |
 
 API keys and secrets can be passed via environment variables or a mounted config file.
 
@@ -97,9 +97,9 @@ docker build --target release-root -t human:root .
 
 ## Volumes
 
-| Mount                     | Purpose                            |
-| ------------------------- | ---------------------------------- |
-| `/human-data/.human`  | Config, crontab, skills, memory DB |
+| Mount                   | Purpose                            |
+| ----------------------- | ---------------------------------- |
+| `/human-data/.human`    | Config, crontab, skills, memory DB |
 | `/human-data/workspace` | Agent workspace files              |
 
 Ensure these directories exist and have correct permissions for the container user.

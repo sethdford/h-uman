@@ -1606,6 +1606,9 @@ function generateKotlin(tokens: TokenMap): string {
   lines.push(
     "            SELECTION -> android.view.HapticFeedbackConstants.CLOCK_TICK",
   );
+  lines.push(
+    "            else -> android.view.HapticFeedbackConstants.KEYBOARD_TAP",
+  );
   lines.push("        }");
   lines.push("    }");
 

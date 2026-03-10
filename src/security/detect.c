@@ -169,7 +169,7 @@ hu_sandbox_t hu_sandbox_create(hu_sandbox_backend_t backend, const char *workspa
             break;
 
         /* Tier 3: MicroVM (requires KVM) */
-        hu_firecracker_sandbox_init(&st->firecracker, ws);
+        hu_firecracker_sandbox_init(&st->firecracker, ws, alloc);
         result = hu_firecracker_sandbox_get(&st->firecracker);
         if (result.vtable->is_available(result.ctx))
             break;
@@ -233,7 +233,7 @@ hu_available_backends_t hu_sandbox_detect_available(const char *workspace_dir,
     sb = hu_seccomp_sandbox_get(&((struct hu_sandbox_storage *)st)->seccomp);
     out.seccomp = sb.vtable->is_available(sb.ctx);
 
-    hu_firecracker_sandbox_init(&((struct hu_sandbox_storage *)st)->firecracker, ws);
+    hu_firecracker_sandbox_init(&((struct hu_sandbox_storage *)st)->firecracker, ws, alloc);
     sb = hu_firecracker_sandbox_get(&((struct hu_sandbox_storage *)st)->firecracker);
     out.firecracker = sb.vtable->is_available(sb.ctx);
 

@@ -258,6 +258,7 @@ object HUTokens {
             SUCCESS -> android.view.HapticFeedbackConstants.CONFIRM
             WARNING -> android.view.HapticFeedbackConstants.REJECT
             SELECTION -> android.view.HapticFeedbackConstants.CLOCK_TICK
+            else -> android.view.HapticFeedbackConstants.KEYBOARD_TAP
         }
     }
 }

@@ -483,22 +483,31 @@
 
   /* ── Hero fade-in (CSS-only LCP optimization — visible before JS loads) ── */
   .hero-fade-in {
-    animation: hu-hero-fade 0.8s var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+    animation: hu-hero-fade 0.8s
+      var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
   }
   .hero-logo {
-    animation: hu-hero-fade 0.6s var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+    animation: hu-hero-fade 0.6s
+      var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
   }
   @keyframes hu-hero-fade {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   /* ── Scroll reveal system (replaces GSAP ScrollTrigger) ── */
   [data-reveal] {
     opacity: 0;
     transform: translateY(20px);
-    transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
-                transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    transition:
+      opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
   }
   [data-reveal].revealed {
     opacity: 1;
@@ -548,12 +557,24 @@
       animation-range: entry 10% cover 35%;
     }
     @keyframes hu-scroll-fade-in {
-      from { opacity: 0; transform: translateY(30px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
     @keyframes hu-scroll-scale-in {
-      from { opacity: 0; transform: scale(0.92); }
-      to { opacity: 1; transform: scale(1); }
+      from {
+        opacity: 0;
+        transform: scale(0.92);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
     }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -573,7 +594,8 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      color-mix(in srgb, var(--hu-accent-secondary, #f59e0b) 15%, transparent) 0%,
+      color-mix(in srgb, var(--hu-accent-secondary, #f59e0b) 15%, transparent)
+        0%,
       transparent 70%
     );
     pointer-events: none;

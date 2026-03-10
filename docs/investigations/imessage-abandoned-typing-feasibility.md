@@ -1,3 +1,8 @@
+---
+title: iMessage Abandoned Typing Pattern Feasibility Investigation
+date: 2026-03-10
+---
+
 # iMessage Abandoned Typing Pattern Feasibility Investigation
 
 **Date:** 2026-03-10

@@ -1,3 +1,8 @@
+---
+title: iMessage Unsend Feasibility Investigation
+date: 2026-03-08
+---
+
 # iMessage Unsend Feasibility Investigation
 
 **Date:** 2026-03-08  

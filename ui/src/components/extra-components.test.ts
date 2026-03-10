@@ -3422,7 +3422,11 @@ describe("spring animation library", () => {
   it("respects prefers-reduced-motion", async () => {
     const matchMediaSpy = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
       if (query === "(prefers-reduced-motion: reduce)") {
-        return { matches: true, addListener: vi.fn(), removeListener: vi.fn() } as MediaQueryList;
+        return {
+          matches: true,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+        } as unknown as MediaQueryList;
       }
       return window.matchMedia(query);
     });

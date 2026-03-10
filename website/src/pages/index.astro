@@ -107,7 +107,12 @@ const tools = [
       name="description"
       content="A complete autonomous AI agent runtime in 528 kilobytes of pure C. One static binary. Zero dependencies. 50+ providers. Runs on anything with a CPU."
     />
-    <link rel="preload" href={`${base}human.svg`} as="image" fetchpriority="high" />
+    <link
+      rel="preload"
+      href={`${base}human.svg`}
+      as="image"
+      fetchpriority="high"
+    />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <link
       rel="icon"
@@ -318,7 +323,8 @@ const tools = [
       >
         <div class="max-w-2xl mx-auto text-center">
           <h2
-            class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16" data-reveal
+            class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16"
+            data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             To run an AI assistant today, you need...
@@ -337,7 +343,8 @@ const tools = [
             }
           </div>
           <p
-            class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)]" data-reveal
+            class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)]"
+            data-reveal
             style="color: var(--color-text)"
           >
             Human needs one thing: <span
@@ -353,13 +360,15 @@ const tools = [
       <section id="use-cases" class="py-16 md:py-32 px-6">
         <div class="max-w-5xl mx-auto">
           <h2
-            class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center" data-reveal
+            class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center"
+            data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             From data centers to five-dollar boards.
           </h2>
           <p
-            class="spectrum-sub text-lg mb-16 text-center" data-reveal
+            class="spectrum-sub text-lg mb-16 text-center"
+            data-reveal
             style="color: var(--color-text-secondary)"
           >
             The same static binary. The same config. Every device.
@@ -424,13 +433,15 @@ const tools = [
         <div class="ambient-blue" style="bottom: 10%; right: 15%;"></div>
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="arch-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
+            class="arch-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4"
+            data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             Swap anything. Lock in nothing.
           </h2>
           <p
-            class="arch-sub hu-scroll-reveal text-lg mb-20" data-reveal
+            class="arch-sub hu-scroll-reveal text-lg mb-20"
+            data-reveal
             style="color: var(--color-text-secondary)"
           >
             Every subsystem is a vtable interface. Change any layer with a
@@ -599,13 +610,15 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="providers-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
+            class="providers-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4"
+            data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             50+ providers. 34 channels. 67+ tools.
           </h2>
           <p
-            class="providers-sub text-lg mb-16" data-reveal
+            class="providers-sub text-lg mb-16"
+            data-reveal
             style="color: var(--color-text-secondary)"
           >
             Connect to any AI model. Reach users on any platform.
@@ -660,13 +673,15 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-3xl mx-auto">
           <h2
-            class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center" data-reveal
+            class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center"
+            data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             Three commands. Zero dependencies.
           </h2>
           <p
-            class="terminal-sub text-lg mb-12 text-center" data-reveal
+            class="terminal-sub text-lg mb-12 text-center"
+            data-reveal
             style="color: var(--color-text-secondary)"
           >
             Clone, build, run. No containers. No interpreters. No package
@@ -704,13 +719,15 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
+            class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4"
+            data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             A command center, not a status page.
           </h2>
           <p
-            class="dash-sub text-lg mb-12" data-reveal
+            class="dash-sub text-lg mb-12"
+            data-reveal
             style="color: var(--color-text-secondary)"
           >
             Real-time stats. Live activity feed. Sparkline trends. All in 528
@@ -730,8 +747,7 @@ const tools = [
               <span class="w-3 h-3 rounded-full bg-[#28C840]"></span>
               <span
                 class="text-[11px] ml-2 font-mono"
-                style="color: var(--hu-web-text-tertiary)"
-                >Human Dashboard</span
+                style="color: var(--hu-web-text-tertiary)">Human Dashboard</span
               >
               <span
                 class="ml-auto text-[11px] px-2 py-0.5 rounded-full"
@@ -882,7 +898,8 @@ const tools = [
             </div>
           </div>
           <p
-            class="mt-6 text-sm dash-cta" data-reveal
+            class="mt-6 text-sm dash-cta"
+            data-reveal
             style="color: var(--color-text-tertiary)"
           >
             <a
@@ -901,19 +918,22 @@ const tools = [
         <div class="ambient-blue" style="top: 40%; right: 20%;"></div>
         <div class="max-w-3xl mx-auto text-center">
           <h2
-            class="cta-title hu-scroll-reveal font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6" data-reveal="scale-up"
+            class="cta-title hu-scroll-reveal font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6"
+            data-reveal="scale-up"
             style="color: var(--color-text); letter-spacing: -0.04em;"
           >
             Bring AI to every device on&nbsp;Earth.
           </h2>
           <p
-            class="cta-sub hu-scroll-reveal text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 max-w-xl mx-auto leading-relaxed" data-reveal
+            class="cta-sub hu-scroll-reveal text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 max-w-xl mx-auto leading-relaxed"
+            data-reveal
             style="color: var(--color-text-secondary)"
           >
             Open source. MIT licensed. ~528 KB. Runs anywhere.
           </p>
           <div
-            class="cta-buttons flex flex-col sm:flex-row gap-4 justify-center" data-reveal
+            class="cta-buttons flex flex-col sm:flex-row gap-4 justify-center"
+            data-reveal
           >
             <a href={`${base}getting-started/installation/`} class="btn-primary"
               >Get Started</a
@@ -1179,7 +1199,9 @@ const tools = [
               if (!entries[0]?.isIntersecting) return;
               archObs.disconnect();
               const { gsap } = await import("gsap");
-              const archTl = gsap.timeline({ defaults: { ease: "power3.out" } });
+              const archTl = gsap.timeline({
+                defaults: { ease: "power3.out" },
+              });
               archTl
                 .to("#arch-core", { opacity: 1, duration: 0.6 })
                 .fromTo(
@@ -1246,109 +1268,107 @@ const tools = [
         }
 
         function typeTerminal(container: HTMLElement, gsap: any) {
-            const accentColor = "var(--color-accent)";
-            const lines: TermLine[] = [
-              {
-                prompt: true,
-                text: "git clone https://github.com/sethdford/human.git",
-              },
-              {
-                prompt: true,
-                text: "cd human && mkdir -p build && cd build",
-              },
-              {
-                prompt: true,
-                text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON",
-              },
-              { prompt: true, text: "cmake --build ." },
-              { prompt: false, text: "[100%] Built target human" },
-              { prompt: true, text: "ls -lh human" },
-              {
-                prompt: false,
-                text: "-rwxr-xr-x  1 user  staff  528K  human",
-                highlights: [{ text: "528K", cls: accentColor }],
-              },
-              {
-                prompt: true,
-                text: './human agent -m "Hello from a ~528 KB binary."',
-              },
-              {
-                prompt: false,
-                text: "Hello! I'm Human — a fully autonomous AI assistant",
-                highlights: [{ text: "Human", cls: accentColor }],
-              },
-              {
-                prompt: false,
-                text: "running in 528 kilobytes. How can I help?",
-              },
-            ];
+          const accentColor = "var(--color-accent)";
+          const lines: TermLine[] = [
+            {
+              prompt: true,
+              text: "git clone https://github.com/sethdford/human.git",
+            },
+            {
+              prompt: true,
+              text: "cd human && mkdir -p build && cd build",
+            },
+            {
+              prompt: true,
+              text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON",
+            },
+            { prompt: true, text: "cmake --build ." },
+            { prompt: false, text: "[100%] Built target human" },
+            { prompt: true, text: "ls -lh human" },
+            {
+              prompt: false,
+              text: "-rwxr-xr-x  1 user  staff  528K  human",
+              highlights: [{ text: "528K", cls: accentColor }],
+            },
+            {
+              prompt: true,
+              text: './human agent -m "Hello from a ~528 KB binary."',
+            },
+            {
+              prompt: false,
+              text: "Hello! I'm Human — a fully autonomous AI assistant",
+              highlights: [{ text: "Human", cls: accentColor }],
+            },
+            {
+              prompt: false,
+              text: "running in 528 kilobytes. How can I help?",
+            },
+          ];
 
-            let lineIdx = 0;
-            function nextLine() {
-              if (lineIdx >= lines.length) {
-                const cursor = document.createElement("span");
-                cursor.className = "terminal-cursor";
-                container.lastElementChild?.appendChild(cursor);
-                return;
-              }
-              const line = lines[lineIdx];
-              const div = document.createElement("div");
-              div.className = "terminal-line";
-
-              if (line.prompt) {
-                const p = document.createElement("span");
-                p.style.color = "var(--color-accent)";
-                p.textContent = "$ ";
-                div.appendChild(p);
-                const t = document.createElement("span");
-                t.style.color = "var(--hu-web-text)";
-                div.appendChild(t);
-                container.appendChild(div);
-                let ci = 0;
-                const tc = () => {
-                  if (ci < line.text.length) {
-                    t.textContent += line.text[ci];
-                    ci++;
-                    setTimeout(tc, 18);
-                  } else {
-                    lineIdx++;
-                    setTimeout(nextLine, 300);
-                  }
-                };
-                tc();
-              } else {
-                const w = document.createElement("span");
-                w.style.color = "var(--hu-web-text-tertiary)";
-                if (line.highlights?.length) {
-                  let rem = line.text;
-                  for (const hl of line.highlights) {
-                    const idx = rem.indexOf(hl.text);
-                    if (idx >= 0) {
-                      if (idx > 0)
-                        w.appendChild(
-                          document.createTextNode(rem.slice(0, idx)),
-                        );
-                      const s = document.createElement("span");
-                      s.style.color = hl.cls;
-                      s.textContent = hl.text;
-                      w.appendChild(s);
-                      rem = rem.slice(idx + hl.text.length);
-                    }
-                  }
-                  if (rem) w.appendChild(document.createTextNode(rem));
-                } else {
-                  w.textContent = line.text;
-                }
-                div.appendChild(w);
-                div.style.opacity = "0";
-                container.appendChild(div);
-                gsap.to(div, { opacity: 1, duration: 0.3 });
-                lineIdx++;
-                setTimeout(nextLine, 200);
-              }
+          let lineIdx = 0;
+          function nextLine() {
+            if (lineIdx >= lines.length) {
+              const cursor = document.createElement("span");
+              cursor.className = "terminal-cursor";
+              container.lastElementChild?.appendChild(cursor);
+              return;
             }
-            nextLine();
+            const line = lines[lineIdx];
+            const div = document.createElement("div");
+            div.className = "terminal-line";
+
+            if (line.prompt) {
+              const p = document.createElement("span");
+              p.style.color = "var(--color-accent)";
+              p.textContent = "$ ";
+              div.appendChild(p);
+              const t = document.createElement("span");
+              t.style.color = "var(--hu-web-text)";
+              div.appendChild(t);
+              container.appendChild(div);
+              let ci = 0;
+              const tc = () => {
+                if (ci < line.text.length) {
+                  t.textContent += line.text[ci];
+                  ci++;
+                  setTimeout(tc, 18);
+                } else {
+                  lineIdx++;
+                  setTimeout(nextLine, 300);
+                }
+              };
+              tc();
+            } else {
+              const w = document.createElement("span");
+              w.style.color = "var(--hu-web-text-tertiary)";
+              if (line.highlights?.length) {
+                let rem = line.text;
+                for (const hl of line.highlights) {
+                  const idx = rem.indexOf(hl.text);
+                  if (idx >= 0) {
+                    if (idx > 0)
+                      w.appendChild(document.createTextNode(rem.slice(0, idx)));
+                    const s = document.createElement("span");
+                    s.style.color = hl.cls;
+                    s.textContent = hl.text;
+                    w.appendChild(s);
+                    rem = rem.slice(idx + hl.text.length);
+                  }
+                }
+                if (rem) w.appendChild(document.createTextNode(rem));
+              } else {
+                w.textContent = line.text;
+              }
+              div.appendChild(w);
+              div.style.opacity = "0";
+              container.appendChild(div);
+              gsap.to(div, { opacity: 1, duration: 0.3 });
+              lineIdx++;
+              setTimeout(nextLine, 200);
+            }
           }
+          nextLine();
+        }
 
         // ═══ Dashboard preview (lazy GSAP for count-up + activity) ═══
         const dashPreview = document.querySelector(".dash-preview");
