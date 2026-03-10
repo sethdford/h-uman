@@ -2364,6 +2364,8 @@ hu_call_escalation_t hu_conversation_should_escalate_to_call(
         emotion = 1.0f;
 
     float score = crisis * 0.4f + complexity * 0.3f + emotion * 0.3f;
+    if (crisis >= 1.0f && score < 0.6f)
+        score = 0.6f;
     out.score = score;
     out.should_suggest = (score >= HU_CALL_ESCALATION_THRESHOLD);
     return out;

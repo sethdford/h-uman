@@ -276,7 +276,7 @@ static void integration_policy_data_init_succeeds(void) {
     HU_ASSERT_EQ(err, HU_OK);
 
     /* Cleanup after test */
-    hu_policy_data_cleanup();
+    hu_policy_data_cleanup(&alloc);
 }
 
 /* Test 5: Verify circadian data init succeeds (if persona enabled) */

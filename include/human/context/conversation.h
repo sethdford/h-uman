@@ -193,6 +193,19 @@ hu_call_escalation_t hu_conversation_should_escalate_to_call(
  * Writes into buf (up to cap bytes). Returns bytes written (0 if invalid args). */
 size_t hu_conversation_build_call_directive(const char *msg, size_t msg_len, char *buf, size_t cap);
 
+/* ── Linguistic mirroring (F28) ──────────────────────────────────────────── */
+size_t hu_conversation_build_mirror_directive(const char *distinctive_words, size_t words_len,
+    uint32_t seed, float probability, char *buf, size_t cap);
+
+/* ── Delayed follow-up topic extraction (F8) ─────────────────────────────── */
+size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len,
+    char *topic_out, size_t cap);
+
+/* ── Double-text decision (F9) ───────────────────────────────────────────── */
+bool hu_conversation_should_double_text(const char *last_response, size_t resp_len,
+    const hu_channel_history_entry_t *entries, size_t count,
+    uint8_t hour_local, uint32_t seed, float probability);
+
 /* ── Emotional escalation detection (F14) ────────────────────────────────── */
 
 /* Track emotional trajectory across multiple messages. When 3+ messages show

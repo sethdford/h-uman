@@ -10,9 +10,9 @@ typedef struct {
     const char *path;
     const unsigned char *data;
     size_t len;
-} hu_embedded_data_entry_t;
+} hu_embedded_data_result_t;
 
-extern const hu_embedded_data_entry_t *hu_embedded_data_lookup(const char *path);
+extern const hu_embedded_data_result_t *hu_embedded_data_lookup(const char *path);
 
 #define HU_DATA_MAX_FILE_SIZE (1024 * 1024)  /* 1MB limit */
 
@@ -33,7 +33,7 @@ hu_error_t hu_data_load_embedded(hu_allocator_t *alloc, const char *relative_pat
     if (alloc == NULL || relative_path == NULL || out == NULL || out_len == NULL)
         return HU_ERR_INVALID_ARGUMENT;
 
-    const hu_embedded_data_entry_t *entry = hu_embedded_data_lookup(relative_path);
+    const hu_embedded_data_result_t *entry = hu_embedded_data_lookup(relative_path);
     if (entry == NULL)
         return HU_ERR_NOT_FOUND;
 
