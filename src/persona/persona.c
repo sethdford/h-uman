@@ -668,6 +668,23 @@ static sc_error_t parse_string_array(sc_allocator_t *a, const sc_json_value_t *a
         }
         buf[count++] = dup;
     }
+    if (count == 0) {
+        a->free(a->ctx, buf, n * sizeof(char *));
+        return SC_OK;
+    }
+    if (count < n) {
+        char **shrunk = (char **)a->alloc(a->ctx, count * sizeof(char *));
+        if (shrunk) {
+            memcpy(shrunk, buf, count * sizeof(char *));
+            a->free(a->ctx, buf, n * sizeof(char *));
+            buf = shrunk;
+        } else {
+            for (size_t j = 0; j < count; j++)
+                a->free(a->ctx, buf[j], strlen(buf[j]) + 1);
+            a->free(a->ctx, buf, n * sizeof(char *));
+            return SC_ERR_OUT_OF_MEMORY;
+        }
+    }
     *out = buf;
     *out_count = count;
     return SC_OK;

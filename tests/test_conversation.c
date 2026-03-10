@@ -1255,6 +1255,50 @@ static void examples_load_input_output_format(void) {
     alloc.free(alloc.ctx, bank.channel, 9);
 }
 
+/* ── Persona-driven style and anti-patterns ──────────────────────────── */
+
+static void style_uses_persona_anti_patterns(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_history_entry_t entries[6] = {
+        make_entry(false, "hey", "12:00"),
+        make_entry(true, "hey", "12:01"),
+        make_entry(false, "what you up to", "12:02"),
+        make_entry(false, "just chilling lol", "12:03"),
+        make_entry(true, "same", "12:04"),
+        make_entry(false, "wanna hang", "12:05"),
+    };
+    sc_persona_t p = {0};
+    char *ap[] = {"CUSTOM_RULE: never use exclamation marks", "CUSTOM_RULE: avoid emoji"};
+    p.anti_patterns = ap;
+    p.anti_patterns_count = 2;
+
+    size_t len = 0;
+    char *s = sc_conversation_analyze_style(&alloc, entries, 6, &p, &len);
+    SC_ASSERT_NOT_NULL(s);
+    SC_ASSERT_TRUE(strstr(s, "CUSTOM_RULE") != NULL);
+    alloc.free(alloc.ctx, s, len + 1);
+}
+
+static void awareness_uses_persona_style_rules(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_channel_history_entry_t entries[4] = {
+        make_entry(false, "hey how are you", "12:00"),
+        make_entry(true, "good hbu", "12:01"),
+        make_entry(false, "doing well thanks for asking", "12:02"),
+        make_entry(false, "what are you working on", "12:03"),
+    };
+    sc_persona_t p = {0};
+    char *rules[] = {"MY_STYLE_RULE: keep it under 20 words"};
+    p.style_rules = rules;
+    p.style_rules_count = 1;
+
+    size_t len = 0;
+    char *s = sc_conversation_build_awareness(&alloc, entries, 4, &p, &len);
+    SC_ASSERT_NOT_NULL(s);
+    SC_ASSERT_TRUE(strstr(s, "MY_STYLE_RULE") != NULL);
+    alloc.free(alloc.ctx, s, len + 1);
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
@@ -1434,4 +1478,8 @@ void run_conversation_tests(void) {
 
     /* Example bank format compatibility */
     SC_RUN_TEST(examples_load_input_output_format);
+
+    /* Persona-driven style/anti-patterns */
+    SC_RUN_TEST(style_uses_persona_anti_patterns);
+    SC_RUN_TEST(awareness_uses_persona_style_rules);
 }

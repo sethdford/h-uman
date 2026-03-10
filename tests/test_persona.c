@@ -2975,6 +2975,167 @@ static void test_e2e_mindy_message_full_pipeline(void) {
     sc_persona_deinit(&alloc, &p);
 }
 
+/* --- Externalized prompt field tests --- */
+
+static void test_persona_load_externalized_fields(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json =
+        "{"
+        "  \"name\": \"test-ext\","
+        "  \"core\": { \"identity\": \"Ext test\" },"
+        "  \"immersive_reinforcement\": [\"rule-A\", \"rule-B\", \"rule-C\"],"
+        "  \"identity_reinforcement\": \"You are real, not an AI.\","
+        "  \"anti_patterns\": [\"no-exclamation\", \"no-emoji\"],"
+        "  \"style_rules\": [\"lowercase only\"],"
+        "  \"proactive_rules\": \"Check in gently.\","
+        "  \"time_overlays\": {"
+        "    \"late_night\": \"Be calm.\","
+        "    \"early_morning\": \"Be gentle.\","
+        "    \"afternoon\": \"Be productive.\","
+        "    \"evening\": \"Wind down.\""
+        "  }"
+        "}";
+    sc_persona_t p = {0};
+    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    SC_ASSERT_EQ(p.immersive_reinforcement_count, 3);
+    SC_ASSERT_STR_EQ(p.immersive_reinforcement[0], "rule-A");
+    SC_ASSERT_STR_EQ(p.immersive_reinforcement[1], "rule-B");
+    SC_ASSERT_STR_EQ(p.immersive_reinforcement[2], "rule-C");
+
+    SC_ASSERT_STR_EQ(p.identity_reinforcement, "You are real, not an AI.");
+
+    SC_ASSERT_EQ(p.anti_patterns_count, 2);
+    SC_ASSERT_STR_EQ(p.anti_patterns[0], "no-exclamation");
+    SC_ASSERT_STR_EQ(p.anti_patterns[1], "no-emoji");
+
+    SC_ASSERT_EQ(p.style_rules_count, 1);
+    SC_ASSERT_STR_EQ(p.style_rules[0], "lowercase only");
+
+    SC_ASSERT_STR_EQ(p.proactive_rules, "Check in gently.");
+
+    SC_ASSERT_STR_EQ(p.time_overlay_late_night, "Be calm.");
+    SC_ASSERT_STR_EQ(p.time_overlay_early_morning, "Be gentle.");
+    SC_ASSERT_STR_EQ(p.time_overlay_afternoon, "Be productive.");
+    SC_ASSERT_STR_EQ(p.time_overlay_evening, "Wind down.");
+
+    sc_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_externalized_fields_absent(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json = "{ \"name\": \"bare\", \"core\": { \"identity\": \"Bare\" } }";
+    sc_persona_t p = {0};
+    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    SC_ASSERT_EQ(p.immersive_reinforcement_count, 0);
+    SC_ASSERT_NULL(p.immersive_reinforcement);
+    SC_ASSERT_NULL(p.identity_reinforcement);
+    SC_ASSERT_EQ(p.anti_patterns_count, 0);
+    SC_ASSERT_NULL(p.anti_patterns);
+    SC_ASSERT_EQ(p.style_rules_count, 0);
+    SC_ASSERT_NULL(p.style_rules);
+    SC_ASSERT_NULL(p.proactive_rules);
+    SC_ASSERT_NULL(p.time_overlay_late_night);
+    SC_ASSERT_NULL(p.time_overlay_early_morning);
+    SC_ASSERT_NULL(p.time_overlay_afternoon);
+    SC_ASSERT_NULL(p.time_overlay_evening);
+
+    sc_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_externalized_deinit_frees(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    const char *json =
+        "{"
+        "  \"name\": \"deinit-ext\","
+        "  \"core\": { \"identity\": \"Ext\" },"
+        "  \"immersive_reinforcement\": [\"a\"],"
+        "  \"identity_reinforcement\": \"x\","
+        "  \"anti_patterns\": [\"b\"],"
+        "  \"style_rules\": [\"c\"],"
+        "  \"proactive_rules\": \"y\","
+        "  \"time_overlays\": { \"late_night\": \"z\" }"
+        "}";
+    sc_persona_t p = {0};
+    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_EQ(p.immersive_reinforcement_count, 1);
+    SC_ASSERT_NOT_NULL(p.identity_reinforcement);
+    sc_persona_deinit(&alloc, &p);
+    SC_ASSERT_EQ(p.immersive_reinforcement_count, 0);
+}
+
+static void test_persona_immersive_in_prompt(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p = {0};
+    p.name = sc_strndup(&alloc, "test-immersive", 14);
+    p.identity = sc_strndup(&alloc, "An immersive persona", 20);
+
+    char *reinforcement[] = {"You are Seth, not an AI", "Stay in character always"};
+    p.immersive_reinforcement = reinforcement;
+    p.immersive_reinforcement_count = 2;
+
+    char *persona_prompt = NULL;
+    size_t persona_prompt_len = 0;
+    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt,
+                                             &persona_prompt_len);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_prompt_config_t cfg = {0};
+    cfg.persona_prompt = persona_prompt;
+    cfg.persona_prompt_len = persona_prompt_len;
+    cfg.persona_immersive = true;
+    cfg.persona = &p;
+
+    char *sys = NULL;
+    size_t sys_len = 0;
+    err = sc_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(sys);
+    SC_ASSERT_TRUE(strstr(sys, "You are Seth, not an AI") != NULL);
+    SC_ASSERT_TRUE(strstr(sys, "Stay in character always") != NULL);
+
+    alloc.free(alloc.ctx, sys, sys_len + 1);
+    alloc.free(alloc.ctx, persona_prompt, persona_prompt_len + 1);
+
+    p.immersive_reinforcement = NULL;
+    p.immersive_reinforcement_count = 0;
+    sc_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_immersive_fallback_when_no_reinforcement(void) {
+    sc_allocator_t alloc = sc_system_allocator();
+    sc_persona_t p = {0};
+    p.name = sc_strndup(&alloc, "test-fallback", 13);
+    p.identity = sc_strndup(&alloc, "Fallback persona", 16);
+
+    char *persona_prompt = NULL;
+    size_t persona_prompt_len = 0;
+    sc_error_t err =
+        sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt, &persona_prompt_len);
+    SC_ASSERT_EQ(err, SC_OK);
+
+    sc_prompt_config_t cfg = {0};
+    cfg.persona_prompt = persona_prompt;
+    cfg.persona_prompt_len = persona_prompt_len;
+    cfg.persona_immersive = true;
+    cfg.persona = &p;
+
+    char *sys = NULL;
+    size_t sys_len = 0;
+    err = sc_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    SC_ASSERT_EQ(err, SC_OK);
+    SC_ASSERT_NOT_NULL(sys);
+    SC_ASSERT_TRUE(strstr(sys, "real person") != NULL);
+
+    alloc.free(alloc.ctx, sys, sys_len + 1);
+    alloc.free(alloc.ctx, persona_prompt, persona_prompt_len + 1);
+    sc_persona_deinit(&alloc, &p);
+}
+
 void run_persona_tests(void) {
     SC_TEST_SUITE("Persona");
 
@@ -3145,6 +3306,13 @@ void run_persona_tests(void) {
     SC_RUN_TEST(test_auto_profile_null_args);
     SC_RUN_TEST(test_profile_describe_style_formats);
     SC_RUN_TEST(test_profile_describe_style_null_args);
+
+    /* Externalized prompt fields */
+    SC_RUN_TEST(test_persona_load_externalized_fields);
+    SC_RUN_TEST(test_persona_externalized_fields_absent);
+    SC_RUN_TEST(test_persona_externalized_deinit_frees);
+    SC_RUN_TEST(test_persona_immersive_in_prompt);
+    SC_RUN_TEST(test_persona_immersive_fallback_when_no_reinforcement);
 
     /* E2E dry run */
     SC_RUN_TEST(test_e2e_mindy_message_full_pipeline);

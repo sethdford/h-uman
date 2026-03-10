@@ -19,8 +19,8 @@ static const char *PHASE_GUIDANCE[] = {
     "Be steady and focused. Energy may be dipping. Keep things clear and structured.",
     "Be relaxed and reflective. The day is winding down. Allow for deeper conversation.",
     "Be calm and intimate. The user is in a quieter headspace. Slow your pace, be thoughtful.",
-    "Be present and unhurried. Late night conversations often carry more weight. Be a quiet "
-    "companion.",
+    ("Be present and unhurried. Late night conversations often carry more weight. Be a quiet "
+     "companion."),
 };
 
 sc_time_phase_t sc_circadian_phase(uint8_t hour) {

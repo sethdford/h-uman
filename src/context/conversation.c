@@ -473,6 +473,7 @@ char *sc_conversation_build_awareness(sc_allocator_t *alloc,
         }
 
         /* Pace (from exchange density) */
+        w = 0;
         if (m.rapid_exchanges >= 4) {
             w = snprintf(buf + pos, CTX_BUF_CAP - pos,
                          "- Pace: rapid back-and-forth — active, casual flow\n");
