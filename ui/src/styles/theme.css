@@ -225,6 +225,49 @@ body {
   }
 }
 
+/* ─── @starting-style Entry Animations ─────────────────────────────── */
+@supports (selector(:popover-open)) {
+  .sc-entry-fade {
+    opacity: 1;
+    transition: opacity var(--sc-duration-normal) var(--sc-ease-out);
+    @starting-style {
+      opacity: 0;
+    }
+  }
+
+  .sc-entry-slide-up {
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+      opacity var(--sc-duration-normal) var(--sc-ease-out),
+      transform var(--sc-duration-normal) var(--sc-ease-out);
+    @starting-style {
+      opacity: 0;
+      transform: translateY(var(--sc-space-sm, 8px));
+    }
+  }
+
+  .sc-entry-scale {
+    opacity: 1;
+    transform: scale(1);
+    transition:
+      opacity var(--sc-duration-normal) var(--sc-ease-out),
+      transform var(--sc-duration-normal) var(--sc-spring-out, cubic-bezier(0.34, 1.56, 0.64, 1));
+    @starting-style {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sc-entry-fade,
+    .sc-entry-slide-up,
+    .sc-entry-scale {
+      transition: none;
+    }
+  }
+}
+
 /* ─── Scrollbar ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;

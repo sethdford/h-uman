@@ -277,7 +277,8 @@ const tools = [
               ].map((stat, i, arr) => (
                 <div
                   class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`}
-                  style="border-color: var(--color-border)"
+                  data-reveal="scale"
+                  style={`--ri: ${i}; border-color: var(--color-border)`}
                 >
                   <div
                     class="font-sans font-black text-[clamp(2rem,4vw,3rem)] leading-none"
@@ -314,7 +315,7 @@ const tools = [
       >
         <div class="max-w-2xl mx-auto text-center">
           <h2
-            class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16 opacity-0"
+            class="bloat-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-16" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             To run an AI assistant today, you need...
@@ -323,8 +324,9 @@ const tools = [
             {
               bloatItems.map((item, i) => (
                 <div
-                  class={`bloat-card opacity-0 glass px-8 py-4 text-[clamp(1rem,2vw,1.25rem)] w-full max-w-md text-center ${i === bloatItems.length - 1 ? "italic" : ""}`}
-                  style={`color: ${i === bloatItems.length - 1 ? "var(--color-text-tertiary)" : "var(--color-text-secondary)"}`}
+                  class={`bloat-card glass px-8 py-4 text-[clamp(1rem,2vw,1.25rem)] w-full max-w-md text-center ${i === bloatItems.length - 1 ? "italic" : ""}`}
+                  data-reveal="scale"
+                  style={`--ri: ${i}; color: ${i === bloatItems.length - 1 ? "var(--color-text-tertiary)" : "var(--color-text-secondary)"}`}
                 >
                   {item}
                 </div>
@@ -332,7 +334,7 @@ const tools = [
             }
           </div>
           <p
-            class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)] opacity-0"
+            class="bloat-answer text-[clamp(1.25rem,3vw,1.75rem)]" data-reveal
             style="color: var(--color-text)"
           >
             SeaClaw needs one thing: <span
@@ -348,13 +350,13 @@ const tools = [
       <section id="use-cases" class="py-16 md:py-32 px-6">
         <div class="max-w-5xl mx-auto">
           <h2
-            class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0"
+            class="spectrum-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             From data centers to five-dollar boards.
           </h2>
           <p
-            class="spectrum-sub text-lg mb-16 text-center opacity-0"
+            class="spectrum-sub text-lg mb-16 text-center" data-reveal
             style="color: var(--color-text-secondary)"
           >
             The same static binary. The same config. Every device.
@@ -382,10 +384,11 @@ const tools = [
                   title: "Embedded",
                   desc: "Arduino, STM32, Nucleo. Serial JSON protocol. Hardware peripherals via vtable interface.",
                 },
-              ].map(({ icon, title, desc }) => (
+              ].map(({ icon, title, desc }, i) => (
                 <div
-                  class="spectrum-card card-glow card-spotlight opacity-0 glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1"
-                  style="--tw-shadow: var(--sc-shadow-md);"
+                  class="spectrum-card card-glow card-spotlight glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1"
+                  data-reveal="scale-up"
+                  style={`--ri: ${i}; --tw-shadow: var(--sc-shadow-md);`}
                 >
                   <span
                     class="w-8 h-8 mx-auto mb-4 flex items-center justify-center [&>svg]:flex-shrink-0"
@@ -418,13 +421,13 @@ const tools = [
         <div class="ambient-blue" style="bottom: 10%; right: 15%;"></div>
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="arch-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0"
+            class="arch-title sc-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             Swap anything. Lock in nothing.
           </h2>
           <p
-            class="arch-sub text-lg mb-20 opacity-0"
+            class="arch-sub sc-scroll-reveal text-lg mb-20" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Every subsystem is a vtable interface. Change any layer with a
@@ -436,7 +439,7 @@ const tools = [
             viewBox="0 0 600 600"
             width="600"
             height="600"
-            class="w-full max-w-lg mx-auto"
+            class="sc-scroll-scale w-full max-w-lg mx-auto"
             style="aspect-ratio: 1;"
             xmlns="http://www.w3.org/2000/svg"
             role="img"
@@ -593,51 +596,55 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="providers-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0"
+            class="providers-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             50+ providers. 33 channels. 65+ tools.
           </h2>
           <p
-            class="providers-sub text-lg mb-16 opacity-0"
+            class="providers-sub text-lg mb-16" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Connect to any AI model. Reach users on any platform.
           </p>
           <div class="flex flex-wrap gap-3 justify-center" id="provider-grid">
             {
-              providers.map((name) => (
+              providers.map((name, i) => (
                 <span
-                  class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
-                  style="color: var(--color-pill-provider); background: var(--color-pill-provider-bg); border: 1px solid var(--color-pill-provider-border)"
+                  class="provider-pill px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
+                  data-reveal="pill"
+                  style={`--ri: ${i}; color: var(--color-pill-provider); background: var(--color-pill-provider-bg); border: 1px solid var(--color-pill-provider-border)`}
                 >
                   {name}
                 </span>
               ))
             }
             {
-              channels.map((name) => (
+              channels.map((name, i) => (
                 <span
-                  class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
-                  style="color: var(--color-pill-channel); background: var(--color-pill-channel-bg); border: 1px solid var(--color-pill-channel-border)"
+                  class="provider-pill px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
+                  data-reveal="pill"
+                  style={`--ri: ${providers.length + i}; color: var(--color-pill-channel); background: var(--color-pill-channel-bg); border: 1px solid var(--color-pill-channel-border)`}
                 >
                   {name}
                 </span>
               ))
             }
             {
-              tools.map((name) => (
+              tools.map((name, i) => (
                 <span
-                  class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
-                  style="color: var(--color-pill-tool); background: var(--color-pill-tool-bg); border: 1px solid var(--color-pill-tool-border)"
+                  class="provider-pill px-4 py-2 rounded-full text-[13px] transition-all duration-200 cursor-default backdrop-blur-sm"
+                  data-reveal="pill"
+                  style={`--ri: ${providers.length + channels.length + i}; color: var(--color-pill-tool); background: var(--color-pill-tool-bg); border: 1px solid var(--color-pill-tool-border)`}
                 >
                   {name}
                 </span>
               ))
             }
             <span
-              class="provider-pill opacity-0 px-4 py-2 rounded-full text-[13px] italic backdrop-blur-sm"
-              style="color: var(--color-text-tertiary); background: var(--color-accent-light); border: 1px solid var(--color-border)"
+              class="provider-pill px-4 py-2 rounded-full text-[13px] italic backdrop-blur-sm"
+              data-reveal="pill"
+              style={`--ri: ${providers.length + channels.length + tools.length}; color: var(--color-text-tertiary); background: var(--color-accent-light); border: 1px solid var(--color-border)`}
             >
               and more...
             </span>
@@ -650,13 +657,13 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-3xl mx-auto">
           <h2
-            class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center opacity-0"
+            class="terminal-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 text-center" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             Three commands. Zero dependencies.
           </h2>
           <p
-            class="terminal-sub text-lg mb-12 text-center opacity-0"
+            class="terminal-sub text-lg mb-12 text-center" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Clone, build, run. No containers. No interpreters. No package
@@ -694,13 +701,13 @@ const tools = [
       <section class="py-16 md:py-32 px-6">
         <div class="max-w-4xl mx-auto text-center">
           <h2
-            class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4 opacity-0"
+            class="dash-title font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
             A command center, not a status page.
           </h2>
           <p
-            class="dash-sub text-lg mb-12 opacity-0"
+            class="dash-sub text-lg mb-12" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Real-time stats. Live activity feed. Sparkline trends. All in 528
@@ -872,7 +879,7 @@ const tools = [
             </div>
           </div>
           <p
-            class="mt-6 text-sm opacity-0 dash-cta"
+            class="mt-6 text-sm dash-cta" data-reveal
             style="color: var(--color-text-tertiary)"
           >
             <a
@@ -891,19 +898,19 @@ const tools = [
         <div class="ambient-blue" style="top: 40%; right: 20%;"></div>
         <div class="max-w-3xl mx-auto text-center">
           <h2
-            class="cta-title font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6 opacity-0"
+            class="cta-title font-sans font-black text-[clamp(2.5rem,6vw,4.5rem)] leading-[1.05] mb-6" data-reveal="scale-up"
             style="color: var(--color-text); letter-spacing: -0.04em;"
           >
             Bring AI to every device on&nbsp;Earth.
           </h2>
           <p
-            class="cta-sub text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 opacity-0 max-w-xl mx-auto leading-relaxed"
+            class="cta-sub text-[clamp(1.1rem,2.5vw,1.4rem)] mb-14 max-w-xl mx-auto leading-relaxed" data-reveal
             style="color: var(--color-text-secondary)"
           >
             Open source. MIT licensed. ~528 KB. Runs anywhere.
           </p>
           <div
-            class="cta-buttons flex flex-col sm:flex-row gap-4 justify-center opacity-0"
+            class="cta-buttons flex flex-col sm:flex-row gap-4 justify-center" data-reveal
           >
             <a href={`${base}getting-started/installation/`} class="btn-primary"
               >Get Started</a
@@ -1046,17 +1053,17 @@ const tools = [
     </footer>
 
     <script>
-      import gsap from "gsap";
-      import { ScrollTrigger } from "gsap/ScrollTrigger";
-
-      gsap.registerPlugin(ScrollTrigger);
-      gsap.config({ nullTargetWarn: false });
-
       const prefersReducedMotion = window.matchMedia(
         "(prefers-reduced-motion: reduce)",
       ).matches;
 
+      // Show all elements immediately for reduced motion
       if (prefersReducedMotion) {
+        document.querySelectorAll("[data-reveal]").forEach((el) => {
+          (el as HTMLElement).style.opacity = "1";
+          (el as HTMLElement).style.transform = "none";
+          (el as HTMLElement).style.transitionDuration = "0s";
+        });
         document.querySelectorAll(".opacity-0").forEach((el) => {
           (el as HTMLElement).style.opacity = "1";
         });
@@ -1084,322 +1091,158 @@ const tools = [
           el.textContent = (el as HTMLElement).dataset.target || "0";
         });
       } else {
-        gsap.context(() => {
-          ScrollTrigger.create({
-            start: "top -80",
-            onEnter: () =>
-              document.getElementById("site-nav")?.classList.add("glass-nav"),
-            onLeaveBack: () =>
-              document
-                .getElementById("site-nav")
-                ?.classList.remove("glass-nav"),
-          });
-
-          // ═══ HERO ═══
-          const heroTl = gsap.timeline({ defaults: { ease: "power3.out" } });
-          heroTl
-            .fromTo(
-              ".hero-logo",
-              { opacity: 0, scale: 0.9 },
-              { opacity: 1, scale: 1, duration: 0.9 },
-              0.2,
-            )
-            .fromTo(
-              ".hero-headline",
-              { opacity: 0, y: 30 },
-              { opacity: 1, y: 0, duration: 1 },
-              0.4,
-            )
-            .fromTo(
-              ".hero-desc",
-              { opacity: 0, y: 20 },
-              { opacity: 1, y: 0, duration: 0.9 },
-              0.7,
-            )
-            .fromTo(
-              ".hero-buttons",
-              { opacity: 0, y: 20 },
-              { opacity: 1, y: 0, duration: 0.9 },
-              0.9,
-            );
-
-          // ═══ NUMBERS ═══
-          document.querySelectorAll(".number-item").forEach((item, i) => {
-            const el = item.querySelector("[data-count]") as HTMLElement;
-            if (!el) return;
-            const target = parseInt(el.dataset.count || "0");
-            const valSpan = el.querySelector(".count-value");
-            if (!valSpan) return;
-            const obj = { val: 0 };
-            gsap.fromTo(
-              item,
-              { opacity: 0, y: 30, scale: 0.98 },
-              {
-                opacity: 1,
-                y: 0,
-                scale: 1,
-                duration: 0.7,
-                delay: i * 0.08,
-                ease: "power3.out",
-                scrollTrigger: { trigger: ".numbers-grid", start: "top 85%" },
-              },
-            );
-            gsap.to(obj, {
-              val: target,
-              duration: 1.5,
-              ease: "power3.out",
-              delay: i * 0.08,
-              scrollTrigger: { trigger: ".numbers-grid", start: "top 85%" },
-              onUpdate: () => {
-                valSpan.textContent =
-                  target > 100
-                    ? Math.round(obj.val).toLocaleString()
-                    : Math.round(obj.val).toString();
-              },
-              onComplete: () => {
-                gsap.fromTo(
-                  item,
-                  { scale: 1 },
-                  {
-                    scale: 1.04,
-                    duration: 0.15,
-                    yoyo: true,
-                    repeat: 1,
-                    ease: "power2.out",
-                  },
-                );
-              },
+        // ═══ Intersection Observer reveal system ═══
+        const revealObserver = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("revealed");
+                revealObserver.unobserve(entry.target);
+              }
             });
-          });
+          },
+          { threshold: 0.15, rootMargin: "0px 0px -50px 0px" },
+        );
+        document.querySelectorAll("[data-reveal]").forEach((el) => {
+          revealObserver.observe(el);
+        });
 
-          // ═══ THE PROBLEM ═══
-          gsap.fromTo(
-            ".bloat-title",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".bloat-title", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".bloat-card",
-            { opacity: 0, y: 30, scale: 0.97 },
-            {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              duration: 0.5,
-              stagger: 0.15,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".bloat-stack", start: "top 80%" },
-            },
-          );
-          gsap.fromTo(
-            ".bloat-answer",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.8,
-              delay: 1.0,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".bloat-stack", start: "top 80%" },
-            },
-          );
+        // ═══ Nav glass toggle via scroll ═══
+        const nav = document.getElementById("site-nav");
+        if (nav) {
+          const onScroll = () => {
+            if (window.scrollY > 80) {
+              nav.classList.add("glass-nav");
+            } else {
+              nav.classList.remove("glass-nav");
+            }
+          };
+          window.addEventListener("scroll", onScroll, { passive: true });
+          onScroll();
+        }
 
-          // ═══ DEVICE SPECTRUM ═══
-          gsap.fromTo(
-            ".spectrum-title",
-            { opacity: 0, y: 30 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".spectrum-title", start: "top 85%" },
+        // ═══ Count-up numbers (lazy GSAP) ═══
+        const numbersGrid = document.querySelector(".numbers-grid");
+        if (numbersGrid) {
+          const numbersObs = new IntersectionObserver(
+            async (entries) => {
+              if (!entries[0]?.isIntersecting) return;
+              numbersObs.disconnect();
+              const { gsap } = await import("gsap");
+              document.querySelectorAll(".number-item").forEach((item, i) => {
+                const el = item.querySelector("[data-count]") as HTMLElement;
+                if (!el) return;
+                const target = parseInt(el.dataset.count || "0");
+                const valSpan = el.querySelector(".count-value");
+                if (!valSpan) return;
+                const obj = { val: 0 };
+                gsap.to(obj, {
+                  val: target,
+                  duration: 1.5,
+                  ease: "power3.out",
+                  delay: i * 0.08,
+                  onUpdate: () => {
+                    valSpan.textContent =
+                      target > 100
+                        ? Math.round(obj.val).toLocaleString()
+                        : Math.round(obj.val).toString();
+                  },
+                  onComplete: () => {
+                    gsap.fromTo(
+                      item,
+                      { scale: 1 },
+                      {
+                        scale: 1.04,
+                        duration: 0.15,
+                        yoyo: true,
+                        repeat: 1,
+                        ease: "power2.out",
+                      },
+                    );
+                  },
+                });
+              });
             },
+            { threshold: 0.15 },
           );
-          gsap.fromTo(
-            ".spectrum-sub",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".spectrum-sub", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".spectrum-card",
-            { opacity: 0, y: 40, scale: 0.98 },
-            {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              duration: 0.7,
-              stagger: 0.12,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".spectrum-card", start: "top 85%" },
-            },
-          );
+          numbersObs.observe(numbersGrid);
+        }
 
-          // ═══ ARCHITECTURE ═══
-          gsap.fromTo(
-            ".arch-title",
-            { opacity: 0, y: 30 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".arch-title", start: "top 85%" },
+        // ═══ Architecture SVG line drawing (lazy GSAP) ═══
+        const archDiagram = document.getElementById("arch-diagram");
+        if (archDiagram) {
+          const archObs = new IntersectionObserver(
+            async (entries) => {
+              if (!entries[0]?.isIntersecting) return;
+              archObs.disconnect();
+              const { gsap } = await import("gsap");
+              const archTl = gsap.timeline({ defaults: { ease: "power3.out" } });
+              archTl
+                .to("#arch-core", { opacity: 1, duration: 0.6 })
+                .fromTo(
+                  ".arch-line",
+                  {
+                    attr: {
+                      "stroke-dasharray": "200",
+                      "stroke-dashoffset": "200",
+                    },
+                  },
+                  {
+                    attr: {
+                      "stroke-dashoffset": "0",
+                      stroke: "var(--color-accent)",
+                    },
+                    duration: 0.7,
+                    stagger: 0.06,
+                  },
+                  0.3,
+                )
+                .to(
+                  ".arch-node",
+                  { opacity: 1, duration: 0.5, stagger: 0.08 },
+                  0.6,
+                );
             },
+            { threshold: 0.15 },
           );
-          gsap.fromTo(
-            ".arch-sub",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".arch-sub", start: "top 85%" },
-            },
-          );
-
-          const archTl = gsap.timeline({
-            scrollTrigger: { trigger: "#arch-diagram", start: "top 75%" },
-            defaults: { ease: "power3.out" },
-          });
-          archTl
-            .to("#arch-core", { opacity: 1, duration: 0.6 })
-            .fromTo(
-              ".arch-line",
-              {
-                attr: { "stroke-dasharray": "200", "stroke-dashoffset": "200" },
-              },
-              {
-                attr: {
-                  "stroke-dashoffset": "0",
-                  stroke: "var(--color-accent)",
-                },
-                duration: 0.7,
-                stagger: 0.06,
-              },
-              0.3,
-            )
-            .to(
-              ".arch-node",
-              { opacity: 1, duration: 0.5, stagger: 0.08 },
-              0.6,
-            );
+          archObs.observe(archDiagram);
 
           document.querySelectorAll(".arch-node").forEach((node) => {
             node.addEventListener("mouseenter", () => {
               const c = node.querySelector("circle");
-              if (c)
-                gsap.to(c, {
-                  attr: { stroke: "var(--color-accent)" },
-                  duration: 0.2,
-                });
+              if (c) c.setAttribute("stroke", "var(--color-accent)");
             });
             node.addEventListener("mouseleave", () => {
               const c = node.querySelector("circle");
-              if (c)
-                gsap.to(c, {
-                  attr: { stroke: "var(--color-node-stroke)" },
-                  duration: 0.2,
-                });
+              if (c) c.setAttribute("stroke", "var(--color-node-stroke)");
             });
           });
+        }
 
-          // ═══ ECOSYSTEM ═══
-          gsap.fromTo(
-            ".providers-title",
-            { opacity: 0, y: 30 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".providers-title", start: "top 85%" },
+        // ═══ Terminal typewriter (lazy GSAP) ═══
+        const terminalEl = document.getElementById("terminal");
+        const outputEl = document.getElementById("terminal-output");
+        if (terminalEl && outputEl) {
+          const termObs = new IntersectionObserver(
+            async (entries) => {
+              if (!entries[0]?.isIntersecting) return;
+              termObs.disconnect();
+              const { gsap } = await import("gsap");
+              gsap.to(terminalEl, { opacity: 1, duration: 0.6 });
+              typeTerminal(outputEl, gsap);
             },
+            { threshold: 0.15 },
           );
-          gsap.fromTo(
-            ".providers-sub",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".providers-sub", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".provider-pill",
-            { opacity: 0, scale: 0.8 },
-            {
-              opacity: 1,
-              scale: 1,
-              duration: 0.5,
-              ease: "power3.out",
-              stagger: { each: 0.02, from: "random" },
-              scrollTrigger: { trigger: "#provider-grid", start: "top 80%" },
-            },
-          );
+          termObs.observe(terminalEl);
+        }
 
-          // ═══ TERMINAL ═══
-          gsap.fromTo(
-            ".terminal-title",
-            { opacity: 0, y: 30 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".terminal-title", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".terminal-sub",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".terminal-sub", start: "top 85%" },
-            },
-          );
+        interface TermLine {
+          prompt: boolean;
+          text: string;
+          highlights?: Array<{ text: string; cls: string }>;
+        }
 
-          const terminalEl = document.getElementById("terminal");
-          const outputEl = document.getElementById("terminal-output");
-          if (terminalEl && outputEl) {
-            let played = false;
-            ScrollTrigger.create({
-              trigger: terminalEl,
-              start: "top 80%",
-              onEnter: () => {
-                if (played) return;
-                played = true;
-                gsap.to(terminalEl, { opacity: 1, duration: 0.6 });
-                typeTerminal(outputEl);
-              },
-            });
-          }
-
-          interface TermLine {
-            prompt: boolean;
-            text: string;
-            highlights?: Array<{ text: string; cls: string }>;
-          }
-
-          function typeTerminal(container: HTMLElement) {
+        function typeTerminal(container: HTMLElement, gsap: any) {
             const accentColor = "var(--color-accent)";
             const lines: TermLine[] = [
               {
@@ -1504,163 +1347,95 @@ const tools = [
             nextLine();
           }
 
-          // ═══ DASHBOARD PREVIEW ═══
-          gsap.fromTo(
-            ".dash-title",
-            { opacity: 0, y: 30 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".dash-title", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".dash-sub",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".dash-sub", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".dash-cta",
-            { opacity: 0, y: 10 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.7,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".dash-cta", start: "top 90%" },
-            },
-          );
-
-          const dashPreview = document.querySelector(".dash-preview");
-          if (dashPreview) {
-            let dashPlayed = false;
-            ScrollTrigger.create({
-              trigger: dashPreview,
-              start: "top 80%",
-              onEnter: () => {
-                if (dashPlayed) return;
-                dashPlayed = true;
-                gsap.to(dashPreview, { opacity: 1, duration: 0.6 });
-                document.querySelectorAll(".dash-count").forEach((el, i) => {
-                  const target = parseInt(
-                    (el as HTMLElement).dataset.target || "0",
-                  );
-                  const obj = { val: 0 };
-                  gsap.to(obj, {
-                    val: target,
-                    duration: 1.2,
-                    ease: "power3.out",
-                    delay: 0.3 + i * 0.1,
-                    onUpdate: () => {
-                      el.textContent = Math.round(obj.val).toString();
-                    },
-                  });
+        // ═══ Dashboard preview (lazy GSAP for count-up + activity) ═══
+        const dashPreview = document.querySelector(".dash-preview");
+        if (dashPreview) {
+          const dashObs = new IntersectionObserver(
+            async (entries) => {
+              if (!entries[0]?.isIntersecting) return;
+              dashObs.disconnect();
+              const { gsap } = await import("gsap");
+              gsap.to(dashPreview, { opacity: 1, duration: 0.6 });
+              document.querySelectorAll(".dash-count").forEach((el, i) => {
+                const target = parseInt(
+                  (el as HTMLElement).dataset.target || "0",
+                );
+                const obj = { val: 0 };
+                gsap.to(obj, {
+                  val: target,
+                  duration: 1.2,
+                  ease: "power3.out",
+                  delay: 0.3 + i * 0.1,
+                  onUpdate: () => {
+                    el.textContent = Math.round(obj.val).toString();
+                  },
                 });
-                const actContainer = document.getElementById("dash-activity");
-                if (actContainer) {
-                  const iconChatCircle =
-                    '<svg viewBox="0 0 256 256" fill="currentColor" width="16" height="16"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-4-1.08,8.09,8.09,0,0,0-2.53.41L40,216l12.47-37.4a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></svg>';
-                  const iconLightning =
-                    '<svg viewBox="0 0 256 256" fill="currentColor" width="16" height="16"><path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7l-112,120a8,8,0,0,0,3,12.95l57.63,21.61L88.16,238.43a8,8,0,0,0,13.69,7l112-120A8,8,0,0,0,215.79,118.17Z"/></svg>';
-                  const iconPlayCircle =
-                    '<svg viewBox="0 0 256 256" fill="currentColor" width="16" height="16"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm36.44-94.66-48-32A8,8,0,0,0,104,96v64a8,8,0,0,0,12.44,6.66l48-32a8,8,0,0,0,0-13.32ZM120,145.05V111l25.58,17Z"/></svg>';
-                  const activities = [
-                    {
-                      icon: iconChatCircle,
-                      text: "Alice via Telegram: Can you review the PR?",
-                      time: "just now",
+              });
+              const actContainer = document.getElementById("dash-activity");
+              if (actContainer) {
+                const iconChatCircle =
+                  '<svg viewBox="0 0 256 256" fill="currentColor" width="16" height="16"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-4-1.08,8.09,8.09,0,0,0-2.53.41L40,216l12.47-37.4a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"/></svg>';
+                const iconLightning =
+                  '<svg viewBox="0 0 256 256" fill="currentColor" width="16" height="16"><path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7l-112,120a8,8,0,0,0,3,12.95l57.63,21.61L88.16,238.43a8,8,0,0,0,13.69,7l112-120A8,8,0,0,0,215.79,118.17Z"/></svg>';
+                const iconPlayCircle =
+                  '<svg viewBox="0 0 256 256" fill="currentColor" width="16" height="16"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm36.44-94.66-48-32A8,8,0,0,0,104,96v64a8,8,0,0,0,12.44,6.66l48-32a8,8,0,0,0,0-13.32ZM120,145.05V111l25.58,17Z"/></svg>';
+                const activities = [
+                  {
+                    icon: iconChatCircle,
+                    text: "Alice via Telegram: Can you review the PR?",
+                    time: "just now",
+                  },
+                  {
+                    icon: iconLightning,
+                    text: "Tool shell: git status",
+                    time: "1m ago",
+                  },
+                  {
+                    icon: iconChatCircle,
+                    text: "Bob via Discord: Deploy looks good",
+                    time: "2m ago",
+                  },
+                  {
+                    icon: iconPlayCircle,
+                    text: 'Session "Code Review" started',
+                    time: "3m ago",
+                  },
+                ];
+                activities.forEach((act, i) => {
+                  setTimeout(
+                    () => {
+                      const div = document.createElement("div");
+                      div.className = "flex items-center gap-2";
+                      div.style.opacity = "0";
+                      div.innerHTML = `<span class="flex-shrink-0 [&>svg]:block">${act.icon}</span><span style="color: var(--sc-web-text-secondary); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: var(--sc-web-text-tertiary)">${act.time}</span>`;
+                      actContainer.appendChild(div);
+                      requestAnimationFrame(() => {
+                        div.style.transition = "opacity 0.4s ease-out";
+                        div.style.opacity = "1";
+                      });
                     },
-                    {
-                      icon: iconLightning,
-                      text: "Tool shell: git status",
-                      time: "1m ago",
-                    },
-                    {
-                      icon: iconChatCircle,
-                      text: "Bob via Discord: Deploy looks good",
-                      time: "2m ago",
-                    },
-                    {
-                      icon: iconPlayCircle,
-                      text: 'Session "Code Review" started',
-                      time: "3m ago",
-                    },
-                  ];
-                  activities.forEach((act, i) => {
-                    setTimeout(
-                      () => {
-                        const div = document.createElement("div");
-                        div.className = "flex items-center gap-2";
-                        div.style.opacity = "0";
-                        div.innerHTML = `<span class="flex-shrink-0 [&>svg]:block">${act.icon}</span><span style="color: var(--sc-web-text-secondary); flex: 1;">${act.text}</span><span class="text-[11px]" style="color: var(--sc-web-text-tertiary)">${act.time}</span>`;
-                        actContainer.appendChild(div);
-                        gsap.to(div, { opacity: 1, duration: 0.4 });
-                      },
-                      800 + i * 400,
-                    );
-                  });
-                }
-              },
-            });
-          }
+                    800 + i * 400,
+                  );
+                });
+              }
+            },
+            { threshold: 0.15 },
+          );
+          dashObs.observe(dashPreview);
+        }
 
-          // ═══ CTA ═══
-          gsap.fromTo(
-            ".cta-title",
-            { opacity: 0, y: 40, scale: 0.98 },
-            {
-              opacity: 1,
-              y: 0,
-              scale: 1,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".cta-title", start: "top 80%" },
-            },
-          );
-          gsap.fromTo(
-            ".cta-sub",
-            { opacity: 0, y: 30 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".cta-sub", start: "top 85%" },
-            },
-          );
-          gsap.fromTo(
-            ".cta-buttons",
-            { opacity: 0, y: 20 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.9,
-              ease: "power3.out",
-              scrollTrigger: { trigger: ".cta-buttons", start: "top 85%" },
-            },
-          );
-
-          // ═══ SPOTLIGHT CARDS ═══
-          document.querySelectorAll(".card-spotlight").forEach((card) => {
-            card.addEventListener("mousemove", (e) => {
-              const rect = (card as HTMLElement).getBoundingClientRect();
-              (card as HTMLElement).style.setProperty(
-                "--mouse-x",
-                (e as MouseEvent).clientX - rect.left + "px",
-              );
-              (card as HTMLElement).style.setProperty(
-                "--mouse-y",
-                (e as MouseEvent).clientY - rect.top + "px",
-              );
-            });
+        // ═══ Spotlight cards (vanilla JS, no GSAP needed) ═══
+        document.querySelectorAll(".card-spotlight").forEach((card) => {
+          card.addEventListener("mousemove", (e) => {
+            const rect = (card as HTMLElement).getBoundingClientRect();
+            (card as HTMLElement).style.setProperty(
+              "--mouse-x",
+              (e as MouseEvent).clientX - rect.left + "px",
+            );
+            (card as HTMLElement).style.setProperty(
+              "--mouse-y",
+              (e as MouseEvent).clientY - rect.top + "px",
+            );
           });
         });
       }

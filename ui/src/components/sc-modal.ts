@@ -212,7 +212,7 @@ export class ScModal extends LitElement {
         @keydown=${this._onKeyDown}
       >
         <div
-          class="panel ${this._closing ? "closing" : ""}"
+          class="panel sc-entry-scale ${this._closing ? "closing" : ""}"
           @click=${(e: MouseEvent) => e.stopPropagation()}
         >
           <header class="header">

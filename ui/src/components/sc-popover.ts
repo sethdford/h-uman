@@ -9,6 +9,7 @@ export class ScPopover extends LitElement {
   @property({ type: String }) position: PopoverPosition = "bottom";
   @property({ type: Boolean }) arrow = true;
 
+  private _nativePopover = typeof HTMLElement.prototype.togglePopover === "function";
   private _clickOutsideHandler = this._onClickOutside.bind(this);
   private _keyHandler = this._onKeyDown.bind(this);
 
@@ -48,6 +49,25 @@ export class ScPopover extends LitElement {
       visibility: visible;
       transform: scale(1);
       animation: sc-fade-in var(--sc-duration-fast) var(--sc-ease-out);
+    }
+
+    /* Native popover enhancement */
+    .popover[popover] {
+      margin: 0;
+      padding: var(--sc-space-md);
+      background: color-mix(in srgb, var(--sc-surface-container-high) 88%, transparent);
+      backdrop-filter: blur(var(--sc-glass-standard-blur))
+        saturate(var(--sc-glass-standard-saturate));
+      -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur))
+        saturate(var(--sc-glass-standard-saturate));
+      border: 1px solid var(--sc-glass-border-color);
+      border-radius: var(--sc-radius-lg);
+      box-shadow: var(--sc-shadow-lg);
+    }
+    .popover[popover]:popover-open {
+      opacity: 1;
+      visibility: visible;
+      transform: scale(1);
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -140,7 +160,7 @@ export class ScPopover extends LitElement {
   `;
 
   override updated(changedProperties: Map<string, unknown>): void {
-    if (changedProperties.has("open")) {
+    if (changedProperties.has("open") && !this._nativePopover) {
       if (this.open) {
         document.addEventListener("click", this._clickOutsideHandler);
         document.addEventListener("keydown", this._keyHandler);
@@ -200,19 +220,43 @@ export class ScPopover extends LitElement {
     this.dispatchEvent(new CustomEvent("sc-close", { bubbles: true, composed: true }));
   }
 
+  private _toggleNative(): void {
+    const popoverEl = this.renderRoot.querySelector<HTMLElement>(".popover");
+    popoverEl?.togglePopover();
+  }
+
+  private _onToggle(e: Event): void {
+    const toggleEvent = e as ToggleEvent;
+    const isOpen = toggleEvent.newState === "open";
+    if (isOpen !== this.open) {
+      this.open = isOpen;
+      if (!isOpen) {
+        this._close();
+      }
+    }
+  }
+
   override render() {
+    const useNative = this._nativePopover;
+    const classes = `popover ${this.open ? "open" : ""} position-${this.position}`;
     return html`
-      <div class="trigger" aria-expanded=${this.open} aria-haspopup="true">
+      <div
+        class="trigger"
+        aria-expanded=${this.open}
+        aria-haspopup="true"
+        @click=${useNative ? this._toggleNative : undefined}
+      >
         <slot></slot>
       </div>
-      ${this.open
-        ? html`
-            <div class="popover open position-${this.position}" role="dialog">
-              ${this.arrow ? html`<span class="arrow" aria-hidden="true"></span>` : null}
-              <slot name="content"></slot>
-            </div>
-          `
-        : nothing}
+      <div
+        class=${classes}
+        role="dialog"
+        popover=${useNative ? "auto" : nothing}
+        @toggle=${useNative ? this._onToggle : undefined}
+      >
+        ${this.arrow ? html`<span class="arrow" aria-hidden="true"></span>` : null}
+        <slot name="content"></slot>
+      </div>
     `;
   }
 }

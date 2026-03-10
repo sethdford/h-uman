@@ -7,6 +7,10 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   site: "https://seaclaw.ai",
   base: "/",
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: "hover",
+  },
   integrations: [
     starlight({
       disable404Route: true,

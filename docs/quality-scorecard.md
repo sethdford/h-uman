@@ -23,23 +23,23 @@ updated: 2026-03-09
 
 | Surface   | Perf | Visual | Motion | Density | A11y | Brand | Innovation | Total | Target      |
 | --------- | ---- | ------ | ------ | ------- | ---- | ----- | ---------- | ----- | ----------- |
-| Website   | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   | 63+ (9 avg) |
-| Dashboard | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   | 63+ (9 avg) |
-| iOS       | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   | 63+ (9 avg) |
-| macOS     | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   | 63+ (9 avg) |
-| Android   | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   | 63+ (9 avg) |
+| Website   | 8    | 7      | 7      | 7       | 9    | 7     | 7          | 52/70 | 63+ (9 avg) |
+| Dashboard | 7    | 7      | 8      | 7       | 8    | 7     | 8          | 52/70 | 63+ (9 avg) |
+| iOS       | 5    | 6      | 5      | 6       | 6    | 6     | 5          | 39/70 | 63+ (9 avg) |
+| macOS     | 5    | 6      | 5      | 6       | 6    | 6     | 5          | 39/70 | 63+ (9 avg) |
+| Android   | 4    | 5      | 5      | 5       | 5    | 5     | 5          | 34/70 | 63+ (9 avg) |
 
 ## Benchmark Comparison
 
 | Brand        | Perf | Visual | Motion | Density | A11y | Brand | Innovation | Total |
 | ------------ | ---- | ------ | ------ | ------- | ---- | ----- | ---------- | ----- |
-| Linear       | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Vercel       | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Stripe       | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Superhuman   | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Raycast      | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Figma        | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Lando Norris | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
+| Linear       | 4    | 9      | 9      | 9       | 6    | 9     | 8          | 54/70 |
+| Vercel       | 6    | 8      | 7      | 8       | 7    | 8     | 8          | 52/70 |
+| Stripe       | 6    | 9      | 8      | 8       | 9    | 9     | 7          | 56/70 |
+| Superhuman   | 6    | 8      | 8      | 8       | 9    | 8     | 7          | 54/70 |
+| Raycast      | 7    | 9      | 9      | 9       | 7    | 9     | 8          | 58/70 |
+| Figma        | 4    | 9      | 7      | 8       | 7    | 9     | 9          | 53/70 |
+| Lando Norris | 5    | 10     | 10     | 6       | 5    | 8     | 10         | 54/70 |
 
 ## Dimension Rubrics
 
@@ -105,11 +105,15 @@ Detailed rubrics for each of the 7 dimensions:
 
 | Quarter | Website | Dashboard | iOS | macOS | Android |
 | ------- | ------- | --------- | --- | ----- | ------- |
-| Q1 2026 | TBD     | TBD       | TBD | TBD   | TBD     |
+| Q1 2026 | 52      | 52        | 39  | 39    | 34      |
 
 ## Action Items from Last Review
 
-_First scorecard — no prior review._
+- **Website Performance**: Lighthouse 96 — target 99+. Remaining gap: LCP (2.6s local). Investigate font loading and hero image optimization.
+- **Visual Craft (all surfaces)**: 7 — target 9. Invest in editorial typography, mathematically precise spacing, dark/light parity polish.
+- **Motion Quality (native apps)**: 5 — target 8. Implement spring animations in SwiftUI/Compose, add meaningful transitions.
+- **Native App Maturity**: iOS/macOS 39/70, Android 34/70. Priority: bring native apps to feature parity with dashboard.
+- **Brand Cohesion**: 6-7 — target 9. Strengthen cross-surface consistency; native apps need design token integration.
 
 ## Related
 

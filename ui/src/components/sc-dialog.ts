@@ -251,7 +251,7 @@ export class ScDialog extends LitElement {
         @click=${this._onBackdropClick}
       >
         <div
-          class="panel ${this._closing ? "closing" : ""}"
+          class="panel sc-entry-scale ${this._closing ? "closing" : ""}"
           @click=${(e: MouseEvent) => e.stopPropagation()}
         >
           <h2 id=${titleId} class="title">${this.title}</h2>

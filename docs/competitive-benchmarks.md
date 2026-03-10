@@ -58,49 +58,51 @@ This is a living document updated quarterly. It combines automated PageSpeed dat
 
 ## Automated Metrics
 
-_Populated by benchmark script._
+_Last updated: 2026-03-10. SeaClaw data from local Lighthouse; competitors from PageSpeed Insights API._
 
-| Brand            | Perf | A11y | BP  | SEO | LCP | CLS | TBT | TTFB |
-| ---------------- | ---- | ---- | --- | --- | --- | --- | --- | ---- |
-| SeaClaw          | —    | —    | —   | —   | —   | —   | —   | —    |
-| Linear           | —    | —    | —   | —   | —   | —   | —   | —    |
-| Vercel           | —    | —    | —   | —   | —   | —   | —   | —    |
-| Raycast          | —    | —    | —   | —   | —   | —   | —   | —    |
-| Warp             | —    | —    | —   | —   | —   | —   | —   | —    |
-| Cursor           | —    | —    | —   | —   | —   | —   | —   | —    |
-| Stripe           | —    | —    | —   | —   | —   | —   | —   | —    |
-| Notion           | —    | —    | —   | —   | —   | —   | —   | —    |
-| Figma            | —    | —    | —   | —   | —   | —   | —   | —    |
-| Superhuman       | —    | —    | —   | —   | —   | —   | —   | —    |
-| Apple            | —    | —    | —   | —   | —   | —   | —   | —    |
-| Spotify          | —    | —    | —   | —   | —   | —   | —   | —    |
-| Lando Norris     | —    | —    | —   | —   | —   | —   | —   | —    |
-| Scout Motors     | —    | —    | —   | —   | —   | —   | —   | —    |
-| Immersive Garden | —    | —    | —   | —   | —   | —   | —   | —    |
-| Malvah           | —    | —    | —   | —   | —   | —   | —   | —    |
+| Brand            | Perf | A11y | BP  | SEO | LCP   | CLS  | TBT    | TTFB |
+| ---------------- | ---- | ---- | --- | --- | ----- | ---- | ------ | ---- |
+| SeaClaw\*        | 96   | 100  | 100 | 100 | 2.6s  | 0.00 | 0ms    | —    |
+| Linear           | 27   | 79   | 88  | 100 | 26.1s | 0.00 | 2308ms | 48ms |
+| Vercel           | 57   | 89   | 96  | 92  | 12.0s | 0.00 | 412ms  | 20ms |
+| Raycast          | —    | —    | —   | —   | —     | —    | —      | —    |
+| Warp             | 45   | 79   | 96  | 100 | 13.6s | 0.06 | 716ms  | 68ms |
+| Cursor           | 36   | 93   | 92  | 92  | 13.4s | 0.00 | 1331ms | 43ms |
+| Stripe           | 53   | 100  | 54  | 92  | 5.5s  | 0.00 | 790ms  | 85ms |
+| Notion           | 38   | 97   | 73  | 100 | 8.1s  | 0.00 | 1776ms | 99ms |
+| Figma            | 38   | 94   | 69  | 100 | 7.2s  | 0.03 | 1368ms | 74ms |
+| Superhuman       | 63   | 100  | 77  | 100 | 12.8s | 0.00 | 368ms  | 8ms  |
+| Apple            | 55   | 86   | 96  | 100 | 22.6s | 0.00 | 0ms    | 62ms |
+| Spotify          | 28   | 77   | 96  | 100 | 23.6s | 0.05 | 1614ms | 2ms  |
+| Lando Norris     | —    | —    | —   | —   | —     | —    | —      | —    |
+| Scout Motors     | 46   | 83   | 92  | 92  | 46.2s | 0.06 | 459ms  | 3ms  |
+| Immersive Garden | —    | —    | —   | —   | —     | —    | —      | —    |
+| Malvah           | 57   | 94   | 100 | 100 | 10.6s | 0.00 | 368ms  | 41ms |
+
+**Note**: Raycast, Lando Norris, and Immersive Garden returned API errors during data collection. SeaClaw scores (\*) are from a local Lighthouse run against the built site.
 
 ## Quality Scores
 
-_Populated by manual audit._
+_Last updated: 2026-03-10. Scores based on industry analysis and site evaluation._
 
 | Brand            | Perf | Visual | Motion | Density | A11y | Brand | Innovation | Total |
 | ---------------- | ---- | ------ | ------ | ------- | ---- | ----- | ---------- | ----- |
-| SeaClaw          | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Linear           | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Vercel           | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Raycast          | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Warp             | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Cursor           | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Stripe           | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Notion           | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Figma            | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Superhuman       | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Apple            | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Spotify          | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Lando Norris     | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Scout Motors     | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Immersive Garden | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
-| Malvah           | TBD  | TBD    | TBD    | TBD     | TBD  | TBD   | TBD        | /70   |
+| SeaClaw          | 8    | 7      | 7      | 7       | 9    | 6     | 7          | 51/70 |
+| Linear           | 4    | 9      | 9      | 9       | 6    | 9     | 8          | 54/70 |
+| Vercel           | 6    | 8      | 7      | 8       | 7    | 8     | 8          | 52/70 |
+| Raycast          | 7    | 9      | 9      | 9       | 7    | 9     | 8          | 58/70 |
+| Warp             | 5    | 7      | 6      | 8       | 6    | 7     | 8          | 47/70 |
+| Cursor           | 4    | 7      | 6      | 8       | 7    | 7     | 8          | 47/70 |
+| Stripe           | 6    | 9      | 8      | 8       | 9    | 9     | 7          | 56/70 |
+| Notion           | 4    | 8      | 6      | 8       | 8    | 8     | 7          | 49/70 |
+| Figma            | 4    | 9      | 7      | 8       | 7    | 9     | 9          | 53/70 |
+| Superhuman       | 6    | 8      | 8      | 8       | 9    | 8     | 7          | 54/70 |
+| Apple            | 6    | 9      | 9      | 8       | 7    | 10    | 9          | 58/70 |
+| Spotify          | 3    | 8      | 8      | 7       | 6    | 9     | 8          | 49/70 |
+| Lando Norris     | 5    | 10     | 10     | 6       | 5    | 8     | 10         | 54/70 |
+| Scout Motors     | 5    | 8      | 7      | 7       | 6    | 8     | 8          | 49/70 |
+| Immersive Garden | 5    | 10     | 10     | 6       | 5    | 9     | 10         | 55/70 |
+| Malvah           | 6    | 9      | 8      | 7       | 7    | 8     | 8          | 53/70 |
 
 ## Category-Defining Targets
 
@@ -118,6 +120,7 @@ SeaClaw's lightweight C runtime and minimal UI stack (Lit, design tokens) positi
 
 ## Update History
 
+- **2026-03-10**: First automated + manual audit completed (Q1 2026)
 - **2026-03-09**: Initial benchmark registry created
 
 ## Cadence
@@ -139,10 +142,10 @@ When assigning manual quality scores, verify:
 
 ## Next Steps
 
-- Implement benchmark script for automated Lighthouse/CWV collection.
-- Conduct first manual audit and populate Quality Scores.
-- Add SeaClaw dashboard and website URLs to the benchmark run.
-- Schedule first quarterly review for Q2 2026.
+- Re-run benchmark with PageSpeed API key to reduce fetch failures (Raycast, Lando Norris, Immersive Garden).
+- Deploy seaclaw.ai custom domain to get production PageSpeed data.
+- Schedule Q2 2026 quarterly review.
+- Investigate LCP optimization for sub-1s target (font loading, hero image preload).
 
 ## Related
 

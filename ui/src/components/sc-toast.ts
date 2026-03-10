@@ -199,7 +199,7 @@ export class ScToast extends LitElement {
       ${this._toasts.map(
         (item) => html`
           <div
-            class="toast variant-${item.variant} ${item.visible ? "" : "exiting"}"
+            class="toast sc-entry-slide-up variant-${item.variant} ${item.visible ? "" : "exiting"}"
             role="status"
             aria-live="polite"
             aria-atomic="true"

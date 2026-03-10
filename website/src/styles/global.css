@@ -493,6 +493,78 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
+  /* ── Scroll reveal system (replaces GSAP ScrollTrigger) ── */
+  [data-reveal] {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  [data-reveal].revealed {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  [data-reveal="scale"] {
+    transform: translateY(20px) scale(0.98);
+  }
+  [data-reveal="scale"].revealed {
+    transform: translateY(0) scale(1);
+  }
+  [data-reveal="scale-up"] {
+    transform: translateY(40px) scale(0.98);
+  }
+  [data-reveal="scale-up"].revealed {
+    transform: translateY(0) scale(1);
+  }
+  [data-reveal="pill"] {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  [data-reveal="pill"].revealed {
+    opacity: 1;
+    transform: scale(1);
+  }
+  /* Stagger support via CSS custom property */
+  [data-reveal][style*="--ri"] {
+    transition-delay: calc(var(--ri, 0) * 50ms);
+  }
+  /* Cap stagger at 300ms */
+  [data-reveal][style*="--ri:7"],
+  [data-reveal][style*="--ri:8"],
+  [data-reveal][style*="--ri:9"] {
+    transition-delay: 300ms;
+  }
+
+  /* ── Scroll-driven animation (CSS animation-timeline) ── */
+  @supports (animation-timeline: view()) {
+    .sc-scroll-reveal {
+      animation: sc-scroll-fade-in linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 30%;
+    }
+    .sc-scroll-scale {
+      animation: sc-scroll-scale-in linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 35%;
+    }
+    @keyframes sc-scroll-fade-in {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes sc-scroll-scale-in {
+      from { opacity: 0; transform: scale(0.92); }
+      to { opacity: 1; transform: scale(1); }
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sc-scroll-reveal,
+    .sc-scroll-scale {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
+  }
+
   /* ── Ambient gradients ── */
   .ambient-coral {
     position: absolute;
