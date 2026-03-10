@@ -21,6 +21,11 @@ typedef enum hu_proactive_action_type {
     HU_PROACTIVE_PATTERN_INSIGHT,
     HU_PROACTIVE_REMINDER,
     HU_PROACTIVE_IMPORTANT_DATE,
+    HU_PROACTIVE_INSIDE_JOKE,
+    HU_PROACTIVE_TOPIC_ABSENCE,
+    HU_PROACTIVE_GROWTH_CELEBRATION,
+    HU_PROACTIVE_CURIOSITY,
+    HU_PROACTIVE_CALLBACK,
 } hu_proactive_action_type_t;
 
 typedef struct hu_proactive_action {
@@ -70,5 +75,15 @@ bool hu_proactive_check_important_dates(const hu_persona_t *persona, const char 
                                         size_t contact_id_len, int month, int day,
                                         char *message_out, size_t msg_cap, char *type_out,
                                         size_t type_cap);
+
+/* F30: Spontaneous curiosity — random genuine questions from memory (10–15% per proactive cycle) */
+bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap);
+
+/* F31: Callback opportunities — reference previous conversations (25–35% per conversation start) */
+bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap);
 
 #endif /* HU_PROACTIVE_H */

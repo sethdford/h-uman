@@ -9,6 +9,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#ifdef HU_ENABLE_SQLITE
+#include "human/memory/superhuman.h"
+#endif
 
 #define HU_PROACTIVE_EVENT_FOLLOW_UP_CAP 3
 #define MS_PER_HOUR                      (3600ULL * 1000ULL)
@@ -649,3 +653,190 @@ bool hu_proactive_check_important_dates(const hu_persona_t *persona, const char 
     }
     return false;
 }
+
+#ifdef HU_ENABLE_SQLITE
+/* F30: Spontaneous curiosity — random genuine questions from micro-moments (10–15% per cycle) */
+bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap) {
+    (void)alloc;
+    if (!memory || !contact_id || contact_id_len == 0 || !message_out || msg_cap == 0)
+        return false;
+
+    /* 10–15% probability based on seed (use 12%) */
+    uint32_t s = (seed == 0) ? 1u : seed;
+    s = s * 1103515245u + 12345u;
+    if ((s >> 16u) % 100u >= 12u)
+        return false;
+
+    char *mm_json = NULL;
+    size_t mm_len = 0;
+    if (hu_superhuman_micro_moment_list(memory, alloc, contact_id, contact_id_len, 20, &mm_json,
+                                         &mm_len) != HU_OK ||
+        !mm_json || mm_len == 0)
+        return false;
+
+    /* Parse "Micro-moments:\n- fact | significance\n" lines to extract facts */
+    const char *p = mm_json;
+    const char *line_start = NULL;
+    size_t fact_count = 0;
+    const char *facts[32];
+    size_t fact_lens[32];
+
+    while (*p) {
+        if (p[0] == '-' && p[1] == ' ') {
+            p += 2;
+            line_start = p;
+            while (*p && *p != '\n' && *p != '|')
+                p++;
+            if (p > line_start && fact_count < 32) {
+                size_t len = (size_t)(p - line_start);
+                while (len > 0 && (line_start[len - 1] == ' ' || line_start[len - 1] == '\t'))
+                    len--;
+                if (len > 0) {
+                    facts[fact_count] = line_start;
+                    fact_lens[fact_count] = len;
+                    fact_count++;
+                }
+            }
+            while (*p && *p != '\n')
+                p++;
+            if (*p == '\n')
+                p++;
+            continue;
+        }
+        if (*p == '\n')
+            p++;
+        else
+            p++;
+    }
+
+    alloc->free(alloc->ctx, mm_json, mm_len);
+
+    if (fact_count == 0)
+        return false;
+
+    /* Pick one randomly */
+    s = s * 1103515245u + 12345u;
+    size_t idx = ((size_t)(s >> 16u) & 0x7FFFu) % fact_count;
+    const char *fact = facts[idx];
+    size_t fact_len = fact_lens[idx];
+
+    /* Format: "random question — do you still [topic]?" or "hey whatever happened with [topic]?" */
+    s = s * 1103515245u + 12345u;
+    int n;
+    if ((s >> 16u) % 2u == 0) {
+        size_t show = fact_len > 80 ? 80 : fact_len;
+        n = snprintf(message_out, msg_cap, "random question — do you still %.*s?",
+                     (int)show, fact);
+    } else {
+        size_t show = fact_len > 80 ? 80 : fact_len;
+        n = snprintf(message_out, msg_cap, "hey whatever happened with %.*s?",
+                     (int)show, fact);
+    }
+    if (n <= 0 || (size_t)n >= msg_cap)
+        return false;
+    return true;
+}
+
+/* F31: Callback opportunities — reference previous conversations (30% per conversation start) */
+bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap) {
+    if (!alloc || !memory || !contact_id || contact_id_len == 0 || !message_out || msg_cap == 0)
+        return false;
+
+    /* 30% probability based on seed */
+    uint32_t s = (seed == 0) ? 1u : seed;
+    s = s * 1103515245u + 12345u;
+    if ((s >> 16u) % 100u >= 30u)
+        return false;
+
+    int64_t now_ts = (int64_t)time(NULL);
+    size_t cid_len = strlen(contact_id);
+    if (cid_len != contact_id_len)
+        cid_len = contact_id_len;
+
+    /* Try delayed follow-ups first */
+    hu_delayed_followup_t *followups = NULL;
+    size_t followup_count = 0;
+    if (hu_superhuman_delayed_followup_list_due(memory, alloc, now_ts, &followups,
+                                                &followup_count) == HU_OK &&
+        followups && followup_count > 0) {
+        /* Filter by contact_id and pick one */
+        for (size_t i = 0; i < followup_count; i++) {
+            if (strlen(followups[i].contact_id) != cid_len ||
+                memcmp(followups[i].contact_id, contact_id, cid_len) != 0)
+                continue;
+            size_t topic_len = strnlen(followups[i].topic, sizeof(followups[i].topic) - 1);
+            if (topic_len == 0)
+                continue;
+            if (topic_len > 200)
+                topic_len = 200;
+            int n = snprintf(message_out, msg_cap,
+                             "CALLBACK: Consider asking about: %.*s. Only if natural.",
+                             (int)topic_len, followups[i].topic);
+            hu_superhuman_delayed_followup_free(alloc, followups, followup_count);
+            if (n > 0 && (size_t)n < msg_cap)
+                return true;
+            return false;
+        }
+        hu_superhuman_delayed_followup_free(alloc, followups, followup_count);
+    }
+
+    /* Fall back to commitments due */
+    hu_superhuman_commitment_t *commitments = NULL;
+    size_t commitment_count = 0;
+    if (hu_superhuman_commitment_list_due(memory, alloc, now_ts, 10, &commitments,
+                                          &commitment_count) == HU_OK &&
+        commitments && commitment_count > 0) {
+        for (size_t i = 0; i < commitment_count; i++) {
+            if (strlen(commitments[i].contact_id) != cid_len ||
+                memcmp(commitments[i].contact_id, contact_id, cid_len) != 0)
+                continue;
+            size_t desc_len = strnlen(commitments[i].description,
+                                      sizeof(commitments[i].description) - 1);
+            if (desc_len == 0)
+                continue;
+            if (desc_len > 200)
+                desc_len = 200;
+            int n = snprintf(message_out, msg_cap,
+                             "CALLBACK: Consider asking about: %.*s. Only if natural.",
+                             (int)desc_len, commitments[i].description);
+            hu_superhuman_commitment_free(alloc, commitments, commitment_count);
+            if (n > 0 && (size_t)n < msg_cap)
+                return true;
+            return false;
+        }
+        hu_superhuman_commitment_free(alloc, commitments, commitment_count);
+    }
+
+    return false;
+}
+#else
+bool hu_proactive_check_curiosity(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap) {
+    (void)alloc;
+    (void)memory;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)seed;
+    (void)message_out;
+    (void)msg_cap;
+    return false;
+}
+
+bool hu_proactive_check_callbacks(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const char *contact_id, size_t contact_id_len, uint32_t seed,
+                                  char *message_out, size_t msg_cap) {
+    (void)alloc;
+    (void)memory;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)seed;
+    (void)message_out;
+    (void)msg_cap;
+    return false;
+}
+#endif
