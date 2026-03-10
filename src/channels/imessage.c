@@ -257,6 +257,28 @@ const char *hu_imessage_reaction_to_tapback_name(hu_reaction_type_t reaction) {
     }
 }
 
+#if defined(HU_IMESSAGE_TAPBACK_ENABLED)
+/* Maps reaction type to iMessage AX context menu label (Love, Like, Ha Ha, etc.). */
+static const char *imessage_reaction_to_ax_menu_name(hu_reaction_type_t reaction) {
+    switch (reaction) {
+    case HU_REACTION_HEART:
+        return "Love";
+    case HU_REACTION_THUMBS_UP:
+        return "Like";
+    case HU_REACTION_THUMBS_DOWN:
+        return "Dislike";
+    case HU_REACTION_HAHA:
+        return "Ha Ha";
+    case HU_REACTION_EMPHASIS:
+        return "!!";
+    case HU_REACTION_QUESTION:
+        return "?";
+    default:
+        return NULL;
+    }
+}
+#endif
+
 /* Escape " and \ for AppleScript string literal */
 size_t escape_for_applescript(char *out, size_t out_cap, const char *in, size_t in_len) {
     size_t j = 0;
@@ -674,63 +696,146 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ctx;
     if (!c || !c->alloc)
         return HU_ERR_INVALID_ARGUMENT;
-    const char *tapback = hu_imessage_reaction_to_tapback_name(reaction);
-    if (!tapback)
+    const char *tapback_ax = imessage_reaction_to_ax_menu_name(reaction);
+    if (!tapback_ax)
         return HU_ERR_INVALID_ARGUMENT;
     if (!target || target_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Escape target for JavaScript string. */
-    size_t tgt_esc_cap = target_len * 2 + 1;
-    if (tgt_esc_cap > 4096)
-        return HU_ERR_INVALID_ARGUMENT;
-    char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
-    if (!tgt_esc)
-        return HU_ERR_OUT_OF_MEMORY;
-    {
-        size_t j = 0;
-        for (size_t i = 0; i < target_len && j + 2 < tgt_esc_cap; i++) {
-            if (target[i] == '\\' || target[i] == '"') {
-                tgt_esc[j++] = '\\';
-                tgt_esc[j++] = target[i];
-            } else if (target[i] == '\n') {
-                tgt_esc[j++] = '\\';
-                tgt_esc[j++] = 'n';
-            } else {
-                tgt_esc[j++] = target[i];
+    /* Fetch message content from chat.db for row matching (message_id > 0). */
+    char content_buf[256];
+    size_t content_len = 0;
+#if defined(HU_ENABLE_SQLITE)
+    if (message_id > 0) {
+        const char *home_env = getenv("HOME");
+        if (home_env) {
+            char db_path[512];
+            int dn = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home_env);
+            if (dn > 0 && (size_t)dn < sizeof(db_path)) {
+                sqlite3 *db = NULL;
+                if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+                    sqlite3_stmt *stmt = NULL;
+                    if (sqlite3_prepare_v2(db, "SELECT text FROM message WHERE ROWID = ?", -1,
+                                           &stmt, NULL) == SQLITE_OK) {
+                        sqlite3_bind_int64(stmt, 1, message_id);
+                        if (sqlite3_step(stmt) == SQLITE_ROW) {
+                            const char *text = (const char *)sqlite3_column_text(stmt, 0);
+                            if (text) {
+                                size_t len = strlen(text);
+                                if (len >= sizeof(content_buf))
+                                    len = sizeof(content_buf) - 1;
+                                memcpy(content_buf, text, len);
+                                content_buf[len] = '\0';
+                                content_len = len;
+                            }
+                        }
+                        sqlite3_finalize(stmt);
+                    }
+                    sqlite3_close(db);
+                }
             }
         }
-        tgt_esc[j] = '\0';
     }
+#endif
+    (void)message_id;
+
+    /* Escape content_prefix and tapback_ax for JavaScript string literals. */
+    size_t esc_cap = (content_len + strlen(tapback_ax)) * 2 + 64;
+    if (esc_cap > 2048)
+        esc_cap = 2048;
+    char *content_esc = (char *)c->alloc->alloc(c->alloc->ctx, esc_cap);
+    if (!content_esc)
+        return HU_ERR_OUT_OF_MEMORY;
+    size_t j = 0;
+    for (size_t i = 0; i < content_len && j + 2 < esc_cap; i++) {
+        if (content_buf[i] == '\\' || content_buf[i] == '"') {
+            content_esc[j++] = '\\';
+            content_esc[j++] = content_buf[i];
+        } else if (content_buf[i] == '\n') {
+            content_esc[j++] = '\\';
+            content_esc[j++] = 'n';
+        } else {
+            content_esc[j++] = content_buf[i];
+        }
+    }
+    content_esc[j] = '\0';
+    size_t content_esc_len = j;
+
+    size_t tapback_esc_cap = strlen(tapback_ax) * 2 + 16;
+    char *tapback_esc = (char *)c->alloc->alloc(c->alloc->ctx, tapback_esc_cap);
+    if (!tapback_esc) {
+        c->alloc->free(c->alloc->ctx, content_esc, esc_cap);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    j = 0;
+    for (size_t i = 0; tapback_ax[i] && j + 2 < tapback_esc_cap; i++) {
+        if (tapback_ax[i] == '\\' || tapback_ax[i] == '"') {
+            tapback_esc[j++] = '\\';
+            tapback_esc[j++] = tapback_ax[i];
+        } else {
+            tapback_esc[j++] = tapback_ax[i];
+        }
+    }
+    tapback_esc[j] = '\0';
 
     /*
-     * JXA script: activate Messages, use System Events to trigger tapback.
+     * JXA script: activate Messages, find row by content, AXShowMenu, select tapback.
+     * - contentPrefix: substring to match in table row (empty = use last row)
+     * - tapbackAx: AX menu label (Love, Like, Ha Ha, etc.)
      * Fragile: requires accessibility permissions; UI hierarchy varies by macOS.
      */
     static const char *script_tpl =
         "ObjC.import(\"stdlib\");"
-        "var tapback=\"%s\";var target=\"%s\";"
+        "var contentPrefix=\"%s\";var tapbackAx=\"%s\";"
         "try{"
         "var M=Application(\"Messages\");M.activate();delay(0.5);"
         "var SE=Application(\"System Events\");var p=SE.processes[\"Messages\"];"
         "if(!p||!p.exists()){$.exit(1);}"
         "var w=p.windows();if(!w||w.length===0){$.exit(1);}"
         "var win=w[0];var t=win.tables();"
-        "if(t&&t.length>0){var rows=t[t.length-1].rows();"
-        "if(rows&&rows.length>0){var r=rows[rows.length-1];"
-        "if(r.actions&&r.actions[\"AXShowMenu\"]){r.actions[\"AXShowMenu\"].perform();}"
-        "delay(0.3);}}"
+        "if(!t||t.length===0){$.exit(1);}"
+        "var rows=t[t.length-1].rows();"
+        "if(!rows||rows.length===0){$.exit(1);}"
+        "var r=rows[rows.length-1];"
+        "if(contentPrefix&&contentPrefix.length>0){"
+        "for(var i=rows.length-1;i>=0;i--){"
+        "var row=rows[i];var val=\"\";"
+        "try{if(row.attributes&&row.attributes.AXValue!==undefined){val=String(row.attributes."
+        "AXValue);}}catch(e){}"
+        "try{if(!val&&row.cells&&row.cells.length>0){var "
+        "c0=row.cells[0];if(c0.attributes&&c0.attributes.AXValue!==undefined){val=String(c0."
+        "attributes.AXValue);}}}catch(e){}"
+        "if(val&&val.indexOf(contentPrefix)!==-1){r=row;break;}"
+        "}}"
+        "if(r.actions&&r.actions.AXShowMenu){r.actions.AXShowMenu.perform();}"
+        "delay(0.5);"
+        "var ctxMenus=r.menus?r.menus():[];"
+        "if(ctxMenus&&ctxMenus.length>0){"
+        "var items=ctxMenus[0].menuItems?ctxMenus[0].menuItems():[];"
+        "for(var ii=0;ii<items.length;ii++){"
+        "var it=items[ii];var title=(it.title?it.title():\"\")+\"\";"
+        "if(title.indexOf(\"Tapback\")!==-1){it.click();delay(0.3);"
+        "var sub=it.menus?it.menus():[];"
+        "if(sub&&sub.length>0){var subItems=sub[0].menuItems?sub[0].menuItems():[];"
+        "for(var si=0;si<subItems.length;si++){var "
+        "st=(subItems[si].title?subItems[si].title():\"\")+\"\";"
+        "if(st===tapbackAx){subItems[si].click();break;}}"
+        "}break;}"
+        "}}"
+        "}"
         "$.exit(0);"
         "}catch(e){$.exit(1);}";
 
-    size_t script_cap = 256 + strlen(tgt_esc);
+    size_t script_cap = 1024 + content_esc_len + strlen(tapback_esc);
     char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
     if (!script) {
-        c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
+        c->alloc->free(c->alloc->ctx, tapback_esc, tapback_esc_cap);
+        c->alloc->free(c->alloc->ctx, content_esc, esc_cap);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    int n = snprintf(script, script_cap, script_tpl, tapback, tgt_esc);
-    c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
+    int n = snprintf(script, script_cap, script_tpl, content_esc, tapback_esc);
+    c->alloc->free(c->alloc->ctx, tapback_esc, tapback_esc_cap);
+    c->alloc->free(c->alloc->ctx, content_esc, esc_cap);
     if (n < 0 || (size_t)n >= script_cap) {
         c->alloc->free(c->alloc->ctx, script, script_cap);
         return HU_ERR_INTERNAL;
