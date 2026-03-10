@@ -43,10 +43,10 @@ Build and test:
 
 ```bash
 mkdir build && cd build
-cmake .. -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SKILLS=ON  # configure
+cmake .. -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SKILLS=ON  # configure
 cmake --build . -j$(nproc)              # dev build
 ./human_tests                        # run all tests
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON  # release build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON  # release build
 ```
 
 ## 2) Deep Architecture Observations (Why This Protocol Exists)
@@ -59,7 +59,7 @@ These codebase realities should drive every design decision:
    - Most features should be added via vtable implementation + factory registration, not cross-cutting rewrites.
 
 2. **Binary size and memory are hard product constraints**
-   - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
+   - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
    - Current release binary: ~1679 KB (all features with LTO).
 
@@ -255,7 +255,7 @@ cd build && cmake --build . -j$(nproc) && ./human_tests  # all tests must pass, 
 For release changes:
 
 ```bash
-cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build . -j$(nproc)  # must compile clean
+cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON && cmake --build . -j$(nproc)  # must compile clean
 ```
 
 Additional expectations by change type:

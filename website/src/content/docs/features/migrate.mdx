@@ -21,7 +21,7 @@ Human is a drop-in replacement for [OpenClaw](https://github.com/openclaw/opencl
 ```bash
 git clone https://github.com/sethdford/human.git
 cd human && mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .
 sudo cp human /usr/local/bin/
 ```
@@ -127,4 +127,4 @@ Migration: N from sqlite, M from markdown, K imported
 
 ### SQLite requirement
 
-When SQLite is disabled (`SC_ENABLE_SQLITE` off), only Markdown ↔ Markdown migrations are supported.
+When SQLite is disabled (`HU_ENABLE_SQLITE` off), only Markdown ↔ Markdown migrations are supported.

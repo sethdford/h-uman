@@ -22,13 +22,13 @@ The vector stack consists of:
 | Voyage         | varies     | Voyage AI API                           |
 | Gemini         | varies     | Google Gemini embedding API             |
 
-The default local embedder (`sc_embedder_local_create`) produces 384-dimensional vectors. No API key is required.
+The default local embedder (`hu_embedder_local_create`) produces 384-dimensional vectors. No API key is required.
 
 ## Vector stores
 
 | Store     | Description                                                |
 | --------- | ---------------------------------------------------------- |
-| In-memory | `sc_vector_store_mem_create` — ephemeral, process lifetime |
+| In-memory | `hu_vector_store_mem_create` — ephemeral, process lifetime |
 | (Future)  | Persistent backends (SQLite, LanceDB, etc.) as configured  |
 
 ## Memory engines with vector support

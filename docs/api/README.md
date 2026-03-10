@@ -27,7 +27,7 @@ human is a C11 autonomous AI assistant runtime with a vtable-driven architecture
 ```bash
 # Build
 mkdir build && cd build
-cmake .. -DSC_ENABLE_ALL_CHANNELS=ON
+cmake .. -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build . -j$(nproc)
 ```
 

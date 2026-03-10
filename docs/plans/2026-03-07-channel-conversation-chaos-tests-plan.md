@@ -548,7 +548,7 @@ endif()
 Key: `HU_IS_TEST=1` is defined so mock inject APIs are compiled in.
 
 **Step 1:** Add the CMake target.
-**Step 2:** Build: `cmake -B build -DSC_ENABLE_CHANNEL_TESTS=ON -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON && cmake --build build`
+**Step 2:** Build: `cmake -B build -DHU_ENABLE_CHANNEL_TESTS=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON && cmake --build build`
 **Step 3:** Verify `human_channel_tests --help` works.
 **Step 4:** Commit.
 
@@ -559,8 +559,8 @@ Key: `HU_IS_TEST=1` is defined so mock inject APIs are compiled in.
 **Step 1:** Build everything:
 
 ```bash
-cmake -B build -DSC_ENABLE_CHANNEL_TESTS=ON -DSC_ENABLE_SYNTHETIC=ON \
-      -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON
+cmake -B build -DHU_ENABLE_CHANNEL_TESTS=ON -DHU_ENABLE_SYNTHETIC=ON \
+      -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON
 cmake --build build -j$(sysctl -n hw.ncpu)
 ```
 

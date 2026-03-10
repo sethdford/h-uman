@@ -3,7 +3,7 @@ title: Hardware Peripherals
 description: Arduino, STM32, Raspberry Pi peripheral support.
 ---
 
-Human can interact with hardware boards through the `sc_peripheral_t` vtable. Peripherals expose read, write, and flash operations.
+Human can interact with hardware boards through the `hu_peripheral_t` vtable. Peripherals expose read, write, and flash operations.
 
 ## Peripheral vtable interface
 
@@ -70,4 +70,4 @@ Build: Peripherals are included when the main binary is built; no separate flag 
 
 ## Non-Linux platforms
 
-On macOS/Windows, peripheral support may return `SC_ERR_NOT_SUPPORTED` for serial or probe-rs–based backends. Use explicit error handling rather than silent no-ops.
+On macOS/Windows, peripheral support may return `HU_ERR_NOT_SUPPORTED` for serial or probe-rs–based backends. Use explicit error handling rather than silent no-ops.

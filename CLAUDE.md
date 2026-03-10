@@ -9,14 +9,14 @@ Read `AGENTS.md` for the full engineering protocol. This file is the quick refer
 
 ```bash
 # Dev build (ASan enabled, all channels)
-cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON -DSC_ENABLE_SKILLS=ON
+cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON
 cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
 # Run tests (3795+ tests, must be 0 failures, 0 ASan errors)
 ./build/human_tests
 
 # Release build
-cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build build-release -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 ```
 

@@ -2,7 +2,7 @@
 description: C backend engineering standards for all source and headers
 globs:
   - "src/**/*.c"
-  - "include/seaclaw/**/*.h"
+  - "include/human/**/*.h"
 ---
 
 # C Backend Standards
@@ -16,16 +16,16 @@ All extension points use `void *ctx` + function pointer vtables. Callers OWN the
 ## Naming
 
 - Functions/variables/fields: `snake_case`
-- Types: `sc_<name>_t` (e.g., `sc_provider_t`)
-- Constants/macros: `SC_SCREAMING_SNAKE`
-- Public functions: `sc_<module>_<action>`
+- Types: `hu_<name>_t` (e.g., `hu_provider_t`)
+- Constants/macros: `HU_SCREAMING_SNAKE`
+- Public functions: `hu_<module>_<action>`
 - Factory keys: stable, lowercase (e.g., `"openai"`, `"telegram"`)
 
 ## Memory
 
 - Free every allocation. ASan catches leaks.
 - Use `SQLITE_STATIC` (null), never `SQLITE_TRANSIENT`.
-- Use `SC_IS_TEST` guards for side effects (network, spawning, hardware I/O).
+- Use `HU_IS_TEST` guards for side effects (network, spawning, hardware I/O).
 
 ## Adding Implementations
 
@@ -38,5 +38,5 @@ All extension points use `void *ctx` + function pointer vtables. Callers OWN the
 ## Validation
 
 ```bash
-cd build && cmake --build . -j$(nproc) && ./seaclaw_tests
+cd build && cmake --build . -j$(nproc) && ./human_tests
 ```

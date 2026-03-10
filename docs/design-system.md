@@ -174,8 +174,8 @@ Four spring presets for different contexts:
 
 ### Swift (iOS)
 
-- Use `SCTokens` for colors, spacing, radius
-- Spring: `SCTokens.springMicro`, `springStandard`, `springExpressive`, `springDramatic`
+- Use `HUTokens` for colors, spacing, radius
+- Spring: `HUTokens.springMicro`, `springStandard`, `springExpressive`, `springDramatic`
 - Font: `Font.custom("Avenir-Book", size:)` etc.
 
 ### Kotlin (Android)

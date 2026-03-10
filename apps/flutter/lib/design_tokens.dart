@@ -1,7 +1,7 @@
 // Auto-generated from design-tokens/ — do not edit manually
 import 'package:flutter/material.dart';
 
-abstract final class SCTokens {
+abstract final class HUTokens {
   static const avatar_font_size = 11;
   static const avatar_font_weight = 500;
   static const avatar_size_lg = 48;

@@ -217,7 +217,7 @@ function generateDart(tokens: TokenMap): string {
     "// Auto-generated from design-tokens/ — do not edit manually",
     "import 'package:flutter/material.dart';",
     "",
-    "abstract final class SCTokens {",
+    "abstract final class HUTokens {",
   ];
 
   for (const [key, val] of Object.entries(tokens).sort()) {
@@ -977,7 +977,7 @@ function generateSwift(tokens: TokenMap): string {
     "// Auto-generated from design-tokens/ — do not edit manually",
     "import SwiftUI",
     "",
-    "public enum SCTokens {",
+    "public enum HUTokens {",
   ];
 
   // Dark colors (exclude shadows - they're CSS values, not colors)
@@ -1294,7 +1294,7 @@ function generateKotlin(tokens: TokenMap): string {
     "import androidx.compose.ui.unit.dp",
     "import androidx.compose.ui.unit.sp",
     "",
-    "object SCTokens {",
+    "object HUTokens {",
   ];
 
   // Dark

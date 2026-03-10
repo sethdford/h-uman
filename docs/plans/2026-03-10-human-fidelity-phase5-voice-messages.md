@@ -201,8 +201,8 @@ end tell
 
 **Tests:**
 
-- Build with `-DSC_ENABLE_CARTESIA=OFF` → no cartesia.c
-- Build with `-DSC_ENABLE_CARTESIA=ON -DSC_ENABLE_CURL=ON` → cartesia.c compiled
+- Build with `-DHU_ENABLE_CARTESIA=OFF` → no cartesia.c
+- Build with `-DHU_ENABLE_CARTESIA=ON -DHU_ENABLE_CURL=ON` → cartesia.c compiled
 
 **Validation:**
 
@@ -675,7 +675,7 @@ Recommended sequence:
 
 | Check          | Command / Action                                                                                                           |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Build          | `cmake -B build -DSC_ENABLE_CARTESIA=ON -DSC_ENABLE_CURL=ON -DSC_ENABLE_ALL_CHANNELS=ON && cmake --build build -j$(nproc)` |
+| Build          | `cmake -B build -DHU_ENABLE_CARTESIA=ON -DHU_ENABLE_CURL=ON -DHU_ENABLE_ALL_CHANNELS=ON && cmake --build build -j$(nproc)` |
 | Tests          | `./build/human_tests` — 0 failures, 0 ASan errors                                                                        |
 | Voice TTS      | Manual: synthesize "Hello" → MP3 bytes                                                                                     |
 | Audio pipeline | Manual: MP3 → CAF → send via iMessage                                                                                      |

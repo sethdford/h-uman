@@ -6,12 +6,12 @@ globs:
   - "apps/**"
 ---
 
-# SeaClaw Design System — Agent Rules
+# Human Design System — Agent Rules
 
 ## Typography
 
 - **Canonical typeface**: Avenir (all platforms).
-- Web (dashboard + website): use `var(--sc-font)` or `var(--sc-font-mono)`. Never set `font-family` directly.
+- Web (dashboard + website): use `var(--hu-font)` or `var(--hu-font-mono)`. Never set `font-family` directly.
 - Apple native (iOS/macOS): use `Font.custom("Avenir-Book", size:)`, `Font.custom("Avenir-Medium", size:)`, `Font.custom("Avenir-Heavy", size:)`, `Font.custom("Avenir-Black", size:)`.
 - Android: use `AvenirFontFamily` from `Theme.kt`. Never reference system fonts directly.
 - **Never** import Google Fonts or any external font CDN.
@@ -30,30 +30,30 @@ globs:
 ## Design Tokens
 
 - **Centralized design strategy**: `docs/design-strategy.md` is the design constitution. Read it first.
-- All values must reference `--sc-*` CSS custom properties from `design-tokens/`.
-- **Never** use raw hex color values in CSS — use `var(--sc-accent)`, `var(--sc-text)`, etc.
-- **Never** use raw pixel values for spacing — use `var(--sc-space-sm)`, `var(--sc-space-md)`, etc.
-- **Never** use raw pixel values for border-radius — use `var(--sc-radius)`, `var(--sc-radius-lg)`, etc.
-- Shadow values must use `var(--sc-shadow-sm)`, `var(--sc-shadow-md)`, `var(--sc-shadow-lg)`.
-- Token namespace: `--sc-` prefix for all custom properties.
+- All values must reference `--hu-*` CSS custom properties from `design-tokens/`.
+- **Never** use raw hex color values in CSS — use `var(--hu-accent)`, `var(--hu-text)`, etc.
+- **Never** use raw pixel values for spacing — use `var(--hu-space-sm)`, `var(--hu-space-md)`, etc.
+- **Never** use raw pixel values for border-radius — use `var(--hu-radius)`, `var(--hu-radius-lg)`, etc.
+- Shadow values must use `var(--hu-shadow-sm)`, `var(--hu-shadow-md)`, `var(--hu-shadow-lg)`.
+- Token namespace: `--hu-` prefix for all custom properties.
 - **Lint enforcement**: Run `ui/scripts/lint-raw-values.sh` to check for drift. Wired into `npm run check`.
 
 ## Surfaces (M3 Tonal)
 
-- **Tonal surfaces** use `--sc-surface-container`, `--sc-surface-container-high`, `--sc-surface-container-highest` for branded card/panel backgrounds
-- Use tonal surfaces instead of `--sc-bg-surface` when the surface should carry brand identity
-- Use `--sc-surface-dim` for recessed wells, `--sc-surface-bright` for hero/featured areas
-- Plain `--sc-bg-surface` / `--sc-bg-elevated` remain available for neutral (non-tinted) surfaces
-- **State layers** are primary-tinted: `--sc-hover-overlay`, `--sc-pressed-overlay`, `--sc-focus-overlay`, `--sc-dragged-overlay` all use fidelity green
-- `--sc-disabled-overlay` remains neutral (no brand color on disabled states)
+- **Tonal surfaces** use `--hu-surface-container`, `--hu-surface-container-high`, `--hu-surface-container-highest` for branded card/panel backgrounds
+- Use tonal surfaces instead of `--hu-bg-surface` when the surface should carry brand identity
+- Use `--hu-surface-dim` for recessed wells, `--hu-surface-bright` for hero/featured areas
+- Plain `--hu-bg-surface` / `--hu-bg-elevated` remain available for neutral (non-tinted) surfaces
+- **State layers** are primary-tinted: `--hu-hover-overlay`, `--hu-pressed-overlay`, `--hu-focus-overlay`, `--hu-dragged-overlay` all use fidelity green
+- `--hu-disabled-overlay` remains neutral (no brand color on disabled states)
 
 ## Glass
 
-- Three tiers: `.sc-glass-subtle` (nav/chrome), `.sc-glass-standard` (cards/panels), `.sc-glass-prominent` (modals/sheets)
-- Interactive glass: add `.sc-glass-interactive` for hover glow + press scale
-- Tinted glass: add `.sc-glass-tinted` for accent-colored tint
-- Enter/exit: use `.sc-glass-enter` / `.sc-glass-exit` for choreographed blur reveal
-- Material densities: `--sc-glass-material-{ultra-thin,thin,regular,thick}-*` tokens (Apple visionOS-style)
+- Three tiers: `.hu-glass-subtle` (nav/chrome), `.hu-glass-standard` (cards/panels), `.hu-glass-prominent` (modals/sheets)
+- Interactive glass: add `.hu-glass-interactive` for hover glow + press scale
+- Tinted glass: add `.hu-glass-tinted` for accent-colored tint
+- Enter/exit: use `.hu-glass-enter` / `.hu-glass-exit` for choreographed blur reveal
+- Material densities: `--hu-glass-material-{ultra-thin,thin,regular,thick}-*` tokens (Apple visionOS-style)
 - **Never** stack glass on glass without testing legibility
 - All glass respects `prefers-reduced-transparency: reduce` fallback in `theme.css`
 - Token source: `design-tokens/glass.tokens.json`
@@ -61,7 +61,7 @@ globs:
 ## Dynamic Color
 
 - OKLCH palette auto-generated from brand hex `#7AB648` via `design-tokens/dynamic-color-lib.ts`
-- Tokens: `--sc-dynamic-{primary,secondary,tertiary,neutral,error}-{50..950}`
+- Tokens: `--hu-dynamic-{primary,secondary,tertiary,neutral,error}-{50..950}`
 - P3 wide-gamut overrides included automatically
 - Generated CSS: `ui/src/styles/_dynamic-color.css` (imported by `theme.css`)
 - To regenerate: `cd design-tokens && npm run build`
@@ -69,25 +69,25 @@ globs:
 
 ## Data Visualization
 
-- Multi-series charts use `--sc-chart-categorical-{1..8}` in order. Never ad-hoc colors.
-- Ordered data uses `--sc-chart-sequential-{100..800}` (Fidelity green ramp).
-- Positive/negative indicators use `--sc-chart-diverging-{positive,neutral,negative}`.
-- Single-metric charts use `--sc-chart-brand`.
+- Multi-series charts use `--hu-chart-categorical-{1..8}` in order. Never ad-hoc colors.
+- Ordered data uses `--hu-chart-sequential-{100..800}` (Fidelity green ramp).
+- Positive/negative indicators use `--hu-chart-diverging-{positive,neutral,negative}`.
+- Single-metric charts use `--hu-chart-brand`.
 - Token source: `design-tokens/data-viz.tokens.json`.
 
 ## Motion & Animation
 
-- Always use `var(--sc-duration-fast)`, `var(--sc-duration-normal)`, `var(--sc-duration-slow)` for timing.
-- Always use `var(--sc-ease-out)`, `var(--sc-ease-in-out)` for easing.
-- Use `var(--sc-ease-spring)` / `var(--sc-ease-spring-gentle)` for interactive elements (buttons, toggles, cards).
-- Use `var(--sc-spring-out)` / `var(--sc-spring-bounce)` for CSS `linear()` spring approximations.
-- Spring physics params (`--sc-spring-micro`, `--sc-spring-standard`, `--sc-spring-expressive`, `--sc-spring-dramatic`) for JS animation libs.
+- Always use `var(--hu-duration-fast)`, `var(--hu-duration-normal)`, `var(--hu-duration-slow)` for timing.
+- Always use `var(--hu-ease-out)`, `var(--hu-ease-in-out)` for easing.
+- Use `var(--hu-ease-spring)` / `var(--hu-ease-spring-gentle)` for interactive elements (buttons, toggles, cards).
+- Use `var(--hu-spring-out)` / `var(--hu-spring-bounce)` for CSS `linear()` spring approximations.
+- Spring physics params (`--hu-spring-micro`, `--hu-spring-standard`, `--hu-spring-expressive`, `--hu-spring-dramatic`) for JS animation libs.
 - **Every animation must respect `prefers-reduced-motion`**. Use the global media query in `theme.css` or add component-level `@media (prefers-reduced-motion: reduce)` overrides.
-- Keyframe names use `sc-` prefix (e.g. `sc-fade-in`, `sc-slide-up`).
+- Keyframe names use `hu-` prefix (e.g. `hu-fade-in`, `hu-slide-up`).
 
 ## Accessibility
 
-- All interactive elements must have visible focus rings using `--sc-accent`.
+- All interactive elements must have visible focus rings using `--hu-accent`.
 - Modals must trap focus and support Escape to close.
 - Tooltips must be keyboard-accessible (show on focus, not just hover).
 - Use semantic HTML and ARIA attributes: `role`, `aria-label`, `aria-labelledby`, `aria-modal`.
@@ -97,23 +97,23 @@ globs:
 ## Component Patterns
 
 - Web components use LitElement with `@customElement` decorator.
-- Component names: `sc-<name>` prefix (e.g. `sc-button`, `sc-card`, `sc-modal`).
-- Styles: `static styles = css\`...\`` using `--sc-*` tokens exclusively.
+- Component names: `hu-<name>` prefix (e.g. `hu-button`, `hu-card`, `hu-modal`).
+- Styles: `static styles = css\`...\`` using `--hu-*` tokens exclusively.
 - Slots for composition; properties for data; events for communication upward.
 - New components must have corresponding test files in `ui/src/` or `ui/tests/`.
 
 ## Responsive Breakpoints
 
 - Standard breakpoint values: 480px (sm), 640px (md), 768px (lg), 1024px (xl) — matches `breakpoints.tokens.json`
-- Every `@media (max-width: Xpx)` MUST include an annotation comment: `@media (max-width: 480px) /* --sc-breakpoint-sm */ {`
+- Every `@media (max-width: Xpx)` MUST include an annotation comment: `@media (max-width: 480px) /* --hu-breakpoint-sm */ {`
 - Never add new magic-number breakpoints — use only the 4 standard values above
-- Breakpoint tokens: `--sc-breakpoint-sm` (480px), `--sc-breakpoint-md` (640px), `--sc-breakpoint-lg` (768px), `--sc-breakpoint-xl` (1024px)
+- Breakpoint tokens: `--hu-breakpoint-sm` (480px), `--hu-breakpoint-md` (640px), `--hu-breakpoint-lg` (768px), `--hu-breakpoint-xl` (1024px)
 
 ## Alpha Transparency (color-mix)
 
-- **Never** use `rgba()` for transparency — use `color-mix(in srgb, var(--sc-token) XX%, transparent)`
-- Fallback pattern: `var(--sc-shadow-sm, 0 2px 8px color-mix(in srgb, var(--sc-shadow-color) 10%, transparent))`
-- Exception: print stylesheets may use raw values with web-specific tokens (e.g., `var(--sc-web-surface, #fff)`)
+- **Never** use `rgba()` for transparency — use `color-mix(in srgb, var(--hu-token) XX%, transparent)`
+- Fallback pattern: `var(--hu-shadow-sm, 0 2px 8px color-mix(in srgb, var(--hu-shadow-color) 10%, transparent))`
+- Exception: print stylesheets may use raw values with web-specific tokens (e.g., `var(--hu-web-surface, #fff)`)
 
 ## Token Lint Enforcement
 

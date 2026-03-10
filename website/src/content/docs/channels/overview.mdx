@@ -3,7 +3,7 @@ title: Channel Overview
 description: Messaging channel architecture in Human.
 ---
 
-Channels are how Human receives and sends messages. Each channel implements the `sc_channel_t` vtable.
+Channels are how Human receives and sends messages. Each channel implements the `hu_channel_t` vtable.
 
 ## Channel vtable interface
 
@@ -21,28 +21,28 @@ Channels are how Human receives and sends messages. Each channel implements the 
 
 | Channel    | Build flag                   | Description                     |
 | ---------- | ---------------------------- | ------------------------------- |
-| CLI        | `SC_ENABLE_CLI` (default ON) | Terminal chat, always available |
-| Telegram   | `SC_ENABLE_TELEGRAM`         | Telegram Bot API                |
-| Discord    | `SC_ENABLE_DISCORD`          | Discord bot                     |
-| Slack      | `SC_ENABLE_SLACK`            | Slack app (Socket mode, events) |
-| Signal     | `SC_ENABLE_SIGNAL`           | Signal via signal-cli           |
-| Nostr      | `SC_ENABLE_NOSTR`            | Nostr DMs (nak)                 |
-| WhatsApp   | `SC_ENABLE_WHATSAPP`         | WhatsApp Business API           |
-| Matrix     | `SC_ENABLE_MATRIX`           | Matrix.org                      |
-| IRC        | `SC_ENABLE_IRC`              | IRC                             |
-| Line       | `SC_ENABLE_LINE`             | LINE                            |
-| Lark       | `SC_ENABLE_LARK`             | Lark/Feishu                     |
-| OneBot     | `SC_ENABLE_ONEBOT`           | OneBot protocol                 |
-| DingTalk   | `SC_ENABLE_DINGTALK`         | DingTalk                        |
-| Email      | `SC_ENABLE_EMAIL`            | Email                           |
-| Web        | `SC_ENABLE_WEB`              | WebSocket web UI                |
-| iMessage   | `SC_ENABLE_IMESSAGE`         | Apple iMessage                  |
-| Mattermost | `SC_ENABLE_MATTERMOST`       | Mattermost                      |
-| QQ         | `SC_ENABLE_QQ`               | QQ                              |
-| MaixCam    | `SC_ENABLE_MAIXCAM`          | MaixCam board                   |
-| Dispatch   | `SC_ENABLE_DISPATCH`         | Dispatch/router                 |
+| CLI        | `HU_ENABLE_CLI` (default ON) | Terminal chat, always available |
+| Telegram   | `HU_ENABLE_TELEGRAM`         | Telegram Bot API                |
+| Discord    | `HU_ENABLE_DISCORD`          | Discord bot                     |
+| Slack      | `HU_ENABLE_SLACK`            | Slack app (Socket mode, events) |
+| Signal     | `HU_ENABLE_SIGNAL`           | Signal via signal-cli           |
+| Nostr      | `HU_ENABLE_NOSTR`            | Nostr DMs (nak)                 |
+| WhatsApp   | `HU_ENABLE_WHATSAPP`         | WhatsApp Business API           |
+| Matrix     | `HU_ENABLE_MATRIX`           | Matrix.org                      |
+| IRC        | `HU_ENABLE_IRC`              | IRC                             |
+| Line       | `HU_ENABLE_LINE`             | LINE                            |
+| Lark       | `HU_ENABLE_LARK`             | Lark/Feishu                     |
+| OneBot     | `HU_ENABLE_ONEBOT`           | OneBot protocol                 |
+| DingTalk   | `HU_ENABLE_DINGTALK`         | DingTalk                        |
+| Email      | `HU_ENABLE_EMAIL`            | Email                           |
+| Web        | `HU_ENABLE_WEB`              | WebSocket web UI                |
+| iMessage   | `HU_ENABLE_IMESSAGE`         | Apple iMessage                  |
+| Mattermost | `HU_ENABLE_MATTERMOST`       | Mattermost                      |
+| QQ         | `HU_ENABLE_QQ`               | QQ                              |
+| MaixCam    | `HU_ENABLE_MAIXCAM`          | MaixCam board                   |
+| Dispatch   | `HU_ENABLE_DISPATCH`         | Dispatch/router                 |
 
-Enable all at once: `-DSC_ENABLE_ALL_CHANNELS=ON`
+Enable all at once: `-DHU_ENABLE_ALL_CHANNELS=ON`
 
 ## Allowlist model
 

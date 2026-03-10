@@ -60,7 +60,7 @@ Use `hu_platform_get_temp_dir()` for portable temp paths.
 ### macOS / Linux (POSIX)
 
 ```bash
-cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON
+cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -81,7 +81,7 @@ cmake --build build --config Release
 ### WASM/WASI
 
 ```bash
-cmake -B build-wasm -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON
+cmake -B build-wasm -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DHU_BUILD_WASM=ON
 ```
 
 ## Guard Pattern

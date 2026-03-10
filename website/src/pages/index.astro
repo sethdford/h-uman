@@ -124,7 +124,7 @@ const tools = [
     />
     <meta
       property="og:description"
-      content="~528 KB binary. 50+ AI providers. 33 channels. 66+ tools. Zero dependencies. Pure C."
+      content="~528 KB binary. 50+ AI providers. 34 channels. 67+ tools. Zero dependencies. Pure C."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://h-uman.ai/" />
@@ -144,7 +144,7 @@ const tools = [
     />
     <meta
       name="twitter:description"
-      content="~528 KB binary. 50+ AI providers. 33 channels. 66+ tools. Zero dependencies. Pure C."
+      content="~528 KB binary. 50+ AI providers. 34 channels. 67+ tools. Zero dependencies. Pure C."
     />
     <meta name="twitter:image" content="https://h-uman.ai/og-image.png" />
 
@@ -273,10 +273,10 @@ const tools = [
               [
                 { count: 528, suffix: " KB", label: "Binary" },
                 { count: 2, prefix: "<", suffix: " ms", label: "Startup" },
-                { count: 3185, label: "Tests" },
+                { count: 3795, label: "Tests" },
                 { count: 50, suffix: "+", label: "Providers" },
-                { count: 33, label: "Channels" },
-                { count: 65, suffix: "+", label: "Tools" },
+                { count: 34, label: "Channels" },
+                { count: 67, suffix: "+", label: "Tools" },
               ].map((stat, i, arr) => (
                 <div
                   class={`number-item text-center py-6 md:py-0 ${i < arr.length - 1 ? "md:border-r" : ""}`}
@@ -539,7 +539,7 @@ const tools = [
                   cx: 441,
                   cy: 441,
                   label: "Tools",
-                  tip: "65+ tools: shell, files, git, browser, web search, hardware",
+                  tip: "67+ tools: shell, files, git, browser, web search, hardware",
                 },
                 {
                   cx: 300,
@@ -602,7 +602,7 @@ const tools = [
             class="providers-title hu-scroll-reveal font-sans font-extrabold text-[clamp(2rem,5vw,3.5rem)] mb-4" data-reveal
             style="color: var(--color-text); letter-spacing: -0.03em;"
           >
-            50+ providers. 33 channels. 65+ tools.
+            50+ providers. 34 channels. 67+ tools.
           </h2>
           <p
             class="providers-sub text-lg mb-16" data-reveal
@@ -790,7 +790,7 @@ const tools = [
                     class="text-2xl font-bold mb-1"
                     style="color: var(--hu-web-text);"
                   >
-                    <span class="dash-count" data-target="20">0</span>
+                    <span class="dash-count" data-target="34">0</span>
                   </div>
                   <div
                     class="flex items-center gap-1 text-[11px]"
@@ -822,7 +822,7 @@ const tools = [
                     class="text-2xl font-bold mb-1"
                     style="color: var(--hu-web-text);"
                   >
-                    <span class="dash-count" data-target="53">0</span>
+                    <span class="dash-count" data-target="67">0</span>
                   </div>
                   <div
                     class="flex items-center gap-1 text-[11px]"
@@ -999,7 +999,7 @@ const tools = [
                 <tr
                   ><td class="p-3">Channels</td><td
                     class="p-3 text-center font-medium"
-                    style="color: var(--color-accent);">20</td
+                    style="color: var(--color-accent);">34</td
                   ><td class="p-3 text-center opacity-60">1</td><td
                     class="p-3 text-center opacity-60">1</td
                   ></tr
@@ -1076,7 +1076,7 @@ const tools = [
           outputEl.innerHTML = [
             '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">git clone https://github.com/sethdford/human.git</span></div>',
             '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">cd human && mkdir -p build && cd build</span></div>',
-            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON && cmake --build .</span></div>',
+            '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON && cmake --build .</span></div>',
             '<div><span style="color:var(--hu-web-text-tertiary)">[100%] Built target human</span></div>',
             '<div><span style="color:var(--color-accent)">$ </span><span style="color:var(--hu-web-text)">ls -lh human</span></div>',
             '<div><span style="color:var(--hu-web-text-tertiary)">-rwxr-xr-x  1 user  staff  </span><span style="color:var(--color-accent)">528K</span><span style="color:var(--hu-web-text-tertiary)">  human</span></div>',
@@ -1258,7 +1258,7 @@ const tools = [
               },
               {
                 prompt: true,
-                text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON",
+                text: "cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON",
               },
               { prompt: true, text: "cmake --build ." },
               { prompt: false, text: "[100%] Built target human" },

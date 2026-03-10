@@ -6,18 +6,18 @@ globs:
   - "website/src/**"
 ---
 
-- Use `var(--sc-duration-fast)`, `var(--sc-duration-normal)`, `var(--sc-duration-slow)` — never hardcode `100ms`, `200ms`, `0.2s`, etc.
-- Use `var(--sc-ease-out)`, `var(--sc-ease-in-out)` — never hardcode `cubic-bezier(...)` or `ease`
-- Use spring tokens: `--sc-spring-micro` for button/toggle, `--sc-spring-standard` for panels, `--sc-spring-expressive` for page transitions, `--sc-spring-dramatic` for hero reveals
-- Native iOS: use `SCTokens.springMicro`, `SCTokens.springStandard`, `SCTokens.springExpressive`, `SCTokens.springDramatic`
+- Use `var(--hu-duration-fast)`, `var(--hu-duration-normal)`, `var(--hu-duration-slow)` — never hardcode `100ms`, `200ms`, `0.2s`, etc.
+- Use `var(--hu-ease-out)`, `var(--hu-ease-in-out)` — never hardcode `cubic-bezier(...)` or `ease`
+- Use spring tokens: `--hu-spring-micro` for button/toggle, `--hu-spring-standard` for panels, `--hu-spring-expressive` for page transitions, `--hu-spring-dramatic` for hero reveals
+- Native iOS: use `HUTokens.springMicro`, `HUTokens.springStandard`, `HUTokens.springExpressive`, `HUTokens.springDramatic`
 - Every animation/transition must work with `prefers-reduced-motion: reduce`
-- Keyframe names: `sc-` prefix (e.g. `sc-fade-in`, `sc-slide-up`)
+- Keyframe names: `hu-` prefix (e.g. `hu-fade-in`, `hu-slide-up`)
 - Never use `setTimeout` for animation timing — use CSS transitions or `requestAnimationFrame`
 - Animate only compositor properties: `transform`, `opacity`, `filter` — never animate `width`, `height`, `top`, `left`, `margin`, `padding` (causes layout thrashing)
 - For layout changes, use `transform: translateX/Y/scale()` instead of position/size properties
-- Glass choreography: use `.sc-glass-enter` / `.sc-glass-exit` classes for blur/saturation reveal animations
+- Glass choreography: use `.hu-glass-enter` / `.hu-glass-exit` classes for blur/saturation reveal animations
 - Glass state transitions: all glass classes have `backdrop-filter` in their CSS transition property — blur/saturation animate between states
-- Glass choreography tokens: `--sc-glass-choreography-enter-duration` (350ms), `--sc-glass-choreography-exit-duration` (200ms), `--sc-glass-choreography-state-duration` (200ms)
-- Glass choreography easing: `--sc-glass-choreography-enter-easing` (M3 emphasize), `--sc-glass-choreography-state-easing` (M3 emphasize)
+- Glass choreography tokens: `--hu-glass-choreography-enter-duration` (350ms), `--hu-glass-choreography-exit-duration` (200ms), `--hu-glass-choreography-state-duration` (200ms)
+- Glass choreography easing: `--hu-glass-choreography-enter-easing` (M3 emphasize), `--hu-glass-choreography-state-easing` (M3 emphasize)
 - `prefers-reduced-motion: reduce` disables all glass choreography animations
-- `prefers-reduced-transparency: reduce` replaces glass with solid `--sc-bg-surface` backgrounds
+- `prefers-reduced-transparency: reduce` replaces glass with solid `--hu-bg-surface` backgrounds

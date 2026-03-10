@@ -51,10 +51,10 @@ Usage:
 
 ## Swift (iOS/macOS)
 
-Tokens are emitted as static properties on `SCTokens`:
+Tokens are emitted as static properties on `HUTokens`:
 
 ```swift
-struct SCTokens {
+struct HUTokens {
     static let accent = Color(hex: 0x7AB648)
     static let bgSurface = Color(hex: 0x0F2236)
     static let spaceMd: CGFloat = 16
@@ -70,19 +70,19 @@ Usage:
 struct MyView: View {
     var body: some View {
         Text("Hello")
-            .foregroundColor(SCTokens.accent)
-            .padding(SCTokens.spaceLg)
-            .cornerRadius(SCTokens.radiusMd)
+            .foregroundColor(HUTokens.accent)
+            .padding(HUTokens.spaceLg)
+            .cornerRadius(HUTokens.radiusMd)
     }
 }
 ```
 
 ## Kotlin (Android)
 
-Tokens are emitted as properties on the `SCTokens` object:
+Tokens are emitted as properties on the `HUTokens` object:
 
 ```kotlin
-object SCTokens {
+object HUTokens {
     val accent = Color(0xFF7AB648.toInt())
     val bgSurface = Color(0xFF0F2236.toInt())
     val spaceMd = 16.dp
@@ -98,11 +98,11 @@ Usage:
 fun MyComponent() {
     Text(
         text = "Hello",
-        color = SCTokens.accent,
-        fontSize = SCTokens.textBase,
+        color = HUTokens.accent,
+        fontSize = HUTokens.textBase,
         modifier = Modifier
-            .background(SCTokens.bgSurface, RoundedCornerShape(SCTokens.radiusMd))
-            .padding(SCTokens.spaceLg)
+            .background(HUTokens.bgSurface, RoundedCornerShape(HUTokens.radiusMd))
+            .padding(HUTokens.spaceLg)
     )
 }
 ```
@@ -113,16 +113,16 @@ Tokens are emitted as preprocessor macros with four variants per color:
 
 ```c
 /* 256-color foreground (widest compat) */
-#define SC_COLOR_ACCENT       "\033[38;5;43m"
+#define HU_COLOR_ACCENT       "\033[38;5;43m"
 
 /* Truecolor foreground (24-bit, best quality) */
-#define SC_COLOR_ACCENT_TC    "\033[38;2;20;184;166m"
+#define HU_COLOR_ACCENT_TC    "\033[38;2;20;184;166m"
 
 /* 256-color background */
-#define SC_COLOR_BG_ACCENT    "\033[48;5;43m"
+#define HU_COLOR_BG_ACCENT    "\033[48;5;43m"
 
 /* Truecolor background */
-#define SC_COLOR_BG_ACCENT_TC "\033[48;2;20;184;166m"
+#define HU_COLOR_BG_ACCENT_TC "\033[48;2;20;184;166m"
 ```
 
 Runtime capability detection chooses the right variant:
@@ -131,11 +131,11 @@ Runtime capability detection chooses the right variant:
 #include <human/terminal.h>
 
 void print_status(const char *msg) {
-    sc_color_level_t level = sc_terminal_color_level();
-    if (level >= SC_COLOR_LEVEL_TRUECOLOR) {
-        printf(SC_COLOR_SUCCESS_TC "%s" SC_COLOR_RESET "\n", msg);
+    hu_color_level_t level = hu_terminal_color_level();
+    if (level >= HU_COLOR_LEVEL_TRUECOLOR) {
+        printf(HU_COLOR_SUCCESS_TC "%s" HU_COLOR_RESET "\n", msg);
     } else {
-        printf(SC_COLOR_SUCCESS "%s" SC_COLOR_RESET "\n", msg);
+        printf(HU_COLOR_SUCCESS "%s" HU_COLOR_RESET "\n", msg);
     }
 }
 ```
@@ -143,11 +143,11 @@ void print_status(const char *msg) {
 ### Terminal Theme Detection
 
 ```c
-sc_theme_t theme = sc_terminal_theme();
-if (theme == SC_THEME_LIGHT) {
-    printf(SC_COLOR_LIGHT_ACCENT "light mode" SC_COLOR_RESET);
+hu_theme_t theme = hu_terminal_theme();
+if (theme == HU_THEME_LIGHT) {
+    printf(HU_COLOR_LIGHT_ACCENT "light mode" HU_COLOR_RESET);
 } else {
-    printf(SC_COLOR_ACCENT "dark mode" SC_COLOR_RESET);
+    printf(HU_COLOR_ACCENT "dark mode" HU_COLOR_RESET);
 }
 ```
 
@@ -155,10 +155,10 @@ if (theme == SC_THEME_LIGHT) {
 
 | JSON Source           | CSS                        | Swift                        | Kotlin                       | C                 |
 | --------------------- | -------------------------- | ---------------------------- | ---------------------------- | ----------------- |
-| `dark.accent`         | `--hu-accent`              | `SCTokens.accent`            | `SCTokens.accent`            | `SC_COLOR_ACCENT` |
-| `space.lg`            | `--hu-space-lg`            | `SCTokens.spaceLg`           | `SCTokens.spaceLg`           | N/A               |
-| `text.xl`             | `--hu-text-xl`             | `SCTokens.textXl`            | `SCTokens.textXl`            | N/A               |
-| `glass.standard.blur` | `--hu-glass-standard-blur` | `SCTokens.glassStandardBlur` | `SCTokens.glassStandardBlur` | N/A               |
+| `dark.accent`         | `--hu-accent`              | `HUTokens.accent`            | `HUTokens.accent`            | `HU_COLOR_ACCENT` |
+| `space.lg`            | `--hu-space-lg`            | `HUTokens.spaceLg`           | `HUTokens.spaceLg`           | N/A               |
+| `text.xl`             | `--hu-text-xl`             | `HUTokens.textXl`            | `HUTokens.textXl`            | N/A               |
+| `glass.standard.blur` | `--hu-glass-standard-blur` | `HUTokens.glassStandardBlur` | `HUTokens.glassStandardBlur` | N/A               |
 
 ## Adding New Tokens
 

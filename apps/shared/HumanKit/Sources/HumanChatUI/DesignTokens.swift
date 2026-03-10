@@ -1,7 +1,7 @@
 // Auto-generated from design-tokens/ — do not edit manually
 import SwiftUI
 
-public enum SCTokens {
+public enum HUTokens {
     // MARK: - Colors (Dark)
     public enum Dark {
         public static let accent = Color(hex: 0x7AB648)

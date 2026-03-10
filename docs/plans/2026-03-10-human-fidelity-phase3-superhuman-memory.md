@@ -246,7 +246,7 @@ hu_error_t hu_superhuman_inside_joke_reference(void *sqlite_ctx, int64_t id);
 void hu_superhuman_inside_joke_free(hu_allocator_t *alloc, hu_inside_joke_t *arr, size_t count);
 
 hu_error_t hu_superhuman_commitment_store(void *sqlite_ctx, hu_allocator_t *alloc,
-    const char *contact_id, size_t contact_id_len, const char *description, size_t desc_len,
+    const char *contact_id, size_t contact_id_len, const char *description, size_t dehu_len,
     const char *who, size_t who_len, int64_t deadline);
 hu_error_t hu_superhuman_commitment_list_due(void *sqlite_ctx, hu_allocator_t *alloc,
     int64_t now_ts, size_t limit, hu_superhuman_commitment_t **out, size_t *out_count);
@@ -389,7 +389,7 @@ Returns `self->db` when mem is sqlite-backed, else NULL.
 
 1. **Extraction:** `hu_commitment_detect` returns commitments. Extend or add `hu_commitment_parse_deadline(const char *statement, size_t len, int64_t *out_ts)` — heuristics for "tomorrow", "next week", "March 15", "in 2 days". Return 0 if no deadline.
 
-2. **Storage:** When saving commitment, if deadline parsed: `hu_superhuman_commitment_store(ctx, alloc, contact_id, len, description, desc_len, "contact", 7, deadline)`. Also keep existing `hu_commitment_store_save` for backward compat (memory-backed).
+2. **Storage:** When saving commitment, if deadline parsed: `hu_superhuman_commitment_store(ctx, alloc, contact_id, len, description, dehu_len, "contact", 7, deadline)`. Also keep existing `hu_commitment_store_save` for backward compat (memory-backed).
 
 3. **List due:** `hu_superhuman_commitment_list_due(ctx, alloc, time(NULL), 5, &out, &count)` — `WHERE contact_id=? AND status='pending' AND deadline IS NOT NULL AND deadline <= ?`.
 
@@ -966,7 +966,7 @@ Before considering Phase 3 complete:
 
 | Check       | Command / Action                                                                                     |
 | ----------- | ---------------------------------------------------------------------------------------------------- |
-| Build       | `cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON && cmake --build build -j$(nproc)` |
+| Build       | `cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON && cmake --build build -j$(nproc)` |
 | Tests       | `./build/human_tests` — 0 failures, 0 ASan errors                                                  |
 | Inside joke | Store → list → proactive action                                                                      |
 | Commitment  | Store with deadline → list_due → follow-up → mark_sent                                               |

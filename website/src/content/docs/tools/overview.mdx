@@ -3,13 +3,13 @@ title: Tools Overview
 description: Tool execution surface and available tools in Human.
 ---
 
-Tools give the AI agent the ability to act: run commands, read/write files, search the web, manage memory, and interact with hardware. Each tool implements the `sc_tool_t` vtable.
+Tools give the AI agent the ability to act: run commands, read/write files, search the web, manage memory, and interact with hardware. Each tool implements the `hu_tool_t` vtable.
 
 ## Tool vtable interface
 
 | Method            | Description                                            |
 | ----------------- | ------------------------------------------------------ |
-| `execute`         | Run the tool with JSON args, return `sc_tool_result_t` |
+| `execute`         | Run the tool with JSON args, return `hu_tool_result_t` |
 | `name`            | Tool identifier (e.g. `shell`, `file_read`)            |
 | `description`     | Human-readable description for the LLM                 |
 | `parameters_json` | JSON Schema for the tool's parameters                  |

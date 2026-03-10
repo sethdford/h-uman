@@ -82,7 +82,7 @@ void hu_tools_destroy_default(hu_allocator_t *alloc, hu_tool_t *tools, size_t co
 ## HU_TOOL_IMPL Macro
 
 ```c
-#define HU_TOOL_IMPL(Prefix, execute_fn, name_fn, desc_fn, params_fn, deinit_fn)
+#define HU_TOOL_IMPL(Prefix, execute_fn, name_fn, dehu_fn, params_fn, deinit_fn)
 ```
 
 ## Usage Example

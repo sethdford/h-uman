@@ -49,7 +49,7 @@ RUN apk add --no-cache build-base cmake sqlite-dev curl-dev
 WORKDIR /app
 COPY CMakeLists.txt src/ include/ asm/ vendor/ cmake/ ./
 RUN mkdir build && cd build && \
-    cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_CURL=ON && \
+    cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_CURL=ON && \
     make -j$(nproc)
 
 # Stage 2: Runtime

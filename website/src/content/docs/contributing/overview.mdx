@@ -17,8 +17,8 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 ## Adding a provider
 
 1. Create `src/providers/<name>.c`
-2. Implement `sc_provider_t` vtable: `chat`, `supports_native_tools`, `get_name`, `deinit`
-3. Add `sc_<name>_create` factory function
+2. Implement `hu_provider_t` vtable: `chat`, `supports_native_tools`, `get_name`, `deinit`
+3. Add `hu_<name>_create` factory function
 4. Register in `src/providers/factory.c` (name check + create call)
 5. Add tests for vtable wiring and error paths
 6. Document in `providers/` docs
@@ -26,9 +26,9 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 ## Adding a channel
 
 1. Create `src/channels/<name>.c`
-2. Implement `sc_channel_t` vtable: `start`, `stop`, `send`, `name`, `health_check`
+2. Implement `hu_channel_t` vtable: `start`, `stop`, `send`, `name`, `health_check`
 3. Add create function with config (token, allowlist, etc.)
-4. Add CMake option `SC_ENABLE_<CHANNEL>`
+4. Add CMake option `HU_ENABLE_<CHANNEL>`
 5. Wire in channel manager / daemon
 6. Add webhook path in gateway if needed
 7. Document in `channels/` docs
@@ -36,23 +36,23 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 ## Adding a tool
 
 1. Create `src/tools/<name>.c`
-2. Implement `sc_tool_t` vtable: `execute`, `name`, `description`, `parameters_json`, `deinit`
-3. Validate and sanitize all inputs; return `sc_tool_result_t`
-4. Add `SC_IS_TEST` guard if the tool spawns processes or opens URLs
+2. Implement `hu_tool_t` vtable: `execute`, `name`, `description`, `parameters_json`, `deinit`
+3. Validate and sanitize all inputs; return `hu_tool_result_t`
+4. Add `HU_IS_TEST` guard if the tool spawns processes or opens URLs
 5. Register in `src/tools/factory.c`
 6. Document in `tools/overview.mdx`
 
 ## Adding a memory backend
 
 1. Create `src/memory/<name>.c`
-2. Implement `sc_memory_t` vtable
+2. Implement `hu_memory_t` vtable
 3. Add CMake option and factory registration
 4. Document in `memory/overview.mdx`
 
 ## Adding a peripheral
 
 1. Create `src/peripherals/<name>.c`
-2. Implement `sc_peripheral_t` vtable: `name`, `board_type`, `health_check`, `read`, `write`, `flash`, `capabilities`, `destroy`
+2. Implement `hu_peripheral_t` vtable: `name`, `board_type`, `health_check`, `read`, `write`, `flash`, `capabilities`, `destroy`
 3. Register in peripheral factory
 4. Document in `peripherals/overview.mdx`
 
@@ -60,16 +60,16 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 
 - **3,185+ tests** must pass
 - **Zero ASan errors** — AddressSanitizer enabled in dev builds
-- Use `SC_IS_TEST` to skip side effects (network, spawning, real hardware)
+- Use `HU_IS_TEST` to skip side effects (network, spawning, real hardware)
 - Tests must be deterministic; no flaky behavior
 - Run: `cmake --build build && ./build/human_tests`
 
 ## Code style
 
 - **Identifiers**: `snake_case` (functions, variables, fields)
-- **Types**: `sc_<name>_t` (e.g. `sc_provider_t`, `sc_channel_t`)
-- **Constants/macros**: `SC_SCREAMING_SNAKE_CASE`
-- **Public functions**: `sc_<module>_<action>`
+- **Types**: `hu_<name>_t` (e.g. `hu_provider_t`, `hu_channel_t`)
+- **Constants/macros**: `HU_SCREAMING_SNAKE_CASE`
+- **Public functions**: `hu_<module>_<action>`
 - **Factory keys**: lowercase, stable (e.g. `"openai"`, `"telegram"`)
 
 ## Validation before commit
@@ -83,7 +83,7 @@ cmake --build . -j$(nproc)
 For release builds:
 
 ```bash
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build .
 ```
 

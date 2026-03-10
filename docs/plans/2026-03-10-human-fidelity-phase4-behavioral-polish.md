@@ -885,9 +885,9 @@ Recommended sequence (dependencies first):
 
 | Check             | Command / Action                                                                                                                                |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Build             | `cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON -DSC_ENABLE_CURL=ON && cmake --build build -j$(nproc)` |
+| Build             | `cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_CURL=ON && cmake --build build -j$(nproc)` |
 | Tests             | `./build/human_tests` — 0 failures, 0 ASan errors                                                                                             |
-| Release           | `cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON && cmake --build build-release`            |
+| Release           | `cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON && cmake --build build-release`            |
 | F48 Investigation | `docs/investigations/meme-image-sharing-feasibility.md` exists                                                                                  |
 
 ---

@@ -225,7 +225,7 @@ Phase 1 of the Human Fidelity project. Fixes broken plumbing, wires message_id f
 
    ```c
    hu_reaction_type_t hu_conversation_classify_photo_reaction(
-       const char *vision_description, size_t desc_len,
+       const char *vision_description, size_t dehu_len,
        const hu_contact_profile_t *contact, uint32_t seed);
    ```
 
@@ -606,7 +606,7 @@ Before considering Phase 1 complete:
 
 | Check          | Command / Action                                                                                     |
 | -------------- | ---------------------------------------------------------------------------------------------------- |
-| Build          | `cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON && cmake --build build -j$(nproc)` |
+| Build          | `cmake -B build -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON && cmake --build build -j$(nproc)` |
 | Tests          | `./build/human_tests` — 0 failures, 0 ASan errors                                                  |
 | Tapback        | Manual: send "lol", verify tapback on correct message                                                |
 | Vision         | Manual: send photo, verify description in response                                                   |

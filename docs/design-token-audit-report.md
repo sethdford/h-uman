@@ -30,7 +30,7 @@ These tokens are **not referenced** in ui/src, website/src, docs, or design-toke
 ### 3. Platform-Specific Consumers
 
 - **C** (`include/human/design_tokens.h`): Uses `HU_COLOR_*` macros — hand-maintained, not generated from CSS var names.
-- **Apps** (Flutter, iOS, Android): Use generated `SCTokens` / `DesignTokens` — same source JSON, different output format. Removing a token from source would affect all platforms.
+- **Apps** (Flutter, iOS, Android): Use generated `HUTokens` / `DesignTokens` — same source JSON, different output format. Removing a token from source would affect all platforms.
 
 ## Full List of Truly Unused Tokens
 
@@ -194,7 +194,7 @@ These tokens are **not referenced** in ui/src, website/src, docs, or design-toke
 
 **Before removing any token from the source JSON files:**
 
-1. **Apps dependency:** Flutter, iOS, and Android consume the same `design-tokens/*.json` source. Removing a token will affect generated `SCTokens` / `DesignTokens` in those platforms. Verify app usage first (e.g. `SCTokens.avatarSizeLg` in Swift, `SCTokens.avatar_size_lg` in Dart).
+1. **Apps dependency:** Flutter, iOS, and Android consume the same `design-tokens/*.json` source. Removing a token will affect generated `HUTokens` / `DesignTokens` in those platforms. Verify app usage first (e.g. `HUTokens.avatarSizeLg` in Swift, `HUTokens.avatar_size_lg` in Dart).
 
 2. **Reserved for future use:** Tokens like `--hu-z-modal`, `--hu-z-toast`, `--hu-z-tooltip` may be intended for components not yet built. Check roadmap/design docs.
 

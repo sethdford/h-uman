@@ -1045,8 +1045,8 @@ Phase 6 of the Human Fidelity project. The deep intelligence features that make 
 
 **Tests:**
 
-- Build with `-DSC_ENABLE_PERSONA=ON -DSC_ENABLE_SQLITE=ON` → all compile.
-- Build with `-DSC_ENABLE_PERSONA=OFF` → Phase 6 modules excluded or stubbed.
+- Build with `-DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SQLITE=ON` → all compile.
+- Build with `-DHU_ENABLE_PERSONA=OFF` → Phase 6 modules excluded or stubbed.
 
 **Validation:**
 
@@ -1147,9 +1147,9 @@ Recommended sequence (dependencies first):
 
 | Check   | Command / Action                                                                                                            |
 | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Build   | `cmake -B build -DSC_ENABLE_PERSONA=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_ALL_CHANNELS=ON && cmake --build build -j$(nproc)` |
+| Build   | `cmake -B build -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON && cmake --build build -j$(nproc)` |
 | Tests   | `./build/human_tests` — 0 failures, 0 ASan errors                                                                           |
-| Release | `cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON ... && cmake --build build-release`                |
+| Release | `cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON ... && cmake --build build-release`                |
 | Privacy | Task 18 audit complete; no cross-contact leakage                                                                            |
 
 ---

@@ -11,7 +11,7 @@ Human includes a full-screen terminal user interface (TUI) for interactive agent
 human agent --tui
 ```
 
-TUI mode requires the build flag `SC_ENABLE_TUI`. If TUI support is not compiled in, the command reports that TUI is unavailable.
+TUI mode requires the build flag `HU_ENABLE_TUI`. If TUI support is not compiled in, the command reports that TUI is unavailable.
 
 ## Features
 
@@ -27,7 +27,7 @@ TUI mode requires the build flag `SC_ENABLE_TUI`. If TUI support is not compiled
 
 ## Build requirement
 
-The TUI is implemented with termbox2 and is guarded by `SC_ENABLE_TUI`. It also requires `SC_GATEWAY_POSIX` (POSIX platform). On Windows or when the flag is off, `--tui` falls back to an error message.
+The TUI is implemented with termbox2 and is guarded by `HU_ENABLE_TUI`. It also requires `HU_GATEWAY_POSIX` (POSIX platform). On Windows or when the flag is off, `--tui` falls back to an error message.
 
 ## Layout
 

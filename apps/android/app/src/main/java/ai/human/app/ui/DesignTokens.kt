@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-object SCTokens {
+object HUTokens {
     // Colors (Dark)
     object Dark {
         val accent = Color(0xFF7AB648)

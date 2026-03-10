@@ -5,9 +5,9 @@ globs:
   - "src/agent/tui.c"
 ---
 
-- Include `seaclaw/design_tokens.h` for all display constants
-- Colors: `SC_COLOR_ACCENT`, `SC_COLOR_SUCCESS`, `SC_COLOR_ERROR`, `SC_COLOR_WARNING`, `SC_COLOR_INFO`, `SC_COLOR_MUTED` — never hardcode `\033[...m` ANSI sequences
-- Box drawing: `SC_BOX_VERT`, `SC_BOX_HORIZ`, `SC_BOX_TL`, `SC_BOX_TR`, `SC_BOX_BL`, `SC_BOX_BR` — never hardcode UTF-8 byte sequences
-- Symbols: `SC_CHEVRON` for prompt, `SC_CHECK` for success, `SC_CROSS` for failure
-- Reset: always use `SC_COLOR_RESET` after colored output
-- Bold/dim: `SC_COLOR_BOLD`, `SC_COLOR_DIM`
+- Include `human/design_tokens.h` for all display constants
+- Colors: `HU_COLOR_ACCENT`, `HU_COLOR_SUCCESS`, `HU_COLOR_ERROR`, `HU_COLOR_WARNING`, `HU_COLOR_INFO`, `HU_COLOR_MUTED` — never hardcode `\033[...m` ANSI sequences
+- Box drawing: `HU_BOX_VERT`, `HU_BOX_HORIZ`, `HU_BOX_TL`, `HU_BOX_TR`, `HU_BOX_BL`, `HU_BOX_BR` — never hardcode UTF-8 byte sequences
+- Symbols: `HU_CHEVRON` for prompt, `HU_CHECK` for success, `HU_CROSS` for failure
+- Reset: always use `HU_COLOR_RESET` after colored output
+- Bold/dim: `HU_COLOR_BOLD`, `HU_COLOR_DIM`

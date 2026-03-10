@@ -113,8 +113,8 @@ All semantic color pairings are validated:
 
 ```swift
 Text("Hello")
-  .foregroundColor(SCTokens.accent)
-  .background(SCTokens.bgSurface)
+  .foregroundColor(HUTokens.accent)
+  .background(HUTokens.bgSurface)
 ```
 
 ### Kotlin
@@ -122,14 +122,14 @@ Text("Hello")
 ```kotlin
 Text(
   text = "Hello",
-  color = SCTokens.accent,
-  modifier = Modifier.background(SCTokens.bgSurface)
+  color = HUTokens.accent,
+  modifier = Modifier.background(HUTokens.bgSurface)
 )
 ```
 
 ### C (Terminal)
 
 ```c
-printf(SC_COLOR_ACCENT "Connected" SC_COLOR_RESET "\n");
-printf(SC_COLOR_ERROR_TC "Error: %s" SC_COLOR_RESET "\n", msg);
+printf(HU_COLOR_ACCENT "Connected" HU_COLOR_RESET "\n");
+printf(HU_COLOR_ERROR_TC "Error: %s" HU_COLOR_RESET "\n", msg);
 ```

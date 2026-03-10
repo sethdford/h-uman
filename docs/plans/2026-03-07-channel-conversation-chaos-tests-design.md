@@ -174,8 +174,8 @@ option(HU_ENABLE_CHANNEL_TESTS "Build channel conversation+chaos test harness" O
 ```
 
 ```bash
-cmake -B build -DSC_ENABLE_CHANNEL_TESTS=ON -DSC_ENABLE_SYNTHETIC=ON \
-      -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON
+cmake -B build -DHU_ENABLE_CHANNEL_TESTS=ON -DHU_ENABLE_SYNTHETIC=ON \
+      -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON
 cmake --build build -j$(nproc)
 ```
 

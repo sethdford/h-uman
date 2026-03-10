@@ -78,7 +78,7 @@ Replay with `--replay DIR` to view previously captured failures.
 ## Build
 
 ```bash
-cmake -B build -DSC_ENABLE_SYNTHETIC=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake -B build -DHU_ENABLE_SYNTHETIC=ON -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build build -j$(nproc)
 ```
 

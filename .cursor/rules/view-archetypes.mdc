@@ -36,7 +36,7 @@ Every view must handle all three states — never show a blank screen:
 
 1. **Loading**: skeleton placeholders matching final layout shape
 2. **Populated**: full content with realistic data
-3. **Error**: inline error banner with retry action + `<sc-toast>` for transient errors
+3. **Error**: inline error banner with retry action + `<hu-toast>` for transient errors
 
 ## Rules
 

@@ -6,10 +6,10 @@ globs:
   - "apps/shared/**"
 ---
 
-- Import and use `SCTokens` from `DesignTokens.swift` for all colors, spacing, radius, fonts, springs
-- Colors: `SCTokens.Dark.*` or `SCTokens.Light.*` — never hardcode `Color(red:green:blue:)` or `Color(hex:)`
-- Spacing: `SCTokens.spaceXs` through `SCTokens.space2xl` — never hardcode `CGFloat` spacing values
-- Radius: `SCTokens.radiusSm` through `SCTokens.radiusXl` — never hardcode `.cornerRadius(12)`
-- Font: `Font.custom(SCTokens.fontSans + "-Book", size:)` — never use `.font(.system(...))`
-- Animation: `SCTokens.springMicro`, `SCTokens.springStandard`, `SCTokens.springExpressive`, `SCTokens.springDramatic`
+- Import and use `HUTokens` from `DesignTokens.swift` for all colors, spacing, radius, fonts, springs
+- Colors: `HUTokens.Dark.*` or `HUTokens.Light.*` — never hardcode `Color(red:green:blue:)` or `Color(hex:)`
+- Spacing: `HUTokens.spaceXs` through `HUTokens.space2xl` — never hardcode `CGFloat` spacing values
+- Radius: `HUTokens.radiusSm` through `HUTokens.radiusXl` — never hardcode `.cornerRadius(12)`
+- Font: `Font.custom(HUTokens.fontSans + "-Book", size:)` — never use `.font(.system(...))`
+- Animation: `HUTokens.springMicro`, `HUTokens.springStandard`, `HUTokens.springExpressive`, `HUTokens.springDramatic`
 - Accessibility: support Dynamic Type, VoiceOver, reduce motion

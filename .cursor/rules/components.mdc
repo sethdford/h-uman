@@ -4,11 +4,11 @@ globs:
   - "ui/src/components/**"
 ---
 
-- Component tag: `sc-<name>` prefix, registered with `@customElement("sc-<name>")`
+- Component tag: `hu-<name>` prefix, registered with `@customElement("hu-<name>")`
 - Base class: LitElement with `static styles = css\`...\``
-- All styles must use `--sc-*` tokens — no raw hex, px spacing, or font-family
+- All styles must use `--hu-*` tokens — no raw hex, px spacing, or font-family
 - ARIA: every interactive component needs `role`, `aria-label` or `aria-labelledby`
-- Focus: visible focus ring using `outline: 2px solid var(--sc-accent)` on `:focus-visible`
+- Focus: visible focus ring using `outline: 2px solid var(--hu-accent)` on `:focus-visible`
 - Keyboard: support Tab, Escape (for overlays), Enter/Space (for buttons), Arrow keys (for lists/tabs)
 - Every new component MUST have: (1) test in `components.test.ts`, (2) entry in `catalog.html`, (3) TypeScript types in `HTMLElementTagNameMap`
 - Events fire upward via `CustomEvent`; data flows down via `@property`
@@ -17,7 +17,7 @@ globs:
 ## Error & State Handling
 
 - Every view/component that fetches data must handle 3 states: **loading** (skeleton), **populated**, **error**
-- Use `<sc-toast>` for transient notifications (success, info); inline error banners for persistent failures
+- Use `<hu-toast>` for transient notifications (success, info); inline error banners for persistent failures
 - Gateway errors: catch in the controller, surface to the view via a reactive `@state()` property
 - Never show raw error messages to users — map to human-friendly text
 - Never render a blank screen — always show at least a skeleton or error state

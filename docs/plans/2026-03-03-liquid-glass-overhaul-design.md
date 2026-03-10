@@ -206,13 +206,13 @@ Backdrop brightness: `backdrop-filter` includes `brightness(var(--hu-vibrancy-ba
 
 - `SCGlassModifier` using `.glassEffect()` with `.regular`/`.clear` variants
 - Token-mapped blur/saturate values
-- Spring animations from `SCTokens.springStandard`
+- Spring animations from `HUTokens.springStandard`
 
 ### Android (Material 3)
 
 - `SCGlassEffect` composable using `RenderEffect.createBlurEffect()`
 - Token-mapped elevation shadows
-- Spring animations from `SCTokens.springStandard*`
+- Spring animations from `HUTokens.springStandard*`
 
 ## Implementation Order
 

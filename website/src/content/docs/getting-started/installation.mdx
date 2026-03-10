@@ -15,8 +15,8 @@ Before building, ensure you have:
 
 - **C compiler** — GCC or Clang (C11)
 - **CMake** 3.16 or later
-- **SQLite3** — for the SQLite memory backend; omit to use markdown-only (`-DSC_ENABLE_SQLITE=OFF`)
-- **libcurl** — for HTTP/HTTPS and cloud providers; omit for minimal builds (`-DSC_ENABLE_CURL=OFF`)
+- **SQLite3** — for the SQLite memory backend; omit to use markdown-only (`-DHU_ENABLE_SQLITE=OFF`)
+- **libcurl** — for HTTP/HTTPS and cloud providers; omit for minimal builds (`-DHU_ENABLE_CURL=OFF`)
 
 ## macOS
 
@@ -46,7 +46,7 @@ Clone the repository, then build:
 git clone https://github.com/sethdford/human.git
 cd human
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_CURL=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_CURL=ON
 cmake --build . -j$(nproc)
 ```
 
@@ -59,7 +59,7 @@ The binaries are produced in `build/`:
 
 ```bash
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .
 ```
 
@@ -69,7 +69,7 @@ This produces a small binary (~528 KB with LTO) and enables all messaging channe
 
 ```bash
 mkdir -p build && cd build
-cmake .. -DSC_ENABLE_ALL_CHANNELS=ON
+cmake .. -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .
 ```
 
@@ -78,7 +78,7 @@ cmake --build .
 For detecting memory errors during development:
 
 ```bash
-cmake -B build -DSC_ENABLE_ASAN=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake -B build -DHU_ENABLE_ASAN=ON -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build build
 ./build/human_tests
 ```
@@ -87,13 +87,13 @@ cmake --build build
 
 | Option                   | Default | Description                                          |
 | ------------------------ | ------- | ---------------------------------------------------- |
-| `SC_ENABLE_ALL_CHANNELS` | OFF     | Build all 33 channels (CLI, Telegram, Discord, etc.) |
-| `SC_ENABLE_LTO`          | OFF     | Link-time optimization for smaller binaries          |
-| `SC_ENABLE_ASAN`         | OFF     | AddressSanitizer for memory debugging                |
-| `SC_ENABLE_SQLITE`       | ON      | SQLite memory backend                                |
-| `SC_ENABLE_CURL`         | ON      | libcurl for HTTP clients                             |
+| `HU_ENABLE_ALL_CHANNELS` | OFF     | Build all 33 channels (CLI, Telegram, Discord, etc.) |
+| `HU_ENABLE_LTO`          | OFF     | Link-time optimization for smaller binaries          |
+| `HU_ENABLE_ASAN`         | OFF     | AddressSanitizer for memory debugging                |
+| `HU_ENABLE_SQLITE`       | ON      | SQLite memory backend                                |
+| `HU_ENABLE_CURL`         | ON      | libcurl for HTTP clients                             |
 
-Per-channel options (`SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, etc.) are available if you want a minimal build with only specific channels.
+Per-channel options (`HU_ENABLE_TELEGRAM`, `HU_ENABLE_DISCORD`, etc.) are available if you want a minimal build with only specific channels.
 
 ## Verify installation
 

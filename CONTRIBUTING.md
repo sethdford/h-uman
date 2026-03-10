@@ -19,7 +19,7 @@ Human is an autonomous AI assistant runtime written in C11. MIT License.
 
 ```bash
 mkdir -p build && cd build
-cmake .. -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_ASAN=ON -DCMAKE_BUILD_TYPE=Debug
+cmake .. -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_ASAN=ON -DCMAKE_BUILD_TYPE=Debug
 cmake --build . -j$(nproc)
 ./human_tests
 ```
@@ -29,7 +29,7 @@ All 3795+ tests must pass. AddressSanitizer must report zero errors — every al
 **Release build:**
 
 ```bash
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build . -j$(nproc)
 ```
 

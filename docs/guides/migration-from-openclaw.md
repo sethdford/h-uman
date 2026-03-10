@@ -29,7 +29,7 @@ This guide walks you through migrating from [OpenClaw](https://github.com/opencl
      git clone https://github.com/sethdford/human.git
      cd human
      mkdir -p build && cd build
-     cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+     cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON
      cmake --build .
      sudo cp human /usr/local/bin/
      ```

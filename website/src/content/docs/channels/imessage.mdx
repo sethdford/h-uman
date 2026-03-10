@@ -9,10 +9,10 @@ Human can send and receive Apple iMessage on macOS. Sends go through AppleScript
 
 ## Prerequisites
 
-- Build with `-DSC_ENABLE_IMESSAGE=ON` or `-DSC_ENABLE_ALL_CHANNELS=ON`
+- Build with `-DHU_ENABLE_IMESSAGE=ON` or `-DHU_ENABLE_ALL_CHANNELS=ON`
 - **macOS only** — not supported on Linux or Windows
 - Messages.app installed and signed in to an Apple ID
-- SQLite support enabled (`SC_ENABLE_SQLITE`)
+- SQLite support enabled (`HU_ENABLE_SQLITE`)
 - **Full Disk Access** granted to the human binary (or terminal) in System Settings → Privacy & Security
 
 ## Configuration
@@ -58,7 +58,7 @@ Add to `~/.human/config.json` under `channels.imessage`:
 
 ## Platform limitations
 
-- **macOS only**: Returns `SC_ERR_NOT_SUPPORTED` on non-Apple platforms
+- **macOS only**: Returns `HU_ERR_NOT_SUPPORTED` on non-Apple platforms
 - **Full Disk Access required**: macOS blocks read access to `~/Library/Messages/` without Full Disk Access
 - **Messages.app must be running**: AppleScript send requires Messages.app to be available
 - **Single default target**: Config provides one default; per-message targets can differ when the agent routes replies

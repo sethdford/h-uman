@@ -9,9 +9,9 @@ Human can interface with hardware peripherals via a vtable-based API. Supported 
 
 | Type    | Factory function               | Config                      |
 | ------- | ------------------------------ | --------------------------- |
-| Arduino | `sc_arduino_peripheral_create` | `serial_port`               |
-| STM32   | `sc_stm32_peripheral_create`   | `chip` (e.g. STM32F401RETx) |
-| RPi     | `sc_rpi_peripheral_create`     | (none)                      |
+| Arduino | `hu_arduino_peripheral_create` | `serial_port`               |
+| STM32   | `hu_stm32_peripheral_create`   | `chip` (e.g. STM32F401RETx) |
+| RPi     | `hu_rpi_peripheral_create`     | (none)                      |
 
 ## CLI commands
 
@@ -71,7 +71,7 @@ Hardware is configured in `~/.human/config.json`:
 
 ## Peripheral API
 
-Peripherals implement `sc_peripheral_t` with:
+Peripherals implement `hu_peripheral_t` with:
 
 - `name`, `board_type`
 - `init_peripheral`
@@ -83,14 +83,14 @@ Peripherals implement `sc_peripheral_t` with:
 Create a peripheral with:
 
 ```c
-sc_peripheral_t p;
-sc_peripheral_config_t cfg = {
+hu_peripheral_t p;
+hu_peripheral_config_t cfg = {
     .serial_port = "/dev/ttyUSB0",
     .serial_port_len = 14,
     .chip = NULL,
     .chip_len = 0
 };
-sc_peripheral_create(alloc, "arduino", 7, &cfg, &p);
+hu_peripheral_create(alloc, "arduino", 7, &cfg, &p);
 ```
 
 ## Agent integration

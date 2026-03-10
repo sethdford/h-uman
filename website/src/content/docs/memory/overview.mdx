@@ -7,7 +7,7 @@ Human maintains memory for facts, conversation context, and session continuity. 
 
 ## Memory vtable
 
-The `sc_memory_t` interface provides:
+The `hu_memory_t` interface provides:
 
 - **Store** — Save a memory entry with key, content, category
 - **Recall** — Search memories by query (keyword or semantic)
@@ -21,7 +21,7 @@ The `sc_memory_t` interface provides:
 - FTS5 full-text search
 - Vector cosine similarity for semantic recall (when embeddings available)
 - Config: `"memory": { "backend": "sqlite", "sqlite_path": "~/.human/memory.db" }`
-- Requires `SC_ENABLE_SQLITE=ON` (default)
+- Requires `HU_ENABLE_SQLITE=ON` (default)
 
 ### Markdown
 

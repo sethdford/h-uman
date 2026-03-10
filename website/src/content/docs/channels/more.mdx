@@ -7,79 +7,79 @@ Human supports additional messaging channels. Each requires its own build flag a
 
 ## IRC
 
-Build: `-DSC_ENABLE_IRC=ON`
+Build: `-DHU_ENABLE_IRC=ON`
 
 Connect to IRC servers. See [IRC](/channels/irc/) for configuration.
 
 ## Matrix
 
-Build: `-DSC_ENABLE_MATRIX=ON`
+Build: `-DHU_ENABLE_MATRIX=ON`
 
 Connect to Matrix.org or self-hosted Synapse. See [Matrix](/channels/matrix/) for configuration.
 
 ## WhatsApp
 
-Build: `-DSC_ENABLE_WHATSAPP=ON`
+Build: `-DHU_ENABLE_WHATSAPP=ON`
 
 Uses WhatsApp Business API. Webhook path: `/webhook/whatsapp` or `/whatsapp`. Requires Business API credentials and webhook verification.
 
 ## LINE
 
-Build: `-DSC_ENABLE_LINE=ON`
+Build: `-DHU_ENABLE_LINE=ON`
 
 LINE Messaging API. Webhook path: `/webhook/line` or `/line`. Requires Channel Secret and Channel Access Token.
 
 ## DingTalk
 
-Build: `-DSC_ENABLE_DINGTALK=ON`
+Build: `-DHU_ENABLE_DINGTALK=ON`
 
 DingTalk (钉钉) custom bot. Configure webhook URL and secret.
 
 ## Lark / Feishu
 
-Build: `-DSC_ENABLE_LARK=ON`
+Build: `-DHU_ENABLE_LARK=ON`
 
 Lark (Feishu 飞书) app. Webhook path: `/webhook/lark` or `/lark`. Requires App ID, App Secret, and event subscription.
 
 ## OneBot
 
-Build: `-DSC_ENABLE_ONEBOT=ON`
+Build: `-DHU_ENABLE_ONEBOT=ON`
 
 [OneBot](https://github.com/botuniverse/onebot) protocol (e.g. go-cqhttp, Lagrange). HTTP API or reverse WebSocket.
 
 ## QQ
 
-Build: `-DSC_ENABLE_QQ=ON`
+Build: `-DHU_ENABLE_QQ=ON`
 
 QQ (腾讯QQ) bot integration. Configure via official QQ bot platform.
 
 ## Email
 
-Build: `-DSC_ENABLE_EMAIL=ON`
+Build: `-DHU_ENABLE_EMAIL=ON`
 
 Bidirectional email: send via SMTP and receive via IMAP polling. See [Email](/channels/email/) for full configuration and setup.
 
 ## iMessage
 
-Build: `-DSC_ENABLE_IMESSAGE=ON`
+Build: `-DHU_ENABLE_IMESSAGE=ON`
 
 Bidirectional Apple iMessage on macOS. Sends via AppleScript, receives by polling `~/Library/Messages/chat.db` (requires Full Disk Access). See [iMessage](/channels/imessage/) for full configuration and setup.
 
 ## Mattermost
 
-Build: `-DSC_ENABLE_MATTERMOST=ON`
+Build: `-DHU_ENABLE_MATTERMOST=ON`
 
 Mattermost server integration. Similar to Slack: bot token, server URL, and channel configuration.
 
 ## MaixCam
 
-Build: `-DSC_ENABLE_MAIXCAM=ON`
+Build: `-DHU_ENABLE_MAIXCAM=ON`
 
 MaixCam board channel for embedded/hardware deployments.
 
 ## Web / WebSocket
 
-Build: `-DSC_ENABLE_WEB=ON`
+Build: `-DHU_ENABLE_WEB=ON`
 
 WebSocket-based web UI channel. Supports local and relay modes. See [Web](/channels/web/) for configuration.
 

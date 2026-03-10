@@ -11,7 +11,7 @@ Source of truth: `design-tokens/` directory. W3C Design Tokens v2025.10 format.
 ## Rules
 
 - All tokens use `$value` and `$type` (W3C format). Add `$description` for non-obvious tokens.
-- Token names map to `--sc-*` CSS custom properties after build.
+- Token names map to `--hu-*` CSS custom properties after build.
 - After editing any `.tokens.json`, run `cd design-tokens && npm run build`.
 - Generated outputs: CSS, Kotlin, Swift, C, Dart. Never hand-edit generated files.
 - Reference `docs/design-strategy.md` for design philosophy.
@@ -23,7 +23,7 @@ Source of truth: `design-tokens/` directory. W3C Design Tokens v2025.10 format.
 | `base.tokens.json` | `color.tonal.*` (M3 tonal surface primitives) |
 | `semantic.tokens.json` | `surface-container`, `surface-container-high`, `surface-container-highest`, `surface-dim`, `surface-bright`, `hover-overlay` (tinted), `pressed-overlay` (tinted), `focus-overlay`, `dragged-overlay` |
 | `glass.tokens.json` | `choreography.*` (enter/exit/state motion), `material.*` (Apple visionOS densities) |
-| `_dynamic-color.css` | Auto-generated `--sc-dynamic-*` from OKLCH pipeline |
+| `_dynamic-color.css` | Auto-generated `--hu-dynamic-*` from OKLCH pipeline |
 
 ## Build Outputs
 

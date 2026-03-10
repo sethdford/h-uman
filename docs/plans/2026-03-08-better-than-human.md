@@ -1443,8 +1443,8 @@ All tests must pass with 0 ASan errors.
 After all layers:
 
 ```bash
-cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON \
-  -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON
+cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON \
+  -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SQLITE=ON -DHU_ENABLE_PERSONA=ON
 cmake --build build-release -j$(sysctl -n hw.ncpu)
 ls -la build-release/human  # verify binary size still reasonable
 ```

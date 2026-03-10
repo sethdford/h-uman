@@ -28,7 +28,7 @@ The smallest fully autonomous AI assistant infrastructure — a static C binary 
 - **Instant Startup:** 6–27 ms on Apple Silicon, sub-50 ms on edge cores.
 - **True Portability:** Single self-contained binary across ARM, x86, and RISC-V. Drop it anywhere, it just runs.
 - **Feature-Complete:** 50+ providers, 34 channels, 67+ tools, hybrid vector+FTS5 memory, multi-layer sandbox, tunnels, hardware peripherals, MCP, subagents, streaming, voice — the full stack.
-- **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DSC_ENABLE_TUI=ON` and run with `--tui`.
+- **Interactive TUI:** Full-screen terminal UI with split panes, markdown rendering, multi-session tabs (Ctrl+T), tool approval prompts, streaming output, and input history. Build with `-DHU_ENABLE_TUI=ON` and run with `--tui`.
 - **Performance-Optimized:** Per-turn arena allocator, HTTP connection pooling, HTTP/2, system prompt caching — all benefiting from C-level control.
 
 ### Why human
@@ -71,7 +71,7 @@ Reproduce locally:
 
 ```bash
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build .
 ls -lh human
 
@@ -124,7 +124,7 @@ curl -fsSL https://raw.githubusercontent.com/sethdford/human/main/install.sh | b
 
 ```bash
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build . -j$(nproc)
 sudo cp human /usr/local/bin/
 ```
@@ -139,7 +139,7 @@ sudo cp human /usr/local/bin/
 git clone https://github.com/sethdford/human.git
 cd human
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .
 cd ..
 
@@ -201,7 +201,7 @@ Every subsystem is a **vtable interface** — swap implementations with a config
 | **AI Models**     | `Provider`       | 50+ providers (OpenRouter, Anthropic, OpenAI, Gemini, Ollama, llama.cpp, Groq, Mistral, xAI, DeepSeek, Together, Fireworks, Perplexity, Cohere, Bedrock, etc.) | `custom:https://your-api.com` — any OpenAI-compatible API |
 | **Channels**      | `Channel`        | CLI, Telegram, Signal, Discord, Slack, iMessage, Matrix, WhatsApp, Webhook, IRC, Lark/Feishu, OneBot, Line, DingTalk, Email, Nostr, QQ, MaixCam, Mattermost    | Any messaging API                                         |
 | **Memory**        | `Memory`         | SQLite with hybrid search (FTS5 + vector cosine similarity), Markdown                                                                                          | Any persistence backend                                   |
-| **Tools**         | `Tool`           | 68+ built-in: shell, file ops, git, memory, browser, screenshot, composio, http, cron, hardware, web search, delegate, and more                                | Any capability                                            |
+| **Tools**         | `Tool`           | 67+ built-in: shell, file ops, git, memory, browser, screenshot, composio, http, cron, hardware, web search, delegate, and more                                | Any capability                                            |
 | **Observability** | `Observer`       | Noop, Log, File, Multi                                                                                                                                         | Prometheus, OTel                                          |
 | **Runtime**       | `RuntimeAdapter` | Native, Docker (sandboxed), WASM (wasmtime)                                                                                                                    | Any runtime                                               |
 | **Security**      | `Sandbox`        | Landlock, Firejail, Bubblewrap, Docker, auto-detect                                                                                                            | Any sandbox backend                                       |
@@ -609,7 +609,7 @@ Build and tests require a C11 compiler and CMake 3.16+. One-time setup:
 
 ```bash
 mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug -DSC_ENABLE_ALL_CHANNELS=ON
+cmake .. -DCMAKE_BUILD_TYPE=Debug -DHU_ENABLE_ALL_CHANNELS=ON
 cmake --build .                            # Dev build
 ./human_tests                             # 3795+ tests
 cd ..
@@ -618,7 +618,7 @@ cd ..
 **ASan (AddressSanitizer)** for leak/overflow detection during development:
 
 ```bash
-cmake -B build -DSC_ENABLE_ASAN=ON
+cmake -B build -DHU_ENABLE_ASAN=ON
 cmake --build build
 ./build/human_tests
 ```
@@ -627,7 +627,7 @@ Release build (~1679 KB):
 
 ```bash
 mkdir -p build-release && cd build-release
-cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DHU_ENABLE_LTO=ON
 cmake --build .
 ```
 
