@@ -1349,6 +1349,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         &early_history_count);
                 }
 
+                /* Track if group classifier indicates brief response */
+                bool group_brief = false;
+
                 /* Group chat gating: use group classifier to decide engagement */
                 if (msgs[batch_start].is_group) {
                     const char *persona_name = NULL;
@@ -1368,6 +1371,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                         early_history_count * sizeof(hu_channel_history_entry_t));
                         continue;
                     }
+                    if (gr == HU_GROUP_BRIEF)
+                        group_brief = true;
                 }
 
                 /* Response decision using conversation-aware classifier */
@@ -1509,7 +1514,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 
                 /* For BRIEF actions, override max_response_chars to force ultra-short */
-                bool brief_mode = (action == HU_RESPONSE_BRIEF);
+                bool brief_mode = (action == HU_RESPONSE_BRIEF) || group_brief ||
+                                  msgs[batch_start].is_group; /* always brief in group chats */
 
 #ifndef HU_IS_TEST
                 if (agent && agent->bth_metrics)

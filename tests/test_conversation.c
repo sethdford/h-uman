@@ -1033,6 +1033,13 @@ static void classify_group_consecutive_2_skips_with_history(void) {
     HU_ASSERT_EQ(r, HU_GROUP_SKIP);
 }
 
+static void classify_group_medium_message_is_brief(void) {
+    /* 30-100 char message, no question, no engage word → HU_GROUP_BRIEF */
+    hu_group_response_t r = hu_conversation_classify_group(
+        "just got back from the gym, pretty tired", 40, "bot", 3, NULL, 0);
+    HU_ASSERT_EQ(r, HU_GROUP_BRIEF);
+}
+
 /* ── Thread callback tests ──────────────────────────────────────────── */
 
 static void callback_finds_dropped_topic(void) {
@@ -1648,6 +1655,7 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(group_too_many_responses_skips);
     HU_RUN_TEST(group_empty_skips);
     HU_RUN_TEST(classify_group_consecutive_2_skips_with_history);
+    HU_RUN_TEST(classify_group_medium_message_is_brief);
 
     /* Tapback-vs-text decision */
     HU_RUN_TEST(tapback_decision_lol_tapback_or_both);
