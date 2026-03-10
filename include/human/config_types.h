@@ -43,6 +43,16 @@ typedef struct hu_scheduler_config {
     uint32_t max_concurrent;
 } hu_scheduler_config_t;
 
+typedef struct hu_behavior_config {
+    uint32_t consecutive_limit;      /* max consecutive messages from self before skip (default 3) */
+    uint32_t participation_pct;      /* max % of recent messages before skip (default 40) */
+    uint32_t max_response_chars;     /* max response length (default 300) */
+    uint32_t min_response_chars;     /* min response length (default 15) */
+    uint32_t decay_days;             /* memory decay window in days (default 30) */
+    uint32_t dedup_threshold;        /* memory dedup similarity % (default 70) */
+    uint32_t missed_msg_threshold_sec; /* seconds before acknowledging missed message (default 1800) */
+} hu_behavior_config_t;
+
 typedef enum hu_dm_scope {
     DirectScopeMain,
     DirectScopePerPeer,

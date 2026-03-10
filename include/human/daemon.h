@@ -79,6 +79,9 @@ uint32_t hu_daemon_video_viewing_delay_ms(const hu_channel_loop_msg_t *msgs, siz
                                           size_t batch_end, uint32_t seed);
 #endif
 
+/* Set the missed-message acknowledgment threshold in seconds (minimum 60s). Default: 1800 (30min) */
+void hu_daemon_set_missed_msg_threshold(uint32_t secs);
+
 /* Missed-message acknowledgment (F10): returns phrase or NULL if none needed. */
 const char *hu_missed_message_acknowledgment(int64_t delay_secs, int receive_hour, int current_hour,
                                              uint32_t seed);

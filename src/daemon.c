@@ -1035,7 +1035,13 @@ uint32_t hu_daemon_video_viewing_delay_ms(const hu_channel_loop_msg_t *msgs, siz
 #endif
 
 /* ── Missed-message acknowledgment (F10) ─────────────────────────────────── */
-#define HU_MISSED_MSG_THRESHOLD_SEC (30 * 60)
+/* Configurable missed message threshold in seconds (default 30 * 60 = 1800) */
+static uint32_t g_missed_msg_threshold_sec = 30 * 60;
+
+void hu_daemon_set_missed_msg_threshold(uint32_t secs) {
+    if (secs >= 60)
+        g_missed_msg_threshold_sec = secs;
+}
 
 /* Returns acknowledgment phrase or NULL if none needed.
  * delay_secs: time between receive and send.
@@ -1043,7 +1049,7 @@ uint32_t hu_daemon_video_viewing_delay_ms(const hu_channel_loop_msg_t *msgs, siz
  * seed: for deterministic phrase selection. */
 const char *hu_missed_message_acknowledgment(int64_t delay_secs, int receive_hour, int current_hour,
                                              uint32_t seed) {
-    if (delay_secs <= HU_MISSED_MSG_THRESHOLD_SEC)
+    if (delay_secs <= (int64_t)g_missed_msg_threshold_sec)
         return NULL;
 
     /* Natural gap: received 2AM–6AM, responding 8AM+ → "just woke up" style */
@@ -1242,9 +1248,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         last_consolidation_ms = now_ms;
                     if (now_ms - last_consolidation_ms >= interval_ms) {
                         hu_consolidation_config_t cons_cfg = {
-                            .decay_days = 30,
+                            .decay_days = cfg->behavior.decay_days,
                             .decay_factor = 0.5,
-                            .dedup_threshold = 70,
+                            .dedup_threshold = cfg->behavior.dedup_threshold,
                             .max_entries = 5000,
                             .provider = &agent->provider,
                             .model = agent->model_name,

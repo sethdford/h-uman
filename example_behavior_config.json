@@ -1,0 +1,16 @@
+{
+  "default_provider": "gemini",
+  "default_model": "gemini-3.1-flash-lite-preview",
+  "memory": {
+    "backend": "markdown"
+  },
+  "behavior": {
+    "consecutive_limit": 3,
+    "participation_pct": 40,
+    "max_response_chars": 300,
+    "min_response_chars": 15,
+    "decay_days": 30,
+    "dedup_threshold": 70,
+    "missed_msg_threshold_sec": 1800
+  }
+}

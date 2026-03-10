@@ -20,4 +20,7 @@ hu_error_t parse_channels(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
 /* Agent-related parsers */
 hu_error_t parse_agent(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj);
 
+/* Behavior thresholds parser */
+hu_error_t parse_behavior(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj);
+
 #endif /* HU_CONFIG_PARSE_INTERNAL_H */

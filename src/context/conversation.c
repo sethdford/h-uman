@@ -17,6 +17,24 @@
 
 #define CTX_BUF_CAP 16384
 
+/* Behavior thresholds — updated by hu_conversation_set_thresholds */
+static uint32_t g_consecutive_limit = 3;
+static uint32_t g_participation_pct = 40;
+static uint32_t g_max_response_chars = 300;
+static uint32_t g_min_response_chars = 15;
+
+void hu_conversation_set_thresholds(uint32_t consecutive_limit, uint32_t participation_pct,
+                                    uint32_t max_response_chars, uint32_t min_response_chars) {
+    if (consecutive_limit > 0)
+        g_consecutive_limit = consecutive_limit;
+    if (participation_pct > 0)
+        g_participation_pct = participation_pct;
+    if (max_response_chars > 0)
+        g_max_response_chars = max_response_chars;
+    if (min_response_chars > 0)
+        g_min_response_chars = min_response_chars;
+}
+
 /* Safe pos advance: snprintf returns the would-be length even when truncated.
  * Clamp to remaining buffer capacity to prevent out-of-bounds writes. */
 #define POS_ADVANCE(w, pos, cap)       \
@@ -1792,13 +1810,13 @@ size_t hu_conversation_split_response(hu_allocator_t *alloc, const char *respons
 
 int hu_conversation_max_response_chars(size_t incoming_len) {
     if (incoming_len == 0)
-        return 15;
+        return (int)g_min_response_chars;
     double scaled = (double)incoming_len * 2.0;
     int result = (int)scaled;
-    if (result < 15)
-        result = 15;
-    if (result > 300)
-        result = 300;
+    if (result < (int)g_min_response_chars)
+        result = (int)g_min_response_chars;
+    if (result > (int)g_max_response_chars)
+        result = (int)g_max_response_chars;
     return result;
 }
 
@@ -3423,21 +3441,23 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
     if (msg_len <= 3)
         return HU_GROUP_SKIP;
 
-    /* Skip if we responded to the last 2 messages already (don't dominate) */
+    /* Skip if we responded to the last N messages already (don't dominate).
+     * Threshold: g_consecutive_limit (default 3) */
     if (entries && count >= 3) {
         size_t consecutive_mine = 0;
-        for (size_t i = count; i > 0 && consecutive_mine < 3; i--) {
+        for (size_t i = count; i > 0 && consecutive_mine < g_consecutive_limit; i--) {
             if (entries[i - 1].from_me)
                 consecutive_mine++;
             else
                 break;
         }
-        if (consecutive_mine >= 2)
+        if (consecutive_mine >= g_consecutive_limit - 1)
             return HU_GROUP_SKIP;
     }
 
     /* Count how much of the recent conversation we've participated in.
-     * If we've responded to >40% of the last 10 messages, dial back. */
+     * If we've responded to more than g_participation_pct% of the last 10 messages, dial back.
+     * Default threshold: 40% */
     if (entries && count >= 6) {
         size_t window = count < 10 ? count : 10;
         size_t my_msgs = 0;
@@ -3445,7 +3465,7 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
             if (entries[i].from_me)
                 my_msgs++;
         }
-        if (my_msgs * 100 / window > 40)
+        if (my_msgs * 100 / window > g_participation_pct)
             return HU_GROUP_SKIP;
     }
 

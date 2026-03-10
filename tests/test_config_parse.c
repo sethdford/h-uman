@@ -650,6 +650,74 @@ static void test_config_sandbox_save_roundtrip(void) {
     hu_arena_destroy(arena2);
 }
 
+static void test_config_parse_behavior_thresholds(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+
+    const char *json =
+        "{\"behavior\":{"
+        "\"consecutive_limit\":2,"
+        "\"participation_pct\":35,"
+        "\"max_response_chars\":250,"
+        "\"min_response_chars\":20,"
+        "\"decay_days\":14,"
+        "\"dedup_threshold\":65,"
+        "\"missed_msg_threshold_sec\":3600"
+        "}}";
+
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Verify behavior thresholds were parsed correctly */
+    HU_ASSERT_EQ(cfg_local.behavior.consecutive_limit, 2);
+    HU_ASSERT_EQ(cfg_local.behavior.participation_pct, 35);
+    HU_ASSERT_EQ(cfg_local.behavior.max_response_chars, 250);
+    HU_ASSERT_EQ(cfg_local.behavior.min_response_chars, 20);
+    HU_ASSERT_EQ(cfg_local.behavior.decay_days, 14);
+    HU_ASSERT_EQ(cfg_local.behavior.dedup_threshold, 65);
+    HU_ASSERT_EQ(cfg_local.behavior.missed_msg_threshold_sec, 3600);
+
+    hu_arena_destroy(arena);
+}
+
+static void test_config_behavior_defaults(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+
+    /* Set defaults before parsing empty JSON */
+    cfg_local.behavior.consecutive_limit = 3;
+    cfg_local.behavior.participation_pct = 40;
+    cfg_local.behavior.max_response_chars = 300;
+    cfg_local.behavior.min_response_chars = 15;
+    cfg_local.behavior.decay_days = 30;
+    cfg_local.behavior.dedup_threshold = 70;
+    cfg_local.behavior.missed_msg_threshold_sec = 1800;
+
+    hu_error_t err = hu_config_parse_json(&cfg_local, "{}", 2);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Defaults should still be in place */
+    HU_ASSERT_EQ(cfg_local.behavior.consecutive_limit, 3);
+    HU_ASSERT_EQ(cfg_local.behavior.participation_pct, 40);
+    HU_ASSERT_EQ(cfg_local.behavior.max_response_chars, 300);
+    HU_ASSERT_EQ(cfg_local.behavior.min_response_chars, 15);
+    HU_ASSERT_EQ(cfg_local.behavior.decay_days, 30);
+    HU_ASSERT_EQ(cfg_local.behavior.dedup_threshold, 70);
+    HU_ASSERT_EQ(cfg_local.behavior.missed_msg_threshold_sec, 1800);
+
+    hu_arena_destroy(arena);
+}
+
 void run_config_parse_tests(void) {
     HU_TEST_SUITE("Config parse");
     HU_RUN_TEST(test_config_parse_empty_json);
@@ -694,4 +762,8 @@ void run_config_parse_tests(void) {
 
     HU_TEST_SUITE("Config sandbox roundtrip");
     HU_RUN_TEST(test_config_sandbox_save_roundtrip);
+
+    HU_TEST_SUITE("Behavior thresholds");
+    HU_RUN_TEST(test_config_parse_behavior_thresholds);
+    HU_RUN_TEST(test_config_behavior_defaults);
 }

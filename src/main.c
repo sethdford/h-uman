@@ -20,6 +20,7 @@
 #include "human/channels/thread_binding.h"
 #include "human/cli_commands.h"
 #include "human/config.h"
+#include "human/context/conversation.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/cost.h"
@@ -696,6 +697,13 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
             gw_tid = 0;
         }
     }
+
+    /* Initialize behavior thresholds from config */
+    hu_conversation_set_thresholds(app_ctx.cfg->behavior.consecutive_limit,
+                                   app_ctx.cfg->behavior.participation_pct,
+                                   app_ctx.cfg->behavior.max_response_chars,
+                                   app_ctx.cfg->behavior.min_response_chars);
+    hu_daemon_set_missed_msg_threshold(app_ctx.cfg->behavior.missed_msg_threshold_sec);
 
     err = hu_service_run(alloc, 1000, app_ctx.channel_count > 0 ? app_ctx.channels : NULL,
                          app_ctx.channel_count, app_ctx.agent, app_ctx.cfg);

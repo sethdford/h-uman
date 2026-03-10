@@ -200,6 +200,13 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->cron.interval_minutes = 30;
     cfg->cron.max_run_history = 50;
     cfg->scheduler.max_concurrent = 4;
+    cfg->behavior.consecutive_limit = 3;
+    cfg->behavior.participation_pct = 40;
+    cfg->behavior.max_response_chars = 300;
+    cfg->behavior.min_response_chars = 15;
+    cfg->behavior.decay_days = 30;
+    cfg->behavior.dedup_threshold = 70;
+    cfg->behavior.missed_msg_threshold_sec = 1800;
     cfg->nodes_len = 1;
     cfg->nodes[0].name = hu_strdup(a, "local");
     cfg->nodes[0].status = hu_strdup(a, "online");

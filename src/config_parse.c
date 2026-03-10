@@ -822,6 +822,10 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     if (agent_obj)
         parse_agent(a, cfg, agent_obj);
 
+    hu_json_value_t *behavior_obj = hu_json_object_get(root, "behavior");
+    if (behavior_obj)
+        parse_behavior(a, cfg, behavior_obj);
+
     hu_json_value_t *heartbeat_obj = hu_json_object_get(root, "heartbeat");
     if (heartbeat_obj)
         parse_heartbeat(a, cfg, heartbeat_obj);

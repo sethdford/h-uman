@@ -909,6 +909,34 @@ static void calibrate_null_returns_zero(void) {
 
 /* ── max_response_chars ratio-based calibration ───────────────────────── */
 
+/* ── Behavior threshold configuration ───────────────────────────────── */
+
+static void set_thresholds_changes_min_response_chars(void) {
+    /* Set custom min of 10 */
+    hu_conversation_set_thresholds(3, 40, 300, 10);
+    int max = hu_conversation_max_response_chars(0);
+    HU_ASSERT_EQ(max, 10);
+    /* Reset to defaults */
+    hu_conversation_set_thresholds(3, 40, 300, 15);
+}
+
+static void set_thresholds_changes_max_response_chars(void) {
+    /* Set custom max of 400 */
+    hu_conversation_set_thresholds(3, 40, 400, 15);
+    int max = hu_conversation_max_response_chars(200);
+    HU_ASSERT_EQ(max, 400);
+    /* Reset to defaults */
+    hu_conversation_set_thresholds(3, 40, 300, 15);
+}
+
+static void set_thresholds_zero_keeps_default(void) {
+    /* Pass 0 for min_response_chars to keep default */
+    hu_conversation_set_thresholds(3, 40, 300, 0);
+    /* Default should still be 15 */
+    int max = hu_conversation_max_response_chars(0);
+    HU_ASSERT_EQ(max, 15);
+}
+
 static void max_response_chars_single_char_returns_min(void) {
     int max = hu_conversation_max_response_chars(1);
     HU_ASSERT_EQ(max, 15);
@@ -2412,6 +2440,9 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(calibrate_emoji_present_in_general);
     HU_RUN_TEST(calibrate_null_returns_zero);
     HU_RUN_TEST(calibrate_rapid_fire_momentum);
+    HU_RUN_TEST(set_thresholds_changes_min_response_chars);
+    HU_RUN_TEST(set_thresholds_changes_max_response_chars);
+    HU_RUN_TEST(set_thresholds_zero_keeps_default);
     HU_RUN_TEST(max_response_chars_single_char_returns_min);
     HU_RUN_TEST(max_response_chars_medium_message_proportional);
     HU_RUN_TEST(max_response_chars_long_paragraph_capped);

@@ -376,6 +376,14 @@ size_t hu_conversation_calibrate_relationship(const char *relationship_stage,
                                               const char *vulnerability_level, char *buf,
                                               size_t cap);
 
+/* ── Behavior configuration ──────────────────────────────────────────── */
+
+/* Set configurable behavior thresholds.
+ * Call this after loading config to apply user-defined values.
+ * Pass 0 to keep default for any threshold. */
+void hu_conversation_set_thresholds(uint32_t consecutive_limit, uint32_t participation_pct,
+                                    uint32_t max_response_chars, uint32_t min_response_chars);
+
 /* ── Group chat classifier ───────────────────────────────────────────── */
 
 typedef enum hu_group_response {
