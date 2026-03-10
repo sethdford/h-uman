@@ -1,17 +1,17 @@
-/* PostgreSQL memory backend — full interface with libpq when SC_ENABLE_POSTGRES.
- * In SC_IS_TEST: in-memory mock.
- * When SC_ENABLE_POSTGRES is not set, all operations return SC_ERR_NOT_SUPPORTED.
+/* PostgreSQL memory backend — full interface with libpq when HU_ENABLE_POSTGRES.
+ * In HU_IS_TEST: in-memory mock.
+ * When HU_ENABLE_POSTGRES is not set, all operations return HU_ERR_NOT_SUPPORTED.
  * This is intentional, documented stub behavior. */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_ENABLE_POSTGRES
+#ifdef HU_ENABLE_POSTGRES
 #include <libpq-fe.h>
 #endif
 
@@ -24,35 +24,35 @@ typedef struct mock_entry {
     char *session_id;
 } mock_entry_t;
 
-typedef struct sc_postgres_memory {
-    sc_allocator_t *alloc;
-#ifdef SC_ENABLE_POSTGRES
+typedef struct hu_postgres_memory {
+    hu_allocator_t *alloc;
+#ifdef HU_ENABLE_POSTGRES
     PGconn *conn;
     char *schema_q;
     char *table_q;
 #else
     void *unused_pg;
 #endif
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     mock_entry_t entries[MOCK_MAX_ENTRIES];
     size_t entry_count;
 #endif
-} sc_postgres_memory_t;
+} hu_postgres_memory_t;
 
-#if (defined(SC_IS_TEST) && SC_IS_TEST) || defined(SC_ENABLE_POSTGRES)
-static const char *category_to_string(const sc_memory_category_t *cat) {
+#if (defined(HU_IS_TEST) && HU_IS_TEST) || defined(HU_ENABLE_POSTGRES)
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -62,8 +62,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
 }
 #endif
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-static void mock_free_entry(sc_allocator_t *alloc, mock_entry_t *e) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static void mock_free_entry(hu_allocator_t *alloc, mock_entry_t *e) {
     if (!alloc || !e)
         return;
     if (e->key)
@@ -77,7 +77,7 @@ static void mock_free_entry(sc_allocator_t *alloc, mock_entry_t *e) {
     e->key = e->content = e->category = e->session_id = NULL;
 }
 
-static mock_entry_t *mock_find_by_key(sc_postgres_memory_t *self, const char *key, size_t key_len) {
+static mock_entry_t *mock_find_by_key(hu_postgres_memory_t *self, const char *key, size_t key_len) {
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
         if (e->key && strlen(e->key) == key_len && memcmp(e->key, key, key_len) == 0)
@@ -98,19 +98,19 @@ static int mock_contains_substring(const char *haystack, size_t hlen, const char
     }
     return 0;
 }
-#endif /* SC_IS_TEST */
+#endif /* HU_IS_TEST */
 
 static const char *impl_name(void *ctx) {
     (void)ctx;
     return "postgres";
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
-    sc_allocator_t *alloc = self->alloc;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
+    hu_allocator_t *alloc = self->alloc;
     mock_entry_t *existing = mock_find_by_key(self, key, key_len);
     const char *cat_str = category_to_string(category);
 
@@ -121,33 +121,33 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
             alloc->free(alloc->ctx, existing->category, strlen(existing->category) + 1);
         if (existing->session_id)
             alloc->free(alloc->ctx, existing->session_id, strlen(existing->session_id) + 1);
-        existing->content = sc_strndup(alloc, content, content_len);
-        existing->category = sc_strndup(alloc, cat_str, strlen(cat_str));
+        existing->content = hu_strndup(alloc, content, content_len);
+        existing->category = hu_strndup(alloc, cat_str, strlen(cat_str));
         existing->session_id = (session_id && session_id_len > 0)
-                                   ? sc_strndup(alloc, session_id, session_id_len)
+                                   ? hu_strndup(alloc, session_id, session_id_len)
                                    : NULL;
-        return existing->content ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        return existing->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
 
     if (self->entry_count >= MOCK_MAX_ENTRIES)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     mock_entry_t *e = &self->entries[self->entry_count];
-    e->key = sc_strndup(alloc, key, key_len);
-    e->content = sc_strndup(alloc, content, content_len);
-    e->category = sc_strndup(alloc, cat_str, strlen(cat_str));
+    e->key = hu_strndup(alloc, key, key_len);
+    e->content = hu_strndup(alloc, content, content_len);
+    e->category = hu_strndup(alloc, cat_str, strlen(cat_str));
     e->session_id =
-        (session_id && session_id_len > 0) ? sc_strndup(alloc, session_id, session_id_len) : NULL;
+        (session_id && session_id_len > 0) ? hu_strndup(alloc, session_id, session_id_len) : NULL;
     if (!e->key || !e->content || !e->category) {
         mock_free_entry(alloc, e);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     self->entry_count++;
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
 
     const char *cat_str = category_to_string(category);
     const char *params[] = {key, content, cat_str, session_id ? session_id : ""};
@@ -167,10 +167,10 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     if (!res || PQresultStatus(res) != PGRES_COMMAND_OK) {
         if (res)
             PQclear(res);
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     }
     PQclear(res);
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)key;
@@ -180,23 +180,23 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     (void)category;
     (void)session_id;
     (void)session_id_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     if (query_len == 0)
-        return SC_OK; /* empty query returns empty (match Zig) */
+        return HU_OK; /* empty query returns empty (match Zig) */
 
     size_t cap = 0;
     size_t n = 0;
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
 
     for (size_t i = 0; i < self->entry_count && n < limit; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -216,55 +216,55 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
 
         if (n >= cap) {
             size_t new_cap = cap ? cap * 2 : 4;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp) {
                 for (size_t j = 0; j < n; j++)
-                    sc_memory_entry_free_fields(alloc, &results[j]);
+                    hu_memory_entry_free_fields(alloc, &results[j]);
                 if (results)
-                    alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = tmp;
             cap = new_cap;
         }
 
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
         r->id_len = r->key_len;
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (e->session_id) {
-            r->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+            r->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
             r->session_id_len = strlen(e->session_id);
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        r->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
         if (!r->key || !r->content) {
             for (size_t j = 0; j <= n; j++)
-                sc_memory_entry_free_fields(alloc, &results[j]);
-            alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-            return SC_ERR_OUT_OF_MEMORY;
+                hu_memory_entry_free_fields(alloc, &results[j]);
+            alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+            return HU_ERR_OUT_OF_MEMORY;
         }
         n++;
     }
 
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK) {
         *out = NULL;
         *out_count = 0;
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
 
     char sql[512];
@@ -290,7 +290,7 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
             PQclear(res);
         *out = NULL;
         *out_count = 0;
-        return SC_ERR_MEMORY_RECALL;
+        return HU_ERR_MEMORY_RECALL;
     }
 
     int rows = PQntuples(res);
@@ -298,19 +298,19 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
         PQclear(res);
         *out = NULL;
         *out_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, (size_t)rows * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, (size_t)rows * sizeof(hu_memory_entry_t));
     if (!entries) {
         PQclear(res);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(entries, 0, (size_t)rows * sizeof(sc_memory_entry_t));
+    memset(entries, 0, (size_t)rows * sizeof(hu_memory_entry_t));
 
     for (int i = 0; i < rows; i++) {
-        sc_memory_entry_t *e = &entries[i];
+        hu_memory_entry_t *e = &entries[i];
         const char *k = PQgetvalue(res, i, 0);
         const char *c = PQgetvalue(res, i, 1);
         const char *cat = PQgetvalue(res, i, 2);
@@ -318,26 +318,26 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
         const char *ts = PQgetvalue(res, i, 4);
         size_t klen = k ? strlen(k) : 0;
         size_t clen = c ? strlen(c) : 0;
-        e->key = sc_strndup(alloc, k, klen);
+        e->key = hu_strndup(alloc, k, klen);
         e->key_len = klen;
         e->id = e->key;
         e->id_len = klen;
-        e->content = sc_strndup(alloc, c, clen);
+        e->content = hu_strndup(alloc, c, clen);
         e->content_len = clen;
-        e->timestamp = ts ? sc_strndup(alloc, ts, strlen(ts)) : NULL;
+        e->timestamp = ts ? hu_strndup(alloc, ts, strlen(ts)) : NULL;
         e->timestamp_len = e->timestamp ? strlen(e->timestamp) : 0;
-        e->session_id = sid && sid[0] ? sc_strndup(alloc, sid, strlen(sid)) : NULL;
+        e->session_id = sid && sid[0] ? hu_strndup(alloc, sid, strlen(sid)) : NULL;
         e->session_id_len = e->session_id ? strlen(e->session_id) : 0;
-        e->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+        e->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
         if (cat && cat[0]) {
-            e->category.data.custom.name = sc_strndup(alloc, cat, strlen(cat));
+            e->category.data.custom.name = hu_strndup(alloc, cat, strlen(cat));
             e->category.data.custom.name_len = strlen(cat);
         }
     }
     PQclear(res);
     *out = entries;
     *out_count = (size_t)rows;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)alloc;
@@ -348,44 +348,44 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     (void)session_id_len;
     *out = NULL;
     *out_count = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     mock_entry_t *e = mock_find_by_key(self, key, key_len);
     *found = false;
     memset(out, 0, sizeof(*out));
 
     if (!e)
-        return SC_OK;
+        return HU_OK;
 
     *found = true;
-    out->id = out->key = sc_strndup(alloc, e->key, strlen(e->key));
+    out->id = out->key = hu_strndup(alloc, e->key, strlen(e->key));
     out->key_len = strlen(e->key);
     out->id_len = out->key_len;
-    out->content = sc_strndup(alloc, e->content, strlen(e->content));
+    out->content = hu_strndup(alloc, e->content, strlen(e->content));
     out->content_len = strlen(e->content);
-    out->timestamp = sc_sprintf(alloc, "0");
+    out->timestamp = hu_sprintf(alloc, "0");
     out->timestamp_len = out->timestamp ? strlen(out->timestamp) : 0;
     if (e->session_id) {
-        out->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+        out->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
         out->session_id_len = strlen(e->session_id);
     }
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-    out->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+    out->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
     out->category.data.custom.name_len = strlen(e->category);
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     *found = false;
     memset(out, 0, sizeof(*out));
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
 
     char sql[384];
     (void)snprintf(
@@ -400,11 +400,11 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     if (!res || PQresultStatus(res) != PGRES_TUPLES_OK) {
         if (res)
             PQclear(res);
-        return SC_ERR_MEMORY_RECALL;
+        return HU_ERR_MEMORY_RECALL;
     }
     if (PQntuples(res) == 0) {
         PQclear(res);
-        return SC_OK;
+        return HU_OK;
     }
 
     const char *k = PQgetvalue(res, 0, 0);
@@ -414,24 +414,24 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     const char *ts = PQgetvalue(res, 0, 4);
     size_t klen = k ? strlen(k) : 0;
     size_t clen = c ? strlen(c) : 0;
-    out->key = sc_strndup(alloc, k, klen);
+    out->key = hu_strndup(alloc, k, klen);
     out->key_len = klen;
     out->id = out->key;
     out->id_len = klen;
-    out->content = sc_strndup(alloc, c, clen);
+    out->content = hu_strndup(alloc, c, clen);
     out->content_len = clen;
-    out->timestamp = ts ? sc_strndup(alloc, ts, strlen(ts)) : NULL;
+    out->timestamp = ts ? hu_strndup(alloc, ts, strlen(ts)) : NULL;
     out->timestamp_len = out->timestamp ? strlen(out->timestamp) : 0;
-    out->session_id = sid && sid[0] ? sc_strndup(alloc, sid, strlen(sid)) : NULL;
+    out->session_id = sid && sid[0] ? hu_strndup(alloc, sid, strlen(sid)) : NULL;
     out->session_id_len = out->session_id ? strlen(out->session_id) : 0;
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     if (cat && cat[0]) {
-        out->category.data.custom.name = sc_strndup(alloc, cat, strlen(cat));
+        out->category.data.custom.name = hu_strndup(alloc, cat, strlen(cat));
         out->category.data.custom.name_len = strlen(cat);
     }
     PQclear(res);
     *found = true;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)alloc;
@@ -439,22 +439,22 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     (void)key_len;
     (void)out;
     *found = false;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     const char *cat_filter = category ? category_to_string(category) : NULL;
     *out = NULL;
     *out_count = 0;
 
     size_t cap = 0;
     size_t n = 0;
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
 
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -472,49 +472,49 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
 
         if (n >= cap) {
             size_t new_cap = cap ? cap * 2 : 4;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp) {
                 for (size_t j = 0; j < n; j++)
-                    sc_memory_entry_free_fields(alloc, &results[j]);
+                    hu_memory_entry_free_fields(alloc, &results[j]);
                 if (results)
-                    alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = tmp;
             cap = new_cap;
         }
 
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
         r->id_len = r->key_len;
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (e->session_id) {
-            r->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+            r->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
             r->session_id_len = strlen(e->session_id);
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        r->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
         n++;
     }
 
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK) {
         *out = NULL;
         *out_count = 0;
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
 
     const char *cat_str = category ? category_to_string(category) : NULL;
@@ -544,7 +544,7 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     if (sn < 0 || (size_t)sn >= sizeof(sql)) {
         *out = NULL;
         *out_count = 0;
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     PGresult *res = NULL;
@@ -572,7 +572,7 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
             PQclear(res);
         *out = NULL;
         *out_count = 0;
-        return SC_ERR_MEMORY_RECALL;
+        return HU_ERR_MEMORY_RECALL;
     }
 
     int rows = PQntuples(res);
@@ -580,19 +580,19 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
         PQclear(res);
         *out = NULL;
         *out_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, (size_t)rows * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, (size_t)rows * sizeof(hu_memory_entry_t));
     if (!entries) {
         PQclear(res);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(entries, 0, (size_t)rows * sizeof(sc_memory_entry_t));
+    memset(entries, 0, (size_t)rows * sizeof(hu_memory_entry_t));
 
     for (int i = 0; i < rows; i++) {
-        sc_memory_entry_t *e = &entries[i];
+        hu_memory_entry_t *e = &entries[i];
         const char *k = PQgetvalue(res, i, 0);
         const char *c = PQgetvalue(res, i, 1);
         const char *cat = PQgetvalue(res, i, 2);
@@ -600,26 +600,26 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
         const char *ts = PQgetvalue(res, i, 4);
         size_t klen = k ? strlen(k) : 0;
         size_t clen = c ? strlen(c) : 0;
-        e->key = sc_strndup(alloc, k, klen);
+        e->key = hu_strndup(alloc, k, klen);
         e->key_len = klen;
         e->id = e->key;
         e->id_len = klen;
-        e->content = sc_strndup(alloc, c, clen);
+        e->content = hu_strndup(alloc, c, clen);
         e->content_len = clen;
-        e->timestamp = ts ? sc_strndup(alloc, ts, strlen(ts)) : NULL;
+        e->timestamp = ts ? hu_strndup(alloc, ts, strlen(ts)) : NULL;
         e->timestamp_len = e->timestamp ? strlen(e->timestamp) : 0;
-        e->session_id = sid && sid[0] ? sc_strndup(alloc, sid, strlen(sid)) : NULL;
+        e->session_id = sid && sid[0] ? hu_strndup(alloc, sid, strlen(sid)) : NULL;
         e->session_id_len = e->session_id ? strlen(e->session_id) : 0;
-        e->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+        e->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
         if (cat && cat[0]) {
-            e->category.data.custom.name = sc_strndup(alloc, cat, strlen(cat));
+            e->category.data.custom.name = hu_strndup(alloc, cat, strlen(cat));
             e->category.data.custom.name_len = strlen(cat);
         }
     }
     PQclear(res);
     *out = entries;
     *out_count = (size_t)rows;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)alloc;
@@ -628,13 +628,13 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     (void)session_id_len;
     *out = NULL;
     *out_count = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     *deleted = false;
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -645,16 +645,16 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
             memset(&self->entries[self->entry_count - 1], 0, sizeof(mock_entry_t));
             self->entry_count--;
             *deleted = true;
-            return SC_OK;
+            return HU_OK;
         }
     }
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     *deleted = false;
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
 
     char sql[256];
     (void)snprintf(sql, sizeof(sql), "DELETE FROM %s.%s WHERE key = $1", self->schema_q,
@@ -668,31 +668,31 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
         (PQresultStatus(res) != PGRES_COMMAND_OK && PQresultStatus(res) != PGRES_TUPLES_OK)) {
         if (res)
             PQclear(res);
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     }
     *deleted = (PQcmdTuples(res) && strtol(PQcmdTuples(res), NULL, 10) > 0);
     PQclear(res);
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)key;
     (void)key_len;
     *deleted = false;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     *out = self->entry_count;
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK) {
         *out = 0;
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     }
     char sql[256];
     (void)snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM %s.%s", self->schema_q, self->table_q);
@@ -701,25 +701,25 @@ static sc_error_t impl_count(void *ctx, size_t *out) {
         if (res)
             PQclear(res);
         *out = 0;
-        return SC_ERR_MEMORY_RECALL;
+        return HU_ERR_MEMORY_RECALL;
     }
     const char *v = PQgetvalue(res, 0, 0);
     *out = v ? (size_t)atoll(v) : 0;
     PQclear(res);
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     *out = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
 static bool impl_health_check(void *ctx) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     (void)ctx;
     return true;
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     return self->conn && PQstatus(self->conn) == CONNECTION_OK;
 #else
     (void)ctx;
@@ -728,15 +728,15 @@ static bool impl_health_check(void *ctx) {
 }
 
 static void impl_deinit(void *ctx) {
-    sc_postgres_memory_t *self = (sc_postgres_memory_t *)ctx;
+    hu_postgres_memory_t *self = (hu_postgres_memory_t *)ctx;
     if (!self || !self->alloc)
         return;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     for (size_t i = 0; i < self->entry_count; i++)
         mock_free_entry(self->alloc, &self->entries[i]);
     self->entry_count = 0;
-#elif defined(SC_ENABLE_POSTGRES)
+#elif defined(HU_ENABLE_POSTGRES)
     if (self->conn) {
         PQfinish(self->conn);
         self->conn = NULL;
@@ -750,10 +750,10 @@ static void impl_deinit(void *ctx) {
         self->table_q = NULL;
     }
 #endif
-    self->alloc->free(self->alloc->ctx, self, sizeof(sc_postgres_memory_t));
+    self->alloc->free(self->alloc->ctx, self, sizeof(hu_postgres_memory_t));
 }
 
-static const sc_memory_vtable_t postgres_vtable = {
+static const hu_memory_vtable_t postgres_vtable = {
     .name = impl_name,
     .store = impl_store,
     .recall = impl_recall,
@@ -776,53 +776,53 @@ static bool pg_is_safe_identifier(const char *id) {
     return true;
 }
 
-sc_memory_t sc_postgres_memory_create(sc_allocator_t *alloc, const char *url, const char *schema,
+hu_memory_t hu_postgres_memory_create(hu_allocator_t *alloc, const char *url, const char *schema,
                                       const char *table) {
     if (!alloc)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     const char *s = schema ? schema : "public";
     const char *t = table ? table : "memories";
     if (!pg_is_safe_identifier(s) || !pg_is_safe_identifier(t))
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     (void)url;
     (void)schema;
     (void)table;
-    sc_postgres_memory_t *self =
-        (sc_postgres_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_postgres_memory_t));
+    hu_postgres_memory_t *self =
+        (hu_postgres_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_postgres_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_postgres_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_postgres_memory_t));
     self->alloc = alloc;
-    return (sc_memory_t){.ctx = self, .vtable = &postgres_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &postgres_vtable};
 
-#elif defined(SC_ENABLE_POSTGRES)
-    sc_postgres_memory_t *self =
-        (sc_postgres_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_postgres_memory_t));
+#elif defined(HU_ENABLE_POSTGRES)
+    hu_postgres_memory_t *self =
+        (hu_postgres_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_postgres_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_postgres_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_postgres_memory_t));
     self->alloc = alloc;
 
     self->conn = PQconnectdb(url);
     if (!self->conn || PQstatus(self->conn) != CONNECTION_OK) {
         if (self->conn)
             PQfinish(self->conn);
-        alloc->free(alloc->ctx, self, sizeof(sc_postgres_memory_t));
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        alloc->free(alloc->ctx, self, sizeof(hu_postgres_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
 
-    self->schema_q = sc_strdup(alloc, schema);
-    self->table_q = sc_strdup(alloc, table);
+    self->schema_q = hu_strdup(alloc, schema);
+    self->table_q = hu_strdup(alloc, table);
     if (!self->schema_q || !self->table_q) {
         if (self->schema_q)
             alloc->free(alloc->ctx, self->schema_q, strlen(self->schema_q) + 1);
         if (self->table_q)
             alloc->free(alloc->ctx, self->table_q, strlen(self->table_q) + 1);
         PQfinish(self->conn);
-        alloc->free(alloc->ctx, self, sizeof(sc_postgres_memory_t));
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        alloc->free(alloc->ctx, self, sizeof(hu_postgres_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
 
     /* CREATE TABLE IF NOT EXISTS on connect */
@@ -848,17 +848,17 @@ sc_memory_t sc_postgres_memory_create(sc_allocator_t *alloc, const char *url, co
         }
     }
 
-    return (sc_memory_t){.ctx = self, .vtable = &postgres_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &postgres_vtable};
 #else
     (void)url;
     (void)schema;
     (void)table;
-    sc_postgres_memory_t *self =
-        (sc_postgres_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_postgres_memory_t));
+    hu_postgres_memory_t *self =
+        (hu_postgres_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_postgres_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_postgres_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_postgres_memory_t));
     self->alloc = alloc;
-    return (sc_memory_t){.ctx = self, .vtable = &postgres_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &postgres_vtable};
 #endif
 }

@@ -1,9 +1,9 @@
 ---
 title: Liquid Glass
-description: SeaClaw's Liquid Glass system — three tiers of depth-aware glassmorphic effects inspired by Apple's visionOS.
+description: Human's Liquid Glass system — three tiers of depth-aware glassmorphic effects inspired by Apple's visionOS.
 ---
 
-Liquid Glass is SeaClaw's signature depth system, inspired by Apple's visionOS glass and adapted for 2D interfaces. It creates a sense of layered surfaces that interact with the content behind them.
+Liquid Glass is Human's signature depth system, inspired by Apple's visionOS glass and adapted for 2D interfaces. It creates a sense of layered surfaces that interact with the content behind them.
 
 ## Three Tiers
 
@@ -13,24 +13,24 @@ The lightest glass — barely perceptible blur with a faint border. Used for bac
 
 | Property           | Value | Token                              |
 | ------------------ | ----- | ---------------------------------- |
-| Blur               | 8px   | `--sc-glass-subtle-blur`           |
-| Saturation         | 120%  | `--sc-glass-subtle-saturation`     |
-| Background opacity | 0.4   | `--sc-glass-subtle-bg-opacity`     |
-| Border opacity     | 0.06  | `--sc-glass-subtle-border-opacity` |
+| Blur               | 8px   | `--hu-glass-subtle-blur`           |
+| Saturation         | 120%  | `--hu-glass-subtle-saturation`     |
+| Background opacity | 0.4   | `--hu-glass-subtle-bg-opacity`     |
+| Border opacity     | 0.06  | `--hu-glass-subtle-border-opacity` |
 
 ```css
 .glass-subtle {
-  backdrop-filter: blur(var(--sc-glass-subtle-blur))
-    saturate(var(--sc-glass-subtle-saturation));
+  backdrop-filter: blur(var(--hu-glass-subtle-blur))
+    saturate(var(--hu-glass-subtle-saturation));
   background: color-mix(
     in srgb,
-    var(--sc-bg-surface) calc(var(--sc-glass-subtle-bg-opacity) * 100%),
+    var(--hu-bg-surface) calc(var(--hu-glass-subtle-bg-opacity) * 100%),
     transparent
   );
   border: 1px solid
     color-mix(
       in srgb,
-      white calc(var(--sc-glass-subtle-border-opacity) * 100%),
+      white calc(var(--hu-glass-subtle-border-opacity) * 100%),
       transparent
     );
 }
@@ -44,11 +44,11 @@ The default glass tier — noticeable blur with visible borders and a subtle ins
 
 | Property           | Value | Token                                |
 | ------------------ | ----- | ------------------------------------ |
-| Blur               | 16px  | `--sc-glass-standard-blur`           |
-| Saturation         | 140%  | `--sc-glass-standard-saturation`     |
-| Background opacity | 0.5   | `--sc-glass-standard-bg-opacity`     |
-| Border opacity     | 0.08  | `--sc-glass-standard-border-opacity` |
-| Inset opacity      | 0.04  | `--sc-glass-standard-inset-opacity`  |
+| Blur               | 16px  | `--hu-glass-standard-blur`           |
+| Saturation         | 140%  | `--hu-glass-standard-saturation`     |
+| Background opacity | 0.5   | `--hu-glass-standard-bg-opacity`     |
+| Border opacity     | 0.08  | `--hu-glass-standard-border-opacity` |
+| Inset opacity      | 0.04  | `--hu-glass-standard-inset-opacity`  |
 
 **Use for**: Cards, panels, dropdowns, popovers.
 
@@ -58,11 +58,11 @@ Maximum glass effect — heavy blur, strong saturation, prominent borders. Creat
 
 | Property           | Value | Token                                 |
 | ------------------ | ----- | ------------------------------------- |
-| Blur               | 24px  | `--sc-glass-prominent-blur`           |
-| Saturation         | 160%  | `--sc-glass-prominent-saturation`     |
-| Background opacity | 0.6   | `--sc-glass-prominent-bg-opacity`     |
-| Border opacity     | 0.12  | `--sc-glass-prominent-border-opacity` |
-| Inset opacity      | 0.06  | `--sc-glass-prominent-inset-opacity`  |
+| Blur               | 24px  | `--hu-glass-prominent-blur`           |
+| Saturation         | 160%  | `--hu-glass-prominent-saturation`     |
+| Background opacity | 0.6   | `--hu-glass-prominent-bg-opacity`     |
+| Border opacity     | 0.12  | `--hu-glass-prominent-border-opacity` |
+| Inset opacity      | 0.06  | `--hu-glass-prominent-inset-opacity`  |
 
 **Use for**: Modals, hero sections, primary CTAs, featured content.
 
@@ -119,8 +119,8 @@ Liquid Glass requires `backdrop-filter` support (available in all modern browser
   .glass,
   .glass-subtle,
   .glass-prominent {
-    background: var(--sc-bg-surface);
-    border: 1px solid var(--sc-border-subtle);
+    background: var(--hu-bg-surface);
+    border: 1px solid var(--hu-border-subtle);
   }
 }
 ```
@@ -137,7 +137,7 @@ Liquid Glass requires `backdrop-filter` support (available in all modern browser
   .glass-subtle,
   .glass-prominent {
     backdrop-filter: none;
-    background: var(--sc-bg-surface);
+    background: var(--hu-bg-surface);
   }
 }
 ```

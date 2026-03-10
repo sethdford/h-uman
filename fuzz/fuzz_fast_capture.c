@@ -1,8 +1,8 @@
-/* libFuzzer harness for sc_fast_capture.
+/* libFuzzer harness for hu_fast_capture.
  * Fuzzes entity/emotion/topic extraction with random text.
  * Goal: find crashes in entity/emotion/topic extraction. */
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/memory/fast_capture.h"
+#include "human/core/allocator.h"
+#include "human/memory/fast_capture.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -13,8 +13,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (size > TEXT_MAX)
         return 0;
 
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_fc_result_t out;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_fc_result_t out;
     memset(&out, 0, sizeof(out));
 
     /* Ensure null-terminated; use alloc'd buffer for large inputs */
@@ -27,10 +27,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         text[size] = '\0';
     }
 
-    sc_error_t err = sc_fast_capture(&alloc, text ? text : "", size, &out);
+    hu_error_t err = hu_fast_capture(&alloc, text ? text : "", size, &out);
     (void)err;
 
-    sc_fc_result_deinit(&out, &alloc);
+    hu_fc_result_deinit(&out, &alloc);
     if (text)
         alloc.free(alloc.ctx, text, size + 1);
     return 0;

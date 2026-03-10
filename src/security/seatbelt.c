@@ -1,6 +1,6 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -43,7 +43,7 @@ static const char *seatbelt_profile_fmt = "(version 1)"
                                           "(deny file-write* (subpath \"/sbin\"))"
                                           "(deny network*)";
 
-static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+static hu_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
                                 size_t buf_count, size_t *out_count) {
 #ifndef __APPLE__
     (void)ctx;
@@ -52,26 +52,26 @@ static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc,
     (void)buf;
     (void)buf_count;
     (void)out_count;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     (void)ctx;
     if (buf_count < argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < argc; i++)
         buf[i] = argv[i];
     *out_count = argc;
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_seatbelt_ctx_t *sb = (sc_seatbelt_ctx_t *)ctx;
+    hu_seatbelt_ctx_t *sb = (hu_seatbelt_ctx_t *)ctx;
     const size_t prefix_len = 3;
     if (buf_count < prefix_len + argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (sb->profile_len == 0)
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
 
     buf[0] = "sandbox-exec";
     buf[1] = "-p";
@@ -79,7 +79,7 @@ static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc,
     for (size_t i = 0; i < argc; i++)
         buf[prefix_len + i] = argv[i];
     *out_count = prefix_len + argc;
-    return SC_OK;
+    return HU_OK;
 #endif
 #endif
 }
@@ -87,7 +87,7 @@ static sc_error_t seatbelt_wrap(void *ctx, const char *const *argv, size_t argc,
 static bool seatbelt_available(void *ctx) {
     (void)ctx;
 #ifdef __APPLE__
-#if SC_IS_TEST
+#if HU_IS_TEST
     return true; /* Skip binary check in tests */
 #else
     return access("/usr/bin/sandbox-exec", X_OK) == 0;
@@ -111,7 +111,7 @@ static const char *seatbelt_desc(void *ctx) {
 #endif
 }
 
-static const sc_sandbox_vtable_t seatbelt_vtable = {
+static const hu_sandbox_vtable_t seatbelt_vtable = {
     .wrap_command = seatbelt_wrap,
     .apply = NULL,
     .is_available = seatbelt_available,
@@ -119,15 +119,15 @@ static const sc_sandbox_vtable_t seatbelt_vtable = {
     .description = seatbelt_desc,
 };
 
-sc_sandbox_t sc_seatbelt_sandbox_get(sc_seatbelt_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_seatbelt_sandbox_get(hu_seatbelt_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &seatbelt_vtable,
     };
     return sb;
 }
 
-void sc_seatbelt_sandbox_init(sc_seatbelt_ctx_t *ctx, const char *workspace_dir) {
+void hu_seatbelt_sandbox_init(hu_seatbelt_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     const char *ws = workspace_dir ? workspace_dir : "/tmp";
     size_t wlen = strlen(ws);

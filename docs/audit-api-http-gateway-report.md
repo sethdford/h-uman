@@ -4,14 +4,14 @@ title: API, HTTP, and Gateway Security Audit Report
 # API, HTTP, and Gateway Security Audit Report
 
 **Date:** 2025-03-08  
-**Scope:** All API, HTTP, and gateway code in the seaclaw C codebase  
+**Scope:** All API, HTTP, and gateway code in the human C codebase  
 **Auditor:** Automated security audit
 
 ---
 
 ## Executive Summary
 
-The seaclaw codebase demonstrates strong security practices in many areas: path traversal protection, HTTPS enforcement for tools, SSRF protection via `sc_tool_validate_url`, rate limiting, HMAC webhook verification, and secure HTTP client defaults. Several findings require attention, ranging from missing authentication on sensitive endpoints to optional webhook verification and URL validation gaps.
+The human codebase demonstrates strong security practices in many areas: path traversal protection, HTTPS enforcement for tools, SSRF protection via `hu_tool_validate_url`, rate limiting, HMAC webhook verification, and secure HTTP client defaults. Several findings require attention, ranging from missing authentication on sensitive endpoints to optional webhook verification and URL validation gaps.
 
 ---
 
@@ -23,7 +23,7 @@ The seaclaw codebase demonstrates strong security practices in many areas: path 
 | --------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | gateway.c | 956-957 | **Low**  | `sscanf(line, "%15s %255s", method, path)` — Fixed-width buffers prevent overflow. `path[256]` and `method[16]` are correctly sized. |
 | gateway.c | 892-906 | **Info** | Request header parsing uses `strtok` which modifies `req` in place. Body is read separately into `body_buf`. No injection risk.      |
-| gateway.c | 243-250 | **Good** | `sc_gateway_path_has_traversal` checks for `..`, `%2e%2e`, `%00`, `%252e%252e` — comprehensive path traversal protection.            |
+| gateway.c | 243-250 | **Good** | `hu_gateway_path_has_traversal` checks for `..`, `%2e%2e`, `%00`, `%252e%252e` — comprehensive path traversal protection.            |
 | gateway.c | 363-368 | **Good** | Static file serving rejects paths with traversal before `open()`. Uses `O_NOFOLLOW` to prevent symlink attacks.                      |
 
 ### 1.2 Authentication/Authorization
@@ -41,14 +41,14 @@ The seaclaw codebase demonstrates strong security practices in many areas: path 
 
 | File      | Line    | Severity | Description                                                                                                                       |
 | --------- | ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| gateway.c | 356-364 | **Good** | CORS origin checked via `sc_gateway_is_allowed_origin`. Localhost/127.0.0.1/[::1] allowed; others must be in `cors_origins` list. |
+| gateway.c | 356-364 | **Good** | CORS origin checked via `hu_gateway_is_allowed_origin`. Localhost/127.0.0.1/[::1] allowed; others must be in `cors_origins` list. |
 | gateway.c | 393-396 | **Good** | CORS header only echoed when origin is allowed.                                                                                   |
 
 ### 1.4 Rate Limiting
 
 | File      | Line    | Severity | Description                                                                |
 | --------- | ------- | -------- | -------------------------------------------------------------------------- |
-| gateway.c | 447-453 | **Good** | Rate limiting applied before request handling via `sc_rate_limiter_allow`. |
+| gateway.c | 447-453 | **Good** | Rate limiting applied before request handling via `hu_rate_limiter_allow`. |
 | gateway.c | 848-850 | **Good** | Rate limiter created with configurable window and request count.           |
 
 ### 1.5 Request Size Limits
@@ -56,7 +56,7 @@ The seaclaw codebase demonstrates strong security practices in many areas: path 
 | File      | Line    | Severity | Description                                                                           |
 | --------- | ------- | -------- | ------------------------------------------------------------------------------------- |
 | gateway.c | 974-982 | **Good** | Content-Length validated; rejects negative, non-numeric, or values > `max_body_size`. |
-| gateway.h | 15      | **Good** | `SC_GATEWAY_MAX_BODY_SIZE` = 65536 (64KB).                                            |
+| gateway.h | 15      | **Good** | `HU_GATEWAY_MAX_BODY_SIZE` = 65536 (64KB).                                            |
 
 ### 1.6 Response Content Types
 
@@ -91,7 +91,7 @@ The seaclaw codebase demonstrates strong security practices in many areas: path 
 
 ## 2. Provider API Clients (`src/providers/*.c`, `src/core/http.c`)
 
-All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
+All providers use `hu_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 ### 2.1 Core HTTP Client (`src/core/http.c`)
 
@@ -100,7 +100,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 | http.c | 136-142 | **Good** | `CURLOPT_SSL_VERIFYPEER`, `CURLOPT_SSL_VERIFYHOST` enabled.                                             |
 | http.c | 135-137 | **Good** | 120s timeout, low-speed limits.                                                                         |
 | http.c | 175-186 | **Good** | curl handle released via `curl_pool_release` on all paths.                                              |
-| http.c | 76      | **Good** | Response body capped at `SC_HTTP_MAX_RESPONSE_BODY` (16MB).                                             |
+| http.c | 76      | **Good** | Response body capped at `HU_HTTP_MAX_RESPONSE_BODY` (16MB).                                             |
 | http.c | 189-194 | **Good** | On curl error, `w.buf` freed before return.                                                             |
 | http.c | 330-331 | **Info** | URL passed directly to curl — **caller must validate**. Providers use hardcoded or config-derived URLs. |
 
@@ -131,7 +131,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 | File         | Line    | Severity   | Description                                                                            |
 | ------------ | ------- | ---------- | -------------------------------------------------------------------------------------- |
 | sse_client.c | 345     | **Medium** | `CURLOPT_TIMEOUT, 0L` — **no timeout** for streaming. Long-lived connections can hang. |
-| sse_client.c | 264-274 | **Good**   | Buffer grows dynamically; `SC_SSE_MAX_EVENT_SIZE` (256KB) caps event size.             |
+| sse_client.c | 264-274 | **Good**   | Buffer grows dynamically; `HU_SSE_MAX_EVENT_SIZE` (256KB) caps event size.             |
 | sse_client.c | 182-193 | **Good**   | Event size check before appending data; overflow prevented.                            |
 | sse_client.c | 307-308 | **Good**   | curl handle cleaned up on alloc failure.                                               |
 | sse_client.c | 293-361 | **Info**   | No reconnection logic — single-shot connect. Caller must retry.                        |
@@ -144,11 +144,11 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 | File        | Line    | Severity   | Description                                                                                                                               |
 | ----------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | websocket.c | 159-169 | **Good**   | `ws_parse_url` accepts only `ws://` and `wss://`.                                                                                         |
-| websocket.c | 215-218 | **Medium** | When `SC_HAS_TLS` is not defined, `wss://` returns `SC_ERR_NOT_SUPPORTED`, but `ws://` is accepted — **unencrypted connections allowed**. |
-| websocket.c | 98-129  | **Good**   | `sc_ws_parse_header` validates payload_len against `SC_WS_MAX_FRAME_PAYLOAD` (4MB).                                                       |
-| websocket.c | 414-418 | **Good**   | `hdr.payload_len > SC_WS_MAX_MSG` returns error.                                                                                          |
-| websocket.c | 456-461 | **Good**   | Fragmented message size checked against `SC_WS_MAX_MSG`.                                                                                  |
-| websocket.c | 500-516 | **Good**   | `sc_ws_close` sends close frame, frees frag_buf, closes socket.                                                                           |
+| websocket.c | 215-218 | **Medium** | When `HU_HAS_TLS` is not defined, `wss://` returns `HU_ERR_NOT_SUPPORTED`, but `ws://` is accepted — **unencrypted connections allowed**. |
+| websocket.c | 98-129  | **Good**   | `hu_ws_parse_header` validates payload_len against `HU_WS_MAX_FRAME_PAYLOAD` (4MB).                                                       |
+| websocket.c | 414-418 | **Good**   | `hdr.payload_len > HU_WS_MAX_MSG` returns error.                                                                                          |
+| websocket.c | 456-461 | **Good**   | Fragmented message size checked against `HU_WS_MAX_MSG`.                                                                                  |
+| websocket.c | 500-516 | **Good**   | `hu_ws_close` sends close frame, frees frag_buf, closes socket.                                                                           |
 
 ---
 
@@ -159,7 +159,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 | Channel      | File                | Severity   | Description                                                                                            |
 | ------------ | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
 | Gateway      | gateway.c:636-644   | **Medium** | Single HMAC for all webhooks when `webhook_hmac_secret` configured. When not set, **no verification**. |
-| Meta (FB/IG) | meta_common.c:14-47 | **Good**   | `sc_meta_verify_webhook` validates `X-Hub-Signature-256` with app secret.                              |
+| Meta (FB/IG) | meta_common.c:14-47 | **Good**   | `hu_meta_verify_webhook` validates `X-Hub-Signature-256` with app secret.                              |
 | Telegram     | —                   | **Info**   | No request signing; uses secret token in URL path. Gateway HMAC is optional layer.                     |
 | Slack        | —                   | **Info**   | Uses `X-Slack-Signature`; channel-specific. Gateway HMAC is optional.                                  |
 
@@ -185,8 +185,8 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 | File        | Line    | Severity | Description                                                                     |
 | ----------- | ------- | -------- | ------------------------------------------------------------------------------- |
-| web_fetch.c | 228-232 | **Good** | `sc_tool_validate_url` enforces HTTPS and blocks private IPs (SSRF protection). |
-| web_fetch.c | 252-262 | **Good** | Uses `sc_http_get`; response freed on all paths.                                |
+| web_fetch.c | 228-232 | **Good** | `hu_tool_validate_url` enforces HTTPS and blocks private IPs (SSRF protection). |
+| web_fetch.c | 252-262 | **Good** | Uses `hu_http_get`; response freed on all paths.                                |
 
 ### 6.2 web_search (`src/tools/web_search.c`)
 
@@ -200,7 +200,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 | File           | Line    | Severity | Description                                                    |
 | -------------- | ------- | -------- | -------------------------------------------------------------- |
-| http_request.c | 128-132 | **Good** | `sc_tool_validate_url` — HTTPS only, no private IPs.           |
+| http_request.c | 128-132 | **Good** | `hu_tool_validate_url` — HTTPS only, no private IPs.           |
 | http_request.c | 30, 246 | **Info** | `allow_http` stored but **never used** in execute — dead code. |
 
 ---
@@ -211,7 +211,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 | File           | Line    | Severity | Description                                                                                                            |
 | -------------- | ------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| config_merge.c | 236-255 | **Good** | `load_json_file` uses fixed paths (`~/.seaclaw/config.json`, `./.seaclaw/config.json`). No path traversal in filename. |
+| config_merge.c | 236-255 | **Good** | `load_json_file` uses fixed paths (`~/.human/config.json`, `./.human/config.json`). No path traversal in filename. |
 | config_merge.c | 245     | **Good** | Config file size capped at 65536 bytes.                                                                                |
 | config_merge.c | 318-326 | **Good** | Config directory permissions tightened if too permissive.                                                              |
 
@@ -226,7 +226,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 | File           | Severity | Description |
 | -------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| config_merge.c | 288-299  | **Good**    | `control_ui_dir`, `workspace_dir` from config. Path traversal in these could affect static file serving — gateway checks `sc_gateway_path_has_traversal` on URL path, not filesystem path. |
+| config_merge.c | 288-299  | **Good**    | `control_ui_dir`, `workspace_dir` from config. Path traversal in these could affect static file serving — gateway checks `hu_gateway_path_has_traversal` on URL path, not filesystem path. |
 | gateway.c      | 363-368  | **Good**    | `serve_static_file` uses `base_dir` + `url_path`; traversal in `url_path` rejected.                                                                                                        |
 
 ---
@@ -266,7 +266,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 - Path traversal protection on gateway paths and static files
 - HTTPS enforcement for web_fetch, http_request, web_search (except searxng base)
-- SSRF protection via `sc_tool_validate_url` (private IP block)
+- SSRF protection via `hu_tool_validate_url` (private IP block)
 - Rate limiting, body size limits, CORS checks
 - curl SSL verification, timeouts, handle cleanup
 - Webhook HMAC when configured
@@ -279,7 +279,7 @@ All providers use `sc_http_*` from `src/core/http.c`. Audit of the HTTP layer:
 
 1. **Add authentication to OpenAI-compatible endpoints** — Require `Authorization: Bearer` or API key header when `auth_token` or pairing is configured.
 2. **Require webhook HMAC when webhooks enabled** — Fail startup or reject webhook requests if `webhook_hmac_secret` is not set.
-3. **Validate SearXNG base URL** — Use `sc_tool_validate_url` or equivalent for `SEARXNG_BASE_URL` before making requests.
+3. **Validate SearXNG base URL** — Use `hu_tool_validate_url` or equivalent for `SEARXNG_BASE_URL` before making requests.
 4. **Add SSE connection timeout** — Use `CURLOPT_CONNECTTIMEOUT` and consider a max stream duration.
 5. **Consider WSS-only for WebSocket client** — Reject `ws://` when TLS is available; document `ws://` as localhost-only when TLS is disabled.
 6. **Restrict `/api/status` to GET** — Or add auth for sensitive fields.

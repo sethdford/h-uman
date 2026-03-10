@@ -1,15 +1,15 @@
 /*
  * Tool relevance scorer — keyword-based selection for semantic routing.
  */
-#include "seaclaw/agent/tool_router.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/tool_router.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_TOOL_ROUTER_MAX_WORDS 128
-#define SC_TOOL_ROUTER_MAX_SCORED 256
-#define SC_TOOL_ROUTER_ALWAYS_COUNT 8
+#define HU_TOOL_ROUTER_MAX_WORDS 128
+#define HU_TOOL_ROUTER_MAX_SCORED 256
+#define HU_TOOL_ROUTER_ALWAYS_COUNT 8
 
 static const char *ALWAYS_TOOLS[] = {"memory_store", "memory_recall", "message", "shell",
                                      "file_read",   "file_write",    "file_edit", "web_search",
@@ -34,10 +34,10 @@ typedef struct {
 } scored_entry_t;
 
 static size_t tokenize_refs(const char *text, size_t text_len,
-                            word_ref_t refs[SC_TOOL_ROUTER_MAX_WORDS]) {
+                            word_ref_t refs[HU_TOOL_ROUTER_MAX_WORDS]) {
     size_t count = 0;
     size_t i = 0;
-    while (i < text_len && count < SC_TOOL_ROUTER_MAX_WORDS) {
+    while (i < text_len && count < HU_TOOL_ROUTER_MAX_WORDS) {
         while (i < text_len && !isalnum((unsigned char)text[i]))
             i++;
         if (i >= text_len)
@@ -87,10 +87,10 @@ static double score_tool(const word_ref_t *msg_refs, size_t msg_count,
     }
     tool_text[pos] = '\0';
 
-    char tool_words[SC_TOOL_ROUTER_MAX_WORDS][64];
+    char tool_words[HU_TOOL_ROUTER_MAX_WORDS][64];
     size_t tool_word_count = 0;
     size_t j = 0;
-    while (j < pos && tool_word_count < SC_TOOL_ROUTER_MAX_WORDS) {
+    while (j < pos && tool_word_count < HU_TOOL_ROUTER_MAX_WORDS) {
         while (j < pos && !isalnum((unsigned char)tool_text[j]))
             j++;
         if (j >= pos)
@@ -130,25 +130,25 @@ static double score_tool(const word_ref_t *msg_refs, size_t msg_count,
     return (double)matches / (double)tool_word_count;
 }
 
-sc_error_t sc_tool_router_select(sc_allocator_t *alloc, const char *message, size_t message_len,
-                                  sc_tool_t *all_tools, size_t all_tools_count,
-                                  sc_tool_selection_t *out) {
+hu_error_t hu_tool_router_select(hu_allocator_t *alloc, const char *message, size_t message_len,
+                                  hu_tool_t *all_tools, size_t all_tools_count,
+                                  hu_tool_selection_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     if (!all_tools || all_tools_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Tokenize message */
-    word_ref_t msg_refs[SC_TOOL_ROUTER_MAX_WORDS];
+    word_ref_t msg_refs[HU_TOOL_ROUTER_MAX_WORDS];
     size_t msg_count = 0;
     if (message && message_len > 0)
         msg_count = tokenize_refs(message, message_len, msg_refs);
 
     /* Always-include tools */
-    for (size_t i = 0; i < all_tools_count && out->count < SC_TOOL_ROUTER_MAX_SELECTED; i++) {
-        const sc_tool_t *t = &all_tools[i];
+    for (size_t i = 0; i < all_tools_count && out->count < HU_TOOL_ROUTER_MAX_SELECTED; i++) {
+        const hu_tool_t *t = &all_tools[i];
         if (!t->vtable || !t->vtable->name)
             continue;
         const char *name = t->vtable->name(t->ctx);
@@ -158,10 +158,10 @@ sc_error_t sc_tool_router_select(sc_allocator_t *alloc, const char *message, siz
     }
 
     /* Score and select remaining tools */
-    scored_entry_t scored[SC_TOOL_ROUTER_MAX_SCORED];
+    scored_entry_t scored[HU_TOOL_ROUTER_MAX_SCORED];
     size_t scored_count = 0;
-    for (size_t i = 0; i < all_tools_count && scored_count < SC_TOOL_ROUTER_MAX_SCORED; i++) {
-        const sc_tool_t *t = &all_tools[i];
+    for (size_t i = 0; i < all_tools_count && scored_count < HU_TOOL_ROUTER_MAX_SCORED; i++) {
+        const hu_tool_t *t = &all_tools[i];
         if (!t->vtable || !t->vtable->name)
             continue;
         const char *name = t->vtable->name(t->ctx);
@@ -186,12 +186,12 @@ sc_error_t sc_tool_router_select(sc_allocator_t *alloc, const char *message, siz
     }
 
     /* Take top (MAX_SELECTED - always_count) */
-    size_t take = SC_TOOL_ROUTER_MAX_SELECTED - out->count;
+    size_t take = HU_TOOL_ROUTER_MAX_SELECTED - out->count;
     if (take > scored_count)
         take = scored_count;
-    for (size_t i = 0; i < take && out->count < SC_TOOL_ROUTER_MAX_SELECTED; i++) {
+    for (size_t i = 0; i < take && out->count < HU_TOOL_ROUTER_MAX_SELECTED; i++) {
         out->indices[out->count++] = scored[i].idx;
     }
 
-    return SC_OK;
+    return HU_OK;
 }

@@ -1,5 +1,5 @@
-#include "seaclaw/max_tokens.h"
-#include "seaclaw/config_types.h"
+#include "human/max_tokens.h"
+#include "human/config_types.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <string.h>
@@ -175,11 +175,11 @@ static uint32_t lookup_model_candidates(const char *model_id_raw, size_t len) {
     return infer_from_pattern(model_id_raw, len);
 }
 
-uint32_t sc_max_tokens_default(void) {
-    return SC_DEFAULT_MODEL_MAX_TOKENS;
+uint32_t hu_max_tokens_default(void) {
+    return HU_DEFAULT_MODEL_MAX_TOKENS;
 }
 
-uint32_t sc_max_tokens_lookup(const char *model_ref, size_t len) {
+uint32_t hu_max_tokens_lookup(const char *model_ref, size_t len) {
     if (!model_ref || len == 0)
         return 0;
     const char *p = model_ref;
@@ -222,9 +222,9 @@ uint32_t sc_max_tokens_lookup(const char *model_ref, size_t len) {
     return 0;
 }
 
-uint32_t sc_max_tokens_resolve(uint32_t override, const char *model_ref, size_t len) {
+uint32_t hu_max_tokens_resolve(uint32_t override, const char *model_ref, size_t len) {
     if (override)
         return override;
-    uint32_t v = sc_max_tokens_lookup(model_ref, len);
-    return v ? v : SC_DEFAULT_MODEL_MAX_TOKENS;
+    uint32_t v = hu_max_tokens_lookup(model_ref, len);
+    return v ? v : HU_DEFAULT_MODEL_MAX_TOKENS;
 }

@@ -1,5 +1,5 @@
 {
-  "workspace": "~/.seaclaw/workspace",
+  "workspace": "~/.human/workspace",
   "default_provider": "openai",
   "default_model": "gpt-4o",
   "default_temperature": 0.7,

@@ -3,77 +3,77 @@ import { customElement, state } from "lit/decorators.js";
 import { icons } from "../icons.js";
 import { AudioRecorder, blobToBase64 } from "../audio-recorder.js";
 
-@customElement("sc-floating-mic")
+@customElement("hu-floating-mic")
 export class ScFloatingMic extends LitElement {
   static override styles = css`
     :host {
       position: fixed;
-      right: var(--sc-space-lg);
-      bottom: var(--sc-space-lg);
+      right: var(--hu-space-lg);
+      bottom: var(--hu-space-lg);
       z-index: 9999;
     }
     .btn {
       width: 3rem;
       height: 3rem;
       border-radius: 50%;
-      background: var(--sc-accent);
-      color: var(--sc-bg);
+      background: var(--hu-accent);
+      color: var(--hu-bg);
       border: none;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 0;
-      transition: background var(--sc-duration-normal);
+      transition: background var(--hu-duration-normal);
     }
     .btn:hover {
-      background: var(--sc-accent-hover);
+      background: var(--hu-accent-hover);
     }
     .btn:disabled {
-      opacity: var(--sc-opacity-disabled);
+      opacity: var(--hu-opacity-disabled);
       cursor: not-allowed;
     }
     .btn.listening {
-      background: var(--sc-error);
-      animation: sc-pulse-red var(--sc-duration-slow) ease-in-out infinite;
+      background: var(--hu-error);
+      animation: hu-pulse-red var(--hu-duration-slow) ease-in-out infinite;
     }
     .btn.transcribing {
-      background: var(--sc-accent-secondary);
+      background: var(--hu-accent-secondary);
       opacity: 0.8;
       cursor: wait;
     }
-    @keyframes sc-pulse-red {
+    @keyframes hu-pulse-red {
       0%,
       100% {
-        box-shadow: 0 0 0 0 color-mix(in srgb, var(--sc-error) 50%, transparent);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--hu-error) 50%, transparent);
       }
       50% {
-        box-shadow: 0 0 0 0.75rem color-mix(in srgb, var(--sc-error) 0%, transparent);
+        box-shadow: 0 0 0 0.75rem color-mix(in srgb, var(--hu-error) 0%, transparent);
       }
     }
     .btn svg {
-      width: var(--sc-icon-lg);
-      height: var(--sc-icon-lg);
+      width: var(--hu-icon-lg);
+      height: var(--hu-icon-lg);
     }
     @media (prefers-reduced-motion: reduce) {
       .btn.listening {
         animation: none;
-        box-shadow: 0 0 0 var(--sc-space-xs) color-mix(in srgb, var(--sc-error) 30%, transparent);
+        box-shadow: 0 0 0 var(--hu-space-xs) color-mix(in srgb, var(--hu-error) 30%, transparent);
       }
     }
     .overlay {
       position: absolute;
-      bottom: calc(100% + var(--sc-space-sm));
+      bottom: calc(100% + var(--hu-space-sm));
       right: 0;
       min-width: 12.5rem;
       max-width: 18.75rem;
-      padding: var(--sc-space-sm) var(--sc-space-md);
-      background: var(--sc-bg-elevated);
-      border: 1px solid var(--sc-border);
-      border-radius: var(--sc-radius);
-      font-size: var(--sc-text-sm);
-      font-family: var(--sc-font-mono);
-      color: var(--sc-text);
+      padding: var(--hu-space-sm) var(--hu-space-md);
+      background: var(--hu-bg-elevated);
+      border: 1px solid var(--hu-border);
+      border-radius: var(--hu-radius);
+      font-size: var(--hu-text-sm);
+      font-family: var(--hu-font-mono);
+      color: var(--hu-text);
       max-height: 7.5rem;
       overflow-y: auto;
     }
@@ -140,7 +140,7 @@ export class ScFloatingMic extends LitElement {
       const audio = await blobToBase64(blob);
 
       const detail = { audio, mimeType };
-      const event = new CustomEvent<{ audio: string; mimeType: string }>("sc-voice-transcribe", {
+      const event = new CustomEvent<{ audio: string; mimeType: string }>("hu-voice-transcribe", {
         bubbles: true,
         composed: true,
         detail,
@@ -150,11 +150,11 @@ export class ScFloatingMic extends LitElement {
         const timeout = setTimeout(() => reject(new Error("Transcription timeout")), 30_000);
         const handler = (e: Event) => {
           clearTimeout(timeout);
-          window.removeEventListener("sc-voice-transcript-result", handler);
+          window.removeEventListener("hu-voice-transcript-result", handler);
           const text = (e as CustomEvent<{ text: string }>).detail.text;
           resolve(text);
         };
-        window.addEventListener("sc-voice-transcript-result", handler);
+        window.addEventListener("hu-voice-transcript-result", handler);
       });
 
       this.dispatchEvent(event);
@@ -208,7 +208,7 @@ export class ScFloatingMic extends LitElement {
     }
 
     if (!target) {
-      const appRoot = document.querySelector("sc-app")?.shadowRoot;
+      const appRoot = document.querySelector("hu-app")?.shadowRoot;
       if (appRoot) target = this._findInput(appRoot, 0);
     }
     if (!target) return;
@@ -250,6 +250,6 @@ export class ScFloatingMic extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-floating-mic": ScFloatingMic;
+    "hu-floating-mic": ScFloatingMic;
   }
 }

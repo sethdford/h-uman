@@ -1,56 +1,56 @@
-#include "seaclaw/memory/vector/embedder_gemini_adapter.h"
+#include "human/memory/vector/embedder_gemini_adapter.h"
 #include <string.h>
 
 typedef struct gemini_adapter_ctx {
-    sc_embedding_provider_t provider;
+    hu_embedding_provider_t provider;
 } gemini_adapter_ctx_t;
 
-static sc_error_t embed_impl(void *ctx, sc_allocator_t *alloc, const char *text, size_t text_len,
-                             sc_embedding_t *out) {
+static hu_error_t embed_impl(void *ctx, hu_allocator_t *alloc, const char *text, size_t text_len,
+                             hu_embedding_t *out) {
     gemini_adapter_ctx_t *adapter = (gemini_adapter_ctx_t *)ctx;
     if (!adapter || !adapter->provider.vtable || !alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (text_len > 0 && !text)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_embedding_provider_result_t result = {0};
-    sc_error_t err =
+    hu_embedding_provider_result_t result = {0};
+    hu_error_t err =
         adapter->provider.vtable->embed(adapter->provider.ctx, alloc, text, text_len, &result);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
     if (result.dimensions == 0) {
-        sc_embedding_provider_free(alloc, &result);
+        hu_embedding_provider_free(alloc, &result);
         out->values = NULL;
         out->dim = 0;
-        return SC_OK;
+        return HU_OK;
     }
 
     out->values = (float *)alloc->alloc(alloc->ctx, result.dimensions * sizeof(float));
     if (!out->values) {
-        sc_embedding_provider_free(alloc, &result);
-        return SC_ERR_OUT_OF_MEMORY;
+        hu_embedding_provider_free(alloc, &result);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(out->values, result.values, result.dimensions * sizeof(float));
     out->dim = result.dimensions;
-    sc_embedding_provider_free(alloc, &result);
-    return SC_OK;
+    hu_embedding_provider_free(alloc, &result);
+    return HU_OK;
 }
 
-static sc_error_t embed_batch_impl(void *ctx, sc_allocator_t *alloc, const char **texts,
-                                   const size_t *text_lens, size_t count, sc_embedding_t *out) {
+static hu_error_t embed_batch_impl(void *ctx, hu_allocator_t *alloc, const char **texts,
+                                   const size_t *text_lens, size_t count, hu_embedding_t *out) {
     if (count > 0 && (!texts || !text_lens || !out))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < count; i++) {
-        sc_error_t err = embed_impl(ctx, alloc, texts[i], text_lens[i], &out[i]);
-        if (err != SC_OK) {
+        hu_error_t err = embed_impl(ctx, alloc, texts[i], text_lens[i], &out[i]);
+        if (err != HU_OK) {
             for (size_t j = 0; j < i; j++)
-                sc_embedding_free(alloc, &out[j]);
+                hu_embedding_free(alloc, &out[j]);
             return err;
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 static size_t dimensions_impl(void *ctx) {
@@ -60,7 +60,7 @@ static size_t dimensions_impl(void *ctx) {
     return adapter->provider.vtable->dimensions(adapter->provider.ctx);
 }
 
-static void deinit_impl(void *ctx, sc_allocator_t *alloc) {
+static void deinit_impl(void *ctx, hu_allocator_t *alloc) {
     if (!ctx || !alloc)
         return;
     gemini_adapter_ctx_t *adapter = (gemini_adapter_ctx_t *)ctx;
@@ -69,16 +69,16 @@ static void deinit_impl(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, ctx, sizeof(gemini_adapter_ctx_t));
 }
 
-static const sc_embedder_vtable_t gemini_adapter_vtable = {
+static const hu_embedder_vtable_t gemini_adapter_vtable = {
     .embed = embed_impl,
     .embed_batch = embed_batch_impl,
     .dimensions = dimensions_impl,
     .deinit = deinit_impl,
 };
 
-sc_embedder_t sc_embedder_gemini_adapter_create(sc_allocator_t *alloc,
-                                                sc_embedding_provider_t provider) {
-    sc_embedder_t emb = {.ctx = NULL, .vtable = &gemini_adapter_vtable};
+hu_embedder_t hu_embedder_gemini_adapter_create(hu_allocator_t *alloc,
+                                                hu_embedding_provider_t provider) {
+    hu_embedder_t emb = {.ctx = NULL, .vtable = &gemini_adapter_vtable};
     if (!alloc || !provider.vtable)
         return emb;
 

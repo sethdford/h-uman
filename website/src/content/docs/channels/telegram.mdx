@@ -5,7 +5,7 @@ description: Set up the Telegram channel with BotFather.
 
 # Telegram Channel
 
-SeaClaw can run as a Telegram bot using the Bot API with long-polling.
+Human can run as a Telegram bot using the Bot API with long-polling.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ SeaClaw can run as a Telegram bot using the Bot API with long-polling.
 
 ## 2. Configuration
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -49,7 +49,7 @@ Add to `~/.seaclaw/config.json`:
 
 ## 3. Webhook vs long-polling
 
-- **Long-polling**: SeaClaw pulls updates from Telegram. Use when running as a CLI process.
+- **Long-polling**: Human pulls updates from Telegram. Use when running as a CLI process.
 - **Webhook**: Telegram pushes updates to your server. Requires the gateway and a public URL.
 
 For webhook mode, configure your bot webhook to point at the gateway:
@@ -58,7 +58,7 @@ For webhook mode, configure your bot webhook to point at the gateway:
 https://your-domain.com/webhook/telegram
 ```
 
-Or use the gateway's `/telegram` path. Ensure `SEACLAW_WEBHOOK_HMAC_SECRET` or `gateway.webhook_hmac_secret` is set if HMAC verification is required.
+Or use the gateway's `/telegram` path. Ensure `HUMAN_WEBHOOK_HMAC_SECRET` or `gateway.webhook_hmac_secret` is set if HMAC verification is required.
 
 ## 4. Allowlist
 

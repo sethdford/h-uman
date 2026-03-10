@@ -1,8 +1,8 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,28 +29,28 @@ typedef struct {
     char _unused;
 } invoice_ctx_t;
 
-static sc_error_t invoice_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                  sc_tool_result_t *out) {
+static hu_error_t invoice_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                  hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
 
     if (strcmp(action, "create") == 0) {
-        const char *inv_num = sc_json_get_string(args, "invoice_number");
-        const char *from = sc_json_get_string(args, "from");
-        const char *to = sc_json_get_string(args, "to");
-        const char *currency = sc_json_get_string(args, "currency");
-        double tax_rate = sc_json_get_number(args, "tax_rate", 0.0);
-        const char *format = sc_json_get_string(args, "format");
+        const char *inv_num = hu_json_get_string(args, "invoice_number");
+        const char *from = hu_json_get_string(args, "from");
+        const char *to = hu_json_get_string(args, "to");
+        const char *currency = hu_json_get_string(args, "currency");
+        double tax_rate = hu_json_get_number(args, "tax_rate", 0.0);
+        const char *format = hu_json_get_string(args, "format");
         if (!format)
             format = "markdown";
         if (!currency)
@@ -64,8 +64,8 @@ static sc_error_t invoice_execute(void *ctx, sc_allocator_t *alloc, const sc_jso
         size_t buf_sz = 8192;
         char *msg = (char *)alloc->alloc(alloc->ctx, buf_sz);
         if (!msg) {
-            *out = sc_tool_result_fail("out of memory", 13);
-            return SC_ERR_OUT_OF_MEMORY;
+            *out = hu_tool_result_fail("out of memory", 13);
+            return HU_ERR_OUT_OF_MEMORY;
         }
 
         int n = 0;
@@ -78,17 +78,17 @@ static sc_error_t invoice_execute(void *ctx, sc_allocator_t *alloc, const sc_jso
                           inv_num ? inv_num : "INV-001", date, from ? from : "", to ? to : "",
                           currency);
 
-            sc_json_value_t *items = sc_json_object_get((sc_json_value_t *)args, "items");
-            if (items && items->type == SC_JSON_ARRAY) {
+            hu_json_value_t *items = hu_json_object_get((hu_json_value_t *)args, "items");
+            if (items && items->type == HU_JSON_ARRAY) {
                 for (size_t i = 0; i < items->data.array.len; i++) {
                     if (n < 0 || (size_t)n >= buf_sz)
                         break;
-                    sc_json_value_t *item = items->data.array.items[i];
+                    hu_json_value_t *item = items->data.array.items[i];
                     if (!item)
                         continue;
-                    const char *desc = sc_json_get_string(item, "description");
-                    double qty = sc_json_get_number(item, "quantity", 1);
-                    double price = sc_json_get_number(item, "unit_price", 0);
+                    const char *desc = hu_json_get_string(item, "description");
+                    double qty = hu_json_get_number(item, "quantity", 1);
+                    double price = hu_json_get_number(item, "unit_price", 0);
                     double line_total = qty * price;
                     subtotal += line_total;
                     int w = snprintf(msg + n, buf_sz - (size_t)n,
@@ -111,17 +111,17 @@ static sc_error_t invoice_execute(void *ctx, sc_allocator_t *alloc, const sc_jso
                           inv_num ? inv_num : "INV-001", date, from ? from : "", to ? to : "",
                           currency);
 
-            sc_json_value_t *items = sc_json_object_get((sc_json_value_t *)args, "items");
-            if (items && items->type == SC_JSON_ARRAY) {
+            hu_json_value_t *items = hu_json_object_get((hu_json_value_t *)args, "items");
+            if (items && items->type == HU_JSON_ARRAY) {
                 for (size_t i = 0; i < items->data.array.len; i++) {
                     if (n < 0 || (size_t)n >= buf_sz)
                         break;
-                    sc_json_value_t *item = items->data.array.items[i];
+                    hu_json_value_t *item = items->data.array.items[i];
                     if (!item)
                         continue;
-                    const char *desc = sc_json_get_string(item, "description");
-                    double qty = sc_json_get_number(item, "quantity", 1);
-                    double price = sc_json_get_number(item, "unit_price", 0);
+                    const char *desc = hu_json_get_string(item, "description");
+                    double qty = hu_json_get_number(item, "quantity", 1);
+                    double price = hu_json_get_number(item, "unit_price", 0);
                     double line_total = qty * price;
                     subtotal += line_total;
                     int w = snprintf(msg + n, buf_sz - (size_t)n, "| %s | %.0f | %.2f | %.2f |\n",
@@ -137,47 +137,47 @@ static sc_error_t invoice_execute(void *ctx, sc_allocator_t *alloc, const sc_jso
                           subtotal, currency, tax_rate * 100, tax, currency, subtotal + tax,
                           currency);
         }
-        *out = sc_tool_result_ok_owned(msg, (size_t)n);
-        return SC_OK;
+        *out = hu_tool_result_ok_owned(msg, (size_t)n);
+        return HU_OK;
     }
 
     if (strcmp(action, "parse") == 0) {
-        const char *data = sc_json_get_string(args, "data");
+        const char *data = hu_json_get_string(args, "data");
         if (!data) {
-            *out = sc_tool_result_fail("missing data to parse", 21);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing data to parse", 21);
+            return HU_OK;
         }
-#if SC_IS_TEST
-        char *msg = sc_sprintf(alloc,
+#if HU_IS_TEST
+        char *msg = hu_sprintf(alloc,
                                "{\"parsed\":true,\"invoice_number\":\"INV-001\",\"total\":1500.00,"
                                "\"line_items\":2,\"source_length\":%zu}",
                                strlen(data));
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
 #else
-        char *msg = sc_sprintf(alloc,
+        char *msg = hu_sprintf(alloc,
                                "{\"raw_length\":%zu,\"hint\":\"use AI to extract "
                                "structured fields from this text\"}",
                                strlen(data));
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
 #endif
-        return SC_OK;
+        return HU_OK;
     }
 
     if (strcmp(action, "summary") == 0) {
-#if SC_IS_TEST
-        *out = sc_tool_result_ok(
+#if HU_IS_TEST
+        *out = hu_tool_result_ok(
             "{\"total_invoices\":5,\"total_amount\":25000.00,\"avg_amount\":5000.00,"
             "\"currency\":\"USD\"}",
             82);
 #else
-        *out = sc_tool_result_ok(
+        *out = hu_tool_result_ok(
             "{\"hint\":\"provide invoice data via the 'data' field for aggregation\"}", 67);
 #endif
-        return SC_OK;
+        return HU_OK;
     }
 
-    *out = sc_tool_result_fail("unknown action", 14);
-    return SC_OK;
+    *out = hu_tool_result_fail("unknown action", 14);
+    return HU_OK;
 }
 
 static const char *invoice_name(void *ctx) {
@@ -192,12 +192,12 @@ static const char *invoice_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void invoice_deinit(void *ctx, sc_allocator_t *alloc) {
+static void invoice_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
         alloc->free(alloc->ctx, ctx, sizeof(invoice_ctx_t));
 }
 
-static const sc_tool_vtable_t invoice_vtable = {
+static const hu_tool_vtable_t invoice_vtable = {
     .execute = invoice_execute,
     .name = invoice_name,
     .description = invoice_desc,
@@ -205,14 +205,14 @@ static const sc_tool_vtable_t invoice_vtable = {
     .deinit = invoice_deinit,
 };
 
-sc_error_t sc_invoice_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_invoice_create(hu_allocator_t *alloc, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     void *ctx = alloc->alloc(alloc->ctx, sizeof(invoice_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(invoice_ctx_t));
     out->ctx = ctx;
     out->vtable = &invoice_vtable;
-    return SC_OK;
+    return HU_OK;
 }

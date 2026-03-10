@@ -3,12 +3,12 @@ title: Gateway API
 description: HTTP endpoints, pairing, webhooks, and WebSocket.
 ---
 
-The SeaClaw gateway is an HTTP server that exposes health checks, pairing, and webhook endpoints for channels.
+The Human gateway is an HTTP server that exposes health checks, pairing, and webhook endpoints for channels.
 
 ## Starting the gateway
 
 ```bash
-./seaclaw gateway
+./human gateway
 ```
 
 Defaults: `127.0.0.1:3000` (config: `gateway.host`, `gateway.port`).
@@ -67,7 +67,7 @@ POST body is forwarded to the channel handler. Response: `{"received": true}` wi
 
 ### HMAC verification
 
-If `gateway.webhook_hmac_secret` or `SEACLAW_WEBHOOK_HMAC_SECRET` is set, webhook requests must include a valid `X-Signature` header (HMAC-SHA256 of body, hex-encoded). Invalid signature returns 401.
+If `gateway.webhook_hmac_secret` or `HUMAN_WEBHOOK_HMAC_SECRET` is set, webhook requests must include a valid `X-Signature` header (HMAC-SHA256 of body, hex-encoded). Invalid signature returns 401.
 
 ### Rate limiting
 

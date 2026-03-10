@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to seaclaw are documented here.
+All notable changes to human are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.4.0] - 2026-03-08
@@ -52,15 +52,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Structured output**: `response_format` field on `sc_chat_request_t` — OpenAI, Anthropic,
+- **Structured output**: `response_format` field on `hu_chat_request_t` — OpenAI, Anthropic,
   Gemini, Compatible, Ollama, OpenRouter providers all emit JSON mode payloads; 6 new tests
-- **Config schema versioning**: `config_version` field with `sc_config_migrate()` — auto-migrates
+- **Config schema versioning**: `config_version` field with `hu_config_migrate()` — auto-migrates
   v1 configs (e.g., moves top-level `memory_backend` into `memory.backend`); 4 migration tests
 - **CI ARM64 cross-compile**: `cmake/aarch64-linux-gnu.cmake` toolchain + `cross-arm64` GitHub
   Actions job verifying ARM64 ELF output
 - **Ollama integration test**: graceful skip when Ollama isn't running, real chat when available;
   dedicated CI job with `ollama/ollama` service container
-- **Streaming to channels**: daemon uses `sc_agent_turn_stream` + `send_event` for Telegram
+- **Streaming to channels**: daemon uses `hu_agent_turn_stream` + `send_event` for Telegram
   (edit), Discord (edit), and Slack (update); falls back to non-streaming for others
 - **Plugin system wiring**: `plugin_loader` integrated into `main.c`, config parsing for
   `plugins.paths[]` and `plugins.enabled`, `register_channel` callback on host, shutdown cleanup;
@@ -77,24 +77,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **Feature gating**: 12 CMake options (`SC_ENABLE_CRON`, `SC_ENABLE_PUSH`, `SC_ENABLE_UPDATE`,
-  `SC_ENABLE_SKILLS`, `SC_ENABLE_PERIPHERALS`, `SC_ENABLE_TUNNELS`, `SC_ENABLE_RUNTIME_EXOTIC`,
-  `SC_ENABLE_TOOLS_BROWSER`, `SC_ENABLE_TOOLS_ADVANCED`, `SC_ENABLE_OTEL`, etc.) for conditional
+- **Feature gating**: 12 CMake options (`HU_ENABLE_CRON`, `HU_ENABLE_PUSH`, `HU_ENABLE_UPDATE`,
+  `HU_ENABLE_SKILLS`, `HU_ENABLE_PERIPHERALS`, `HU_ENABLE_TUNNELS`, `HU_ENABLE_RUNTIME_EXOTIC`,
+  `HU_ENABLE_TOOLS_BROWSER`, `HU_ENABLE_TOOLS_ADVANCED`, `HU_ENABLE_OTEL`, etc.) for conditional
   compilation — minimal binary drops from 431 KB to 365 KB
 - **CMake presets**: `minimal`, `default`, `full`, `release`, `dev` build profiles in
   `CMakePresets.json`
 - **10 business tools**: analytics, broadcast, calendar, CRM, invoice, jira, report, social,
   spreadsheet, workflow — all security-hardened
 - **3 new channels**: Teams (incoming webhook), Twilio SMS (Messages API + Basic auth),
-  Google Chat (webhook) — all with `SC_IS_TEST` mocks and HTTPS enforcement
-- **Config schema validation**: `sc_config_validate_strict` checks unknown keys, type mismatches,
+  Google Chat (webhook) — all with `HU_IS_TEST` mocks and HTTPS enforcement
+- **Config schema validation**: `hu_config_validate_strict` checks unknown keys, type mismatches,
   invalid URLs (`http://` rejected), path traversal (`..`), numeric range limits; strict mode via
-  `SEACLAW_STRICT_CONFIG=1`
+  `HUMAN_STRICT_CONFIG=1`
 - **Fuzz testing**: libFuzzer harnesses for JSON parsing, config loading, and tool parameter
-  handling (`fuzz/` directory, `SC_ENABLE_FUZZ=ON`)
+  handling (`fuzz/` directory, `HU_ENABLE_FUZZ=ON`)
 - **Benchmark suite**: JSON, memory backend, and config parsing benchmarks with
-  `clock_gettime`/`mach_absolute_time` timing (`bench/`, `SC_ENABLE_BENCH=ON`)
-- **Unified memory factory**: `sc_memory_create_from_config()` replaces 3 duplicated memory
+  `clock_gettime`/`mach_absolute_time` timing (`bench/`, `HU_ENABLE_BENCH=ON`)
+- **Unified memory factory**: `hu_memory_create_from_config()` replaces 3 duplicated memory
   creation paths in `cli.c`, `main.c`, and `cli_commands.c`
 - **Channel integration tests**: full lifecycle + negative cases for Teams, Twilio, Google Chat
 - **Peripheral mock tests**: 15 tests for Arduino, STM32/Nucleo, RPi (create/read/write/deinit +
@@ -114,7 +114,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **5 tools**: empty credential acceptance (analytics, CRM, social, broadcast, invoice)
 - **5 compiler warnings**: seatbelt unused variable, pdf unused result, 3 provider const-discard
 - `config.c` split into `config_serialize.c` + `config_getters.c` (was 74 KB object)
-- `-Werror` enabled on `seaclaw_core` and `seaclaw` targets
+- `-Werror` enabled on `human_core` and `human` targets
 
 ### Changed
 
@@ -132,15 +132,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   service — completes the push notification system (FCM was already implemented)
 - **OTel HTTP export**: `otel_record_event` and `otel_record_metric` now POST OTLP JSON
   payloads to `/v1/logs` and `/v1/metrics` on the configured collector endpoint
-- **Dispatch channel wired**: `SC_CHANNEL_DISPATCH` added to enum and channel catalog
-- **4 new UI components**: `sc-data-table`, `sc-date-picker`, `sc-search`, `sc-segmented-control`
+- **Dispatch channel wired**: `HU_CHANNEL_DISPATCH` added to enum and channel catalog
+- **4 new UI components**: `hu-data-table`, `hu-date-picker`, `hu-search`, `hu-segmented-control`
 - **Design tokens**: motion tokens, expanded semantic tokens, platform token sync (iOS/Android)
 - **Lighthouse CI**: `.lighthouserc.json` for automated performance/accessibility auditing
 - **8 orphaned tests wired**: `test_new_features.c` (PDF, health, config, ws_streaming) now runs
 
 ### Fixed
 
-- Removed orphan `SC_CHANNEL_WEBHOOK` enum value (unused)
+- Removed orphan `HU_CHANNEL_WEBHOOK` enum value (unused)
 - Fixed `thread_binding.c` duplicate in CMakeLists.txt
 - Fixed STUBS.md tool count (66 → 54, matches actual factory)
 - Filled production API paths: social (LinkedIn post/read), jira (get/comment/update),
@@ -158,7 +158,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - **10 business automation tools**: spreadsheet, report, broadcast, calendar, jira, social, crm,
-  analytics, invoice, workflow — all with real implementations + `SC_IS_TEST` mock paths
+  analytics, invoice, workflow — all with real implementations + `HU_IS_TEST` mock paths
 - **spreadsheet**: CSV/TSV parse, analyze (stats), query (filter by column), generate
 - **report**: structured Markdown/HTML report generation with templates (executive_summary,
   weekly_status, incident_report, financial_summary) and sections
@@ -170,7 +170,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **analytics**: Plausible + Google Analytics — overview, top pages, referrers, realtime visitors
 - **invoice**: create invoices (Markdown/JSON), parse invoice text, aggregate summaries
 - **workflow**: DAG workflow engine with approval gates — create, run, approve, cancel, status, list
-- **10 new headers**: `include/seaclaw/tools/{spreadsheet,report,broadcast,calendar_tool,jira,
+- **10 new headers**: `include/human/tools/{spreadsheet,report,broadcast,calendar_tool,jira,
 social,crm,analytics,invoice,workflow}.h`
 - **20 new tests**: create + functional test for each tool (analyze, template, list, post,
   contacts, overview, parse, create+run, approval_gate)
@@ -178,69 +178,69 @@ social,crm,analytics,invoice,workflow}.h`
 
 ### Changed
 
-- `SC_TOOLS_COUNT_BASE` in factory.c: 25 → 35
+- `HU_TOOLS_COUNT_BASE` in factory.c: 25 → 35
 - STUBS.md: 56 → 66 tools, 2,238 → 2,258 tests
 
 ## [2026.3.3b] - 2026-03-03
 
 ### Added
 
-- **Microsoft Teams channel**: `sc_teams_create`, `sc_teams_on_webhook` (Bot Framework Activity
-  JSON parsing), `sc_teams_poll` ring buffer queue, `sc_teams_destroy`; sends via Bot Framework
+- **Microsoft Teams channel**: `hu_teams_create`, `hu_teams_on_webhook` (Bot Framework Activity
+  JSON parsing), `hu_teams_poll` ring buffer queue, `hu_teams_destroy`; sends via Bot Framework
   REST API with Bearer auth
-- **Twilio SMS channel**: `sc_twilio_create`, `sc_twilio_on_webhook` (form-urlencoded `From`/`Body`
-  parsing), `sc_twilio_poll` ring buffer queue, `sc_twilio_destroy`; sends via Twilio Messages API
+- **Twilio SMS channel**: `hu_twilio_create`, `hu_twilio_on_webhook` (form-urlencoded `From`/`Body`
+  parsing), `hu_twilio_poll` ring buffer queue, `hu_twilio_destroy`; sends via Twilio Messages API
   with Basic auth
-- **Google Chat channel**: `sc_google_chat_create`, `sc_google_chat_on_webhook` (Google Chat event
-  JSON parsing with `message.text`/`message.sender.name`), `sc_google_chat_poll` ring buffer queue,
-  `sc_google_chat_destroy`; sends via Google Chat Spaces API with Bearer auth
-- **3 new channel headers**: `include/seaclaw/channels/teams.h`, `twilio.h`, `google_chat.h`
+- **Google Chat channel**: `hu_google_chat_create`, `hu_google_chat_on_webhook` (Google Chat event
+  JSON parsing with `message.text`/`message.sender.name`), `hu_google_chat_poll` ring buffer queue,
+  `hu_google_chat_destroy`; sends via Google Chat Spaces API with Bearer auth
+- **3 new channel headers**: `include/human/channels/teams.h`, `twilio.h`, `google_chat.h`
 - **12 new tests**: create, health_check, webhook+poll, poll_null_args for each of Teams, Twilio,
   Google Chat
-- **CMake options**: `SC_ENABLE_TEAMS`, `SC_ENABLE_TWILIO`, `SC_ENABLE_GOOGLE_CHAT` (all included
-  in `SC_ENABLE_ALL_CHANNELS`)
+- **CMake options**: `HU_ENABLE_TEAMS`, `HU_ENABLE_TWILIO`, `HU_ENABLE_GOOGLE_CHAT` (all included
+  in `HU_ENABLE_ALL_CHANNELS`)
 
 ### Changed
 
 - Channel catalog: 21 send+receive channels (was 18)
-- `channel_catalog.c`: added Teams, Twilio, Google Chat as `SC_LISTENER_POLLING`
-- `sc_channel_catalog_requires_runtime`: returns true for Teams, Twilio, Google Chat
+- `channel_catalog.c`: added Teams, Twilio, Google Chat as `HU_LISTENER_POLLING`
+- `hu_channel_catalog_requires_runtime`: returns true for Teams, Twilio, Google Chat
 
 ## [2026.3.3] - 2026-03-03
 
 ### Added
 
-- **Matrix inbound polling**: `sc_matrix_poll` via Matrix `/sync` API with `since` token tracking,
+- **Matrix inbound polling**: `hu_matrix_poll` via Matrix `/sync` API with `since` token tracking,
   room timeline parsing, and sender filtering (skips own messages)
-- **IRC inbound polling**: `sc_irc_poll` via `select()`+`recv()` on existing socket, PRIVMSG parsing,
+- **IRC inbound polling**: `hu_irc_poll` via `select()`+`recv()` on existing socket, PRIVMSG parsing,
   automatic PING/PONG handling, and line-buffered read with `\r\n` framing
 - **SSE streaming for Ollama, OpenRouter, Compatible**: all three providers now implement
   `supports_streaming` and `stream_chat` vtable methods; in test mode returns mock delta chunks,
   in prod delegates to non-streaming chat then emits as single chunk (full SSE parsing TBD)
-- **Real `update.check`**: control protocol handler now calls `sc_update_check()` to fetch latest
+- **Real `update.check`**: control protocol handler now calls `hu_update_check()` to fetch latest
   version from GitHub releases API, compares with current, returns `{available, current, latest}`
-- **Real `update.run`**: control protocol handler now calls `sc_update_apply()` to download and
+- **Real `update.run`**: control protocol handler now calls `hu_update_apply()` to download and
   replace binary, returns `{status: "updated"}` or error string
-- **Enriched `nodes.list`**: local node now includes `hostname`, `version` (from `sc_version_string()`),
+- **Enriched `nodes.list`**: local node now includes `hostname`, `version` (from `hu_version_string()`),
   and `uptime_secs` (from `CLOCK_MONOTONIC`) in addition to existing fields
-- **LINE/Lark/DingTalk/QQ/OneBot webhook handlers**: `sc_{ch}_on_webhook` parses platform-specific
-  JSON payloads and queues inbound messages into a ring buffer for `sc_{ch}_poll` consumption
-- **Mattermost REST polling**: `sc_mattermost_poll` via `GET /api/v4/channels/{id}/posts` with
+- **LINE/Lark/DingTalk/QQ/OneBot webhook handlers**: `hu_{ch}_on_webhook` parses platform-specific
+  JSON payloads and queues inbound messages into a ring buffer for `hu_{ch}_poll` consumption
+- **Mattermost REST polling**: `hu_mattermost_poll` via `GET /api/v4/channels/{id}/posts` with
   `after` cursor tracking, post ordering, and user ID extraction
-- **Channel headers**: all 7 new channels get public headers in `include/seaclaw/channels/`
-- **Slack inbound polling**: `sc_slack_poll` via Slack `conversations.history` API; `sc_slack_create_ex`
+- **Channel headers**: all 7 new channels get public headers in `include/human/channels/`
+- **Slack inbound polling**: `hu_slack_poll` via Slack `conversations.history` API; `hu_slack_create_ex`
   accepts `channel_ids` for multi-channel polling, bot message filtering, and `last_ts` cursor tracking
-- **WhatsApp inbound**: `sc_whatsapp_on_webhook` parses WhatsApp Cloud API webhook payloads
-  (entry → changes → value → messages), queues inbound text messages for `sc_whatsapp_poll` consumption
+- **WhatsApp inbound**: `hu_whatsapp_on_webhook` parses WhatsApp Cloud API webhook payloads
+  (entry → changes → value → messages), queues inbound text messages for `hu_whatsapp_poll` consumption
 - **Multi-agent orchestration wiring**: agent pool, mailbox, policy engine, thread binding,
   and agent profiles wired into `cli.c`, `main.c` (service, gateway, MCP modes)
-- **Policy engine in tool dispatch**: `sc_agent_check_policy` evaluates tool calls against policy
+- **Policy engine in tool dispatch**: `hu_agent_check_policy` evaluates tool calls against policy
   engine before execution; denied calls return "denied by policy"
 - **Slash commands**: `/spawn <task>`, `/agents`, `/cancel <id>` in agent loop using agent pool
-- **`sc_message_tool_set_channel`**: post-creation channel injection for the message tool
-- **`sc_gateway_path_is`**: path-matching utility for gateway routing
+- **`hu_message_tool_set_channel`**: post-creation channel injection for the message tool
+- **`hu_gateway_path_is`**: path-matching utility for gateway routing
 - **Config parsing**: `pool_max_concurrent`, `default_profile`, `policy`, `plugins`, `slack`, `whatsapp`
-  sections in `~/.seaclaw/config.json`
+  sections in `~/.human/config.json`
 - **OTel observer**: created when config has `otel_endpoint`
 - **28 new tests**: 6 streaming, 4 matrix/irc poll, 10 webhook+poll (LINE, Lark, Mattermost, OneBot,
   DingTalk × webhook+null), 1 update_apply, 13 roadmap integration, 4 channel tests
@@ -248,17 +248,17 @@ social,crm,analytics,invoice,workflow}.h`
 
 ### Changed
 
-- Matrix channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
-- IRC channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
-- Slack channel listener type: `SC_LISTENER_GATEWAY` → `SC_LISTENER_POLLING`
-- WhatsApp channel listener type: `SC_LISTENER_WEBHOOK_ONLY` → `SC_LISTENER_POLLING`
-- LINE, Lark, Mattermost, OneBot, DingTalk, QQ listener types: `SC_LISTENER_WEBHOOK_ONLY` → `SC_LISTENER_POLLING`
+- Matrix channel listener type: `HU_LISTENER_GATEWAY` → `HU_LISTENER_POLLING`
+- IRC channel listener type: `HU_LISTENER_GATEWAY` → `HU_LISTENER_POLLING`
+- Slack channel listener type: `HU_LISTENER_GATEWAY` → `HU_LISTENER_POLLING`
+- WhatsApp channel listener type: `HU_LISTENER_WEBHOOK_ONLY` → `HU_LISTENER_POLLING`
+- LINE, Lark, Mattermost, OneBot, DingTalk, QQ listener types: `HU_LISTENER_WEBHOOK_ONLY` → `HU_LISTENER_POLLING`
 - Ollama, OpenRouter, Compatible providers: streaming column "No" → "Yes (SSE)"
 - `nodes.list` response: added `hostname`, `version`, `uptime_secs` to local node
 - `update.check` response: now returns real version comparison instead of hardcoded false
-- `update.run` response: now calls `sc_update_apply()` instead of returning "up_to_date"
+- `update.run` response: now calls `hu_update_apply()` instead of returning "up_to_date"
 - Service loop `channels` array expanded from 8 → 10 to accommodate Slack and WhatsApp
-- `sc_channels_config_t` extended with `sc_slack_channel_config_t` and `sc_whatsapp_channel_config_t`
+- `hu_channels_config_t` extended with `hu_slack_channel_config_t` and `hu_whatsapp_channel_config_t`
 
 ## [2026.3.2] - 2026-03-02
 
@@ -274,33 +274,33 @@ social,crm,analytics,invoice,workflow}.h`
   - **AppContainer** (Windows): Job Object + capability-based isolation
 - **Sandbox `apply` callback**: vtable extension for kernel-level sandboxes that apply restrictions
   programmatically after fork() rather than via argv wrapping
-- **`sc_process_run_sandboxed`**: new API in process_util that invokes sandbox `apply` callback
+- **`hu_process_run_sandboxed`**: new API in process_util that invokes sandbox `apply` callback
   between fork() and child execution, enabling Landlock/seccomp enforcement
-- **Network isolation proxy**: `sc_net_proxy_t` for domain-based network filtering with wildcard
+- **Network isolation proxy**: `hu_net_proxy_t` for domain-based network filtering with wildcard
   subdomain matching, composable with any sandbox backend
-- **Tiered auto-detection**: `SC_SANDBOX_AUTO` now selects the strongest available backend per OS:
+- **Tiered auto-detection**: `HU_SANDBOX_AUTO` now selects the strongest available backend per OS:
   macOS Seatbelt -> Linux Landlock+seccomp -> Bubblewrap -> Firejail -> Firecracker -> Docker -> WASI -> noop
-- **Config schema**: all new backends configurable via `~/.seaclaw/config.json` `security.sandbox` field
+- **Config schema**: all new backends configurable via `~/.human/config.json` `security.sandbox` field
   (`"seatbelt"`, `"seccomp"`, `"landlock+seccomp"`, `"wasi"`, `"firecracker"`, `"appcontainer"`)
 - **Claude Code integration**: `claude_code` tool delegates coding tasks to Claude CLI via `fork`/`exec`
-- **MCP server**: `seaclaw --mcp` exposes all tools as JSON-RPC over stdin/stdout (MCP protocol)
+- **MCP server**: `human --mcp` exposes all tools as JSON-RPC over stdin/stdout (MCP protocol)
 - **MCP client**: load external MCP servers from `config.json` and merge their tools into the agent
 - **Bidirectional email**: IMAP polling for inbound messages, SMTP with auth for outbound
 - **Bidirectional iMessage**: poll macOS `chat.db` for inbound, AppleScript for outbound
-- **Always-on service loop**: `seaclaw service` daemonizes; polls channels, dispatches to agent, sends replies
+- **Always-on service loop**: `human service` daemonizes; polls channels, dispatches to agent, sends replies
 - **Persistent sessions**: service loop saves/loads per-sender conversation history via session store
 - **Full cron syntax**: `*/N` steps, `N-M` ranges, `N-M/S` range-steps, `N,M,O` comma lists
 - **Shell completions**: bash and zsh completion scripts for all subcommands
-- **Homebrew formula**: `Formula/seaclaw.rb` for macOS distribution
+- **Homebrew formula**: `Formula/human.rb` for macOS distribution
 - **Channel docs**: individual documentation pages for Email, iMessage, IRC, Matrix, Web channels
 - **E2E test script**: `scripts/e2e-test.sh` validates full service loop end-to-end
-- **`.mcp.json`**: project-level config to register seaclaw as MCP server for Claude Code
+- **`.mcp.json`**: project-level config to register human as MCP server for Claude Code
 
 ### Changed
 
 - `delegate` tool now routes to `claude_code` when agent is "claude_code"
-- `sc_service_run` accepts an `sc_agent_t` for message dispatch (was poll-only)
-- `sc_service_channel_t` includes `sc_channel_t *channel` for sending replies
+- `hu_service_run` accepts an `hu_agent_t` for message dispatch (was poll-only)
+- `hu_service_channel_t` includes `hu_channel_t *channel` for sending replies
 - Service loop clears and restores per-session history before each agent turn
 - Cron field parser uses `strtol` with bounds checking (was `atoi`)
 - Autonomy level cast clamped to valid enum range in service loop
@@ -340,7 +340,7 @@ social,crm,analytics,invoice,workflow}.h`
 
 ### Added
 
-- Complete nullclaw-to-seaclaw rename
+- Complete nullclaw-to-human rename
 - Claude CLI provider
 - Zig artifacts removed (pure C11)
 

@@ -2,10 +2,10 @@
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "$description": "Semantic tokens — ocean-aligned theme",
   "$extensions": {
-    "com.seaclaw.platform": "all",
-    "com.seaclaw.version": "0.3.0",
-    "seaclaw.colorSpace": "display-p3",
-    "seaclaw.p3Colors": {
+    "com.human.platform": "all",
+    "com.human.version": "0.3.0",
+    "human.colorSpace": "display-p3",
+    "human.p3Colors": {
       "dark.accent": "color(display-p3 0.420 0.680 0.220)",
       "dark.accent-text": "color(display-p3 0.490 0.740 0.180)",
       "dark.accent-hover": "color(display-p3 0.490 0.740 0.180)",
@@ -193,7 +193,7 @@
       "$type": "shadow"
     },
     "shadow-glow-accent": {
-      "$value": "0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
+      "$value": "0 0 0 1px var(--hu-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)",
       "$type": "shadow"
     },
     "shadow-glow-blue": {

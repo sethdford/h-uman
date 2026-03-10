@@ -1,4 +1,4 @@
-#include "seaclaw/agent/input_guard.h"
+#include "human/agent/input_guard.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -21,18 +21,18 @@ static int has(const char *msg, size_t len, const char *pat) {
     return ci_strstr(msg, len, pat, strlen(pat)) != NULL;
 }
 
-#define SC_INPUT_GUARD_MAX_LEN (256u * 1024u)
+#define HU_INPUT_GUARD_MAX_LEN (256u * 1024u)
 
-sc_error_t sc_input_guard_check(const char *message, size_t message_len,
-                                sc_injection_risk_t *out_risk) {
+hu_error_t hu_input_guard_check(const char *message, size_t message_len,
+                                hu_injection_risk_t *out_risk) {
     if (!out_risk)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!message || message_len == 0) {
-        *out_risk = SC_INJECTION_SAFE;
-        return SC_OK;
+        *out_risk = HU_INJECTION_SAFE;
+        return HU_OK;
     }
-    if (message_len > SC_INPUT_GUARD_MAX_LEN)
-        message_len = SC_INPUT_GUARD_MAX_LEN;
+    if (message_len > HU_INPUT_GUARD_MAX_LEN)
+        message_len = HU_INPUT_GUARD_MAX_LEN;
 
     int score = 0;
 
@@ -76,11 +76,11 @@ sc_error_t sc_input_guard_check(const char *message, size_t message_len,
             score += 1;
 
     if (score >= 3)
-        *out_risk = SC_INJECTION_HIGH_RISK;
+        *out_risk = HU_INJECTION_HIGH_RISK;
     else if (score >= 1)
-        *out_risk = SC_INJECTION_SUSPICIOUS;
+        *out_risk = HU_INJECTION_SUSPICIOUS;
     else
-        *out_risk = SC_INJECTION_SAFE;
+        *out_risk = HU_INJECTION_SAFE;
 
-    return SC_OK;
+    return HU_OK;
 }

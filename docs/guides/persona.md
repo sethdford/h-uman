@@ -1,12 +1,12 @@
 ---
 title: Persona Guide
-description: Create and use persona profiles for personality cloning in seaclaw
+description: Create and use persona profiles for personality cloning in human
 updated: 2026-03-06
 ---
 
 # Persona Guide
 
-Personas let seaclaw adopt your real communication style by analyzing your message history and synthesizing a profile. The agent then uses this profile to match your voice, vocabulary, and tone across channels.
+Personas let human adopt your real communication style by analyzing your message history and synthesizing a profile. The agent then uses this profile to match your voice, vocabulary, and tone across channels.
 
 ## Overview
 
@@ -24,13 +24,13 @@ Create your first persona in three commands:
 
 ```bash
 # Create from iMessage (macOS)
-seaclaw persona create myname --from-imessage
+human persona create myname --from-imessage
 
 # Show the generated profile
-seaclaw persona show myname
+human persona show myname
 
 # Enable in config
-# Add to ~/.seaclaw/config.json: { "agent": { "persona": "myname" } }
+# Add to ~/.human/config.json: { "agent": { "persona": "myname" } }
 ```
 
 ## Creating a Persona
@@ -40,17 +40,17 @@ seaclaw persona show myname
 Requires macOS and access to `~/Library/Messages/chat.db`:
 
 ```bash
-seaclaw persona create myname --from-imessage
+human persona create myname --from-imessage
 ```
 
-The tool queries your sent messages (excluding group chats by default), sends them to the configured AI provider for analysis, and writes `~/.seaclaw/personas/myname.json`.
+The tool queries your sent messages (excluding group chats by default), sends them to the configured AI provider for analysis, and writes `~/.human/personas/myname.json`.
 
 ### From Facebook
 
 Export your Facebook data (Settings > Your Facebook Information > Download Your Information), then:
 
 ```bash
-seaclaw persona create myname --from-facebook /path/to/messages/inbox/your_thread/message_1.json
+human persona create myname --from-facebook /path/to/messages/inbox/your_thread/message_1.json
 ```
 
 You can also pass a directory; the tool will find and parse message JSON files.
@@ -60,13 +60,13 @@ You can also pass a directory; the tool will find and parse message JSON files.
 Export Gmail via Google Takeout (MBOX or JSON). Then:
 
 ```bash
-seaclaw persona create myname --from-gmail /path/to/Takeout/Mail/your_label.mbox
+human persona create myname --from-gmail /path/to/Takeout/Mail/your_label.mbox
 ```
 
 Or with a JSON export:
 
 ```bash
-seaclaw persona create myname --from-gmail /path/to/messages.json
+human persona create myname --from-gmail /path/to/messages.json
 ```
 
 ### Manual Creation
@@ -74,15 +74,15 @@ seaclaw persona create myname --from-gmail /path/to/messages.json
 Create the file directly:
 
 ```bash
-mkdir -p ~/.seaclaw/personas
-# Edit ~/.seaclaw/personas/myname.json
+mkdir -p ~/.human/personas
+# Edit ~/.human/personas/myname.json
 ```
 
 See [Persona JSON format](#persona-json-format) for the schema.
 
 ## Persona JSON Format
 
-All persona files live in `~/.seaclaw/personas/<name>.json`. Required structure:
+All persona files live in `~/.human/personas/<name>.json`. Required structure:
 
 ```json
 {
@@ -180,7 +180,7 @@ A minimal but complete persona (like the `seth` example):
 
 ### Config
 
-Set the default persona in `~/.seaclaw/config.json`:
+Set the default persona in `~/.human/config.json`:
 
 ```json
 {
@@ -219,32 +219,32 @@ Channel overlays are applied automatically when the agent responds on a given ch
 
 ```bash
 # List all personas
-seaclaw persona list
+human persona list
 
 # Show persona profile (rendered system prompt)
-seaclaw persona show myname
+human persona show myname
 
 # Validate persona JSON
-seaclaw persona validate myname
+human persona validate myname
 
 # Delete a persona
-seaclaw persona delete myname
+human persona delete myname
 
 # Export persona JSON to stdout
-seaclaw persona export myname
+human persona export myname
 
 # Merge multiple personas into one
-seaclaw persona merge output_name persona1 persona2 [persona3 ...]
+human persona merge output_name persona1 persona2 [persona3 ...]
 
 # Import persona from file or stdin
-seaclaw persona import myname --from-file /path/to/persona.json
-seaclaw persona import myname --from-stdin   # read JSON from stdin
+human persona import myname --from-file /path/to/persona.json
+human persona import myname --from-stdin   # read JSON from stdin
 
 # Diff two personas (identity, traits, overlays)
-seaclaw persona diff persona1 persona2
+human persona diff persona1 persona2
 
 # Apply recorded feedback to persona
-seaclaw persona feedback apply myname
+human persona feedback apply myname
 ```
 
 ## Example Banks
@@ -254,10 +254,10 @@ Example banks provide few-shot style examples per channel. The prompt builder se
 ### File Location
 
 ```
-~/.seaclaw/personas/examples/<persona_name>/<channel>/examples.json
+~/.human/personas/examples/<persona_name>/<channel>/examples.json
 ```
 
-Example: `~/.seaclaw/personas/examples/seth/imessage/examples.json`
+Example: `~/.human/personas/examples/seth/imessage/examples.json`
 
 ### Example JSON Format
 
@@ -302,14 +302,14 @@ When the agent responds in a way that does not match your style, record a correc
 }
 ```
 
-Feedback is stored in `~/.seaclaw/personas/feedback/<name>.jsonl`.
+Feedback is stored in `~/.human/personas/feedback/<name>.jsonl`.
 
 ### Applying Feedback
 
 Periodically apply recorded feedback to update the persona and example banks:
 
 ```bash
-seaclaw persona feedback apply myname
+human persona feedback apply myname
 ```
 
 This reads the feedback file, merges corrections into example banks, and rewrites `examples.json` for affected channels.
@@ -327,34 +327,34 @@ Overlays let the same persona adapt: casual on iMessage, more formal on Slack, t
 
 ## Environment Override
 
-For tests or custom layouts, set `SC_PERSONA_DIR` to override the persona base directory (default `~/.seaclaw/personas`):
+For tests or custom layouts, set `HU_PERSONA_DIR` to override the persona base directory (default `~/.human/personas`):
 
 ```bash
-export SC_PERSONA_DIR=/tmp/my-personas
-seaclaw persona list   # lists /tmp/my-personas/*.json
+export HU_PERSONA_DIR=/tmp/my-personas
+human persona list   # lists /tmp/my-personas/*.json
 ```
 
 ## CLI Reference
 
 | Command                                                                                                        | Description                                       |
 | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `seaclaw persona list`                                                                                         | List all persona profiles                         |
-| `seaclaw persona show <name>`                                                                                  | Display persona (rendered prompt)                 |
-| `seaclaw persona validate <name>`                                                                              | Validate persona JSON                             |
-| `seaclaw persona create <name> [--from-imessage \| --from-gmail \| --from-facebook \| --from-response <path>]` | Create persona from message history               |
-| `seaclaw persona update <name> [--from-imessage \| ...]`                                                       | Update existing persona from sources              |
-| `seaclaw persona delete <name>`                                                                                | Remove persona file                               |
-| `seaclaw persona export <name>`                                                                                | Export persona JSON to stdout                     |
-| `seaclaw persona merge <output> <name1> <name2> [...]`                                                         | Merge multiple personas into one                  |
-| `seaclaw persona import <name> [--from-file <path> \| --from-stdin]`                                           | Import persona from file or stdin                 |
-| `seaclaw persona diff <name1> <name2>`                                                                         | Compare two personas (identity, traits, overlays) |
-| `seaclaw persona feedback apply <name>`                                                                        | Apply recorded feedback to persona                |
+| `human persona list`                                                                                         | List all persona profiles                         |
+| `human persona show <name>`                                                                                  | Display persona (rendered prompt)                 |
+| `human persona validate <name>`                                                                              | Validate persona JSON                             |
+| `human persona create <name> [--from-imessage \| --from-gmail \| --from-facebook \| --from-response <path>]` | Create persona from message history               |
+| `human persona update <name> [--from-imessage \| ...]`                                                       | Update existing persona from sources              |
+| `human persona delete <name>`                                                                                | Remove persona file                               |
+| `human persona export <name>`                                                                                | Export persona JSON to stdout                     |
+| `human persona merge <output> <name1> <name2> [...]`                                                         | Merge multiple personas into one                  |
+| `human persona import <name> [--from-file <path> \| --from-stdin]`                                           | Import persona from file or stdin                 |
+| `human persona diff <name1> <name2>`                                                                         | Compare two personas (identity, traits, overlays) |
+| `human persona feedback apply <name>`                                                                        | Apply recorded feedback to persona                |
 
 ## Persona for Agents
 
 When you spawn subagents (e.g. via the delegate tool or agent teams), the spawn config can include a persona:
 
-- `sc_spawn_config_t.persona_name` — name of the persona to load
-- The spawned agent loads the persona from `~/.seaclaw/personas/<name>.json` and injects it into its system prompt
+- `hu_spawn_config_t.persona_name` — name of the persona to load
+- The spawned agent loads the persona from `~/.human/personas/<name>.json` and injects it into its system prompt
 
-Config-driven agents use `agent.persona` from `config.json`. Spawned agents use `sc_spawn_config_t.persona_name` when provided.
+Config-driven agents use `agent.persona` from `config.json`. Spawned agents use `hu_spawn_config_t.persona_name` when provided.

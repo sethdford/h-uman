@@ -1,9 +1,9 @@
 ---
 title: Provider Overview
-description: AI model provider architecture in SeaClaw.
+description: AI model provider architecture in Human.
 ---
 
-SeaClaw uses a **vtable-driven provider interface**. All AI model backends implement `sc_provider_t` and are selected by name at runtime.
+Human uses a **vtable-driven provider interface**. All AI model backends implement `sc_provider_t` and are selected by name at runtime.
 
 ## Provider vtable interface
 
@@ -94,7 +94,7 @@ No API key is required for local providers.
 Set `default_provider` in config or pass `--provider` on the CLI:
 
 ```bash
-./seaclaw agent --provider ollama --model llama3
+./human agent --provider ollama --model llama3
 ```
 
 For compatible providers, add a `providers` entry with your API key:

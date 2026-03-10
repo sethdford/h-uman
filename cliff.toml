@@ -2,7 +2,7 @@
 header = """
 # Changelog
 
-All notable changes to seaclaw are documented here.\n
+All notable changes to human are documented here.\n
 """
 body = """
 {% if version %}\

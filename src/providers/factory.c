@@ -1,22 +1,22 @@
-#include "seaclaw/providers/factory.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/provider.h"
-#include "seaclaw/providers/anthropic.h"
-#include "seaclaw/providers/claude_cli.h"
-#include "seaclaw/providers/codex_cli.h"
-#include "seaclaw/providers/compatible.h"
-#include "seaclaw/providers/gemini.h"
-#include "seaclaw/providers/ollama.h"
-#include "seaclaw/providers/openai.h"
-#include "seaclaw/providers/openai_codex.h"
-#include "seaclaw/providers/openrouter.h"
+#include "human/providers/factory.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/provider.h"
+#include "human/providers/anthropic.h"
+#include "human/providers/claude_cli.h"
+#include "human/providers/codex_cli.h"
+#include "human/providers/compatible.h"
+#include "human/providers/gemini.h"
+#include "human/providers/ollama.h"
+#include "human/providers/openai.h"
+#include "human/providers/openai_codex.h"
+#include "human/providers/openrouter.h"
 #include <string.h>
 
 static const struct {
     const char *name;
     const char *url;
-} sc_compat_providers[] = {
+} hu_compat_providers[] = {
     {"groq", "https://api.groq.com/openai"},
     {"mistral", "https://api.mistral.ai/v1"},
     {"deepseek", "https://api.deepseek.com"},
@@ -107,68 +107,68 @@ static const struct {
     {"litellm", "http://localhost:4000"},
 };
 
-static const size_t sc_compat_providers_count =
-    sizeof(sc_compat_providers) / sizeof(sc_compat_providers[0]);
+static const size_t hu_compat_providers_count =
+    sizeof(hu_compat_providers) / sizeof(hu_compat_providers[0]);
 
-const char *sc_compatible_provider_url(const char *name) {
+const char *hu_compatible_provider_url(const char *name) {
     if (!name)
         return NULL;
-    for (size_t i = 0; i < sc_compat_providers_count; i++) {
-        if (strcmp(sc_compat_providers[i].name, name) == 0)
-            return sc_compat_providers[i].url;
+    for (size_t i = 0; i < hu_compat_providers_count; i++) {
+        if (strcmp(hu_compat_providers[i].name, name) == 0)
+            return hu_compat_providers[i].url;
     }
     return NULL;
 }
 
-sc_error_t sc_provider_create(sc_allocator_t *alloc, const char *name, size_t name_len,
+hu_error_t hu_provider_create(hu_allocator_t *alloc, const char *name, size_t name_len,
                               const char *api_key, size_t api_key_len, const char *base_url,
-                              size_t base_url_len, sc_provider_t *out) {
+                              size_t base_url_len, hu_provider_t *out) {
     if (!alloc || !name || name_len == 0 || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (name_len == 6 && memcmp(name, "openai", 6) == 0) {
-        return sc_openai_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_openai_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 9 && memcmp(name, "anthropic", 9) == 0) {
-        return sc_anthropic_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_anthropic_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 6 && memcmp(name, "gemini", 6) == 0) {
-        return sc_gemini_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_gemini_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 6 && memcmp(name, "google", 6) == 0) {
-        return sc_gemini_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_gemini_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 13 && memcmp(name, "google-gemini", 13) == 0) {
-        return sc_gemini_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_gemini_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 6 && memcmp(name, "ollama", 6) == 0) {
-        return sc_ollama_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_ollama_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 10 && memcmp(name, "openrouter", 10) == 0) {
-        return sc_openrouter_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_openrouter_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 10 && memcmp(name, "compatible", 10) == 0) {
-        return sc_compatible_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_compatible_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 10 && memcmp(name, "claude_cli", 10) == 0) {
-        return sc_claude_cli_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_claude_cli_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 9 && memcmp(name, "codex_cli", 9) == 0) {
-        return sc_codex_cli_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_codex_cli_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
     if (name_len == 12 && memcmp(name, "openai-codex", 12) == 0) {
-        return sc_openai_codex_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
+        return hu_openai_codex_create(alloc, api_key, api_key_len, base_url, base_url_len, out);
     }
 
     if (name_len > 7 && memcmp(name, "custom:", 7) == 0) {
         const char *url = name + 7;
         size_t url_len = name_len - 7;
-        return sc_compatible_create(alloc, api_key, api_key_len, url, url_len, out);
+        return hu_compatible_create(alloc, api_key, api_key_len, url, url_len, out);
     }
     if (name_len > 17 && memcmp(name, "anthropic-custom:", 17) == 0) {
         const char *url = name + 17;
         size_t url_len = name_len - 17;
-        return sc_anthropic_create(alloc, api_key, api_key_len, url, url_len, out);
+        return hu_anthropic_create(alloc, api_key, api_key_len, url, url_len, out);
     }
 
     {
@@ -176,7 +176,7 @@ sc_error_t sc_provider_create(sc_allocator_t *alloc, const char *name, size_t na
         if (name_len < sizeof(nbuf)) {
             memcpy(nbuf, name, name_len);
             nbuf[name_len] = '\0';
-            const char *compat_url = sc_compatible_provider_url(nbuf);
+            const char *compat_url = hu_compatible_provider_url(nbuf);
             if (compat_url) {
                 const char *url = base_url;
                 size_t url_len = base_url_len;
@@ -184,10 +184,10 @@ sc_error_t sc_provider_create(sc_allocator_t *alloc, const char *name, size_t na
                     url = compat_url;
                     url_len = strlen(compat_url);
                 }
-                return sc_compatible_create(alloc, api_key, api_key_len, url, url_len, out);
+                return hu_compatible_create(alloc, api_key, api_key_len, url, url_len, out);
             }
         }
     }
 
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }

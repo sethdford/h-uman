@@ -1,8 +1,8 @@
 {
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "$extensions": {
-    "com.seaclaw.platform": "all",
-    "com.seaclaw.version": "0.3.0"
+    "com.human.platform": "all",
+    "com.human.version": "0.3.0"
   },
   "$description": "Elevation tokens — shadow definitions mapped to semantic levels",
   "elevation": {

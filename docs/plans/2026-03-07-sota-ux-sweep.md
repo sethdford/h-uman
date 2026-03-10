@@ -4,7 +4,7 @@
 
 **Goal:** Bring every dashboard view to Linear/Raycast/Vercel tier by building 7 new components and rewriting/upgrading all 14 views.
 
-**Architecture:** 4 waves, each builds primitives then applies them to views. TDD throughout. Each task produces one commit. Components are LitElement web components using `--sc-*` design tokens exclusively.
+**Architecture:** 4 waves, each builds primitives then applies them to views. TDD throughout. Each task produces one commit. Components are LitElement web components using `--hu-*` design tokens exclusively.
 
 **Tech Stack:** LitElement, TypeScript, Chart.js (CDN dynamic import), CSS custom properties, vitest.
 
@@ -16,11 +16,11 @@
 
 ## Wave 1: "See Everything" — Data Visualization
 
-### Task 1: Create sc-chart component
+### Task 1: Create hu-chart component
 
 **Files:**
 
-- Create: `ui/src/components/sc-chart.ts`
+- Create: `ui/src/components/hu-chart.ts`
 - Modify: `ui/src/components/extra-components.test.ts` (append tests)
 
 **Step 1: Write failing tests**
@@ -28,38 +28,38 @@
 Append to `ui/src/components/extra-components.test.ts`:
 
 ```typescript
-import "./sc-chart.js";
+import "./hu-chart.js";
 
-describe("sc-chart", () => {
+describe("hu-chart", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-chart")).toBeDefined();
+    expect(customElements.get("hu-chart")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-chart");
+    const el = document.createElement("hu-chart");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept type property", () => {
-    const el = document.createElement("sc-chart") as any;
+    const el = document.createElement("hu-chart") as any;
     el.type = "bar";
     expect(el.type).toBe("bar");
   });
 
   it("should accept data property", () => {
-    const el = document.createElement("sc-chart") as any;
+    const el = document.createElement("hu-chart") as any;
     const data = { labels: ["A", "B"], datasets: [{ data: [1, 2] }] };
     el.data = data;
     expect(el.data).toEqual(data);
   });
 
   it("should default height to 200", () => {
-    const el = document.createElement("sc-chart") as any;
+    const el = document.createElement("hu-chart") as any;
     expect(el.height).toBe(200);
   });
 
   it("should render a canvas element", async () => {
-    const el = document.createElement("sc-chart") as any;
+    const el = document.createElement("hu-chart") as any;
     el.type = "bar";
     el.data = { labels: ["A"], datasets: [{ data: [1] }] };
     document.body.appendChild(el);
@@ -74,11 +74,11 @@ describe("sc-chart", () => {
 **Step 2: Run tests, verify failure**
 
 Run: `npx vitest run -- extra-components`
-Expected: FAIL — cannot resolve `./sc-chart.js`
+Expected: FAIL — cannot resolve `./hu-chart.js`
 
-**Step 3: Implement sc-chart**
+**Step 3: Implement hu-chart**
 
-Create `ui/src/components/sc-chart.ts`:
+Create `ui/src/components/hu-chart.ts`:
 
 ```typescript
 import { LitElement, html, css } from "lit";
@@ -96,7 +96,7 @@ export interface ChartData {
   datasets: ChartDataset[];
 }
 
-@customElement("sc-chart")
+@customElement("hu-chart")
 export class ScChart extends LitElement {
   @property({ type: String }) type: "bar" | "line" | "area" | "doughnut" =
     "bar";
@@ -126,9 +126,9 @@ export class ScChart extends LitElement {
       align-items: center;
       justify-content: center;
       height: var(--chart-h, 200px);
-      color: var(--sc-text-muted);
-      font-size: var(--sc-text-sm);
-      font-family: var(--sc-font);
+      color: var(--hu-text-muted);
+      font-size: var(--hu-text-sm);
+      font-family: var(--hu-font);
     }
   `;
 
@@ -170,21 +170,21 @@ export class ScChart extends LitElement {
     ).matches;
     const style = getComputedStyle(this);
     const font =
-      style.getPropertyValue("--sc-font").trim() || "Avenir, sans-serif";
+      style.getPropertyValue("--hu-font").trim() || "Avenir, sans-serif";
     const textMuted =
-      style.getPropertyValue("--sc-text-muted").trim() || "#888";
+      style.getPropertyValue("--hu-text-muted").trim() || "#888";
     const border =
-      style.getPropertyValue("--sc-border-subtle").trim() || "#333";
+      style.getPropertyValue("--hu-border-subtle").trim() || "#333";
 
     const categoricalColors = [
-      style.getPropertyValue("--sc-chart-categorical-1").trim(),
-      style.getPropertyValue("--sc-chart-categorical-2").trim(),
-      style.getPropertyValue("--sc-chart-categorical-3").trim(),
-      style.getPropertyValue("--sc-chart-categorical-4").trim(),
-      style.getPropertyValue("--sc-chart-categorical-5").trim(),
-      style.getPropertyValue("--sc-chart-categorical-6").trim(),
-      style.getPropertyValue("--sc-chart-categorical-7").trim(),
-      style.getPropertyValue("--sc-chart-categorical-8").trim(),
+      style.getPropertyValue("--hu-chart-categorical-1").trim(),
+      style.getPropertyValue("--hu-chart-categorical-2").trim(),
+      style.getPropertyValue("--hu-chart-categorical-3").trim(),
+      style.getPropertyValue("--hu-chart-categorical-4").trim(),
+      style.getPropertyValue("--hu-chart-categorical-5").trim(),
+      style.getPropertyValue("--hu-chart-categorical-6").trim(),
+      style.getPropertyValue("--hu-chart-categorical-7").trim(),
+      style.getPropertyValue("--hu-chart-categorical-8").trim(),
     ].filter(Boolean);
 
     const fallbackColors = [
@@ -289,7 +289,7 @@ export class ScChart extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-chart": ScChart;
+    "hu-chart": ScChart;
   }
 }
 ```
@@ -302,17 +302,17 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add ui/src/components/sc-chart.ts ui/src/components/extra-components.test.ts
-git commit -m "feat(ui): add sc-chart component with Chart.js integration"
+git add ui/src/components/hu-chart.ts ui/src/components/extra-components.test.ts
+git commit -m "feat(ui): add hu-chart component with Chart.js integration"
 ```
 
 ---
 
-### Task 2: Create sc-json-viewer component
+### Task 2: Create hu-json-viewer component
 
 **Files:**
 
-- Create: `ui/src/components/sc-json-viewer.ts`
+- Create: `ui/src/components/hu-json-viewer.ts`
 - Modify: `ui/src/components/extra-components.test.ts` (append tests)
 
 **Step 1: Write failing tests**
@@ -320,31 +320,31 @@ git commit -m "feat(ui): add sc-chart component with Chart.js integration"
 Append to `ui/src/components/extra-components.test.ts`:
 
 ```typescript
-import "./sc-json-viewer.js";
+import "./hu-json-viewer.js";
 
-describe("sc-json-viewer", () => {
+describe("hu-json-viewer", () => {
   it("should be defined as a custom element", () => {
-    expect(customElements.get("sc-json-viewer")).toBeDefined();
+    expect(customElements.get("hu-json-viewer")).toBeDefined();
   });
 
   it("should be creatable", () => {
-    const el = document.createElement("sc-json-viewer");
+    const el = document.createElement("hu-json-viewer");
     expect(el).toBeInstanceOf(HTMLElement);
   });
 
   it("should accept data property", () => {
-    const el = document.createElement("sc-json-viewer") as any;
+    const el = document.createElement("hu-json-viewer") as any;
     el.data = { key: "value" };
     expect(el.data).toEqual({ key: "value" });
   });
 
   it("should default expandedDepth to 2", () => {
-    const el = document.createElement("sc-json-viewer") as any;
+    const el = document.createElement("hu-json-viewer") as any;
     expect(el.expandedDepth).toBe(2);
   });
 
   it("should render primitive values inline", async () => {
-    const el = document.createElement("sc-json-viewer") as any;
+    const el = document.createElement("hu-json-viewer") as any;
     el.data = "hello";
     document.body.appendChild(el);
     await el.updateComplete;
@@ -354,7 +354,7 @@ describe("sc-json-viewer", () => {
   });
 
   it("should render object keys", async () => {
-    const el = document.createElement("sc-json-viewer") as any;
+    const el = document.createElement("hu-json-viewer") as any;
     el.data = { name: "test" };
     document.body.appendChild(el);
     await el.updateComplete;
@@ -364,7 +364,7 @@ describe("sc-json-viewer", () => {
   });
 
   it("should render array length indicator", async () => {
-    const el = document.createElement("sc-json-viewer") as any;
+    const el = document.createElement("hu-json-viewer") as any;
     el.data = [1, 2, 3];
     document.body.appendChild(el);
     await el.updateComplete;
@@ -378,11 +378,11 @@ describe("sc-json-viewer", () => {
 **Step 2: Run tests, verify failure**
 
 Run: `npx vitest run -- extra-components`
-Expected: FAIL — cannot resolve `./sc-json-viewer.js`
+Expected: FAIL — cannot resolve `./hu-json-viewer.js`
 
-**Step 3: Implement sc-json-viewer**
+**Step 3: Implement hu-json-viewer**
 
-Create `ui/src/components/sc-json-viewer.ts` — a collapsible tree component that renders any JSON-serializable value. Uses `--sc-font-mono`, semantic colors for types (strings = accent, numbers = amber, booleans = indigo, null = muted). Collapsed past `expandedDepth`. Copy-to-clipboard on right-click. Arrow key navigation for expand/collapse.
+Create `ui/src/components/hu-json-viewer.ts` — a collapsible tree component that renders any JSON-serializable value. Uses `--hu-font-mono`, semantic colors for types (strings = accent, numbers = amber, booleans = indigo, null = muted). Collapsed past `expandedDepth`. Copy-to-clipboard on right-click. Arrow key navigation for expand/collapse.
 
 **Step 4: Run tests, verify pass**
 
@@ -392,8 +392,8 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add ui/src/components/sc-json-viewer.ts ui/src/components/extra-components.test.ts
-git commit -m "feat(ui): add sc-json-viewer collapsible tree component"
+git add ui/src/components/hu-json-viewer.ts ui/src/components/extra-components.test.ts
+git commit -m "feat(ui): add hu-json-viewer collapsible tree component"
 ```
 
 ---
@@ -410,7 +410,7 @@ git commit -m "feat(ui): add sc-json-viewer collapsible tree component"
 In `ui/src/views/views.test.ts`, update the usage-view describe block to add:
 
 ```typescript
-it("should render sc-chart elements when data is present", async () => {
+it("should render hu-chart elements when data is present", async () => {
   // Test that the view renders chart components
 });
 
@@ -427,10 +427,10 @@ it("should show empty state when no data", async () => {
 
 Full rewrite:
 
-- Import `sc-chart`, `sc-segmented-control`
+- Import `hu-chart`, `hu-segmented-control`
 - Top: 3 stat cards with inline trend sparklines
-- Middle: `sc-chart type="area"` for token usage over time, time range toggle (24h/7d/30d)
-- Bottom: `sc-chart type="bar" horizontal` for cost breakdown by provider
+- Middle: `hu-chart type="area"` for token usage over time, time range toggle (24h/7d/30d)
+- Bottom: `hu-chart type="bar" horizontal` for cost breakdown by provider
 - Export button
 - Proper responsive breakpoints, stagger animations, skeleton loading
 
@@ -459,10 +459,10 @@ git commit -m "feat(ui): rewrite usage view with real charts and time range sele
 
 Full rewrite:
 
-- Import `sc-json-viewer`, `sc-segmented-control`
+- Import `hu-json-viewer`, `hu-segmented-control`
 - Full-height layout (flex: 1, no fixed 400px)
-- `sc-json-viewer` for payload display instead of `JSON.stringify`
-- Level filter chips (All / Chat / Tool / Error / Health) via `sc-segmented-control`
+- `hu-json-viewer` for payload display instead of `JSON.stringify`
+- Level filter chips (All / Chat / Tool / Error / Health) via `hu-segmented-control`
 - Pause/resume button
 - Relative timestamps with absolute on hover via `title` attribute
 - Sticky header with filter + controls
@@ -492,8 +492,8 @@ git commit -m "feat(ui): rewrite logs view with json-viewer, level filters, paus
 
 **Step 1: Add charts and clickable session rows**
 
-- Import `sc-chart`
-- Add `sc-chart type="doughnut"` for channel health
+- Import `hu-chart`
+- Add `hu-chart type="doughnut"` for channel health
 - Make session rows clickable (dispatch navigate event to `#chat:sessionKey`)
 - Add activity sparkline
 
@@ -513,48 +513,48 @@ git commit -m "feat(ui): add charts and clickable sessions to overview"
 
 ## Wave 2: "Find & Act On Anything" — Interactive Tables
 
-### Task 6: Create sc-pagination component
+### Task 6: Create hu-pagination component
 
 **Files:**
 
-- Create: `ui/src/components/sc-pagination.ts`
+- Create: `ui/src/components/hu-pagination.ts`
 - Modify: `ui/src/components/extra-components.test.ts`
 
 **Step 1: Write failing tests**
 
-Tests for: registration, creatable, total/page/pageSize props, page count calculation, fires `sc-page-change`, prev/next buttons, disabled state at boundaries.
+Tests for: registration, creatable, total/page/pageSize props, page count calculation, fires `hu-page-change`, prev/next buttons, disabled state at boundaries.
 
-**Step 2: Implement sc-pagination**
+**Step 2: Implement hu-pagination**
 
-LitElement component: prev/next buttons, page numbers (collapsed with ellipsis for large sets), page size selector dropdown, "Showing X–Y of Z" label. Uses `--sc-*` tokens. Keyboard navigable.
+LitElement component: prev/next buttons, page numbers (collapsed with ellipsis for large sets), page size selector dropdown, "Showing X–Y of Z" label. Uses `--hu-*` tokens. Keyboard navigable.
 
 **Step 3: Run tests, commit**
 
 ```bash
-git commit -m "feat(ui): add sc-pagination component"
+git commit -m "feat(ui): add hu-pagination component"
 ```
 
 ---
 
-### Task 7: Create sc-data-table-v2 component
+### Task 7: Create hu-data-table-v2 component
 
 **Files:**
 
-- Create: `ui/src/components/sc-data-table-v2.ts`
+- Create: `ui/src/components/hu-data-table-v2.ts`
 - Modify: `ui/src/components/extra-components.test.ts`
 
 **Step 1: Write failing tests**
 
-Tests for: registration, column sorting (click header toggles asc/desc/none), filtering (filterable columns get input), pagination integration, `sc-row-click` event, keyboard navigation (arrow keys), empty state, compact mode, responsive.
+Tests for: registration, column sorting (click header toggles asc/desc/none), filtering (filterable columns get input), pagination integration, `hu-row-click` event, keyboard navigation (arrow keys), empty state, compact mode, responsive.
 
-**Step 2: Implement sc-data-table-v2**
+**Step 2: Implement hu-data-table-v2**
 
-Extends column definition with `sortable`, `filterable`, `render` function. Internal state for sort column/direction, filter values, current page. Sticky thead. Row hover with `--sc-bg-elevated`. Mobile: collapses to label-value card per row. Keyboard: arrow up/down between rows, Enter fires row-click.
+Extends column definition with `sortable`, `filterable`, `render` function. Internal state for sort column/direction, filter values, current page. Sticky thead. Row hover with `--hu-bg-elevated`. Mobile: collapses to label-value card per row. Keyboard: arrow up/down between rows, Enter fires row-click.
 
 **Step 3: Run tests, commit**
 
 ```bash
-git commit -m "feat(ui): add sc-data-table-v2 with sort, filter, pagination"
+git commit -m "feat(ui): add hu-data-table-v2 with sort, filter, pagination"
 ```
 
 ---
@@ -566,7 +566,7 @@ git commit -m "feat(ui): add sc-data-table-v2 with sort, filter, pagination"
 - Modify: `ui/src/views/tools-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Replace card grid with `sc-data-table-v2`. Row click expands inline `sc-json-viewer` for parameter schema. Single count + search. Remove redundant stats.
+Replace card grid with `hu-data-table-v2`. Row click expands inline `hu-json-viewer` for parameter schema. Single count + search. Remove redundant stats.
 
 ```bash
 git commit -m "feat(ui): rewrite tools view with interactive data table"
@@ -581,7 +581,7 @@ git commit -m "feat(ui): rewrite tools view with interactive data table"
 - Modify: `ui/src/views/channels-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Replace card grid with `sc-data-table-v2` (Name, Status badge, Health, Last Active). Row click opens `sc-sheet` detail. Filter chips via `sc-segmented-control`.
+Replace card grid with `hu-data-table-v2` (Name, Status badge, Health, Last Active). Row click opens `hu-sheet` detail. Filter chips via `hu-segmented-control`.
 
 ```bash
 git commit -m "feat(ui): rewrite channels view with interactive data table"
@@ -596,7 +596,7 @@ git commit -m "feat(ui): rewrite channels view with interactive data table"
 - Modify: `ui/src/views/nodes-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Replace flat cards with `sc-data-table-v2` (Node ID, Status, WS Count, Uptime). Row click detail sheet. Refresh button with timestamp.
+Replace flat cards with `hu-data-table-v2` (Node ID, Status, WS Count, Uptime). Row click detail sheet. Refresh button with timestamp.
 
 ```bash
 git commit -m "feat(ui): rewrite nodes view with interactive data table"
@@ -611,7 +611,7 @@ git commit -m "feat(ui): rewrite nodes view with interactive data table"
 - Modify: `ui/src/views/agents-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Sessions list via `sc-data-table-v2` with sort/filter. Clickable rows to `#chat:sessionKey`. Add sessions-per-day bar chart.
+Sessions list via `hu-data-table-v2` with sort/filter. Clickable rows to `#chat:sessionKey`. Add sessions-per-day bar chart.
 
 ```bash
 git commit -m "feat(ui): upgrade agents view with data table and chart"
@@ -621,47 +621,47 @@ git commit -m "feat(ui): upgrade agents view with data table and chart"
 
 ## Wave 3: "Control Everything" — Forms
 
-### Task 12: Create sc-checkbox component
+### Task 12: Create hu-checkbox component
 
 **Files:**
 
-- Create: `ui/src/components/sc-checkbox.ts`
+- Create: `ui/src/components/hu-checkbox.ts`
 - Modify: `ui/src/components/extra-components.test.ts`
 
-Tests: registration, checked/indeterminate/disabled/label/error props, fires `sc-change`, keyboard toggle (Space), ARIA attributes.
+Tests: registration, checked/indeterminate/disabled/label/error props, fires `hu-change`, keyboard toggle (Space), ARIA attributes.
 
 ```bash
-git commit -m "feat(ui): add sc-checkbox component"
+git commit -m "feat(ui): add hu-checkbox component"
 ```
 
 ---
 
-### Task 13: Create sc-combobox component
+### Task 13: Create hu-combobox component
 
 **Files:**
 
-- Create: `ui/src/components/sc-combobox.ts`
+- Create: `ui/src/components/hu-combobox.ts`
 - Modify: `ui/src/components/extra-components.test.ts`
 
-Tests: registration, options/value/placeholder props, filters on type, keyboard nav (arrow/Enter/Escape), fires `sc-combobox-change`, free-text mode, ARIA combobox role.
+Tests: registration, options/value/placeholder props, filters on type, keyboard nav (arrow/Enter/Escape), fires `hu-combobox-change`, free-text mode, ARIA combobox role.
 
 ```bash
-git commit -m "feat(ui): add sc-combobox autocomplete component"
+git commit -m "feat(ui): add hu-combobox autocomplete component"
 ```
 
 ---
 
-### Task 14: Create sc-form-group component
+### Task 14: Create hu-form-group component
 
 **Files:**
 
-- Create: `ui/src/components/sc-form-group.ts`
+- Create: `ui/src/components/hu-form-group.ts`
 - Modify: `ui/src/components/extra-components.test.ts`
 
-Tests: registration, dirty/valid readonly props, validate() method, reset() method, fires `sc-form-submit`, shows inline validation messages.
+Tests: registration, dirty/valid readonly props, validate() method, reset() method, fires `hu-form-submit`, shows inline validation messages.
 
 ```bash
-git commit -m "feat(ui): add sc-form-group validation coordinator"
+git commit -m "feat(ui): add hu-form-group validation coordinator"
 ```
 
 ---
@@ -673,7 +673,7 @@ git commit -m "feat(ui): add sc-form-group validation coordinator"
 - Modify: `ui/src/views/config-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Grouped sections with `sc-form-group`. Inline validation. `sc-combobox` for provider/model. Unsaved changes banner. `sc-code-block` for raw JSON mode.
+Grouped sections with `hu-form-group`. Inline validation. `hu-combobox` for provider/model. Unsaved changes banner. `hu-code-block` for raw JSON mode.
 
 ```bash
 git commit -m "feat(ui): rewrite config view with form validation and combobox"
@@ -688,7 +688,7 @@ git commit -m "feat(ui): rewrite config view with form validation and combobox"
 - Modify: `ui/src/views/security-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Replace native `<select>` with `sc-select`. Risk indicator. Editable sections with `sc-switch`. Security score stat card. Pairing management.
+Replace native `<select>` with `hu-select`. Risk indicator. Editable sections with `hu-switch`. Security score stat card. Pairing management.
 
 ```bash
 git commit -m "feat(ui): rewrite security view with risk indicators and editable sections"
@@ -703,7 +703,7 @@ git commit -m "feat(ui): rewrite security view with risk indicators and editable
 - Modify: `ui/src/views/automations-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Modal validation via `sc-form-group`. Run history in `sc-data-table-v2`. Success/failure chart.
+Modal validation via `hu-form-group`. Run history in `hu-data-table-v2`. Success/failure chart.
 
 ```bash
 git commit -m "feat(ui): upgrade automations view with validation and run history table"
@@ -720,7 +720,7 @@ git commit -m "feat(ui): upgrade automations view with validation and run histor
 - Modify: `ui/src/views/models-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Fix heading to `sc-page-hero`. "Set as default" action. Request distribution doughnut chart. `sc-combobox` for inline editing.
+Fix heading to `hu-page-hero`. "Set as default" action. Request distribution doughnut chart. `hu-combobox` for inline editing.
 
 ```bash
 git commit -m "feat(ui): rewrite models view with proper hero, actions, and chart"
@@ -735,7 +735,7 @@ git commit -m "feat(ui): rewrite models view with proper hero, actions, and char
 - Modify: `ui/src/views/voice-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-Fix duration stat. Export conversation. Replace `sc-message-stream` with `sc-message-thread`. Session management.
+Fix duration stat. Export conversation. Replace `hu-message-stream` with `hu-message-thread`. Session management.
 
 ```bash
 git commit -m "feat(ui): upgrade voice view with thread, export, and session management"
@@ -750,7 +750,7 @@ git commit -m "feat(ui): upgrade voice view with thread, export, and session man
 - Modify: `ui/src/views/skills-view.ts`
 - Modify: `ui/src/views/views.test.ts`
 
-`sc-json-viewer` for parameters. Tag filter for installed skills. URL install validation.
+`hu-json-viewer` for parameters. Tag filter for installed skills. URL install validation.
 
 ```bash
 git commit -m "feat(ui): upgrade skills view with json-viewer and tag filtering"
@@ -766,7 +766,7 @@ git commit -m "feat(ui): upgrade skills view with json-viewer and tag filtering"
 
 Checklist:
 
-- [ ] Every view: stagger animation on load (`sc-stagger` class)
+- [ ] Every view: stagger animation on load (`hu-stagger` class)
 - [ ] Every view: skeleton shapes matching content layout
 - [ ] Every view: empty state with actionable CTA
 - [ ] Every view: responsive at sm/md/lg breakpoints
@@ -796,5 +796,5 @@ After all waves, run full project validation:
 
 ```bash
 cd /path/to/project
-cmake --build build -j$(sysctl -n hw.ncpu) && ./build/seaclaw_tests  # C tests still pass
+cmake --build build -j$(sysctl -n hw.ncpu) && ./build/human_tests  # C tests still pass
 ```

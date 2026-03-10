@@ -1,9 +1,9 @@
-#include "seaclaw/version.h"
+#include "human/version.h"
 
-#ifndef SC_VERSION
-#define SC_VERSION "0.4.0"
+#ifndef HU_VERSION
+#define HU_VERSION "0.4.0"
 #endif
 
-const char *sc_version_string(void) {
-    return SC_VERSION;
+const char *hu_version_string(void) {
+    return HU_VERSION;
 }

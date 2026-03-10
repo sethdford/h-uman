@@ -1,9 +1,9 @@
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
 #endif
-#include "seaclaw/persona/replay.h"
-#include "seaclaw/context/conversation.h"
-#include "seaclaw/core/string.h"
+#include "human/persona/replay.h"
+#include "human/context/conversation.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -11,13 +11,13 @@
 #include <string.h>
 #include <time.h>
 
-#define SC_REPLAY_LONG_PAUSE_SEC        1800 /* 30 min */
-#define SC_REPLAY_RAPID_WINDOW_SEC      120  /* 2 min for rapid reply = engaged */
-#define SC_REPLAY_HIGH_ENGAGEMENT_RATIO 2.0  /* their reply >= 2x our length */
-#define SC_REPLAY_LOW_ENGAGEMENT_RATIO  0.33 /* their reply < 1/3 our length */
-#define SC_REPLAY_ONE_WORD_MAX          15   /* reply <= 15 chars = one-word territory */
-#define SC_REPLAY_ENERGY_EXCLAM_MIN     1    /* 1+ exclamation marks = energy */
-#define SC_REPLAY_GENERIC_RESPONSE_MAX                         \
+#define HU_REPLAY_LONG_PAUSE_SEC        1800 /* 30 min */
+#define HU_REPLAY_RAPID_WINDOW_SEC      120  /* 2 min for rapid reply = engaged */
+#define HU_REPLAY_HIGH_ENGAGEMENT_RATIO 2.0  /* their reply >= 2x our length */
+#define HU_REPLAY_LOW_ENGAGEMENT_RATIO  0.33 /* their reply < 1/3 our length */
+#define HU_REPLAY_ONE_WORD_MAX          15   /* reply <= 15 chars = one-word territory */
+#define HU_REPLAY_ENERGY_EXCLAM_MIN     1    /* 1+ exclamation marks = energy */
+#define HU_REPLAY_GENERIC_RESPONSE_MAX                         \
     70 /* our msg < 70 chars to long theirs = possible generic \
         */
 
@@ -84,24 +84,24 @@ static bool has_lengthened_word(const char *text, size_t len) {
 /* Generic validation heuristic: short our-msg to substantial their-msg, no question */
 static bool looks_generic_response(size_t my_len, size_t their_prev_len, const char *my_text,
                                    size_t my_text_len) {
-    if (my_len >= SC_REPLAY_GENERIC_RESPONSE_MAX || their_prev_len < 25)
+    if (my_len >= HU_REPLAY_GENERIC_RESPONSE_MAX || their_prev_len < 25)
         return false;
     if (contains_question(my_text, my_text_len))
         return false;
     return true;
 }
 
-sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_entry_t *entries,
-                             size_t entry_count, uint32_t max_chars, sc_replay_result_t *out) {
+hu_error_t hu_replay_analyze(hu_allocator_t *alloc, const hu_channel_history_entry_t *entries,
+                             size_t entry_count, uint32_t max_chars, hu_replay_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!entries && entry_count > 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     memset(out, 0, sizeof(*out));
 
     if (entry_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     int total_quality = 0;
     size_t our_response_count = 0;
@@ -111,7 +111,7 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
     size_t best_engaged_my_len = 0;
     size_t worst_engaged_my_len = 0;
 
-    for (size_t i = 0; i < entry_count && out->insight_count < SC_REPLAY_MAX_INSIGHTS; i++) {
+    for (size_t i = 0; i < entry_count && out->insight_count < HU_REPLAY_MAX_INSIGHTS; i++) {
         if (!entries[i].from_me)
             continue;
 
@@ -119,8 +119,8 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
         if (my_len == 0)
             continue;
 
-        sc_quality_score_t q =
-            sc_conversation_evaluate_quality(entries[i].text, my_len, entries, i + 1, max_chars);
+        hu_quality_score_t q =
+            hu_conversation_evaluate_quality(entries[i].text, my_len, entries, i + 1, max_chars);
         total_quality += q.total;
         our_response_count++;
         total_my_len += my_len;
@@ -140,19 +140,19 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
             time_t their_ts = parse_timestamp(entries[i + 1].timestamp);
             if (my_ts != (time_t)-1 && their_ts != (time_t)-1)
                 gap_sec = difftime(their_ts, my_ts);
-            bool rapid_reply = (gap_sec >= 0 && gap_sec < (double)SC_REPLAY_RAPID_WINDOW_SEC);
+            bool rapid_reply = (gap_sec >= 0 && gap_sec < (double)HU_REPLAY_RAPID_WINDOW_SEC);
 
             /* High engagement: ratio >= 2, or 2+ exclamations, or question, or rapid, or lengthened
              */
-            bool high = (ratio >= SC_REPLAY_HIGH_ENGAGEMENT_RATIO) ||
-                        (exclam >= SC_REPLAY_ENERGY_EXCLAM_MIN) || has_q || rapid_reply ||
+            bool high = (ratio >= HU_REPLAY_HIGH_ENGAGEMENT_RATIO) ||
+                        (exclam >= HU_REPLAY_ENERGY_EXCLAM_MIN) || has_q || rapid_reply ||
                         has_lengthened;
 
             /* Low engagement: one-word reply (<=15 chars) to our longer msg, or ratio < 1/3 */
-            bool low = (their_len <= SC_REPLAY_ONE_WORD_MAX && my_len > 50) ||
-                       (my_len > 0 && ratio < SC_REPLAY_LOW_ENGAGEMENT_RATIO);
+            bool low = (their_len <= HU_REPLAY_ONE_WORD_MAX && my_len > 50) ||
+                       (my_len > 0 && ratio < HU_REPLAY_LOW_ENGAGEMENT_RATIO);
 
-            if (high && !low && out->insight_count < SC_REPLAY_MAX_INSIGHTS) {
+            if (high && !low && out->insight_count < HU_REPLAY_MAX_INSIGHTS) {
                 high_engagement_count++;
                 if (best_engaged_my_len == 0 || my_len < best_engaged_my_len)
                     best_engaged_my_len = my_len;
@@ -174,10 +174,10 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
                                   "keep this tone and brevity",
                                   my_len);
                 if (no > 0 && (size_t)no < sizeof(obs) && nr > 0 && (size_t)nr < sizeof(rec)) {
-                    sc_replay_insight_t *ins = &out->insights[out->insight_count];
-                    ins->observation = sc_strndup(alloc, obs, (size_t)no);
+                    hu_replay_insight_t *ins = &out->insights[out->insight_count];
+                    ins->observation = hu_strndup(alloc, obs, (size_t)no);
                     ins->observation_len = ins->observation ? (size_t)no : 0;
-                    ins->recommendation = sc_strndup(alloc, rec, (size_t)nr);
+                    ins->recommendation = hu_strndup(alloc, rec, (size_t)nr);
                     ins->recommendation_len = ins->recommendation ? (size_t)nr : 0;
                     ins->score_delta = 10;
                     if (ins->observation && ins->recommendation)
@@ -190,7 +190,7 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
                                         ins->recommendation_len + 1);
                     }
                 }
-            } else if (low && !high && out->insight_count < SC_REPLAY_MAX_INSIGHTS) {
+            } else if (low && !high && out->insight_count < HU_REPLAY_MAX_INSIGHTS) {
                 low_engagement_count++;
                 if (worst_engaged_my_len == 0 || my_len > worst_engaged_my_len)
                     worst_engaged_my_len = my_len;
@@ -204,10 +204,10 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
                                   "specific follow-ups",
                                   my_len);
                 if (no > 0 && (size_t)no < sizeof(obs) && nr > 0 && (size_t)nr < sizeof(rec)) {
-                    sc_replay_insight_t *ins = &out->insights[out->insight_count];
-                    ins->observation = sc_strndup(alloc, obs, (size_t)no);
+                    hu_replay_insight_t *ins = &out->insights[out->insight_count];
+                    ins->observation = hu_strndup(alloc, obs, (size_t)no);
                     ins->observation_len = ins->observation ? (size_t)no : 0;
-                    ins->recommendation = sc_strndup(alloc, rec, (size_t)nr);
+                    ins->recommendation = hu_strndup(alloc, rec, (size_t)nr);
                     ins->recommendation_len = ins->recommendation ? (size_t)nr : 0;
                     ins->score_delta = -10;
                     if (ins->observation && ins->recommendation)
@@ -223,18 +223,18 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
             }
 
             /* Long pause: gap > 30 min */
-            if (gap_sec > (double)SC_REPLAY_LONG_PAUSE_SEC &&
-                out->insight_count < SC_REPLAY_MAX_INSIGHTS) {
+            if (gap_sec > (double)HU_REPLAY_LONG_PAUSE_SEC &&
+                out->insight_count < HU_REPLAY_MAX_INSIGHTS) {
                 char obs[96];
                 int no = snprintf(obs, sizeof(obs),
                                   "%.0f min pause before their reply after your %zu-char message",
                                   gap_sec / 60.0, my_len);
                 if (no > 0 && (size_t)no < sizeof(obs)) {
-                    sc_replay_insight_t *ins = &out->insights[out->insight_count];
-                    ins->observation = sc_strndup(alloc, obs, (size_t)no);
+                    hu_replay_insight_t *ins = &out->insights[out->insight_count];
+                    ins->observation = hu_strndup(alloc, obs, (size_t)no);
                     ins->observation_len = ins->observation ? (size_t)no : 0;
                     ins->recommendation =
-                        sc_strndup(alloc, "Consider shorter or more engaging messages", 41);
+                        hu_strndup(alloc, "Consider shorter or more engaging messages", 41);
                     ins->recommendation_len = ins->recommendation ? 41 : 0;
                     ins->score_delta = -5;
                     if (ins->observation && ins->recommendation)
@@ -253,18 +253,18 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
         if (i > 0 && !entries[i - 1].from_me) {
             size_t their_prev = strlen(entries[i - 1].text);
             if (looks_generic_response(my_len, their_prev, entries[i].text, my_len) &&
-                out->insight_count < SC_REPLAY_MAX_INSIGHTS) {
+                out->insight_count < HU_REPLAY_MAX_INSIGHTS) {
                 char obs[96];
                 int no = snprintf(obs, sizeof(obs),
                                   "Your %zu-char response to their %zu-char message lacked "
                                   "specificity or a follow-up question",
                                   my_len, their_prev);
                 if (no > 0 && (size_t)no < sizeof(obs)) {
-                    sc_replay_insight_t *ins = &out->insights[out->insight_count];
-                    ins->observation = sc_strndup(alloc, obs, (size_t)no);
+                    hu_replay_insight_t *ins = &out->insights[out->insight_count];
+                    ins->observation = hu_strndup(alloc, obs, (size_t)no);
                     ins->observation_len = ins->observation ? (size_t)no : 0;
                     ins->recommendation =
-                        sc_strndup(alloc, "Use more specific follow-up questions", 37);
+                        hu_strndup(alloc, "Use more specific follow-up questions", 37);
                     ins->recommendation_len = ins->recommendation ? 37 : 0;
                     ins->score_delta = -15;
                     if (ins->observation && ins->recommendation)
@@ -280,7 +280,7 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
         }
 
         /* Our response too long relative to theirs (previous message) */
-        if (i > 0 && !entries[i - 1].from_me && out->insight_count < SC_REPLAY_MAX_INSIGHTS) {
+        if (i > 0 && !entries[i - 1].from_me && out->insight_count < HU_REPLAY_MAX_INSIGHTS) {
             size_t their_len = strlen(entries[i - 1].text);
             if (their_len > 0 && my_len > their_len * 3 && my_len > 150) {
                 char obs[96];
@@ -289,11 +289,11 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
                              "Your %zu-char response was 3x longer than their %zu-char message",
                              my_len, their_len);
                 if (no > 0 && (size_t)no < sizeof(obs)) {
-                    sc_replay_insight_t *ins = &out->insights[out->insight_count];
-                    ins->observation = sc_strndup(alloc, obs, (size_t)no);
+                    hu_replay_insight_t *ins = &out->insights[out->insight_count];
+                    ins->observation = hu_strndup(alloc, obs, (size_t)no);
                     ins->observation_len = ins->observation ? (size_t)no : 0;
                     ins->recommendation =
-                        sc_strndup(alloc, "Mirror their message length more closely", 38);
+                        hu_strndup(alloc, "Mirror their message length more closely", 38);
                     ins->recommendation_len = ins->recommendation ? 38 : 0;
                     ins->score_delta = -8;
                     if (ins->observation && ins->recommendation)
@@ -341,19 +341,19 @@ sc_error_t sc_replay_analyze(sc_allocator_t *alloc, const sc_channel_history_ent
             n = snprintf(buf, sizeof(buf), "Quality %d/100. Avg message length %zu chars.",
                          out->overall_score, avg_len);
         if (n > 0 && (size_t)n < sizeof(buf)) {
-            out->summary = sc_strndup(alloc, buf, (size_t)n);
+            out->summary = hu_strndup(alloc, buf, (size_t)n);
             out->summary_len = out->summary ? (size_t)n : 0;
         }
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_replay_result_deinit(sc_replay_result_t *result, sc_allocator_t *alloc) {
+void hu_replay_result_deinit(hu_replay_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
     for (size_t i = 0; i < result->insight_count; i++) {
-        sc_replay_insight_t *ins = &result->insights[i];
+        hu_replay_insight_t *ins = &result->insights[i];
         if (ins->observation) {
             alloc->free(alloc->ctx, ins->observation, ins->observation_len + 1);
             ins->observation = NULL;
@@ -371,7 +371,7 @@ void sc_replay_result_deinit(sc_replay_result_t *result, sc_allocator_t *alloc) 
     result->summary_len = 0;
 }
 
-char *sc_replay_build_context(sc_allocator_t *alloc, const sc_replay_result_t *result,
+char *hu_replay_build_context(hu_allocator_t *alloc, const hu_replay_result_t *result,
                               size_t *out_len) {
     if (!alloc || !result || !out_len)
         return NULL;
@@ -447,7 +447,7 @@ char *sc_replay_build_context(sc_allocator_t *alloc, const sc_replay_result_t *r
         return NULL;
     }
     buf[pos] = '\0';
-    char *out = sc_strndup(alloc, buf, pos);
+    char *out = hu_strndup(alloc, buf, pos);
     alloc->free(alloc->ctx, buf, cap);
     if (out)
         *out_len = (size_t)pos;

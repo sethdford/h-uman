@@ -3,7 +3,7 @@ title: Local Models
 description: Run AI models locally with llama.cpp, Ollama, LM Studio, vLLM, and sglang.
 ---
 
-SeaClaw supports multiple local inference servers. **No API key is required** for any local provider. Add your provider to `~/.seaclaw/config.json` and set `default_provider` and `default_model`.
+Human supports multiple local inference servers. **No API key is required** for any local provider. Add your provider to `~/.human/config.json` and set `default_provider` and `default_model`.
 
 ## llama.cpp
 
@@ -43,9 +43,9 @@ Or with `llama.cpp` binary:
 ./llama-server -m models/llama-3.2-3b.gguf --port 8080
 ```
 
-### SeaClaw config
+### Human config
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -93,9 +93,9 @@ ollama serve
 
 Default URL: `http://localhost:11434`
 
-### SeaClaw config
+### Human config
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -137,9 +137,9 @@ mistral:7b      def456...       4.1 GB  1 week ago
 3. Load the model and start the **local server** (Server tab)
 4. Default port: **1234**
 
-### SeaClaw config
+### Human config
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -181,9 +181,9 @@ INFO:     Started server process
 INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
-### SeaClaw config
+### Human config
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -213,9 +213,9 @@ pip install "sglang[all]"
 python -m sglang.launch_server --model-path meta-llama/Llama-3.2-3B-Instruct --port 30000
 ```
 
-### SeaClaw config
+### Human config
 
-Add to `~/.seaclaw/config.json`:
+Add to `~/.human/config.json`:
 
 ```json
 {
@@ -269,4 +269,4 @@ Config:
 | sglang    | 30000 | Fast structured output     |
 | osaurus   | 1337  | Alternative server         |
 
-All use the OpenAI chat completions API, so SeaClaw treats them uniformly.
+All use the OpenAI chat completions API, so Human treats them uniformly.

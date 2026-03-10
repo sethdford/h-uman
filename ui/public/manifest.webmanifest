@@ -1,6 +1,6 @@
 {
-  "name": "SeaClaw Control",
-  "short_name": "SeaClaw",
+  "name": "Human Control",
+  "short_name": "Human",
   "description": "AI assistant dashboard — real-time monitoring, configuration, and control.",
   "start_url": "/",
   "display": "standalone",

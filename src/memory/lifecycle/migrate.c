@@ -1,11 +1,11 @@
-#include "seaclaw/memory/lifecycle/migrate.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/memory/lifecycle/migrate.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_ENABLE_SQLITE
+#ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
 
 static int table_exists(sqlite3 *db, const char *table) {
@@ -95,37 +95,37 @@ static void detect_columns(sqlite3 *db, const char **key_expr, const char **cont
     *content_col = content_buf;
     *category_expr = category_buf;
 }
-#endif /* SC_ENABLE_SQLITE */
+#endif /* HU_ENABLE_SQLITE */
 
-sc_error_t sc_migrate_read_brain_db(sc_allocator_t *alloc, const char *db_path,
-                                    sc_sqlite_source_entry_t **out, size_t *out_count) {
+hu_error_t hu_migrate_read_brain_db(hu_allocator_t *alloc, const char *db_path,
+                                    hu_sqlite_source_entry_t **out, size_t *out_count) {
     *out = NULL;
     *out_count = 0;
     if (!alloc || !db_path)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#ifndef SC_ENABLE_SQLITE
+#ifndef HU_ENABLE_SQLITE
     (void)alloc;
     (void)db_path;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     if (!table_exists(db, "memories")) {
         sqlite3_close(db);
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     const char *key_expr = NULL, *content_col = NULL, *category_expr = NULL;
     detect_columns(db, &key_expr, &content_col, &category_expr);
     if (!content_col) {
         sqlite3_close(db);
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
 
     char sql[320];
@@ -135,16 +135,16 @@ sc_error_t sc_migrate_read_brain_db(sc_allocator_t *alloc, const char *db_path,
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
 
     size_t cap = 64, count = 0;
-    sc_sqlite_source_entry_t *entries = (sc_sqlite_source_entry_t *)alloc->alloc(
-        alloc->ctx, cap * sizeof(sc_sqlite_source_entry_t));
+    hu_sqlite_source_entry_t *entries = (hu_sqlite_source_entry_t *)alloc->alloc(
+        alloc->ctx, cap * sizeof(hu_sqlite_source_entry_t));
     if (!entries) {
         sqlite3_finalize(stmt);
         sqlite3_close(db);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -161,9 +161,9 @@ sc_error_t sc_migrate_read_brain_db(sc_allocator_t *alloc, const char *db_path,
 
         if (count >= cap) {
             cap *= 2;
-            sc_sqlite_source_entry_t *n = (sc_sqlite_source_entry_t *)alloc->realloc(
-                alloc->ctx, entries, count * sizeof(sc_sqlite_source_entry_t),
-                cap * sizeof(sc_sqlite_source_entry_t));
+            hu_sqlite_source_entry_t *n = (hu_sqlite_source_entry_t *)alloc->realloc(
+                alloc->ctx, entries, count * sizeof(hu_sqlite_source_entry_t),
+                cap * sizeof(hu_sqlite_source_entry_t));
             if (!n)
                 break;
             entries = n;
@@ -200,11 +200,11 @@ sc_error_t sc_migrate_read_brain_db(sc_allocator_t *alloc, const char *db_path,
     sqlite3_close(db);
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-void sc_migrate_free_entries(sc_allocator_t *alloc, sc_sqlite_source_entry_t *entries,
+void hu_migrate_free_entries(hu_allocator_t *alloc, hu_sqlite_source_entry_t *entries,
                              size_t count) {
     if (!alloc || !entries)
         return;
@@ -216,5 +216,5 @@ void sc_migrate_free_entries(sc_allocator_t *alloc, sc_sqlite_source_entry_t *en
         if (entries[i].category)
             alloc->free(alloc->ctx, entries[i].category, strlen(entries[i].category) + 1);
     }
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_sqlite_source_entry_t));
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_sqlite_source_entry_t));
 }

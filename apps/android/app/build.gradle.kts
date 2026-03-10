@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "ai.seaclaw.app"
+    namespace = "ai.human.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "ai.seaclaw.app"
+        applicationId = "ai.human.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

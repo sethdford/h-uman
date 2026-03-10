@@ -1,4 +1,4 @@
-# Build my_channel as a static library for linking into seaclaw.
+# Build my_channel as a static library for linking into human.
 cmake_minimum_required(VERSION 3.20)
 project(my_channel C)
 

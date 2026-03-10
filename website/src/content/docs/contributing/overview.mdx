@@ -1,9 +1,9 @@
 ---
 title: Contributing
-description: How to add providers, channels, tools, and contribute to SeaClaw.
+description: How to add providers, channels, tools, and contribute to Human.
 ---
 
-SeaClaw uses a vtable-driven architecture. New features are added by implementing vtables and registering them in factory code.
+Human uses a vtable-driven architecture. New features are added by implementing vtables and registering them in factory code.
 
 ## Vtable interface pattern
 
@@ -62,7 +62,7 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 - **Zero ASan errors** — AddressSanitizer enabled in dev builds
 - Use `SC_IS_TEST` to skip side effects (network, spawning, real hardware)
 - Tests must be deterministic; no flaky behavior
-- Run: `cmake --build build && ./build/seaclaw_tests`
+- Run: `cmake --build build && ./build/human_tests`
 
 ## Code style
 
@@ -77,7 +77,7 @@ Callers receive a struct `{ void *ctx; const vtable_t *vtable }`. The caller doe
 ```bash
 cd build
 cmake --build . -j$(nproc)
-./seaclaw_tests
+./human_tests
 ```
 
 For release builds:

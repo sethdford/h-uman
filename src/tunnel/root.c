@@ -1,46 +1,46 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/tunnel.h"
+#include "human/core/allocator.h"
+#include "human/tunnel.h"
 #include <string.h>
 
 static const char *tunnel_err_strings[] = {
-    [SC_TUNNEL_ERR_OK] = "ok",
-    [SC_TUNNEL_ERR_START_FAILED] = "tunnel start failed",
-    [SC_TUNNEL_ERR_PROCESS_SPAWN] = "process spawn failed",
-    [SC_TUNNEL_ERR_URL_NOT_FOUND] = "public URL not found",
-    [SC_TUNNEL_ERR_TIMEOUT] = "timeout",
-    [SC_TUNNEL_ERR_INVALID_COMMAND] = "invalid command",
-    [SC_TUNNEL_ERR_NOT_IMPLEMENTED] = "not implemented",
+    [HU_TUNNEL_ERR_OK] = "ok",
+    [HU_TUNNEL_ERR_START_FAILED] = "tunnel start failed",
+    [HU_TUNNEL_ERR_PROCESS_SPAWN] = "process spawn failed",
+    [HU_TUNNEL_ERR_URL_NOT_FOUND] = "public URL not found",
+    [HU_TUNNEL_ERR_TIMEOUT] = "timeout",
+    [HU_TUNNEL_ERR_INVALID_COMMAND] = "invalid command",
+    [HU_TUNNEL_ERR_NOT_IMPLEMENTED] = "not implemented",
 };
 
-const char *sc_tunnel_error_string(sc_tunnel_error_t err) {
+const char *hu_tunnel_error_string(hu_tunnel_error_t err) {
     if ((unsigned)err < sizeof(tunnel_err_strings) / sizeof(tunnel_err_strings[0]))
         return tunnel_err_strings[err];
     return "unknown tunnel error";
 }
 
-sc_tunnel_t sc_tunnel_create(sc_allocator_t *alloc, const sc_tunnel_config_t *config) {
+hu_tunnel_t hu_tunnel_create(hu_allocator_t *alloc, const hu_tunnel_config_t *config) {
     if (!alloc)
-        return (sc_tunnel_t){.ctx = NULL, .vtable = NULL};
+        return (hu_tunnel_t){.ctx = NULL, .vtable = NULL};
     if (!config)
-        return sc_none_tunnel_create(alloc);
+        return hu_none_tunnel_create(alloc);
 
     switch (config->provider) {
-    case SC_TUNNEL_NONE:
-        return sc_none_tunnel_create(alloc);
-#ifdef SC_HAS_TUNNELS
-    case SC_TUNNEL_CLOUDFLARE:
-        return sc_cloudflare_tunnel_create(alloc, config->cloudflare_token,
+    case HU_TUNNEL_NONE:
+        return hu_none_tunnel_create(alloc);
+#ifdef HU_HAS_TUNNELS
+    case HU_TUNNEL_CLOUDFLARE:
+        return hu_cloudflare_tunnel_create(alloc, config->cloudflare_token,
                                            config->cloudflare_token_len);
-    case SC_TUNNEL_NGROK:
-        return sc_ngrok_tunnel_create(alloc, config->ngrok_auth_token, config->ngrok_auth_token_len,
+    case HU_TUNNEL_NGROK:
+        return hu_ngrok_tunnel_create(alloc, config->ngrok_auth_token, config->ngrok_auth_token_len,
                                       config->ngrok_domain, config->ngrok_domain_len);
-    case SC_TUNNEL_TAILSCALE:
-        return sc_tailscale_tunnel_create(alloc);
-    case SC_TUNNEL_CUSTOM:
-        return sc_custom_tunnel_create(alloc, config->custom_start_cmd,
+    case HU_TUNNEL_TAILSCALE:
+        return hu_tailscale_tunnel_create(alloc);
+    case HU_TUNNEL_CUSTOM:
+        return hu_custom_tunnel_create(alloc, config->custom_start_cmd,
                                        config->custom_start_cmd_len);
 #endif
     default:
-        return sc_none_tunnel_create(alloc);
+        return hu_none_tunnel_create(alloc);
     }
 }

@@ -1,13 +1,13 @@
-#include "seaclaw/persona/auto_profile.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/persona.h"
+#include "human/persona/auto_profile.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/persona.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(SC_ENABLE_SQLITE)
+#if defined(HU_ENABLE_SQLITE)
 #include <sqlite3.h>
 #endif
 
@@ -15,10 +15,10 @@
 #include <unistd.h>
 #endif
 
-#define SC_AUTO_PROFILE_MSG_LIMIT 500
+#define HU_AUTO_PROFILE_MSG_LIMIT 500
 
-char *sc_persona_profile_describe_style(sc_allocator_t *alloc,
-                                        const sc_sampler_contact_stats_t *stats,
+char *hu_persona_profile_describe_style(hu_allocator_t *alloc,
+                                        const hu_sampler_contact_stats_t *stats,
                                         const char *contact_id, size_t contact_id_len,
                                         size_t *out_len) {
     if (!alloc || !stats || !out_len)
@@ -47,50 +47,50 @@ char *sc_persona_profile_describe_style(sc_allocator_t *alloc,
     (void)contact_id;
     (void)contact_id_len;
 
-    char *out = sc_strndup(alloc, buf, pos);
+    char *out = hu_strndup(alloc, buf, pos);
     if (out)
         *out_len = pos;
     return out;
 }
 
-sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id,
-                                   size_t contact_id_len, sc_persona_overlay_t *overlay) {
+hu_error_t hu_persona_auto_profile(hu_allocator_t *alloc, const char *contact_id,
+                                   size_t contact_id_len, hu_persona_overlay_t *overlay) {
     if (!alloc || !contact_id || !overlay)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(overlay, 0, sizeof(*overlay));
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     /* Mock overlay for tests */
-    overlay->formality = sc_strndup(alloc, "casual", 6);
-    overlay->avg_length = sc_strndup(alloc, "35", 2);
-    overlay->emoji_usage = sc_strndup(alloc, "moderate", 8);
+    overlay->formality = hu_strndup(alloc, "casual", 6);
+    overlay->avg_length = hu_strndup(alloc, "35", 2);
+    overlay->emoji_usage = hu_strndup(alloc, "moderate", 8);
     overlay->message_splitting = false;
     overlay->max_segment_chars = 160;
-    return SC_OK;
+    return HU_OK;
 #endif
 
 #if !defined(__APPLE__) || !defined(__MACH__)
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 
-#if defined(SC_ENABLE_SQLITE)
+#if defined(HU_ENABLE_SQLITE)
     const char *home = getenv("HOME");
     if (!home || !home[0])
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
 
     char db_path[512];
     int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
     if (n < 0 || (size_t)n >= sizeof(db_path))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (access(db_path, R_OK) != 0)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
 
     sqlite3 *db = NULL;
     if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
         if (db)
             sqlite3_close(db);
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     }
 
     const char *sql = "SELECT m.text, m.is_from_me, m.date "
@@ -102,7 +102,7 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     char contact_buf[128];
@@ -111,11 +111,11 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
     memcpy(contact_buf, contact_id, clen);
     contact_buf[clen] = '\0';
     sqlite3_bind_text(stmt, 1, contact_buf, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 2, (int)SC_AUTO_PROFILE_MSG_LIMIT);
+    sqlite3_bind_int(stmt, 2, (int)HU_AUTO_PROFILE_MSG_LIMIT);
 
-    size_t raw_cap = SC_AUTO_PROFILE_MSG_LIMIT;
-    sc_sampler_raw_msg_t *raw =
-        (sc_sampler_raw_msg_t *)alloc->alloc(alloc->ctx, raw_cap * sizeof(*raw));
+    size_t raw_cap = HU_AUTO_PROFILE_MSG_LIMIT;
+    hu_sampler_raw_msg_t *raw =
+        (hu_sampler_raw_msg_t *)alloc->alloc(alloc->ctx, raw_cap * sizeof(*raw));
     char **text_bufs = (char **)alloc->alloc(alloc->ctx, raw_cap * sizeof(char *));
     if (!raw || !text_bufs) {
         if (raw)
@@ -124,7 +124,7 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
             alloc->free(alloc->ctx, text_bufs, raw_cap * sizeof(char *));
         sqlite3_finalize(stmt);
         sqlite3_close(db);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memset(raw, 0, raw_cap * sizeof(*raw));
     memset(text_bufs, 0, raw_cap * sizeof(char *));
@@ -135,7 +135,7 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
         int from_me = sqlite3_column_int(stmt, 1);
         int64_t date = sqlite3_column_int64(stmt, 2);
         if (text && text[0]) {
-            text_bufs[raw_count] = sc_strdup(alloc, text);
+            text_bufs[raw_count] = hu_strdup(alloc, text);
             if (!text_bufs[raw_count])
                 break;
             raw[raw_count].text = text_bufs[raw_count];
@@ -149,8 +149,8 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 
-    sc_sampler_contact_stats_t stats;
-    sc_error_t err = sc_persona_sampler_detect_contact(alloc, raw, raw_count, &stats);
+    hu_sampler_contact_stats_t stats;
+    hu_error_t err = hu_persona_sampler_detect_contact(alloc, raw, raw_count, &stats);
 
     for (size_t i = 0; i < raw_count; i++) {
         if (text_bufs[i])
@@ -159,29 +159,29 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
     alloc->free(alloc->ctx, text_bufs, raw_cap * sizeof(char *));
     alloc->free(alloc->ctx, raw, raw_cap * sizeof(*raw));
 
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
     /* Map stats to overlay */
     if (stats.avg_their_len < 30) {
-        overlay->formality = sc_strndup(alloc, "casual", 6);
-        overlay->avg_length = sc_strndup(alloc, "20", 2);
+        overlay->formality = hu_strndup(alloc, "casual", 6);
+        overlay->avg_length = hu_strndup(alloc, "20", 2);
         overlay->message_splitting = true;
         overlay->max_segment_chars = 80;
     } else if (stats.avg_their_len <= 80) {
-        overlay->formality = sc_strndup(alloc, "neutral", 7);
-        overlay->avg_length = sc_strndup(alloc, "50", 2);
+        overlay->formality = hu_strndup(alloc, "neutral", 7);
+        overlay->avg_length = hu_strndup(alloc, "50", 2);
         overlay->message_splitting = false;
         overlay->max_segment_chars = 160;
     } else {
-        overlay->formality = sc_strndup(alloc, "formal", 6);
-        overlay->avg_length = sc_strndup(alloc, "80", 2);
+        overlay->formality = hu_strndup(alloc, "formal", 6);
+        overlay->avg_length = hu_strndup(alloc, "80", 2);
         overlay->message_splitting = false;
         overlay->max_segment_chars = 320;
     }
 
     overlay->emoji_usage =
-        stats.uses_emoji ? sc_strndup(alloc, "frequent", 8) : sc_strndup(alloc, "rare", 4);
+        stats.uses_emoji ? hu_strndup(alloc, "frequent", 8) : hu_strndup(alloc, "rare", 4);
 
     if (stats.texts_in_bursts)
         overlay->message_splitting = true;
@@ -189,15 +189,15 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
     if (stats.prefers_short) {
         overlay->typing_quirks = (char **)alloc->alloc(alloc->ctx, 2 * sizeof(char *));
         if (overlay->typing_quirks) {
-            overlay->typing_quirks[0] = sc_strndup(alloc, "lowercase", 9);
-            overlay->typing_quirks[1] = sc_strndup(alloc, "no_periods", 10);
+            overlay->typing_quirks[0] = hu_strndup(alloc, "lowercase", 9);
+            overlay->typing_quirks[1] = hu_strndup(alloc, "no_periods", 10);
             overlay->typing_quirks_count = 2;
         }
     }
 
     size_t desc_len = 0;
     char *desc =
-        sc_persona_profile_describe_style(alloc, &stats, contact_id, contact_id_len, &desc_len);
+        hu_persona_profile_describe_style(alloc, &stats, contact_id, contact_id_len, &desc_len);
     if (desc && desc_len > 0) {
         overlay->style_notes = (char **)alloc->alloc(alloc->ctx, sizeof(char *));
         if (overlay->style_notes) {
@@ -208,9 +208,9 @@ sc_error_t sc_persona_auto_profile(sc_allocator_t *alloc, const char *contact_id
         }
     }
 
-    return SC_OK;
+    return HU_OK;
 #else
     (void)contact_id_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }

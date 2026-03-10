@@ -1,5 +1,5 @@
-#include "seaclaw/agent/reflection.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/reflection.h"
+#include "human/core/string.h"
 #include <string.h>
 
 static bool contains_ci(const char *s, size_t slen, const char *needle, size_t nlen) {
@@ -25,22 +25,22 @@ static bool contains_ci(const char *s, size_t slen, const char *needle, size_t n
     return false;
 }
 
-sc_reflection_quality_t sc_reflection_evaluate(const char *user_query, size_t user_query_len,
+hu_reflection_quality_t hu_reflection_evaluate(const char *user_query, size_t user_query_len,
                                                const char *response, size_t response_len,
-                                               const sc_reflection_config_t *config) {
+                                               const hu_reflection_config_t *config) {
     if (!response || response_len == 0)
-        return SC_QUALITY_NEEDS_RETRY;
+        return HU_QUALITY_NEEDS_RETRY;
 
     /* Check for empty/trivial responses */
     if (response_len < 10)
-        return SC_QUALITY_NEEDS_RETRY;
+        return HU_QUALITY_NEEDS_RETRY;
 
     /* Check for known failure patterns */
     if (contains_ci(response, response_len, "i cannot", 8) ||
         contains_ci(response, response_len, "i can't", 7) ||
         contains_ci(response, response_len, "i'm unable", 10) ||
         contains_ci(response, response_len, "as an ai", 8))
-        return SC_QUALITY_ACCEPTABLE;
+        return HU_QUALITY_ACCEPTABLE;
 
     /* If user asked a question, check response addresses it */
     bool user_has_question = false;
@@ -54,7 +54,7 @@ sc_reflection_quality_t sc_reflection_evaluate(const char *user_query, size_t us
     }
 
     if (user_has_question && response_len < 30)
-        return SC_QUALITY_ACCEPTABLE;
+        return HU_QUALITY_ACCEPTABLE;
 
     /* Min response tokens check (approximate tokens as words) */
     if (config && config->min_response_tokens > 0) {
@@ -63,18 +63,18 @@ sc_reflection_quality_t sc_reflection_evaluate(const char *user_query, size_t us
             if (response[i] == ' ')
                 approx_words++;
         if (approx_words < config->min_response_tokens)
-            return SC_QUALITY_ACCEPTABLE;
+            return HU_QUALITY_ACCEPTABLE;
     }
 
-    return SC_QUALITY_GOOD;
+    return HU_QUALITY_GOOD;
 }
 
-sc_error_t sc_reflection_build_critique_prompt(sc_allocator_t *alloc, const char *user_query,
+hu_error_t hu_reflection_build_critique_prompt(hu_allocator_t *alloc, const char *user_query,
                                                size_t user_query_len, const char *response,
                                                size_t response_len, char **out_prompt,
                                                size_t *out_prompt_len) {
     if (!alloc || !out_prompt)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     const char *prefix =
         "Evaluate the following response. Score it as GOOD, ACCEPTABLE, or NEEDS_RETRY. "
@@ -91,7 +91,7 @@ sc_error_t sc_reflection_build_critique_prompt(sc_allocator_t *alloc, const char
     size_t total = prefix_len + user_query_len + mid_len + response_len + suffix_len;
     char *buf = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     size_t pos = 0;
     memcpy(buf + pos, prefix, prefix_len);
@@ -113,21 +113,21 @@ sc_error_t sc_reflection_build_critique_prompt(sc_allocator_t *alloc, const char
     *out_prompt = buf;
     if (out_prompt_len)
         *out_prompt_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_reflection_quality_t sc_reflection_evaluate_llm(sc_allocator_t *alloc, sc_provider_t *provider,
+hu_reflection_quality_t hu_reflection_evaluate_llm(hu_allocator_t *alloc, hu_provider_t *provider,
                                                    const char *user_query, size_t user_query_len,
                                                    const char *response, size_t response_len,
-                                                   sc_reflection_quality_t heuristic_quality) {
+                                                   hu_reflection_quality_t heuristic_quality) {
     if (!alloc || !provider || !provider->vtable || !provider->vtable->chat_with_system)
         return heuristic_quality;
 
     char *critique = NULL;
     size_t critique_len = 0;
-    sc_error_t err = sc_reflection_build_critique_prompt(
+    hu_error_t err = hu_reflection_build_critique_prompt(
         alloc, user_query, user_query_len, response, response_len, &critique, &critique_len);
-    if (err != SC_OK || !critique)
+    if (err != HU_OK || !critique)
         return heuristic_quality;
 
     static const char sys[] =
@@ -141,25 +141,25 @@ sc_reflection_quality_t sc_reflection_evaluate_llm(sc_allocator_t *alloc, sc_pro
                                              &llm_out_len);
     alloc->free(alloc->ctx, critique, critique_len + 1);
 
-    if (err != SC_OK || !llm_out || llm_out_len == 0) {
+    if (err != HU_OK || !llm_out || llm_out_len == 0) {
         if (llm_out)
             alloc->free(alloc->ctx, llm_out, llm_out_len + 1);
         return heuristic_quality;
     }
 
-    sc_reflection_quality_t result = heuristic_quality;
+    hu_reflection_quality_t result = heuristic_quality;
     if (contains_ci(llm_out, llm_out_len, "needs_retry", 11))
-        result = SC_QUALITY_NEEDS_RETRY;
+        result = HU_QUALITY_NEEDS_RETRY;
     else if (contains_ci(llm_out, llm_out_len, "good", 4))
-        result = SC_QUALITY_GOOD;
+        result = HU_QUALITY_GOOD;
     else if (contains_ci(llm_out, llm_out_len, "acceptable", 10))
-        result = SC_QUALITY_ACCEPTABLE;
+        result = HU_QUALITY_ACCEPTABLE;
 
     alloc->free(alloc->ctx, llm_out, llm_out_len + 1);
     return result;
 }
 
-void sc_reflection_result_free(sc_allocator_t *alloc, sc_reflection_result_t *result) {
+void hu_reflection_result_free(hu_allocator_t *alloc, hu_reflection_result_t *result) {
     if (!alloc || !result)
         return;
     if (result->feedback && result->feedback_len > 0)

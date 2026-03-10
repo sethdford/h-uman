@@ -3,30 +3,30 @@ title: Cron System
 description: Schedule recurring agent tasks with the built-in cron scheduler.
 ---
 
-SeaClaw includes a cron-like scheduler that lets scheduled commands run on a recurring basis. Jobs are stored in a JSON crontab file and executed by the service loop when the gateway is running.
+Human includes a cron-like scheduler that lets scheduled commands run on a recurring basis. Jobs are stored in a JSON crontab file and executed by the service loop when the gateway is running.
 
 ## CLI commands
 
-The cron CLI manages the crontab file at `~/.seaclaw/crontab.json`:
+The cron CLI manages the crontab file at `~/.human/crontab.json`:
 
 ```bash
-seaclaw cron list                      # List all scheduled jobs
-seaclaw cron add "<schedule>" <command>  # Add a job
-seaclaw cron remove <id>               # Remove a job by ID
+human cron list                      # List all scheduled jobs
+human cron add "<schedule>" <command>  # Add a job
+human cron remove <id>               # Remove a job by ID
 ```
 
 Example:
 
 ```bash
-seaclaw cron add "0 9 * * *" "Check email and summarize"
-seaclaw cron add "*/15 * * * *" echo "Heartbeat"
-seaclaw cron list
-seaclaw cron remove 1
+human cron add "0 9 * * *" "Check email and summarize"
+human cron add "*/15 * * * *" echo "Heartbeat"
+human cron list
+human cron remove 1
 ```
 
 ## Crontab file format
 
-Jobs are persisted in `~/.seaclaw/crontab.json` as a JSON array:
+Jobs are persisted in `~/.human/crontab.json` as a JSON array:
 
 ```json
 [
@@ -64,7 +64,7 @@ Standard 5-field cron syntax:
 
 ## Configuration
 
-Cron behavior is configured in `~/.seaclaw/config.json` under the `cron` key:
+Cron behavior is configured in `~/.human/config.json` under the `cron` key:
 
 ```json
 {
@@ -84,7 +84,7 @@ Cron behavior is configured in `~/.seaclaw/config.json` under the `cron` key:
 
 ## Gateway control protocol
 
-When running the gateway (`seaclaw gateway` or `seaclaw service-loop`), the WebSocket control protocol exposes additional cron methods:
+When running the gateway (`human gateway` or `human service-loop`), the WebSocket control protocol exposes additional cron methods:
 
 | Method        | Description            |
 | ------------- | ---------------------- |

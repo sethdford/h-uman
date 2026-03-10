@@ -3,10 +3,10 @@
  * Sends via /api/v1/rpc, receives via SSE at /api/v1/events,
  * health at /api/v1/check.
  */
-#include "seaclaw/channels/signal.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/channels/signal.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,11 +14,11 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
-#if !SC_IS_TEST
+#if !HU_IS_TEST
 #include <unistd.h>
 #endif
 
-#if !SC_IS_TEST && defined(SC_HTTP_CURL)
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
 #include <pthread.h>
 #endif
 
@@ -27,8 +27,8 @@
 #define SIGNAL_HEALTH_ENDPOINT     "/api/v1/check"
 #define SIGNAL_TYPING_INTERVAL_SEC 8
 
-typedef struct sc_signal_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_signal_ctx {
+    hu_allocator_t *alloc;
     char *http_url;
     size_t http_url_len;
     char *account;
@@ -40,7 +40,7 @@ typedef struct sc_signal_ctx {
     size_t group_allow_from_count;
     char *group_policy;
     size_t group_policy_len;
-#if SC_IS_TEST
+#if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
     struct {
@@ -49,22 +49,22 @@ typedef struct sc_signal_ctx {
     } mock_msgs[8];
     size_t mock_count;
 #endif
-#if !SC_IS_TEST && defined(SC_HTTP_CURL)
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
     pthread_mutex_t typing_mu;
     char *typing_target;
     size_t typing_target_len;
     volatile int typing_stop;
     pthread_t typing_thread;
 #endif
-} sc_signal_ctx_t;
+} hu_signal_ctx_t;
 
-#if !SC_IS_TEST
+#if !HU_IS_TEST
 /* Build URL for RPC, SSE, or health. */
-static int build_url(char *buf, size_t cap, const sc_signal_ctx_t *c, const char *endpoint) {
+static int build_url(char *buf, size_t cap, const hu_signal_ctx_t *c, const char *endpoint) {
     return snprintf(buf, cap, "%.*s%s", (int)c->http_url_len, c->http_url, endpoint);
 }
 
-static int build_sse_url(char *buf, size_t cap, const sc_signal_ctx_t *c) {
+static int build_sse_url(char *buf, size_t cap, const hu_signal_ctx_t *c) {
     int n = snprintf(buf, cap, "%.*s%s?account=", (int)c->http_url_len, c->http_url,
                      SIGNAL_SSE_ENDPOINT);
     if (n < 0 || (size_t)n >= cap)
@@ -85,7 +85,7 @@ static int build_sse_url(char *buf, size_t cap, const sc_signal_ctx_t *c) {
 /* Parse target: "group:xxx" -> group, else direct recipient. */
 static int parse_target(const char *target, size_t target_len, int *out_is_group,
                         const char **out_id, size_t *out_id_len) {
-    const char *prefix = SC_SIGNAL_GROUP_TARGET_PREFIX;
+    const char *prefix = HU_SIGNAL_GROUP_TARGET_PREFIX;
     size_t prefix_len = strlen(prefix);
     if (target_len >= prefix_len && strncasecmp(target, prefix, prefix_len) == 0) {
         *out_is_group = 1;
@@ -99,15 +99,15 @@ static int parse_target(const char *target, size_t target_len, int *out_is_group
     return 0;
 }
 
-/* Chunk message at SC_SIGNAL_MAX_MSG, prefer newline then space. */
+/* Chunk message at HU_SIGNAL_MAX_MSG, prefer newline then space. */
 static size_t chunk_next(const char *buf, size_t len, size_t cursor, size_t *out_end) {
     if (cursor >= len) {
         *out_end = cursor;
         return 0;
     }
     size_t max_chunk = len - cursor;
-    if (max_chunk > SC_SIGNAL_MAX_MSG)
-        max_chunk = SC_SIGNAL_MAX_MSG;
+    if (max_chunk > HU_SIGNAL_MAX_MSG)
+        max_chunk = HU_SIGNAL_MAX_MSG;
     size_t search_end = cursor + max_chunk;
     if (search_end > len)
         search_end = len;
@@ -131,99 +131,99 @@ done:
 }
 
 /* Build JSON-RPC body for send or sendTyping. */
-static sc_error_t build_rpc_body(sc_allocator_t *alloc, const char *method, int is_group,
+static hu_error_t build_rpc_body(hu_allocator_t *alloc, const char *method, int is_group,
                                  const char *id, size_t id_len, const char *account,
                                  size_t account_len, const char *message, size_t message_len,
                                  char **out, size_t *out_len) {
-    sc_json_buf_t jbuf;
-    sc_error_t err = sc_json_buf_init(&jbuf, alloc);
+    hu_json_buf_t jbuf;
+    hu_error_t err = hu_json_buf_init(&jbuf, alloc);
     if (err)
         return err;
 
-    err = sc_json_buf_append_raw(&jbuf, "{\"jsonrpc\":\"2.0\",\"method\":", 26);
+    err = hu_json_buf_append_raw(&jbuf, "{\"jsonrpc\":\"2.0\",\"method\":", 26);
     if (err)
         goto fail;
-    err = sc_json_append_string(&jbuf, method, strlen(method));
+    err = hu_json_append_string(&jbuf, method, strlen(method));
     if (err)
         goto fail;
-    err = sc_json_buf_append_raw(&jbuf, ",\"params\":{", 11);
+    err = hu_json_buf_append_raw(&jbuf, ",\"params\":{", 11);
     if (err)
         goto fail;
 
     if (is_group) {
-        err = sc_json_buf_append_raw(&jbuf, "\"groupId\":", 10);
+        err = hu_json_buf_append_raw(&jbuf, "\"groupId\":", 10);
         if (err)
             goto fail;
-        err = sc_json_append_string(&jbuf, id, id_len);
+        err = hu_json_append_string(&jbuf, id, id_len);
     } else {
-        err = sc_json_buf_append_raw(&jbuf, "\"recipient\":[", 13);
+        err = hu_json_buf_append_raw(&jbuf, "\"recipient\":[", 13);
         if (err)
             goto fail;
-        err = sc_json_append_string(&jbuf, id, id_len);
+        err = hu_json_append_string(&jbuf, id, id_len);
         if (err)
             goto fail;
-        err = sc_json_buf_append_raw(&jbuf, "]", 1);
+        err = hu_json_buf_append_raw(&jbuf, "]", 1);
     }
     if (err)
         goto fail;
 
-    err = sc_json_buf_append_raw(&jbuf, ",\"account\":", 11);
+    err = hu_json_buf_append_raw(&jbuf, ",\"account\":", 11);
     if (err)
         goto fail;
-    err = sc_json_append_string(&jbuf, account, account_len);
+    err = hu_json_append_string(&jbuf, account, account_len);
     if (err)
         goto fail;
 
     if (message && message_len > 0) {
-        err = sc_json_buf_append_raw(&jbuf, ",\"message\":", 11);
+        err = hu_json_buf_append_raw(&jbuf, ",\"message\":", 11);
         if (err)
             goto fail;
-        err = sc_json_append_string(&jbuf, message, message_len);
+        err = hu_json_append_string(&jbuf, message, message_len);
         if (err)
             goto fail;
     }
 
-    err = sc_json_buf_append_raw(&jbuf, "},\"id\":\"1\"}", 11);
+    err = hu_json_buf_append_raw(&jbuf, "},\"id\":\"1\"}", 11);
     if (err)
         goto fail;
 
     *out_len = jbuf.len;
     *out = (char *)alloc->alloc(alloc->ctx, jbuf.len + 1);
     if (!*out) {
-        err = SC_ERR_OUT_OF_MEMORY;
+        err = HU_ERR_OUT_OF_MEMORY;
         goto fail;
     }
     memcpy(*out, jbuf.ptr, jbuf.len + 1);
-    sc_json_buf_free(&jbuf);
-    return SC_OK;
+    hu_json_buf_free(&jbuf);
+    return HU_OK;
 fail:
-    sc_json_buf_free(&jbuf);
+    hu_json_buf_free(&jbuf);
     return err;
 }
 
 /* Send one JSON-RPC payload. */
-static sc_error_t send_rpc(sc_signal_ctx_t *c, const char *body, size_t body_len) {
+static hu_error_t send_rpc(hu_signal_ctx_t *c, const char *body, size_t body_len) {
     char url_buf[512];
     int n = build_url(url_buf, sizeof(url_buf), c, SIGNAL_RPC_ENDPOINT);
     if (n < 0 || (size_t)n >= sizeof(url_buf))
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
 
-    sc_http_response_t resp = {0};
-    sc_error_t err = sc_http_post_json(c->alloc, url_buf, NULL, body, body_len, &resp);
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_post_json(c->alloc, url_buf, NULL, body, body_len, &resp);
     if (err) {
         if (resp.owned && resp.body)
-            sc_http_response_free(c->alloc, &resp);
-        return SC_ERR_CHANNEL_SEND;
+            hu_http_response_free(c->alloc, &resp);
+        return HU_ERR_CHANNEL_SEND;
     }
     if (resp.owned && resp.body)
-        sc_http_response_free(c->alloc, &resp);
-    return SC_OK;
+        hu_http_response_free(c->alloc, &resp);
+    return HU_OK;
 }
-#endif /* !SC_IS_TEST */
+#endif /* !HU_IS_TEST */
 
-#if !SC_IS_TEST && defined(SC_HTTP_CURL)
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
 static void *typing_thread_fn(void *arg) {
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)arg;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)arg;
     while (!c->typing_stop && c->running) {
         pthread_mutex_lock(&c->typing_mu);
         char *target = c->typing_target;
@@ -239,7 +239,7 @@ static void *typing_thread_fn(void *arg) {
         char *body = NULL;
         size_t body_len = 0;
         if (build_rpc_body(c->alloc, "sendTyping", is_group, id, id_len, c->account, c->account_len,
-                           NULL, 0, &body, &body_len) == SC_OK &&
+                           NULL, 0, &body, &body_len) == HU_OK &&
             body) {
             send_rpc(c, body, body_len);
             c->alloc->free(c->alloc->ctx, body, body_len + 1);
@@ -252,19 +252,19 @@ static void *typing_thread_fn(void *arg) {
 }
 #endif
 
-static sc_error_t signal_start(void *ctx) {
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
+static hu_error_t signal_start(void *ctx) {
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void signal_stop(void *ctx) {
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ctx;
     if (c)
         c->running = false;
-#if !SC_IS_TEST && defined(SC_HTTP_CURL)
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
     c->typing_stop = 1;
     if (c->typing_thread) {
         pthread_join(c->typing_thread, NULL);
@@ -280,24 +280,24 @@ static void signal_stop(void *ctx) {
 #endif
 }
 
-static sc_error_t signal_send(void *ctx, const char *target, size_t target_len, const char *message,
+static hu_error_t signal_send(void *ctx, const char *target, size_t target_len, const char *message,
                               size_t message_len, const char *const *media, size_t media_count) {
     (void)media;
     (void)media_count;
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ctx;
     if (!c || !c->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!c->http_url || !target || target_len == 0 || !message)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        return SC_OK;
+        return HU_OK;
     }
 #else
     int is_group = 0;
@@ -306,7 +306,7 @@ static sc_error_t signal_send(void *ctx, const char *target, size_t target_len, 
     parse_target(target, target_len, &is_group, &id, &id_len);
 
     size_t cursor = 0;
-    sc_error_t last_err = SC_OK;
+    hu_error_t last_err = HU_OK;
     while (cursor < message_len) {
         size_t chunk_end = 0;
         size_t chunk_sz = chunk_next(message, message_len, cursor, &chunk_end);
@@ -315,17 +315,17 @@ static sc_error_t signal_send(void *ctx, const char *target, size_t target_len, 
 
         char *body = NULL;
         size_t body_len = 0;
-        sc_error_t err =
+        hu_error_t err =
             build_rpc_body(c->alloc, "send", is_group, id, id_len, c->account, c->account_len,
                            message + cursor, chunk_sz, &body, &body_len);
         if (err)
             return err;
         if (!body)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
 
         last_err = send_rpc(c, body, body_len);
         c->alloc->free(c->alloc->ctx, body, body_len + 1);
-        if (last_err != SC_OK)
+        if (last_err != HU_OK)
             return last_err;
         cursor = chunk_end;
     }
@@ -333,31 +333,31 @@ static sc_error_t signal_send(void *ctx, const char *target, size_t target_len, 
 #endif
 }
 
-static sc_error_t signal_start_typing(void *ctx, const char *recipient, size_t recipient_len) {
-#if SC_IS_TEST
+static hu_error_t signal_start_typing(void *ctx, const char *recipient, size_t recipient_len) {
+#if HU_IS_TEST
     (void)ctx;
     (void)recipient;
     (void)recipient_len;
-    return SC_OK;
+    return HU_OK;
 #else
-#if !defined(SC_HTTP_CURL)
+#if !defined(HU_HTTP_CURL)
     (void)ctx;
     (void)recipient;
     (void)recipient_len;
 #else
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ctx;
     if (!c || recipient_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     pthread_mutex_lock(&c->typing_mu);
     if (c->typing_target) {
         c->alloc->free(c->alloc->ctx, c->typing_target, c->typing_target_len + 1);
         c->typing_target = NULL;
     }
-    c->typing_target = sc_strndup(c->alloc, recipient, recipient_len);
+    c->typing_target = hu_strndup(c->alloc, recipient, recipient_len);
     if (!c->typing_target) {
         pthread_mutex_unlock(&c->typing_mu);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     c->typing_target_len = recipient_len;
     c->typing_stop = 0;
@@ -369,25 +369,25 @@ static sc_error_t signal_start_typing(void *ctx, const char *recipient, size_t r
     }
     pthread_mutex_unlock(&c->typing_mu);
 #endif
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-static sc_error_t signal_stop_typing(void *ctx, const char *recipient, size_t recipient_len) {
-#if SC_IS_TEST
+static hu_error_t signal_stop_typing(void *ctx, const char *recipient, size_t recipient_len) {
+#if HU_IS_TEST
     (void)ctx;
     (void)recipient;
     (void)recipient_len;
-    return SC_OK;
+    return HU_OK;
 #else
-#if !defined(SC_HTTP_CURL)
+#if !defined(HU_HTTP_CURL)
     (void)ctx;
     (void)recipient;
     (void)recipient_len;
 #else
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ctx;
     if (!c)
-        return SC_OK;
+        return HU_OK;
 
     pthread_mutex_lock(&c->typing_mu);
     if (c->typing_target && recipient_len == c->typing_target_len &&
@@ -403,7 +403,7 @@ static sc_error_t signal_stop_typing(void *ctx, const char *recipient, size_t re
         c->typing_thread = 0;
     }
 #endif
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -413,11 +413,11 @@ static const char *signal_name(void *ctx) {
 }
 
 static bool signal_health_check(void *ctx) {
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ctx;
     if (!c || !c->running)
         return false;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     return true;
 #else
     if (!c->http_url || c->http_url_len == 0)
@@ -427,21 +427,21 @@ static bool signal_health_check(void *ctx) {
     if (n < 0 || (size_t)n >= sizeof(url_buf))
         return false;
 
-    sc_http_response_t resp = {0};
-    sc_error_t err = sc_http_get(c->alloc, url_buf, NULL, &resp);
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_get(c->alloc, url_buf, NULL, &resp);
     if (err) {
         if (resp.owned && resp.body)
-            sc_http_response_free(c->alloc, &resp);
+            hu_http_response_free(c->alloc, &resp);
         return false;
     }
     bool ok = (resp.status_code >= 200 && resp.status_code < 300);
     if (resp.owned && resp.body)
-        sc_http_response_free(c->alloc, &resp);
+        hu_http_response_free(c->alloc, &resp);
     return ok;
 #endif
 }
 
-static const sc_channel_vtable_t signal_vtable = {
+static const hu_channel_vtable_t signal_vtable = {
     .start = signal_start,
     .stop = signal_stop,
     .send = signal_send,
@@ -452,7 +452,7 @@ static const sc_channel_vtable_t signal_vtable = {
     .stop_typing = signal_stop_typing,
 };
 
-static void free_group_policy(sc_signal_ctx_t *c) {
+static void free_group_policy(hu_signal_ctx_t *c) {
     if (c->group_policy) {
         c->alloc->free(c->alloc->ctx, c->group_policy, c->group_policy_len + 1);
         c->group_policy = NULL;
@@ -460,27 +460,27 @@ static void free_group_policy(sc_signal_ctx_t *c) {
     }
 }
 
-sc_error_t sc_signal_create(sc_allocator_t *alloc, const char *http_url, size_t http_url_len,
-                            const char *account, size_t account_len, sc_channel_t *out) {
-    return sc_signal_create_ex(alloc, http_url, http_url_len, account, account_len, NULL, 0, NULL,
-                               0, SC_SIGNAL_GROUP_POLICY_ALLOWLIST,
-                               strlen(SC_SIGNAL_GROUP_POLICY_ALLOWLIST), out);
+hu_error_t hu_signal_create(hu_allocator_t *alloc, const char *http_url, size_t http_url_len,
+                            const char *account, size_t account_len, hu_channel_t *out) {
+    return hu_signal_create_ex(alloc, http_url, http_url_len, account, account_len, NULL, 0, NULL,
+                               0, HU_SIGNAL_GROUP_POLICY_ALLOWLIST,
+                               strlen(HU_SIGNAL_GROUP_POLICY_ALLOWLIST), out);
 }
 
-sc_error_t sc_signal_create_ex(sc_allocator_t *alloc, const char *http_url, size_t http_url_len,
+hu_error_t hu_signal_create_ex(hu_allocator_t *alloc, const char *http_url, size_t http_url_len,
                                const char *account, size_t account_len,
                                const char *const *allow_from, size_t allow_from_count,
                                const char *const *group_allow_from, size_t group_allow_from_count,
                                const char *group_policy, size_t group_policy_len,
-                               sc_channel_t *out) {
+                               hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
-#if !SC_IS_TEST && defined(SC_HTTP_CURL)
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
     pthread_mutex_init(&c->typing_mu, NULL);
 #endif
 
@@ -488,7 +488,7 @@ sc_error_t sc_signal_create_ex(sc_allocator_t *alloc, const char *http_url, size
         c->http_url = (char *)alloc->alloc(alloc->ctx, http_url_len + 1);
         if (!c->http_url) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->http_url, http_url, http_url_len);
         c->http_url[http_url_len] = '\0';
@@ -501,7 +501,7 @@ sc_error_t sc_signal_create_ex(sc_allocator_t *alloc, const char *http_url, size
             if (c->http_url)
                 alloc->free(alloc->ctx, c->http_url, c->http_url_len + 1);
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->account, account, account_len);
         c->account[account_len] = '\0';
@@ -521,7 +521,7 @@ sc_error_t sc_signal_create_ex(sc_allocator_t *alloc, const char *http_url, size
             if (c->account)
                 alloc->free(alloc->ctx, c->account, c->account_len + 1);
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->group_policy, group_policy, group_policy_len);
         c->group_policy[group_policy_len] = '\0';
@@ -530,13 +530,13 @@ sc_error_t sc_signal_create_ex(sc_allocator_t *alloc, const char *http_url, size
 
     out->ctx = c;
     out->vtable = &signal_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-#if !SC_IS_TEST
+#if !HU_IS_TEST
 /* Parse SSE data lines, extract "data: {json}" events. */
-static size_t parse_sse_events(const char *buf, size_t buf_len, sc_channel_loop_msg_t *msgs,
-                               size_t max_msgs, sc_allocator_t *alloc) {
+static size_t parse_sse_events(const char *buf, size_t buf_len, hu_channel_loop_msg_t *msgs,
+                               size_t max_msgs, hu_allocator_t *alloc) {
     size_t count = 0;
     size_t i = 0;
     while (i < buf_len && count < max_msgs) {
@@ -551,16 +551,16 @@ static size_t parse_sse_events(const char *buf, size_t buf_len, sc_channel_loop_
                 const char *json = buf + i;
                 size_t json_len = line_end - i;
                 if (json_len > 0 && json[0] == '{') {
-                    sc_json_value_t *parsed = NULL;
-                    if (sc_json_parse(alloc, json, json_len, &parsed) == SC_OK && parsed) {
-                        sc_json_value_t *env = sc_json_object_get(parsed, "envelope");
-                        if (env && env->type == SC_JSON_OBJECT) {
-                            sc_json_value_t *dm = sc_json_object_get(env, "dataMessage");
-                            if (dm && dm->type == SC_JSON_OBJECT) {
-                                const char *msg = sc_json_get_string(dm, "message");
-                                const char *src = sc_json_get_string(env, "sourceNumber");
+                    hu_json_value_t *parsed = NULL;
+                    if (hu_json_parse(alloc, json, json_len, &parsed) == HU_OK && parsed) {
+                        hu_json_value_t *env = hu_json_object_get(parsed, "envelope");
+                        if (env && env->type == HU_JSON_OBJECT) {
+                            hu_json_value_t *dm = hu_json_object_get(env, "dataMessage");
+                            if (dm && dm->type == HU_JSON_OBJECT) {
+                                const char *msg = hu_json_get_string(dm, "message");
+                                const char *src = hu_json_get_string(env, "sourceNumber");
                                 if (!src)
-                                    src = sc_json_get_string(env, "source");
+                                    src = hu_json_get_string(env, "source");
                                 if (msg && src) {
                                     size_t msg_len = msg ? strlen(msg) : 0;
                                     size_t src_len = src ? strlen(src) : 0;
@@ -573,7 +573,7 @@ static size_t parse_sse_events(const char *buf, size_t buf_len, sc_channel_loop_
                                 }
                             }
                         }
-                        sc_json_free(alloc, parsed);
+                        hu_json_free(alloc, parsed);
                     }
                 }
             }
@@ -588,15 +588,15 @@ static size_t parse_sse_events(const char *buf, size_t buf_len, sc_channel_loop_
 }
 #endif
 
-sc_error_t sc_signal_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
+hu_error_t hu_signal_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                           size_t max_msgs, size_t *out_count) {
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)channel_ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)channel_ctx;
     if (!c || !alloc || !msgs || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     (void)max_msgs;
     *out_count = 0;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (c->mock_count > 0) {
         (void)alloc;
         size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
@@ -606,42 +606,42 @@ sc_error_t sc_signal_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_l
         }
         *out_count = n;
         c->mock_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
-    return SC_OK;
+    return HU_OK;
 #else
     if (!c->http_url || !c->account || c->account_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     char url_buf[1024];
     int n = build_sse_url(url_buf, sizeof(url_buf), c);
     if (n < 0 || (size_t)n >= sizeof(url_buf))
-        return SC_OK;
+        return HU_OK;
 
-    sc_http_response_t resp = {0};
-    sc_error_t err = sc_http_get_ex(c->alloc, url_buf, "Accept: text/event-stream\n", &resp);
+    hu_http_response_t resp = {0};
+    hu_error_t err = hu_http_get_ex(c->alloc, url_buf, "Accept: text/event-stream\n", &resp);
     if (err || !resp.body || resp.body_len == 0) {
         if (resp.owned && resp.body)
-            sc_http_response_free(c->alloc, &resp);
-        return SC_OK;
+            hu_http_response_free(c->alloc, &resp);
+        return HU_OK;
     }
 
     *out_count = parse_sse_events(resp.body, resp.body_len, msgs, max_msgs, alloc);
     if (resp.owned && resp.body)
-        sc_http_response_free(c->alloc, &resp);
-    return SC_OK;
+        hu_http_response_free(c->alloc, &resp);
+    return HU_OK;
 #endif
 }
 
-#if SC_IS_TEST
-sc_error_t sc_signal_test_inject_mock(sc_channel_t *ch, const char *session_key,
+#if HU_IS_TEST
+hu_error_t hu_signal_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                       size_t session_key_len, const char *content,
                                       size_t content_len) {
     if (!ch || !ch->ctx)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ch->ctx;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ch->ctx;
     if (c->mock_count >= 8)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t i = c->mock_count++;
     size_t sk = session_key_len > 127 ? 127 : session_key_len;
     size_t ct = content_len > 4095 ? 4095 : content_len;
@@ -651,30 +651,30 @@ sc_error_t sc_signal_test_inject_mock(sc_channel_t *ch, const char *session_key,
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
 
-const char *sc_signal_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+const char *hu_signal_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
-    sc_signal_ctx_t *c = (sc_signal_ctx_t *)ch->ctx;
+    hu_signal_ctx_t *c = (hu_signal_ctx_t *)ch->ctx;
     if (out_len)
         *out_len = c->last_message_len;
     return c->last_message;
 }
 #endif
 
-void sc_signal_destroy(sc_channel_t *ch) {
+void hu_signal_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_signal_ctx_t *c = (sc_signal_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
+        hu_signal_ctx_t *c = (hu_signal_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
         signal_stop(c);
         free_group_policy(c);
         if (c->http_url)
             a->free(a->ctx, c->http_url, c->http_url_len + 1);
         if (c->account)
             a->free(a->ctx, c->account, c->account_len + 1);
-#if !SC_IS_TEST && defined(SC_HTTP_CURL)
+#if !HU_IS_TEST && defined(HU_HTTP_CURL)
         pthread_mutex_destroy(&c->typing_mu);
 #endif
         a->free(a->ctx, c, sizeof(*c));

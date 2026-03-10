@@ -75,7 +75,7 @@ test.describe("Accessibility", () => {
     // Use Meta+k on Mac, Control+k elsewhere (app accepts both)
     await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
     await expect(
-      page.locator("sc-command-palette input, sc-command-palette [role='listbox']"),
+      page.locator("hu-command-palette input, hu-command-palette [role='listbox']"),
     ).toBeVisible({
       timeout: 5000,
     });
@@ -88,12 +88,12 @@ test.describe("Accessibility", () => {
     await page.goto("/?demo");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
     await expect(
-      page.locator("sc-command-palette input, sc-command-palette [role='listbox']"),
+      page.locator("hu-command-palette input, hu-command-palette [role='listbox']"),
     ).toBeVisible({
       timeout: 5000,
     });
     await page.keyboard.press("Escape");
-    await expect(page.locator("sc-command-palette input")).not.toBeVisible();
+    await expect(page.locator("hu-command-palette input")).not.toBeVisible();
   });
 });
 
@@ -101,16 +101,16 @@ test.describe("Accessibility", () => {
 
 test.describe("Icon-Only Button Audit", () => {
   const VIEWS_TO_AUDIT = [
-    { hash: "overview", tag: "sc-overview-view", name: "Overview" },
-    { hash: "chat", tag: "sc-chat-view", name: "Chat" },
-    { hash: "voice", tag: "sc-voice-view", name: "Voice" },
-    { hash: "tools", tag: "sc-tools-view", name: "Tools" },
-    { hash: "channels", tag: "sc-channels-view", name: "Channels" },
-    { hash: "config", tag: "sc-config-view", name: "Config" },
-    { hash: "skills", tag: "sc-skills-view", name: "Skills" },
-    { hash: "logs", tag: "sc-logs-view", name: "Logs" },
-    { hash: "security", tag: "sc-security-view", name: "Security" },
-    { hash: "nodes", tag: "sc-nodes-view", name: "Nodes" },
+    { hash: "overview", tag: "hu-overview-view", name: "Overview" },
+    { hash: "chat", tag: "hu-chat-view", name: "Chat" },
+    { hash: "voice", tag: "hu-voice-view", name: "Voice" },
+    { hash: "tools", tag: "hu-tools-view", name: "Tools" },
+    { hash: "channels", tag: "hu-channels-view", name: "Channels" },
+    { hash: "config", tag: "hu-config-view", name: "Config" },
+    { hash: "skills", tag: "hu-skills-view", name: "Skills" },
+    { hash: "logs", tag: "hu-logs-view", name: "Logs" },
+    { hash: "security", tag: "hu-security-view", name: "Security" },
+    { hash: "nodes", tag: "hu-nodes-view", name: "Nodes" },
   ];
 
   for (const view of VIEWS_TO_AUDIT) {
@@ -143,11 +143,11 @@ test.describe("Icon-Only Button Audit", () => {
 
 test.describe("Heading Hierarchy", () => {
   const HEADING_VIEWS = [
-    { hash: "overview", tag: "sc-overview-view", name: "Overview" },
-    { hash: "tools", tag: "sc-tools-view", name: "Tools" },
-    { hash: "channels", tag: "sc-channels-view", name: "Channels" },
-    { hash: "security", tag: "sc-security-view", name: "Security" },
-    { hash: "nodes", tag: "sc-nodes-view", name: "Nodes" },
+    { hash: "overview", tag: "hu-overview-view", name: "Overview" },
+    { hash: "tools", tag: "hu-tools-view", name: "Tools" },
+    { hash: "channels", tag: "hu-channels-view", name: "Channels" },
+    { hash: "security", tag: "hu-security-view", name: "Security" },
+    { hash: "nodes", tag: "hu-nodes-view", name: "Nodes" },
   ];
 
   for (const view of HEADING_VIEWS) {
@@ -156,7 +156,7 @@ test.describe("Heading Hierarchy", () => {
       await waitForViewReady(page, view.tag);
       await expect(async () => {
         const levels = (await page.evaluate(`(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const v = app?.shadowRoot?.querySelector("${view.tag}");
           if (!v?.shadowRoot) return [];
           const headings = v.shadowRoot.querySelectorAll("h1, h2, h3, h4, h5, h6");

@@ -1,10 +1,10 @@
-#include "seaclaw/core/string.h"
+#include "human/core/string.h"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-char *sc_strdup(sc_allocator_t *alloc, const char *s) {
+char *hu_strdup(hu_allocator_t *alloc, const char *s) {
     if (!s)
         return NULL;
     size_t len = strlen(s);
@@ -15,7 +15,7 @@ char *sc_strdup(sc_allocator_t *alloc, const char *s) {
     return dup;
 }
 
-char *sc_strndup(sc_allocator_t *alloc, const char *s, size_t n) {
+char *hu_strndup(hu_allocator_t *alloc, const char *s, size_t n) {
     if (!s)
         return NULL;
     const char *end = (const char *)memchr(s, '\0', n);
@@ -28,7 +28,7 @@ char *sc_strndup(sc_allocator_t *alloc, const char *s, size_t n) {
     return dup;
 }
 
-char *sc_str_dup(sc_allocator_t *alloc, sc_str_t s) {
+char *hu_str_dup(hu_allocator_t *alloc, hu_str_t s) {
     if (!s.ptr || s.len == 0) {
         char *empty = (char *)alloc->alloc(alloc->ctx, 1);
         if (empty)
@@ -43,7 +43,7 @@ char *sc_str_dup(sc_allocator_t *alloc, sc_str_t s) {
     return dup;
 }
 
-char *sc_str_concat(sc_allocator_t *alloc, sc_str_t a, sc_str_t b) {
+char *hu_str_concat(hu_allocator_t *alloc, hu_str_t a, hu_str_t b) {
     if (a.len > SIZE_MAX - b.len)
         return NULL;
     size_t total = a.len + b.len;
@@ -58,7 +58,7 @@ char *sc_str_concat(sc_allocator_t *alloc, sc_str_t a, sc_str_t b) {
     return out;
 }
 
-char *sc_str_join(sc_allocator_t *alloc, const sc_str_t *parts, size_t count, sc_str_t sep) {
+char *hu_str_join(hu_allocator_t *alloc, const hu_str_t *parts, size_t count, hu_str_t sep) {
     if (count == 0) {
         char *empty = (char *)alloc->alloc(alloc->ctx, 1);
         if (empty)
@@ -99,7 +99,7 @@ char *sc_str_join(sc_allocator_t *alloc, const sc_str_t *parts, size_t count, sc
     return out;
 }
 
-char *sc_sprintf(sc_allocator_t *alloc, const char *fmt, ...) {
+char *hu_sprintf(hu_allocator_t *alloc, const char *fmt, ...) {
     va_list args, args2;
     va_start(args, fmt);
     va_copy(args2, args);
@@ -123,16 +123,16 @@ char *sc_sprintf(sc_allocator_t *alloc, const char *fmt, ...) {
     return buf;
 }
 
-void sc_str_free(sc_allocator_t *alloc, char *s) {
+void hu_str_free(hu_allocator_t *alloc, char *s) {
     if (s)
         alloc->free(alloc->ctx, s, strlen(s) + 1);
 }
 
-bool sc_str_contains(sc_str_t haystack, sc_str_t needle) {
-    return sc_str_index_of(haystack, needle) >= 0;
+bool hu_str_contains(hu_str_t haystack, hu_str_t needle) {
+    return hu_str_index_of(haystack, needle) >= 0;
 }
 
-int sc_str_index_of(sc_str_t haystack, sc_str_t needle) {
+int hu_str_index_of(hu_str_t haystack, hu_str_t needle) {
     if (!haystack.ptr || !needle.ptr)
         return -1;
     if (needle.len == 0)

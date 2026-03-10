@@ -1,9 +1,9 @@
-/* libFuzzer harness for sc_graph_upsert_entity and sc_graph_upsert_relation.
+/* libFuzzer harness for hu_graph_upsert_entity and hu_graph_upsert_relation.
  * Opens in-memory graph, feeds fuzzed entity names/types/relations.
  * Goal: find crashes or memory corruption.
- * Requires SC_ENABLE_SQLITE. */
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/memory/graph.h"
+ * Requires HU_ENABLE_SQLITE. */
+#include "human/core/allocator.h"
+#include "human/memory/graph.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -11,14 +11,14 @@
 #define BUF_MAX 512
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-#ifdef SC_ENABLE_SQLITE
+#ifdef HU_ENABLE_SQLITE
     if (size < 2 || size > BUF_MAX)
         return 0;
 
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_graph_t *g = NULL;
-    sc_error_t err = sc_graph_open(&alloc, "x", 1, &g);
-    if (err != SC_OK || !g)
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = NULL;
+    hu_error_t err = hu_graph_open(&alloc, "x", 1, &g);
+    if (err != HU_OK || !g)
         return 0;
 
     char buf[BUF_MAX + 1];
@@ -36,9 +36,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
 
     int64_t id1 = 0, id2 = 0;
-    err = sc_graph_upsert_entity(g, buf, name_len, SC_ENTITY_PERSON, NULL, &id1);
-    if (err != SC_OK) {
-        sc_graph_close(g, &alloc);
+    err = hu_graph_upsert_entity(g, buf, name_len, HU_ENTITY_PERSON, NULL, &id1);
+    if (err != HU_OK) {
+        hu_graph_close(g, &alloc);
         return 0;
     }
 
@@ -52,15 +52,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             buf[mid] = 'f';
             len2 = 1;
         }
-        (void)sc_graph_upsert_entity(g, buf + mid, len2, SC_ENTITY_ORGANIZATION, NULL, &id2);
+        (void)hu_graph_upsert_entity(g, buf + mid, len2, HU_ENTITY_ORGANIZATION, NULL, &id2);
     } else {
-        (void)sc_graph_upsert_entity(g, "b", 1, SC_ENTITY_PERSON, NULL, &id2);
+        (void)hu_graph_upsert_entity(g, "b", 1, HU_ENTITY_PERSON, NULL, &id2);
     }
 
     if (id1 > 0 && id2 > 0)
-        (void)sc_graph_upsert_relation(g, id1, id2, SC_REL_KNOWS, 0.8f, NULL, 0);
+        (void)hu_graph_upsert_relation(g, id1, id2, HU_REL_KNOWS, 0.8f, NULL, 0);
 
-    sc_graph_close(g, &alloc);
-#endif /* SC_ENABLE_SQLITE */
+    hu_graph_close(g, &alloc);
+#endif /* HU_ENABLE_SQLITE */
     return 0;
 }

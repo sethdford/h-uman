@@ -1,14 +1,14 @@
-#include "seaclaw/bootstrap.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/paperclip/client.h"
+#include "human/bootstrap.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/paperclip/client.h"
 #include <stdio.h>
 #include <string.h>
 
-static size_t build_task_context(char *buf, size_t cap, const sc_paperclip_task_t *task,
-                                 const sc_paperclip_comment_list_t *comments,
-                                 const sc_paperclip_client_t *client) {
+static size_t build_task_context(char *buf, size_t cap, const hu_paperclip_task_t *task,
+                                 const hu_paperclip_comment_list_t *comments,
+                                 const hu_paperclip_client_t *client) {
     size_t pos = 0;
     int w;
 
@@ -38,7 +38,7 @@ static size_t build_task_context(char *buf, size_t cap, const sc_paperclip_task_
         CTX_APPEND("\nRecent comments:\n");
         size_t start = comments->count > 5 ? comments->count - 5 : 0;
         for (size_t i = start; i < comments->count; i++) {
-            const sc_paperclip_comment_t *c = &comments->comments[i];
+            const hu_paperclip_comment_t *c = &comments->comments[i];
             CTX_APPEND("  [%s] %s: %s\n", c->created_at ? c->created_at : "?",
                        c->author_name ? c->author_name : "unknown", c->body ? c->body : "");
         }
@@ -55,13 +55,13 @@ static size_t build_task_context(char *buf, size_t cap, const sc_paperclip_task_
     return pos;
 }
 
-sc_error_t sc_paperclip_heartbeat(sc_allocator_t *alloc, int argc, char **argv) {
+hu_error_t hu_paperclip_heartbeat(hu_allocator_t *alloc, int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    sc_paperclip_client_t client = {0};
-    sc_error_t err = sc_paperclip_client_init(&client, alloc);
-    if (err != SC_OK) {
+    hu_paperclip_client_t client = {0};
+    hu_error_t err = hu_paperclip_client_init(&client, alloc);
+    if (err != HU_OK) {
         fprintf(stderr, "[paperclip] Failed to init client. Set PAPERCLIP_API_URL "
                         "and PAPERCLIP_AGENT_ID.\n");
         return err;
@@ -71,73 +71,73 @@ sc_error_t sc_paperclip_heartbeat(sc_allocator_t *alloc, int argc, char **argv) 
             client.wake_reason ? client.wake_reason : "timer");
 
     const char *target_task_id = client.task_id;
-    sc_paperclip_task_t task = {0};
-    sc_paperclip_task_list_t task_list = {0};
+    hu_paperclip_task_t task = {0};
+    hu_paperclip_task_list_t task_list = {0};
 
     if (target_task_id) {
-        err = sc_paperclip_get_task(&client, target_task_id, &task);
-        if (err != SC_OK) {
+        err = hu_paperclip_get_task(&client, target_task_id, &task);
+        if (err != HU_OK) {
             fprintf(stderr, "[paperclip] Failed to get task %s: %d\n", target_task_id, (int)err);
-            sc_paperclip_client_deinit(&client);
+            hu_paperclip_client_deinit(&client);
             return err;
         }
     } else {
-        err = sc_paperclip_list_tasks(&client, &task_list);
-        if (err != SC_OK) {
+        err = hu_paperclip_list_tasks(&client, &task_list);
+        if (err != HU_OK) {
             fprintf(stderr, "[paperclip] Failed to list tasks: %d\n", (int)err);
-            sc_paperclip_client_deinit(&client);
+            hu_paperclip_client_deinit(&client);
             return err;
         }
         if (task_list.count == 0) {
             fprintf(stderr, "[paperclip] No assigned tasks. Heartbeat complete.\n");
-            sc_paperclip_task_list_free(alloc, &task_list);
-            sc_paperclip_client_deinit(&client);
-            return SC_OK;
+            hu_paperclip_task_list_free(alloc, &task_list);
+            hu_paperclip_client_deinit(&client);
+            return HU_OK;
         }
         task = task_list.tasks[0];
         target_task_id = task.id;
-        memset(&task_list.tasks[0], 0, sizeof(sc_paperclip_task_t));
+        memset(&task_list.tasks[0], 0, sizeof(hu_paperclip_task_t));
     }
 
     fprintf(stderr, "[paperclip] Working on: %s — %s\n", target_task_id,
             task.title ? task.title : "(untitled)");
 
-    err = sc_paperclip_checkout_task(&client, target_task_id);
-    if (err == SC_ERR_ALREADY_EXISTS) {
+    err = hu_paperclip_checkout_task(&client, target_task_id);
+    if (err == HU_ERR_ALREADY_EXISTS) {
         fprintf(stderr, "[paperclip] Task already checked out by another agent.\n");
-        sc_paperclip_task_free(alloc, &task);
-        sc_paperclip_task_list_free(alloc, &task_list);
-        sc_paperclip_client_deinit(&client);
-        return SC_OK;
+        hu_paperclip_task_free(alloc, &task);
+        hu_paperclip_task_list_free(alloc, &task_list);
+        hu_paperclip_client_deinit(&client);
+        return HU_OK;
     }
-    if (err != SC_OK) {
+    if (err != HU_OK) {
         fprintf(stderr, "[paperclip] Checkout failed: %d\n", (int)err);
-        sc_paperclip_task_free(alloc, &task);
-        sc_paperclip_task_list_free(alloc, &task_list);
-        sc_paperclip_client_deinit(&client);
+        hu_paperclip_task_free(alloc, &task);
+        hu_paperclip_task_list_free(alloc, &task_list);
+        hu_paperclip_client_deinit(&client);
         return err;
     }
 
-    sc_paperclip_comment_list_t comments = {0};
-    sc_paperclip_get_comments(&client, target_task_id, &comments);
+    hu_paperclip_comment_list_t comments = {0};
+    hu_paperclip_get_comments(&client, target_task_id, &comments);
 
     char context[4096];
     size_t ctx_len = build_task_context(context, sizeof(context), &task, &comments, &client);
 
     fprintf(stderr, "[paperclip] Context built (%zu chars). Bootstrapping agent...\n", ctx_len);
 
-    sc_app_ctx_t app = {0};
-    err = sc_app_bootstrap(&app, alloc, NULL, true, false);
-    if (err != SC_OK || !app.agent_ok) {
+    hu_app_ctx_t app = {0};
+    err = hu_app_bootstrap(&app, alloc, NULL, true, false);
+    if (err != HU_OK || !app.agent_ok) {
         fprintf(stderr, "[paperclip] Agent bootstrap failed: %d (agent_ok=%d)\n", (int)err,
                 app.agent_ok);
         if (app.agent_ok)
-            sc_app_teardown(&app);
-        sc_paperclip_comment_list_free(alloc, &comments);
-        sc_paperclip_task_free(alloc, &task);
-        sc_paperclip_task_list_free(alloc, &task_list);
-        sc_paperclip_client_deinit(&client);
-        return err != SC_OK ? err : SC_ERR_NOT_SUPPORTED;
+            hu_app_teardown(&app);
+        hu_paperclip_comment_list_free(alloc, &comments);
+        hu_paperclip_task_free(alloc, &task);
+        hu_paperclip_task_list_free(alloc, &task_list);
+        hu_paperclip_client_deinit(&client);
+        return err != HU_OK ? err : HU_ERR_NOT_SUPPORTED;
     }
 
     app.agent->conversation_context = context;
@@ -146,12 +146,12 @@ sc_error_t sc_paperclip_heartbeat(sc_allocator_t *alloc, int argc, char **argv) 
     char *response = NULL;
     size_t response_len = 0;
     fprintf(stderr, "[paperclip] Running agent turn...\n");
-    err = sc_agent_turn(app.agent, context, ctx_len, &response, &response_len);
+    err = hu_agent_turn(app.agent, context, ctx_len, &response, &response_len);
 
-    if (err == SC_OK && response && response_len > 0) {
+    if (err == HU_OK && response && response_len > 0) {
         fprintf(stderr, "[paperclip] Agent responded (%zu chars). Posting comment...\n",
                 response_len);
-        sc_paperclip_post_comment(&client, target_task_id, response, response_len);
+        hu_paperclip_post_comment(&client, target_task_id, response, response_len);
 
         bool mark_done = true;
         if (strstr(response, "BLOCKED") || strstr(response, "blocked"))
@@ -160,11 +160,11 @@ sc_error_t sc_paperclip_heartbeat(sc_allocator_t *alloc, int argc, char **argv) 
             mark_done = false;
 
         const char *new_status = mark_done ? "done" : "in_progress";
-        sc_paperclip_update_task(&client, target_task_id, new_status);
+        hu_paperclip_update_task(&client, target_task_id, new_status);
         fprintf(stderr, "[paperclip] Task updated to '%s'\n", new_status);
     } else {
         fprintf(stderr, "[paperclip] Agent turn failed: %d\n", (int)err);
-        sc_paperclip_post_comment(&client, target_task_id,
+        hu_paperclip_post_comment(&client, target_task_id,
                                   "Agent encountered an error processing this task.",
                                   strlen("Agent encountered an error processing this task."));
     }
@@ -172,13 +172,13 @@ sc_error_t sc_paperclip_heartbeat(sc_allocator_t *alloc, int argc, char **argv) 
     if (response)
         alloc->free(alloc->ctx, response, response_len + 1);
 
-    sc_app_teardown(&app);
+    hu_app_teardown(&app);
 
-    sc_paperclip_comment_list_free(alloc, &comments);
-    sc_paperclip_task_free(alloc, &task);
-    sc_paperclip_task_list_free(alloc, &task_list);
-    sc_paperclip_client_deinit(&client);
+    hu_paperclip_comment_list_free(alloc, &comments);
+    hu_paperclip_task_free(alloc, &task);
+    hu_paperclip_task_list_free(alloc, &task_list);
+    hu_paperclip_client_deinit(&client);
 
     fprintf(stderr, "[paperclip] Heartbeat complete.\n");
-    return SC_OK;
+    return HU_OK;
 }

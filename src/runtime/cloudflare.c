@@ -1,10 +1,10 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/runtime.h"
+#include "human/core/error.h"
+#include "human/runtime.h"
 #include <stdint.h>
 
 static char cf_ctx_dummy;
 
-static sc_error_t cf_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
+static hu_error_t cf_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
                                   const char **argv_out, size_t max_out, size_t *argc_out) {
     (void)ctx;
     (void)argv_in;
@@ -12,7 +12,7 @@ static sc_error_t cf_wrap_command(void *ctx, const char **argv_in, size_t argc_i
     (void)argv_out;
     (void)max_out;
     (void)argc_out;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 }
 
 static const char *cf_name(void *ctx) {
@@ -40,7 +40,7 @@ static uint64_t cf_memory_budget(void *ctx) {
     return 128ULL * 1024 * 1024;
 }
 
-static const sc_runtime_vtable_t cloudflare_vtable = {
+static const hu_runtime_vtable_t cloudflare_vtable = {
     .name = cf_name,
     .has_shell_access = cf_has_shell,
     .has_filesystem_access = cf_has_fs,
@@ -50,6 +50,6 @@ static const sc_runtime_vtable_t cloudflare_vtable = {
     .wrap_command = cf_wrap_command,
 };
 
-sc_runtime_t sc_runtime_cloudflare(void) {
-    return (sc_runtime_t){.ctx = &cf_ctx_dummy, .vtable = &cloudflare_vtable};
+hu_runtime_t hu_runtime_cloudflare(void) {
+    return (hu_runtime_t){.ctx = &cf_ctx_dummy, .vtable = &cloudflare_vtable};
 }

@@ -1,10 +1,10 @@
-#include "seaclaw/terminal.h"
+#include "human/terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static sc_color_level_t cached_level = (sc_color_level_t)-1;
-static sc_theme_t cached_theme = (sc_theme_t)-1;
+static hu_color_level_t cached_level = (hu_color_level_t)-1;
+static hu_theme_t cached_theme = (hu_theme_t)-1;
 
 static int env_is(const char *name, const char *val) {
     const char *e = getenv(name);
@@ -16,17 +16,17 @@ static int env_contains(const char *name, const char *needle) {
     return e && strstr(e, needle) != NULL;
 }
 
-sc_color_level_t sc_terminal_color_level(void) {
-    if (cached_level != (sc_color_level_t)-1)
+hu_color_level_t hu_terminal_color_level(void) {
+    if (cached_level != (hu_color_level_t)-1)
         return cached_level;
 
     if (getenv("NO_COLOR") || env_is("TERM", "dumb")) {
-        cached_level = SC_COLOR_LEVEL_NONE;
+        cached_level = HU_COLOR_LEVEL_NONE;
         return cached_level;
     }
 
     if (env_is("COLORTERM", "truecolor") || env_is("COLORTERM", "24bit")) {
-        cached_level = SC_COLOR_LEVEL_TRUECOLOR;
+        cached_level = HU_COLOR_LEVEL_TRUECOLOR;
         return cached_level;
     }
 
@@ -36,35 +36,35 @@ sc_color_level_t sc_terminal_color_level(void) {
         (strcmp(tp, "iTerm.app") == 0 || strcmp(tp, "WezTerm") == 0 ||
          strcmp(tp, "Alacritty") == 0 || strcmp(tp, "kitty") == 0 ||
          strcmp(tp, "WarpTerminal") == 0 || strcmp(tp, "ghostty") == 0 || strcmp(tp, "rio") == 0)) {
-        cached_level = SC_COLOR_LEVEL_TRUECOLOR;
+        cached_level = HU_COLOR_LEVEL_TRUECOLOR;
         return cached_level;
     }
 
     if (env_contains("TERM", "256color")) {
-        cached_level = SC_COLOR_LEVEL_256;
+        cached_level = HU_COLOR_LEVEL_256;
         return cached_level;
     }
 
     if (getenv("COLORTERM")) {
-        cached_level = SC_COLOR_LEVEL_256;
+        cached_level = HU_COLOR_LEVEL_256;
         return cached_level;
     }
 
-    cached_level = SC_COLOR_LEVEL_BASIC;
+    cached_level = HU_COLOR_LEVEL_BASIC;
     return cached_level;
 }
 
-sc_theme_t sc_terminal_theme(void) {
-    if (cached_theme != (sc_theme_t)-1)
+hu_theme_t hu_terminal_theme(void) {
+    if (cached_theme != (hu_theme_t)-1)
         return cached_theme;
 
-    const char *cfg = getenv("SC_THEME");
+    const char *cfg = getenv("HU_THEME");
     if (cfg) {
         if (strcmp(cfg, "light") == 0) {
-            cached_theme = SC_THEME_LIGHT;
+            cached_theme = HU_THEME_LIGHT;
             return cached_theme;
         }
-        cached_theme = SC_THEME_DARK;
+        cached_theme = HU_THEME_DARK;
         return cached_theme;
     }
 
@@ -74,12 +74,12 @@ sc_theme_t sc_terminal_theme(void) {
         const char *semi = strrchr(colorfgbg, ';');
         if (semi) {
             int bg = (int)strtol(semi + 1, NULL, 10);
-            cached_theme = (bg >= 8) ? SC_THEME_LIGHT : SC_THEME_DARK;
+            cached_theme = (bg >= 8) ? HU_THEME_LIGHT : HU_THEME_DARK;
             return cached_theme;
         }
     }
 
-    cached_theme = SC_THEME_DARK;
+    cached_theme = HU_THEME_DARK;
     return cached_theme;
 }
 
@@ -109,16 +109,16 @@ static unsigned int rgb_to_ansi16(unsigned int r, unsigned int g, unsigned int b
     return base + bright;
 }
 
-const char *sc_color_fg(char *buf, unsigned int r, unsigned int g, unsigned int b) {
-    sc_color_level_t level = sc_terminal_color_level();
+const char *hu_color_fg(char *buf, unsigned int r, unsigned int g, unsigned int b) {
+    hu_color_level_t level = hu_terminal_color_level();
     switch (level) {
-    case SC_COLOR_LEVEL_TRUECOLOR:
+    case HU_COLOR_LEVEL_TRUECOLOR:
         snprintf(buf, 24, "\033[38;2;%u;%u;%um", r, g, b);
         break;
-    case SC_COLOR_LEVEL_256:
+    case HU_COLOR_LEVEL_256:
         snprintf(buf, 24, "\033[38;5;%um", rgb_to_ansi256(r, g, b));
         break;
-    case SC_COLOR_LEVEL_BASIC:
+    case HU_COLOR_LEVEL_BASIC:
         snprintf(buf, 24, "\033[%um", rgb_to_ansi16(r, g, b));
         break;
     default:
@@ -128,16 +128,16 @@ const char *sc_color_fg(char *buf, unsigned int r, unsigned int g, unsigned int 
     return buf;
 }
 
-const char *sc_color_bg(char *buf, unsigned int r, unsigned int g, unsigned int b) {
-    sc_color_level_t level = sc_terminal_color_level();
+const char *hu_color_bg(char *buf, unsigned int r, unsigned int g, unsigned int b) {
+    hu_color_level_t level = hu_terminal_color_level();
     switch (level) {
-    case SC_COLOR_LEVEL_TRUECOLOR:
+    case HU_COLOR_LEVEL_TRUECOLOR:
         snprintf(buf, 24, "\033[48;2;%u;%u;%um", r, g, b);
         break;
-    case SC_COLOR_LEVEL_256:
+    case HU_COLOR_LEVEL_256:
         snprintf(buf, 24, "\033[48;5;%um", rgb_to_ansi256(r, g, b));
         break;
-    case SC_COLOR_LEVEL_BASIC:
+    case HU_COLOR_LEVEL_BASIC:
         snprintf(buf, 24, "\033[%um", rgb_to_ansi16(r, g, b) + 10);
         break;
     default:

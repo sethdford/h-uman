@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://seaclaw.ai/sitemap-index.xml
+Sitemap: https://h-uman.ai/sitemap-index.xml

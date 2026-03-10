@@ -1,6 +1,6 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -22,7 +22,7 @@
 #endif
 
 static bool wasi_runtime_exists(void) {
-#if SC_IS_TEST
+#if HU_IS_TEST
     return false;
 #elif defined(__linux__) || defined(__APPLE__)
     if (access("/usr/local/bin/wasmtime", X_OK) == 0)
@@ -58,30 +58,30 @@ static const char *find_wasi_runtime(void) {
     return "wasmtime";
 }
 
-static sc_error_t wasi_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+static hu_error_t wasi_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
                             size_t buf_count, size_t *out_count) {
-    sc_wasi_sandbox_ctx_t *wc = (sc_wasi_sandbox_ctx_t *)ctx;
+    hu_wasi_sandbox_ctx_t *wc = (hu_wasi_sandbox_ctx_t *)ctx;
     const size_t prefix_len = 4;
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (buf_count < prefix_len + argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!wc->workspace_dir[0])
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     buf[0] = wc->runtime_path;
     buf[1] = "run";
     /* Use workspace_dir for the --dir= arg; pre-formatted in init */
     int n = snprintf(wc->dir_arg, sizeof(wc->dir_arg), "--dir=%s", wc->workspace_dir);
     if (n <= 0 || (size_t)n >= sizeof(wc->dir_arg))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     buf[2] = wc->dir_arg;
     buf[3] = "--dir=/tmp";
     for (size_t i = 0; i < argc; i++)
         buf[prefix_len + i] = argv[i];
     *out_count = prefix_len + argc;
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool wasi_available(void *ctx) {
@@ -99,7 +99,7 @@ static const char *wasi_desc(void *ctx) {
     return "WASI sandbox (cross-platform capability-based isolation via wasmtime/wasmer)";
 }
 
-static const sc_sandbox_vtable_t wasi_vtable = {
+static const hu_sandbox_vtable_t wasi_vtable = {
     .wrap_command = wasi_wrap,
     .apply = NULL,
     .is_available = wasi_available,
@@ -107,15 +107,15 @@ static const sc_sandbox_vtable_t wasi_vtable = {
     .description = wasi_desc,
 };
 
-sc_sandbox_t sc_wasi_sandbox_get(sc_wasi_sandbox_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_wasi_sandbox_get(hu_wasi_sandbox_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &wasi_vtable,
     };
     return sb;
 }
 
-void sc_wasi_sandbox_init(sc_wasi_sandbox_ctx_t *ctx, const char *workspace_dir) {
+void hu_wasi_sandbox_init(hu_wasi_sandbox_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     if (workspace_dir) {
         size_t len = strlen(workspace_dir);

@@ -1,4 +1,4 @@
-#include "seaclaw/providers/error_classify.h"
+#include "human/providers/error_classify.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -24,7 +24,7 @@ static bool contains_fold(const char *haystack, size_t hlen, const char *needle,
     return false;
 }
 
-bool sc_error_is_non_retryable(const char *msg, size_t msg_len) {
+bool hu_error_is_non_retryable(const char *msg, size_t msg_len) {
     if (!msg || msg_len == 0)
         return false;
     for (size_t i = 0; i < msg_len;) {
@@ -50,7 +50,7 @@ bool sc_error_is_non_retryable(const char *msg, size_t msg_len) {
     return false;
 }
 
-bool sc_error_is_context_exhausted(const char *msg, size_t msg_len) {
+bool hu_error_is_context_exhausted(const char *msg, size_t msg_len) {
     if (!msg || msg_len == 0)
         return false;
     size_t check_len = msg_len > 512 ? 512 : msg_len;
@@ -71,7 +71,7 @@ bool sc_error_is_context_exhausted(const char *msg, size_t msg_len) {
     return false;
 }
 
-bool sc_error_is_rate_limited(const char *msg, size_t msg_len) {
+bool hu_error_is_rate_limited(const char *msg, size_t msg_len) {
     if (!msg || msg_len == 0)
         return false;
     size_t check_len = msg_len > 512 ? 512 : msg_len;
@@ -87,7 +87,7 @@ bool sc_error_is_rate_limited(const char *msg, size_t msg_len) {
             contains_fold(msg, check_len, "too many", 8));
 }
 
-uint64_t sc_error_parse_retry_after_ms(const char *msg, size_t msg_len) {
+uint64_t hu_error_parse_retry_after_ms(const char *msg, size_t msg_len) {
     if (!msg || msg_len == 0)
         return 0;
     static const char *prefixes[] = {"retry-after:", "retry_after:", "retry-after ",
@@ -119,15 +119,15 @@ uint64_t sc_error_parse_retry_after_ms(const char *msg, size_t msg_len) {
     return 0;
 }
 
-bool sc_error_is_rate_limited_text(const char *text, size_t text_len) {
-    return sc_error_is_rate_limited(text, text_len);
+bool hu_error_is_rate_limited_text(const char *text, size_t text_len) {
+    return hu_error_is_rate_limited(text, text_len);
 }
 
-bool sc_error_is_context_exhausted_text(const char *text, size_t text_len) {
-    return sc_error_is_context_exhausted(text, text_len);
+bool hu_error_is_context_exhausted_text(const char *text, size_t text_len) {
+    return hu_error_is_context_exhausted(text, text_len);
 }
 
-bool sc_error_is_vision_unsupported_text(const char *text, size_t text_len) {
+bool hu_error_is_vision_unsupported_text(const char *text, size_t text_len) {
     if (!text || text_len == 0)
         return false;
     return contains_fold(text, text_len, "does not support image", 21) ||

@@ -1,13 +1,13 @@
 /* HTTP API memory backend — delegates to external REST service.
- * In SC_IS_TEST: in-memory mock. Otherwise uses sc_http_* calls. */
+ * In HU_IS_TEST: in-memory mock. Otherwise uses hu_http_* calls. */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,30 +22,30 @@ typedef struct mock_entry {
     char *session_id;
 } mock_entry_t;
 
-typedef struct sc_api_memory {
-    sc_allocator_t *alloc;
+typedef struct hu_api_memory {
+    hu_allocator_t *alloc;
     char *base_url;
     char *api_key;
     uint32_t timeout_ms;
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     mock_entry_t entries[MOCK_MAX_ENTRIES];
     size_t entry_count;
 #endif
-} sc_api_memory_t;
+} hu_api_memory_t;
 
-static const char *category_to_string(const sc_memory_category_t *cat) {
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -54,8 +54,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
     }
 }
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-static void mock_free_entry(sc_allocator_t *alloc, mock_entry_t *e) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static void mock_free_entry(hu_allocator_t *alloc, mock_entry_t *e) {
     if (!alloc || !e)
         return;
     if (e->key)
@@ -69,7 +69,7 @@ static void mock_free_entry(sc_allocator_t *alloc, mock_entry_t *e) {
     e->key = e->content = e->category = e->session_id = NULL;
 }
 
-static mock_entry_t *mock_find_by_key(sc_api_memory_t *self, const char *key, size_t key_len) {
+static mock_entry_t *mock_find_by_key(hu_api_memory_t *self, const char *key, size_t key_len) {
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
         if (e->key && strlen(e->key) == key_len && memcmp(e->key, key, key_len) == 0)
@@ -90,19 +90,19 @@ static int mock_contains_substring(const char *haystack, size_t hlen, const char
     }
     return 0;
 }
-#endif /* SC_IS_TEST */
+#endif /* HU_IS_TEST */
 
 static const char *impl_name(void *ctx) {
     (void)ctx;
     return "api";
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
-    sc_allocator_t *alloc = self->alloc;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
+    hu_allocator_t *alloc = self->alloc;
     mock_entry_t *existing = mock_find_by_key(self, key, key_len);
     const char *cat_str = category_to_string(category);
 
@@ -113,49 +113,49 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
             alloc->free(alloc->ctx, existing->category, strlen(existing->category) + 1);
         if (existing->session_id)
             alloc->free(alloc->ctx, existing->session_id, strlen(existing->session_id) + 1);
-        existing->content = sc_strndup(alloc, content, content_len);
-        existing->category = sc_strndup(alloc, cat_str, strlen(cat_str));
+        existing->content = hu_strndup(alloc, content, content_len);
+        existing->category = hu_strndup(alloc, cat_str, strlen(cat_str));
         existing->session_id = (session_id && session_id_len > 0)
-                                   ? sc_strndup(alloc, session_id, session_id_len)
+                                   ? hu_strndup(alloc, session_id, session_id_len)
                                    : NULL;
-        return existing->content ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        return existing->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
 
     if (self->entry_count >= MOCK_MAX_ENTRIES)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     mock_entry_t *e = &self->entries[self->entry_count];
-    e->key = sc_strndup(alloc, key, key_len);
-    e->content = sc_strndup(alloc, content, content_len);
-    e->category = sc_strndup(alloc, cat_str, strlen(cat_str));
+    e->key = hu_strndup(alloc, key, key_len);
+    e->content = hu_strndup(alloc, content, content_len);
+    e->category = hu_strndup(alloc, cat_str, strlen(cat_str));
     e->session_id =
-        (session_id && session_id_len > 0) ? sc_strndup(alloc, session_id, session_id_len) : NULL;
+        (session_id && session_id_len > 0) ? hu_strndup(alloc, session_id, session_id_len) : NULL;
     if (!e->key || !e->content || !e->category) {
         mock_free_entry(alloc, e);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     self->entry_count++;
-    return SC_OK;
+    return HU_OK;
 
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     const char *cat_str = category_to_string(category);
     const char *sid = (session_id && session_id_len > 0) ? session_id : "";
     size_t sid_len = (session_id && session_id_len > 0) ? session_id_len : 0;
 
-    sc_json_buf_t jbuf;
-    if (sc_json_buf_init(&jbuf, self->alloc) != SC_OK)
-        return SC_ERR_OUT_OF_MEMORY;
-    sc_error_t err = sc_json_append_key_value(&jbuf, "content", 7, content, content_len);
-    if (err == SC_OK)
-        err = sc_json_buf_append_raw(&jbuf, ",", 1);
-    if (err == SC_OK)
-        err = sc_json_append_key_value(&jbuf, "category", 8, cat_str, strlen(cat_str));
-    if (err == SC_OK)
-        err = sc_json_buf_append_raw(&jbuf, ",", 1);
-    if (err == SC_OK)
-        err = sc_json_append_key_value(&jbuf, "session_id", 10, sid, sid_len);
-    if (err != SC_OK) {
-        sc_json_buf_free(&jbuf);
+    hu_json_buf_t jbuf;
+    if (hu_json_buf_init(&jbuf, self->alloc) != HU_OK)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_error_t err = hu_json_append_key_value(&jbuf, "content", 7, content, content_len);
+    if (err == HU_OK)
+        err = hu_json_buf_append_raw(&jbuf, ",", 1);
+    if (err == HU_OK)
+        err = hu_json_append_key_value(&jbuf, "category", 8, cat_str, strlen(cat_str));
+    if (err == HU_OK)
+        err = hu_json_buf_append_raw(&jbuf, ",", 1);
+    if (err == HU_OK)
+        err = hu_json_append_key_value(&jbuf, "session_id", 10, sid, sid_len);
+    if (err != HU_OK) {
+        hu_json_buf_free(&jbuf);
         return err;
     }
 
@@ -166,8 +166,8 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     int ul = snprintf(url, sizeof(url), "%.*s/memories/%.*s", (int)blen, self->base_url,
                       (int)key_len, key);
     if (ul <= 0 || (size_t)ul >= sizeof(url)) {
-        sc_json_buf_free(&jbuf);
-        return SC_ERR_INVALID_ARGUMENT;
+        hu_json_buf_free(&jbuf);
+        return HU_ERR_INVALID_ARGUMENT;
     }
     char headers[320];
     int hl = 0;
@@ -176,27 +176,27 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
                       "Authorization: Bearer %s\nContent-Type: application/json", self->api_key);
     const char *extra = (hl > 0) ? headers : "Content-Type: application/json";
 
-    sc_http_response_t resp = {0};
-    err = sc_http_request(self->alloc, url, "PUT", extra, jbuf.ptr, jbuf.len, &resp);
-    sc_json_buf_free(&jbuf);
-    if (err != SC_OK)
+    hu_http_response_t resp = {0};
+    err = hu_http_request(self->alloc, url, "PUT", extra, jbuf.ptr, jbuf.len, &resp);
+    hu_json_buf_free(&jbuf);
+    if (err != HU_OK)
         return err;
     long status = resp.status_code;
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
-    return (status >= 200 && status < 300) ? SC_OK : SC_ERR_MEMORY_STORE;
+        hu_http_response_free(self->alloc, &resp);
+    return (status >= 200 && status < 300) ? HU_OK : HU_ERR_MEMORY_STORE;
 #endif
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     size_t cap = 0, n = 0;
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
 
     for (size_t i = 0; i < self->entry_count && n < limit; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -215,49 +215,49 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
 
         if (n >= cap) {
             size_t new_cap = cap ? cap * 2 : 4;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp) {
                 for (size_t j = 0; j < n; j++)
-                    sc_memory_entry_free_fields(alloc, &results[j]);
+                    hu_memory_entry_free_fields(alloc, &results[j]);
                 if (results)
-                    alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = tmp;
             cap = new_cap;
         }
 
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
         r->id_len = r->key_len;
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (e->session_id) {
-            r->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+            r->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
             r->session_id_len = strlen(e->session_id);
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        r->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
         if (!r->key || !r->content) {
             for (size_t j = 0; j <= n; j++)
-                sc_memory_entry_free_fields(alloc, &results[j]);
-            alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-            return SC_ERR_OUT_OF_MEMORY;
+                hu_memory_entry_free_fields(alloc, &results[j]);
+            alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+            return HU_ERR_OUT_OF_MEMORY;
         }
         n++;
     }
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     char url[1024];
@@ -265,21 +265,21 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     while (blen > 0 && self->base_url[blen - 1] == '/')
         blen--;
     (void)snprintf(url, sizeof(url), "%.*s/memories/search", (int)blen, self->base_url);
-    sc_json_buf_t jbuf;
-    if (sc_json_buf_init(&jbuf, self->alloc) != SC_OK)
-        return SC_ERR_OUT_OF_MEMORY;
-    sc_error_t err = sc_json_append_key_value(&jbuf, "query", 5, query, query_len);
-    if (err == SC_OK)
-        err = sc_json_buf_append_raw(&jbuf, ",", 1);
-    if (err == SC_OK)
-        err = sc_json_append_key_int(&jbuf, "limit", 5, (long long)limit);
-    if (err == SC_OK && session_id && session_id_len > 0) {
-        err = sc_json_buf_append_raw(&jbuf, ",", 1);
-        if (err == SC_OK)
-            err = sc_json_append_key_value(&jbuf, "session_id", 10, session_id, session_id_len);
+    hu_json_buf_t jbuf;
+    if (hu_json_buf_init(&jbuf, self->alloc) != HU_OK)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_error_t err = hu_json_append_key_value(&jbuf, "query", 5, query, query_len);
+    if (err == HU_OK)
+        err = hu_json_buf_append_raw(&jbuf, ",", 1);
+    if (err == HU_OK)
+        err = hu_json_append_key_int(&jbuf, "limit", 5, (long long)limit);
+    if (err == HU_OK && session_id && session_id_len > 0) {
+        err = hu_json_buf_append_raw(&jbuf, ",", 1);
+        if (err == HU_OK)
+            err = hu_json_append_key_value(&jbuf, "session_id", 10, session_id, session_id_len);
     }
-    if (err != SC_OK) {
-        sc_json_buf_free(&jbuf);
+    if (err != HU_OK) {
+        hu_json_buf_free(&jbuf);
         return err;
     }
     char auth[256];
@@ -287,108 +287,108 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
                  ? snprintf(auth, sizeof(auth), "Bearer %s", self->api_key)
                  : 0;
     const char *auth_header = (al > 0) ? auth : NULL;
-    sc_http_response_t resp = {0};
-    err = sc_http_post_json(self->alloc, url, auth_header, jbuf.ptr, jbuf.len, &resp);
-    sc_json_buf_free(&jbuf);
-    if (err != SC_OK)
+    hu_http_response_t resp = {0};
+    err = hu_http_post_json(self->alloc, url, auth_header, jbuf.ptr, jbuf.len, &resp);
+    hu_json_buf_free(&jbuf);
+    if (err != HU_OK)
         return err;
     if (resp.status_code < 200 || resp.status_code >= 300 || !resp.body) {
         if (resp.owned && resp.body)
-            sc_http_response_free(self->alloc, &resp);
-        return SC_ERR_MEMORY_RECALL;
+            hu_http_response_free(self->alloc, &resp);
+        return HU_ERR_MEMORY_RECALL;
     }
-    sc_json_value_t *root = NULL;
-    err = sc_json_parse(self->alloc, resp.body, resp.body_len, &root);
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(self->alloc, resp.body, resp.body_len, &root);
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
-    if (err != SC_OK || !root || root->type != SC_JSON_OBJECT) {
+        hu_http_response_free(self->alloc, &resp);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
         if (root)
-            sc_json_free(self->alloc, root);
-        return SC_ERR_MEMORY_RECALL;
+            hu_json_free(self->alloc, root);
+        return HU_ERR_MEMORY_RECALL;
     }
-    sc_json_value_t *arr = sc_json_object_get(root, "memories");
-    if (!arr || arr->type != SC_JSON_ARRAY) {
-        sc_json_free(self->alloc, root);
+    hu_json_value_t *arr = hu_json_object_get(root, "memories");
+    if (!arr || arr->type != HU_JSON_ARRAY) {
+        hu_json_free(self->alloc, root);
         *out = NULL;
         *out_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
     size_t n = arr->data.array.len < limit ? arr->data.array.len : limit;
     if (n == 0) {
-        sc_json_free(self->alloc, root);
-        return SC_OK;
+        hu_json_free(self->alloc, root);
+        return HU_OK;
     }
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_memory_entry_t));
     if (!entries) {
-        sc_json_free(self->alloc, root);
-        return SC_ERR_OUT_OF_MEMORY;
+        hu_json_free(self->alloc, root);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(entries, 0, n * sizeof(sc_memory_entry_t));
+    memset(entries, 0, n * sizeof(hu_memory_entry_t));
     for (size_t i = 0; i < n; i++) {
-        sc_json_value_t *item = arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
+        hu_json_value_t *item = arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
             continue;
-        const char *k = sc_json_get_string(item, "key");
-        const char *c = sc_json_get_string(item, "content");
-        const char *cat = sc_json_get_string(item, "category");
-        const char *sid = sc_json_get_string(item, "session_id");
+        const char *k = hu_json_get_string(item, "key");
+        const char *c = hu_json_get_string(item, "content");
+        const char *cat = hu_json_get_string(item, "category");
+        const char *sid = hu_json_get_string(item, "session_id");
         if (k) {
-            entries[i].key = sc_strndup(alloc, k, strlen(k));
+            entries[i].key = hu_strndup(alloc, k, strlen(k));
             entries[i].key_len = strlen(k);
             entries[i].id = entries[i].key;
             entries[i].id_len = entries[i].key_len;
         }
         if (c) {
-            entries[i].content = sc_strndup(alloc, c, strlen(c));
+            entries[i].content = hu_strndup(alloc, c, strlen(c));
             entries[i].content_len = strlen(c);
         }
         if (cat) {
-            entries[i].category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-            entries[i].category.data.custom.name = sc_strndup(alloc, cat, strlen(cat));
+            entries[i].category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+            entries[i].category.data.custom.name = hu_strndup(alloc, cat, strlen(cat));
             entries[i].category.data.custom.name_len = strlen(cat);
         }
         if (sid) {
-            entries[i].session_id = sc_strndup(alloc, sid, strlen(sid));
+            entries[i].session_id = hu_strndup(alloc, sid, strlen(sid));
             entries[i].session_id_len = strlen(sid);
         }
-        entries[i].timestamp = sc_sprintf(alloc, "0");
+        entries[i].timestamp = hu_sprintf(alloc, "0");
         entries[i].timestamp_len = entries[i].timestamp ? strlen(entries[i].timestamp) : 0;
     }
-    sc_json_free(self->alloc, root);
+    hu_json_free(self->alloc, root);
     *out = entries;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     mock_entry_t *e = mock_find_by_key(self, key, key_len);
     *found = false;
     memset(out, 0, sizeof(*out));
     if (!e)
-        return SC_OK;
+        return HU_OK;
     *found = true;
-    out->id = out->key = sc_strndup(alloc, e->key, strlen(e->key));
+    out->id = out->key = hu_strndup(alloc, e->key, strlen(e->key));
     out->key_len = strlen(e->key);
     out->id_len = out->key_len;
-    out->content = sc_strndup(alloc, e->content, strlen(e->content));
+    out->content = hu_strndup(alloc, e->content, strlen(e->content));
     out->content_len = strlen(e->content);
-    out->timestamp = sc_sprintf(alloc, "0");
+    out->timestamp = hu_sprintf(alloc, "0");
     out->timestamp_len = out->timestamp ? strlen(out->timestamp) : 0;
     if (e->session_id) {
-        out->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+        out->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
         out->session_id_len = strlen(e->session_id);
     }
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-    out->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+    out->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
     out->category.data.custom.name_len = strlen(e->category);
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *found = false;
     memset(out, 0, sizeof(*out));
     char url[1024];
@@ -403,65 +403,65 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
             ? snprintf(headers, sizeof(headers),
                        "Authorization: Bearer %s\nContent-Type: application/json", self->api_key)
             : 0;
-    sc_http_response_t resp = {0};
-    sc_error_t err =
-        sc_http_request(self->alloc, url, "GET",
+    hu_http_response_t resp = {0};
+    hu_error_t err =
+        hu_http_request(self->alloc, url, "GET",
                         (hl > 0) ? headers : "Content-Type: application/json", NULL, 0, &resp);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
     if (resp.status_code == 404 || !resp.body) {
         if (resp.owned && resp.body)
-            sc_http_response_free(self->alloc, &resp);
-        return SC_OK;
+            hu_http_response_free(self->alloc, &resp);
+        return HU_OK;
     }
-    sc_json_value_t *root = NULL;
-    err = sc_json_parse(self->alloc, resp.body, resp.body_len, &root);
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(self->alloc, resp.body, resp.body_len, &root);
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
-    if (err != SC_OK || !root || root->type != SC_JSON_OBJECT) {
+        hu_http_response_free(self->alloc, &resp);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
         if (root)
-            sc_json_free(self->alloc, root);
-        return SC_OK;
+            hu_json_free(self->alloc, root);
+        return HU_OK;
     }
-    const char *k = sc_json_get_string(root, "key");
-    const char *c = sc_json_get_string(root, "content");
-    const char *cat = sc_json_get_string(root, "category");
-    const char *sid = sc_json_get_string(root, "session_id");
+    const char *k = hu_json_get_string(root, "key");
+    const char *c = hu_json_get_string(root, "content");
+    const char *cat = hu_json_get_string(root, "category");
+    const char *sid = hu_json_get_string(root, "session_id");
     if (!k && !c) {
-        sc_json_free(self->alloc, root);
-        return SC_OK;
+        hu_json_free(self->alloc, root);
+        return HU_OK;
     }
     *found = true;
-    out->id = out->key = k ? sc_strndup(alloc, k, strlen(k)) : sc_strndup(alloc, key, key_len);
+    out->id = out->key = k ? hu_strndup(alloc, k, strlen(k)) : hu_strndup(alloc, key, key_len);
     out->key_len = out->id_len = k ? strlen(k) : key_len;
-    out->content = c ? sc_strndup(alloc, c, strlen(c)) : sc_strndup(alloc, "", 0);
+    out->content = c ? hu_strndup(alloc, c, strlen(c)) : hu_strndup(alloc, "", 0);
     out->content_len = c ? strlen(c) : 0;
-    out->timestamp = sc_sprintf(alloc, "0");
+    out->timestamp = hu_sprintf(alloc, "0");
     out->timestamp_len = out->timestamp ? strlen(out->timestamp) : 0;
     if (sid) {
-        out->session_id = sc_strndup(alloc, sid, strlen(sid));
+        out->session_id = hu_strndup(alloc, sid, strlen(sid));
         out->session_id_len = strlen(sid);
     }
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     if (cat) {
-        out->category.data.custom.name = sc_strndup(alloc, cat, strlen(cat));
+        out->category.data.custom.name = hu_strndup(alloc, cat, strlen(cat));
         out->category.data.custom.name_len = strlen(cat);
     }
-    sc_json_free(self->alloc, root);
-    return SC_OK;
+    hu_json_free(self->alloc, root);
+    return HU_OK;
 #endif
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     const char *cat_filter = category ? category_to_string(category) : NULL;
     *out = NULL;
     *out_count = 0;
     size_t cap = 0, n = 0;
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
 
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -479,43 +479,43 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
 
         if (n >= cap) {
             size_t new_cap = cap ? cap * 2 : 4;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp) {
                 for (size_t j = 0; j < n; j++)
-                    sc_memory_entry_free_fields(alloc, &results[j]);
+                    hu_memory_entry_free_fields(alloc, &results[j]);
                 if (results)
-                    alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = tmp;
             cap = new_cap;
         }
 
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
         r->id_len = r->key_len;
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (e->session_id) {
-            r->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+            r->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
             r->session_id_len = strlen(e->session_id);
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        r->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
         n++;
     }
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     const char *cat_filter = category ? category_to_string(category) : NULL;
     *out = NULL;
     *out_count = 0;
@@ -525,7 +525,7 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
         blen--;
     int ul = (int)snprintf(url, sizeof(url), "%.*s/memories", (int)blen, self->base_url);
     if (ul <= 0 || (size_t)ul >= sizeof(url))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (cat_filter || (session_id && session_id_len > 0)) {
         size_t pos = strlen(url);
         if (cat_filter)
@@ -546,83 +546,83 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
             ? snprintf(headers, sizeof(headers),
                        "Authorization: Bearer %s\nContent-Type: application/json", self->api_key)
             : 0;
-    sc_http_response_t resp = {0};
-    sc_error_t err =
-        sc_http_request(self->alloc, url, "GET",
+    hu_http_response_t resp = {0};
+    hu_error_t err =
+        hu_http_request(self->alloc, url, "GET",
                         (hl > 0) ? headers : "Content-Type: application/json", NULL, 0, &resp);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
     if (!resp.body || resp.body_len == 0) {
         if (resp.owned && resp.body)
-            sc_http_response_free(self->alloc, &resp);
-        return SC_OK;
+            hu_http_response_free(self->alloc, &resp);
+        return HU_OK;
     }
-    sc_json_value_t *root = NULL;
-    err = sc_json_parse(self->alloc, resp.body, resp.body_len, &root);
+    hu_json_value_t *root = NULL;
+    err = hu_json_parse(self->alloc, resp.body, resp.body_len, &root);
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
-    if (err != SC_OK || !root || root->type != SC_JSON_OBJECT) {
+        hu_http_response_free(self->alloc, &resp);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
         if (root)
-            sc_json_free(self->alloc, root);
-        return SC_OK;
+            hu_json_free(self->alloc, root);
+        return HU_OK;
     }
-    sc_json_value_t *arr = sc_json_object_get(root, "memories");
-    if (!arr || arr->type != SC_JSON_ARRAY) {
-        sc_json_free(self->alloc, root);
-        return SC_OK;
+    hu_json_value_t *arr = hu_json_object_get(root, "memories");
+    if (!arr || arr->type != HU_JSON_ARRAY) {
+        hu_json_free(self->alloc, root);
+        return HU_OK;
     }
     size_t n = arr->data.array.len;
     if (n == 0) {
-        sc_json_free(self->alloc, root);
-        return SC_OK;
+        hu_json_free(self->alloc, root);
+        return HU_OK;
     }
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_memory_entry_t));
     if (!entries) {
-        sc_json_free(self->alloc, root);
-        return SC_ERR_OUT_OF_MEMORY;
+        hu_json_free(self->alloc, root);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(entries, 0, n * sizeof(sc_memory_entry_t));
+    memset(entries, 0, n * sizeof(hu_memory_entry_t));
     for (size_t i = 0; i < n; i++) {
-        sc_json_value_t *item = arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
+        hu_json_value_t *item = arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
             continue;
-        const char *k = sc_json_get_string(item, "key");
-        const char *c = sc_json_get_string(item, "content");
-        const char *cat = sc_json_get_string(item, "category");
-        const char *sid = sc_json_get_string(item, "session_id");
+        const char *k = hu_json_get_string(item, "key");
+        const char *c = hu_json_get_string(item, "content");
+        const char *cat = hu_json_get_string(item, "category");
+        const char *sid = hu_json_get_string(item, "session_id");
         if (k) {
-            entries[i].key = sc_strndup(alloc, k, strlen(k));
+            entries[i].key = hu_strndup(alloc, k, strlen(k));
             entries[i].key_len = strlen(k);
             entries[i].id = entries[i].key;
             entries[i].id_len = entries[i].key_len;
         }
         if (c) {
-            entries[i].content = sc_strndup(alloc, c, strlen(c));
+            entries[i].content = hu_strndup(alloc, c, strlen(c));
             entries[i].content_len = strlen(c);
         }
         if (cat) {
-            entries[i].category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-            entries[i].category.data.custom.name = sc_strndup(alloc, cat, strlen(cat));
+            entries[i].category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+            entries[i].category.data.custom.name = hu_strndup(alloc, cat, strlen(cat));
             entries[i].category.data.custom.name_len = strlen(cat);
         }
         if (sid) {
-            entries[i].session_id = sc_strndup(alloc, sid, strlen(sid));
+            entries[i].session_id = hu_strndup(alloc, sid, strlen(sid));
             entries[i].session_id_len = strlen(sid);
         }
-        entries[i].timestamp = sc_sprintf(alloc, "0");
+        entries[i].timestamp = hu_sprintf(alloc, "0");
         entries[i].timestamp_len = entries[i].timestamp ? strlen(entries[i].timestamp) : 0;
     }
-    sc_json_free(self->alloc, root);
+    hu_json_free(self->alloc, root);
     *out = entries;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *deleted = false;
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -633,12 +633,12 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
             memset(&self->entries[self->entry_count - 1], 0, sizeof(mock_entry_t));
             self->entry_count--;
             *deleted = true;
-            return SC_OK;
+            return HU_OK;
         }
     }
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *deleted = false;
     char url[1024];
     size_t blen = strlen(self->base_url);
@@ -652,26 +652,26 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
             ? snprintf(headers, sizeof(headers),
                        "Authorization: Bearer %s\nContent-Type: application/json", self->api_key)
             : 0;
-    sc_http_response_t resp = {0};
-    sc_error_t err =
-        sc_http_request(self->alloc, url, "DELETE",
+    hu_http_response_t resp = {0};
+    hu_error_t err =
+        hu_http_request(self->alloc, url, "DELETE",
                         (hl > 0) ? headers : "Content-Type: application/json", NULL, 0, &resp);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
     *deleted = (resp.status_code >= 200 && resp.status_code < 300);
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
-    return SC_OK;
+        hu_http_response_free(self->alloc, &resp);
+    return HU_OK;
 #endif
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *out = self->entry_count;
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     *out = 0;
     char url[1024];
     size_t blen = strlen(self->base_url);
@@ -684,33 +684,33 @@ static sc_error_t impl_count(void *ctx, size_t *out) {
             ? snprintf(headers, sizeof(headers),
                        "Authorization: Bearer %s\nContent-Type: application/json", self->api_key)
             : 0;
-    sc_http_response_t resp = {0};
-    sc_error_t err =
-        sc_http_request(self->alloc, url, "GET",
+    hu_http_response_t resp = {0};
+    hu_error_t err =
+        hu_http_request(self->alloc, url, "GET",
                         (hl > 0) ? headers : "Content-Type: application/json", NULL, 0, &resp);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
     if (resp.body && resp.body_len > 0) {
-        sc_json_value_t *root = NULL;
-        if (sc_json_parse(self->alloc, resp.body, resp.body_len, &root) == SC_OK && root &&
-            root->type == SC_JSON_OBJECT) {
-            double c = sc_json_get_number(root, "count", 0);
+        hu_json_value_t *root = NULL;
+        if (hu_json_parse(self->alloc, resp.body, resp.body_len, &root) == HU_OK && root &&
+            root->type == HU_JSON_OBJECT) {
+            double c = hu_json_get_number(root, "count", 0);
             *out = (size_t)c;
-            sc_json_free(self->alloc, root);
+            hu_json_free(self->alloc, root);
         }
     }
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
-    return SC_OK;
+        hu_http_response_free(self->alloc, &resp);
+    return HU_OK;
 #endif
 }
 
 static bool impl_health_check(void *ctx) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     (void)ctx;
     return true;
 #else
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     char url[1024];
     size_t blen = strlen(self->base_url);
     while (blen > 0 && self->base_url[blen - 1] == '/')
@@ -722,24 +722,24 @@ static bool impl_health_check(void *ctx) {
             ? snprintf(headers, sizeof(headers),
                        "Authorization: Bearer %s\nContent-Type: application/json", self->api_key)
             : 0;
-    sc_http_response_t resp = {0};
-    sc_error_t err =
-        sc_http_request(self->alloc, url, "GET",
+    hu_http_response_t resp = {0};
+    hu_error_t err =
+        hu_http_request(self->alloc, url, "GET",
                         (hl > 0) ? headers : "Content-Type: application/json", NULL, 0, &resp);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return false;
     bool ok = (resp.status_code >= 200 && resp.status_code < 300);
     if (resp.owned && resp.body)
-        sc_http_response_free(self->alloc, &resp);
+        hu_http_response_free(self->alloc, &resp);
     return ok;
 #endif
 }
 
 static void impl_deinit(void *ctx) {
-    sc_api_memory_t *self = (sc_api_memory_t *)ctx;
+    hu_api_memory_t *self = (hu_api_memory_t *)ctx;
     if (!self)
         return;
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     for (size_t i = 0; i < self->entry_count; i++)
         mock_free_entry(self->alloc, &self->entries[i]);
     self->entry_count = 0;
@@ -749,10 +749,10 @@ static void impl_deinit(void *ctx) {
     if (self->api_key && self->alloc)
         self->alloc->free(self->alloc->ctx, self->api_key, strlen(self->api_key) + 1);
     if (self->alloc)
-        self->alloc->free(self->alloc->ctx, self, sizeof(sc_api_memory_t));
+        self->alloc->free(self->alloc->ctx, self, sizeof(hu_api_memory_t));
 }
 
-static const sc_memory_vtable_t api_vtable = {
+static const hu_memory_vtable_t api_vtable = {
     .name = impl_name,
     .store = impl_store,
     .recall = impl_recall,
@@ -764,14 +764,14 @@ static const sc_memory_vtable_t api_vtable = {
     .deinit = impl_deinit,
 };
 
-sc_memory_t sc_api_memory_create(sc_allocator_t *alloc, const char *base_url, const char *api_key,
+hu_memory_t hu_api_memory_create(hu_allocator_t *alloc, const char *base_url, const char *api_key,
                                  uint32_t timeout_ms) {
     if (!alloc || !base_url)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    sc_api_memory_t *self = (sc_api_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_api_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    hu_api_memory_t *self = (hu_api_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_api_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_api_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_api_memory_t));
     self->alloc = alloc;
     self->base_url = (char *)alloc->alloc(alloc->ctx, strlen(base_url) + 1);
     if (self->base_url)
@@ -780,5 +780,5 @@ sc_memory_t sc_api_memory_create(sc_allocator_t *alloc, const char *base_url, co
     if (api_key && self->api_key)
         memcpy(self->api_key, api_key, strlen(api_key) + 1);
     self->timeout_ms = timeout_ms;
-    return (sc_memory_t){.ctx = self, .vtable = &api_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &api_vtable};
 }

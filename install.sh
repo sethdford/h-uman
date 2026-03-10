@@ -1,5 +1,5 @@
 #!/bin/sh
-# seaclaw install script — run with: curl -fsSL https://seaclaw.ai/install.sh | sh
+# human install script — run with: curl -fsSL https://h-uman.ai/install.sh | sh
 # POSIX-compatible, no bash required
 
 # ANSI colors (work without tput where unavailable)
@@ -10,11 +10,11 @@ red()   { [ -t 1 ] && printf '\033[31m%s\033[0m\n' "$1" || printf '%s\n' "$1"; }
 # shellcheck disable=SC2039
 bold()  { [ -t 1 ] && printf '\033[1m%s\033[0m' "$1" || printf '%s' "$1"; }
 
-REPO="sethdford/seaclaw"
-INSTALL_URL="https://seaclaw.ai/install.sh"
+REPO="sethdford/human"
+INSTALL_URL="https://h-uman.ai/install.sh"
 
 print_help() {
-    bold "seaclaw "
+    bold "human "
     printf "— install script\n\n"
     printf "Usage: curl -fsSL %s | sh\n" "$INSTALL_URL"
     printf "       curl -fsSL %s | sh -s -- --help\n\n" "$INSTALL_URL"
@@ -69,9 +69,9 @@ main() {
     os=$(detect_os)
 
     case "${os}-${arch}" in
-        linux-x86_64)   bin_name="seaclaw-linux-x86_64.bin" ;;
-        linux-aarch64)  bin_name="seaclaw-linux-aarch64.bin" ;;
-        macos-aarch64)  bin_name="seaclaw-macos-aarch64.bin" ;;
+        linux-x86_64)   bin_name="human-linux-x86_64.bin" ;;
+        linux-aarch64)  bin_name="human-linux-aarch64.bin" ;;
+        macos-aarch64)  bin_name="human-macos-aarch64.bin" ;;
         *)
             red "Unsupported platform: $os $arch"
             exit 1
@@ -94,9 +94,9 @@ main() {
 
     url="https://github.com/$REPO/releases/download/$version/$bin_name"
     tmpdir="${TMPDIR:-/tmp}"
-    tmp="$tmpdir/seaclaw-$$.bin"
+    tmp="$tmpdir/human-$$.bin"
 
-    printf "Installing seaclaw %s (%s-%s)...\n" "$version" "$os" "$arch"
+    printf "Installing human %s (%s-%s)...\n" "$version" "$os" "$arch"
     if ! download "$url" "$tmp"; then
         red "Download failed: $url"
         rm -f "$tmp" 2>/dev/null
@@ -115,7 +115,7 @@ main() {
         fi
     fi
 
-    install_path="$install_dir/seaclaw"
+    install_path="$install_dir/human"
     if ! mv "$tmp" "$install_path" 2>/dev/null; then
         red "Failed to move binary to $install_path"
         rm -f "$tmp" 2>/dev/null
@@ -124,7 +124,7 @@ main() {
 
     chmod +x "$install_path"
 
-    green "seaclaw v$version installed to $install_path"
+    green "human v$version installed to $install_path"
 
     if [ "$install_dir" = "$HOME/.local/bin" ]; then
         printf "\nEnsure %s is in your PATH:\n" "$install_dir"
@@ -132,7 +132,7 @@ main() {
     fi
 
     if "$install_path" --version 2>/dev/null; then
-        green "Run 'seaclaw help' to get started."
+        green "Run 'human help' to get started."
     fi
 }
 

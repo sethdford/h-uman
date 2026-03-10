@@ -1,11 +1,11 @@
 /*
  * Shared CLI wrapper helpers — sanitize and split for gcloud, firebase, etc.
  */
-#include "seaclaw/tools/cli_wrapper_common.h"
+#include "human/tools/cli_wrapper_common.h"
 #include <ctype.h>
 #include <string.h>
 
-bool sc_cli_sanitize_command(const char *cmd) {
+bool hu_cli_sanitize_command(const char *cmd) {
     if (!cmd)
         return true;
     if (strstr(cmd, "$(") || strchr(cmd, '`') || strchr(cmd, '|') || strchr(cmd, ';'))
@@ -13,7 +13,7 @@ bool sc_cli_sanitize_command(const char *cmd) {
     return true;
 }
 
-size_t sc_cli_split_args(char *cmd, const char **argv_out, size_t max_out) {
+size_t hu_cli_split_args(char *cmd, const char **argv_out, size_t max_out) {
     size_t argc = 0;
     char *p = cmd;
     while (*p && argc < max_out) {

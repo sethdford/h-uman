@@ -1,45 +1,45 @@
-#include "seaclaw/agent.h"
-#include "seaclaw/agent/awareness.h"
-#include "seaclaw/agent/commitment_store.h"
-#include "seaclaw/agent/pattern_radar.h"
-#include "seaclaw/agent/superhuman.h"
-#include "seaclaw/agent/superhuman_commitment.h"
-#include "seaclaw/agent/superhuman_emotional.h"
-#include "seaclaw/agent/superhuman_predictive.h"
-#include "seaclaw/agent/superhuman_silence.h"
-#include "seaclaw/memory/consolidation.h"
-#include "seaclaw/memory/promotion.h"
-#ifdef SC_HAS_PERSONA
-#include "seaclaw/persona/circadian.h"
-#include "seaclaw/persona/relationship.h"
+#include "human/agent.h"
+#include "human/agent/awareness.h"
+#include "human/agent/commitment_store.h"
+#include "human/agent/pattern_radar.h"
+#include "human/agent/superhuman.h"
+#include "human/agent/superhuman_commitment.h"
+#include "human/agent/superhuman_emotional.h"
+#include "human/agent/superhuman_predictive.h"
+#include "human/agent/superhuman_silence.h"
+#include "human/memory/consolidation.h"
+#include "human/memory/promotion.h"
+#ifdef HU_HAS_PERSONA
+#include "human/persona/circadian.h"
+#include "human/persona/relationship.h"
 #endif
-#include "seaclaw/agent/commands.h"
-#include "seaclaw/agent/compaction.h"
-#include "seaclaw/agent/dispatcher.h"
-#include "seaclaw/agent/episodic.h"
-#include "seaclaw/agent/input_guard.h"
-#include "seaclaw/agent/mailbox.h"
-#include "seaclaw/agent/memory_loader.h"
-#include "seaclaw/agent/outcomes.h"
-#include "seaclaw/agent/planner.h"
-#include "seaclaw/agent/preferences.h"
-#include "seaclaw/agent/prompt.h"
-#include "seaclaw/agent/reflection.h"
-#include "seaclaw/agent/task_list.h"
-#include "seaclaw/agent/team.h"
-#include "seaclaw/agent/tool_context.h"
-#include "seaclaw/agent/undo.h"
-#include "seaclaw/context.h"
-#include "seaclaw/context_tokens.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory/stm.h"
-#include "seaclaw/observer.h"
-#ifdef SC_HAS_PERSONA
-#include "seaclaw/persona.h"
+#include "human/agent/commands.h"
+#include "human/agent/compaction.h"
+#include "human/agent/dispatcher.h"
+#include "human/agent/episodic.h"
+#include "human/agent/input_guard.h"
+#include "human/agent/mailbox.h"
+#include "human/agent/memory_loader.h"
+#include "human/agent/outcomes.h"
+#include "human/agent/planner.h"
+#include "human/agent/preferences.h"
+#include "human/agent/prompt.h"
+#include "human/agent/reflection.h"
+#include "human/agent/task_list.h"
+#include "human/agent/team.h"
+#include "human/agent/tool_context.h"
+#include "human/agent/undo.h"
+#include "human/context.h"
+#include "human/context_tokens.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/memory/stm.h"
+#include "human/observer.h"
+#ifdef HU_HAS_PERSONA
+#include "human/persona.h"
 #endif
-#include "seaclaw/provider.h"
-#include "seaclaw/voice.h"
+#include "human/provider.h"
+#include "human/voice.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,7 +47,7 @@
 #include <string.h>
 #include <time.h>
 
-void sc_agent_internal_generate_trace_id(char *buf) {
+void hu_agent_internal_generate_trace_id(char *buf) {
     static uint32_t counter = 0;
     uint64_t t = (uint64_t)clock();
     counter++;
@@ -57,26 +57,26 @@ void sc_agent_internal_generate_trace_id(char *buf) {
              (uint16_t)(counter & 0xFFFF));
 }
 
-uint64_t sc_agent_internal_clock_diff_ms(clock_t start, clock_t end) {
+uint64_t hu_agent_internal_clock_diff_ms(clock_t start, clock_t end) {
     return (uint64_t)((end - start) * 1000 / CLOCKS_PER_SEC);
 }
 
-static _Thread_local sc_agent_t *sc__current_agent_for_tools;
+static _Thread_local hu_agent_t *hu__current_agent_for_tools;
 
-void sc_agent_set_current_for_tools(sc_agent_t *agent) {
-    sc__current_agent_for_tools = agent;
+void hu_agent_set_current_for_tools(hu_agent_t *agent) {
+    hu__current_agent_for_tools = agent;
 }
-void sc_agent_clear_current_for_tools(void) {
-    sc__current_agent_for_tools = NULL;
+void hu_agent_clear_current_for_tools(void) {
+    hu__current_agent_for_tools = NULL;
 }
-sc_agent_t *sc_agent_get_current_for_tools(void) {
-    return sc__current_agent_for_tools;
+hu_agent_t *hu_agent_get_current_for_tools(void) {
+    return hu__current_agent_for_tools;
 }
 
-void sc_agent_internal_record_cost(sc_agent_t *agent, const sc_token_usage_t *usage) {
+void hu_agent_internal_record_cost(hu_agent_t *agent, const hu_token_usage_t *usage) {
     if (!agent->cost_tracker || !agent->cost_tracker->enabled)
         return;
-    sc_cost_entry_t entry;
+    hu_cost_entry_t entry;
     memset(&entry, 0, sizeof(entry));
     entry.model = agent->model_name;
     entry.input_tokens = usage->prompt_tokens;
@@ -84,23 +84,23 @@ void sc_agent_internal_record_cost(sc_agent_t *agent, const sc_token_usage_t *us
     entry.total_tokens = usage->total_tokens;
     entry.cost_usd = 0.0;
     entry.timestamp_secs = (int64_t)time(NULL);
-    (void)sc_cost_record_usage(agent->cost_tracker, &entry, agent->active_job_id);
+    (void)hu_cost_record_usage(agent->cost_tracker, &entry, agent->active_job_id);
 }
 
-#define SC_AGENT_HISTORY_INIT_CAP 16
-#define SC_AGENT_MAX_SLASH_LEN    256
+#define HU_AGENT_HISTORY_INIT_CAP 16
+#define HU_AGENT_MAX_SLASH_LEN    256
 
-sc_error_t sc_agent_from_config(
-    sc_agent_t *out, sc_allocator_t *alloc, sc_provider_t provider, const sc_tool_t *tools,
-    size_t tools_count, sc_memory_t *memory, sc_session_store_t *session_store,
-    sc_observer_t *observer, sc_security_policy_t *policy, const char *model_name,
+hu_error_t hu_agent_from_config(
+    hu_agent_t *out, hu_allocator_t *alloc, hu_provider_t provider, const hu_tool_t *tools,
+    size_t tools_count, hu_memory_t *memory, hu_session_store_t *session_store,
+    hu_observer_t *observer, hu_security_policy_t *policy, const char *model_name,
     size_t model_name_len, const char *default_provider, size_t default_provider_len,
     double temperature, const char *workspace_dir, size_t workspace_dir_len,
     uint32_t max_tool_iterations, uint32_t max_history_messages, bool auto_save,
     uint8_t autonomy_level, const char *custom_instructions, size_t custom_instructions_len,
-    const char *persona, size_t persona_len, const sc_agent_context_config_t *ctx_cfg) {
+    const char *persona, size_t persona_len, const hu_agent_context_config_t *ctx_cfg) {
     if (!out || !alloc || !provider.vtable || !model_name) {
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     }
     memset(out, 0, sizeof(*out));
 
@@ -123,32 +123,32 @@ sc_error_t sc_agent_from_config(
     out->custom_instructions = NULL;
     out->custom_instructions_len = 0;
     if (custom_instructions && custom_instructions_len > 0) {
-        out->custom_instructions = sc_strndup(alloc, custom_instructions, custom_instructions_len);
+        out->custom_instructions = hu_strndup(alloc, custom_instructions, custom_instructions_len);
         if (!out->custom_instructions)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         out->custom_instructions_len = custom_instructions_len;
     }
 
-    out->model_name = sc_strndup(alloc, model_name, model_name_len);
+    out->model_name = hu_strndup(alloc, model_name, model_name_len);
     if (!out->model_name)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     out->model_name_len = model_name_len;
 
     out->default_provider =
-        sc_strndup(alloc, default_provider ? default_provider : "openai",
+        hu_strndup(alloc, default_provider ? default_provider : "openai",
                    default_provider_len ? default_provider_len : strlen("openai"));
     if (!out->default_provider) {
         alloc->free(alloc->ctx, out->model_name, out->model_name_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     out->default_provider_len = default_provider_len ? default_provider_len : strlen("openai");
 
-    out->workspace_dir = sc_strndup(alloc, workspace_dir ? workspace_dir : ".",
+    out->workspace_dir = hu_strndup(alloc, workspace_dir ? workspace_dir : ".",
                                     workspace_dir_len ? workspace_dir_len : 1);
     if (!out->workspace_dir) {
         alloc->free(alloc->ctx, out->default_provider, out->default_provider_len + 1);
         alloc->free(alloc->ctx, out->model_name, out->model_name_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     out->workspace_dir_len = workspace_dir_len ? workspace_dir_len : 1;
 
@@ -172,23 +172,23 @@ sc_error_t sc_agent_from_config(
 
     out->tools_count = tools_count;
     if (tools_count > 0) {
-        out->tools = (sc_tool_t *)alloc->alloc(alloc->ctx, tools_count * sizeof(sc_tool_t));
+        out->tools = (hu_tool_t *)alloc->alloc(alloc->ctx, tools_count * sizeof(hu_tool_t));
         if (!out->tools) {
             alloc->free(alloc->ctx, out->workspace_dir, out->workspace_dir_len + 1);
             alloc->free(alloc->ctx, out->default_provider, out->default_provider_len + 1);
             alloc->free(alloc->ctx, out->model_name, out->model_name_len + 1);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        memcpy(out->tools, tools, tools_count * sizeof(sc_tool_t));
+        memcpy(out->tools, tools, tools_count * sizeof(hu_tool_t));
 
         out->tool_specs =
-            (sc_tool_spec_t *)alloc->alloc(alloc->ctx, tools_count * sizeof(sc_tool_spec_t));
+            (hu_tool_spec_t *)alloc->alloc(alloc->ctx, tools_count * sizeof(hu_tool_spec_t));
         if (!out->tool_specs) {
-            alloc->free(alloc->ctx, out->tools, tools_count * sizeof(sc_tool_t));
+            alloc->free(alloc->ctx, out->tools, tools_count * sizeof(hu_tool_t));
             alloc->free(alloc->ctx, out->workspace_dir, out->workspace_dir_len + 1);
             alloc->free(alloc->ctx, out->default_provider, out->default_provider_len + 1);
             alloc->free(alloc->ctx, out->model_name, out->model_name_len + 1);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         out->tool_specs_count = tools_count;
         for (size_t i = 0; i < tools_count; i++) {
@@ -215,7 +215,7 @@ sc_error_t sc_agent_from_config(
 
     /* Build and cache the static portion of the system prompt */
     {
-        sc_prompt_config_t cfg = {
+        hu_prompt_config_t cfg = {
             .provider_name = out->provider.vtable->get_name(out->provider.ctx),
             .provider_name_len = 0,
             .model_name = out->model_name,
@@ -230,9 +230,9 @@ sc_error_t sc_agent_from_config(
             .custom_instructions = out->custom_instructions,
             .custom_instructions_len = out->custom_instructions_len,
         };
-        sc_error_t perr = sc_prompt_build_static(alloc, &cfg, &out->cached_static_prompt,
+        hu_error_t perr = hu_prompt_build_static(alloc, &cfg, &out->cached_static_prompt,
                                                  &out->cached_static_prompt_len);
-        if (perr != SC_OK) {
+        if (perr != HU_OK) {
             out->cached_static_prompt = NULL;
             out->cached_static_prompt_len = 0;
         }
@@ -240,64 +240,64 @@ sc_error_t sc_agent_from_config(
     }
 
     if (persona && persona_len > 0) {
-        out->persona_name = sc_strndup(alloc, persona, persona_len);
+        out->persona_name = hu_strndup(alloc, persona, persona_len);
         out->persona_name_len = persona_len;
-#ifdef SC_HAS_PERSONA
-        out->persona = (sc_persona_t *)alloc->alloc(alloc->ctx, sizeof(sc_persona_t));
+#ifdef HU_HAS_PERSONA
+        out->persona = (hu_persona_t *)alloc->alloc(alloc->ctx, sizeof(hu_persona_t));
         if (out->persona) {
-            memset(out->persona, 0, sizeof(sc_persona_t));
-            sc_error_t perr = sc_persona_load(alloc, persona, persona_len, out->persona);
-            if (perr != SC_OK) {
-#ifndef SC_IS_TEST
+            memset(out->persona, 0, sizeof(hu_persona_t));
+            hu_error_t perr = hu_persona_load(alloc, persona, persona_len, out->persona);
+            if (perr != HU_OK) {
+#ifndef HU_IS_TEST
                 fprintf(stderr,
-                        "[seaclaw] warning: persona '%.*s' not found, running without persona\n",
+                        "[human] warning: persona '%.*s' not found, running without persona\n",
                         (int)persona_len, persona);
 #endif
-                alloc->free(alloc->ctx, out->persona, sizeof(sc_persona_t));
+                alloc->free(alloc->ctx, out->persona, sizeof(hu_persona_t));
                 out->persona = NULL;
             }
         }
 #endif
     }
 
-    out->turn_arena = sc_arena_create(*alloc);
+    out->turn_arena = hu_arena_create(*alloc);
 
     out->audit_logger = NULL;
-    out->undo_stack = sc_undo_stack_create(alloc, 100);
+    out->undo_stack = hu_undo_stack_create(alloc, 100);
     if (!out->undo_stack) {
-        sc_arena_destroy(out->turn_arena);
+        hu_arena_destroy(out->turn_arena);
         out->turn_arena = NULL;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     {
         const char *session_id = "default";
-        sc_error_t serr = sc_stm_init(&out->stm, *alloc, session_id, 7);
-        if (serr != SC_OK)
+        hu_error_t serr = hu_stm_init(&out->stm, *alloc, session_id, 7);
+        if (serr != HU_OK)
             return serr;
     }
 
     {
-        sc_error_t rerr = sc_pattern_radar_init(&out->radar, *alloc);
-        if (rerr != SC_OK)
+        hu_error_t rerr = hu_pattern_radar_init(&out->radar, *alloc);
+        if (rerr != HU_OK)
             return rerr;
     }
 
-#ifdef SC_HAS_PERSONA
+#ifdef HU_HAS_PERSONA
     memset(&out->relationship, 0, sizeof(out->relationship));
-    sc_relationship_new_session(&out->relationship);
+    hu_relationship_new_session(&out->relationship);
 #endif
 
     if (memory && memory->vtable) {
-        sc_error_t cerr = sc_commitment_store_create(alloc, memory, &out->commitment_store);
-        if (cerr != SC_OK)
+        hu_error_t cerr = hu_commitment_store_create(alloc, memory, &out->commitment_store);
+        if (cerr != HU_OK)
             out->commitment_store = NULL;
     } else {
         out->commitment_store = NULL;
     }
 
     /* Superhuman services */
-    (void)sc_superhuman_registry_init(&out->superhuman);
+    (void)hu_superhuman_registry_init(&out->superhuman);
     memset(&out->superhuman_commitment_ctx, 0, sizeof(out->superhuman_commitment_ctx));
     memset(&out->superhuman_emotional_ctx, 0, sizeof(out->superhuman_emotional_ctx));
     memset(&out->superhuman_silence_ctx, 0, sizeof(out->superhuman_silence_ctx));
@@ -306,38 +306,38 @@ sc_error_t sc_agent_from_config(
         out->superhuman_commitment_ctx.store = out->commitment_store;
         out->superhuman_commitment_ctx.session_id = NULL;
         out->superhuman_commitment_ctx.session_id_len = 0;
-        sc_superhuman_service_t svc;
-        (void)sc_superhuman_commitment_service(&out->superhuman_commitment_ctx, &svc);
-        (void)sc_superhuman_register(&out->superhuman, svc);
+        hu_superhuman_service_t svc;
+        (void)hu_superhuman_commitment_service(&out->superhuman_commitment_ctx, &svc);
+        (void)hu_superhuman_register(&out->superhuman, svc);
     }
     {
-        sc_superhuman_service_t svc;
-        (void)sc_superhuman_predictive_service(&out->radar, &svc);
-        (void)sc_superhuman_register(&out->superhuman, svc);
+        hu_superhuman_service_t svc;
+        (void)hu_superhuman_predictive_service(&out->radar, &svc);
+        (void)hu_superhuman_register(&out->superhuman, svc);
     }
     {
-        sc_superhuman_service_t svc;
-        (void)sc_superhuman_emotional_service(&out->superhuman_emotional_ctx, &svc);
-        (void)sc_superhuman_register(&out->superhuman, svc);
+        hu_superhuman_service_t svc;
+        (void)hu_superhuman_emotional_service(&out->superhuman_emotional_ctx, &svc);
+        (void)hu_superhuman_register(&out->superhuman, svc);
     }
     {
-        sc_superhuman_service_t svc;
-        (void)sc_superhuman_silence_service(&out->superhuman_silence_ctx, &svc);
-        (void)sc_superhuman_register(&out->superhuman, svc);
+        hu_superhuman_service_t svc;
+        (void)hu_superhuman_silence_service(&out->superhuman_silence_ctx, &svc);
+        (void)hu_superhuman_register(&out->superhuman, svc);
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-#ifdef SC_HAS_PERSONA
-sc_error_t sc_agent_set_persona(sc_agent_t *agent, const char *name, size_t name_len) {
+#ifdef HU_HAS_PERSONA
+hu_error_t hu_agent_set_persona(hu_agent_t *agent, const char *name, size_t name_len) {
     if (!agent)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* Free existing persona */
     if (agent->persona) {
-        sc_persona_deinit(agent->alloc, agent->persona);
-        agent->alloc->free(agent->alloc->ctx, agent->persona, sizeof(sc_persona_t));
+        hu_persona_deinit(agent->alloc, agent->persona);
+        agent->alloc->free(agent->alloc->ctx, agent->persona, sizeof(hu_persona_t));
         agent->persona = NULL;
     }
     if (agent->persona_name) {
@@ -353,102 +353,102 @@ sc_error_t sc_agent_set_persona(sc_agent_t *agent, const char *name, size_t name
 
     /* If name is NULL or empty, just clear the persona */
     if (!name || name_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     /* Load new persona */
-    sc_persona_t *new_persona =
-        (sc_persona_t *)agent->alloc->alloc(agent->alloc->ctx, sizeof(sc_persona_t));
+    hu_persona_t *new_persona =
+        (hu_persona_t *)agent->alloc->alloc(agent->alloc->ctx, sizeof(hu_persona_t));
     if (!new_persona)
-        return SC_ERR_OUT_OF_MEMORY;
-    memset(new_persona, 0, sizeof(sc_persona_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(new_persona, 0, sizeof(hu_persona_t));
 
-    sc_error_t err = sc_persona_load(agent->alloc, name, name_len, new_persona);
-    if (err != SC_OK) {
-        agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(sc_persona_t));
+    hu_error_t err = hu_persona_load(agent->alloc, name, name_len, new_persona);
+    if (err != HU_OK) {
+        agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(hu_persona_t));
         return err;
     }
 
     agent->persona = new_persona;
-    agent->persona_name = sc_strndup(agent->alloc, name, name_len);
+    agent->persona_name = hu_strndup(agent->alloc, name, name_len);
     if (!agent->persona_name) {
-        sc_persona_deinit(agent->alloc, new_persona);
-        agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(sc_persona_t));
+        hu_persona_deinit(agent->alloc, new_persona);
+        agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(hu_persona_t));
         agent->persona = NULL;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     agent->persona_name_len = name_len;
 
-    return SC_OK;
+    return HU_OK;
 }
 #endif
 
-void sc_agent_set_mailbox(sc_agent_t *agent, sc_mailbox_t *mailbox) {
+void hu_agent_set_mailbox(hu_agent_t *agent, hu_mailbox_t *mailbox) {
     if (!agent)
         return;
     uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
     if (agent->mailbox) {
-        sc_error_t err = sc_mailbox_unregister(agent->mailbox, id);
-        if (err != SC_OK)
-            fprintf(stderr, "warning: mailbox unregister failed: %s\n", sc_error_string(err));
+        hu_error_t err = hu_mailbox_unregister(agent->mailbox, id);
+        if (err != HU_OK)
+            fprintf(stderr, "warning: mailbox unregister failed: %s\n", hu_error_string(err));
     }
     agent->mailbox = mailbox;
     if (agent->mailbox) {
-        sc_error_t err = sc_mailbox_register(agent->mailbox, id);
-        if (err != SC_OK)
-            fprintf(stderr, "warning: mailbox register failed: %s\n", sc_error_string(err));
+        hu_error_t err = hu_mailbox_register(agent->mailbox, id);
+        if (err != HU_OK)
+            fprintf(stderr, "warning: mailbox register failed: %s\n", hu_error_string(err));
     }
 }
 
-void sc_agent_set_task_list(sc_agent_t *agent, sc_task_list_t *task_list) {
+void hu_agent_set_task_list(hu_agent_t *agent, hu_task_list_t *task_list) {
     if (!agent)
         return;
     agent->task_list = task_list;
 }
 
-void sc_agent_set_retrieval_engine(sc_agent_t *agent, sc_retrieval_engine_t *engine) {
+void hu_agent_set_retrieval_engine(hu_agent_t *agent, hu_retrieval_engine_t *engine) {
     if (!agent)
         return;
     agent->retrieval_engine = engine;
 }
 
-void sc_agent_set_awareness(sc_agent_t *agent, struct sc_awareness *awareness) {
+void hu_agent_set_awareness(hu_agent_t *agent, struct hu_awareness *awareness) {
     if (!agent)
         return;
     agent->awareness = awareness;
 }
 
-const struct sc_awareness *sc_agent_get_awareness(const sc_agent_t *agent) {
+const struct hu_awareness *hu_agent_get_awareness(const hu_agent_t *agent) {
     return agent ? agent->awareness : NULL;
 }
 
-void sc_agent_set_outcomes(sc_agent_t *agent, struct sc_outcome_tracker *tracker) {
+void hu_agent_set_outcomes(hu_agent_t *agent, struct hu_outcome_tracker *tracker) {
     if (!agent)
         return;
     agent->outcomes = tracker;
 }
 
-void sc_agent_deinit(sc_agent_t *agent) {
+void hu_agent_deinit(hu_agent_t *agent) {
     if (!agent)
         return;
     if (agent->mailbox) {
         uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
-        (void)sc_mailbox_unregister(agent->mailbox, id);
+        (void)hu_mailbox_unregister(agent->mailbox, id);
         agent->mailbox = NULL;
     }
-    sc_agent_clear_history(agent);
+    hu_agent_clear_history(agent);
     if (agent->history) {
         agent->alloc->free(agent->alloc->ctx, agent->history,
-                           agent->history_cap * sizeof(sc_owned_message_t));
+                           agent->history_cap * sizeof(hu_owned_message_t));
         agent->history = NULL;
         agent->history_cap = 0;
     }
     if (agent->tools) {
-        agent->alloc->free(agent->alloc->ctx, agent->tools, agent->tools_count * sizeof(sc_tool_t));
+        agent->alloc->free(agent->alloc->ctx, agent->tools, agent->tools_count * sizeof(hu_tool_t));
         agent->tools = NULL;
     }
     if (agent->tool_specs) {
         agent->alloc->free(agent->alloc->ctx, agent->tool_specs,
-                           agent->tool_specs_count * sizeof(sc_tool_spec_t));
+                           agent->tool_specs_count * sizeof(hu_tool_spec_t));
         agent->tool_specs = NULL;
     }
     if (agent->cached_static_prompt) {
@@ -474,10 +474,10 @@ void sc_agent_deinit(sc_agent_t *agent) {
                            agent->custom_instructions_len + 1);
         agent->custom_instructions = NULL;
     }
-#ifdef SC_HAS_PERSONA
+#ifdef HU_HAS_PERSONA
     if (agent->persona) {
-        sc_persona_deinit(agent->alloc, agent->persona);
-        agent->alloc->free(agent->alloc->ctx, agent->persona, sizeof(sc_persona_t));
+        hu_persona_deinit(agent->alloc, agent->persona);
+        agent->alloc->free(agent->alloc->ctx, agent->persona, sizeof(hu_persona_t));
         agent->persona = NULL;
     }
 #endif
@@ -491,112 +491,112 @@ void sc_agent_deinit(sc_agent_t *agent) {
     }
     /* Promote important STM entities to persistent memory before cleanup */
     if (agent->memory && agent->memory->vtable) {
-        sc_promotion_config_t promo_config = SC_PROMOTION_DEFAULTS;
-        (void)sc_promotion_run(agent->alloc, &agent->stm, agent->memory, &promo_config);
+        hu_promotion_config_t promo_config = HU_PROMOTION_DEFAULTS;
+        (void)hu_promotion_run(agent->alloc, &agent->stm, agent->memory, &promo_config);
     }
-    sc_stm_deinit(&agent->stm);
-    sc_pattern_radar_deinit(&agent->radar);
+    hu_stm_deinit(&agent->stm);
+    hu_pattern_radar_deinit(&agent->radar);
     if (agent->commitment_store) {
-        sc_commitment_store_destroy(agent->commitment_store);
+        hu_commitment_store_destroy(agent->commitment_store);
         agent->commitment_store = NULL;
     }
     if (agent->provider.vtable && agent->provider.vtable->deinit) {
         agent->provider.vtable->deinit(agent->provider.ctx, agent->alloc);
     }
     if (agent->turn_arena) {
-        sc_arena_destroy(agent->turn_arena);
+        hu_arena_destroy(agent->turn_arena);
         agent->turn_arena = NULL;
     }
     if (agent->audit_logger) {
-        sc_audit_logger_destroy(agent->audit_logger, agent->alloc);
+        hu_audit_logger_destroy(agent->audit_logger, agent->alloc);
         agent->audit_logger = NULL;
     }
     if (agent->team) {
-        sc_team_destroy(agent->team);
+        hu_team_destroy(agent->team);
         agent->team = NULL;
     }
     if (agent->undo_stack) {
-        sc_undo_stack_destroy(agent->undo_stack);
+        hu_undo_stack_destroy(agent->undo_stack);
         agent->undo_stack = NULL;
     }
 }
 
-sc_error_t sc_agent_consolidate_memory(sc_agent_t *agent) {
+hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent) {
     if (!agent || !agent->memory || !agent->memory->vtable)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_consolidation_config_t config = SC_CONSOLIDATION_DEFAULTS;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_consolidation_config_t config = HU_CONSOLIDATION_DEFAULTS;
     config.provider = &agent->provider;
     config.model = agent->model_name;
     config.model_len = agent->model_name_len;
-    return sc_memory_consolidate(agent->alloc, agent->memory, &config);
+    return hu_memory_consolidate(agent->alloc, agent->memory, &config);
 }
 
-sc_error_t sc_agent_internal_ensure_history_cap(sc_agent_t *agent, size_t need) {
+hu_error_t hu_agent_internal_ensure_history_cap(hu_agent_t *agent, size_t need) {
     if (agent->history_cap >= need)
-        return SC_OK;
-    size_t new_cap = agent->history_cap ? agent->history_cap : SC_AGENT_HISTORY_INIT_CAP;
+        return HU_OK;
+    size_t new_cap = agent->history_cap ? agent->history_cap : HU_AGENT_HISTORY_INIT_CAP;
     while (new_cap < need)
         new_cap *= 2;
-    sc_owned_message_t *new_arr = (sc_owned_message_t *)agent->alloc->realloc(
-        agent->alloc->ctx, agent->history, agent->history_cap * sizeof(sc_owned_message_t),
-        new_cap * sizeof(sc_owned_message_t));
+    hu_owned_message_t *new_arr = (hu_owned_message_t *)agent->alloc->realloc(
+        agent->alloc->ctx, agent->history, agent->history_cap * sizeof(hu_owned_message_t),
+        new_cap * sizeof(hu_owned_message_t));
     if (!new_arr)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     agent->history = new_arr;
     agent->history_cap = new_cap;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_agent_internal_append_history(sc_agent_t *agent, sc_role_t role, const char *content,
+hu_error_t hu_agent_internal_append_history(hu_agent_t *agent, hu_role_t role, const char *content,
                                             size_t content_len, const char *name, size_t name_len,
                                             const char *tool_call_id, size_t tool_call_id_len) {
-    sc_error_t err = sc_agent_internal_ensure_history_cap(agent, agent->history_count + 1);
-    if (err != SC_OK)
+    hu_error_t err = hu_agent_internal_ensure_history_cap(agent, agent->history_count + 1);
+    if (err != HU_OK)
         return err;
-    char *dup = sc_strndup(agent->alloc, content, content_len);
+    char *dup = hu_strndup(agent->alloc, content, content_len);
     if (!dup)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     agent->history[agent->history_count].role = role;
     agent->history[agent->history_count].content = dup;
     agent->history[agent->history_count].content_len = content_len;
     agent->history[agent->history_count].name =
-        name_len ? sc_strndup(agent->alloc, name, name_len) : NULL;
+        name_len ? hu_strndup(agent->alloc, name, name_len) : NULL;
     agent->history[agent->history_count].name_len = name_len;
     if (name_len && !agent->history[agent->history_count].name) {
         agent->alloc->free(agent->alloc->ctx, dup, content_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     agent->history[agent->history_count].tool_call_id =
-        tool_call_id_len ? sc_strndup(agent->alloc, tool_call_id, tool_call_id_len) : NULL;
+        tool_call_id_len ? hu_strndup(agent->alloc, tool_call_id, tool_call_id_len) : NULL;
     agent->history[agent->history_count].tool_call_id_len = tool_call_id_len;
     if (tool_call_id_len && !agent->history[agent->history_count].tool_call_id) {
         agent->alloc->free(agent->alloc->ctx, dup, content_len + 1);
         if (agent->history[agent->history_count].name)
             agent->alloc->free(agent->alloc->ctx, agent->history[agent->history_count].name,
                                agent->history[agent->history_count].name_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     agent->history[agent->history_count].tool_calls = NULL;
     agent->history[agent->history_count].tool_calls_count = 0;
     agent->history[agent->history_count].content_parts = NULL;
     agent->history[agent->history_count].content_parts_count = 0;
     agent->history_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
 /* Append assistant message with tool_calls (duplicates and owns tool_calls). */
-sc_error_t sc_agent_internal_append_history_with_tool_calls(sc_agent_t *agent, const char *content,
+hu_error_t hu_agent_internal_append_history_with_tool_calls(hu_agent_t *agent, const char *content,
                                                             size_t content_len,
-                                                            const sc_tool_call_t *tool_calls,
+                                                            const hu_tool_call_t *tool_calls,
                                                             size_t tool_calls_count) {
-    sc_error_t err = sc_agent_internal_ensure_history_cap(agent, agent->history_count + 1);
-    if (err != SC_OK)
+    hu_error_t err = hu_agent_internal_ensure_history_cap(agent, agent->history_count + 1);
+    if (err != HU_OK)
         return err;
-    char *dup = content && content_len > 0 ? sc_strndup(agent->alloc, content, content_len)
-                                           : sc_strndup(agent->alloc, "", 0);
+    char *dup = content && content_len > 0 ? hu_strndup(agent->alloc, content, content_len)
+                                           : hu_strndup(agent->alloc, "", 0);
     if (!dup)
-        return SC_ERR_OUT_OF_MEMORY;
-    agent->history[agent->history_count].role = SC_ROLE_ASSISTANT;
+        return HU_ERR_OUT_OF_MEMORY;
+    agent->history[agent->history_count].role = HU_ROLE_ASSISTANT;
     agent->history[agent->history_count].content = dup;
     agent->history[agent->history_count].content_len = content_len;
     agent->history[agent->history_count].name = NULL;
@@ -608,39 +608,39 @@ sc_error_t sc_agent_internal_append_history_with_tool_calls(sc_agent_t *agent, c
     agent->history[agent->history_count].content_parts = NULL;
     agent->history[agent->history_count].content_parts_count = 0;
     if (tool_calls && tool_calls_count > 0) {
-        sc_tool_call_t *owned = (sc_tool_call_t *)agent->alloc->alloc(
-            agent->alloc->ctx, tool_calls_count * sizeof(sc_tool_call_t));
+        hu_tool_call_t *owned = (hu_tool_call_t *)agent->alloc->alloc(
+            agent->alloc->ctx, tool_calls_count * sizeof(hu_tool_call_t));
         if (!owned) {
             agent->alloc->free(agent->alloc->ctx, dup, content_len + 1);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        memset(owned, 0, tool_calls_count * sizeof(sc_tool_call_t));
+        memset(owned, 0, tool_calls_count * sizeof(hu_tool_call_t));
         for (size_t i = 0; i < tool_calls_count; i++) {
-            const sc_tool_call_t *src = &tool_calls[i];
+            const hu_tool_call_t *src = &tool_calls[i];
             if (src->id && src->id_len > 0) {
-                owned[i].id = sc_strndup(agent->alloc, src->id, src->id_len);
+                owned[i].id = hu_strndup(agent->alloc, src->id, src->id_len);
                 if (!owned[i].id) {
-                    sc_agent_commands_free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
+                    hu_agent_commands_free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
                     agent->alloc->free(agent->alloc->ctx, dup, content_len ? content_len + 1 : 1);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 owned[i].id_len = src->id_len;
             }
             if (src->name && src->name_len > 0) {
-                owned[i].name = sc_strndup(agent->alloc, src->name, src->name_len);
+                owned[i].name = hu_strndup(agent->alloc, src->name, src->name_len);
                 if (!owned[i].name) {
-                    sc_agent_commands_free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
+                    hu_agent_commands_free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
                     agent->alloc->free(agent->alloc->ctx, dup, content_len ? content_len + 1 : 1);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 owned[i].name_len = src->name_len;
             }
             if (src->arguments && src->arguments_len > 0) {
-                owned[i].arguments = sc_strndup(agent->alloc, src->arguments, src->arguments_len);
+                owned[i].arguments = hu_strndup(agent->alloc, src->arguments, src->arguments_len);
                 if (!owned[i].arguments) {
-                    sc_agent_commands_free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
+                    hu_agent_commands_free_owned_tool_calls(agent->alloc, owned, tool_calls_count);
                     agent->alloc->free(agent->alloc->ctx, dup, content_len ? content_len + 1 : 1);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 owned[i].arguments_len = src->arguments_len;
             }
@@ -649,10 +649,10 @@ sc_error_t sc_agent_internal_append_history_with_tool_calls(sc_agent_t *agent, c
         agent->history[agent->history_count].tool_calls_count = tool_calls_count;
     }
     agent->history_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_agent_clear_history(sc_agent_t *agent) {
+void hu_agent_clear_history(hu_agent_t *agent) {
     if (!agent || !agent->history)
         return;
     for (size_t i = 0; i < agent->history_count; i++) {
@@ -669,21 +669,21 @@ void sc_agent_clear_history(sc_agent_t *agent) {
                                agent->history[i].tool_call_id_len + 1);
         }
         if (agent->history[i].tool_calls && agent->history[i].tool_calls_count > 0) {
-            sc_agent_commands_free_owned_tool_calls(agent->alloc, agent->history[i].tool_calls,
+            hu_agent_commands_free_owned_tool_calls(agent->alloc, agent->history[i].tool_calls,
                                                     agent->history[i].tool_calls_count);
             agent->history[i].tool_calls = NULL;
             agent->history[i].tool_calls_count = 0;
         }
         if (agent->history[i].content_parts && agent->history[i].content_parts_count > 0) {
             for (size_t j = 0; j < agent->history[i].content_parts_count; j++) {
-                sc_content_part_t *cp = &agent->history[i].content_parts[j];
-                if (cp->tag == SC_CONTENT_PART_TEXT && cp->data.text.ptr)
+                hu_content_part_t *cp = &agent->history[i].content_parts[j];
+                if (cp->tag == HU_CONTENT_PART_TEXT && cp->data.text.ptr)
                     agent->alloc->free(agent->alloc->ctx, (void *)cp->data.text.ptr,
                                        cp->data.text.len + 1);
-                else if (cp->tag == SC_CONTENT_PART_IMAGE_URL && cp->data.image_url.url)
+                else if (cp->tag == HU_CONTENT_PART_IMAGE_URL && cp->data.image_url.url)
                     agent->alloc->free(agent->alloc->ctx, (void *)cp->data.image_url.url,
                                        cp->data.image_url.url_len + 1);
-                else if (cp->tag == SC_CONTENT_PART_IMAGE_BASE64) {
+                else if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64) {
                     if (cp->data.image_base64.data)
                         agent->alloc->free(agent->alloc->ctx, (void *)cp->data.image_base64.data,
                                            cp->data.image_base64.data_len + 1);
@@ -691,7 +691,7 @@ void sc_agent_clear_history(sc_agent_t *agent) {
                         agent->alloc->free(agent->alloc->ctx,
                                            (void *)cp->data.image_base64.media_type,
                                            cp->data.image_base64.media_type_len + 1);
-                } else if (cp->tag == SC_CONTENT_PART_AUDIO_BASE64) {
+                } else if (cp->tag == HU_CONTENT_PART_AUDIO_BASE64) {
                     if (cp->data.audio_base64.data)
                         agent->alloc->free(agent->alloc->ctx, (void *)cp->data.audio_base64.data,
                                            cp->data.audio_base64.data_len + 1);
@@ -699,7 +699,7 @@ void sc_agent_clear_history(sc_agent_t *agent) {
                         agent->alloc->free(agent->alloc->ctx,
                                            (void *)cp->data.audio_base64.media_type,
                                            cp->data.audio_base64.media_type_len + 1);
-                } else if (cp->tag == SC_CONTENT_PART_VIDEO_URL) {
+                } else if (cp->tag == HU_CONTENT_PART_VIDEO_URL) {
                     if (cp->data.video_url.url)
                         agent->alloc->free(agent->alloc->ctx, (void *)cp->data.video_url.url,
                                            cp->data.video_url.url_len + 1);
@@ -709,7 +709,7 @@ void sc_agent_clear_history(sc_agent_t *agent) {
                 }
             }
             agent->alloc->free(agent->alloc->ctx, agent->history[i].content_parts,
-                               agent->history[i].content_parts_count * sizeof(sc_content_part_t));
+                               agent->history[i].content_parts_count * sizeof(hu_content_part_t));
             agent->history[i].content_parts = NULL;
             agent->history[i].content_parts_count = 0;
         }
@@ -721,53 +721,53 @@ void sc_agent_clear_history(sc_agent_t *agent) {
     }
 }
 
-uint32_t sc_agent_estimate_tokens(const char *text, size_t len) {
+uint32_t hu_agent_estimate_tokens(const char *text, size_t len) {
     if (!text)
         return 0;
     return (uint32_t)((len + 3) / 4);
 }
 
-sc_policy_action_t sc_agent_internal_check_policy(sc_agent_t *agent, const char *tool_name,
+hu_policy_action_t hu_agent_internal_check_policy(hu_agent_t *agent, const char *tool_name,
                                                   const char *arguments) {
     /* First check existing security policy (agent->policy) */
     if (agent->policy && agent->policy->block_high_risk_commands &&
-        sc_tool_risk_level(tool_name) == SC_RISK_HIGH)
-        return SC_POLICY_DENY;
+        hu_tool_risk_level(tool_name) == HU_RISK_HIGH)
+        return HU_POLICY_DENY;
     /* Then check rule-based policy engine */
     if (!agent->policy_engine)
-        return SC_POLICY_ALLOW;
-    sc_policy_eval_ctx_t pe_ctx = {
+        return HU_POLICY_ALLOW;
+    hu_policy_eval_ctx_t pe_ctx = {
         .tool_name = tool_name, .args_json = arguments ? arguments : "", .session_cost_usd = 0};
-    sc_policy_result_t pe_res = sc_policy_engine_evaluate(agent->policy_engine, &pe_ctx);
+    hu_policy_result_t pe_res = hu_policy_engine_evaluate(agent->policy_engine, &pe_ctx);
     return pe_res.action;
 }
 
-sc_policy_action_t sc_agent_internal_evaluate_tool_policy(sc_agent_t *agent, const char *tool_name,
+hu_policy_action_t hu_agent_internal_evaluate_tool_policy(hu_agent_t *agent, const char *tool_name,
                                                           const char *args_json) {
-    sc_policy_action_t base = sc_agent_internal_check_policy(agent, tool_name, args_json);
-    if (base == SC_POLICY_DENY)
-        return SC_POLICY_DENY;
+    hu_policy_action_t base = hu_agent_internal_check_policy(agent, tool_name, args_json);
+    if (base == HU_POLICY_DENY)
+        return HU_POLICY_DENY;
     if (agent->team && agent->agent_id) {
-        const sc_team_member_t *member = sc_team_get_member(agent->team, agent->agent_id);
-        if (member && !sc_team_role_allows_tool(member->role, tool_name))
-            return SC_POLICY_DENY;
+        const hu_team_member_t *member = hu_team_get_member(agent->team, agent->agent_id);
+        if (member && !hu_team_role_allows_tool(member->role, tool_name))
+            return HU_POLICY_DENY;
     }
     if (agent->policy_engine) {
-        sc_policy_eval_ctx_t ctx = {
+        hu_policy_eval_ctx_t ctx = {
             .tool_name = tool_name,
             .args_json = args_json ? args_json : "",
             .session_cost_usd = 0.0,
         };
-        sc_policy_result_t pr = sc_policy_engine_evaluate(agent->policy_engine, &ctx);
-        if (pr.action == SC_POLICY_DENY)
-            return SC_POLICY_DENY;
-        if (pr.action == SC_POLICY_REQUIRE_APPROVAL)
-            return SC_POLICY_REQUIRE_APPROVAL;
+        hu_policy_result_t pr = hu_policy_engine_evaluate(agent->policy_engine, &ctx);
+        if (pr.action == HU_POLICY_DENY)
+            return HU_POLICY_DENY;
+        if (pr.action == HU_POLICY_REQUIRE_APPROVAL)
+            return HU_POLICY_REQUIRE_APPROVAL;
     }
     return base;
 }
 
-sc_tool_t *sc_agent_internal_find_tool(sc_agent_t *agent, const char *name, size_t name_len) {
+hu_tool_t *hu_agent_internal_find_tool(hu_agent_t *agent, const char *name, size_t name_len) {
     for (size_t i = 0; i < agent->tools_count; i++) {
         const char *n = agent->tools[i].vtable->name(agent->tools[i].ctx);
         if (n && name_len == strlen(n) && memcmp(n, name, name_len) == 0) {
@@ -777,20 +777,20 @@ sc_tool_t *sc_agent_internal_find_tool(sc_agent_t *agent, const char *name, size
     return NULL;
 }
 
-sc_error_t sc_agent_run_single(sc_agent_t *agent, const char *system_prompt,
+hu_error_t hu_agent_run_single(hu_agent_t *agent, const char *system_prompt,
                                size_t system_prompt_len, const char *user_message,
                                size_t user_message_len, char **response_out,
                                size_t *response_len_out) {
     if (!agent || !response_out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *response_out = NULL;
     if (response_len_out)
         *response_len_out = 0;
 
-    sc_chat_request_t req;
+    hu_chat_request_t req;
     memset(&req, 0, sizeof(req));
-    sc_chat_message_t msgs[2];
-    msgs[0].role = SC_ROLE_SYSTEM;
+    hu_chat_message_t msgs[2];
+    msgs[0].role = HU_ROLE_SYSTEM;
     msgs[0].content = system_prompt ? system_prompt : "";
     msgs[0].content_len = system_prompt_len;
     msgs[0].name = NULL;
@@ -800,7 +800,7 @@ sc_error_t sc_agent_run_single(sc_agent_t *agent, const char *system_prompt,
     msgs[0].content_parts = NULL;
     msgs[0].content_parts_count = 0;
 
-    msgs[1].role = SC_ROLE_USER;
+    msgs[1].role = HU_ROLE_USER;
     msgs[1].content = user_message ? user_message : "";
     msgs[1].content_len = user_message_len;
     msgs[1].name = NULL;
@@ -822,39 +822,39 @@ sc_error_t sc_agent_run_single(sc_agent_t *agent, const char *system_prompt,
     req.reasoning_effort = NULL;
     req.reasoning_effort_len = 0;
 
-    sc_chat_response_t resp;
+    hu_chat_response_t resp;
     memset(&resp, 0, sizeof(resp));
-    sc_error_t err =
+    hu_error_t err =
         agent->provider.vtable->chat(agent->provider.ctx, agent->alloc, &req, agent->model_name,
                                      agent->model_name_len, agent->temperature, &resp);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
     if (resp.content && resp.content_len > 0) {
-        *response_out = sc_strndup(agent->alloc, resp.content, resp.content_len);
+        *response_out = hu_strndup(agent->alloc, resp.content, resp.content_len);
         if (!*response_out) {
-            sc_chat_response_free(agent->alloc, &resp);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_chat_response_free(agent->alloc, &resp);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         if (response_len_out)
             *response_len_out = resp.content_len;
     }
     agent->total_tokens += resp.usage.total_tokens;
-    sc_agent_internal_record_cost(agent, &resp.usage);
-    sc_chat_response_free(agent->alloc, &resp);
-    return SC_OK;
+    hu_agent_internal_record_cost(agent, &resp.usage);
+    hu_chat_response_free(agent->alloc, &resp);
+    return HU_OK;
 }
 
-void sc_agent_internal_maybe_tts(sc_agent_t *agent, const char *text, size_t text_len) {
+void hu_agent_internal_maybe_tts(hu_agent_t *agent, const char *text, size_t text_len) {
     if (!agent->tts_enabled || !agent->voice_config || !text || text_len == 0)
         return;
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
     void *audio = NULL;
     size_t audio_len = 0;
-    sc_error_t err =
-        sc_voice_tts(agent->alloc, agent->voice_config, text, text_len, &audio, &audio_len);
-    if (err == SC_OK && audio && audio_len > 0) {
-        sc_voice_play(agent->alloc, audio, audio_len);
+    hu_error_t err =
+        hu_voice_tts(agent->alloc, agent->voice_config, text, text_len, &audio, &audio_len);
+    if (err == HU_OK && audio && audio_len > 0) {
+        hu_voice_play(agent->alloc, audio, audio_len);
         agent->alloc->free(agent->alloc->ctx, audio, audio_len);
     }
 #else
@@ -864,20 +864,20 @@ void sc_agent_internal_maybe_tts(sc_agent_t *agent, const char *text, size_t tex
 #endif
 }
 
-void sc_agent_internal_process_mailbox_messages(sc_agent_t *agent) {
+void hu_agent_internal_process_mailbox_messages(hu_agent_t *agent) {
     if (!agent->mailbox)
         return;
     uint64_t id = agent->agent_id ? agent->agent_id : (uint64_t)(uintptr_t)agent;
-    sc_message_t msg;
-    while (sc_mailbox_recv(agent->mailbox, id, &msg) == SC_OK) {
+    hu_message_t msg;
+    while (hu_mailbox_recv(agent->mailbox, id, &msg) == HU_OK) {
         char buf[512];
         size_t payload_len = msg.payload_len < 400 ? msg.payload_len : 400;
         int n = snprintf(buf, sizeof(buf), "[Message from agent %llu]: %.*s",
                          (unsigned long long)msg.from_agent, (int)payload_len,
                          msg.payload ? msg.payload : "");
         if (n > 0)
-            (void)sc_agent_internal_append_history(agent, SC_ROLE_USER, buf, (size_t)n, NULL, 0,
+            (void)hu_agent_internal_append_history(agent, HU_ROLE_USER, buf, (size_t)n, NULL, 0,
                                                    NULL, 0);
-        sc_message_free(agent->alloc, &msg);
+        hu_message_free(agent->alloc, &msg);
     }
 }

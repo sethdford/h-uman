@@ -2,21 +2,21 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import { ScToast } from "../components/sc-toast.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-card.js";
-import "../components/sc-badge.js";
-import "../components/sc-button.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-search.js";
-import "../components/sc-chart.js";
-import "../components/sc-combobox.js";
-import "../components/sc-button.js";
-import type { ChartData } from "../components/sc-chart.js";
+import { ScToast } from "../components/hu-toast.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-card.js";
+import "../components/hu-badge.js";
+import "../components/hu-button.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-search.js";
+import "../components/hu-chart.js";
+import "../components/hu-combobox.js";
+import "../components/hu-button.js";
+import type { ChartData } from "../components/hu-chart.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -58,7 +58,7 @@ interface UsageSummary {
   by_provider?: ProviderUsage[];
 }
 
-@customElement("sc-models-view")
+@customElement("hu-models-view")
 export class ScModelsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
   static override styles = css`
@@ -70,70 +70,70 @@ export class ScModelsView extends GatewayAwareLitElement {
     .info-section {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: var(--sc-space-xl);
-      margin-bottom: var(--sc-space-2xl);
+      gap: var(--hu-space-xl);
+      margin-bottom: var(--hu-space-2xl);
     }
     .info-item {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
     }
     .chart-section {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
     .chart-header {
-      font-size: var(--sc-text-sm);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
-      margin-bottom: var(--sc-space-md);
+      font-size: var(--hu-text-sm);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
+      margin-bottom: var(--hu-space-md);
     }
     .section-label {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
-      gap: var(--sc-space-xl);
+      gap: var(--hu-space-xl);
     }
     .card-header {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
-      margin-bottom: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
+      margin-bottom: var(--hu-space-sm);
       flex-wrap: wrap;
     }
     .card-name {
-      font-weight: var(--sc-weight-semibold);
-      font-size: var(--sc-text-lg);
-      color: var(--sc-text);
+      font-weight: var(--hu-weight-semibold);
+      font-size: var(--hu-text-lg);
+      color: var(--hu-text);
     }
     .card-name.default {
-      color: var(--sc-accent-text, var(--sc-accent));
+      color: var(--hu-accent-text, var(--hu-accent));
     }
     .card-url {
-      font-size: var(--sc-text-xs);
-      font-family: var(--sc-font-mono);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      font-family: var(--hu-font-mono);
+      color: var(--hu-text-muted);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      margin-top: var(--sc-space-xs);
+      margin-top: var(--hu-space-xs);
     }
     .key-status {
-      font-size: var(--sc-text-sm);
-      margin-top: var(--sc-space-sm);
+      font-size: var(--hu-text-sm);
+      margin-top: var(--hu-space-sm);
       display: flex;
       align-items: center;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
     }
     .key-status.has {
-      color: var(--sc-success);
+      color: var(--hu-success);
     }
     .key-status.missing {
-      color: var(--sc-error);
+      color: var(--hu-error);
     }
     .key-icon {
       width: 0.875rem;
@@ -142,11 +142,11 @@ export class ScModelsView extends GatewayAwareLitElement {
       vertical-align: middle;
     }
     .card-actions {
-      margin-top: var(--sc-space-md);
+      margin-top: var(--hu-space-md);
       display: flex;
       justify-content: flex-end;
     }
-    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-lg */ {
       .info-section {
         grid-template-columns: 1fr;
       }
@@ -154,15 +154,15 @@ export class ScModelsView extends GatewayAwareLitElement {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 40rem) /* --sc-breakpoint-md */ {
+    @media (max-width: 40rem) /* --hu-breakpoint-md */ {
       .grid {
         grid-template-columns: 1fr;
       }
     }
     .search-wrap {
-      margin-bottom: var(--sc-space-xl);
+      margin-bottom: var(--hu-space-xl);
     }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       .grid {
         grid-template-columns: 1fr;
       }
@@ -299,19 +299,19 @@ export class ScModelsView extends GatewayAwareLitElement {
   override render() {
     if (this.loading) return this._renderSkeleton();
     return html`
-      <sc-page-hero role="region" aria-label="Models and providers">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Models and providers">
+        <hu-section-header
           heading="Models & Providers"
           description="AI model providers and their configurations"
         >
           <div class="search-wrap" role="group" aria-label="Search providers">
-            <sc-search
+            <hu-search
               placeholder="Search providers..."
-              @sc-search=${(e: CustomEvent<{ value: string }>) => (this.filter = e.detail.value)}
-              @sc-clear=${() => (this.filter = "")}
-            ></sc-search>
+              @hu-search=${(e: CustomEvent<{ value: string }>) => (this.filter = e.detail.value)}
+              @hu-clear=${() => (this.filter = "")}
+            ></hu-search>
           </div>
-          <sc-button
+          <hu-button
             variant="ghost"
             size="sm"
             ?disabled=${this._refreshing}
@@ -319,37 +319,37 @@ export class ScModelsView extends GatewayAwareLitElement {
             aria-label="Refresh models"
           >
             ${icons.refresh} ${this._refreshing ? "Refreshing..." : "Refresh"}
-          </sc-button>
-        </sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-stat-card
+          </hu-button>
+        </hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-stat-card
           .value=${this.providers.length}
           label="Providers"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.providers.filter((p) => p.has_key).length}
           label="Configured"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.providers.filter((p) => p.native_tools).length}
           label="Native Tools"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.usageByProvider.length}
           label="Usage Providers"
-          style="--sc-stagger-delay: 150ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 150ms"
+        ></hu-stat-card>
+      </hu-stats-row>
       ${this.error
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.warning}
             heading="Error"
             description=${this.error}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : nothing}
       ${!this.error
         ? html`${this._renderInfoSection()}${this._renderChart()}${this._renderGrid()}`
@@ -359,59 +359,59 @@ export class ScModelsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-page-hero role="region" aria-label="Models and providers">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Models and providers">
+        <hu-section-header
           heading="Models"
           description="AI model providers and their configurations"
-        ></sc-section-header>
-      </sc-page-hero>
+        ></hu-section-header>
+      </hu-page-hero>
       <div class="stats-row">
-        <sc-skeleton variant="card" height="90px" style="--sc-stagger-delay: 0ms"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px" style="--sc-stagger-delay: 50ms"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px" style="--sc-stagger-delay: 100ms"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px" style="--sc-stagger-delay: 150ms"></sc-skeleton>
-      </sc-stats-row>
-      <div class="info-section sc-stagger">
-        <sc-skeleton variant="card" height="80px"></sc-skeleton>
-        <sc-skeleton variant="card" height="80px"></sc-skeleton>
+        <hu-skeleton variant="card" height="90px" style="--hu-stagger-delay: 0ms"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px" style="--hu-stagger-delay: 50ms"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px" style="--hu-stagger-delay: 100ms"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px" style="--hu-stagger-delay: 150ms"></hu-skeleton>
+      </hu-stats-row>
+      <div class="info-section hu-stagger">
+        <hu-skeleton variant="card" height="80px"></hu-skeleton>
+        <hu-skeleton variant="card" height="80px"></hu-skeleton>
       </div>
-      <div class="grid sc-stagger">
-        <sc-skeleton variant="card" height="120px"></sc-skeleton>
-        <sc-skeleton variant="card" height="120px"></sc-skeleton>
-        <sc-skeleton variant="card" height="120px"></sc-skeleton>
+      <div class="grid hu-stagger">
+        <hu-skeleton variant="card" height="120px"></hu-skeleton>
+        <hu-skeleton variant="card" height="120px"></hu-skeleton>
+        <hu-skeleton variant="card" height="120px"></hu-skeleton>
       </div>
     `;
   }
 
   private _renderInfoSection() {
     return html`
-      <sc-card>
-        <div class="info-section sc-stagger">
+      <hu-card>
+        <div class="info-section hu-stagger">
           <div class="info-item">
             <span class="section-label">Default provider</span>
-            <sc-combobox
+            <hu-combobox
               .options=${this.providerOptions}
               .value=${this.defaultProvider}
               label=""
               placeholder="Select provider"
               ?disabled=${this.settingDefault || this.providerOptions.length === 0}
-              @sc-combobox-change=${this._onProviderChange}
-            ></sc-combobox>
+              @hu-combobox-change=${this._onProviderChange}
+            ></hu-combobox>
           </div>
           <div class="info-item">
             <span class="section-label">Default model</span>
-            <sc-combobox
+            <hu-combobox
               .options=${[]}
               .value=${this.defaultModel}
               freeText
               label=""
               placeholder="Model name"
               ?disabled=${this.settingDefault}
-              @sc-combobox-change=${this._onModelChange}
-            ></sc-combobox>
+              @hu-combobox-change=${this._onModelChange}
+            ></hu-combobox>
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
@@ -419,9 +419,9 @@ export class ScModelsView extends GatewayAwareLitElement {
     const data = this.requestDistributionChartData;
     if (!data) return nothing;
     return html`
-      <div class="chart-section sc-stagger">
+      <div class="chart-section hu-stagger">
         <div class="chart-header">Request distribution by provider</div>
-        <sc-chart type="doughnut" .data=${data} height="200"></sc-chart>
+        <hu-chart type="doughnut" .data=${data} height="200"></hu-chart>
       </div>
     `;
   }
@@ -429,16 +429,16 @@ export class ScModelsView extends GatewayAwareLitElement {
   private _renderGrid() {
     const filtered = this.filteredProviders;
     return html`
-      <div class="grid sc-stagger">
+      <div class="grid hu-stagger">
         ${filtered.length === 0
           ? html`
-              <sc-empty-state
+              <hu-empty-state
                 .icon=${icons.cpu}
                 heading=${this.filter ? "No matching providers" : "No providers configured"}
                 description=${this.filter
                   ? "Try a different search term."
                   : "Configure an AI provider in your config to get started."}
-              ></sc-empty-state>
+              ></hu-empty-state>
             `
           : filtered.map((p) => this._renderProviderCard(p))}
       </div>
@@ -448,11 +448,11 @@ export class ScModelsView extends GatewayAwareLitElement {
   private _renderProviderCard(p: ProviderItem) {
     const isDefault = p.is_default ?? (p.name ?? "") === this.defaultProvider;
     return html`
-      <sc-card aria-label=${`Provider: ${p.name ?? "unnamed"}`}>
+      <hu-card aria-label=${`Provider: ${p.name ?? "unnamed"}`}>
         <div class="card-header">
           <span class="card-name ${isDefault ? "default" : ""}">${p.name ?? "unnamed"}</span>
-          ${isDefault ? html`<sc-badge variant="info">default</sc-badge>` : nothing}
-          ${p.native_tools ? html`<sc-badge variant="neutral">native tools</sc-badge>` : nothing}
+          ${isDefault ? html`<hu-badge variant="info">default</hu-badge>` : nothing}
+          ${p.native_tools ? html`<hu-badge variant="neutral">native tools</hu-badge>` : nothing}
         </div>
         <div class="key-status ${p.has_key ? "has" : "missing"}">
           <span class="key-icon">${p.has_key ? icons.check : icons["x-circle"]}</span>
@@ -462,7 +462,7 @@ export class ScModelsView extends GatewayAwareLitElement {
         ${!isDefault
           ? html`
               <div class="card-actions">
-                <sc-button
+                <hu-button
                   variant="ghost"
                   size="sm"
                   ?disabled=${this.settingDefault}
@@ -470,11 +470,11 @@ export class ScModelsView extends GatewayAwareLitElement {
                   aria-label=${`Set ${p.name ?? "unnamed"} as default`}
                 >
                   Set as default
-                </sc-button>
+                </hu-button>
               </div>
             `
           : nothing}
-      </sc-card>
+      </hu-card>
     `;
   }
 }

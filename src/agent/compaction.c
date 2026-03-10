@@ -1,34 +1,34 @@
-#include "seaclaw/agent/compaction.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/provider.h"
+#include "human/agent/compaction.h"
+#include "human/core/string.h"
+#include "human/provider.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static const char *role_str(sc_role_t role) {
+static const char *role_str(hu_role_t role) {
     switch (role) {
-    case SC_ROLE_SYSTEM:
+    case HU_ROLE_SYSTEM:
         return "SYSTEM";
-    case SC_ROLE_USER:
+    case HU_ROLE_USER:
         return "USER";
-    case SC_ROLE_ASSISTANT:
+    case HU_ROLE_ASSISTANT:
         return "ASSISTANT";
-    case SC_ROLE_TOOL:
+    case HU_ROLE_TOOL:
         return "TOOL";
     default:
         return "UNKNOWN";
     }
 }
 
-void sc_compaction_config_default(sc_compaction_config_t *cfg) {
+void hu_compaction_config_default(hu_compaction_config_t *cfg) {
     if (!cfg)
         return;
-    cfg->keep_recent = SC_COMPACTION_DEFAULT_KEEP_RECENT;
-    cfg->max_summary_chars = SC_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
-    cfg->max_source_chars = SC_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
-    cfg->token_limit = SC_COMPACTION_DEFAULT_TOKEN_LIMIT;
-    cfg->max_history_messages = SC_COMPACTION_DEFAULT_MAX_HISTORY;
+    cfg->keep_recent = HU_COMPACTION_DEFAULT_KEEP_RECENT;
+    cfg->max_summary_chars = HU_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
+    cfg->max_source_chars = HU_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
+    cfg->token_limit = HU_COMPACTION_DEFAULT_TOKEN_LIMIT;
+    cfg->max_history_messages = HU_COMPACTION_DEFAULT_MAX_HISTORY;
 }
 
 /*
@@ -37,27 +37,27 @@ void sc_compaction_config_default(sc_compaction_config_t *cfg) {
  * Audio/video: ~25 tokens per second (~1500 bytes of base64 per second).
  * We use conservative middle-ground estimates.
  */
-#define SC_IMAGE_TOKEN_ESTIMATE 170
-#define SC_AUDIO_TOKENS_PER_KB  17
-#define SC_VIDEO_TOKEN_ESTIMATE 256
+#define HU_IMAGE_TOKEN_ESTIMATE 170
+#define HU_AUDIO_TOKENS_PER_KB  17
+#define HU_VIDEO_TOKEN_ESTIMATE 256
 
-static uint64_t estimate_content_parts_tokens(const sc_content_part_t *parts, size_t count) {
+static uint64_t estimate_content_parts_tokens(const hu_content_part_t *parts, size_t count) {
     uint64_t tokens = 0;
     for (size_t p = 0; p < count; p++) {
         switch (parts[p].tag) {
-        case SC_CONTENT_PART_TEXT:
+        case HU_CONTENT_PART_TEXT:
             tokens += (uint64_t)parts[p].data.text.len / 4;
             break;
-        case SC_CONTENT_PART_IMAGE_URL:
-        case SC_CONTENT_PART_IMAGE_BASE64:
-            tokens += SC_IMAGE_TOKEN_ESTIMATE;
+        case HU_CONTENT_PART_IMAGE_URL:
+        case HU_CONTENT_PART_IMAGE_BASE64:
+            tokens += HU_IMAGE_TOKEN_ESTIMATE;
             break;
-        case SC_CONTENT_PART_AUDIO_BASE64:
+        case HU_CONTENT_PART_AUDIO_BASE64:
             tokens +=
-                ((uint64_t)parts[p].data.audio_base64.data_len / 1024) * SC_AUDIO_TOKENS_PER_KB;
+                ((uint64_t)parts[p].data.audio_base64.data_len / 1024) * HU_AUDIO_TOKENS_PER_KB;
             break;
-        case SC_CONTENT_PART_VIDEO_URL:
-            tokens += SC_VIDEO_TOKEN_ESTIMATE;
+        case HU_CONTENT_PART_VIDEO_URL:
+            tokens += HU_VIDEO_TOKEN_ESTIMATE;
             break;
         default:
             break;
@@ -66,11 +66,11 @@ static uint64_t estimate_content_parts_tokens(const sc_content_part_t *parts, si
     return tokens;
 }
 
-uint64_t sc_estimate_tokens(const sc_owned_message_t *history, size_t history_count) {
+uint64_t hu_estimate_tokens(const hu_owned_message_t *history, size_t history_count) {
     uint64_t total_chars = 0;
     uint64_t multimodal_tokens = 0;
     for (size_t i = 0; i < history_count; i++) {
-        const sc_owned_message_t *m = &history[i];
+        const hu_owned_message_t *m = &history[i];
         if (m->content_parts_count > 0 && m->content_parts) {
             multimodal_tokens +=
                 estimate_content_parts_tokens(m->content_parts, m->content_parts_count);
@@ -81,12 +81,12 @@ uint64_t sc_estimate_tokens(const sc_owned_message_t *history, size_t history_co
     return (total_chars + 3 * (uint64_t)history_count) / 4 + multimodal_tokens;
 }
 
-bool sc_should_compact(const sc_owned_message_t *history, size_t history_count,
-                       const sc_compaction_config_t *config) {
+bool hu_should_compact(const hu_owned_message_t *history, size_t history_count,
+                       const hu_compaction_config_t *config) {
     if (!history || !config)
         return false;
 
-    bool has_system = history_count > 0 && history[0].role == SC_ROLE_SYSTEM;
+    bool has_system = history_count > 0 && history[0].role == HU_ROLE_SYSTEM;
     size_t start = has_system ? 1 : 0;
     size_t non_system_count = history_count - start;
 
@@ -99,7 +99,7 @@ bool sc_should_compact(const sc_owned_message_t *history, size_t history_count,
 
     /* Token trigger: 75% of limit */
     if (config->token_limit > 0) {
-        uint64_t tokens = sc_estimate_tokens(history, history_count);
+        uint64_t tokens = hu_estimate_tokens(history, history_count);
         uint64_t threshold = (config->token_limit * 3) / 4;
         if (tokens > threshold)
             return true;
@@ -110,7 +110,7 @@ bool sc_should_compact(const sc_owned_message_t *history, size_t history_count,
 
 /* Build summary from messages [start, end) as concatenation of "ROLE: content\n".
  * Truncates each message to 500 chars and total to max_source_chars. */
-static char *build_summary(sc_allocator_t *alloc, const sc_owned_message_t *history, size_t start,
+static char *build_summary(hu_allocator_t *alloc, const hu_owned_message_t *history, size_t start,
                            size_t end, uint32_t max_source_chars, size_t *alloc_size_out) {
     size_t total = 0;
     for (size_t i = start; i < end && total < max_source_chars; i++) {
@@ -158,7 +158,7 @@ static char *build_summary(sc_allocator_t *alloc, const sc_owned_message_t *hist
     return buf;
 }
 
-static void free_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs, size_t count) {
+static void free_tool_calls(hu_allocator_t *alloc, hu_tool_call_t *tcs, size_t count) {
     if (!alloc || !tcs || count == 0)
         return;
     for (size_t i = 0; i < count; i++) {
@@ -169,11 +169,11 @@ static void free_tool_calls(sc_allocator_t *alloc, sc_tool_call_t *tcs, size_t c
         if (tcs[i].arguments && tcs[i].arguments_len > 0)
             alloc->free(alloc->ctx, (void *)tcs[i].arguments, tcs[i].arguments_len + 1);
     }
-    alloc->free(alloc->ctx, tcs, count * sizeof(sc_tool_call_t));
+    alloc->free(alloc->ctx, tcs, count * sizeof(hu_tool_call_t));
 }
 
 /* Free messages in range [start, end) */
-static void free_messages(sc_allocator_t *alloc, sc_owned_message_t *history, size_t start,
+static void free_messages(hu_allocator_t *alloc, hu_owned_message_t *history, size_t start,
                           size_t end) {
     for (size_t i = start; i < end; i++) {
         if (history[i].content) {
@@ -195,27 +195,27 @@ static void free_messages(sc_allocator_t *alloc, sc_owned_message_t *history, si
         }
         if (history[i].content_parts) {
             for (size_t j = 0; j < history[i].content_parts_count; j++) {
-                sc_content_part_t *cp = &history[i].content_parts[j];
-                if (cp->tag == SC_CONTENT_PART_TEXT && cp->data.text.ptr) {
+                hu_content_part_t *cp = &history[i].content_parts[j];
+                if (cp->tag == HU_CONTENT_PART_TEXT && cp->data.text.ptr) {
                     alloc->free(alloc->ctx, (void *)cp->data.text.ptr, cp->data.text.len + 1);
-                } else if (cp->tag == SC_CONTENT_PART_IMAGE_URL && cp->data.image_url.url) {
+                } else if (cp->tag == HU_CONTENT_PART_IMAGE_URL && cp->data.image_url.url) {
                     alloc->free(alloc->ctx, (void *)cp->data.image_url.url,
                                 cp->data.image_url.url_len + 1);
-                } else if (cp->tag == SC_CONTENT_PART_IMAGE_BASE64) {
+                } else if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64) {
                     if (cp->data.image_base64.data)
                         alloc->free(alloc->ctx, (void *)cp->data.image_base64.data,
                                     cp->data.image_base64.data_len + 1);
                     if (cp->data.image_base64.media_type)
                         alloc->free(alloc->ctx, (void *)cp->data.image_base64.media_type,
                                     cp->data.image_base64.media_type_len + 1);
-                } else if (cp->tag == SC_CONTENT_PART_AUDIO_BASE64) {
+                } else if (cp->tag == HU_CONTENT_PART_AUDIO_BASE64) {
                     if (cp->data.audio_base64.data)
                         alloc->free(alloc->ctx, (void *)cp->data.audio_base64.data,
                                     cp->data.audio_base64.data_len + 1);
                     if (cp->data.audio_base64.media_type)
                         alloc->free(alloc->ctx, (void *)cp->data.audio_base64.media_type,
                                     cp->data.audio_base64.media_type_len + 1);
-                } else if (cp->tag == SC_CONTENT_PART_VIDEO_URL) {
+                } else if (cp->tag == HU_CONTENT_PART_VIDEO_URL) {
                     if (cp->data.video_url.url)
                         alloc->free(alloc->ctx, (void *)cp->data.video_url.url,
                                     cp->data.video_url.url_len + 1);
@@ -225,27 +225,27 @@ static void free_messages(sc_allocator_t *alloc, sc_owned_message_t *history, si
                 }
             }
             alloc->free(alloc->ctx, history[i].content_parts,
-                        history[i].content_parts_count * sizeof(sc_content_part_t));
+                        history[i].content_parts_count * sizeof(hu_content_part_t));
             history[i].content_parts = NULL;
             history[i].content_parts_count = 0;
         }
     }
 }
 
-sc_error_t sc_compact_history(sc_allocator_t *alloc, sc_owned_message_t *history,
+hu_error_t hu_compact_history(hu_allocator_t *alloc, hu_owned_message_t *history,
                               size_t *history_count, size_t *history_cap,
-                              const sc_compaction_config_t *config) {
+                              const hu_compaction_config_t *config) {
     if (!alloc || !history || !history_count || !history_cap || !config)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t count = *history_count;
 
     (void)history_cap;
     if (!history || count == 0)
-        return SC_OK;
-    if (!sc_should_compact(history, count, config))
-        return SC_OK;
+        return HU_OK;
+    if (!hu_should_compact(history, count, config))
+        return HU_OK;
 
-    bool has_system = history[0].role == SC_ROLE_SYSTEM;
+    bool has_system = history[0].role == HU_ROLE_SYSTEM;
     size_t start = has_system ? 1 : 0;
     size_t non_system = count - start;
 
@@ -255,25 +255,25 @@ sc_error_t sc_compact_history(sc_allocator_t *alloc, sc_owned_message_t *history
 
     size_t compact_count = non_system - keep;
     if (compact_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t compact_end = start + compact_count;
 
     /* Build summary from messages [start, compact_end) */
     uint32_t max_src = config->max_source_chars;
     if (max_src == 0)
-        max_src = SC_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
+        max_src = HU_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
 
     size_t summary_raw_alloc = 0;
     char *summary_raw =
         build_summary(alloc, history, start, compact_end, max_src, &summary_raw_alloc);
     if (!summary_raw)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     size_t sum_len = strlen(summary_raw);
     uint32_t max_sum = config->max_summary_chars;
     if (max_sum == 0)
-        max_sum = SC_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
+        max_sum = HU_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
     if (sum_len > max_sum) {
         summary_raw[max_sum] = '\0';
         sum_len = max_sum;
@@ -283,7 +283,7 @@ sc_error_t sc_compact_history(sc_allocator_t *alloc, sc_owned_message_t *history
     char *summary_content = (char *)alloc->alloc(alloc->ctx, prefix_len + sum_len + 1);
     if (!summary_content) {
         alloc->free(alloc->ctx, summary_raw, summary_raw_alloc);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(summary_content, "[Compaction summary]\n", prefix_len);
     memcpy(summary_content + prefix_len, summary_raw, sum_len + 1);
@@ -293,7 +293,7 @@ sc_error_t sc_compact_history(sc_allocator_t *alloc, sc_owned_message_t *history
     free_messages(alloc, history, start, compact_end);
 
     /* Replace first compacted slot with summary (assistant role for consistency) */
-    history[start].role = SC_ROLE_ASSISTANT;
+    history[start].role = HU_ROLE_ASSISTANT;
     history[start].content = summary_content;
     history[start].content_len = prefix_len + sum_len;
     history[start].name = NULL;
@@ -309,35 +309,35 @@ sc_error_t sc_compact_history(sc_allocator_t *alloc, sc_owned_message_t *history
         size_t remaining = count - compact_end;
         if (remaining > 0) {
             memmove(&history[start + 1], &history[compact_end],
-                    remaining * sizeof(sc_owned_message_t));
+                    remaining * sizeof(hu_owned_message_t));
         }
         count -= shift;
     }
 
     *history_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_context_compact_for_pressure(sc_allocator_t *alloc, sc_owned_message_t *history,
+hu_error_t hu_context_compact_for_pressure(hu_allocator_t *alloc, hu_owned_message_t *history,
                                            size_t *history_count, size_t *history_cap,
                                            size_t max_tokens, float target_pressure) {
     (void)history_cap;
     if (!alloc || !history || !history_count || max_tokens == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t count = *history_count;
     if (count == 0)
-        return SC_OK;
+        return HU_OK;
 
-    uint64_t current = sc_estimate_tokens(history, count);
+    uint64_t current = hu_estimate_tokens(history, count);
     float pressure = (float)((double)current / (double)max_tokens);
     if (pressure < target_pressure)
-        return SC_OK;
+        return HU_OK;
 
-    bool has_system = history[0].role == SC_ROLE_SYSTEM;
+    bool has_system = history[0].role == HU_ROLE_SYSTEM;
     size_t start = has_system ? 1 : 0;
     size_t non_system = count - start;
     if (non_system <= 1)
-        return SC_OK;
+        return HU_OK;
 
     uint64_t target_tokens = (uint64_t)((double)max_tokens * (double)target_pressure);
     size_t compact_count = 0;
@@ -356,25 +356,25 @@ sc_error_t sc_context_compact_for_pressure(sc_allocator_t *alloc, sc_owned_messa
         compact_count = k;
     }
     if (compact_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t compact_end = start + compact_count;
     char buf[96];
     int n = snprintf(buf, sizeof(buf), "[Previous context compacted: %zu messages summarized]",
                      compact_count);
     if (n < 0 || (size_t)n >= sizeof(buf))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t marker_len = (size_t)n;
 
     char *summary_content = (char *)alloc->alloc(alloc->ctx, marker_len + 1);
     if (!summary_content)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(summary_content, buf, marker_len + 1);
 
     /* Free compacted messages */
     free_messages(alloc, history, start, compact_end);
 
-    history[start].role = SC_ROLE_ASSISTANT;
+    history[start].role = HU_ROLE_ASSISTANT;
     history[start].content = summary_content;
     history[start].content_len = marker_len;
     history[start].name = NULL;
@@ -388,29 +388,29 @@ sc_error_t sc_context_compact_for_pressure(sc_allocator_t *alloc, sc_owned_messa
         size_t remaining = count - compact_end;
         if (remaining > 0) {
             memmove(&history[start + 1], &history[compact_end],
-                    remaining * sizeof(sc_owned_message_t));
+                    remaining * sizeof(hu_owned_message_t));
         }
         count -= (compact_end - start - 1);
     }
 
     *history_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *history,
+hu_error_t hu_compact_history_llm(hu_allocator_t *alloc, hu_owned_message_t *history,
                                   size_t *history_count, size_t *history_cap,
-                                  const sc_compaction_config_t *config, sc_provider_t *provider) {
+                                  const hu_compaction_config_t *config, hu_provider_t *provider) {
     if (!alloc || !history || !history_count || !history_cap || !config)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (!provider || !provider->vtable || !provider->vtable->chat_with_system)
-        return sc_compact_history(alloc, history, history_count, history_cap, config);
+        return hu_compact_history(alloc, history, history_count, history_cap, config);
 
     size_t count = *history_count;
-    if (!sc_should_compact(history, count, config))
-        return SC_OK;
+    if (!hu_should_compact(history, count, config))
+        return HU_OK;
 
-    bool has_system = history[0].role == SC_ROLE_SYSTEM;
+    bool has_system = history[0].role == HU_ROLE_SYSTEM;
     size_t start = has_system ? 1 : 0;
     size_t non_system = count - start;
 
@@ -420,18 +420,18 @@ sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *his
 
     size_t compact_count = non_system - keep;
     if (compact_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t compact_end = start + compact_count;
 
     uint32_t max_src = config->max_source_chars;
     if (max_src == 0)
-        max_src = SC_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
+        max_src = HU_COMPACTION_DEFAULT_MAX_SOURCE_CHARS;
 
     size_t raw_alloc = 0;
     char *raw = build_summary(alloc, history, start, compact_end, max_src, &raw_alloc);
     if (!raw)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     static const char sys_prompt[] =
         "Summarize the following conversation excerpt concisely, preserving key decisions, "
@@ -439,21 +439,21 @@ sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *his
 
     char *llm_summary = NULL;
     size_t llm_summary_len = 0;
-    sc_error_t err = provider->vtable->chat_with_system(
+    hu_error_t err = provider->vtable->chat_with_system(
         provider->ctx, alloc, sys_prompt, sizeof(sys_prompt) - 1, raw, strlen(raw), "gpt-4o-mini",
         11, 0.2, &llm_summary, &llm_summary_len);
 
     alloc->free(alloc->ctx, raw, raw_alloc);
 
-    if (err != SC_OK || !llm_summary || llm_summary_len == 0) {
+    if (err != HU_OK || !llm_summary || llm_summary_len == 0) {
         if (llm_summary)
             alloc->free(alloc->ctx, llm_summary, llm_summary_len + 1);
-        return sc_compact_history(alloc, history, history_count, history_cap, config);
+        return hu_compact_history(alloc, history, history_count, history_cap, config);
     }
 
     uint32_t max_sum = config->max_summary_chars;
     if (max_sum == 0)
-        max_sum = SC_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
+        max_sum = HU_COMPACTION_DEFAULT_MAX_SUMMARY_CHARS;
     if (llm_summary_len > max_sum) {
         llm_summary[max_sum] = '\0';
         llm_summary_len = max_sum;
@@ -464,7 +464,7 @@ sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *his
     char *summary_content = (char *)alloc->alloc(alloc->ctx, prefix_len + llm_summary_len + 1);
     if (!summary_content) {
         alloc->free(alloc->ctx, llm_summary, llm_summary_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(summary_content, llm_prefix, prefix_len);
     memcpy(summary_content + prefix_len, llm_summary, llm_summary_len + 1);
@@ -472,7 +472,7 @@ sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *his
 
     free_messages(alloc, history, start, compact_end);
 
-    history[start].role = SC_ROLE_ASSISTANT;
+    history[start].role = HU_ROLE_ASSISTANT;
     history[start].content = summary_content;
     history[start].content_len = prefix_len + llm_summary_len;
     history[start].name = NULL;
@@ -487,11 +487,11 @@ sc_error_t sc_compact_history_llm(sc_allocator_t *alloc, sc_owned_message_t *his
         size_t remaining = count - compact_end;
         if (remaining > 0) {
             memmove(&history[start + 1], &history[compact_end],
-                    remaining * sizeof(sc_owned_message_t));
+                    remaining * sizeof(hu_owned_message_t));
         }
         count -= shift;
     }
 
     *history_count = count;
-    return SC_OK;
+    return HU_OK;
 }

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "seaclaw"
+rootProject.name = "human"
 include(":app")

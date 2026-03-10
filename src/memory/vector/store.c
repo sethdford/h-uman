@@ -1,6 +1,6 @@
-#include "seaclaw/memory/vector/store.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory/vector_math.h"
+#include "human/memory/vector/store.h"
+#include "human/core/string.h"
+#include "human/memory/vector_math.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,15 +11,15 @@ typedef struct mem_vec_entry {
 } mem_vec_entry_t;
 
 typedef struct mem_vec_ctx {
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
     mem_vec_entry_t *entries;
     size_t count;
     size_t capacity;
 } mem_vec_ctx_t;
 
 static int score_cmp(const void *va, const void *vb) {
-    const sc_vector_search_result_t *a = (const sc_vector_search_result_t *)va;
-    const sc_vector_search_result_t *b = (const sc_vector_search_result_t *)vb;
+    const hu_vector_search_result_t *a = (const hu_vector_search_result_t *)va;
+    const hu_vector_search_result_t *b = (const hu_vector_search_result_t *)vb;
     if (a->score > b->score)
         return -1;
     if (a->score < b->score)
@@ -27,25 +27,25 @@ static int score_cmp(const void *va, const void *vb) {
     return 0;
 }
 
-static sc_error_t mem_vec_upsert(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len,
+static hu_error_t mem_vec_upsert(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len,
                                  const float *embedding, size_t dims, const char *metadata,
                                  size_t metadata_len) {
     (void)metadata;
     (void)metadata_len;
     mem_vec_ctx_t *m = (mem_vec_ctx_t *)ctx;
     if (!m || !alloc || !id || !embedding)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     for (size_t i = 0; i < m->count; i++) {
         if (strlen(m->entries[i].id) == id_len && memcmp(m->entries[i].id, id, id_len) == 0) {
             alloc->free(alloc->ctx, m->entries[i].embedding, m->entries[i].dims * sizeof(float));
-            m->entries[i].id = sc_strndup(alloc, id, id_len);
+            m->entries[i].id = hu_strndup(alloc, id, id_len);
             m->entries[i].embedding = (float *)alloc->alloc(alloc->ctx, dims * sizeof(float));
             if (!m->entries[i].embedding)
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             memcpy(m->entries[i].embedding, embedding, dims * sizeof(float));
             m->entries[i].dims = dims;
-            return SC_OK;
+            return HU_OK;
         }
     }
 
@@ -56,49 +56,49 @@ static sc_error_t mem_vec_upsert(void *ctx, sc_allocator_t *alloc, const char *i
         mem_vec_entry_t *tmp =
             (mem_vec_entry_t *)alloc->realloc(alloc->ctx, m->entries, old_sz, new_sz);
         if (!tmp)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         m->entries = tmp;
         m->capacity = new_cap;
     }
 
     mem_vec_entry_t *e = &m->entries[m->count];
-    e->id = sc_strndup(alloc, id, id_len);
+    e->id = hu_strndup(alloc, id, id_len);
     e->embedding = (float *)alloc->alloc(alloc->ctx, dims * sizeof(float));
     if (!e->id || !e->embedding)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(e->embedding, embedding, dims * sizeof(float));
     e->dims = dims;
     m->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t mem_vec_search(void *ctx, sc_allocator_t *alloc, const float *query_embedding,
-                                 size_t dims, size_t limit, sc_vector_search_result_t **results,
+static hu_error_t mem_vec_search(void *ctx, hu_allocator_t *alloc, const float *query_embedding,
+                                 size_t dims, size_t limit, hu_vector_search_result_t **results,
                                  size_t *result_count) {
     mem_vec_ctx_t *m = (mem_vec_ctx_t *)ctx;
     if (!m || !query_embedding || !results || !result_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_vector_search_result_t *arr = (sc_vector_search_result_t *)alloc->alloc(
-        alloc->ctx, m->count * sizeof(sc_vector_search_result_t));
+    hu_vector_search_result_t *arr = (hu_vector_search_result_t *)alloc->alloc(
+        alloc->ctx, m->count * sizeof(hu_vector_search_result_t));
     if (!arr) {
         *result_count = 0;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(arr, 0, m->count * sizeof(sc_vector_search_result_t));
+    memset(arr, 0, m->count * sizeof(hu_vector_search_result_t));
 
     size_t n = 0;
     for (size_t i = 0; i < m->count; i++) {
         if (m->entries[i].dims != dims)
             continue;
-        float sim = sc_vector_cosine_similarity(query_embedding, m->entries[i].embedding, dims);
-        arr[n].id = sc_strdup(alloc, m->entries[i].id);
+        float sim = hu_vector_cosine_similarity(query_embedding, m->entries[i].embedding, dims);
+        arr[n].id = hu_strdup(alloc, m->entries[i].id);
         arr[n].score = sim;
         n++;
     }
 
     if (n > 1)
-        qsort(arr, n, sizeof(sc_vector_search_result_t), score_cmp);
+        qsort(arr, n, sizeof(hu_vector_search_result_t), score_cmp);
     if (limit > 0 && n > limit) {
         for (size_t i = limit; i < n; i++) {
             if (arr[i].id)
@@ -108,13 +108,13 @@ static sc_error_t mem_vec_search(void *ctx, sc_allocator_t *alloc, const float *
     }
     *results = arr;
     *result_count = n;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t mem_vec_delete(void *ctx, sc_allocator_t *alloc, const char *id, size_t id_len) {
+static hu_error_t mem_vec_delete(void *ctx, hu_allocator_t *alloc, const char *id, size_t id_len) {
     mem_vec_ctx_t *m = (mem_vec_ctx_t *)ctx;
     if (!m || !alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < m->count; i++) {
         if (strlen(m->entries[i].id) == id_len && memcmp(m->entries[i].id, id, id_len) == 0) {
             alloc->free(alloc->ctx, m->entries[i].id, strlen(m->entries[i].id) + 1);
@@ -122,10 +122,10 @@ static sc_error_t mem_vec_delete(void *ctx, sc_allocator_t *alloc, const char *i
             memmove(&m->entries[i], &m->entries[i + 1],
                     (m->count - 1 - i) * sizeof(mem_vec_entry_t));
             m->count--;
-            return SC_OK;
+            return HU_OK;
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 static size_t mem_vec_count(void *ctx) {
@@ -133,7 +133,7 @@ static size_t mem_vec_count(void *ctx) {
     return m ? m->count : 0;
 }
 
-static void mem_vec_deinit(void *ctx, sc_allocator_t *alloc) {
+static void mem_vec_deinit(void *ctx, hu_allocator_t *alloc) {
     mem_vec_ctx_t *m = (mem_vec_ctx_t *)ctx;
     if (!m || !alloc)
         return;
@@ -148,7 +148,7 @@ static void mem_vec_deinit(void *ctx, sc_allocator_t *alloc) {
     alloc->free(alloc->ctx, m, sizeof(mem_vec_ctx_t));
 }
 
-static const sc_vector_store_vtable_t mem_vec_vtable = {
+static const hu_vector_store_vtable_t mem_vec_vtable = {
     .upsert = mem_vec_upsert,
     .search = mem_vec_search,
     .delete = mem_vec_delete,
@@ -156,8 +156,8 @@ static const sc_vector_store_vtable_t mem_vec_vtable = {
     .deinit = mem_vec_deinit,
 };
 
-sc_vector_store_t sc_vector_store_mem_vec_create(sc_allocator_t *alloc) {
-    sc_vector_store_t s = {.ctx = NULL, .vtable = &mem_vec_vtable};
+hu_vector_store_t hu_vector_store_mem_vec_create(hu_allocator_t *alloc) {
+    hu_vector_store_t s = {.ctx = NULL, .vtable = &mem_vec_vtable};
     if (!alloc)
         return s;
     mem_vec_ctx_t *m = (mem_vec_ctx_t *)alloc->alloc(alloc->ctx, sizeof(mem_vec_ctx_t));
@@ -169,7 +169,7 @@ sc_vector_store_t sc_vector_store_mem_vec_create(sc_allocator_t *alloc) {
     return s;
 }
 
-void sc_vector_search_results_free(sc_allocator_t *alloc, sc_vector_search_result_t *results,
+void hu_vector_search_results_free(hu_allocator_t *alloc, hu_vector_search_result_t *results,
                                    size_t count) {
     if (!alloc || !results)
         return;
@@ -179,5 +179,5 @@ void sc_vector_search_results_free(sc_allocator_t *alloc, sc_vector_search_resul
         if (results[i].metadata)
             alloc->free(alloc->ctx, results[i].metadata, strlen(results[i].metadata) + 1);
     }
-    alloc->free(alloc->ctx, results, count * sizeof(sc_vector_search_result_t));
+    alloc->free(alloc->ctx, results, count * sizeof(hu_vector_search_result_t));
 }

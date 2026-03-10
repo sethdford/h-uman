@@ -1,5 +1,5 @@
-#include "seaclaw/memory/stm.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/stm.h"
+#include "human/core/string.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,22 +9,22 @@ static const char *EMOTION_NAMES[] = {
     "surprise", "frustration", "excitement", "anxiety",
 };
 
-sc_error_t sc_stm_init(sc_stm_buffer_t *buf, sc_allocator_t alloc, const char *session_id,
+hu_error_t hu_stm_init(hu_stm_buffer_t *buf, hu_allocator_t alloc, const char *session_id,
                        size_t session_id_len) {
     if (!buf)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(buf, 0, sizeof(*buf));
     buf->alloc = alloc;
     if (session_id && session_id_len > 0) {
-        buf->session_id = sc_strndup(&buf->alloc, session_id, session_id_len);
+        buf->session_id = hu_strndup(&buf->alloc, session_id, session_id_len);
         if (!buf->session_id)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         buf->session_id_len = session_id_len;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-static void free_turn(sc_stm_turn_t *t, sc_allocator_t *alloc) {
+static void free_turn(hu_stm_turn_t *t, hu_allocator_t *alloc) {
     if (!t || !alloc)
         return;
     if (t->role) {
@@ -50,29 +50,29 @@ static void free_turn(sc_stm_turn_t *t, sc_allocator_t *alloc) {
     t->occupied = false;
 }
 
-sc_error_t sc_stm_record_turn(sc_stm_buffer_t *buf, const char *role, size_t role_len,
+hu_error_t hu_stm_record_turn(hu_stm_buffer_t *buf, const char *role, size_t role_len,
                               const char *content, size_t content_len, uint64_t timestamp_ms) {
     if (!buf || !role || !content)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t slot;
-    if (buf->turn_count >= SC_STM_MAX_TURNS) {
+    if (buf->turn_count >= HU_STM_MAX_TURNS) {
         slot = buf->head;
         free_turn(&buf->turns[slot], &buf->alloc);
-        buf->head = (buf->head + 1) % SC_STM_MAX_TURNS;
+        buf->head = (buf->head + 1) % HU_STM_MAX_TURNS;
     } else {
         slot = buf->turn_count;
     }
 
-    sc_stm_turn_t *t = &buf->turns[slot];
-    t->role = sc_strndup(&buf->alloc, role, role_len);
+    hu_stm_turn_t *t = &buf->turns[slot];
+    t->role = hu_strndup(&buf->alloc, role, role_len);
     if (!t->role)
-        return SC_ERR_OUT_OF_MEMORY;
-    t->content = sc_strndup(&buf->alloc, content, content_len);
+        return HU_ERR_OUT_OF_MEMORY;
+    t->content = hu_strndup(&buf->alloc, content, content_len);
     if (!t->content) {
         buf->alloc.free(buf->alloc.ctx, t->role, role_len + 1);
         t->role = NULL;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     t->content_len = content_len;
     t->timestamp_ms = timestamp_ms;
@@ -82,130 +82,130 @@ sc_error_t sc_stm_record_turn(sc_stm_buffer_t *buf, const char *role, size_t rol
     t->primary_topic = NULL;
 
     buf->turn_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_stm_turn_t *get_turn_mutable(sc_stm_buffer_t *buf, size_t idx) {
+static hu_stm_turn_t *get_turn_mutable(hu_stm_buffer_t *buf, size_t idx) {
     if (!buf)
         return NULL;
-    size_t n = sc_stm_count(buf);
+    size_t n = hu_stm_count(buf);
     if (idx >= n)
         return NULL;
     size_t physical;
-    if (buf->turn_count <= SC_STM_MAX_TURNS) {
+    if (buf->turn_count <= HU_STM_MAX_TURNS) {
         physical = idx;
     } else {
-        physical = (buf->head + idx) % SC_STM_MAX_TURNS;
+        physical = (buf->head + idx) % HU_STM_MAX_TURNS;
     }
-    sc_stm_turn_t *t = &buf->turns[physical];
+    hu_stm_turn_t *t = &buf->turns[physical];
     return t->occupied ? t : NULL;
 }
 
-sc_error_t sc_stm_turn_add_entity(sc_stm_buffer_t *buf, size_t turn_idx, const char *name,
+hu_error_t hu_stm_turn_add_entity(hu_stm_buffer_t *buf, size_t turn_idx, const char *name,
                                   size_t name_len, const char *type, size_t type_len,
                                   uint32_t mention_count) {
-    sc_stm_turn_t *t = get_turn_mutable(buf, turn_idx);
+    hu_stm_turn_t *t = get_turn_mutable(buf, turn_idx);
     if (!t || !name || name_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (t->entity_count >= SC_STM_MAX_ENTITIES)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_INVALID_ARGUMENT;
+    if (t->entity_count >= HU_STM_MAX_ENTITIES)
+        return HU_ERR_OUT_OF_MEMORY;
 
-    sc_stm_entity_t *e = &t->entities[t->entity_count];
-    e->name = sc_strndup(&buf->alloc, name, name_len);
+    hu_stm_entity_t *e = &t->entities[t->entity_count];
+    e->name = hu_strndup(&buf->alloc, name, name_len);
     if (!e->name)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     e->name_len = name_len;
-    e->type = (type && type_len > 0) ? sc_strndup(&buf->alloc, type, type_len)
-                                     : sc_strndup(&buf->alloc, "entity", 6);
+    e->type = (type && type_len > 0) ? hu_strndup(&buf->alloc, type, type_len)
+                                     : hu_strndup(&buf->alloc, "entity", 6);
     if (!e->type) {
         buf->alloc.free(buf->alloc.ctx, e->name, name_len + 1);
         e->name = NULL;
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     e->type_len = type && type_len > 0 ? type_len : 6;
     e->mention_count = mention_count;
     e->importance = 0.0;
     t->entity_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_stm_turn_add_emotion(sc_stm_buffer_t *buf, size_t turn_idx, sc_emotion_tag_t tag,
+hu_error_t hu_stm_turn_add_emotion(hu_stm_buffer_t *buf, size_t turn_idx, hu_emotion_tag_t tag,
                                    double intensity) {
-    sc_stm_turn_t *t = get_turn_mutable(buf, turn_idx);
+    hu_stm_turn_t *t = get_turn_mutable(buf, turn_idx);
     if (!t)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (t->emotion_count >= SC_STM_MAX_EMOTIONS)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_INVALID_ARGUMENT;
+    if (t->emotion_count >= HU_STM_MAX_EMOTIONS)
+        return HU_ERR_OUT_OF_MEMORY;
     for (size_t i = 0; i < t->emotion_count; i++) {
         if (t->emotions[i].tag == tag)
-            return SC_OK;
+            return HU_OK;
     }
     t->emotions[t->emotion_count].tag = tag;
     t->emotions[t->emotion_count].intensity = intensity;
     t->emotion_count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_stm_turn_set_primary_topic(sc_stm_buffer_t *buf, size_t turn_idx, const char *topic,
+hu_error_t hu_stm_turn_set_primary_topic(hu_stm_buffer_t *buf, size_t turn_idx, const char *topic,
                                          size_t topic_len) {
-    sc_stm_turn_t *t = get_turn_mutable(buf, turn_idx);
+    hu_stm_turn_t *t = get_turn_mutable(buf, turn_idx);
     if (!t)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (t->primary_topic) {
         buf->alloc.free(buf->alloc.ctx, t->primary_topic, strlen(t->primary_topic) + 1);
         t->primary_topic = NULL;
     }
     if (!topic || topic_len == 0)
-        return SC_OK;
-    t->primary_topic = sc_strndup(&buf->alloc, topic, topic_len);
+        return HU_OK;
+    t->primary_topic = hu_strndup(&buf->alloc, topic, topic_len);
     if (!t->primary_topic)
-        return SC_ERR_OUT_OF_MEMORY;
-    return SC_OK;
+        return HU_ERR_OUT_OF_MEMORY;
+    return HU_OK;
 }
 
-size_t sc_stm_count(const sc_stm_buffer_t *buf) {
+size_t hu_stm_count(const hu_stm_buffer_t *buf) {
     if (!buf)
         return 0;
-    return buf->turn_count > SC_STM_MAX_TURNS ? SC_STM_MAX_TURNS : buf->turn_count;
+    return buf->turn_count > HU_STM_MAX_TURNS ? HU_STM_MAX_TURNS : buf->turn_count;
 }
 
-const sc_stm_turn_t *sc_stm_get(const sc_stm_buffer_t *buf, size_t idx) {
+const hu_stm_turn_t *hu_stm_get(const hu_stm_buffer_t *buf, size_t idx) {
     if (!buf)
         return NULL;
-    size_t n = sc_stm_count(buf);
+    size_t n = hu_stm_count(buf);
     if (idx >= n)
         return NULL;
     size_t physical;
-    if (buf->turn_count <= SC_STM_MAX_TURNS) {
+    if (buf->turn_count <= HU_STM_MAX_TURNS) {
         physical = idx;
     } else {
-        physical = (buf->head + idx) % SC_STM_MAX_TURNS;
+        physical = (buf->head + idx) % HU_STM_MAX_TURNS;
     }
-    const sc_stm_turn_t *t = &buf->turns[physical];
+    const hu_stm_turn_t *t = &buf->turns[physical];
     return t->occupied ? t : NULL;
 }
 
-sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *alloc, char **out,
+hu_error_t hu_stm_build_context(const hu_stm_buffer_t *buf, hu_allocator_t *alloc, char **out,
                                 size_t *out_len) {
     if (!buf || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t cap = 4096;
     char *result = (char *)alloc->alloc(alloc->ctx, cap);
     if (!result)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     static const char header[] = "## Session Context\n\n";
     size_t len = sizeof(header) - 1;
     if (len >= cap) {
         alloc->free(alloc->ctx, result, cap);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(result, header, len);
 
-    size_t n = sc_stm_count(buf);
+    size_t n = hu_stm_count(buf);
     for (size_t i = 0; i < n; i++) {
-        const sc_stm_turn_t *t = sc_stm_get(buf, i);
+        const hu_stm_turn_t *t = hu_stm_get(buf, i);
         if (!t || !t->role || !t->content)
             continue;
 
@@ -220,7 +220,7 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
             char *nb = (char *)alloc->realloc(alloc->ctx, result, cap, new_cap);
             if (!nb) {
                 alloc->free(alloc->ctx, result, cap);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             result = nb;
             cap = new_cap;
@@ -243,7 +243,7 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
     size_t user_start = 0;
     size_t user_count = 0;
     for (size_t i = n; i > 0; i--) {
-        const sc_stm_turn_t *t = sc_stm_get(buf, i - 1);
+        const hu_stm_turn_t *t = hu_stm_get(buf, i - 1);
         if (t && t->role && strcmp(t->role, "user") == 0) {
             user_start = i - 1;
             user_count++;
@@ -258,22 +258,22 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
     double pos_sum = 0.0, neg_sum = 0.0;
 
     for (size_t i = user_start; i < n; i++) {
-        const sc_stm_turn_t *t = sc_stm_get(buf, i);
+        const hu_stm_turn_t *t = hu_stm_get(buf, i);
         if (!t || !t->role || strcmp(t->role, "user") != 0)
             continue;
         for (size_t j = 0; j < t->emotion_count; j++) {
             double intensity = t->emotions[j].intensity;
             if (intensity < 0.3)
                 continue;
-            sc_emotion_tag_t tag = t->emotions[j].tag;
+            hu_emotion_tag_t tag = t->emotions[j].tag;
             size_t tag_idx = (size_t)tag;
             if (tag_idx >= sizeof(EMOTION_NAMES) / sizeof(EMOTION_NAMES[0]))
                 continue;
             if (intensity > max_intensity[tag_idx])
                 max_intensity[tag_idx] = intensity;
-            if (tag == SC_EMOTION_JOY || tag == SC_EMOTION_EXCITEMENT || tag == SC_EMOTION_SURPRISE)
+            if (tag == HU_EMOTION_JOY || tag == HU_EMOTION_EXCITEMENT || tag == HU_EMOTION_SURPRISE)
                 pos_sum += intensity;
-            else if (tag != SC_EMOTION_NEUTRAL)
+            else if (tag != HU_EMOTION_NEUTRAL)
                 neg_sum += intensity;
         }
     }
@@ -311,7 +311,7 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
                 char *nb = (char *)alloc->realloc(alloc->ctx, result, cap, new_cap);
                 if (!nb) {
                     alloc->free(alloc->ctx, result, cap);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 result = nb;
                 cap = new_cap;
@@ -324,13 +324,13 @@ sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *allo
     result[len] = '\0';
     *out = result;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_stm_clear(sc_stm_buffer_t *buf) {
+void hu_stm_clear(hu_stm_buffer_t *buf) {
     if (!buf)
         return;
-    for (size_t i = 0; i < SC_STM_MAX_TURNS; i++) {
+    for (size_t i = 0; i < HU_STM_MAX_TURNS; i++) {
         if (buf->turns[i].occupied)
             free_turn(&buf->turns[i], &buf->alloc);
     }
@@ -345,10 +345,10 @@ void sc_stm_clear(sc_stm_buffer_t *buf) {
     buf->topic_count = 0;
 }
 
-void sc_stm_deinit(sc_stm_buffer_t *buf) {
+void hu_stm_deinit(hu_stm_buffer_t *buf) {
     if (!buf)
         return;
-    sc_stm_clear(buf);
+    hu_stm_clear(buf);
     if (buf->session_id) {
         buf->alloc.free(buf->alloc.ctx, buf->session_id, buf->session_id_len + 1);
         buf->session_id = NULL;

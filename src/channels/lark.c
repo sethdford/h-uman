@@ -1,9 +1,9 @@
-#include "seaclaw/channel.h"
-#include "seaclaw/channel_loop.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
+#include "human/channel.h"
+#include "human/channel_loop.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,13 +12,13 @@
 #define LARK_SESSION_KEY_MAX 127
 #define LARK_CONTENT_MAX     4095
 
-typedef struct sc_lark_queued_msg {
+typedef struct hu_lark_queued_msg {
     char session_key[128];
     char content[4096];
-} sc_lark_queued_msg_t;
+} hu_lark_queued_msg_t;
 
-typedef struct sc_lark_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_lark_ctx {
+    hu_allocator_t *alloc;
     char *webhook_url;
     size_t webhook_url_len;
     char *app_id;
@@ -26,11 +26,11 @@ typedef struct sc_lark_ctx {
     char *app_secret;
     size_t app_secret_len;
     bool running;
-    sc_lark_queued_msg_t queue[LARK_QUEUE_MAX];
+    hu_lark_queued_msg_t queue[LARK_QUEUE_MAX];
     size_t queue_head;
     size_t queue_tail;
     size_t queue_count;
-#if SC_IS_TEST
+#if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
     struct {
@@ -39,27 +39,27 @@ typedef struct sc_lark_ctx {
     } mock_msgs[8];
     size_t mock_count;
 #endif
-} sc_lark_ctx_t;
+} hu_lark_ctx_t;
 
-static sc_error_t lark_start(void *ctx) {
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)ctx;
+static hu_error_t lark_start(void *ctx) {
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void lark_stop(void *ctx) {
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)ctx;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)ctx;
     if (c)
         c->running = false;
 }
 
-static void lark_queue_push(sc_lark_ctx_t *c, const char *from, size_t from_len, const char *body,
+static void lark_queue_push(hu_lark_ctx_t *c, const char *from, size_t from_len, const char *body,
                             size_t body_len) {
     if (c->queue_count >= LARK_QUEUE_MAX)
         return;
-    sc_lark_queued_msg_t *slot = &c->queue[c->queue_tail];
+    hu_lark_queued_msg_t *slot = &c->queue[c->queue_tail];
     size_t sk = from_len < LARK_SESSION_KEY_MAX ? from_len : LARK_SESSION_KEY_MAX;
     memcpy(slot->session_key, from, sk);
     slot->session_key[sk] = '\0';
@@ -70,79 +70,79 @@ static void lark_queue_push(sc_lark_ctx_t *c, const char *from, size_t from_len,
     c->queue_count++;
 }
 
-static sc_error_t lark_send(void *ctx, const char *target, size_t target_len, const char *message,
+static hu_error_t lark_send(void *ctx, const char *target, size_t target_len, const char *message,
                             size_t message_len, const char *const *media, size_t media_count) {
     (void)target;
     (void)target_len;
     (void)media;
     (void)media_count;
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)ctx;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)ctx;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        return SC_OK;
+        return HU_OK;
     }
 #else
     if (!c || !c->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!c->webhook_url || c->webhook_url_len == 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
+        return HU_ERR_CHANNEL_NOT_CONFIGURED;
     if (!message)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (c->webhook_url_len < 9 || strncmp(c->webhook_url, "https://", 8) != 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
+        return HU_ERR_CHANNEL_NOT_CONFIGURED;
 
-    sc_json_buf_t inner;
-    sc_error_t err = sc_json_buf_init(&inner, c->alloc);
+    hu_json_buf_t inner;
+    hu_error_t err = hu_json_buf_init(&inner, c->alloc);
     if (err)
         return err;
-    err = sc_json_buf_append_raw(&inner, "{\"text\":", 8);
+    err = hu_json_buf_append_raw(&inner, "{\"text\":", 8);
     if (err)
         goto inner_fail;
-    err = sc_json_append_string(&inner, message, message_len);
+    err = hu_json_append_string(&inner, message, message_len);
     if (err)
         goto inner_fail;
-    err = sc_json_buf_append_raw(&inner, "}", 1);
+    err = hu_json_buf_append_raw(&inner, "}", 1);
     if (err)
         goto inner_fail;
 
-    sc_json_buf_t jbuf;
-    err = sc_json_buf_init(&jbuf, c->alloc);
+    hu_json_buf_t jbuf;
+    err = hu_json_buf_init(&jbuf, c->alloc);
     if (err)
         goto inner_fail;
-    err = sc_json_buf_append_raw(&jbuf, "{\"msg_type\":\"text\",\"content\":", 29);
+    err = hu_json_buf_append_raw(&jbuf, "{\"msg_type\":\"text\",\"content\":", 29);
     if (err)
         goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, inner.ptr, inner.len);
+    err = hu_json_buf_append_raw(&jbuf, inner.ptr, inner.len);
     if (err)
         goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, "}", 1);
+    err = hu_json_buf_append_raw(&jbuf, "}", 1);
     if (err)
         goto jfail;
-    sc_json_buf_free(&inner);
+    hu_json_buf_free(&inner);
 
-    sc_http_response_t resp = {0};
-    err = sc_http_post_json(c->alloc, c->webhook_url, NULL, jbuf.ptr, jbuf.len, &resp);
-    sc_json_buf_free(&jbuf);
-    if (err != SC_OK) {
+    hu_http_response_t resp = {0};
+    err = hu_http_post_json(c->alloc, c->webhook_url, NULL, jbuf.ptr, jbuf.len, &resp);
+    hu_json_buf_free(&jbuf);
+    if (err != HU_OK) {
         if (resp.owned && resp.body)
-            sc_http_response_free(c->alloc, &resp);
-        return SC_ERR_CHANNEL_SEND;
+            hu_http_response_free(c->alloc, &resp);
+        return HU_ERR_CHANNEL_SEND;
     }
     if (resp.owned && resp.body)
-        sc_http_response_free(c->alloc, &resp);
+        hu_http_response_free(c->alloc, &resp);
     if (resp.status_code < 200 || resp.status_code >= 300)
-        return SC_ERR_CHANNEL_SEND;
-    return SC_OK;
+        return HU_ERR_CHANNEL_SEND;
+    return HU_OK;
 jfail:
-    sc_json_buf_free(&jbuf);
+    hu_json_buf_free(&jbuf);
 inner_fail:
-    sc_json_buf_free(&inner);
+    hu_json_buf_free(&inner);
     return err;
 #endif
 }
@@ -156,7 +156,7 @@ static bool lark_health_check(void *ctx) {
     return true;
 }
 
-static const sc_channel_vtable_t lark_vtable = {
+static const hu_channel_vtable_t lark_vtable = {
     .start = lark_start,
     .stop = lark_stop,
     .send = lark_send,
@@ -167,45 +167,45 @@ static const sc_channel_vtable_t lark_vtable = {
     .stop_typing = NULL,
 };
 
-sc_error_t sc_lark_on_webhook(void *channel_ctx, sc_allocator_t *alloc, const char *body,
+hu_error_t hu_lark_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const char *body,
                               size_t body_len) {
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)channel_ctx;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)channel_ctx;
     if (!c || !body || body_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
-#if SC_IS_TEST
+        return HU_ERR_INVALID_ARGUMENT;
+#if HU_IS_TEST
     (void)alloc;
     lark_queue_push(c, "test-sender", 11, body, body_len);
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_json_value_t *parsed = NULL;
-    sc_error_t err = sc_json_parse(alloc, body, body_len, &parsed);
-    if (err != SC_OK || !parsed)
-        return SC_OK;
-    sc_json_value_t *ev = sc_json_object_get(parsed, "event");
-    if (ev && ev->type == SC_JSON_OBJECT) {
-        sc_json_value_t *msg = sc_json_object_get(ev, "message");
-        sc_json_value_t *sender = sc_json_object_get(ev, "sender");
+    hu_json_value_t *parsed = NULL;
+    hu_error_t err = hu_json_parse(alloc, body, body_len, &parsed);
+    if (err != HU_OK || !parsed)
+        return HU_OK;
+    hu_json_value_t *ev = hu_json_object_get(parsed, "event");
+    if (ev && ev->type == HU_JSON_OBJECT) {
+        hu_json_value_t *msg = hu_json_object_get(ev, "message");
+        hu_json_value_t *sender = hu_json_object_get(ev, "sender");
         if (msg && sender) {
-            sc_json_value_t *sid = sc_json_object_get(sender, "sender_id");
-            const char *open_id = sid ? sc_json_get_string(sid, "open_id") : NULL;
-            const char *content = sc_json_get_string(msg, "content");
+            hu_json_value_t *sid = hu_json_object_get(sender, "sender_id");
+            const char *open_id = sid ? hu_json_get_string(sid, "open_id") : NULL;
+            const char *content = hu_json_get_string(msg, "content");
             if (open_id && content && strlen(content) > 0)
                 lark_queue_push(c, open_id, strlen(open_id), content, strlen(content));
         }
     }
-    sc_json_free(alloc, parsed);
-    return SC_OK;
+    hu_json_free(alloc, parsed);
+    return HU_OK;
 #endif
 }
 
-sc_error_t sc_lark_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
+hu_error_t hu_lark_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                         size_t max_msgs, size_t *out_count) {
     (void)alloc;
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)channel_ctx;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)channel_ctx;
     if (!c || !msgs || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (c->mock_count > 0) {
         size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
         for (size_t i = 0; i < n; i++) {
@@ -214,12 +214,12 @@ sc_error_t sc_lark_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loo
         }
         *out_count = n;
         c->mock_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 #endif
     size_t cnt = 0;
     while (c->queue_count > 0 && cnt < max_msgs) {
-        sc_lark_queued_msg_t *slot = &c->queue[c->queue_head];
+        hu_lark_queued_msg_t *slot = &c->queue[c->queue_head];
         memcpy(msgs[cnt].session_key, slot->session_key, sizeof(slot->session_key));
         memcpy(msgs[cnt].content, slot->content, sizeof(slot->content));
         c->queue_head = (c->queue_head + 1) % LARK_QUEUE_MAX;
@@ -227,16 +227,16 @@ sc_error_t sc_lark_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loo
         cnt++;
     }
     *out_count = cnt;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_lark_create(sc_allocator_t *alloc, const char *app_id_or_webhook, size_t app_id_len,
-                          const char *app_secret, size_t app_secret_len, sc_channel_t *out) {
+hu_error_t hu_lark_create(hu_allocator_t *alloc, const char *app_id_or_webhook, size_t app_id_len,
+                          const char *app_secret, size_t app_secret_len, hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     if (app_id_or_webhook && app_id_len > 0) {
@@ -244,7 +244,7 @@ sc_error_t sc_lark_create(sc_allocator_t *alloc, const char *app_id_or_webhook, 
             c->webhook_url = (char *)malloc(app_id_len + 1);
             if (!c->webhook_url) {
                 alloc->free(alloc->ctx, c, sizeof(*c));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             memcpy(c->webhook_url, app_id_or_webhook, app_id_len);
             c->webhook_url[app_id_len] = '\0';
@@ -253,7 +253,7 @@ sc_error_t sc_lark_create(sc_allocator_t *alloc, const char *app_id_or_webhook, 
             c->app_id = (char *)malloc(app_id_len + 1);
             if (!c->app_id) {
                 alloc->free(alloc->ctx, c, sizeof(*c));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             memcpy(c->app_id, app_id_or_webhook, app_id_len);
             c->app_id[app_id_len] = '\0';
@@ -268,7 +268,7 @@ sc_error_t sc_lark_create(sc_allocator_t *alloc, const char *app_id_or_webhook, 
             if (c->webhook_url)
                 free(c->webhook_url);
             free(c);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->app_secret, app_secret, app_secret_len);
         c->app_secret[app_secret_len] = '\0';
@@ -276,20 +276,20 @@ sc_error_t sc_lark_create(sc_allocator_t *alloc, const char *app_id_or_webhook, 
     }
     out->ctx = c;
     out->vtable = &lark_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_lark_is_configured(sc_channel_t *ch) {
+bool hu_lark_is_configured(hu_channel_t *ch) {
     if (!ch || !ch->ctx)
         return false;
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)ch->ctx;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)ch->ctx;
     return (c->webhook_url != NULL && c->webhook_url_len > 0);
 }
 
-void sc_lark_destroy(sc_channel_t *ch) {
+void hu_lark_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_lark_ctx_t *c = (sc_lark_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
+        hu_lark_ctx_t *c = (hu_lark_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
         if (c->webhook_url)
             free(c->webhook_url);
         if (c->app_id)
@@ -302,15 +302,15 @@ void sc_lark_destroy(sc_channel_t *ch) {
     }
 }
 
-#if SC_IS_TEST
-sc_error_t sc_lark_test_inject_mock(sc_channel_t *ch, const char *session_key,
+#if HU_IS_TEST
+hu_error_t hu_lark_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                     size_t session_key_len, const char *content,
                                     size_t content_len) {
     if (!ch || !ch->ctx)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)ch->ctx;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)ch->ctx;
     if (c->mock_count >= 8)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t i = c->mock_count++;
     size_t sk = session_key_len > 127 ? 127 : session_key_len;
     size_t ct = content_len > 4095 ? 4095 : content_len;
@@ -320,12 +320,12 @@ sc_error_t sc_lark_test_inject_mock(sc_channel_t *ch, const char *session_key,
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
-const char *sc_lark_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+const char *hu_lark_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
-    sc_lark_ctx_t *c = (sc_lark_ctx_t *)ch->ctx;
+    hu_lark_ctx_t *c = (hu_lark_ctx_t *)ch->ctx;
     if (out_len)
         *out_len = c->last_message_len;
     return c->last_message;

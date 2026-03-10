@@ -1,5 +1,5 @@
 /**
- * Spring physics utilities for SeaClaw UI animations.
+ * Spring physics utilities for Human UI animations.
  * Simulates damped harmonic oscillator; aligns with motion tokens.
  */
 

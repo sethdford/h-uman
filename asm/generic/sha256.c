@@ -65,7 +65,7 @@ static void sha256_transform(sha256_ctx_t *ctx) {
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
 }
 
-void sc_sha256_init(sha256_ctx_t *ctx) {
+void hu_sha256_init(sha256_ctx_t *ctx) {
     ctx->state[0] = 0x6a09e667; ctx->state[1] = 0xbb67ae85;
     ctx->state[2] = 0x3c6ef372; ctx->state[3] = 0xa54ff53a;
     ctx->state[4] = 0x510e527f; ctx->state[5] = 0x9b05688c;
@@ -74,7 +74,7 @@ void sc_sha256_init(sha256_ctx_t *ctx) {
     ctx->buflen = 0;
 }
 
-void sc_sha256_update(sha256_ctx_t *ctx, const uint8_t *data, size_t len) {
+void hu_sha256_update(sha256_ctx_t *ctx, const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len; i++) {
         ctx->buf[ctx->buflen++] = data[i];
         if (ctx->buflen == 64) {
@@ -85,7 +85,7 @@ void sc_sha256_update(sha256_ctx_t *ctx, const uint8_t *data, size_t len) {
     }
 }
 
-void sc_sha256_final(sha256_ctx_t *ctx, uint8_t out[32]) {
+void hu_sha256_final(sha256_ctx_t *ctx, uint8_t out[32]) {
     uint64_t total_bits = ctx->total + ctx->buflen * 8;
 
     ctx->buf[ctx->buflen++] = 0x80;
@@ -109,21 +109,21 @@ void sc_sha256_final(sha256_ctx_t *ctx, uint8_t out[32]) {
     }
 }
 
-void sc_sha256_generic(const uint8_t *data, size_t len, uint8_t out[32]) {
+void hu_sha256_generic(const uint8_t *data, size_t len, uint8_t out[32]) {
     sha256_ctx_t ctx;
-    sc_sha256_init(&ctx);
-    sc_sha256_update(&ctx, data, len);
-    sc_sha256_final(&ctx, out);
+    hu_sha256_init(&ctx);
+    hu_sha256_update(&ctx, data, len);
+    hu_sha256_final(&ctx, out);
 }
 
-void sc_hmac_sha256_generic(const uint8_t *key, size_t key_len,
+void hu_hmac_sha256_generic(const uint8_t *key, size_t key_len,
                     const uint8_t *msg, size_t msg_len,
                     uint8_t out[32]) {
     uint8_t k_pad[64];
     uint8_t k_ipad[64], k_opad[64];
 
     if (key_len > 64) {
-        sc_sha256_generic(key, key_len, k_pad);
+        hu_sha256_generic(key, key_len, k_pad);
         memset(k_pad + 32, 0, 32);
     } else {
         memcpy(k_pad, key, key_len);
@@ -136,14 +136,14 @@ void sc_hmac_sha256_generic(const uint8_t *key, size_t key_len,
     }
 
     sha256_ctx_t ctx;
-    sc_sha256_init(&ctx);
-    sc_sha256_update(&ctx, k_ipad, 64);
-    sc_sha256_update(&ctx, msg, msg_len);
+    hu_sha256_init(&ctx);
+    hu_sha256_update(&ctx, k_ipad, 64);
+    hu_sha256_update(&ctx, msg, msg_len);
     uint8_t inner[32];
-    sc_sha256_final(&ctx, inner);
+    hu_sha256_final(&ctx, inner);
 
-    sc_sha256_init(&ctx);
-    sc_sha256_update(&ctx, k_opad, 64);
-    sc_sha256_update(&ctx, inner, 32);
-    sc_sha256_final(&ctx, out);
+    hu_sha256_init(&ctx);
+    hu_sha256_update(&ctx, k_opad, 64);
+    hu_sha256_update(&ctx, inner, 32);
+    hu_sha256_final(&ctx, out);
 }

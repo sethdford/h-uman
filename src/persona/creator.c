@@ -1,7 +1,7 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/persona.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/persona.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -21,116 +21,116 @@ static bool string_in_array(const char *s, char **arr, size_t count) {
 }
 
 /* Merge traits from all partials, deduplicating */
-static sc_error_t merge_traits(sc_allocator_t *alloc, char ***out, size_t *out_count,
-                               const sc_persona_t *partials, size_t count) {
+static hu_error_t merge_traits(hu_allocator_t *alloc, char ***out, size_t *out_count,
+                               const hu_persona_t *partials, size_t count) {
     size_t total = 0;
     for (size_t i = 0; i < count; i++)
         total += partials[i].traits_count;
     if (total == 0)
-        return SC_OK;
+        return HU_OK;
     char **buf = (char **)alloc->alloc(alloc->ctx, total * sizeof(char *));
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
         for (size_t j = 0; j < partials[i].traits_count; j++) {
             const char *t = partials[i].traits[j];
             if (!t || string_in_array(t, buf, n))
                 continue;
-            char *dup = sc_strdup(alloc, t);
+            char *dup = hu_strdup(alloc, t);
             if (!dup) {
                 for (size_t k = 0; k < n; k++)
                     alloc->free(alloc->ctx, buf[k], strlen(buf[k]) + 1);
                 alloc->free(alloc->ctx, buf, total * sizeof(char *));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf[n++] = dup;
         }
     }
     *out = buf;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 }
 
 /* Merge preferred_vocab only */
-static sc_error_t merge_preferred_vocab(sc_allocator_t *alloc, char ***out, size_t *out_count,
-                                        const sc_persona_t *partials, size_t count) {
+static hu_error_t merge_preferred_vocab(hu_allocator_t *alloc, char ***out, size_t *out_count,
+                                        const hu_persona_t *partials, size_t count) {
     size_t total = 0;
     for (size_t i = 0; i < count; i++)
         total += partials[i].preferred_vocab_count;
     if (total == 0)
-        return SC_OK;
+        return HU_OK;
     char **buf = (char **)alloc->alloc(alloc->ctx, total * sizeof(char *));
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
         for (size_t j = 0; j < partials[i].preferred_vocab_count; j++) {
             const char *v = partials[i].preferred_vocab[j];
             if (!v || string_in_array(v, buf, n))
                 continue;
-            char *dup = sc_strdup(alloc, v);
+            char *dup = hu_strdup(alloc, v);
             if (!dup) {
                 for (size_t k = 0; k < n; k++)
                     alloc->free(alloc->ctx, buf[k], strlen(buf[k]) + 1);
                 alloc->free(alloc->ctx, buf, total * sizeof(char *));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf[n++] = dup;
         }
     }
     *out = buf;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t merge_communication_rules(sc_allocator_t *alloc, char ***out, size_t *out_count,
-                                            const sc_persona_t *partials, size_t count) {
+static hu_error_t merge_communication_rules(hu_allocator_t *alloc, char ***out, size_t *out_count,
+                                            const hu_persona_t *partials, size_t count) {
     size_t total = 0;
     for (size_t i = 0; i < count; i++)
         total += partials[i].communication_rules_count;
     if (total == 0)
-        return SC_OK;
+        return HU_OK;
     char **buf = (char **)alloc->alloc(alloc->ctx, total * sizeof(char *));
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
         for (size_t j = 0; j < partials[i].communication_rules_count; j++) {
             const char *r = partials[i].communication_rules[j];
             if (!r || string_in_array(r, buf, n))
                 continue;
-            char *dup = sc_strdup(alloc, r);
+            char *dup = hu_strdup(alloc, r);
             if (!dup) {
                 for (size_t k = 0; k < n; k++)
                     alloc->free(alloc->ctx, buf[k], strlen(buf[k]) + 1);
                 alloc->free(alloc->ctx, buf, total * sizeof(char *));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf[n++] = dup;
         }
     }
     *out = buf;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t merge_overlays(sc_allocator_t *alloc, sc_persona_overlay_t **out,
-                                 size_t *out_count, const sc_persona_t *partials, size_t count) {
+static hu_error_t merge_overlays(hu_allocator_t *alloc, hu_persona_overlay_t **out,
+                                 size_t *out_count, const hu_persona_t *partials, size_t count) {
     size_t total = 0;
     for (size_t i = 0; i < count; i++)
         total += partials[i].overlays_count;
     if (total == 0)
-        return SC_OK;
-    sc_persona_overlay_t *buf =
-        (sc_persona_overlay_t *)alloc->alloc(alloc->ctx, total * sizeof(sc_persona_overlay_t));
+        return HU_OK;
+    hu_persona_overlay_t *buf =
+        (hu_persona_overlay_t *)alloc->alloc(alloc->ctx, total * sizeof(hu_persona_overlay_t));
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
-    memset(buf, 0, total * sizeof(sc_persona_overlay_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(buf, 0, total * sizeof(hu_persona_overlay_t));
     size_t n = 0;
     for (size_t i = 0; i < count; i++) {
         for (size_t j = 0; j < partials[i].overlays_count; j++) {
-            const sc_persona_overlay_t *ov = &partials[i].overlays[j];
+            const hu_persona_overlay_t *ov = &partials[i].overlays[j];
             bool found = false;
             for (size_t k = 0; k < n; k++) {
                 if (ov->channel && buf[k].channel && strcmp(ov->channel, buf[k].channel) == 0) {
@@ -140,16 +140,16 @@ static sc_error_t merge_overlays(sc_allocator_t *alloc, sc_persona_overlay_t **o
             }
             if (found)
                 continue;
-            buf[n].channel = ov->channel ? sc_strdup(alloc, ov->channel) : NULL;
+            buf[n].channel = ov->channel ? hu_strdup(alloc, ov->channel) : NULL;
             if (ov->channel && !buf[n].channel)
                 goto overlay_oom;
-            buf[n].formality = ov->formality ? sc_strdup(alloc, ov->formality) : NULL;
+            buf[n].formality = ov->formality ? hu_strdup(alloc, ov->formality) : NULL;
             if (ov->formality && !buf[n].formality)
                 goto overlay_oom;
-            buf[n].avg_length = ov->avg_length ? sc_strdup(alloc, ov->avg_length) : NULL;
+            buf[n].avg_length = ov->avg_length ? hu_strdup(alloc, ov->avg_length) : NULL;
             if (ov->avg_length && !buf[n].avg_length)
                 goto overlay_oom;
-            buf[n].emoji_usage = ov->emoji_usage ? sc_strdup(alloc, ov->emoji_usage) : NULL;
+            buf[n].emoji_usage = ov->emoji_usage ? hu_strdup(alloc, ov->emoji_usage) : NULL;
             if (ov->emoji_usage && !buf[n].emoji_usage)
                 goto overlay_oom;
             if (ov->style_notes_count > 0 && ov->style_notes) {
@@ -159,7 +159,7 @@ static sc_error_t merge_overlays(sc_allocator_t *alloc, sc_persona_overlay_t **o
                     buf[n].style_notes_count = ov->style_notes_count;
                     for (size_t k = 0; k < ov->style_notes_count; k++) {
                         buf[n].style_notes[k] =
-                            ov->style_notes[k] ? sc_strdup(alloc, ov->style_notes[k]) : NULL;
+                            ov->style_notes[k] ? hu_strdup(alloc, ov->style_notes[k]) : NULL;
                         if (ov->style_notes[k] && !buf[n].style_notes[k])
                             goto overlay_oom;
                     }
@@ -170,7 +170,7 @@ static sc_error_t merge_overlays(sc_allocator_t *alloc, sc_persona_overlay_t **o
     }
     *out = buf;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 overlay_oom:
     for (size_t i = 0; i <= n; i++) {
         if (buf[i].channel)
@@ -189,31 +189,31 @@ overlay_oom:
             alloc->free(alloc->ctx, buf[i].style_notes, buf[i].style_notes_count * sizeof(char *));
         }
     }
-    alloc->free(alloc->ctx, buf, total * sizeof(sc_persona_overlay_t));
-    return SC_ERR_OUT_OF_MEMORY;
+    alloc->free(alloc->ctx, buf, total * sizeof(hu_persona_overlay_t));
+    return HU_ERR_OUT_OF_MEMORY;
 }
 
-sc_error_t sc_persona_creator_synthesize(sc_allocator_t *alloc, const sc_persona_t *partials,
+hu_error_t hu_persona_creator_synthesize(hu_allocator_t *alloc, const hu_persona_t *partials,
                                          size_t count, const char *name, size_t name_len,
-                                         sc_persona_t *out) {
+                                         hu_persona_t *out) {
     if (!alloc || !partials || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
-    out->name = sc_strndup(alloc, name, name_len);
+    out->name = hu_strndup(alloc, name, name_len);
     if (!out->name)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     out->name_len = name_len;
 
-    sc_error_t err = merge_traits(alloc, &out->traits, &out->traits_count, partials, count);
-    if (err != SC_OK) {
-        sc_persona_deinit(alloc, out);
+    hu_error_t err = merge_traits(alloc, &out->traits, &out->traits_count, partials, count);
+    if (err != HU_OK) {
+        hu_persona_deinit(alloc, out);
         return err;
     }
     err = merge_preferred_vocab(alloc, &out->preferred_vocab, &out->preferred_vocab_count, partials,
                                 count);
-    if (err != SC_OK) {
-        sc_persona_deinit(alloc, out);
+    if (err != HU_OK) {
+        hu_persona_deinit(alloc, out);
         return err;
     }
     /* Merge avoided and slang similarly - for simplicity use merge_vocab for all, but test only
@@ -231,13 +231,13 @@ sc_error_t sc_persona_creator_synthesize(sc_allocator_t *alloc, const sc_persona
                 for (size_t j = 0; j < partials[i].avoided_vocab_count; j++) {
                     const char *v = partials[i].avoided_vocab[j];
                     if (v && !string_in_array(v, abuf, an)) {
-                        char *dup = sc_strdup(alloc, v);
+                        char *dup = hu_strdup(alloc, v);
                         if (!dup) {
                             for (size_t k = 0; k < an; k++)
                                 alloc->free(alloc->ctx, abuf[k], strlen(abuf[k]) + 1);
                             alloc->free(alloc->ctx, abuf, total_avoided * sizeof(char *));
-                            sc_persona_deinit(alloc, out);
-                            return SC_ERR_OUT_OF_MEMORY;
+                            hu_persona_deinit(alloc, out);
+                            return HU_ERR_OUT_OF_MEMORY;
                         }
                         abuf[an++] = dup;
                     }
@@ -255,13 +255,13 @@ sc_error_t sc_persona_creator_synthesize(sc_allocator_t *alloc, const sc_persona
                 for (size_t j = 0; j < partials[i].slang_count; j++) {
                     const char *v = partials[i].slang[j];
                     if (v && !string_in_array(v, sbuf, sn)) {
-                        char *dup = sc_strdup(alloc, v);
+                        char *dup = hu_strdup(alloc, v);
                         if (!dup) {
                             for (size_t k = 0; k < sn; k++)
                                 alloc->free(alloc->ctx, sbuf[k], strlen(sbuf[k]) + 1);
                             alloc->free(alloc->ctx, sbuf, total_slang * sizeof(char *));
-                            sc_persona_deinit(alloc, out);
-                            return SC_ERR_OUT_OF_MEMORY;
+                            hu_persona_deinit(alloc, out);
+                            return HU_ERR_OUT_OF_MEMORY;
                         }
                         sbuf[sn++] = dup;
                     }
@@ -274,8 +274,8 @@ sc_error_t sc_persona_creator_synthesize(sc_allocator_t *alloc, const sc_persona
 
     err = merge_communication_rules(alloc, &out->communication_rules,
                                     &out->communication_rules_count, partials, count);
-    if (err != SC_OK) {
-        sc_persona_deinit(alloc, out);
+    if (err != HU_OK) {
+        hu_persona_deinit(alloc, out);
         return err;
     }
 
@@ -291,13 +291,13 @@ sc_error_t sc_persona_creator_synthesize(sc_allocator_t *alloc, const sc_persona
                 for (size_t k = 0; k < partials[i].values_count; k++) {
                     const char *v = partials[i].values[k];
                     if (v && !string_in_array(v, vbuf, vn)) {
-                        char *dup = sc_strdup(alloc, v);
+                        char *dup = hu_strdup(alloc, v);
                         if (!dup) {
                             for (size_t j = 0; j < vn; j++)
                                 alloc->free(alloc->ctx, vbuf[j], strlen(vbuf[j]) + 1);
                             alloc->free(alloc->ctx, vbuf, vtotal * sizeof(char *));
-                            sc_persona_deinit(alloc, out);
-                            return SC_ERR_OUT_OF_MEMORY;
+                            hu_persona_deinit(alloc, out);
+                            return HU_ERR_OUT_OF_MEMORY;
                         }
                         vbuf[vn++] = dup;
                     }
@@ -310,156 +310,156 @@ sc_error_t sc_persona_creator_synthesize(sc_allocator_t *alloc, const sc_persona
 
     for (size_t i = 0; i < count; i++) {
         if (partials[i].identity && !out->identity) {
-            out->identity = sc_strdup(alloc, partials[i].identity);
+            out->identity = hu_strdup(alloc, partials[i].identity);
             if (!out->identity) {
-                sc_persona_deinit(alloc, out);
-                return SC_ERR_OUT_OF_MEMORY;
+                hu_persona_deinit(alloc, out);
+                return HU_ERR_OUT_OF_MEMORY;
             }
         }
         if (partials[i].decision_style && !out->decision_style) {
-            out->decision_style = sc_strdup(alloc, partials[i].decision_style);
+            out->decision_style = hu_strdup(alloc, partials[i].decision_style);
             if (!out->decision_style) {
-                sc_persona_deinit(alloc, out);
-                return SC_ERR_OUT_OF_MEMORY;
+                hu_persona_deinit(alloc, out);
+                return HU_ERR_OUT_OF_MEMORY;
             }
         }
     }
 
     err = merge_overlays(alloc, &out->overlays, &out->overlays_count, partials, count);
-    if (err != SC_OK) {
-        sc_persona_deinit(alloc, out);
+    if (err != HU_OK) {
+        hu_persona_deinit(alloc, out);
         return err;
     }
 
     /* Merge deep fields: first non-null wins */
     for (size_t i = 0; i < count; i++) {
         if (partials[i].biography && !out->biography)
-            out->biography = sc_strdup(alloc, partials[i].biography);
+            out->biography = hu_strdup(alloc, partials[i].biography);
         if (partials[i].core_anchor && !out->core_anchor)
-            out->core_anchor = sc_strdup(alloc, partials[i].core_anchor);
+            out->core_anchor = hu_strdup(alloc, partials[i].core_anchor);
 
         if (partials[i].motivation.primary_drive && !out->motivation.primary_drive)
-            out->motivation.primary_drive = sc_strdup(alloc, partials[i].motivation.primary_drive);
+            out->motivation.primary_drive = hu_strdup(alloc, partials[i].motivation.primary_drive);
         if (partials[i].motivation.protecting && !out->motivation.protecting)
-            out->motivation.protecting = sc_strdup(alloc, partials[i].motivation.protecting);
+            out->motivation.protecting = hu_strdup(alloc, partials[i].motivation.protecting);
         if (partials[i].motivation.avoiding && !out->motivation.avoiding)
-            out->motivation.avoiding = sc_strdup(alloc, partials[i].motivation.avoiding);
+            out->motivation.avoiding = hu_strdup(alloc, partials[i].motivation.avoiding);
         if (partials[i].motivation.wanting && !out->motivation.wanting)
-            out->motivation.wanting = sc_strdup(alloc, partials[i].motivation.wanting);
+            out->motivation.wanting = hu_strdup(alloc, partials[i].motivation.wanting);
 
         if (partials[i].humor.type && !out->humor.type)
-            out->humor.type = sc_strdup(alloc, partials[i].humor.type);
+            out->humor.type = hu_strdup(alloc, partials[i].humor.type);
         if (partials[i].humor.frequency && !out->humor.frequency)
-            out->humor.frequency = sc_strdup(alloc, partials[i].humor.frequency);
+            out->humor.frequency = hu_strdup(alloc, partials[i].humor.frequency);
         if (partials[i].humor.timing && !out->humor.timing)
-            out->humor.timing = sc_strdup(alloc, partials[i].humor.timing);
+            out->humor.timing = hu_strdup(alloc, partials[i].humor.timing);
 
         if (partials[i].conflict_style.pushback_response &&
             !out->conflict_style.pushback_response)
             out->conflict_style.pushback_response =
-                sc_strdup(alloc, partials[i].conflict_style.pushback_response);
+                hu_strdup(alloc, partials[i].conflict_style.pushback_response);
         if (partials[i].conflict_style.apology_style && !out->conflict_style.apology_style)
             out->conflict_style.apology_style =
-                sc_strdup(alloc, partials[i].conflict_style.apology_style);
+                hu_strdup(alloc, partials[i].conflict_style.apology_style);
         if (partials[i].conflict_style.confrontation_comfort &&
             !out->conflict_style.confrontation_comfort)
             out->conflict_style.confrontation_comfort =
-                sc_strdup(alloc, partials[i].conflict_style.confrontation_comfort);
+                hu_strdup(alloc, partials[i].conflict_style.confrontation_comfort);
         if (partials[i].conflict_style.boundary_assertion &&
             !out->conflict_style.boundary_assertion)
             out->conflict_style.boundary_assertion =
-                sc_strdup(alloc, partials[i].conflict_style.boundary_assertion);
+                hu_strdup(alloc, partials[i].conflict_style.boundary_assertion);
         if (partials[i].conflict_style.repair_behavior && !out->conflict_style.repair_behavior)
             out->conflict_style.repair_behavior =
-                sc_strdup(alloc, partials[i].conflict_style.repair_behavior);
+                hu_strdup(alloc, partials[i].conflict_style.repair_behavior);
 
         if (partials[i].emotional_range.ceiling && !out->emotional_range.ceiling)
-            out->emotional_range.ceiling = sc_strdup(alloc, partials[i].emotional_range.ceiling);
+            out->emotional_range.ceiling = hu_strdup(alloc, partials[i].emotional_range.ceiling);
         if (partials[i].emotional_range.floor && !out->emotional_range.floor)
-            out->emotional_range.floor = sc_strdup(alloc, partials[i].emotional_range.floor);
+            out->emotional_range.floor = hu_strdup(alloc, partials[i].emotional_range.floor);
         if (partials[i].emotional_range.withdrawal_conditions &&
             !out->emotional_range.withdrawal_conditions)
             out->emotional_range.withdrawal_conditions =
-                sc_strdup(alloc, partials[i].emotional_range.withdrawal_conditions);
+                hu_strdup(alloc, partials[i].emotional_range.withdrawal_conditions);
         if (partials[i].emotional_range.recovery_style && !out->emotional_range.recovery_style)
             out->emotional_range.recovery_style =
-                sc_strdup(alloc, partials[i].emotional_range.recovery_style);
+                hu_strdup(alloc, partials[i].emotional_range.recovery_style);
 
         if (partials[i].voice_rhythm.sentence_pattern && !out->voice_rhythm.sentence_pattern)
             out->voice_rhythm.sentence_pattern =
-                sc_strdup(alloc, partials[i].voice_rhythm.sentence_pattern);
+                hu_strdup(alloc, partials[i].voice_rhythm.sentence_pattern);
         if (partials[i].voice_rhythm.paragraph_cadence && !out->voice_rhythm.paragraph_cadence)
             out->voice_rhythm.paragraph_cadence =
-                sc_strdup(alloc, partials[i].voice_rhythm.paragraph_cadence);
+                hu_strdup(alloc, partials[i].voice_rhythm.paragraph_cadence);
         if (partials[i].voice_rhythm.response_tempo && !out->voice_rhythm.response_tempo)
             out->voice_rhythm.response_tempo =
-                sc_strdup(alloc, partials[i].voice_rhythm.response_tempo);
+                hu_strdup(alloc, partials[i].voice_rhythm.response_tempo);
         if (partials[i].voice_rhythm.emphasis_style && !out->voice_rhythm.emphasis_style)
             out->voice_rhythm.emphasis_style =
-                sc_strdup(alloc, partials[i].voice_rhythm.emphasis_style);
+                hu_strdup(alloc, partials[i].voice_rhythm.emphasis_style);
         if (partials[i].voice_rhythm.pause_behavior && !out->voice_rhythm.pause_behavior)
             out->voice_rhythm.pause_behavior =
-                sc_strdup(alloc, partials[i].voice_rhythm.pause_behavior);
+                hu_strdup(alloc, partials[i].voice_rhythm.pause_behavior);
 
         /* Relational intelligence */
         if (partials[i].relational.bid_response_style && !out->relational.bid_response_style)
             out->relational.bid_response_style =
-                sc_strdup(alloc, partials[i].relational.bid_response_style);
+                hu_strdup(alloc, partials[i].relational.bid_response_style);
         if (partials[i].relational.attachment_style && !out->relational.attachment_style)
             out->relational.attachment_style =
-                sc_strdup(alloc, partials[i].relational.attachment_style);
+                hu_strdup(alloc, partials[i].relational.attachment_style);
         if (partials[i].relational.attachment_awareness && !out->relational.attachment_awareness)
             out->relational.attachment_awareness =
-                sc_strdup(alloc, partials[i].relational.attachment_awareness);
+                hu_strdup(alloc, partials[i].relational.attachment_awareness);
         if (partials[i].relational.dunbar_awareness && !out->relational.dunbar_awareness)
             out->relational.dunbar_awareness =
-                sc_strdup(alloc, partials[i].relational.dunbar_awareness);
+                hu_strdup(alloc, partials[i].relational.dunbar_awareness);
 
         /* Listening protocol */
         if (partials[i].listening.default_response_type && !out->listening.default_response_type)
             out->listening.default_response_type =
-                sc_strdup(alloc, partials[i].listening.default_response_type);
+                hu_strdup(alloc, partials[i].listening.default_response_type);
         if (partials[i].listening.nvc_style && !out->listening.nvc_style)
-            out->listening.nvc_style = sc_strdup(alloc, partials[i].listening.nvc_style);
+            out->listening.nvc_style = hu_strdup(alloc, partials[i].listening.nvc_style);
         if (partials[i].listening.validation_style && !out->listening.validation_style)
             out->listening.validation_style =
-                sc_strdup(alloc, partials[i].listening.validation_style);
+                hu_strdup(alloc, partials[i].listening.validation_style);
 
         /* Repair protocol */
         if (partials[i].repair.rupture_detection && !out->repair.rupture_detection)
             out->repair.rupture_detection =
-                sc_strdup(alloc, partials[i].repair.rupture_detection);
+                hu_strdup(alloc, partials[i].repair.rupture_detection);
         if (partials[i].repair.repair_approach && !out->repair.repair_approach)
-            out->repair.repair_approach = sc_strdup(alloc, partials[i].repair.repair_approach);
+            out->repair.repair_approach = hu_strdup(alloc, partials[i].repair.repair_approach);
         if (partials[i].repair.face_saving_style && !out->repair.face_saving_style)
             out->repair.face_saving_style =
-                sc_strdup(alloc, partials[i].repair.face_saving_style);
+                hu_strdup(alloc, partials[i].repair.face_saving_style);
 
         /* Linguistic mirroring */
         if (partials[i].mirroring.mirroring_level && !out->mirroring.mirroring_level)
             out->mirroring.mirroring_level =
-                sc_strdup(alloc, partials[i].mirroring.mirroring_level);
+                hu_strdup(alloc, partials[i].mirroring.mirroring_level);
         if (partials[i].mirroring.convergence_speed && !out->mirroring.convergence_speed)
             out->mirroring.convergence_speed =
-                sc_strdup(alloc, partials[i].mirroring.convergence_speed);
+                hu_strdup(alloc, partials[i].mirroring.convergence_speed);
         if (partials[i].mirroring.power_dynamic && !out->mirroring.power_dynamic)
             out->mirroring.power_dynamic =
-                sc_strdup(alloc, partials[i].mirroring.power_dynamic);
+                hu_strdup(alloc, partials[i].mirroring.power_dynamic);
 
         /* Social dynamics */
         if (partials[i].social.default_ego_state && !out->social.default_ego_state)
             out->social.default_ego_state =
-                sc_strdup(alloc, partials[i].social.default_ego_state);
+                hu_strdup(alloc, partials[i].social.default_ego_state);
         if (partials[i].social.phatic_style && !out->social.phatic_style)
-            out->social.phatic_style = sc_strdup(alloc, partials[i].social.phatic_style);
+            out->social.phatic_style = hu_strdup(alloc, partials[i].social.phatic_style);
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-#define SC_PERSONA_CREATOR_PATH_MAX 512
+#define HU_PERSONA_CREATOR_PATH_MAX 512
 
-static sc_error_t write_json_string(FILE *f, const char *s) {
+static hu_error_t write_json_string(FILE *f, const char *s) {
     fputc('"', f);
     for (const char *p = s ? s : ""; *p; p++) {
         switch (*p) {
@@ -484,106 +484,106 @@ static sc_error_t write_json_string(FILE *f, const char *s) {
         }
     }
     fputc('"', f);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t write_json_string_array(FILE *f, char **arr, size_t count) {
+static hu_error_t write_json_string_array(FILE *f, char **arr, size_t count) {
     for (size_t i = 0; i < count; i++) {
         if (i > 0)
             fputc(',', f);
-        if (write_json_string(f, arr[i] ? arr[i] : "") != SC_OK)
-            return SC_ERR_IO;
+        if (write_json_string(f, arr[i] ? arr[i] : "") != HU_OK)
+            return HU_ERR_IO;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *persona) {
+hu_error_t hu_persona_creator_write(hu_allocator_t *alloc, const hu_persona_t *persona) {
     if (!alloc || !persona || !persona->name)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    char dir_buf[SC_PERSONA_CREATOR_PATH_MAX];
-    if (!sc_persona_base_dir(dir_buf, sizeof(dir_buf)))
-        return SC_ERR_NOT_FOUND;
+    char dir_buf[HU_PERSONA_CREATOR_PATH_MAX];
+    if (!hu_persona_base_dir(dir_buf, sizeof(dir_buf)))
+        return HU_ERR_NOT_FOUND;
 #if defined(__unix__) || defined(__APPLE__)
     {
-        const char *override = getenv("SC_PERSONA_DIR");
+        const char *override = getenv("HU_PERSONA_DIR");
         if (!override || !override[0]) {
             const char *home = getenv("HOME");
             if (home && home[0]) {
-                char parent[SC_PERSONA_CREATOR_PATH_MAX];
-                int pn = snprintf(parent, sizeof(parent), "%s/.seaclaw", home);
+                char parent[HU_PERSONA_CREATOR_PATH_MAX];
+                int pn = snprintf(parent, sizeof(parent), "%s/.human", home);
                 if (pn > 0 && (size_t)pn < sizeof(parent))
                     (void)mkdir(parent, 0755);
             }
         }
         if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST)
-            return SC_ERR_IO;
+            return HU_ERR_IO;
     }
 #endif
 
-    char path[SC_PERSONA_CREATOR_PATH_MAX];
+    char path[HU_PERSONA_CREATOR_PATH_MAX];
     int n = snprintf(path, sizeof(path), "%s/%.*s.json", dir_buf, (int)persona->name_len,
                      persona->name);
     if (n <= 0 || (size_t)n >= sizeof(path))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     FILE *f = fopen(path, "wb");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     fputs("{\n  \"version\": 1,\n  \"name\": ", f);
-    if (write_json_string(f, persona->name) != SC_OK)
+    if (write_json_string(f, persona->name) != HU_OK)
         goto fail;
     fputs(",\n  \"core\": {\n", f);
 
     fputs("    \"identity\": ", f);
-    if (write_json_string(f, persona->identity) != SC_OK)
+    if (write_json_string(f, persona->identity) != HU_OK)
         goto fail;
     fputs(",\n    \"traits\": [", f);
-    if (write_json_string_array(f, persona->traits, persona->traits_count) != SC_OK)
+    if (write_json_string_array(f, persona->traits, persona->traits_count) != HU_OK)
         goto fail;
     fputs("],\n    \"vocabulary\": {\n      \"preferred\": [", f);
     if (write_json_string_array(f, persona->preferred_vocab, persona->preferred_vocab_count) !=
-        SC_OK)
+        HU_OK)
         goto fail;
     fputs("],\n      \"avoided\": [", f);
-    if (write_json_string_array(f, persona->avoided_vocab, persona->avoided_vocab_count) != SC_OK)
+    if (write_json_string_array(f, persona->avoided_vocab, persona->avoided_vocab_count) != HU_OK)
         goto fail;
     fputs("],\n      \"slang\": [", f);
-    if (write_json_string_array(f, persona->slang, persona->slang_count) != SC_OK)
+    if (write_json_string_array(f, persona->slang, persona->slang_count) != HU_OK)
         goto fail;
     fputs("]\n    },\n    \"communication_rules\": [", f);
     if (write_json_string_array(f, persona->communication_rules,
-                                persona->communication_rules_count) != SC_OK)
+                                persona->communication_rules_count) != HU_OK)
         goto fail;
     fputs("],\n    \"values\": [", f);
-    if (write_json_string_array(f, persona->values, persona->values_count) != SC_OK)
+    if (write_json_string_array(f, persona->values, persona->values_count) != HU_OK)
         goto fail;
     fputs("],\n    \"decision_style\": ", f);
-    if (write_json_string(f, persona->decision_style) != SC_OK)
+    if (write_json_string(f, persona->decision_style) != HU_OK)
         goto fail;
 
     fputs("\n  },\n  \"channel_overlays\": {\n", f);
     for (size_t i = 0; i < persona->overlays_count; i++) {
-        const sc_persona_overlay_t *ov = &persona->overlays[i];
+        const hu_persona_overlay_t *ov = &persona->overlays[i];
         if (!ov->channel)
             continue;
         if (i > 0)
             fputs(",\n", f);
         fputs("    ", f);
-        if (write_json_string(f, ov->channel) != SC_OK)
+        if (write_json_string(f, ov->channel) != HU_OK)
             goto fail;
         fputs(": {\n      \"formality\": ", f);
-        if (write_json_string(f, ov->formality) != SC_OK)
+        if (write_json_string(f, ov->formality) != HU_OK)
             goto fail;
         fputs(",\n      \"avg_length\": ", f);
-        if (write_json_string(f, ov->avg_length) != SC_OK)
+        if (write_json_string(f, ov->avg_length) != HU_OK)
             goto fail;
         fputs(",\n      \"emoji_usage\": ", f);
-        if (write_json_string(f, ov->emoji_usage) != SC_OK)
+        if (write_json_string(f, ov->emoji_usage) != HU_OK)
             goto fail;
         fputs(",\n      \"style_notes\": [", f);
-        if (write_json_string_array(f, ov->style_notes, ov->style_notes_count) != SC_OK)
+        if (write_json_string_array(f, ov->style_notes, ov->style_notes_count) != HU_OK)
             goto fail;
         fputs("]\n    }", f);
     }
@@ -897,7 +897,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
 
     /* Relational intelligence */
     {
-        const sc_relational_intelligence_t *ri = &persona->relational;
+        const hu_relational_intelligence_t *ri = &persona->relational;
         if (ri->bid_response_style || ri->attachment_style || ri->attachment_awareness ||
             ri->dunbar_awareness || ri->emotional_bids_count > 0) {
             fputs(",\n  \"relational\": {", f);
@@ -937,7 +937,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
 
     /* Listening protocol */
     {
-        const sc_listening_protocol_t *lp = &persona->listening;
+        const hu_listening_protocol_t *lp = &persona->listening;
         if (lp->default_response_type || lp->reflective_techniques_count > 0 ||
             lp->nvc_style || lp->validation_style) {
             fputs(",\n  \"listening\": {", f);
@@ -972,7 +972,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
 
     /* Repair protocol */
     {
-        const sc_repair_protocol_t *rp = &persona->repair;
+        const hu_repair_protocol_t *rp = &persona->repair;
         if (rp->rupture_detection || rp->repair_approach || rp->face_saving_style ||
             rp->repair_phrases_count > 0) {
             fputs(",\n  \"repair\": {", f);
@@ -1006,7 +1006,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
 
     /* Linguistic mirroring */
     {
-        const sc_linguistic_mirroring_t *lm = &persona->mirroring;
+        const hu_linguistic_mirroring_t *lm = &persona->mirroring;
         if (lm->mirroring_level || lm->adapts_to_count > 0 || lm->convergence_speed ||
             lm->power_dynamic) {
             fputs(",\n  \"mirroring\": {", f);
@@ -1040,7 +1040,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
 
     /* Social dynamics */
     {
-        const sc_social_dynamics_t *sd = &persona->social;
+        const hu_social_dynamics_t *sd = &persona->social;
         if (sd->default_ego_state || sd->phatic_style || sd->bonding_behaviors_count > 0 ||
             sd->anti_patterns_count > 0) {
             fputs(",\n  \"social\": {", f);
@@ -1077,7 +1077,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
     if (persona->example_banks_count > 0) {
         fputs(",\n  \"example_banks\": {\n", f);
         for (size_t bi = 0; bi < persona->example_banks_count; bi++) {
-            const sc_persona_example_bank_t *bank = &persona->example_banks[bi];
+            const hu_persona_example_bank_t *bank = &persona->example_banks[bi];
             if (!bank->channel)
                 continue;
             if (bi > 0)
@@ -1105,7 +1105,7 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
     if (persona->contacts_count > 0) {
         fputs(",\n  \"contacts\": [\n", f);
         for (size_t ci = 0; ci < persona->contacts_count; ci++) {
-            const sc_contact_profile_t *c = &persona->contacts[ci];
+            const hu_contact_profile_t *c = &persona->contacts[ci];
             if (ci > 0)
                 fputs(",\n", f);
             fputs("    {\n", f);
@@ -1171,11 +1171,11 @@ sc_error_t sc_persona_creator_write(sc_allocator_t *alloc, const sc_persona_t *p
 
     if (ferror(f)) {
         fclose(f);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 fail:
     fclose(f);
-    return SC_ERR_IO;
+    return HU_ERR_IO;
 }

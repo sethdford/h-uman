@@ -1,9 +1,9 @@
 ---
-title: SeaClaw Competitive Benchmarks (Latest Run)
+title: Human Competitive Benchmarks (Latest Run)
 generated: 2026-03-10T02:36:23Z
 ---
 
-# SeaClaw Competitive Benchmarks
+# Human Competitive Benchmarks
 
 **Generated:** 2026-03-10T02:36:23Z
 
@@ -11,7 +11,7 @@ generated: 2026-03-10T02:36:23Z
 
 | Site | Perf | A11y | BP | SEO | LCP (ms) | CLS | TBT (ms) | TTFB (ms) |
 | ---- | ---- | ---- | -- | --- | -------- | --- | -------- | --------- |
-| SeaClaw | — | — | — | — | — | — | — | — |
+| Human | — | — | — | — | — | — | — | — |
 | Linear | 27 | 79 | 88 | 100 | 26123 | 0.00 | 2308 | 48 |
 | Vercel | 57 | 89 | 96 | 92 | 11985 | 0.00 | 412 | 20 |
 | Raycast | — | — | — | — | — | — | — | — |
@@ -28,9 +28,9 @@ generated: 2026-03-10T02:36:23Z
 | Immersive Garden | — | — | — | — | — | — | — | — |
 | Malvah | 57 | 94 | 100 | 100 | 10613 | 0.00 | 368 | 41 |
 
-## SeaClaw vs Category-Defining Targets
+## Human vs Category-Defining Targets
 
-| Metric | Industry Best | SeaClaw Target | SeaClaw Actual |
+| Metric | Industry Best | Human Target | Human Actual |
 | ------ | ------------- | -------------- | -------------- |
 | Lighthouse Performance | 95–97 (Vercel) | 99+ | — |
 | LCP | 0.8s (Linear) | < 0.5s | — |

@@ -1,6 +1,6 @@
-#include "seaclaw/memory/deep_extract.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/deep_extract.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,16 +12,16 @@ static const char DEEP_EXTRACT_PROMPT[] =
     "\"entity_b\":\"...\",\"confidence\":0.8}],\"summary\":\"1-2 sentence summary\"}\n\n"
     "Conversation:\n";
 
-sc_error_t sc_deep_extract_build_prompt(sc_allocator_t *alloc, const char *conversation,
+hu_error_t hu_deep_extract_build_prompt(hu_allocator_t *alloc, const char *conversation,
                                         size_t conversation_len, char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t prompt_len = sizeof(DEEP_EXTRACT_PROMPT) - 1;
     size_t total = prompt_len + conversation_len + 1;
     char *buf = (char *)alloc->alloc(alloc->ctx, total);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     memcpy(buf, DEEP_EXTRACT_PROMPT, prompt_len);
     if (conversation && conversation_len > 0)
@@ -30,63 +30,63 @@ sc_error_t sc_deep_extract_build_prompt(sc_allocator_t *alloc, const char *conve
 
     *out = buf;
     *out_len = prompt_len + conversation_len;
-    return SC_OK;
+    return HU_OK;
 }
 
-static const char *get_str(sc_json_value_t *v) {
-    if (!v || v->type != SC_JSON_STRING)
+static const char *get_str(hu_json_value_t *v) {
+    if (!v || v->type != HU_JSON_STRING)
         return NULL;
     return v->data.string.ptr;
 }
 
-static size_t get_str_len(sc_json_value_t *v) {
-    if (!v || v->type != SC_JSON_STRING)
+static size_t get_str_len(hu_json_value_t *v) {
+    if (!v || v->type != HU_JSON_STRING)
         return 0;
     return v->data.string.len;
 }
 
-static double get_num(sc_json_value_t *v, double def) {
-    if (!v || v->type != SC_JSON_NUMBER)
+static double get_num(hu_json_value_t *v, double def) {
+    if (!v || v->type != HU_JSON_NUMBER)
         return def;
     return v->data.number;
 }
 
-sc_error_t sc_deep_extract_parse(sc_allocator_t *alloc, const char *response, size_t response_len,
-                                 sc_deep_extract_result_t *out) {
+hu_error_t hu_deep_extract_parse(hu_allocator_t *alloc, const char *response, size_t response_len,
+                                 hu_deep_extract_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     if (!response || response_len == 0)
-        return SC_OK;
+        return HU_OK;
 
-    sc_json_value_t *root = NULL;
-    sc_error_t err = sc_json_parse(alloc, response, response_len, &root);
-    if (err != SC_OK || !root || root->type != SC_JSON_OBJECT) {
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, response, response_len, &root);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
         if (root)
-            sc_json_free(alloc, root);
-        return err != SC_OK ? err : SC_ERR_JSON_PARSE;
+            hu_json_free(alloc, root);
+        return err != HU_OK ? err : HU_ERR_JSON_PARSE;
     }
 
-    sc_json_value_t *facts_arr = sc_json_object_get(root, "facts");
-    if (facts_arr && facts_arr->type == SC_JSON_ARRAY) {
-        for (size_t i = 0; i < facts_arr->data.array.len && out->fact_count < SC_DE_MAX_FACTS;
+    hu_json_value_t *facts_arr = hu_json_object_get(root, "facts");
+    if (facts_arr && facts_arr->type == HU_JSON_ARRAY) {
+        for (size_t i = 0; i < facts_arr->data.array.len && out->fact_count < HU_DE_MAX_FACTS;
              i++) {
-            sc_json_value_t *item = facts_arr->data.array.items[i];
-            if (!item || item->type != SC_JSON_OBJECT)
+            hu_json_value_t *item = facts_arr->data.array.items[i];
+            if (!item || item->type != HU_JSON_OBJECT)
                 continue;
-            sc_json_value_t *subj = sc_json_object_get(item, "subject");
-            sc_json_value_t *pred = sc_json_object_get(item, "predicate");
-            sc_json_value_t *obj = sc_json_object_get(item, "object");
+            hu_json_value_t *subj = hu_json_object_get(item, "subject");
+            hu_json_value_t *pred = hu_json_object_get(item, "predicate");
+            hu_json_value_t *obj = hu_json_object_get(item, "object");
             const char *s = get_str(subj);
             const char *p = get_str(pred);
             const char *o = get_str(obj);
             if (s && p && o) {
-                sc_extracted_fact_t *f = &out->facts[out->fact_count];
-                f->subject = sc_strndup(alloc, s, get_str_len(subj));
-                f->predicate = sc_strndup(alloc, p, get_str_len(pred));
-                f->object = sc_strndup(alloc, o, get_str_len(obj));
-                f->confidence = get_num(sc_json_object_get(item, "confidence"), 0.9);
+                hu_extracted_fact_t *f = &out->facts[out->fact_count];
+                f->subject = hu_strndup(alloc, s, get_str_len(subj));
+                f->predicate = hu_strndup(alloc, p, get_str_len(pred));
+                f->object = hu_strndup(alloc, o, get_str_len(obj));
+                f->confidence = get_num(hu_json_object_get(item, "confidence"), 0.9);
                 if (f->subject && f->predicate && f->object)
                     out->fact_count++;
                 else {
@@ -101,25 +101,25 @@ sc_error_t sc_deep_extract_parse(sc_allocator_t *alloc, const char *response, si
         }
     }
 
-    sc_json_value_t *rels_arr = sc_json_object_get(root, "relations");
-    if (rels_arr && rels_arr->type == SC_JSON_ARRAY) {
+    hu_json_value_t *rels_arr = hu_json_object_get(root, "relations");
+    if (rels_arr && rels_arr->type == HU_JSON_ARRAY) {
         for (size_t i = 0;
-             i < rels_arr->data.array.len && out->relation_count < SC_DE_MAX_RELATIONS; i++) {
-            sc_json_value_t *item = rels_arr->data.array.items[i];
-            if (!item || item->type != SC_JSON_OBJECT)
+             i < rels_arr->data.array.len && out->relation_count < HU_DE_MAX_RELATIONS; i++) {
+            hu_json_value_t *item = rels_arr->data.array.items[i];
+            if (!item || item->type != HU_JSON_OBJECT)
                 continue;
-            sc_json_value_t *ea = sc_json_object_get(item, "entity_a");
-            sc_json_value_t *rel = sc_json_object_get(item, "relation");
-            sc_json_value_t *eb = sc_json_object_get(item, "entity_b");
+            hu_json_value_t *ea = hu_json_object_get(item, "entity_a");
+            hu_json_value_t *rel = hu_json_object_get(item, "relation");
+            hu_json_value_t *eb = hu_json_object_get(item, "entity_b");
             const char *a = get_str(ea);
             const char *r = get_str(rel);
             const char *b = get_str(eb);
             if (a && r && b) {
-                sc_extracted_relation_t *rel_out = &out->relations[out->relation_count];
-                rel_out->entity_a = sc_strndup(alloc, a, get_str_len(ea));
-                rel_out->relation = sc_strndup(alloc, r, get_str_len(rel));
-                rel_out->entity_b = sc_strndup(alloc, b, get_str_len(eb));
-                rel_out->confidence = get_num(sc_json_object_get(item, "confidence"), 0.8);
+                hu_extracted_relation_t *rel_out = &out->relations[out->relation_count];
+                rel_out->entity_a = hu_strndup(alloc, a, get_str_len(ea));
+                rel_out->relation = hu_strndup(alloc, r, get_str_len(rel));
+                rel_out->entity_b = hu_strndup(alloc, b, get_str_len(eb));
+                rel_out->confidence = get_num(hu_json_object_get(item, "confidence"), 0.8);
                 if (rel_out->entity_a && rel_out->relation && rel_out->entity_b)
                     out->relation_count++;
                 else {
@@ -134,16 +134,16 @@ sc_error_t sc_deep_extract_parse(sc_allocator_t *alloc, const char *response, si
         }
     }
 
-    const char *summary = sc_json_get_string(root, "summary");
+    const char *summary = hu_json_get_string(root, "summary");
     if (summary) {
         size_t slen = strlen(summary);
-        out->summary = sc_strndup(alloc, summary, slen);
+        out->summary = hu_strndup(alloc, summary, slen);
         if (out->summary)
             out->summary_len = slen;
     }
 
-    sc_json_free(alloc, root);
-    return SC_OK;
+    hu_json_free(alloc, root);
+    return HU_OK;
 }
 
 static bool prefix_match_ci(const char *text, size_t text_len, const char *prefix,
@@ -181,9 +181,9 @@ typedef struct {
     size_t pattern_len;
     const char *predicate;
     size_t predicate_len;
-} sc_de_lightweight_pattern_t;
+} hu_de_lightweight_pattern_t;
 
-static const sc_de_lightweight_pattern_t LIGHTWEIGHT_PATTERNS[] = {
+static const hu_de_lightweight_pattern_t LIGHTWEIGHT_PATTERNS[] = {
     {"I work at ", 10, "works_at", 8},
     {"I'm a ", 6, "is_a", 4},
     {"I am a ", 7, "is_a", 4},
@@ -200,26 +200,26 @@ static const sc_de_lightweight_pattern_t LIGHTWEIGHT_PATTERNS[] = {
 #define LIGHTWEIGHT_PATTERN_COUNT \
     (sizeof(LIGHTWEIGHT_PATTERNS) / sizeof(LIGHTWEIGHT_PATTERNS[0]))
 
-sc_error_t sc_deep_extract_lightweight(sc_allocator_t *alloc, const char *text, size_t text_len,
-                                       sc_deep_extract_result_t *out) {
+hu_error_t hu_deep_extract_lightweight(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                       hu_deep_extract_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     if (!text) {
         if (text_len > 0)
-            return SC_ERR_INVALID_ARGUMENT;
-        return SC_OK;
+            return HU_ERR_INVALID_ARGUMENT;
+        return HU_OK;
     }
 
-    for (size_t i = 0; i < text_len && out->fact_count < SC_DE_MAX_FACTS; i++) {
+    for (size_t i = 0; i < text_len && out->fact_count < HU_DE_MAX_FACTS; i++) {
         while (i < text_len && (unsigned char)text[i] <= 32)
             i++;
         if (i >= text_len)
             break;
 
         for (size_t p = 0; p < LIGHTWEIGHT_PATTERN_COUNT; p++) {
-            const sc_de_lightweight_pattern_t *pat = &LIGHTWEIGHT_PATTERNS[p];
+            const hu_de_lightweight_pattern_t *pat = &LIGHTWEIGHT_PATTERNS[p];
             if (!prefix_match_ci(text + i, text_len - i, pat->pattern, pat->pattern_len))
                 continue;
             if (i > 0 && !is_word_boundary(text[i - 1]))
@@ -241,10 +241,10 @@ sc_error_t sc_deep_extract_lightweight(sc_allocator_t *alloc, const char *text, 
             if (obj_len == 0)
                 continue;
 
-            sc_extracted_fact_t *f = &out->facts[out->fact_count];
-            f->subject = sc_strndup(alloc, "user", 4);
-            f->predicate = sc_strndup(alloc, pat->predicate, pat->predicate_len);
-            f->object = sc_strndup(alloc, text + obj_start, obj_len);
+            hu_extracted_fact_t *f = &out->facts[out->fact_count];
+            f->subject = hu_strndup(alloc, "user", 4);
+            f->predicate = hu_strndup(alloc, pat->predicate, pat->predicate_len);
+            f->object = hu_strndup(alloc, text + obj_start, obj_len);
             f->confidence = 0.85;
             if (f->subject && f->predicate && f->object) {
                 out->fact_count++;
@@ -259,10 +259,10 @@ sc_error_t sc_deep_extract_lightweight(sc_allocator_t *alloc, const char *text, 
                 alloc->free(alloc->ctx, f->object, strlen(f->object) + 1);
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_deep_extract_result_deinit(sc_deep_extract_result_t *result, sc_allocator_t *alloc) {
+void hu_deep_extract_result_deinit(hu_deep_extract_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
     for (size_t i = 0; i < result->fact_count; i++) {

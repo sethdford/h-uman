@@ -1,6 +1,6 @@
 # apps/ios/ — iOS App
 
-SwiftUI app using SeaClawKit shared library.
+SwiftUI app using HumanKit shared library.
 
 ## Rules
 

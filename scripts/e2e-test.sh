@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# E2E test: validates that seaclaw builds, runs unit tests, and the binary
+# E2E test: validates that human builds, runs unit tests, and the binary
 # starts correctly for key subcommands.
 # Usage: ./scripts/e2e-test.sh [--help]
 
@@ -19,7 +19,7 @@ warn() { printf "${YELLOW}warning:${RESET} %s\n" "$1"; }
 case "${1:-}" in
     --help|-h)
         printf "Usage: %s [--help]\n" "$0"
-        printf "E2E test: validates that seaclaw builds, runs unit tests, and the binary starts correctly.\n"
+        printf "E2E test: validates that human builds, runs unit tests, and the binary starts correctly.\n"
         exit 0
         ;;
 esac
@@ -27,8 +27,8 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD="$ROOT/build"
-BIN="$BUILD/seaclaw"
-TESTS="$BUILD/seaclaw_tests"
+BIN="$BUILD/human"
+TESTS="$BUILD/human_tests"
 
 pass=0
 fail=0
@@ -45,7 +45,7 @@ check() {
     fi
 }
 
-echo "=== seaclaw E2E test suite ==="
+echo "=== human E2E test suite ==="
 echo ""
 
 # Build
@@ -66,7 +66,7 @@ check "binary exists" test -f "$BIN"
 check "binary is executable" test -x "$BIN"
 check "--version exits 0" "$BIN" --version
 check "--help exits 0" "$BIN" --help
-check "version output contains seaclaw" bash -c "$BIN --version 2>&1 | grep -qi seaclaw"
+check "version output contains human" bash -c "$BIN --version 2>&1 | grep -qi human"
 
 # Subcommand smoke tests
 echo ""
@@ -85,7 +85,7 @@ mkdir -p "$RELEASE_BUILD"
 (cd "$RELEASE_BUILD" && cmake "$ROOT" -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON >/dev/null 2>&1)
 (cd "$RELEASE_BUILD" && cmake --build . -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)" >/dev/null 2>&1)
 
-RELEASE_BIN="$RELEASE_BUILD/seaclaw"
+RELEASE_BIN="$RELEASE_BUILD/human"
 RELEASE_SIZE=$(stat -f%z "$RELEASE_BIN" 2>/dev/null || stat -c%s "$RELEASE_BIN" 2>/dev/null)
 check "release binary < 600 KB" test "$RELEASE_SIZE" -lt 614400
 echo -e "  ${DIM}release binary size: ${RELEASE_SIZE} bytes${RESET}"

@@ -1,4 +1,4 @@
-# SeaClaw Design Tokens
+# Human Design Tokens
 
 W3C Design Tokens v2025.10 format — single source of truth for all platform styling.
 
@@ -30,9 +30,9 @@ npm run check:drift # verifies outputs match source tokens
 | --------------------- | ----------------------------------------------- | ------------------- |
 | CSS custom properties | `ui/src/styles/_tokens.css`                     | Web                 |
 | CSS custom properties | `website/src/styles/_tokens.css`                | Website             |
-| Swift constants       | `seaclaw/Sources/SeaClawKit/DesignTokens.swift` | iOS/macOS           |
+| Swift constants       | `human/Sources/HumanKit/DesignTokens.swift` | iOS/macOS           |
 | Kotlin constants      | (Android module)                                | Android             |
-| C `#define` macros    | `include/seaclaw/design_tokens.h`               | C runtime (TUI/CLI) |
+| C `#define` macros    | `include/human/design_tokens.h`               | C runtime (TUI/CLI) |
 | JSON reference        | `docs/design-tokens-reference.json`             | Documentation       |
 
 ### How It Works

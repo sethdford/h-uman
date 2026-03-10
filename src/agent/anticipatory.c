@@ -1,23 +1,23 @@
-#include "seaclaw/agent/anticipatory.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/anticipatory.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-#define SC_SECONDS_PER_DAY   86400
-#define SC_ANTICIPATORY_DAYS 7
+#define HU_SECONDS_PER_DAY   86400
+#define HU_ANTICIPATORY_DAYS 7
 
-static void add_action(sc_anticipatory_result_t *result, sc_allocator_t *alloc,
-                       sc_action_type_t type, const char *desc, size_t desc_len,
+static void add_action(hu_anticipatory_result_t *result, hu_allocator_t *alloc,
+                       hu_action_type_t type, const char *desc, size_t desc_len,
                        const char *trigger, size_t trigger_len, float relevance,
                        int64_t suggested_time) {
-    if (result->action_count >= SC_ANTICIPATORY_MAX_ACTIONS)
+    if (result->action_count >= HU_ANTICIPATORY_MAX_ACTIONS)
         return;
-    sc_anticipatory_action_t *a = &result->actions[result->action_count];
+    hu_anticipatory_action_t *a = &result->actions[result->action_count];
     a->type = type;
-    a->description = desc_len > 0 ? sc_strndup(alloc, desc, desc_len) : NULL;
+    a->description = desc_len > 0 ? hu_strndup(alloc, desc, desc_len) : NULL;
     a->description_len = a->description ? desc_len : 0;
-    a->trigger_entity = trigger_len > 0 ? sc_strndup(alloc, trigger, trigger_len) : NULL;
+    a->trigger_entity = trigger_len > 0 ? hu_strndup(alloc, trigger, trigger_len) : NULL;
     a->trigger_entity_len = a->trigger_entity ? trigger_len : 0;
     a->relevance = relevance;
     a->suggested_time = suggested_time;
@@ -25,7 +25,7 @@ static void add_action(sc_anticipatory_result_t *result, sc_allocator_t *alloc,
 }
 
 static void parse_temporal_lines(const char *text, size_t text_len,
-                                 sc_anticipatory_result_t *result, sc_allocator_t *alloc,
+                                 hu_anticipatory_result_t *result, hu_allocator_t *alloc,
                                  int64_t now_ts) {
     const char *p = text;
     const char *end = text + text_len;
@@ -84,12 +84,12 @@ static void parse_temporal_lines(const char *text, size_t text_len,
                 float rel = 0.8f;
                 if (ts > now_ts) {
                     int64_t delta = ts - now_ts;
-                    if (delta <= SC_SECONDS_PER_DAY)
+                    if (delta <= HU_SECONDS_PER_DAY)
                         rel = 0.95f;
-                    else if (delta <= 3 * SC_SECONDS_PER_DAY)
+                    else if (delta <= 3 * HU_SECONDS_PER_DAY)
                         rel = 0.85f;
                 }
-                add_action(result, alloc, SC_ACTION_CELEBRATE, desc_start, desc_len, trigger_start,
+                add_action(result, alloc, HU_ACTION_CELEBRATE, desc_start, desc_len, trigger_start,
                            trigger_len, rel, ts);
             }
         }
@@ -98,8 +98,8 @@ static void parse_temporal_lines(const char *text, size_t text_len,
     }
 }
 
-static void parse_causal_lines(const char *text, size_t text_len, sc_anticipatory_result_t *result,
-                               sc_allocator_t *alloc) {
+static void parse_causal_lines(const char *text, size_t text_len, hu_anticipatory_result_t *result,
+                               hu_allocator_t *alloc) {
     const char *p = text;
     const char *end = text + text_len;
     while (p < end) {
@@ -150,7 +150,7 @@ static void parse_causal_lines(const char *text, size_t text_len, sc_anticipator
                     int n = snprintf(desc_buf, sizeof(desc_buf), "Remind: %.*s -> %.*s",
                                      (int)action_len, line_start, (int)outcome_len, outcome_start);
                     if (n > 0 && (size_t)n < sizeof(desc_buf))
-                        add_action(result, alloc, SC_ACTION_REMIND, desc_buf, (size_t)n, line_start,
+                        add_action(result, alloc, HU_ACTION_REMIND, desc_buf, (size_t)n, line_start,
                                    action_len, confidence, 0);
                 }
             }
@@ -160,19 +160,19 @@ static void parse_causal_lines(const char *text, size_t text_len, sc_anticipator
     }
 }
 
-sc_error_t sc_anticipatory_analyze(sc_graph_t *graph, sc_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, int64_t now_ts,
-                                   sc_anticipatory_result_t *result) {
+                                   hu_anticipatory_result_t *result) {
     if (!graph || !alloc || !result)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(result, 0, sizeof(*result));
 
-    int64_t to_ts = now_ts + (int64_t)(SC_ANTICIPATORY_DAYS * SC_SECONDS_PER_DAY);
+    int64_t to_ts = now_ts + (int64_t)(HU_ANTICIPATORY_DAYS * HU_SECONDS_PER_DAY);
     char *temporal_out = NULL;
     size_t temporal_len = 0;
-    sc_error_t err =
-        sc_graph_query_temporal(graph, alloc, now_ts, to_ts, 20, &temporal_out, &temporal_len);
-    if (err == SC_OK && temporal_out && temporal_len > 0) {
+    hu_error_t err =
+        hu_graph_query_temporal(graph, alloc, now_ts, to_ts, 20, &temporal_out, &temporal_len);
+    if (err == HU_OK && temporal_out && temporal_len > 0) {
         parse_temporal_lines(temporal_out, temporal_len, result, alloc, now_ts);
         alloc->free(alloc->ctx, temporal_out, temporal_len + 1);
         temporal_out = NULL;
@@ -181,16 +181,16 @@ sc_error_t sc_anticipatory_analyze(sc_graph_t *graph, sc_allocator_t *alloc, con
         temporal_out = NULL;
     }
 
-    if (contact_id && contact_id_len > 0 && result->action_count < SC_ANTICIPATORY_MAX_ACTIONS) {
-        sc_graph_entity_t ent;
+    if (contact_id && contact_id_len > 0 && result->action_count < HU_ANTICIPATORY_MAX_ACTIONS) {
+        hu_graph_entity_t ent;
         memset(&ent, 0, sizeof(ent));
-        err = sc_graph_find_entity(graph, contact_id, contact_id_len, &ent);
-        if (err == SC_OK && ent.id > 0) {
+        err = hu_graph_find_entity(graph, contact_id, contact_id_len, &ent);
+        if (err == HU_OK && ent.id > 0) {
             char *causal_out = NULL;
             size_t causal_len = 0;
-            sc_error_t c_err =
-                sc_graph_query_causal(graph, alloc, ent.id, 10, &causal_out, &causal_len);
-            if (c_err == SC_OK && causal_out && causal_len > 0) {
+            hu_error_t c_err =
+                hu_graph_query_causal(graph, alloc, ent.id, 10, &causal_out, &causal_len);
+            if (c_err == HU_OK && causal_out && causal_len > 0) {
                 parse_causal_lines(causal_out, causal_len, result, alloc);
                 alloc->free(alloc->ctx, causal_out, causal_len + 1);
             } else if (causal_out) {
@@ -203,36 +203,36 @@ sc_error_t sc_anticipatory_analyze(sc_graph_t *graph, sc_allocator_t *alloc, con
         }
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_anticipatory_build_context(const sc_anticipatory_result_t *result,
-                                         sc_allocator_t *alloc, char **out, size_t *out_len) {
+hu_error_t hu_anticipatory_build_context(const hu_anticipatory_result_t *result,
+                                         hu_allocator_t *alloc, char **out, size_t *out_len) {
     if (!result || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
     if (result->action_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     static const char *const type_str[] = {"FOLLOW_UP", "REMIND", "CELEBRATE", "EMPATHIZE"};
     size_t cap = 512;
     for (size_t i = 0; i < result->action_count; i++) {
-        const sc_anticipatory_action_t *a = &result->actions[i];
+        const hu_anticipatory_action_t *a = &result->actions[i];
         cap += 64;
         if (a->description)
             cap += a->description_len;
     }
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t pos = 0;
     int w = snprintf(buf, cap, "### Anticipatory Awareness\n");
     if (w > 0)
         pos = (size_t)w;
     for (size_t i = 0; i < result->action_count && pos < cap - 128; i++) {
-        const sc_anticipatory_action_t *a = &result->actions[i];
-        const char *t = (a->type <= SC_ACTION_EMPATHIZE) ? type_str[a->type] : "FOLLOW_UP";
+        const hu_anticipatory_action_t *a = &result->actions[i];
+        const char *t = (a->type <= HU_ACTION_EMPATHIZE) ? type_str[a->type] : "FOLLOW_UP";
         int pct = (int)(a->relevance * 100.0f + 0.5f);
         if (pct > 100)
             pct = 100;
@@ -247,21 +247,21 @@ sc_error_t sc_anticipatory_build_context(const sc_anticipatory_result_t *result,
     buf[pos] = '\0';
     *out = buf;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_anticipatory_result_deinit(sc_anticipatory_result_t *result, sc_allocator_t *alloc) {
+void hu_anticipatory_result_deinit(hu_anticipatory_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
     for (size_t i = 0; i < result->action_count; i++) {
-        sc_anticipatory_action_t *a = &result->actions[i];
+        hu_anticipatory_action_t *a = &result->actions[i];
         if (a->description) {
-            sc_str_free(alloc, a->description);
+            hu_str_free(alloc, a->description);
             a->description = NULL;
             a->description_len = 0;
         }
         if (a->trigger_entity) {
-            sc_str_free(alloc, a->trigger_entity);
+            hu_str_free(alloc, a->trigger_entity);
             a->trigger_entity = NULL;
             a->trigger_entity_len = 0;
         }

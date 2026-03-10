@@ -10,8 +10,8 @@ import { icons } from "./icons.js";
 import "./components/floating-mic.js";
 import "./components/sidebar.js";
 import "./components/command-palette.js";
-import "./components/sc-shortcut-overlay.js";
-import "./components/sc-error-boundary.js";
+import "./components/hu-shortcut-overlay.js";
+import "./components/hu-error-boundary.js";
 import "./views/overview-view.js";
 
 type TabId =
@@ -53,7 +53,7 @@ const VALID_TABS: TabId[] = [
   "logs",
 ];
 
-const SIDEBAR_KEY = "sc-sidebar-collapsed";
+const SIDEBAR_KEY = "hu-sidebar-collapsed";
 
 const VIEW_IMPORTS: Record<TabId, () => Promise<unknown>> = {
   overview: () => Promise.resolve(),
@@ -98,58 +98,58 @@ const MORE_TABS: { id: TabId; label: string; icon: ReturnType<typeof html> }[] =
   { id: "logs", label: "Logs", icon: icons.terminal },
 ];
 
-@customElement("sc-app")
+@customElement("hu-app")
 export class ScApp extends LitElement {
   static override styles = css`
     :host {
       display: block;
       height: 100vh;
-      font-family: var(--sc-font);
+      font-family: var(--hu-font);
     }
-    .sc-skip-link {
+    .hu-skip-link {
       position: absolute;
       top: -100%;
-      left: var(--sc-space-md);
+      left: var(--hu-space-md);
       z-index: 9999;
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      background: var(--sc-accent);
-      color: var(--sc-on-accent);
-      border-radius: var(--sc-radius-sm);
+      padding: var(--hu-space-xs) var(--hu-space-md);
+      background: var(--hu-accent);
+      color: var(--hu-on-accent);
+      border-radius: var(--hu-radius-sm);
       text-decoration: none;
       font-weight: 600;
     }
-    .sc-skip-link:focus {
-      top: var(--sc-space-md);
+    .hu-skip-link:focus {
+      top: var(--hu-space-md);
     }
 
     .layout {
       display: grid;
-      grid-template-columns: var(--sc-sidebar-width) 1fr;
+      grid-template-columns: var(--hu-sidebar-width) 1fr;
       height: 100%;
-      transition: grid-template-columns var(--sc-duration-normal) var(--sc-ease-out);
+      transition: grid-template-columns var(--hu-duration-normal) var(--hu-ease-out);
     }
 
     .layout.collapsed {
-      grid-template-columns: var(--sc-sidebar-collapsed) 1fr;
+      grid-template-columns: var(--hu-sidebar-collapsed) 1fr;
     }
 
     main {
       display: flex;
       flex-direction: column;
       overflow: auto;
-      padding: var(--sc-space-2xl);
-      background: var(--sc-bg);
+      padding: var(--hu-space-2xl);
+      background: var(--hu-bg);
       view-transition-name: main-content;
       position: relative;
       outline: none;
     }
 
     main:focus-visible {
-      outline: var(--sc-focus-ring-width, 2px) solid var(--sc-focus-ring);
-      outline-offset: calc(-1 * var(--sc-focus-ring-width, 2px));
+      outline: var(--hu-focus-ring-width, 2px) solid var(--hu-focus-ring);
+      outline-offset: calc(-1 * var(--hu-focus-ring-width, 2px));
     }
 
-    @keyframes sc-ambient-drift {
+    @keyframes hu-ambient-drift {
       0%,
       100% {
         transform: translate(0, 0);
@@ -175,12 +175,12 @@ export class ScApp extends LitElement {
       height: 55%;
       background: radial-gradient(
         ellipse 70% 60% at 40% 30%,
-        color-mix(in srgb, var(--sc-accent) 7%, transparent),
+        color-mix(in srgb, var(--hu-accent) 7%, transparent),
         transparent 70%
       );
       pointer-events: none;
       z-index: 0;
-      animation: sc-ambient-drift var(--sc-duration-ambient) var(--sc-ease-in-out) infinite;
+      animation: hu-ambient-drift var(--hu-duration-ambient) var(--hu-ease-in-out) infinite;
     }
     main::after {
       content: "";
@@ -191,12 +191,12 @@ export class ScApp extends LitElement {
       height: 50%;
       background: radial-gradient(
         ellipse 60% 50% at 60% 60%,
-        color-mix(in srgb, var(--sc-accent) 4%, transparent),
+        color-mix(in srgb, var(--hu-accent) 4%, transparent),
         transparent 70%
       );
       pointer-events: none;
       z-index: 0;
-      animation: sc-ambient-drift var(--sc-duration-ambient-slow) var(--sc-ease-in-out) infinite
+      animation: hu-ambient-drift var(--hu-duration-ambient-slow) var(--hu-ease-in-out) infinite
         reverse;
     }
 
@@ -205,12 +205,12 @@ export class ScApp extends LitElement {
       min-height: 0;
       display: flex;
       flex-direction: column;
-      animation: sc-view-enter var(--sc-duration-moderate) var(--sc-spring-out) both;
+      animation: hu-view-enter var(--hu-duration-moderate) var(--hu-spring-out) both;
     }
-    @keyframes sc-view-enter {
+    @keyframes hu-view-enter {
       from {
         opacity: 0;
-        transform: translateY(var(--sc-space-sm)) scale(0.995);
+        transform: translateY(var(--hu-space-sm)) scale(0.995);
       }
       to {
         opacity: 1;
@@ -227,15 +227,15 @@ export class ScApp extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: var(--sc-space-sm);
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      background: var(--sc-error);
-      color: var(--sc-on-accent);
-      font-size: var(--sc-text-sm);
-      font-weight: var(--sc-weight-medium);
-      animation: sc-slide-down var(--sc-duration-normal) var(--sc-ease-out);
+      gap: var(--hu-space-sm);
+      padding: var(--hu-space-xs) var(--hu-space-md);
+      background: var(--hu-error);
+      color: var(--hu-on-accent);
+      font-size: var(--hu-text-sm);
+      font-weight: var(--hu-weight-medium);
+      animation: hu-slide-down var(--hu-duration-normal) var(--hu-ease-out);
     }
-    @keyframes sc-slide-down {
+    @keyframes hu-slide-down {
       from {
         transform: translateY(-100%);
       }
@@ -244,25 +244,25 @@ export class ScApp extends LitElement {
       }
     }
     .disconnect-banner button {
-      background: color-mix(in srgb, var(--sc-on-accent) 20%, transparent);
-      border: 1px solid color-mix(in srgb, var(--sc-on-accent) 40%, transparent);
-      color: var(--sc-on-accent);
-      padding: var(--sc-space-2xs) var(--sc-space-sm);
-      border-radius: var(--sc-radius-sm);
-      font-size: var(--sc-text-xs);
-      font-family: var(--sc-font);
+      background: color-mix(in srgb, var(--hu-on-accent) 20%, transparent);
+      border: 1px solid color-mix(in srgb, var(--hu-on-accent) 40%, transparent);
+      color: var(--hu-on-accent);
+      padding: var(--hu-space-2xs) var(--hu-space-sm);
+      border-radius: var(--hu-radius-sm);
+      font-size: var(--hu-text-xs);
+      font-family: var(--hu-font);
       cursor: pointer;
-      transition: background var(--sc-duration-fast);
+      transition: background var(--hu-duration-fast);
     }
     .disconnect-banner button:hover {
-      background: color-mix(in srgb, var(--sc-on-accent) 35%, transparent);
+      background: color-mix(in srgb, var(--hu-on-accent) 35%, transparent);
     }
 
     .mobile-nav {
       display: none;
     }
 
-    @media (max-width: var(--sc-breakpoint-lg)) /* --sc-breakpoint-lg */ {
+    @media (max-width: var(--hu-breakpoint-lg)) /* --hu-breakpoint-lg */ {
       .layout {
         grid-template-columns: 1fr;
         grid-template-rows: 1fr auto;
@@ -270,48 +270,48 @@ export class ScApp extends LitElement {
       .layout.collapsed {
         grid-template-columns: 1fr;
       }
-      sc-sidebar {
+      hu-sidebar {
         display: none;
       }
       main {
-        padding: var(--sc-space-md);
+        padding: var(--hu-space-md);
       }
       .mobile-nav {
         display: flex;
         align-items: center;
         justify-content: space-around;
-        background: color-mix(in srgb, var(--sc-bg-surface) 82%, transparent);
-        backdrop-filter: blur(var(--sc-glass-blur, 20px)) saturate(180%);
-        -webkit-backdrop-filter: blur(var(--sc-glass-blur, 20px)) saturate(180%);
-        box-shadow: var(--sc-shadow-sm);
-        padding: var(--sc-space-xs) 0;
+        background: color-mix(in srgb, var(--hu-bg-surface) 82%, transparent);
+        backdrop-filter: blur(var(--hu-glass-blur, 20px)) saturate(180%);
+        -webkit-backdrop-filter: blur(var(--hu-glass-blur, 20px)) saturate(180%);
+        box-shadow: var(--hu-shadow-sm);
+        padding: var(--hu-space-xs) 0;
         padding-bottom: env(safe-area-inset-bottom, 0);
       }
       .mobile-tab {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: var(--sc-space-2xs);
-        padding: var(--sc-space-xs) var(--sc-space-sm);
+        gap: var(--hu-space-2xs);
+        padding: var(--hu-space-xs) var(--hu-space-sm);
         background: transparent;
         border: none;
-        color: var(--sc-text-muted);
-        font-size: var(--sc-text-xs);
-        font-family: var(--sc-font);
+        color: var(--hu-text-muted);
+        font-size: var(--hu-text-xs);
+        font-family: var(--hu-font);
         cursor: pointer;
         min-width: 44px;
         min-height: 44px;
-        border-radius: var(--sc-radius-sm);
-        transition: color var(--sc-duration-fast);
+        border-radius: var(--hu-radius-sm);
+        transition: color var(--hu-duration-fast);
       }
       .mobile-tab:hover,
       .mobile-tab.active {
-        color: var(--sc-accent-text, var(--sc-accent));
+        color: var(--hu-accent-text, var(--hu-accent));
       }
       .mobile-tab .icon {
-        width: var(--sc-icon-md);
-        height: var(--sc-icon-md);
-        line-height: var(--sc-leading-none);
+        width: var(--hu-icon-md);
+        height: var(--hu-icon-md);
+        line-height: var(--hu-leading-none);
       }
       .mobile-tab .icon svg {
         width: 100%;
@@ -323,9 +323,9 @@ export class ScApp extends LitElement {
       position: fixed;
       inset: 0;
       z-index: 9998;
-      background: color-mix(in srgb, var(--sc-bg) 40%, transparent);
-      backdrop-filter: blur(var(--sc-blur-sm, 4px));
-      -webkit-backdrop-filter: blur(var(--sc-blur-sm, 4px));
+      background: color-mix(in srgb, var(--hu-bg) 40%, transparent);
+      backdrop-filter: blur(var(--hu-blur-sm, 4px));
+      -webkit-backdrop-filter: blur(var(--hu-blur-sm, 4px));
     }
     .more-sheet {
       position: fixed;
@@ -333,16 +333,16 @@ export class ScApp extends LitElement {
       left: 0;
       right: 0;
       z-index: 9999;
-      background: var(--sc-bg-surface);
-      border-radius: var(--sc-radius-xl) var(--sc-radius-xl) 0 0;
-      box-shadow: var(--sc-shadow-lg);
-      padding: var(--sc-space-md) var(--sc-space-md)
-        calc(var(--sc-space-lg) + env(safe-area-inset-bottom, 0));
-      animation: sc-sheet-up var(--sc-duration-normal) var(--sc-ease-out);
+      background: var(--hu-bg-surface);
+      border-radius: var(--hu-radius-xl) var(--hu-radius-xl) 0 0;
+      box-shadow: var(--hu-shadow-lg);
+      padding: var(--hu-space-md) var(--hu-space-md)
+        calc(var(--hu-space-lg) + env(safe-area-inset-bottom, 0));
+      animation: hu-sheet-up var(--hu-duration-normal) var(--hu-ease-out);
       max-height: 70vh;
       overflow-y: auto;
     }
-    @keyframes sc-sheet-up {
+    @keyframes hu-sheet-up {
       from {
         transform: translateY(100%);
       }
@@ -351,38 +351,38 @@ export class ScApp extends LitElement {
       }
     }
     .more-sheet-handle {
-      width: var(--sc-space-2xl, 36px);
-      height: var(--sc-space-2xs, 4px);
-      background: var(--sc-border);
-      border-radius: var(--sc-radius-sm, 2px);
-      margin: 0 auto var(--sc-space-md);
+      width: var(--hu-space-2xl, 36px);
+      height: var(--hu-space-2xs, 4px);
+      background: var(--hu-border);
+      border-radius: var(--hu-radius-sm, 2px);
+      margin: 0 auto var(--hu-space-md);
     }
     .more-sheet-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
     .more-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: var(--sc-space-xs);
-      padding: var(--sc-space-sm);
-      border-radius: var(--sc-radius);
+      gap: var(--hu-space-xs);
+      padding: var(--hu-space-sm);
+      border-radius: var(--hu-radius);
       background: transparent;
       border: none;
-      color: var(--sc-text);
-      font-family: var(--sc-font);
-      font-size: var(--sc-text-xs);
+      color: var(--hu-text);
+      font-family: var(--hu-font);
+      font-size: var(--hu-text-xs);
       cursor: pointer;
-      transition: background var(--sc-duration-fast);
+      transition: background var(--hu-duration-fast);
     }
     .more-item:hover {
-      background: var(--sc-hover-overlay);
+      background: var(--hu-hover-overlay);
     }
     .more-item .more-icon {
-      width: var(--sc-icon-lg);
-      height: var(--sc-icon-lg);
+      width: var(--hu-icon-lg);
+      height: var(--hu-icon-lg);
     }
     .more-item .more-icon svg {
       width: 100%;
@@ -441,7 +441,7 @@ export class ScApp extends LitElement {
 
     // Auto-fallback: if real gateway doesn't complete handshake within 2.5s, use demo.
     // A raw WebSocket open (e.g. to Vite's HMR server) is not enough — we need a
-    // successful "connect" handshake proving this is a real seaclaw gateway.
+    // successful "connect" handshake proving this is a real human gateway.
     if (!this._isDemo) {
       this._inFallbackWindow = true;
       this._fallbackTimer = setTimeout(() => {
@@ -472,7 +472,7 @@ export class ScApp extends LitElement {
       }
     }) as EventListener);
 
-    this.addEventListener("sc-voice-transcribe", ((
+    this.addEventListener("hu-voice-transcribe", ((
       e: CustomEvent<{ audio: string; mimeType: string }>,
     ) => {
       if (!this.gateway) return;
@@ -483,14 +483,14 @@ export class ScApp extends LitElement {
         })
         .then((result) => {
           window.dispatchEvent(
-            new CustomEvent("sc-voice-transcript-result", {
+            new CustomEvent("hu-voice-transcript-result", {
               detail: { text: result.text ?? "" },
             }),
           );
         })
         .catch(() => {
           window.dispatchEvent(
-            new CustomEvent("sc-voice-transcript-result", {
+            new CustomEvent("hu-voice-transcript-result", {
               detail: { text: "" },
             }),
           );
@@ -685,7 +685,7 @@ export class ScApp extends LitElement {
     return html`
       <a
         href="#main-content"
-        class="sc-skip-link"
+        class="hu-skip-link"
         @click=${(e: Event) => {
           e.preventDefault();
           this.shadowRoot?.getElementById("main-content")?.focus();
@@ -699,19 +699,19 @@ export class ScApp extends LitElement {
           </div>`
         : nothing}
       <div class="layout ${this.sidebarCollapsed ? "collapsed" : ""}">
-        <sc-sidebar
+        <hu-sidebar
           .activeTab=${this.tab}
           ?collapsed=${this.sidebarCollapsed}
           .connectionStatus=${this.connectionStatus}
           @tab-change=${this._onTabChange}
           @toggle-collapse=${() => this._toggleSidebar()}
-        ></sc-sidebar>
+        ></hu-sidebar>
 
         <main id="main-content" tabindex="0">
           <div class="view-enter">
-            <sc-error-boundary .error=${this._viewError} @retry=${this._onViewRetry}>
+            <hu-error-boundary .error=${this._viewError} @retry=${this._onViewRetry}>
               ${this._renderWrappedView()}
-            </sc-error-boundary>
+            </hu-error-boundary>
           </div>
         </main>
 
@@ -770,22 +770,22 @@ export class ScApp extends LitElement {
           `
         : nothing}
 
-      <sc-command-palette
+      <hu-command-palette
         .open=${this.commandPaletteOpen}
         @execute=${this._onCommandExecute}
         @close=${() => {
           this.commandPaletteOpen = false;
         }}
-      ></sc-command-palette>
+      ></hu-command-palette>
 
-      <sc-shortcut-overlay
+      <hu-shortcut-overlay
         .open=${this.shortcutOverlayOpen}
         @close=${() => {
           this.shortcutOverlayOpen = false;
         }}
-      ></sc-shortcut-overlay>
+      ></hu-shortcut-overlay>
 
-      <sc-floating-mic></sc-floating-mic>
+      <hu-floating-mic></hu-floating-mic>
     `;
   }
 
@@ -815,41 +815,41 @@ export class ScApp extends LitElement {
   private _renderView() {
     switch (this.tab) {
       case "overview":
-        return html`<sc-overview-view></sc-overview-view>`;
+        return html`<hu-overview-view></hu-overview-view>`;
       case "chat":
-        return html`<sc-chat-view .sessionKey=${this.chatSessionKey}></sc-chat-view>`;
+        return html`<hu-chat-view .sessionKey=${this.chatSessionKey}></hu-chat-view>`;
       case "agents":
-        return html`<sc-agents-view></sc-agents-view>`;
+        return html`<hu-agents-view></hu-agents-view>`;
       case "sessions":
-        return html`<sc-sessions-view></sc-sessions-view>`;
+        return html`<hu-sessions-view></hu-sessions-view>`;
       case "models":
-        return html`<sc-models-view></sc-models-view>`;
+        return html`<hu-models-view></hu-models-view>`;
       case "config":
-        return html`<sc-config-view></sc-config-view>`;
+        return html`<hu-config-view></hu-config-view>`;
       case "tools":
-        return html`<sc-tools-view></sc-tools-view>`;
+        return html`<hu-tools-view></hu-tools-view>`;
       case "channels":
-        return html`<sc-channels-view></sc-channels-view>`;
+        return html`<hu-channels-view></hu-channels-view>`;
       case "automations":
-        return html`<sc-automations-view></sc-automations-view>`;
+        return html`<hu-automations-view></hu-automations-view>`;
       case "skills":
-        return html`<sc-skills-view></sc-skills-view>`;
+        return html`<hu-skills-view></hu-skills-view>`;
       case "voice":
-        return html`<sc-voice-view></sc-voice-view>`;
+        return html`<hu-voice-view></hu-voice-view>`;
       case "nodes":
-        return html`<sc-nodes-view></sc-nodes-view>`;
+        return html`<hu-nodes-view></hu-nodes-view>`;
       case "usage":
-        return html`<sc-usage-view></sc-usage-view>`;
+        return html`<hu-usage-view></hu-usage-view>`;
       case "metrics":
-        return html`<sc-metrics-view></sc-metrics-view>`;
+        return html`<hu-metrics-view></hu-metrics-view>`;
       case "memory":
-        return html`<sc-memory-view></sc-memory-view>`;
+        return html`<hu-memory-view></hu-memory-view>`;
       case "security":
-        return html`<sc-security-view></sc-security-view>`;
+        return html`<hu-security-view></hu-security-view>`;
       case "logs":
-        return html`<sc-logs-view></sc-logs-view>`;
+        return html`<hu-logs-view></hu-logs-view>`;
       default:
-        return html`<sc-overview-view></sc-overview-view>`;
+        return html`<hu-overview-view></hu-overview-view>`;
     }
   }
 }

@@ -1,10 +1,10 @@
-#include "seaclaw/channels/facebook.h"
-#include "seaclaw/channel.h"
-#include "seaclaw/channel_loop.h"
-#include "seaclaw/channels/meta_common.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
+#include "human/channels/facebook.h"
+#include "human/channel.h"
+#include "human/channel_loop.h"
+#include "human/channels/meta_common.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,13 +15,13 @@
 #define FACEBOOK_ENDPOINT        "me/messages"
 #define FACEBOOK_ENDPOINT_LEN    12
 
-typedef struct sc_facebook_queued_msg {
+typedef struct hu_facebook_queued_msg {
     char session_key[128];
     char content[4096];
-} sc_facebook_queued_msg_t;
+} hu_facebook_queued_msg_t;
 
-typedef struct sc_facebook_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_facebook_ctx {
+    hu_allocator_t *alloc;
     char *page_id;
     size_t page_id_len;
     char *page_access_token;
@@ -29,11 +29,11 @@ typedef struct sc_facebook_ctx {
     char *app_secret;
     size_t app_secret_len;
     bool running;
-    sc_facebook_queued_msg_t queue[FACEBOOK_QUEUE_MAX];
+    hu_facebook_queued_msg_t queue[FACEBOOK_QUEUE_MAX];
     size_t queue_head;
     size_t queue_tail;
     size_t queue_count;
-#if SC_IS_TEST
+#if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
     struct {
@@ -42,84 +42,84 @@ typedef struct sc_facebook_ctx {
     } mock_msgs[8];
     size_t mock_count;
 #endif
-} sc_facebook_ctx_t;
+} hu_facebook_ctx_t;
 
-static sc_error_t facebook_start(void *ctx) {
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)ctx;
+static hu_error_t facebook_start(void *ctx) {
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void facebook_stop(void *ctx) {
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)ctx;
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)ctx;
     if (c)
         c->running = false;
 }
 
-static sc_error_t facebook_send(void *ctx, const char *target, size_t target_len,
+static hu_error_t facebook_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
     (void)media;
     (void)media_count;
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)ctx;
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)ctx;
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        return SC_OK;
+        return HU_OK;
     }
 #else
     if (!c || !c->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!c->page_access_token || c->page_access_token_len == 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
+        return HU_ERR_CHANNEL_NOT_CONFIGURED;
     if (!target || target_len == 0 || !message)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_json_buf_t jbuf;
-    sc_error_t err = sc_json_buf_init(&jbuf, c->alloc);
+    hu_json_buf_t jbuf;
+    hu_error_t err = hu_json_buf_init(&jbuf, c->alloc);
     if (err)
         return err;
 
-    err = sc_json_buf_append_raw(&jbuf, "{\"recipient\":{", 13);
+    err = hu_json_buf_append_raw(&jbuf, "{\"recipient\":{", 13);
     if (err)
         goto jfail;
-    err = sc_json_append_key_value(&jbuf, "id", 2, target, target_len);
+    err = hu_json_append_key_value(&jbuf, "id", 2, target, target_len);
     if (err)
         goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, "},\"message\":{", 13);
+    err = hu_json_buf_append_raw(&jbuf, "},\"message\":{", 13);
     if (err)
         goto jfail;
-    err = sc_json_append_key_value(&jbuf, "text", 4, message, message_len);
+    err = hu_json_append_key_value(&jbuf, "text", 4, message, message_len);
     if (err)
         goto jfail;
-    err = sc_json_buf_append_raw(&jbuf, "}}", 2);
+    err = hu_json_buf_append_raw(&jbuf, "}}", 2);
     if (err)
         goto jfail;
 
-    err = sc_meta_graph_send(c->alloc, c->page_access_token, c->page_access_token_len,
+    err = hu_meta_graph_send(c->alloc, c->page_access_token, c->page_access_token_len,
                              FACEBOOK_ENDPOINT, FACEBOOK_ENDPOINT_LEN, jbuf.ptr, jbuf.len);
-    sc_json_buf_free(&jbuf);
-    if (err != SC_OK)
-        return SC_ERR_CHANNEL_SEND;
-    return SC_OK;
+    hu_json_buf_free(&jbuf);
+    if (err != HU_OK)
+        return HU_ERR_CHANNEL_SEND;
+    return HU_OK;
 jfail:
-    sc_json_buf_free(&jbuf);
+    hu_json_buf_free(&jbuf);
     return err;
 #endif
 }
 
-static void facebook_queue_push(sc_facebook_ctx_t *c, const char *from, size_t from_len,
+static void facebook_queue_push(hu_facebook_ctx_t *c, const char *from, size_t from_len,
                                 const char *body, size_t body_len) {
     if (!c || !from || !body || c->queue_count >= FACEBOOK_QUEUE_MAX)
         return;
-    sc_facebook_queued_msg_t *slot = &c->queue[c->queue_tail];
+    hu_facebook_queued_msg_t *slot = &c->queue[c->queue_tail];
     size_t sk = from_len < FACEBOOK_SESSION_KEY_MAX ? from_len : FACEBOOK_SESSION_KEY_MAX;
     memcpy(slot->session_key, from, sk);
     slot->session_key[sk] = '\0';
@@ -130,67 +130,67 @@ static void facebook_queue_push(sc_facebook_ctx_t *c, const char *from, size_t f
     c->queue_count++;
 }
 
-sc_error_t sc_facebook_on_webhook(void *channel_ctx, sc_allocator_t *alloc, const char *body,
+hu_error_t hu_facebook_on_webhook(void *channel_ctx, hu_allocator_t *alloc, const char *body,
                                   size_t body_len) {
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)channel_ctx;
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)channel_ctx;
     if (!c || !body || body_len == 0)
-        return SC_ERR_INVALID_ARGUMENT;
-#if SC_IS_TEST
+        return HU_ERR_INVALID_ARGUMENT;
+#if HU_IS_TEST
     (void)alloc;
     facebook_queue_push(c, "test-sender", 11, body, body_len);
-    return SC_OK;
+    return HU_OK;
 #else
-    sc_json_value_t *parsed = NULL;
-    sc_error_t err = sc_json_parse(alloc, body, body_len, &parsed);
-    if (err != SC_OK || !parsed)
-        return SC_OK;
+    hu_json_value_t *parsed = NULL;
+    hu_error_t err = hu_json_parse(alloc, body, body_len, &parsed);
+    if (err != HU_OK || !parsed)
+        return HU_OK;
 
-    sc_json_value_t *entry = sc_json_object_get(parsed, "entry");
-    if (!entry || entry->type != SC_JSON_ARRAY) {
-        sc_json_free(alloc, parsed);
-        return SC_OK;
+    hu_json_value_t *entry = hu_json_object_get(parsed, "entry");
+    if (!entry || entry->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, parsed);
+        return HU_OK;
     }
 
     for (size_t e = 0; e < entry->data.array.len; e++) {
-        sc_json_value_t *ent = entry->data.array.items[e];
-        if (!ent || ent->type != SC_JSON_OBJECT)
+        hu_json_value_t *ent = entry->data.array.items[e];
+        if (!ent || ent->type != HU_JSON_OBJECT)
             continue;
-        sc_json_value_t *messaging = sc_json_object_get(ent, "messaging");
-        if (!messaging || messaging->type != SC_JSON_ARRAY)
+        hu_json_value_t *messaging = hu_json_object_get(ent, "messaging");
+        if (!messaging || messaging->type != HU_JSON_ARRAY)
             continue;
 
         for (size_t m = 0; m < messaging->data.array.len; m++) {
-            sc_json_value_t *msg = messaging->data.array.items[m];
-            if (!msg || msg->type != SC_JSON_OBJECT)
+            hu_json_value_t *msg = messaging->data.array.items[m];
+            if (!msg || msg->type != HU_JSON_OBJECT)
                 continue;
-            sc_json_value_t *message_obj = sc_json_object_get(msg, "message");
-            if (!message_obj || message_obj->type != SC_JSON_OBJECT)
+            hu_json_value_t *message_obj = hu_json_object_get(msg, "message");
+            if (!message_obj || message_obj->type != HU_JSON_OBJECT)
                 continue;
-            const char *text = sc_json_get_string(message_obj, "text");
+            const char *text = hu_json_get_string(message_obj, "text");
             if (!text || strlen(text) == 0)
                 continue;
-            sc_json_value_t *sender = sc_json_object_get(msg, "sender");
-            if (!sender || sender->type != SC_JSON_OBJECT)
+            hu_json_value_t *sender = hu_json_object_get(msg, "sender");
+            if (!sender || sender->type != HU_JSON_OBJECT)
                 continue;
-            const char *sender_id = sc_json_get_string(sender, "id");
+            const char *sender_id = hu_json_get_string(sender, "id");
             if (!sender_id)
                 continue;
             facebook_queue_push(c, sender_id, strlen(sender_id), text, strlen(text));
         }
     }
-    sc_json_free(alloc, parsed);
-    return SC_OK;
+    hu_json_free(alloc, parsed);
+    return HU_OK;
 #endif
 }
 
-sc_error_t sc_facebook_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
+hu_error_t hu_facebook_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                             size_t max_msgs, size_t *out_count) {
     (void)alloc;
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)channel_ctx;
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)channel_ctx;
     if (!c || !msgs || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (c->mock_count > 0) {
         size_t n = c->mock_count < max_msgs ? c->mock_count : max_msgs;
         for (size_t i = 0; i < n; i++) {
@@ -199,12 +199,12 @@ sc_error_t sc_facebook_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
         }
         *out_count = n;
         c->mock_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
 #endif
     size_t cnt = 0;
     while (c->queue_count > 0 && cnt < max_msgs) {
-        sc_facebook_queued_msg_t *slot = &c->queue[c->queue_head];
+        hu_facebook_queued_msg_t *slot = &c->queue[c->queue_head];
         memcpy(msgs[cnt].session_key, slot->session_key, sizeof(slot->session_key));
         memcpy(msgs[cnt].content, slot->content, sizeof(slot->content));
         c->queue_head = (c->queue_head + 1) % FACEBOOK_QUEUE_MAX;
@@ -212,7 +212,7 @@ sc_error_t sc_facebook_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel
         cnt++;
     }
     *out_count = cnt;
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *facebook_name(void *ctx) {
@@ -225,7 +225,7 @@ static bool facebook_health_check(void *ctx) {
     return true;
 }
 
-static const sc_channel_vtable_t facebook_vtable = {
+static const hu_channel_vtable_t facebook_vtable = {
     .start = facebook_start,
     .stop = facebook_stop,
     .send = facebook_send,
@@ -236,15 +236,15 @@ static const sc_channel_vtable_t facebook_vtable = {
     .stop_typing = NULL,
 };
 
-sc_error_t sc_facebook_create(sc_allocator_t *alloc, const char *page_id, size_t page_id_len,
+hu_error_t hu_facebook_create(hu_allocator_t *alloc, const char *page_id, size_t page_id_len,
                               const char *page_access_token, size_t token_len,
-                              const char *app_secret, size_t secret_len, sc_channel_t *out) {
+                              const char *app_secret, size_t secret_len, hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
 
@@ -252,7 +252,7 @@ sc_error_t sc_facebook_create(sc_allocator_t *alloc, const char *page_id, size_t
         c->page_id = (char *)alloc->alloc(alloc->ctx, page_id_len + 1);
         if (!c->page_id) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->page_id, page_id, page_id_len);
         c->page_id[page_id_len] = '\0';
@@ -265,7 +265,7 @@ sc_error_t sc_facebook_create(sc_allocator_t *alloc, const char *page_id, size_t
             if (c->page_id)
                 alloc->free(alloc->ctx, c->page_id, c->page_id_len + 1);
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->page_access_token, page_access_token, token_len);
         c->page_access_token[token_len] = '\0';
@@ -280,7 +280,7 @@ sc_error_t sc_facebook_create(sc_allocator_t *alloc, const char *page_id, size_t
             if (c->page_access_token)
                 alloc->free(alloc->ctx, c->page_access_token, c->page_access_token_len + 1);
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->app_secret, app_secret, secret_len);
         c->app_secret[secret_len] = '\0';
@@ -289,13 +289,13 @@ sc_error_t sc_facebook_create(sc_allocator_t *alloc, const char *page_id, size_t
 
     out->ctx = c;
     out->vtable = &facebook_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_facebook_destroy(sc_channel_t *ch) {
+void hu_facebook_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
+        hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
         if (a) {
             if (c->page_id)
                 a->free(a->ctx, c->page_id, c->page_id_len + 1);
@@ -310,15 +310,15 @@ void sc_facebook_destroy(sc_channel_t *ch) {
     }
 }
 
-#if SC_IS_TEST
-sc_error_t sc_facebook_test_inject_mock(sc_channel_t *ch, const char *session_key,
+#if HU_IS_TEST
+hu_error_t hu_facebook_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                         size_t session_key_len, const char *content,
                                         size_t content_len) {
     if (!ch || !ch->ctx)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)ch->ctx;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)ch->ctx;
     if (c->mock_count >= 8)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t i = c->mock_count++;
     size_t sk = session_key_len > 127 ? 127 : session_key_len;
     size_t ct = content_len > 4095 ? 4095 : content_len;
@@ -328,12 +328,12 @@ sc_error_t sc_facebook_test_inject_mock(sc_channel_t *ch, const char *session_ke
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
-const char *sc_facebook_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+const char *hu_facebook_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
-    sc_facebook_ctx_t *c = (sc_facebook_ctx_t *)ch->ctx;
+    hu_facebook_ctx_t *c = (hu_facebook_ctx_t *)ch->ctx;
     if (out_len)
         *out_len = c->last_message_len;
     return c->last_message;

@@ -352,8 +352,8 @@ function main() {
     }
     const data = JSON.parse(fs.readFileSync(p, "utf-8"));
     tokens = { ...tokens, ...collectTokens(data) };
-    if (data.$extensions?.["seaclaw.p3Colors"]) {
-      p3Colors = { ...p3Colors, ...data.$extensions["seaclaw.p3Colors"] };
+    if (data.$extensions?.["human.p3Colors"]) {
+      p3Colors = { ...p3Colors, ...data.$extensions["human.p3Colors"] };
     }
   }
   tokens = resolveRefs(tokens);
@@ -383,9 +383,9 @@ function main() {
       ROOT,
       "apps",
       "shared",
-      "SeaClawKit",
+      "HumanKit",
       "Sources",
-      "SeaClawChatUI",
+      "HumanChatUI",
       "DesignTokens.swift",
     ),
     "DesignTokens.swift",
@@ -404,7 +404,7 @@ function main() {
       "main",
       "java",
       "ai",
-      "seaclaw",
+      "human",
       "app",
       "ui",
       "DesignTokens.kt",
@@ -416,7 +416,7 @@ function main() {
   const header = generateCHeader(tokens);
   const headerPath = outdir
     ? path.join(outdir, "design_tokens.h")
-    : path.join(ROOT, "include", "seaclaw", "design_tokens.h");
+    : path.join(ROOT, "include", "human", "design_tokens.h");
   writeOutput(outdir, headerPath, "design_tokens.h", header);
 
   try {
@@ -529,19 +529,19 @@ function generateCSS(
   for (const k of spacingKeys) {
     const v = tokens[k];
     if (v != null)
-      lines.push(`  --sc-space-${k.replace("spacing.", "")}: ${v};`);
+      lines.push(`  --hu-space-${k.replace("spacing.", "")}: ${v};`);
   }
 
   // Base: Radius
   lines.push("  /* Base: Radius */");
-  lines.push(`  --sc-radius: ${tokens["radius.md"] ?? "8px"};`);
+  lines.push(`  --hu-radius: ${tokens["radius.md"] ?? "8px"};`);
   const radiusKeys = Object.keys(tokens)
     .filter((k) => k.startsWith("radius."))
     .sort();
   for (const k of radiusKeys) {
     const v = tokens[k];
     if (v != null)
-      lines.push(`  --sc-radius-${k.replace("radius.", "")}: ${v};`);
+      lines.push(`  --hu-radius-${k.replace("radius.", "")}: ${v};`);
   }
 
   // Blur
@@ -551,7 +551,7 @@ function generateCSS(
     .sort();
   for (const k of blurKeys) {
     const v = tokens[k];
-    if (v != null) lines.push(`  --sc-blur-${k.replace("blur.", "")}: ${v};`);
+    if (v != null) lines.push(`  --hu-blur-${k.replace("blur.", "")}: ${v};`);
   }
 
   // Z-index
@@ -561,7 +561,7 @@ function generateCSS(
     .sort();
   for (const k of zIndexKeys) {
     const v = tokens[k];
-    if (v != null) lines.push(`  --sc-z-${k.replace("z-index.", "")}: ${v};`);
+    if (v != null) lines.push(`  --hu-z-${k.replace("z-index.", "")}: ${v};`);
   }
 
   // Opacity
@@ -572,7 +572,7 @@ function generateCSS(
   for (const k of opacityKeys) {
     const v = tokens[k];
     if (v != null)
-      lines.push(`  --sc-opacity-${k.replace("opacity.", "")}: ${v};`);
+      lines.push(`  --hu-opacity-${k.replace("opacity.", "")}: ${v};`);
   }
 
   // Elevation (skip elevation-role)
@@ -587,7 +587,7 @@ function generateCSS(
     if (v != null) {
       const suffix = k.replace("elevation.", "");
       if (suffix && !suffix.includes("."))
-        lines.push(`  --sc-elevation-${suffix}: ${v};`);
+        lines.push(`  --hu-elevation-${suffix}: ${v};`);
     }
   }
 
@@ -606,7 +606,7 @@ function generateCSS(
     ];
     for (const prop of glassProps) {
       const val = tokens[`glass.${tier}.${prop}`];
-      if (val != null) lines.push(`  --sc-glass-${tier}-${prop}: ${val};`);
+      if (val != null) lines.push(`  --hu-glass-${tier}-${prop}: ${val};`);
     }
   }
 
@@ -623,7 +623,7 @@ function generateCSS(
     const val = tokens[k];
     if (val != null) {
       const suffix = k.replace("glass.", "").replace(/\./g, "-");
-      lines.push(`  --sc-glass-${suffix}: ${val};`);
+      lines.push(`  --hu-glass-${suffix}: ${val};`);
     }
   }
 
@@ -654,7 +654,7 @@ function generateCSS(
       const val = tokens[k];
       if (val != null) {
         const prop = k.replace(`${group}.`, "").replace(/\./g, "-");
-        lines.push(`  --sc-glass-${group}-${prop}: ${val};`);
+        lines.push(`  --hu-glass-${group}-${prop}: ${val};`);
       }
     }
   }
@@ -668,7 +668,7 @@ function generateCSS(
     const v = tokens[k];
     if (v != null) {
       const name = k.replace("micro-physics.", "").replace(/\./g, "-");
-      lines.push(`  --sc-physics-${name}: ${v};`);
+      lines.push(`  --hu-physics-${name}: ${v};`);
     }
   }
 
@@ -680,26 +680,26 @@ function generateCSS(
   for (const k of breakpointKeys) {
     const v = tokens[k];
     if (v != null)
-      lines.push(`  --sc-breakpoint-${k.replace("breakpoint.", "")}: ${v};`);
+      lines.push(`  --hu-breakpoint-${k.replace("breakpoint.", "")}: ${v};`);
   }
 
   // Typography
   lines.push("  /* Typography */");
   lines.push(
-    `  --sc-font: ${tokens["fontFamily.sans"] ?? "'Avenir', sans-serif"};`,
+    `  --hu-font: ${tokens["fontFamily.sans"] ?? "'Avenir', sans-serif"};`,
   );
   lines.push(
-    `  --sc-font-mono: ${tokens["fontFamily.mono"] ?? "'Geist Mono', monospace"};`,
+    `  --hu-font-mono: ${tokens["fontFamily.mono"] ?? "'Geist Mono', monospace"};`,
   );
   for (const [k, v] of Object.entries(tokens)) {
     if (k.startsWith("fontSize.") && typeof v === "string")
-      lines.push(`  --sc-text-${k.replace("fontSize.", "")}: ${v};`);
+      lines.push(`  --hu-text-${k.replace("fontSize.", "")}: ${v};`);
     if (k.startsWith("fontWeight.") && typeof v === "number")
-      lines.push(`  --sc-weight-${k.replace("fontWeight.", "")}: ${v};`);
+      lines.push(`  --hu-weight-${k.replace("fontWeight.", "")}: ${v};`);
     if (k.startsWith("lineHeight.") && typeof v === "number")
-      lines.push(`  --sc-leading-${k.replace("lineHeight.", "")}: ${v};`);
+      lines.push(`  --hu-leading-${k.replace("lineHeight.", "")}: ${v};`);
     if (k.startsWith("letterSpacing.") && typeof v === "string")
-      lines.push(`  --sc-tracking-${k.replace("letterSpacing.", "")}: ${v};`);
+      lines.push(`  --hu-tracking-${k.replace("letterSpacing.", "")}: ${v};`);
   }
 
   // Type roles
@@ -735,7 +735,7 @@ function generateCSS(
                 : cssProp === "letter-spacing"
                   ? "letter-spacing"
                   : cssProp;
-        lines.push(`  --sc-type-${role.replace(/-/g, "-")}-${suffix}: ${v};`);
+        lines.push(`  --hu-type-${role.replace(/-/g, "-")}-${suffix}: ${v};`);
       }
     }
   }
@@ -743,12 +743,12 @@ function generateCSS(
   // Focus ring tokens (from dark theme)
   lines.push("  /* Focus ring */");
   if (tokens["dark.focus-ring"] != null)
-    lines.push(`  --sc-focus-ring: ${tokens["dark.focus-ring"]};`);
+    lines.push(`  --hu-focus-ring: ${tokens["dark.focus-ring"]};`);
   if (tokens["dark.focus-ring-width"] != null)
-    lines.push(`  --sc-focus-ring-width: ${tokens["dark.focus-ring-width"]};`);
+    lines.push(`  --hu-focus-ring-width: ${tokens["dark.focus-ring-width"]};`);
   if (tokens["dark.focus-ring-offset"] != null)
     lines.push(
-      `  --sc-focus-ring-offset: ${tokens["dark.focus-ring-offset"]};`,
+      `  --hu-focus-ring-offset: ${tokens["dark.focus-ring-offset"]};`,
     );
 
   // Choreography tokens
@@ -763,7 +763,7 @@ function generateCSS(
     const v = tokens[k];
     if (v != null) {
       const name = k.replace("choreography.", "").replace(/-/g, "-");
-      lines.push(`  --sc-${name}: ${v};`);
+      lines.push(`  --hu-${name}: ${v};`);
     }
   }
 
@@ -785,7 +785,7 @@ function generateCSS(
       const v = tokens[`purpose.${purpose}.${prop}`];
       if (v != null) {
         const suffix = purpose.replace(/-/g, "-") + "-" + prop;
-        lines.push(`  --sc-${suffix}: ${v};`);
+        lines.push(`  --hu-${suffix}: ${v};`);
       }
     }
   }
@@ -794,11 +794,11 @@ function generateCSS(
   lines.push("  /* Motion */");
   for (const [k, v] of Object.entries(tokens)) {
     if (k.startsWith("duration.") && typeof v === "string")
-      lines.push(`  --sc-duration-${k.replace("duration.", "")}: ${v};`);
+      lines.push(`  --hu-duration-${k.replace("duration.", "")}: ${v};`);
     if (k.startsWith("easing.") && typeof v === "string")
-      lines.push(`  --sc-${k.replace("easing.", "")}: ${v};`);
+      lines.push(`  --hu-${k.replace("easing.", "")}: ${v};`);
     if (k.startsWith("transition.") && typeof v === "string")
-      lines.push(`  --sc-transition: ${v};`);
+      lines.push(`  --hu-transition: ${v};`);
   }
   for (const [k, v] of Object.entries(tokens)) {
     if (k.match(/^spring\.\w+\.stiffness$/)) {
@@ -806,8 +806,8 @@ function generateCSS(
       const stiff = v as number;
       const damp = (tokens[`spring.${name}.damping`] as number) ?? 20;
       const mass = (tokens[`spring.${name}.mass`] as number) ?? 1;
-      lines.push(`  --sc-spring-${name}-stiffness: ${stiff};`);
-      lines.push(`  --sc-spring-${name}-damping: ${damp};`);
+      lines.push(`  --hu-spring-${name}-stiffness: ${stiff};`);
+      lines.push(`  --hu-spring-${name}-damping: ${damp};`);
     }
   }
 
@@ -827,7 +827,7 @@ function generateCSS(
         const val = tokens[k];
         if (val != null) {
           const prop = k.replace(`${group}.`, "");
-          lines.push(`  --sc-${group}-${prop}: ${val};`);
+          lines.push(`  --hu-${group}-${prop}: ${val};`);
         }
       }
     }
@@ -840,7 +840,7 @@ function generateCSS(
     const v = tokens[k];
     if (v == null) continue;
     const name = k.replace("dark.", "").replace(/-/g, "-");
-    lines.push(`  --sc-${name}: ${v};`);
+    lines.push(`  --hu-${name}: ${v};`);
   }
 
   // Component tokens — ALL components
@@ -853,7 +853,7 @@ function generateCSS(
       const v = tokens[k];
       if (v != null) {
         const suffix = k.replace(`${prefix}.`, "").replace(/-/g, "-");
-        lines.push(`  --sc-${prefix}-${suffix}: ${v};`);
+        lines.push(`  --hu-${prefix}-${suffix}: ${v};`);
       }
     }
   }
@@ -867,7 +867,7 @@ function generateCSS(
     const val = tokens[k];
     if (val != null) {
       const suffix = k.replace("chart.", "").replace(/\./g, "-");
-      lines.push(`  --sc-chart-${suffix}: ${val};`);
+      lines.push(`  --hu-chart-${suffix}: ${val};`);
     }
   }
 
@@ -881,7 +881,7 @@ function generateCSS(
     const v = tokens[k];
     if (v == null) continue;
     const name = k.replace("light.", "").replace(/-/g, "-");
-    lines.push(`    --sc-${name}: ${v};`);
+    lines.push(`    --hu-${name}: ${v};`);
   }
   lines.push("  }");
   lines.push("}");
@@ -894,7 +894,7 @@ function generateCSS(
     const v = tokens[k];
     if (v == null) continue;
     const name = k.replace("dark.", "").replace(/-/g, "-");
-    lines.push(`  --sc-${name}: ${v};`);
+    lines.push(`  --hu-${name}: ${v};`);
   }
   lines.push("}");
   lines.push("");
@@ -904,7 +904,7 @@ function generateCSS(
     const v = tokens[k];
     if (v == null) continue;
     const name = k.replace("light.", "").replace(/-/g, "-");
-    lines.push(`  --sc-${name}: ${v};`);
+    lines.push(`  --hu-${name}: ${v};`);
   }
   lines.push("}");
   lines.push("");
@@ -920,7 +920,7 @@ function generateCSS(
       const v = tokens[k];
       if (v == null) continue;
       const name = k.replace("high-contrast.", "").replace(/-/g, "-");
-      lines.push(`    --sc-${name}: ${v};`);
+      lines.push(`    --hu-${name}: ${v};`);
     }
     lines.push("  }");
     lines.push("}");
@@ -935,7 +935,7 @@ function generateCSS(
   );
   for (const k of durationKeys) {
     const suffix = k.replace("duration.", "");
-    lines.push(`    --sc-duration-${suffix}: 0ms;`);
+    lines.push(`    --hu-duration-${suffix}: 0ms;`);
   }
   lines.push("  }");
   lines.push("}");
@@ -952,7 +952,7 @@ function generateCSS(
     const darkP3 = p3Entries.filter(([k]) => k.startsWith("dark."));
     for (const [k, v] of darkP3.sort()) {
       const name = k.replace("dark.", "").replace(/-/g, "-");
-      lines.push(`    --sc-${name}: ${v};`);
+      lines.push(`    --hu-${name}: ${v};`);
     }
     lines.push("  }");
     const lightP3 = p3Entries.filter(([k]) => k.startsWith("light."));
@@ -961,7 +961,7 @@ function generateCSS(
       lines.push("    :root {");
       for (const [k, v] of lightP3.sort()) {
         const name = k.replace("light.", "").replace(/-/g, "-");
-        lines.push(`      --sc-${name}: ${v};`);
+        lines.push(`      --hu-${name}: ${v};`);
       }
       lines.push("    }");
       lines.push("  }");
@@ -1288,7 +1288,7 @@ function generateSwift(tokens: TokenMap): string {
 function generateKotlin(tokens: TokenMap): string {
   const lines: string[] = [
     "// Auto-generated from design-tokens/ — do not edit manually",
-    "package ai.seaclaw.app.ui",
+    "package ai.human.app.ui",
     "",
     "import androidx.compose.ui.graphics.Color",
     "import androidx.compose.ui.unit.dp",
@@ -1720,35 +1720,35 @@ function generateCHeader(tokens: TokenMap): string {
     return lines.join("\n");
   }
 
-  const darkSection = emitColorMacros(darkTokens, "SC_COLOR_", "Dark theme");
+  const darkSection = emitColorMacros(darkTokens, "HU_COLOR_", "Dark theme");
   const lightSection = emitColorMacros(
     lightTokens,
-    "SC_COLOR_LIGHT_",
+    "HU_COLOR_LIGHT_",
     "Light theme",
   );
 
   /* Legacy aliases for backward compatibility */
   const legacyAliases = [
-    ["SC_COLOR_MUTED", "SC_COLOR_TEXT_MUTED"],
-    ["SC_COLOR_FAINT", "SC_COLOR_TEXT_FAINT"],
+    ["HU_COLOR_MUTED", "HU_COLOR_TEXT_MUTED"],
+    ["HU_COLOR_FAINT", "HU_COLOR_TEXT_FAINT"],
   ];
   const aliasLines = legacyAliases
     .map(([old, cur]) => `#define ${old.padEnd(40)} ${cur}`)
     .join("\n");
 
   return `/* Auto-generated from design-tokens/ — do not edit manually */
-#ifndef SC_DESIGN_TOKENS_H
-#define SC_DESIGN_TOKENS_H
+#ifndef HU_DESIGN_TOKENS_H
+#define HU_DESIGN_TOKENS_H
 
 /*
  * Color macros come in four variants per token:
- *   SC_COLOR_<NAME>        — 256-color foreground (widest terminal compat)
- *   SC_COLOR_<NAME>_TC     — truecolor (24-bit) foreground
- *   SC_COLOR_BG_<NAME>     — 256-color background
- *   SC_COLOR_BG_<NAME>_TC  — truecolor (24-bit) background
+ *   HU_COLOR_<NAME>        — 256-color foreground (widest terminal compat)
+ *   HU_COLOR_<NAME>_TC     — truecolor (24-bit) foreground
+ *   HU_COLOR_BG_<NAME>     — 256-color background
+ *   HU_COLOR_BG_<NAME>_TC  — truecolor (24-bit) background
  *
- * Use sc_terminal_color_level() from <seaclaw/terminal.h> to pick the right
- * variant at runtime, or use sc_color_fg()/sc_color_bg() for dynamic colors.
+ * Use hu_terminal_color_level() from <human/terminal.h> to pick the right
+ * variant at runtime, or use hu_color_fg()/hu_color_bg() for dynamic colors.
  */
 
 ${darkSection}
@@ -1759,31 +1759,31 @@ ${lightSection}
 ${aliasLines}
 
 /* Formatting */
-#define SC_COLOR_RESET               "\\033[0m"
-#define SC_COLOR_BOLD                "\\033[1m"
-#define SC_COLOR_DIM                 "\\033[2m"
-#define SC_COLOR_ITALIC              "\\033[3m"
-#define SC_COLOR_UNDERLINE           "\\033[4m"
-#define SC_COLOR_STRIKETHROUGH       "\\033[9m"
+#define HU_COLOR_RESET               "\\033[0m"
+#define HU_COLOR_BOLD                "\\033[1m"
+#define HU_COLOR_DIM                 "\\033[2m"
+#define HU_COLOR_ITALIC              "\\033[3m"
+#define HU_COLOR_UNDERLINE           "\\033[4m"
+#define HU_COLOR_STRIKETHROUGH       "\\033[9m"
 
 /* Box-drawing characters (UTF-8) */
-#define SC_BOX_VERT  "\\xe2\\x94\\x82"
-#define SC_BOX_HORIZ "\\xe2\\x94\\x80"
-#define SC_BOX_TL    "\\xe2\\x94\\x8c"
-#define SC_BOX_TR    "\\xe2\\x94\\x90"
-#define SC_BOX_BL    "\\xe2\\x94\\x94"
-#define SC_BOX_BR    "\\xe2\\x94\\x98"
-#define SC_BOX_TEE_R "\\xe2\\x94\\x9c"
-#define SC_BOX_TEE_L "\\xe2\\x94\\xa4"
-#define SC_BOX_CROSS "\\xe2\\x94\\xbc"
-#define SC_CHEVRON   "\\xe2\\x9d\\xaf"
-#define SC_CHECK     "\\xe2\\x9c\\x93"
-#define SC_CROSS     "\\xe2\\x9c\\x97"
-#define SC_BULLET    "\\xe2\\x80\\xa2"
-#define SC_ELLIPSIS  "\\xe2\\x80\\xa6"
-#define SC_ARROW_R   "\\xe2\\x86\\x92"
+#define HU_BOX_VERT  "\\xe2\\x94\\x82"
+#define HU_BOX_HORIZ "\\xe2\\x94\\x80"
+#define HU_BOX_TL    "\\xe2\\x94\\x8c"
+#define HU_BOX_TR    "\\xe2\\x94\\x90"
+#define HU_BOX_BL    "\\xe2\\x94\\x94"
+#define HU_BOX_BR    "\\xe2\\x94\\x98"
+#define HU_BOX_TEE_R "\\xe2\\x94\\x9c"
+#define HU_BOX_TEE_L "\\xe2\\x94\\xa4"
+#define HU_BOX_CROSS "\\xe2\\x94\\xbc"
+#define HU_CHEVRON   "\\xe2\\x9d\\xaf"
+#define HU_CHECK     "\\xe2\\x9c\\x93"
+#define HU_CROSS     "\\xe2\\x9c\\x97"
+#define HU_BULLET    "\\xe2\\x80\\xa2"
+#define HU_ELLIPSIS  "\\xe2\\x80\\xa6"
+#define HU_ARROW_R   "\\xe2\\x86\\x92"
 
-#endif /* SC_DESIGN_TOKENS_H */
+#endif /* HU_DESIGN_TOKENS_H */
 `;
 }
 

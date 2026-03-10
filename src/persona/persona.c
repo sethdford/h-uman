@@ -1,6 +1,6 @@
-#include "seaclaw/persona.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/persona.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,13 +9,13 @@
 #include <dirent.h>
 #endif
 
-#define SC_PERSONA_PROMPT_INIT_CAP 4096
-#define SC_PERSONA_PATH_MAX        512
+#define HU_PERSONA_PROMPT_INIT_CAP 4096
+#define HU_PERSONA_PATH_MAX        512
 
-/* --- Persona base directory (SC_PERSONA_DIR override for tests) --- */
+/* --- Persona base directory (HU_PERSONA_DIR override for tests) --- */
 
-const char *sc_persona_base_dir(char *buf, size_t cap) {
-    const char *override = getenv("SC_PERSONA_DIR");
+const char *hu_persona_base_dir(char *buf, size_t cap) {
+    const char *override = getenv("HU_PERSONA_DIR");
     if (override && override[0]) {
         size_t len = strlen(override);
         if (len + 1 > cap)
@@ -26,18 +26,18 @@ const char *sc_persona_base_dir(char *buf, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !home[0])
         return NULL;
-    int n = snprintf(buf, cap, "%s/.seaclaw/personas", home);
+    int n = snprintf(buf, cap, "%s/.human/personas", home);
     return (n > 0 && (size_t)n < cap) ? buf : NULL;
 }
 
 /* --- Overlay lookup --- */
 
-const sc_persona_overlay_t *sc_persona_find_overlay(const sc_persona_t *persona,
+const hu_persona_overlay_t *hu_persona_find_overlay(const hu_persona_t *persona,
                                                     const char *channel, size_t channel_len) {
     if (!persona || !channel || persona->overlays_count == 0 || !persona->overlays)
         return NULL;
     for (size_t i = 0; i < persona->overlays_count; i++) {
-        const sc_persona_overlay_t *ov = &persona->overlays[i];
+        const hu_persona_overlay_t *ov = &persona->overlays[i];
         if (!ov->channel)
             continue;
         size_t ov_len = strlen(ov->channel);
@@ -49,7 +49,7 @@ const sc_persona_overlay_t *sc_persona_find_overlay(const sc_persona_t *persona,
 
 /* --- Deinit helpers --- */
 
-static void free_string_array(sc_allocator_t *alloc, char **arr, size_t count) {
+static void free_string_array(hu_allocator_t *alloc, char **arr, size_t count) {
     if (!alloc || !arr)
         return;
     for (size_t i = 0; i < count; i++) {
@@ -61,7 +61,7 @@ static void free_string_array(sc_allocator_t *alloc, char **arr, size_t count) {
     alloc->free(alloc->ctx, arr, count * sizeof(char *));
 }
 
-static void free_overlay(sc_allocator_t *alloc, sc_persona_overlay_t *ov) {
+static void free_overlay(hu_allocator_t *alloc, hu_persona_overlay_t *ov) {
     if (!alloc || !ov)
         return;
     if (ov->channel) {
@@ -84,7 +84,7 @@ static void free_overlay(sc_allocator_t *alloc, sc_persona_overlay_t *ov) {
     free_string_array(alloc, ov->typing_quirks, ov->typing_quirks_count);
 }
 
-static void free_example(sc_allocator_t *alloc, sc_persona_example_t *ex) {
+static void free_example(hu_allocator_t *alloc, hu_persona_example_t *ex) {
     if (!alloc || !ex)
         return;
     if (ex->context) {
@@ -101,7 +101,7 @@ static void free_example(sc_allocator_t *alloc, sc_persona_example_t *ex) {
     }
 }
 
-static void free_example_bank(sc_allocator_t *alloc, sc_persona_example_bank_t *bank) {
+static void free_example_bank(hu_allocator_t *alloc, hu_persona_example_bank_t *bank) {
     if (!alloc || !bank)
         return;
     if (bank->channel) {
@@ -112,18 +112,18 @@ static void free_example_bank(sc_allocator_t *alloc, sc_persona_example_bank_t *
         for (size_t i = 0; i < bank->examples_count; i++)
             free_example(alloc, &bank->examples[i]);
         alloc->free(alloc->ctx, bank->examples,
-                    bank->examples_count * sizeof(sc_persona_example_t));
+                    bank->examples_count * sizeof(hu_persona_example_t));
     }
 }
 
-static void free_contact_string(sc_allocator_t *alloc, char *s) {
+static void free_contact_string(hu_allocator_t *alloc, char *s) {
     if (s) {
         size_t len = strlen(s);
         alloc->free(alloc->ctx, s, len + 1);
     }
 }
 
-static void free_contact_profile(sc_allocator_t *alloc, sc_contact_profile_t *cp) {
+static void free_contact_profile(hu_allocator_t *alloc, hu_contact_profile_t *cp) {
     if (!alloc || !cp)
         return;
     free_contact_string(alloc, cp->contact_id);
@@ -149,7 +149,7 @@ static void free_contact_profile(sc_allocator_t *alloc, sc_contact_profile_t *cp
     free_contact_string(alloc, cp->dunbar_layer);
 }
 
-void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
+void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
     if (!alloc || !persona)
         return;
 
@@ -199,7 +199,7 @@ void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
             free_contact_string(alloc, persona->situational_directions[i].instruction);
         }
         alloc->free(alloc->ctx, persona->situational_directions,
-                    persona->situational_directions_count * sizeof(sc_situational_direction_t));
+                    persona->situational_directions_count * sizeof(hu_situational_direction_t));
     }
 
     /* Humor */
@@ -252,7 +252,7 @@ void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
             free_contact_string(alloc, persona->backstory_behaviors[i].behavioral_rule);
         }
         alloc->free(alloc->ctx, persona->backstory_behaviors,
-                    persona->backstory_behaviors_count * sizeof(sc_backstory_behavior_t));
+                    persona->backstory_behaviors_count * sizeof(hu_backstory_behavior_t));
     }
 
     /* Sensory preferences */
@@ -311,30 +311,30 @@ void sc_persona_deinit(sc_allocator_t *alloc, sc_persona_t *persona) {
         for (size_t i = 0; i < persona->overlays_count; i++)
             free_overlay(alloc, &persona->overlays[i]);
         alloc->free(alloc->ctx, persona->overlays,
-                    persona->overlays_count * sizeof(sc_persona_overlay_t));
+                    persona->overlays_count * sizeof(hu_persona_overlay_t));
     }
 
     if (persona->example_banks) {
         for (size_t i = 0; i < persona->example_banks_count; i++)
             free_example_bank(alloc, &persona->example_banks[i]);
         alloc->free(alloc->ctx, persona->example_banks,
-                    persona->example_banks_count * sizeof(sc_persona_example_bank_t));
+                    persona->example_banks_count * sizeof(hu_persona_example_bank_t));
     }
 
     if (persona->contacts) {
         for (size_t i = 0; i < persona->contacts_count; i++)
             free_contact_profile(alloc, &persona->contacts[i]);
         alloc->free(alloc->ctx, persona->contacts,
-                    persona->contacts_count * sizeof(sc_contact_profile_t));
+                    persona->contacts_count * sizeof(hu_contact_profile_t));
     }
 
     memset(persona, 0, sizeof(*persona));
 }
 
-const sc_contact_profile_t *sc_persona_find_contact(const sc_persona_t *persona,
+const hu_contact_profile_t *hu_persona_find_contact(const hu_persona_t *persona,
                                                     const char *contact_id, size_t contact_id_len) {
     if (!persona || !contact_id || !persona->contacts) {
-        if (getenv("SC_DEBUG"))
+        if (getenv("HU_DEBUG"))
             fprintf(stderr,
                     "[persona] find_contact: early NULL (persona=%p contact_id=%p contacts=%p)\n",
                     (const void *)persona, (const void *)contact_id,
@@ -342,29 +342,29 @@ const sc_contact_profile_t *sc_persona_find_contact(const sc_persona_t *persona,
         return NULL;
     }
     for (size_t i = 0; i < persona->contacts_count; i++) {
-        const sc_contact_profile_t *cp = &persona->contacts[i];
+        const hu_contact_profile_t *cp = &persona->contacts[i];
         if (!cp->contact_id)
             continue;
         size_t cp_len = strlen(cp->contact_id);
         if (cp_len == contact_id_len && memcmp(cp->contact_id, contact_id, contact_id_len) == 0)
             return cp;
     }
-    if (getenv("SC_DEBUG"))
+    if (getenv("HU_DEBUG"))
         fprintf(stderr, "[persona] find_contact: no match for '%.*s' among %zu contacts\n",
                 (int)(contact_id_len > 30 ? 30 : contact_id_len), contact_id,
                 persona->contacts_count);
     return NULL;
 }
 
-sc_error_t sc_contact_profile_build_context(sc_allocator_t *alloc, const sc_contact_profile_t *cp,
+hu_error_t hu_contact_profile_build_context(hu_allocator_t *alloc, const hu_contact_profile_t *cp,
                                             char **out, size_t *out_len) {
     if (!alloc || !cp || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t cap = 4096;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t pos = 0;
     int w;
 
@@ -542,12 +542,12 @@ sc_error_t sc_contact_profile_build_context(sc_allocator_t *alloc, const sc_cont
     buf[pos] = '\0';
     *out = buf;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }
 
 /* ── Inner World (stage-gated surfacing) ──────────────────────────── */
 
-char *sc_persona_build_inner_world_context(sc_allocator_t *alloc, const sc_persona_t *persona,
+char *hu_persona_build_inner_world_context(hu_allocator_t *alloc, const hu_persona_t *persona,
                                            const char *relationship_stage, size_t *out_len) {
     if (!alloc || !persona || !out_len)
         return NULL;
@@ -563,7 +563,7 @@ char *sc_persona_build_inner_world_context(sc_allocator_t *alloc, const sc_perso
     if (!allowed)
         return NULL;
 
-    const sc_inner_world_t *iw = &persona->inner_world;
+    const hu_inner_world_t *iw = &persona->inner_world;
     bool has_content = iw->contradictions_count > 0 || iw->embodied_memories_count > 0 ||
                        iw->emotional_flashpoints_count > 0 || iw->unfinished_business_count > 0 ||
                        iw->secret_self_count > 0;
@@ -644,33 +644,33 @@ char *sc_persona_build_inner_world_context(sc_allocator_t *alloc, const sc_perso
 
 /* --- JSON loading helpers --- */
 
-static sc_error_t parse_string_array(sc_allocator_t *a, const sc_json_value_t *arr, char ***out,
+static hu_error_t parse_string_array(hu_allocator_t *a, const hu_json_value_t *arr, char ***out,
                                      size_t *out_count) {
-    if (!arr || arr->type != SC_JSON_ARRAY || !arr->data.array.items)
-        return SC_OK;
+    if (!arr || arr->type != HU_JSON_ARRAY || !arr->data.array.items)
+        return HU_OK;
     size_t n = arr->data.array.len;
     if (n == 0)
-        return SC_OK;
+        return HU_OK;
     char **buf = (char **)a->alloc(a->ctx, n * sizeof(char *));
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t count = 0;
     for (size_t i = 0; i < n; i++) {
-        const sc_json_value_t *item = arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_STRING || !item->data.string.ptr)
+        const hu_json_value_t *item = arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_STRING || !item->data.string.ptr)
             continue;
-        char *dup = sc_strndup(a, item->data.string.ptr, item->data.string.len);
+        char *dup = hu_strndup(a, item->data.string.ptr, item->data.string.len);
         if (!dup) {
             for (size_t j = 0; j < count; j++)
                 a->free(a->ctx, buf[j], strlen(buf[j]) + 1);
             a->free(a->ctx, buf, n * sizeof(char *));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         buf[count++] = dup;
     }
     if (count == 0) {
         a->free(a->ctx, buf, n * sizeof(char *));
-        return SC_OK;
+        return HU_OK;
     }
     if (count < n) {
         char **shrunk = (char **)a->alloc(a->ctx, count * sizeof(char *));
@@ -682,48 +682,48 @@ static sc_error_t parse_string_array(sc_allocator_t *a, const sc_json_value_t *a
             for (size_t j = 0; j < count; j++)
                 a->free(a->ctx, buf[j], strlen(buf[j]) + 1);
             a->free(a->ctx, buf, n * sizeof(char *));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
     }
     *out = buf;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t parse_overlay(sc_allocator_t *a, const char *channel_name,
-                                const sc_json_value_t *obj, sc_persona_overlay_t *ov) {
-    if (!obj || obj->type != SC_JSON_OBJECT)
-        return SC_OK;
-    ov->channel = sc_strdup(a, channel_name);
+static hu_error_t parse_overlay(hu_allocator_t *a, const char *channel_name,
+                                const hu_json_value_t *obj, hu_persona_overlay_t *ov) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    ov->channel = hu_strdup(a, channel_name);
     if (!ov->channel)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     /* Optional overlay fields: PERSONA_STRDUP_OPT doesn't apply here (different allocator param) */
-    const char *s = sc_json_get_string(obj, "formality");
+    const char *s = hu_json_get_string(obj, "formality");
     if (s)
-        ov->formality = sc_strdup(a, s);
-    s = sc_json_get_string(obj, "avg_length");
+        ov->formality = hu_strdup(a, s);
+    s = hu_json_get_string(obj, "avg_length");
     if (s)
-        ov->avg_length = sc_strdup(a, s);
-    s = sc_json_get_string(obj, "emoji_usage");
+        ov->avg_length = hu_strdup(a, s);
+    s = hu_json_get_string(obj, "emoji_usage");
     if (s)
-        ov->emoji_usage = sc_strdup(a, s);
-    sc_json_value_t *notes = sc_json_object_get(obj, "style_notes");
+        ov->emoji_usage = hu_strdup(a, s);
+    hu_json_value_t *notes = hu_json_object_get(obj, "style_notes");
     if (notes)
         parse_string_array(a, notes, &ov->style_notes, &ov->style_notes_count);
-    ov->message_splitting = sc_json_get_bool(obj, "message_splitting", false);
-    sc_json_value_t *seg = sc_json_object_get(obj, "max_segment_chars");
-    if (seg && seg->type == SC_JSON_NUMBER)
+    ov->message_splitting = hu_json_get_bool(obj, "message_splitting", false);
+    hu_json_value_t *seg = hu_json_object_get(obj, "max_segment_chars");
+    if (seg && seg->type == HU_JSON_NUMBER)
         ov->max_segment_chars = (uint32_t)seg->data.number;
-    sc_json_value_t *quirks = sc_json_object_get(obj, "typing_quirks");
+    hu_json_value_t *quirks = hu_json_object_get(obj, "typing_quirks");
     if (quirks)
         parse_string_array(a, quirks, &ov->typing_quirks, &ov->typing_quirks_count);
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t json_len,
-                                sc_persona_t *out) {
+hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t json_len,
+                                hu_persona_t *out) {
     if (!alloc || !json || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     bool oom_on_optional = false;
@@ -732,142 +732,142 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
      * OOM on optional fields is non-fatal — we continue with NULL. */
 #define PERSONA_STRDUP_OPT(target, src)     \
     do {                                    \
-        (target) = sc_strdup(alloc, (src)); \
+        (target) = hu_strdup(alloc, (src)); \
         if (!(target))                      \
             oom_on_optional = true;         \
     } while (0)
 
-    sc_json_value_t *root = NULL;
+    hu_json_value_t *root = NULL;
     (void)oom_on_optional;
-    sc_error_t err = sc_json_parse(alloc, json, json_len, &root);
-    if (err != SC_OK || !root || root->type != SC_JSON_OBJECT)
-        return err != SC_OK ? err : SC_ERR_JSON_PARSE;
+    hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
+    if (err != HU_OK || !root || root->type != HU_JSON_OBJECT)
+        return err != HU_OK ? err : HU_ERR_JSON_PARSE;
 
-    const char *name = sc_json_get_string(root, "name");
+    const char *name = hu_json_get_string(root, "name");
     if (name) {
-        out->name = sc_strdup(alloc, name);
+        out->name = hu_strdup(alloc, name);
         if (!out->name) {
-            sc_json_free(alloc, root);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_json_free(alloc, root);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         out->name_len = strlen(out->name);
     }
 
-    sc_json_value_t *core = sc_json_object_get(root, "core");
-    if (core && core->type == SC_JSON_OBJECT) {
-        const char *s = sc_json_get_string(core, "identity");
+    hu_json_value_t *core = hu_json_object_get(root, "core");
+    if (core && core->type == HU_JSON_OBJECT) {
+        const char *s = hu_json_get_string(core, "identity");
         if (s) {
-            out->identity = sc_strdup(alloc, s);
+            out->identity = hu_strdup(alloc, s);
             if (!out->identity) {
-                sc_persona_deinit(alloc, out);
-                sc_json_free(alloc, root);
-                return SC_ERR_OUT_OF_MEMORY;
+                hu_persona_deinit(alloc, out);
+                hu_json_free(alloc, root);
+                return HU_ERR_OUT_OF_MEMORY;
             }
         }
-        sc_json_value_t *traits = sc_json_object_get(core, "traits");
+        hu_json_value_t *traits = hu_json_object_get(core, "traits");
         if (traits) {
             err = parse_string_array(alloc, traits, &out->traits, &out->traits_count);
-            if (err != SC_OK) {
-                sc_persona_deinit(alloc, out);
-                sc_json_free(alloc, root);
+            if (err != HU_OK) {
+                hu_persona_deinit(alloc, out);
+                hu_json_free(alloc, root);
                 return err;
             }
         }
-        sc_json_value_t *vocab = sc_json_object_get(core, "vocabulary");
-        if (vocab && vocab->type == SC_JSON_OBJECT) {
-            sc_json_value_t *pref = sc_json_object_get(vocab, "preferred");
+        hu_json_value_t *vocab = hu_json_object_get(core, "vocabulary");
+        if (vocab && vocab->type == HU_JSON_OBJECT) {
+            hu_json_value_t *pref = hu_json_object_get(vocab, "preferred");
             if (pref) {
                 err = parse_string_array(alloc, pref, &out->preferred_vocab,
                                          &out->preferred_vocab_count);
-                if (err != SC_OK) {
-                    sc_persona_deinit(alloc, out);
-                    sc_json_free(alloc, root);
+                if (err != HU_OK) {
+                    hu_persona_deinit(alloc, out);
+                    hu_json_free(alloc, root);
                     return err;
                 }
             }
-            sc_json_value_t *avoid = sc_json_object_get(vocab, "avoided");
+            hu_json_value_t *avoid = hu_json_object_get(vocab, "avoided");
             if (avoid) {
                 err = parse_string_array(alloc, avoid, &out->avoided_vocab,
                                          &out->avoided_vocab_count);
-                if (err != SC_OK) {
-                    sc_persona_deinit(alloc, out);
-                    sc_json_free(alloc, root);
+                if (err != HU_OK) {
+                    hu_persona_deinit(alloc, out);
+                    hu_json_free(alloc, root);
                     return err;
                 }
             }
-            sc_json_value_t *sl = sc_json_object_get(vocab, "slang");
+            hu_json_value_t *sl = hu_json_object_get(vocab, "slang");
             if (sl) {
                 err = parse_string_array(alloc, sl, &out->slang, &out->slang_count);
-                if (err != SC_OK) {
-                    sc_persona_deinit(alloc, out);
-                    sc_json_free(alloc, root);
+                if (err != HU_OK) {
+                    hu_persona_deinit(alloc, out);
+                    hu_json_free(alloc, root);
                     return err;
                 }
             }
         }
-        sc_json_value_t *rules = sc_json_object_get(core, "communication_rules");
+        hu_json_value_t *rules = hu_json_object_get(core, "communication_rules");
         if (rules) {
             err = parse_string_array(alloc, rules, &out->communication_rules,
                                      &out->communication_rules_count);
-            if (err != SC_OK) {
-                sc_persona_deinit(alloc, out);
-                sc_json_free(alloc, root);
+            if (err != HU_OK) {
+                hu_persona_deinit(alloc, out);
+                hu_json_free(alloc, root);
                 return err;
             }
         }
-        sc_json_value_t *vals = sc_json_object_get(core, "values");
+        hu_json_value_t *vals = hu_json_object_get(core, "values");
         if (vals) {
             err = parse_string_array(alloc, vals, &out->values, &out->values_count);
-            if (err != SC_OK) {
-                sc_persona_deinit(alloc, out);
-                sc_json_free(alloc, root);
+            if (err != HU_OK) {
+                hu_persona_deinit(alloc, out);
+                hu_json_free(alloc, root);
                 return err;
             }
         }
-        s = sc_json_get_string(core, "decision_style");
+        s = hu_json_get_string(core, "decision_style");
         if (s) {
-            out->decision_style = sc_strdup(alloc, s);
+            out->decision_style = hu_strdup(alloc, s);
             if (!out->decision_style) {
-                sc_persona_deinit(alloc, out);
-                sc_json_free(alloc, root);
-                return SC_ERR_OUT_OF_MEMORY;
+                hu_persona_deinit(alloc, out);
+                hu_json_free(alloc, root);
+                return HU_ERR_OUT_OF_MEMORY;
             }
         }
-        s = sc_json_get_string(core, "biography");
+        s = hu_json_get_string(core, "biography");
         if (s)
             PERSONA_STRDUP_OPT(out->biography, s);
 
-        sc_json_value_t *dn = sc_json_object_get(core, "directors_notes");
+        hu_json_value_t *dn = hu_json_object_get(core, "directors_notes");
         if (dn)
             parse_string_array(alloc, dn, &out->directors_notes, &out->directors_notes_count);
 
-        sc_json_value_t *ms = sc_json_object_get(core, "mood_states");
+        hu_json_value_t *ms = hu_json_object_get(core, "mood_states");
         if (ms)
             parse_string_array(alloc, ms, &out->mood_states, &out->mood_states_count);
     }
 
     /* Parse inner_world */
     {
-        sc_json_value_t *iw = sc_json_object_get(root, "inner_world");
-        if (iw && iw->type == SC_JSON_OBJECT) {
-            sc_json_value_t *a;
-            a = sc_json_object_get(iw, "contradictions");
+        hu_json_value_t *iw = hu_json_object_get(root, "inner_world");
+        if (iw && iw->type == HU_JSON_OBJECT) {
+            hu_json_value_t *a;
+            a = hu_json_object_get(iw, "contradictions");
             if (a)
                 parse_string_array(alloc, a, &out->inner_world.contradictions,
                                    &out->inner_world.contradictions_count);
-            a = sc_json_object_get(iw, "embodied_memories");
+            a = hu_json_object_get(iw, "embodied_memories");
             if (a)
                 parse_string_array(alloc, a, &out->inner_world.embodied_memories,
                                    &out->inner_world.embodied_memories_count);
-            a = sc_json_object_get(iw, "emotional_flashpoints");
+            a = hu_json_object_get(iw, "emotional_flashpoints");
             if (a)
                 parse_string_array(alloc, a, &out->inner_world.emotional_flashpoints,
                                    &out->inner_world.emotional_flashpoints_count);
-            a = sc_json_object_get(iw, "unfinished_business");
+            a = hu_json_object_get(iw, "unfinished_business");
             if (a)
                 parse_string_array(alloc, a, &out->inner_world.unfinished_business,
                                    &out->inner_world.unfinished_business_count);
-            a = sc_json_object_get(iw, "secret_self");
+            a = hu_json_object_get(iw, "secret_self");
             if (a)
                 parse_string_array(alloc, a, &out->inner_world.secret_self,
                                    &out->inner_world.secret_self_count);
@@ -876,19 +876,19 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse motivation */
     {
-        sc_json_value_t *mot = sc_json_object_get(root, "motivation");
-        if (mot && mot->type == SC_JSON_OBJECT) {
+        hu_json_value_t *mot = hu_json_object_get(root, "motivation");
+        if (mot && mot->type == HU_JSON_OBJECT) {
             const char *s;
-            s = sc_json_get_string(mot, "primary_drive");
+            s = hu_json_get_string(mot, "primary_drive");
             if (s)
                 PERSONA_STRDUP_OPT(out->motivation.primary_drive, s);
-            s = sc_json_get_string(mot, "protecting");
+            s = hu_json_get_string(mot, "protecting");
             if (s)
                 PERSONA_STRDUP_OPT(out->motivation.protecting, s);
-            s = sc_json_get_string(mot, "avoiding");
+            s = hu_json_get_string(mot, "avoiding");
             if (s)
                 PERSONA_STRDUP_OPT(out->motivation.avoiding, s);
-            s = sc_json_get_string(mot, "wanting");
+            s = hu_json_get_string(mot, "wanting");
             if (s)
                 PERSONA_STRDUP_OPT(out->motivation.wanting, s);
         }
@@ -896,21 +896,21 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse situational_directions */
     {
-        sc_json_value_t *sd_arr = sc_json_object_get(root, "situational_directions");
-        if (sd_arr && sd_arr->type == SC_JSON_ARRAY && sd_arr->data.array.items) {
+        hu_json_value_t *sd_arr = hu_json_object_get(root, "situational_directions");
+        if (sd_arr && sd_arr->type == HU_JSON_ARRAY && sd_arr->data.array.items) {
             size_t n = sd_arr->data.array.len;
             if (n > 0) {
-                sc_situational_direction_t *dirs = (sc_situational_direction_t *)alloc->alloc(
-                    alloc->ctx, n * sizeof(sc_situational_direction_t));
+                hu_situational_direction_t *dirs = (hu_situational_direction_t *)alloc->alloc(
+                    alloc->ctx, n * sizeof(hu_situational_direction_t));
                 if (dirs) {
-                    memset(dirs, 0, n * sizeof(sc_situational_direction_t));
+                    memset(dirs, 0, n * sizeof(hu_situational_direction_t));
                     size_t count = 0;
                     for (size_t i = 0; i < n; i++) {
-                        const sc_json_value_t *item = sd_arr->data.array.items[i];
-                        if (!item || item->type != SC_JSON_OBJECT)
+                        const hu_json_value_t *item = sd_arr->data.array.items[i];
+                        if (!item || item->type != HU_JSON_OBJECT)
                             continue;
-                        const char *t = sc_json_get_string(item, "trigger");
-                        const char *ins = sc_json_get_string(item, "instruction");
+                        const char *t = hu_json_get_string(item, "trigger");
+                        const char *ins = hu_json_get_string(item, "instruction");
                         if (t)
                             PERSONA_STRDUP_OPT(dirs[count].trigger, t);
                         if (ins)
@@ -926,22 +926,22 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse humor */
     {
-        sc_json_value_t *hum = sc_json_object_get(root, "humor");
-        if (hum && hum->type == SC_JSON_OBJECT) {
+        hu_json_value_t *hum = hu_json_object_get(root, "humor");
+        if (hum && hum->type == HU_JSON_OBJECT) {
             const char *s;
-            s = sc_json_get_string(hum, "type");
+            s = hu_json_get_string(hum, "type");
             if (s)
                 PERSONA_STRDUP_OPT(out->humor.type, s);
-            s = sc_json_get_string(hum, "frequency");
+            s = hu_json_get_string(hum, "frequency");
             if (s)
                 PERSONA_STRDUP_OPT(out->humor.frequency, s);
-            sc_json_value_t *a = sc_json_object_get(hum, "targets");
+            hu_json_value_t *a = hu_json_object_get(hum, "targets");
             if (a)
                 parse_string_array(alloc, a, &out->humor.targets, &out->humor.targets_count);
-            a = sc_json_object_get(hum, "boundaries");
+            a = hu_json_object_get(hum, "boundaries");
             if (a)
                 parse_string_array(alloc, a, &out->humor.boundaries, &out->humor.boundaries_count);
-            s = sc_json_get_string(hum, "timing");
+            s = hu_json_get_string(hum, "timing");
             if (s)
                 PERSONA_STRDUP_OPT(out->humor.timing, s);
         }
@@ -949,22 +949,22 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse conflict_style */
     {
-        sc_json_value_t *cs = sc_json_object_get(root, "conflict_style");
-        if (cs && cs->type == SC_JSON_OBJECT) {
+        hu_json_value_t *cs = hu_json_object_get(root, "conflict_style");
+        if (cs && cs->type == HU_JSON_OBJECT) {
             const char *s;
-            s = sc_json_get_string(cs, "pushback_response");
+            s = hu_json_get_string(cs, "pushback_response");
             if (s)
                 PERSONA_STRDUP_OPT(out->conflict_style.pushback_response, s);
-            s = sc_json_get_string(cs, "confrontation_comfort");
+            s = hu_json_get_string(cs, "confrontation_comfort");
             if (s)
                 PERSONA_STRDUP_OPT(out->conflict_style.confrontation_comfort, s);
-            s = sc_json_get_string(cs, "apology_style");
+            s = hu_json_get_string(cs, "apology_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->conflict_style.apology_style, s);
-            s = sc_json_get_string(cs, "boundary_assertion");
+            s = hu_json_get_string(cs, "boundary_assertion");
             if (s)
                 PERSONA_STRDUP_OPT(out->conflict_style.boundary_assertion, s);
-            s = sc_json_get_string(cs, "repair_behavior");
+            s = hu_json_get_string(cs, "repair_behavior");
             if (s)
                 PERSONA_STRDUP_OPT(out->conflict_style.repair_behavior, s);
         }
@@ -972,27 +972,27 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse emotional_range */
     {
-        sc_json_value_t *er = sc_json_object_get(root, "emotional_range");
-        if (er && er->type == SC_JSON_OBJECT) {
+        hu_json_value_t *er = hu_json_object_get(root, "emotional_range");
+        if (er && er->type == HU_JSON_OBJECT) {
             const char *s;
-            s = sc_json_get_string(er, "ceiling");
+            s = hu_json_get_string(er, "ceiling");
             if (s)
                 PERSONA_STRDUP_OPT(out->emotional_range.ceiling, s);
-            s = sc_json_get_string(er, "floor");
+            s = hu_json_get_string(er, "floor");
             if (s)
                 PERSONA_STRDUP_OPT(out->emotional_range.floor, s);
-            sc_json_value_t *a = sc_json_object_get(er, "escalation_triggers");
+            hu_json_value_t *a = hu_json_object_get(er, "escalation_triggers");
             if (a)
                 parse_string_array(alloc, a, &out->emotional_range.escalation_triggers,
                                    &out->emotional_range.escalation_triggers_count);
-            a = sc_json_object_get(er, "de_escalation");
+            a = hu_json_object_get(er, "de_escalation");
             if (a)
                 parse_string_array(alloc, a, &out->emotional_range.de_escalation,
                                    &out->emotional_range.de_escalation_count);
-            s = sc_json_get_string(er, "withdrawal_conditions");
+            s = hu_json_get_string(er, "withdrawal_conditions");
             if (s)
                 PERSONA_STRDUP_OPT(out->emotional_range.withdrawal_conditions, s);
-            s = sc_json_get_string(er, "recovery_style");
+            s = hu_json_get_string(er, "recovery_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->emotional_range.recovery_style, s);
         }
@@ -1000,22 +1000,22 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse voice_rhythm */
     {
-        sc_json_value_t *vr = sc_json_object_get(root, "voice_rhythm");
-        if (vr && vr->type == SC_JSON_OBJECT) {
+        hu_json_value_t *vr = hu_json_object_get(root, "voice_rhythm");
+        if (vr && vr->type == HU_JSON_OBJECT) {
             const char *s;
-            s = sc_json_get_string(vr, "sentence_pattern");
+            s = hu_json_get_string(vr, "sentence_pattern");
             if (s)
                 PERSONA_STRDUP_OPT(out->voice_rhythm.sentence_pattern, s);
-            s = sc_json_get_string(vr, "paragraph_cadence");
+            s = hu_json_get_string(vr, "paragraph_cadence");
             if (s)
                 PERSONA_STRDUP_OPT(out->voice_rhythm.paragraph_cadence, s);
-            s = sc_json_get_string(vr, "response_tempo");
+            s = hu_json_get_string(vr, "response_tempo");
             if (s)
                 PERSONA_STRDUP_OPT(out->voice_rhythm.response_tempo, s);
-            s = sc_json_get_string(vr, "emphasis_style");
+            s = hu_json_get_string(vr, "emphasis_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->voice_rhythm.emphasis_style, s);
-            s = sc_json_get_string(vr, "pause_behavior");
+            s = hu_json_get_string(vr, "pause_behavior");
             if (s)
                 PERSONA_STRDUP_OPT(out->voice_rhythm.pause_behavior, s);
         }
@@ -1023,32 +1023,32 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse character_invariants + core_anchor */
     {
-        sc_json_value_t *ci = sc_json_object_get(root, "character_invariants");
+        hu_json_value_t *ci = hu_json_object_get(root, "character_invariants");
         if (ci)
             parse_string_array(alloc, ci, &out->character_invariants,
                                &out->character_invariants_count);
-        const char *anchor = sc_json_get_string(root, "core_anchor");
+        const char *anchor = hu_json_get_string(root, "core_anchor");
         if (anchor)
             PERSONA_STRDUP_OPT(out->core_anchor, anchor);
     }
 
     /* Parse intellectual */
     {
-        sc_json_value_t *ip = sc_json_object_get(root, "intellectual");
-        if (ip && ip->type == SC_JSON_OBJECT) {
-            sc_json_value_t *a = sc_json_object_get(ip, "expertise");
+        hu_json_value_t *ip = hu_json_object_get(root, "intellectual");
+        if (ip && ip->type == HU_JSON_OBJECT) {
+            hu_json_value_t *a = hu_json_object_get(ip, "expertise");
             if (a)
                 parse_string_array(alloc, a, &out->intellectual.expertise,
                                    &out->intellectual.expertise_count);
-            a = sc_json_object_get(ip, "curiosity_areas");
+            a = hu_json_object_get(ip, "curiosity_areas");
             if (a)
                 parse_string_array(alloc, a, &out->intellectual.curiosity_areas,
                                    &out->intellectual.curiosity_areas_count);
             const char *s;
-            s = sc_json_get_string(ip, "thinking_style");
+            s = hu_json_get_string(ip, "thinking_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->intellectual.thinking_style, s);
-            s = sc_json_get_string(ip, "metaphor_sources");
+            s = hu_json_get_string(ip, "metaphor_sources");
             if (s)
                 PERSONA_STRDUP_OPT(out->intellectual.metaphor_sources, s);
         }
@@ -1056,25 +1056,25 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse backstory_behaviors */
     {
-        sc_json_value_t *bb_arr = sc_json_object_get(root, "backstory_behaviors");
-        if (bb_arr && bb_arr->type == SC_JSON_ARRAY && bb_arr->data.array.items) {
+        hu_json_value_t *bb_arr = hu_json_object_get(root, "backstory_behaviors");
+        if (bb_arr && bb_arr->type == HU_JSON_ARRAY && bb_arr->data.array.items) {
             size_t n = bb_arr->data.array.len;
             if (n > 0) {
-                sc_backstory_behavior_t *bbs = (sc_backstory_behavior_t *)alloc->alloc(
-                    alloc->ctx, n * sizeof(sc_backstory_behavior_t));
+                hu_backstory_behavior_t *bbs = (hu_backstory_behavior_t *)alloc->alloc(
+                    alloc->ctx, n * sizeof(hu_backstory_behavior_t));
                 if (bbs) {
-                    memset(bbs, 0, n * sizeof(sc_backstory_behavior_t));
+                    memset(bbs, 0, n * sizeof(hu_backstory_behavior_t));
                     size_t count = 0;
                     for (size_t i = 0; i < n; i++) {
-                        const sc_json_value_t *item = bb_arr->data.array.items[i];
-                        if (!item || item->type != SC_JSON_OBJECT)
+                        const hu_json_value_t *item = bb_arr->data.array.items[i];
+                        if (!item || item->type != HU_JSON_OBJECT)
                             continue;
-                        const char *beat = sc_json_get_string(item, "backstory_beat");
-                        const char *rule = sc_json_get_string(item, "behavioral_rule");
+                        const char *beat = hu_json_get_string(item, "backstory_beat");
+                        const char *rule = hu_json_get_string(item, "behavioral_rule");
                         if (beat)
-                            bbs[count].backstory_beat = sc_strdup(alloc, beat);
+                            bbs[count].backstory_beat = hu_strdup(alloc, beat);
                         if (rule)
-                            bbs[count].behavioral_rule = sc_strdup(alloc, rule);
+                            bbs[count].behavioral_rule = hu_strdup(alloc, rule);
                         count++;
                     }
                     out->backstory_behaviors = bbs;
@@ -1086,16 +1086,16 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse sensory */
     {
-        sc_json_value_t *sen = sc_json_object_get(root, "sensory");
-        if (sen && sen->type == SC_JSON_OBJECT) {
-            const char *s = sc_json_get_string(sen, "dominant_sense");
+        hu_json_value_t *sen = hu_json_object_get(root, "sensory");
+        if (sen && sen->type == HU_JSON_OBJECT) {
+            const char *s = hu_json_get_string(sen, "dominant_sense");
             if (s)
                 PERSONA_STRDUP_OPT(out->sensory.dominant_sense, s);
-            sc_json_value_t *a = sc_json_object_get(sen, "metaphor_vocabulary");
+            hu_json_value_t *a = hu_json_object_get(sen, "metaphor_vocabulary");
             if (a)
                 parse_string_array(alloc, a, &out->sensory.metaphor_vocabulary,
                                    &out->sensory.metaphor_vocabulary_count);
-            s = sc_json_get_string(sen, "grounding_patterns");
+            s = hu_json_get_string(sen, "grounding_patterns");
             if (s)
                 PERSONA_STRDUP_OPT(out->sensory.grounding_patterns, s);
         }
@@ -1103,22 +1103,22 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse relational intelligence */
     {
-        sc_json_value_t *rel = sc_json_object_get(root, "relational");
-        if (rel && rel->type == SC_JSON_OBJECT) {
-            const char *s = sc_json_get_string(rel, "bid_response_style");
+        hu_json_value_t *rel = hu_json_object_get(root, "relational");
+        if (rel && rel->type == HU_JSON_OBJECT) {
+            const char *s = hu_json_get_string(rel, "bid_response_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->relational.bid_response_style, s);
-            sc_json_value_t *a = sc_json_object_get(rel, "emotional_bids");
+            hu_json_value_t *a = hu_json_object_get(rel, "emotional_bids");
             if (a)
                 parse_string_array(alloc, a, &out->relational.emotional_bids,
                                    &out->relational.emotional_bids_count);
-            s = sc_json_get_string(rel, "attachment_style");
+            s = hu_json_get_string(rel, "attachment_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->relational.attachment_style, s);
-            s = sc_json_get_string(rel, "attachment_awareness");
+            s = hu_json_get_string(rel, "attachment_awareness");
             if (s)
                 PERSONA_STRDUP_OPT(out->relational.attachment_awareness, s);
-            s = sc_json_get_string(rel, "dunbar_awareness");
+            s = hu_json_get_string(rel, "dunbar_awareness");
             if (s)
                 PERSONA_STRDUP_OPT(out->relational.dunbar_awareness, s);
         }
@@ -1126,19 +1126,19 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse listening protocol */
     {
-        sc_json_value_t *lis = sc_json_object_get(root, "listening");
-        if (lis && lis->type == SC_JSON_OBJECT) {
-            const char *s = sc_json_get_string(lis, "default_response_type");
+        hu_json_value_t *lis = hu_json_object_get(root, "listening");
+        if (lis && lis->type == HU_JSON_OBJECT) {
+            const char *s = hu_json_get_string(lis, "default_response_type");
             if (s)
                 PERSONA_STRDUP_OPT(out->listening.default_response_type, s);
-            sc_json_value_t *a = sc_json_object_get(lis, "reflective_techniques");
+            hu_json_value_t *a = hu_json_object_get(lis, "reflective_techniques");
             if (a)
                 parse_string_array(alloc, a, &out->listening.reflective_techniques,
                                    &out->listening.reflective_techniques_count);
-            s = sc_json_get_string(lis, "nvc_style");
+            s = hu_json_get_string(lis, "nvc_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->listening.nvc_style, s);
-            s = sc_json_get_string(lis, "validation_style");
+            s = hu_json_get_string(lis, "validation_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->listening.validation_style, s);
         }
@@ -1146,18 +1146,18 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse repair protocol */
     {
-        sc_json_value_t *rep = sc_json_object_get(root, "repair");
-        if (rep && rep->type == SC_JSON_OBJECT) {
-            const char *s = sc_json_get_string(rep, "rupture_detection");
+        hu_json_value_t *rep = hu_json_object_get(root, "repair");
+        if (rep && rep->type == HU_JSON_OBJECT) {
+            const char *s = hu_json_get_string(rep, "rupture_detection");
             if (s)
                 PERSONA_STRDUP_OPT(out->repair.rupture_detection, s);
-            s = sc_json_get_string(rep, "repair_approach");
+            s = hu_json_get_string(rep, "repair_approach");
             if (s)
                 PERSONA_STRDUP_OPT(out->repair.repair_approach, s);
-            s = sc_json_get_string(rep, "face_saving_style");
+            s = hu_json_get_string(rep, "face_saving_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->repair.face_saving_style, s);
-            sc_json_value_t *a = sc_json_object_get(rep, "repair_phrases");
+            hu_json_value_t *a = hu_json_object_get(rep, "repair_phrases");
             if (a)
                 parse_string_array(alloc, a, &out->repair.repair_phrases,
                                    &out->repair.repair_phrases_count);
@@ -1166,19 +1166,19 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse linguistic mirroring */
     {
-        sc_json_value_t *mir = sc_json_object_get(root, "mirroring");
-        if (mir && mir->type == SC_JSON_OBJECT) {
-            const char *s = sc_json_get_string(mir, "mirroring_level");
+        hu_json_value_t *mir = hu_json_object_get(root, "mirroring");
+        if (mir && mir->type == HU_JSON_OBJECT) {
+            const char *s = hu_json_get_string(mir, "mirroring_level");
             if (s)
                 PERSONA_STRDUP_OPT(out->mirroring.mirroring_level, s);
-            sc_json_value_t *a = sc_json_object_get(mir, "adapts_to");
+            hu_json_value_t *a = hu_json_object_get(mir, "adapts_to");
             if (a)
                 parse_string_array(alloc, a, &out->mirroring.adapts_to,
                                    &out->mirroring.adapts_to_count);
-            s = sc_json_get_string(mir, "convergence_speed");
+            s = hu_json_get_string(mir, "convergence_speed");
             if (s)
                 PERSONA_STRDUP_OPT(out->mirroring.convergence_speed, s);
-            s = sc_json_get_string(mir, "power_dynamic");
+            s = hu_json_get_string(mir, "power_dynamic");
             if (s)
                 PERSONA_STRDUP_OPT(out->mirroring.power_dynamic, s);
         }
@@ -1186,19 +1186,19 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse social dynamics */
     {
-        sc_json_value_t *soc = sc_json_object_get(root, "social");
-        if (soc && soc->type == SC_JSON_OBJECT) {
-            const char *s = sc_json_get_string(soc, "default_ego_state");
+        hu_json_value_t *soc = hu_json_object_get(root, "social");
+        if (soc && soc->type == HU_JSON_OBJECT) {
+            const char *s = hu_json_get_string(soc, "default_ego_state");
             if (s)
                 PERSONA_STRDUP_OPT(out->social.default_ego_state, s);
-            s = sc_json_get_string(soc, "phatic_style");
+            s = hu_json_get_string(soc, "phatic_style");
             if (s)
                 PERSONA_STRDUP_OPT(out->social.phatic_style, s);
-            sc_json_value_t *a = sc_json_object_get(soc, "bonding_behaviors");
+            hu_json_value_t *a = hu_json_object_get(soc, "bonding_behaviors");
             if (a)
                 parse_string_array(alloc, a, &out->social.bonding_behaviors,
                                    &out->social.bonding_behaviors_count);
-            a = sc_json_object_get(soc, "anti_patterns");
+            a = hu_json_object_get(soc, "anti_patterns");
             if (a)
                 parse_string_array(alloc, a, &out->social.anti_patterns,
                                    &out->social.anti_patterns_count);
@@ -1207,136 +1207,136 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
 
     /* Parse externalized prompt content (root level) */
     {
-        sc_json_value_t *ir = sc_json_object_get(root, "immersive_reinforcement");
+        hu_json_value_t *ir = hu_json_object_get(root, "immersive_reinforcement");
         if (ir)
             parse_string_array(alloc, ir, &out->immersive_reinforcement,
                                &out->immersive_reinforcement_count);
-        const char *s = sc_json_get_string(root, "identity_reinforcement");
+        const char *s = hu_json_get_string(root, "identity_reinforcement");
         if (s)
             PERSONA_STRDUP_OPT(out->identity_reinforcement, s);
-        sc_json_value_t *ap = sc_json_object_get(root, "anti_patterns");
+        hu_json_value_t *ap = hu_json_object_get(root, "anti_patterns");
         if (ap)
             parse_string_array(alloc, ap, &out->anti_patterns, &out->anti_patterns_count);
-        sc_json_value_t *sr = sc_json_object_get(root, "style_rules");
+        hu_json_value_t *sr = hu_json_object_get(root, "style_rules");
         if (sr)
             parse_string_array(alloc, sr, &out->style_rules, &out->style_rules_count);
-        s = sc_json_get_string(root, "proactive_rules");
+        s = hu_json_get_string(root, "proactive_rules");
         if (s)
             PERSONA_STRDUP_OPT(out->proactive_rules, s);
-        sc_json_value_t *to = sc_json_object_get(root, "time_overlays");
-        if (to && to->type == SC_JSON_OBJECT) {
-            s = sc_json_get_string(to, "late_night");
+        hu_json_value_t *to = hu_json_object_get(root, "time_overlays");
+        if (to && to->type == HU_JSON_OBJECT) {
+            s = hu_json_get_string(to, "late_night");
             if (s)
                 PERSONA_STRDUP_OPT(out->time_overlay_late_night, s);
-            s = sc_json_get_string(to, "early_morning");
+            s = hu_json_get_string(to, "early_morning");
             if (s)
                 PERSONA_STRDUP_OPT(out->time_overlay_early_morning, s);
-            s = sc_json_get_string(to, "afternoon");
+            s = hu_json_get_string(to, "afternoon");
             if (s)
                 PERSONA_STRDUP_OPT(out->time_overlay_afternoon, s);
-            s = sc_json_get_string(to, "evening");
+            s = hu_json_get_string(to, "evening");
             if (s)
                 PERSONA_STRDUP_OPT(out->time_overlay_evening, s);
         }
     }
 
     /* Parse contacts */
-    sc_json_value_t *contacts_obj = sc_json_object_get(root, "contacts");
-    if (contacts_obj && contacts_obj->type == SC_JSON_OBJECT && contacts_obj->data.object.pairs) {
+    hu_json_value_t *contacts_obj = hu_json_object_get(root, "contacts");
+    if (contacts_obj && contacts_obj->type == HU_JSON_OBJECT && contacts_obj->data.object.pairs) {
         size_t n = contacts_obj->data.object.len;
-        sc_contact_profile_t *contacts =
-            (sc_contact_profile_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_contact_profile_t));
+        hu_contact_profile_t *contacts =
+            (hu_contact_profile_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_contact_profile_t));
         if (!contacts) {
-            sc_persona_deinit(alloc, out);
-            sc_json_free(alloc, root);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_persona_deinit(alloc, out);
+            hu_json_free(alloc, root);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        memset(contacts, 0, n * sizeof(sc_contact_profile_t));
+        memset(contacts, 0, n * sizeof(hu_contact_profile_t));
         size_t count = 0;
         for (size_t i = 0; i < n; i++) {
-            sc_json_pair_t *pair = &contacts_obj->data.object.pairs[i];
-            if (!pair->key || !pair->value || pair->value->type != SC_JSON_OBJECT)
+            hu_json_pair_t *pair = &contacts_obj->data.object.pairs[i];
+            if (!pair->key || !pair->value || pair->value->type != HU_JSON_OBJECT)
                 continue;
-            sc_contact_profile_t *cp = &contacts[count];
-            cp->contact_id = sc_strdup(alloc, pair->key);
+            hu_contact_profile_t *cp = &contacts[count];
+            cp->contact_id = hu_strdup(alloc, pair->key);
             if (!cp->contact_id)
                 continue;
-            const sc_json_value_t *cval = pair->value;
+            const hu_json_value_t *cval = pair->value;
             const char *s;
-            s = sc_json_get_string(cval, "name");
+            s = hu_json_get_string(cval, "name");
             if (s)
                 PERSONA_STRDUP_OPT(cp->name, s);
-            s = sc_json_get_string(cval, "email");
+            s = hu_json_get_string(cval, "email");
             if (s)
                 PERSONA_STRDUP_OPT(cp->email, s);
-            s = sc_json_get_string(cval, "relationship");
+            s = hu_json_get_string(cval, "relationship");
             if (s)
                 PERSONA_STRDUP_OPT(cp->relationship, s);
-            s = sc_json_get_string(cval, "relationship_stage");
+            s = hu_json_get_string(cval, "relationship_stage");
             if (s)
                 PERSONA_STRDUP_OPT(cp->relationship_stage, s);
-            s = sc_json_get_string(cval, "relationship_type");
+            s = hu_json_get_string(cval, "relationship_type");
             if (s)
                 PERSONA_STRDUP_OPT(cp->relationship_type, s);
-            s = sc_json_get_string(cval, "warmth_level");
+            s = hu_json_get_string(cval, "warmth_level");
             if (s)
                 PERSONA_STRDUP_OPT(cp->warmth_level, s);
-            s = sc_json_get_string(cval, "vulnerability_level");
+            s = hu_json_get_string(cval, "vulnerability_level");
             if (s)
                 PERSONA_STRDUP_OPT(cp->vulnerability_level, s);
-            s = sc_json_get_string(cval, "identity");
+            s = hu_json_get_string(cval, "identity");
             if (s)
                 PERSONA_STRDUP_OPT(cp->identity, s);
-            s = sc_json_get_string(cval, "context");
+            s = hu_json_get_string(cval, "context");
             if (s)
                 PERSONA_STRDUP_OPT(cp->context, s);
-            s = sc_json_get_string(cval, "dynamic");
+            s = hu_json_get_string(cval, "dynamic");
             if (s)
                 PERSONA_STRDUP_OPT(cp->dynamic, s);
-            s = sc_json_get_string(cval, "greeting_style");
+            s = hu_json_get_string(cval, "greeting_style");
             if (s)
                 PERSONA_STRDUP_OPT(cp->greeting_style, s);
-            s = sc_json_get_string(cval, "closing_style");
+            s = hu_json_get_string(cval, "closing_style");
             if (s)
                 PERSONA_STRDUP_OPT(cp->closing_style, s);
-            sc_json_value_t *arr;
-            arr = sc_json_object_get(cval, "interests");
+            hu_json_value_t *arr;
+            arr = hu_json_object_get(cval, "interests");
             if (arr)
                 parse_string_array(alloc, arr, &cp->interests, &cp->interests_count);
-            arr = sc_json_object_get(cval, "recent_topics");
+            arr = hu_json_object_get(cval, "recent_topics");
             if (arr)
                 parse_string_array(alloc, arr, &cp->recent_topics, &cp->recent_topics_count);
-            arr = sc_json_object_get(cval, "sensitive_topics");
+            arr = hu_json_object_get(cval, "sensitive_topics");
             if (arr)
                 parse_string_array(alloc, arr, &cp->sensitive_topics, &cp->sensitive_topics_count);
-            arr = sc_json_object_get(cval, "allowed_behaviors");
+            arr = hu_json_object_get(cval, "allowed_behaviors");
             if (arr)
                 parse_string_array(alloc, arr, &cp->allowed_behaviors,
                                    &cp->allowed_behaviors_count);
-            sc_json_value_t *comm = sc_json_object_get(cval, "communication_patterns");
-            if (comm && comm->type == SC_JSON_OBJECT) {
-                cp->texts_in_bursts = sc_json_get_bool(comm, "texts_in_bursts", false);
-                cp->prefers_short_texts = sc_json_get_bool(comm, "prefers_short_texts", false);
-                cp->sends_links_often = sc_json_get_bool(comm, "sends_links_often", false);
-                cp->uses_emoji = sc_json_get_bool(comm, "uses_emoji", false);
+            hu_json_value_t *comm = hu_json_object_get(cval, "communication_patterns");
+            if (comm && comm->type == HU_JSON_OBJECT) {
+                cp->texts_in_bursts = hu_json_get_bool(comm, "texts_in_bursts", false);
+                cp->prefers_short_texts = hu_json_get_bool(comm, "prefers_short_texts", false);
+                cp->sends_links_often = hu_json_get_bool(comm, "sends_links_often", false);
+                cp->uses_emoji = hu_json_get_bool(comm, "uses_emoji", false);
             }
 
             /* Proactive engagement config */
-            sc_json_value_t *proactive = sc_json_object_get(cval, "proactive");
-            if (proactive && proactive->type == SC_JSON_OBJECT) {
-                cp->proactive_checkin = sc_json_get_bool(proactive, "enabled", false);
-                s = sc_json_get_string(proactive, "channel");
+            hu_json_value_t *proactive = hu_json_object_get(cval, "proactive");
+            if (proactive && proactive->type == HU_JSON_OBJECT) {
+                cp->proactive_checkin = hu_json_get_bool(proactive, "enabled", false);
+                s = hu_json_get_string(proactive, "channel");
                 if (s)
                     PERSONA_STRDUP_OPT(cp->proactive_channel, s);
-                s = sc_json_get_string(proactive, "schedule");
+                s = hu_json_get_string(proactive, "schedule");
                 if (s)
                     PERSONA_STRDUP_OPT(cp->proactive_schedule, s);
             }
 
-            s = sc_json_get_string(cval, "attachment_style");
+            s = hu_json_get_string(cval, "attachment_style");
             if (s)
                 PERSONA_STRDUP_OPT(cp->attachment_style, s);
-            s = sc_json_get_string(cval, "dunbar_layer");
+            s = hu_json_get_string(cval, "dunbar_layer");
             if (s)
                 PERSONA_STRDUP_OPT(cp->dunbar_layer, s);
 
@@ -1346,29 +1346,29 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
         out->contacts_count = count;
     }
 
-    sc_json_value_t *overlays_obj = sc_json_object_get(root, "channel_overlays");
-    if (overlays_obj && overlays_obj->type == SC_JSON_OBJECT && overlays_obj->data.object.pairs) {
+    hu_json_value_t *overlays_obj = hu_json_object_get(root, "channel_overlays");
+    if (overlays_obj && overlays_obj->type == HU_JSON_OBJECT && overlays_obj->data.object.pairs) {
         size_t n = overlays_obj->data.object.len;
-        sc_persona_overlay_t *ovs =
-            (sc_persona_overlay_t *)alloc->alloc(alloc->ctx, n * sizeof(sc_persona_overlay_t));
+        hu_persona_overlay_t *ovs =
+            (hu_persona_overlay_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_persona_overlay_t));
         if (!ovs) {
-            sc_persona_deinit(alloc, out);
-            sc_json_free(alloc, root);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_persona_deinit(alloc, out);
+            hu_json_free(alloc, root);
+            return HU_ERR_OUT_OF_MEMORY;
         }
-        memset(ovs, 0, n * sizeof(sc_persona_overlay_t));
+        memset(ovs, 0, n * sizeof(hu_persona_overlay_t));
         size_t count = 0;
         for (size_t i = 0; i < n; i++) {
-            sc_json_pair_t *pair = &overlays_obj->data.object.pairs[i];
-            if (!pair->key || !pair->value || pair->value->type != SC_JSON_OBJECT)
+            hu_json_pair_t *pair = &overlays_obj->data.object.pairs[i];
+            if (!pair->key || !pair->value || pair->value->type != HU_JSON_OBJECT)
                 continue;
             err = parse_overlay(alloc, pair->key, pair->value, &ovs[count]);
-            if (err != SC_OK) {
+            if (err != HU_OK) {
                 for (size_t j = 0; j < count; j++)
                     free_overlay(alloc, &ovs[j]);
-                alloc->free(alloc->ctx, ovs, n * sizeof(sc_persona_overlay_t));
-                sc_persona_deinit(alloc, out);
-                sc_json_free(alloc, root);
+                alloc->free(alloc->ctx, ovs, n * sizeof(hu_persona_overlay_t));
+                hu_persona_deinit(alloc, out);
+                hu_json_free(alloc, root);
                 return err;
             }
             count++;
@@ -1380,324 +1380,324 @@ sc_error_t sc_persona_load_json(sc_allocator_t *alloc, const char *json, size_t 
     if (oom_on_optional)
         fprintf(stderr, "[persona] warning: some optional fields dropped due to OOM\n");
 
-    sc_json_free(alloc, root);
-    return SC_OK;
+    hu_json_free(alloc, root);
+    return HU_OK;
 #undef PERSONA_STRDUP_OPT
 }
 
 /* --- Validation --- */
 
-static sc_error_t set_err_msg(sc_allocator_t *alloc, char **err_msg, size_t *err_msg_len,
+static hu_error_t set_err_msg(hu_allocator_t *alloc, char **err_msg, size_t *err_msg_len,
                               const char *msg) {
     if (!alloc || !err_msg || !err_msg_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t len = strlen(msg);
     char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(buf, msg, len + 1);
     *err_msg = buf;
     *err_msg_len = len;
-    return SC_ERR_INVALID_ARGUMENT;
+    return HU_ERR_INVALID_ARGUMENT;
 }
 
-static bool is_string_array(const sc_json_value_t *arr) {
-    if (!arr || arr->type != SC_JSON_ARRAY || !arr->data.array.items)
+static bool is_string_array(const hu_json_value_t *arr) {
+    if (!arr || arr->type != HU_JSON_ARRAY || !arr->data.array.items)
         return false;
     for (size_t i = 0; i < arr->data.array.len; i++) {
-        const sc_json_value_t *item = arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_STRING)
+        const hu_json_value_t *item = arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_STRING)
             return false;
     }
     return true;
 }
 
-sc_error_t sc_persona_validate_json(sc_allocator_t *alloc, const char *json, size_t json_len,
+hu_error_t hu_persona_validate_json(hu_allocator_t *alloc, const char *json, size_t json_len,
                                     char **err_msg, size_t *err_msg_len) {
     if (!alloc || !json || !err_msg || !err_msg_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *err_msg = NULL;
     *err_msg_len = 0;
 
-    sc_json_value_t *root = NULL;
-    sc_error_t err = sc_json_parse(alloc, json, json_len, &root);
-    if (err != SC_OK || !root) {
+    hu_json_value_t *root = NULL;
+    hu_error_t err = hu_json_parse(alloc, json, json_len, &root);
+    if (err != HU_OK || !root) {
         return set_err_msg(alloc, err_msg, err_msg_len,
-                           err != SC_OK ? "JSON parse error" : "Invalid JSON");
+                           err != HU_OK ? "JSON parse error" : "Invalid JSON");
     }
-    if (root->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    if (root->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "Root must be JSON object");
     }
 
     /* Required: version — must be number, must be 1 */
-    sc_json_value_t *ver_val = sc_json_object_get(root, "version");
-    if (!ver_val || ver_val->type != SC_JSON_NUMBER) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *ver_val = hu_json_object_get(root, "version");
+    if (!ver_val || ver_val->type != HU_JSON_NUMBER) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len,
                            "Missing or invalid 'version' (must be number 1)");
     }
     double ver = ver_val->data.number;
     if (ver != 1.0) {
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "version must be 1");
     }
 
     /* Required: name — must be non-empty string */
-    const char *name = sc_json_get_string(root, "name");
+    const char *name = hu_json_get_string(root, "name");
     if (!name || !name[0]) {
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "Missing or empty 'name'");
     }
 
     /* Required: core — must be object */
-    sc_json_value_t *core = sc_json_object_get(root, "core");
-    if (!core || core->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *core = hu_json_object_get(root, "core");
+    if (!core || core->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len,
                            "Missing or invalid 'core' (must be object)");
     }
 
     /* Required: core.identity — must be string */
-    const char *identity = sc_json_get_string(core, "identity");
+    const char *identity = hu_json_get_string(core, "identity");
     if (!identity) {
-        sc_json_value_t *id_val = sc_json_object_get(core, "identity");
+        hu_json_value_t *id_val = hu_json_object_get(core, "identity");
         if (!id_val) {
-            sc_json_free(alloc, root);
+            hu_json_free(alloc, root);
             return set_err_msg(alloc, err_msg, err_msg_len, "Missing 'core.identity'");
         }
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "core.identity must be string");
     }
 
     /* Required: core.traits — must be array */
-    sc_json_value_t *traits = sc_json_object_get(core, "traits");
-    if (!traits || traits->type != SC_JSON_ARRAY) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *traits = hu_json_object_get(core, "traits");
+    if (!traits || traits->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len,
                            "Missing or invalid 'core.traits' (must be array)");
     }
 
     /* Optional: core.vocabulary — object */
-    sc_json_value_t *vocab = sc_json_object_get(core, "vocabulary");
-    if (vocab && vocab->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *vocab = hu_json_object_get(core, "vocabulary");
+    if (vocab && vocab->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "core.vocabulary must be object");
     }
-    if (vocab && vocab->type == SC_JSON_OBJECT) {
-        sc_json_value_t *pref = sc_json_object_get(vocab, "preferred");
+    if (vocab && vocab->type == HU_JSON_OBJECT) {
+        hu_json_value_t *pref = hu_json_object_get(vocab, "preferred");
         if (pref && !is_string_array(pref)) {
-            sc_json_free(alloc, root);
+            hu_json_free(alloc, root);
             return set_err_msg(alloc, err_msg, err_msg_len,
                                "core.vocabulary.preferred must be array of strings");
         }
-        sc_json_value_t *avoid = sc_json_object_get(vocab, "avoided");
+        hu_json_value_t *avoid = hu_json_object_get(vocab, "avoided");
         if (avoid && !is_string_array(avoid)) {
-            sc_json_free(alloc, root);
+            hu_json_free(alloc, root);
             return set_err_msg(alloc, err_msg, err_msg_len,
                                "core.vocabulary.avoided must be array of strings");
         }
-        sc_json_value_t *slang = sc_json_object_get(vocab, "slang");
+        hu_json_value_t *slang = hu_json_object_get(vocab, "slang");
         if (slang && !is_string_array(slang)) {
-            sc_json_free(alloc, root);
+            hu_json_free(alloc, root);
             return set_err_msg(alloc, err_msg, err_msg_len,
                                "core.vocabulary.slang must be array of strings");
         }
     }
 
     /* Optional: core.communication_rules — array of strings */
-    sc_json_value_t *rules = sc_json_object_get(core, "communication_rules");
+    hu_json_value_t *rules = hu_json_object_get(core, "communication_rules");
     if (rules && !is_string_array(rules)) {
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len,
                            "core.communication_rules must be array of strings");
     }
 
     /* Optional: core.values — array of strings */
-    sc_json_value_t *vals = sc_json_object_get(core, "values");
+    hu_json_value_t *vals = hu_json_object_get(core, "values");
     if (vals && !is_string_array(vals)) {
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "core.values must be array of strings");
     }
 
     /* Optional: core.decision_style — string */
-    sc_json_value_t *ds_val = sc_json_object_get(core, "decision_style");
-    if (ds_val && ds_val->type != SC_JSON_STRING) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *ds_val = hu_json_object_get(core, "decision_style");
+    if (ds_val && ds_val->type != HU_JSON_STRING) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "core.decision_style must be string");
     }
 
     /* Optional: channel_overlays — object */
-    sc_json_value_t *overlays = sc_json_object_get(root, "channel_overlays");
-    if (overlays && overlays->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *overlays = hu_json_object_get(root, "channel_overlays");
+    if (overlays && overlays->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "channel_overlays must be object");
     }
 
     /* Optional: motivation — object */
-    sc_json_value_t *mot = sc_json_object_get(root, "motivation");
-    if (mot && mot->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *mot = hu_json_object_get(root, "motivation");
+    if (mot && mot->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "motivation must be object");
     }
 
     /* Optional: situational_directions — array of objects */
-    sc_json_value_t *sd = sc_json_object_get(root, "situational_directions");
-    if (sd && sd->type != SC_JSON_ARRAY) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *sd = hu_json_object_get(root, "situational_directions");
+    if (sd && sd->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "situational_directions must be array");
     }
 
     /* Optional: humor — object */
-    sc_json_value_t *hum = sc_json_object_get(root, "humor");
-    if (hum && hum->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *hum = hu_json_object_get(root, "humor");
+    if (hum && hum->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "humor must be object");
     }
 
     /* Optional: conflict_style — object */
-    sc_json_value_t *csj = sc_json_object_get(root, "conflict_style");
-    if (csj && csj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *csj = hu_json_object_get(root, "conflict_style");
+    if (csj && csj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "conflict_style must be object");
     }
 
     /* Optional: emotional_range — object */
-    sc_json_value_t *erj = sc_json_object_get(root, "emotional_range");
-    if (erj && erj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *erj = hu_json_object_get(root, "emotional_range");
+    if (erj && erj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "emotional_range must be object");
     }
 
     /* Optional: voice_rhythm — object */
-    sc_json_value_t *vrj = sc_json_object_get(root, "voice_rhythm");
-    if (vrj && vrj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *vrj = hu_json_object_get(root, "voice_rhythm");
+    if (vrj && vrj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "voice_rhythm must be object");
     }
 
     /* Optional: character_invariants — array of strings */
-    sc_json_value_t *cij = sc_json_object_get(root, "character_invariants");
+    hu_json_value_t *cij = hu_json_object_get(root, "character_invariants");
     if (cij && !is_string_array(cij)) {
-        sc_json_free(alloc, root);
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len,
                            "character_invariants must be array of strings");
     }
 
     /* Optional: core_anchor — string */
-    sc_json_value_t *caj = sc_json_object_get(root, "core_anchor");
-    if (caj && caj->type != SC_JSON_STRING) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *caj = hu_json_object_get(root, "core_anchor");
+    if (caj && caj->type != HU_JSON_STRING) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "core_anchor must be string");
     }
 
     /* Optional: intellectual — object */
-    sc_json_value_t *ipj = sc_json_object_get(root, "intellectual");
-    if (ipj && ipj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *ipj = hu_json_object_get(root, "intellectual");
+    if (ipj && ipj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "intellectual must be object");
     }
 
     /* Optional: backstory_behaviors — array of objects */
-    sc_json_value_t *bbj = sc_json_object_get(root, "backstory_behaviors");
-    if (bbj && bbj->type != SC_JSON_ARRAY) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *bbj = hu_json_object_get(root, "backstory_behaviors");
+    if (bbj && bbj->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "backstory_behaviors must be array");
     }
 
     /* Optional: sensory — object */
-    sc_json_value_t *snj = sc_json_object_get(root, "sensory");
-    if (snj && snj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *snj = hu_json_object_get(root, "sensory");
+    if (snj && snj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "sensory must be object");
     }
 
     /* Optional: relational — object */
-    sc_json_value_t *rlj = sc_json_object_get(root, "relational");
-    if (rlj && rlj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *rlj = hu_json_object_get(root, "relational");
+    if (rlj && rlj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "relational must be object");
     }
 
     /* Optional: listening — object */
-    sc_json_value_t *lij = sc_json_object_get(root, "listening");
-    if (lij && lij->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *lij = hu_json_object_get(root, "listening");
+    if (lij && lij->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "listening must be object");
     }
 
     /* Optional: repair — object */
-    sc_json_value_t *rpj = sc_json_object_get(root, "repair");
-    if (rpj && rpj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *rpj = hu_json_object_get(root, "repair");
+    if (rpj && rpj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "repair must be object");
     }
 
     /* Optional: mirroring — object */
-    sc_json_value_t *mrj = sc_json_object_get(root, "mirroring");
-    if (mrj && mrj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *mrj = hu_json_object_get(root, "mirroring");
+    if (mrj && mrj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "mirroring must be object");
     }
 
     /* Optional: social — object */
-    sc_json_value_t *scj = sc_json_object_get(root, "social");
-    if (scj && scj->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, root);
+    hu_json_value_t *scj = hu_json_object_get(root, "social");
+    if (scj && scj->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, root);
         return set_err_msg(alloc, err_msg, err_msg_len, "social must be object");
     }
 
-    sc_json_free(alloc, root);
-    return SC_OK;
+    hu_json_free(alloc, root);
+    return HU_OK;
 }
 
-sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_len,
-                           sc_persona_t *out) {
+hu_error_t hu_persona_load(hu_allocator_t *alloc, const char *name, size_t name_len,
+                           hu_persona_t *out) {
     if (!alloc || !name || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    char base[SC_PERSONA_PATH_MAX];
-    if (!sc_persona_base_dir(base, sizeof(base)))
-        return SC_ERR_NOT_FOUND;
-    char path[SC_PERSONA_PATH_MAX];
+        return HU_ERR_INVALID_ARGUMENT;
+    char base[HU_PERSONA_PATH_MAX];
+    if (!hu_persona_base_dir(base, sizeof(base)))
+        return HU_ERR_NOT_FOUND;
+    char path[HU_PERSONA_PATH_MAX];
     int n = snprintf(path, sizeof(path), "%s/%.*s.json", base, (int)name_len, name);
     if (n <= 0 || (size_t)n >= sizeof(path))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     FILE *f = fopen(path, "rb");
     if (!f)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     long sz = ftell(f);
     if (sz < 0 || sz > (long)(1024 * 1024)) {
         fclose(f);
-        return sz < 0 ? SC_ERR_IO : SC_ERR_INVALID_ARGUMENT;
+        return sz < 0 ? HU_ERR_IO : HU_ERR_INVALID_ARGUMENT;
     }
     rewind(f);
     char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
     if (!buf) {
         fclose(f);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t read_len = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     if (read_len != (size_t)sz) {
         alloc->free(alloc->ctx, buf, (size_t)sz + 1);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     buf[read_len] = '\0';
-    sc_error_t err = sc_persona_load_json(alloc, buf, read_len, out);
+    hu_error_t err = hu_persona_load_json(alloc, buf, read_len, out);
     alloc->free(alloc->ctx, buf, (size_t)sz + 1);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
-#if !(defined(SC_IS_TEST) && SC_IS_TEST) && (defined(__unix__) || defined(__APPLE__))
+#if !(defined(HU_IS_TEST) && HU_IS_TEST) && (defined(__unix__) || defined(__APPLE__))
     /* Load example banks from <base>/examples/<name>/<channel>/examples.json */
     {
-        char base_dir[SC_PERSONA_PATH_MAX];
-        if (sc_persona_base_dir(base_dir, sizeof(base_dir)) && out->name && out->name_len > 0) {
-            char ex_base[SC_PERSONA_PATH_MAX];
+        char base_dir[HU_PERSONA_PATH_MAX];
+        if (hu_persona_base_dir(base_dir, sizeof(base_dir)) && out->name && out->name_len > 0) {
+            char ex_base[HU_PERSONA_PATH_MAX];
             int bn = snprintf(ex_base, sizeof(ex_base), "%s/examples/%.*s", base_dir,
                               (int)out->name_len, out->name);
             if (bn > 0 && (size_t)bn < sizeof(ex_base)) {
@@ -1707,7 +1707,7 @@ sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_
                     while ((e = readdir(d)) != NULL) {
                         if (e->d_name[0] == '\0' || e->d_name[0] == '.')
                             continue;
-                        char ch_path[SC_PERSONA_PATH_MAX];
+                        char ch_path[HU_PERSONA_PATH_MAX];
                         int pn = snprintf(ch_path, sizeof(ch_path), "%s/%s/examples.json", ex_base,
                                           e->d_name);
                         if (pn <= 0 || (size_t)pn >= sizeof(ch_path))
@@ -1738,23 +1738,23 @@ sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_
                         }
                         ebuf[erd] = '\0';
                         size_t ch_len = strlen(e->d_name);
-                        sc_persona_example_bank_t *banks = out->example_banks;
+                        hu_persona_example_bank_t *banks = out->example_banks;
                         size_t banks_count = out->example_banks_count;
                         size_t new_cap = banks_count + 1;
-                        sc_persona_example_bank_t *new_banks =
-                            (sc_persona_example_bank_t *)alloc->realloc(
-                                alloc->ctx, banks, banks_count * sizeof(sc_persona_example_bank_t),
-                                new_cap * sizeof(sc_persona_example_bank_t));
+                        hu_persona_example_bank_t *new_banks =
+                            (hu_persona_example_bank_t *)alloc->realloc(
+                                alloc->ctx, banks, banks_count * sizeof(hu_persona_example_bank_t),
+                                new_cap * sizeof(hu_persona_example_bank_t));
                         if (!new_banks) {
                             alloc->free(alloc->ctx, ebuf, (size_t)esz + 1);
                             continue;
                         }
                         out->example_banks = new_banks;
-                        memset(&new_banks[banks_count], 0, sizeof(sc_persona_example_bank_t));
-                        sc_error_t berr = sc_persona_examples_load_json(
+                        memset(&new_banks[banks_count], 0, sizeof(hu_persona_example_bank_t));
+                        hu_error_t berr = hu_persona_examples_load_json(
                             alloc, e->d_name, ch_len, ebuf, erd, &new_banks[banks_count]);
                         alloc->free(alloc->ctx, ebuf, (size_t)esz + 1);
-                        if (berr == SC_OK)
+                        if (berr == HU_OK)
                             out->example_banks_count++;
                         else
                             free_example_bank(alloc, &new_banks[banks_count]);
@@ -1766,38 +1766,38 @@ sc_error_t sc_persona_load(sc_allocator_t *alloc, const char *name, size_t name_
     }
 #endif
 
-    return SC_OK;
+    return HU_OK;
 }
 
 /* --- Prompt builder --- */
 
-static sc_error_t append_prompt(sc_allocator_t *alloc, char **buf, size_t *len, size_t *cap,
+static hu_error_t append_prompt(hu_allocator_t *alloc, char **buf, size_t *len, size_t *cap,
                                 const char *s, size_t slen) {
     while (*len + slen + 1 > *cap) {
-        size_t new_cap = *cap ? *cap * 2 : SC_PERSONA_PROMPT_INIT_CAP;
+        size_t new_cap = *cap ? *cap * 2 : HU_PERSONA_PROMPT_INIT_CAP;
         char *nb = (char *)alloc->realloc(alloc->ctx, *buf, *cap, new_cap);
         if (!nb)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         *buf = nb;
         *cap = new_cap;
     }
     memcpy(*buf + *len, s, slen);
     (*buf)[*len + slen] = '\0';
     *len += slen;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *persona,
+hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *persona,
                                    const char *channel, size_t channel_len, const char *topic,
                                    size_t topic_len, char **out, size_t *out_len) {
     if (!alloc || !persona || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!topic)
         topic_len = 0;
-    size_t cap = SC_PERSONA_PROMPT_INIT_CAP;
+    size_t cap = HU_PERSONA_PROMPT_INIT_CAP;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t len = 0;
     buf[0] = '\0';
 
@@ -1806,130 +1806,130 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     char header[256];
     int n = snprintf(header, sizeof(header), "You are acting as %.*s.", (int)name_len, name);
     if (n > 0) {
-        sc_error_t err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
-        if (err != SC_OK) {
+        hu_error_t err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
+        if (err != HU_OK) {
             alloc->free(alloc->ctx, buf, cap);
             return err;
         }
     }
     if (persona->identity && persona->identity[0]) {
-        sc_error_t e2 = append_prompt(alloc, &buf, &len, &cap, " ", 1);
-        if (e2 == SC_OK)
+        hu_error_t e2 = append_prompt(alloc, &buf, &len, &cap, " ", 1);
+        if (e2 == HU_OK)
             e2 = append_prompt(alloc, &buf, &len, &cap, persona->identity,
                                strlen(persona->identity));
-        if (e2 != SC_OK) {
+        if (e2 != HU_OK) {
             alloc->free(alloc->ctx, buf, cap);
             return e2;
         }
     }
-    sc_error_t err = append_prompt(alloc, &buf, &len, &cap, "\n\n", 2);
-    if (err != SC_OK) {
+    hu_error_t err = append_prompt(alloc, &buf, &len, &cap, "\n\n", 2);
+    if (err != HU_OK) {
         alloc->free(alloc->ctx, buf, cap);
         return err;
     }
 
     if (persona->traits && persona->traits_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Personality traits: ", 20);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->traits_count; i++) {
             if (i > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             const char *t = persona->traits[i];
             if (t)
                 err = append_prompt(alloc, &buf, &len, &cap, t, strlen(t));
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     if (persona->preferred_vocab && persona->preferred_vocab_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Preferred vocabulary: ", 22);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->preferred_vocab_count; i++) {
             if (i > 0)
                 err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
             else
-                err = SC_OK;
-            if (err != SC_OK)
+                err = HU_OK;
+            if (err != HU_OK)
                 goto fail;
             const char *v = persona->preferred_vocab[i];
             if (v)
                 err = append_prompt(alloc, &buf, &len, &cap, v, strlen(v));
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     if (persona->avoided_vocab && persona->avoided_vocab_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Avoid: ", 7);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->avoided_vocab_count; i++) {
             if (i > 0)
                 err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
             else
-                err = SC_OK;
-            if (err != SC_OK)
+                err = HU_OK;
+            if (err != HU_OK)
                 goto fail;
             const char *v = persona->avoided_vocab[i];
             if (v)
                 err = append_prompt(alloc, &buf, &len, &cap, v, strlen(v));
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     if (persona->slang && persona->slang_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Slang: ", 7);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->slang_count; i++) {
             if (i > 0)
                 err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
             else
-                err = SC_OK;
-            if (err != SC_OK)
+                err = HU_OK;
+            if (err != HU_OK)
                 goto fail;
             const char *s = persona->slang[i];
             if (s)
                 err = append_prompt(alloc, &buf, &len, &cap, s, strlen(s));
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     if (persona->communication_rules && persona->communication_rules_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Communication rules:\n", 21);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->communication_rules_count; i++) {
             const char *r = persona->communication_rules[i];
             if (r) {
                 err = append_prompt(alloc, &buf, &len, &cap, "- ", 2);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 err = append_prompt(alloc, &buf, &len, &cap, r, strlen(r));
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
         }
@@ -1937,48 +1937,48 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     if (persona->values && persona->values_count > 0) {
         err = append_prompt(alloc, &buf, &len, &cap, "Values: ", 8);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->values_count; i++) {
             if (i > 0)
                 err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
             else
-                err = SC_OK;
-            if (err != SC_OK)
+                err = HU_OK;
+            if (err != HU_OK)
                 goto fail;
             const char *v = persona->values[i];
             if (v)
                 err = append_prompt(alloc, &buf, &len, &cap, v, strlen(v));
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     if (persona->decision_style && persona->decision_style[0]) {
         err = append_prompt(alloc, &buf, &len, &cap, "Decision style: ", 16);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         err = append_prompt(alloc, &buf, &len, &cap, persona->decision_style,
                             strlen(persona->decision_style));
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     /* Biography */
     if (persona->biography && persona->biography[0]) {
         err = append_prompt(alloc, &buf, &len, &cap, "\n--- Biography ---\n", 19);
-        if (err == SC_OK)
+        if (err == HU_OK)
             err = append_prompt(alloc, &buf, &len, &cap, persona->biography,
                                 strlen(persona->biography));
-        if (err == SC_OK)
+        if (err == HU_OK)
             err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
@@ -1986,30 +1986,30 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     if (persona->core_anchor && persona->core_anchor[0]) {
         static const char anc_hdr[] = "\n--- Core Anchor (your identity in one line) ---\n";
         err = append_prompt(alloc, &buf, &len, &cap, anc_hdr, sizeof(anc_hdr) - 1);
-        if (err == SC_OK)
+        if (err == HU_OK)
             err = append_prompt(alloc, &buf, &len, &cap, persona->core_anchor,
                                 strlen(persona->core_anchor));
-        if (err == SC_OK)
+        if (err == HU_OK)
             err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
     }
 
     /* Motivation */
     {
-        const sc_persona_motivation_t *m = &persona->motivation;
+        const hu_persona_motivation_t *m = &persona->motivation;
         bool has = m->primary_drive || m->protecting || m->avoiding || m->wanting;
         if (has) {
             static const char mot_hdr[] = "\n--- Motivation (your core drive) ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, mot_hdr, sizeof(mot_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (m->primary_drive) {
                 char line[512];
                 int w = snprintf(line, sizeof(line), "Why you engage: %s\n", m->primary_drive);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2018,7 +2018,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "What you protect: %s\n", m->protecting);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2027,7 +2027,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "What you avoid: %s\n", m->avoiding);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2036,7 +2036,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "What you want most: %s\n", m->wanting);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2047,18 +2047,18 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     if (persona->directors_notes_count > 0) {
         static const char dn_hdr[] = "\n--- Director's Notes (performance direction) ---\n";
         err = append_prompt(alloc, &buf, &len, &cap, dn_hdr, sizeof(dn_hdr) - 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->directors_notes_count; i++) {
             if (!persona->directors_notes[i])
                 continue;
             err = append_prompt(alloc, &buf, &len, &cap, "- ", 2);
-            if (err == SC_OK)
+            if (err == HU_OK)
                 err = append_prompt(alloc, &buf, &len, &cap, persona->directors_notes[i],
                                     strlen(persona->directors_notes[i]));
-            if (err == SC_OK)
+            if (err == HU_OK)
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
     }
@@ -2067,16 +2067,16 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     if (persona->situational_directions_count > 0) {
         static const char sd_hdr[] = "\n--- Situational Direction (scene-specific notes) ---\n";
         err = append_prompt(alloc, &buf, &len, &cap, sd_hdr, sizeof(sd_hdr) - 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->situational_directions_count; i++) {
-            const sc_situational_direction_t *d = &persona->situational_directions[i];
+            const hu_situational_direction_t *d = &persona->situational_directions[i];
             if (d->trigger && d->instruction) {
                 char line[512];
                 int w = snprintf(line, sizeof(line), "- WHEN %s: %s\n", d->trigger, d->instruction);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2085,19 +2085,19 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Humor profile */
     {
-        const sc_humor_profile_t *h = &persona->humor;
+        const hu_humor_profile_t *h = &persona->humor;
         bool has = h->type || h->frequency || h->timing;
         if (has) {
             static const char hum_hdr[] = "\n--- Humor ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, hum_hdr, sizeof(hum_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (h->type) {
                 char line[256];
                 int w = snprintf(line, sizeof(line), "Type: %s\n", h->type);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2106,7 +2106,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Frequency: %s\n", h->frequency);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2115,46 +2115,46 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Timing: %s\n", h->timing);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (h->targets_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Targets: ", 9);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < h->targets_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, h->targets[i],
                                         strlen(h->targets[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (h->boundaries_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Never funny: ", 13);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < h->boundaries_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, h->boundaries[i],
                                         strlen(h->boundaries[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
         }
@@ -2162,20 +2162,20 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Conflict style */
     {
-        const sc_conflict_style_t *cs = &persona->conflict_style;
+        const hu_conflict_style_t *cs = &persona->conflict_style;
         bool has = cs->pushback_response || cs->confrontation_comfort || cs->apology_style ||
                    cs->boundary_assertion || cs->repair_behavior;
         if (has) {
             static const char cs_hdr[] = "\n--- Conflict & Disagreement ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, cs_hdr, sizeof(cs_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (cs->pushback_response) {
                 char line[256];
                 int w = snprintf(line, sizeof(line), "Pushback: %s\n", cs->pushback_response);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2185,7 +2185,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                                  cs->confrontation_comfort);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2194,7 +2194,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Apology style: %s\n", cs->apology_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2203,7 +2203,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Saying no: %s\n", cs->boundary_assertion);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2212,7 +2212,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Repair: %s\n", cs->repair_behavior);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2221,20 +2221,20 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Emotional range */
     {
-        const sc_emotional_range_t *er = &persona->emotional_range;
+        const hu_emotional_range_t *er = &persona->emotional_range;
         bool has = er->ceiling || er->floor || er->withdrawal_conditions || er->recovery_style ||
                    er->escalation_triggers_count > 0 || er->de_escalation_count > 0;
         if (has) {
             static const char er_hdr[] = "\n--- Emotional Range ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, er_hdr, sizeof(er_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (er->ceiling) {
                 char line[256];
                 int w = snprintf(line, sizeof(line), "Ceiling: %s\n", er->ceiling);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2243,46 +2243,46 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Floor: %s\n", er->floor);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (er->escalation_triggers_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Escalates when: ", 16);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < er->escalation_triggers_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, "; ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, er->escalation_triggers[i],
                                         strlen(er->escalation_triggers[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (er->de_escalation_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Self-regulates by: ", 19);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < er->de_escalation_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, "; ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, er->de_escalation[i],
                                         strlen(er->de_escalation[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (er->withdrawal_conditions) {
@@ -2291,7 +2291,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Withdraws when: %s\n", er->withdrawal_conditions);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2300,7 +2300,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Recovery: %s\n", er->recovery_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2309,13 +2309,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Voice rhythm */
     {
-        const sc_voice_rhythm_t *vr = &persona->voice_rhythm;
+        const hu_voice_rhythm_t *vr = &persona->voice_rhythm;
         bool has = vr->sentence_pattern || vr->paragraph_cadence || vr->response_tempo ||
                    vr->emphasis_style || vr->pause_behavior;
         if (has) {
             static const char vr_hdr[] = "\n--- Voice Rhythm ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, vr_hdr, sizeof(vr_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (vr->sentence_pattern) {
                 char line[256];
@@ -2323,7 +2323,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Sentence pattern: %s\n", vr->sentence_pattern);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2333,7 +2333,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Paragraph cadence: %s\n", vr->paragraph_cadence);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2342,7 +2342,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Response tempo: %s\n", vr->response_tempo);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2351,7 +2351,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Emphasis: %s\n", vr->emphasis_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2360,7 +2360,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Pauses: %s\n", vr->pause_behavior);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2369,50 +2369,50 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Intellectual profile */
     {
-        const sc_intellectual_profile_t *ip = &persona->intellectual;
+        const hu_intellectual_profile_t *ip = &persona->intellectual;
         bool has = ip->expertise_count > 0 || ip->curiosity_areas_count > 0 || ip->thinking_style ||
                    ip->metaphor_sources;
         if (has) {
             static const char ip_hdr[] = "\n--- Intellectual Profile ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, ip_hdr, sizeof(ip_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (ip->expertise_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Deep knowledge: ", 16);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < ip->expertise_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, ip->expertise[i],
                                         strlen(ip->expertise[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (ip->curiosity_areas_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Genuinely curious about: ", 25);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < ip->curiosity_areas_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, ip->curiosity_areas[i],
                                         strlen(ip->curiosity_areas[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (ip->thinking_style) {
@@ -2420,7 +2420,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Thinks by: %s\n", ip->thinking_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2430,7 +2430,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                                  ip->metaphor_sources);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2441,17 +2441,17 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     if (persona->backstory_behaviors_count > 0) {
         static const char bb_hdr[] = "\n--- Backstory-to-Behavior (why you do what you do) ---\n";
         err = append_prompt(alloc, &buf, &len, &cap, bb_hdr, sizeof(bb_hdr) - 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->backstory_behaviors_count; i++) {
-            const sc_backstory_behavior_t *b = &persona->backstory_behaviors[i];
+            const hu_backstory_behavior_t *b = &persona->backstory_behaviors[i];
             if (b->backstory_beat && b->behavioral_rule) {
                 char line[512];
                 int w = snprintf(line, sizeof(line), "- Because %s → %s\n", b->backstory_beat,
                                  b->behavioral_rule);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2460,40 +2460,40 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Sensory preferences */
     {
-        const sc_sensory_preferences_t *sp = &persona->sensory;
+        const hu_sensory_preferences_t *sp = &persona->sensory;
         bool has =
             sp->dominant_sense || sp->metaphor_vocabulary_count > 0 || sp->grounding_patterns;
         if (has) {
             static const char sp_hdr[] = "\n--- Sensory Grounding ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, sp_hdr, sizeof(sp_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (sp->dominant_sense) {
                 char line[256];
                 int w = snprintf(line, sizeof(line), "Dominant sense: %s\n", sp->dominant_sense);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (sp->metaphor_vocabulary_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Sensory vocabulary: ", 20);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < sp->metaphor_vocabulary_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, sp->metaphor_vocabulary[i],
                                         strlen(sp->metaphor_vocabulary[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (sp->grounding_patterns) {
@@ -2501,7 +2501,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Grounding: %s\n", sp->grounding_patterns);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2510,13 +2510,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Relational intelligence (Gottman bids, attachment, Dunbar layers) */
     {
-        const sc_relational_intelligence_t *ri = &persona->relational;
+        const hu_relational_intelligence_t *ri = &persona->relational;
         bool has = ri->bid_response_style || ri->emotional_bids_count > 0 || ri->attachment_style ||
                    ri->attachment_awareness || ri->dunbar_awareness;
         if (has) {
             static const char ri_hdr[] = "\n--- Relational Intelligence ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, ri_hdr, sizeof(ri_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (ri->attachment_style) {
                 char line[256];
@@ -2524,7 +2524,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Attachment style: %s\n", ri->attachment_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2533,27 +2533,27 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Bid response: %s\n", ri->bid_response_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (ri->emotional_bids_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Bids you make: ", 15);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < ri->emotional_bids_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, ri->emotional_bids[i],
                                         strlen(ri->emotional_bids[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (ri->attachment_awareness) {
@@ -2562,7 +2562,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                                  ri->attachment_awareness);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2572,7 +2572,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Relationship layers: %s\n", ri->dunbar_awareness);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2581,13 +2581,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Listening protocol (Derber support/shift, OARS, NVC) */
     {
-        const sc_listening_protocol_t *lp = &persona->listening;
+        const hu_listening_protocol_t *lp = &persona->listening;
         bool has = lp->default_response_type || lp->reflective_techniques_count > 0 ||
                    lp->nvc_style || lp->validation_style;
         if (has) {
             static const char lp_hdr[] = "\n--- Listening & Response Protocol ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, lp_hdr, sizeof(lp_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (lp->default_response_type) {
                 char line[256];
@@ -2595,27 +2595,27 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                                  lp->default_response_type);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (lp->reflective_techniques_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Techniques: ", 12);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < lp->reflective_techniques_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, lp->reflective_techniques[i],
                                         strlen(lp->reflective_techniques[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (lp->nvc_style) {
@@ -2623,7 +2623,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "NVC approach: %s\n", lp->nvc_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2632,7 +2632,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Validation: %s\n", lp->validation_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2641,13 +2641,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Repair protocol (rupture-repair, conversational repair, face-saving) */
     {
-        const sc_repair_protocol_t *rp = &persona->repair;
+        const hu_repair_protocol_t *rp = &persona->repair;
         bool has = rp->rupture_detection || rp->repair_approach || rp->face_saving_style ||
                    rp->repair_phrases_count > 0;
         if (has) {
             static const char rp_hdr[] = "\n--- Repair Protocol ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, rp_hdr, sizeof(rp_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (rp->rupture_detection) {
                 char line[512];
@@ -2655,7 +2655,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Rupture detection: %s\n", rp->rupture_detection);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2664,7 +2664,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Repair approach: %s\n", rp->repair_approach);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2673,27 +2673,27 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Face-saving: %s\n", rp->face_saving_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (rp->repair_phrases_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Repair phrases: ", 16);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < rp->repair_phrases_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, " | ", 3);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, rp->repair_phrases[i],
                                         strlen(rp->repair_phrases[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
         }
@@ -2701,40 +2701,40 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Linguistic mirroring (CAT, accommodation, style matching) */
     {
-        const sc_linguistic_mirroring_t *lm = &persona->mirroring;
+        const hu_linguistic_mirroring_t *lm = &persona->mirroring;
         bool has = lm->mirroring_level || lm->adapts_to_count > 0 || lm->convergence_speed ||
                    lm->power_dynamic;
         if (has) {
             static const char lm_hdr[] = "\n--- Linguistic Mirroring ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, lm_hdr, sizeof(lm_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (lm->mirroring_level) {
                 char line[256];
                 int w = snprintf(line, sizeof(line), "Mirroring level: %s\n", lm->mirroring_level);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (lm->adapts_to_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Adapts to: ", 11);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < lm->adapts_to_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, lm->adapts_to[i],
                                         strlen(lm->adapts_to[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (lm->convergence_speed) {
@@ -2742,7 +2742,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Convergence: %s\n", lm->convergence_speed);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2751,7 +2751,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Power dynamic: %s\n", lm->power_dynamic);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2760,13 +2760,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     /* Social dynamics (ego states, phatic communication, anti-patterns) */
     {
-        const sc_social_dynamics_t *sd = &persona->social;
+        const hu_social_dynamics_t *sd = &persona->social;
         bool has = sd->default_ego_state || sd->phatic_style || sd->bonding_behaviors_count > 0 ||
                    sd->anti_patterns_count > 0;
         if (has) {
             static const char sd_hdr[] = "\n--- Social Dynamics ---\n";
             err = append_prompt(alloc, &buf, &len, &cap, sd_hdr, sizeof(sd_hdr) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (sd->default_ego_state) {
                 char line[256];
@@ -2774,7 +2774,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                     snprintf(line, sizeof(line), "Default ego state: %s\n", sd->default_ego_state);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2783,46 +2783,46 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 int w = snprintf(line, sizeof(line), "Phatic style: %s\n", sd->phatic_style);
                 if (w > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, line, (size_t)w);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (sd->bonding_behaviors_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "Bonding behaviors: ", 19);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < sd->bonding_behaviors_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, sd->bonding_behaviors[i],
                                         strlen(sd->bonding_behaviors[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (sd->anti_patterns_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "NEVER do: ", 10);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < sd->anti_patterns_count; i++) {
                     if (i > 0) {
                         err = append_prompt(alloc, &buf, &len, &cap, " | ", 3);
-                        if (err != SC_OK)
+                        if (err != HU_OK)
                             goto fail;
                     }
                     err = append_prompt(alloc, &buf, &len, &cap, sd->anti_patterns[i],
                                         strlen(sd->anti_patterns[i]));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
         }
@@ -2832,16 +2832,16 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
     if (persona->character_invariants_count > 0) {
         static const char ci_hdr[] = "\n--- Character Invariants (NEVER break these) ---\n";
         err = append_prompt(alloc, &buf, &len, &cap, ci_hdr, sizeof(ci_hdr) - 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->character_invariants_count; i++) {
             err = append_prompt(alloc, &buf, &len, &cap, "- ", 2);
-            if (err == SC_OK)
+            if (err == HU_OK)
                 err = append_prompt(alloc, &buf, &len, &cap, persona->character_invariants[i],
                                     strlen(persona->character_invariants[i]));
-            if (err == SC_OK)
+            if (err == HU_OK)
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
     }
@@ -2853,18 +2853,18 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
             "You have moods that shift naturally. Current mood is chosen "
             "by the context of the conversation. Available moods:\n";
         err = append_prompt(alloc, &buf, &len, &cap, mood_hdr, sizeof(mood_hdr) - 1);
-        if (err != SC_OK)
+        if (err != HU_OK)
             goto fail;
         for (size_t i = 0; i < persona->mood_states_count; i++) {
             if (!persona->mood_states[i])
                 continue;
             err = append_prompt(alloc, &buf, &len, &cap, "- ", 2);
-            if (err == SC_OK)
+            if (err == HU_OK)
                 err = append_prompt(alloc, &buf, &len, &cap, persona->mood_states[i],
                                     strlen(persona->mood_states[i]));
-            if (err == SC_OK)
+            if (err == HU_OK)
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
         }
     }
@@ -2875,11 +2875,11 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
             "authenticity, not caricature.\n\n";
         err = append_prompt(alloc, &buf, &len, &cap, style_note, sizeof(style_note) - 1);
     }
-    if (err != SC_OK)
+    if (err != HU_OK)
         goto fail;
 
     if (channel && channel_len > 0) {
-        const sc_persona_overlay_t *ov = sc_persona_find_overlay(persona, channel, channel_len);
+        const hu_persona_overlay_t *ov = hu_persona_find_overlay(persona, channel, channel_len);
         if (ov) {
             /* Build "Channel (imessage) style:\n" in one go for clarity */
             char ch_header[128];
@@ -2890,13 +2890,13 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
             } else {
                 err = append_prompt(alloc, &buf, &len, &cap, "Channel style:\n", 16);
             }
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             if (ov->formality && ov->formality[0]) {
                 n = snprintf(header, sizeof(header), "- Formality: %s\n", ov->formality);
                 if (n > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2904,7 +2904,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 n = snprintf(header, sizeof(header), "- Avg length: %s\n", ov->avg_length);
                 if (n > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
@@ -2912,29 +2912,29 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                 n = snprintf(header, sizeof(header), "- Emoji usage: %s\n", ov->emoji_usage);
                 if (n > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (ov->style_notes && ov->style_notes_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "- Style notes: ", 15);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < ov->style_notes_count; i++) {
                     if (i > 0)
                         err = append_prompt(alloc, &buf, &len, &cap, "; ", 2);
                     else
-                        err = SC_OK;
-                    if (err != SC_OK)
+                        err = HU_OK;
+                    if (err != HU_OK)
                         goto fail;
                     const char *sn = ov->style_notes[i];
                     if (sn)
                         err = append_prompt(alloc, &buf, &len, &cap, sn, strlen(sn));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
             if (ov->message_splitting) {
@@ -2942,80 +2942,80 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
                              ov->max_segment_chars ? ov->max_segment_chars : 120);
                 if (n > 0) {
                     err = append_prompt(alloc, &buf, &len, &cap, header, (size_t)n);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
             }
             if (ov->typing_quirks && ov->typing_quirks_count > 0) {
                 err = append_prompt(alloc, &buf, &len, &cap, "- Typing quirks: ", 17);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < ov->typing_quirks_count; i++) {
                     if (i > 0)
                         err = append_prompt(alloc, &buf, &len, &cap, ", ", 2);
                     else
-                        err = SC_OK;
-                    if (err != SC_OK)
+                        err = HU_OK;
+                    if (err != HU_OK)
                         goto fail;
                     const char *q = ov->typing_quirks[i];
                     if (q)
                         err = append_prompt(alloc, &buf, &len, &cap, q, strlen(q));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
         }
     }
 
     if (persona->example_banks && persona->example_banks_count > 0) {
-        const sc_persona_example_t *sel_buf[8];
+        const hu_persona_example_t *sel_buf[8];
         size_t selected_count = 0;
-        sc_error_t sel_err = sc_persona_select_examples(persona, channel, channel_len, topic,
+        hu_error_t sel_err = hu_persona_select_examples(persona, channel, channel_len, topic,
                                                         topic_len, sel_buf, &selected_count, 5);
-        if (sel_err == SC_OK && selected_count > 0) {
+        if (sel_err == HU_OK && selected_count > 0) {
             static const char examples_header[] = "Example conversations showing your style:\n";
             err = append_prompt(alloc, &buf, &len, &cap, examples_header,
                                 sizeof(examples_header) - 1);
-            if (err != SC_OK)
+            if (err != HU_OK)
                 goto fail;
             for (size_t i = 0; i < selected_count; i++) {
-                const sc_persona_example_t *ex = sel_buf[i];
+                const hu_persona_example_t *ex = sel_buf[i];
                 if (ex->incoming) {
                     err = append_prompt(alloc, &buf, &len, &cap, "Them: ", sizeof("Them: ") - 1);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                     err =
                         append_prompt(alloc, &buf, &len, &cap, ex->incoming, strlen(ex->incoming));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                     err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 if (ex->response) {
                     err = append_prompt(alloc, &buf, &len, &cap, "You: ", sizeof("You: ") - 1);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                     err =
                         append_prompt(alloc, &buf, &len, &cap, ex->response, strlen(ex->response));
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                     err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                    if (err != SC_OK)
+                    if (err != HU_OK)
                         goto fail;
                 }
                 err = append_prompt(alloc, &buf, &len, &cap, "\n", 1);
-                if (err != SC_OK)
+                if (err != HU_OK)
                     goto fail;
             }
         }
     }
 
-    if (len > SC_PERSONA_PROMPT_MAX_BYTES) {
-        len = SC_PERSONA_PROMPT_MAX_BYTES;
+    if (len > HU_PERSONA_PROMPT_MAX_BYTES) {
+        len = HU_PERSONA_PROMPT_MAX_BYTES;
         static const char trunc[] = "\n[persona prompt truncated]\n";
         if (len >= sizeof(trunc) - 1) {
             memcpy(buf + len - sizeof(trunc) + 1, trunc, sizeof(trunc) - 1);
@@ -3025,7 +3025,7 @@ sc_error_t sc_persona_build_prompt(sc_allocator_t *alloc, const sc_persona_t *pe
 
     *out = buf;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 fail:
     alloc->free(alloc->ctx, buf, cap);
     return err;

@@ -2,23 +2,23 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import { ScToast } from "../components/sc-toast.js";
-import "../components/sc-card.js";
-import "../components/sc-button.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-metric-row.js";
-import "../components/sc-tabs.js";
-import "../components/sc-modal.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-automation-card.js";
-import "../components/sc-automation-form.js";
-import "../components/sc-chart.js";
-import { TEMPLATES, cronToHuman } from "../components/sc-automation-form.js";
-import type { AutomationFormData } from "../components/sc-automation-form.js";
+import { ScToast } from "../components/hu-toast.js";
+import "../components/hu-card.js";
+import "../components/hu-button.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-metric-row.js";
+import "../components/hu-tabs.js";
+import "../components/hu-modal.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-automation-card.js";
+import "../components/hu-automation-form.js";
+import "../components/hu-chart.js";
+import { TEMPLATES, cronToHuman } from "../components/hu-automation-form.js";
+import type { AutomationFormData } from "../components/hu-automation-form.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -61,7 +61,7 @@ interface ChannelStatus {
   configured: boolean;
 }
 
-@customElement("sc-automations-view")
+@customElement("hu-automations-view")
 export class ScAutomationsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
   static override styles = css`
@@ -70,78 +70,78 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       display: block;
       max-width: 60rem;
       margin: 0 auto;
-      font-family: var(--sc-font);
-      color: var(--sc-text);
+      font-family: var(--hu-font);
+      color: var(--hu-text);
     }
 
     .job-list {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-lg);
+      gap: var(--hu-space-lg);
     }
 
     .modal-footer {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sc-space-sm);
-      margin-top: var(--sc-space-xl);
-      padding-top: var(--sc-space-lg);
-      border-top: 1px solid var(--sc-border);
+      gap: var(--hu-space-sm);
+      margin-top: var(--hu-space-xl);
+      padding-top: var(--hu-space-lg);
+      border-top: 1px solid var(--hu-border);
     }
 
     .delete-body {
-      padding: var(--sc-space-lg) 0;
+      padding: var(--hu-space-lg) 0;
     }
 
     .delete-body p {
       margin: 0;
-      font-size: var(--sc-text-base);
-      color: var(--sc-text);
-      line-height: var(--sc-leading-relaxed);
+      font-size: var(--hu-text-base);
+      color: var(--hu-text);
+      line-height: var(--hu-leading-relaxed);
     }
 
     .templates-section {
-      margin-bottom: var(--sc-space-xl);
+      margin-bottom: var(--hu-space-xl);
     }
 
     .templates-section h3 {
-      margin: 0 0 var(--sc-space-md);
-      font-size: var(--sc-text-lg);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      margin: 0 0 var(--hu-space-md);
+      font-size: var(--hu-text-lg);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
 
     .templates-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
-      gap: var(--sc-space-md);
+      gap: var(--hu-space-md);
     }
 
     .template-card .template-name {
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-medium);
-      color: var(--sc-text);
-      margin-bottom: var(--sc-space-xs);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-medium);
+      color: var(--hu-text);
+      margin-bottom: var(--hu-space-xs);
     }
 
     .template-card .template-desc {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
-      margin-bottom: var(--sc-space-xs);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
+      margin-bottom: var(--hu-space-xs);
     }
 
     .template-card .template-schedule {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-faint);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-faint);
     }
     .run-chart-card {
-      margin-bottom: var(--sc-space-xl);
+      margin-bottom: var(--hu-space-xl);
     }
     .run-chart-title {
-      margin: 0 0 var(--sc-space-md);
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      margin: 0 0 var(--hu-space-md);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
   `;
 
@@ -411,32 +411,32 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   private _renderStats() {
     return html`
-      <sc-stats-row>
-        <sc-stat-card
+      <hu-stats-row>
+        <hu-stat-card
           .value=${this.totalCount}
           label="Total"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.activeCount}
           label="Active"
           accent="primary"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.pausedCount}
           label="Paused"
           accent="secondary"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.failedCount}
           label="Failed"
           accent="error"
-          style="--sc-stagger-delay: 150ms"
-        ></sc-stat-card>
-      </sc-stats-row>
-      <sc-metric-row
+          style="--hu-stagger-delay: 150ms"
+        ></hu-stat-card>
+      </hu-stats-row>
+      <hu-metric-row
         .items=${[
           {
             label: "Agent Tasks",
@@ -454,22 +454,22 @@ export class ScAutomationsView extends GatewayAwareLitElement {
                 : "—",
           },
         ]}
-      ></sc-metric-row>
+      ></hu-metric-row>
     `;
   }
 
   private _renderSkeleton() {
     return html`
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
       </div>
       <div class="job-list">
-        <sc-skeleton variant="card" height="160px"></sc-skeleton>
-        <sc-skeleton variant="card" height="160px"></sc-skeleton>
-        <sc-skeleton variant="card" height="160px"></sc-skeleton>
+        <hu-skeleton variant="card" height="160px"></hu-skeleton>
+        <hu-skeleton variant="card" height="160px"></hu-skeleton>
+        <hu-skeleton variant="card" height="160px"></hu-skeleton>
       </div>
     `;
   }
@@ -482,42 +482,42 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           <div class="templates-grid">
             ${TEMPLATES.filter((t) => t.type === this.activeTab).map(
               (t) => html`
-                <sc-card clickable @click=${() => this._useTemplate(t)}>
+                <hu-card clickable @click=${() => this._useTemplate(t)}>
                   <div class="template-card">
                     <div class="template-name">${t.name}</div>
                     <div class="template-desc">${t.description}</div>
                     <div class="template-schedule">${cronToHuman(t.expression)}</div>
                   </div>
-                </sc-card>
+                </hu-card>
               `,
             )}
           </div>
         </div>
-        <sc-empty-state
+        <hu-empty-state
           .icon=${icons.timer}
           heading=${this.activeTab === "agent" ? "No agent tasks" : "No shell jobs"}
           description=${this.activeTab === "agent"
             ? "Create an agent automation to run AI tasks on a schedule."
             : "Create a shell job to run commands on a schedule."}
         >
-          <sc-button variant="primary" @click=${this._openNewAutomation}>
+          <hu-button variant="primary" @click=${this._openNewAutomation}>
             New Automation
-          </sc-button>
-        </sc-empty-state>
+          </hu-button>
+        </hu-empty-state>
       `;
     }
     return html`
       <div class="job-list">
         ${this.filteredJobs.map(
           (job) => html`
-            <sc-automation-card
+            <hu-automation-card
               .job=${job}
               .runs=${this.runsMap.get(job.id) ?? []}
               @automation-toggle=${this._handleToggle}
               @automation-edit=${this._handleEdit}
               @automation-run=${this._handleRun}
               @automation-delete=${this._handleDelete}
-            ></sc-automation-card>
+            ></hu-automation-card>
           `,
         )}
       </div>
@@ -527,45 +527,45 @@ export class ScAutomationsView extends GatewayAwareLitElement {
   private _renderAgentModal() {
     const template = this.selectedTemplate?.type === "agent" ? this.selectedTemplate : null;
     return html`
-      <sc-modal
+      <hu-modal
         heading=${this.editingJob ? "Edit Automation" : "New Agent Automation"}
         ?open=${this.showAgentModal}
         @close=${this._closeAgentModal}
       >
-        <sc-automation-form
+        <hu-automation-form
           type="agent"
           .template=${template}
           .editingJob=${this.editingJob}
           .channels=${this.channels}
-          @sc-automation-submit=${this._handleFormSubmit}
-          @sc-automation-cancel=${this._closeAgentModal}
-        ></sc-automation-form>
-      </sc-modal>
+          @hu-automation-submit=${this._handleFormSubmit}
+          @hu-automation-cancel=${this._closeAgentModal}
+        ></hu-automation-form>
+      </hu-modal>
     `;
   }
 
   private _renderShellModal() {
     const template = this.selectedTemplate?.type === "shell" ? this.selectedTemplate : null;
     return html`
-      <sc-modal
+      <hu-modal
         heading=${this.editingJob ? "Edit Shell Job" : "New Shell Job"}
         ?open=${this.showShellModal}
         @close=${this._closeShellModal}
       >
-        <sc-automation-form
+        <hu-automation-form
           type="shell"
           .template=${template}
           .editingJob=${this.editingJob}
-          @sc-automation-submit=${this._handleFormSubmit}
-          @sc-automation-cancel=${this._closeShellModal}
-        ></sc-automation-form>
-      </sc-modal>
+          @hu-automation-submit=${this._handleFormSubmit}
+          @hu-automation-cancel=${this._closeShellModal}
+        ></hu-automation-form>
+      </hu-modal>
     `;
   }
 
   private _renderDeleteModal() {
     return html`
-      <sc-modal
+      <hu-modal
         heading="Delete Automation?"
         ?open=${!!this.pendingDelete}
         @close=${() => (this.pendingDelete = null)}
@@ -578,22 +578,22 @@ export class ScAutomationsView extends GatewayAwareLitElement {
           </p>
         </div>
         <div class="modal-footer">
-          <sc-button
+          <hu-button
             variant="secondary"
             ?disabled=${this._deleteInProgress}
             @click=${() => (this.pendingDelete = null)}
           >
             Cancel
-          </sc-button>
-          <sc-button
+          </hu-button>
+          <hu-button
             variant="destructive"
             ?disabled=${this._deleteInProgress}
             @click=${this._confirmDelete}
           >
             Delete
-          </sc-button>
+          </hu-button>
         </div>
-      </sc-modal>
+      </hu-modal>
     `;
   }
 
@@ -603,45 +603,45 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
   override render() {
     return html`
-      <sc-page-hero role="region" aria-label="Automations">
-        <sc-section-header heading="Automations" description="Scheduled agent tasks and shell jobs">
-          <sc-button
+      <hu-page-hero role="region" aria-label="Automations">
+        <hu-section-header heading="Automations" description="Scheduled agent tasks and shell jobs">
+          <hu-button
             variant="primary"
             @click=${this._openNewAutomation}
             aria-label="Create new automation"
-            >New Automation</sc-button
+            >New Automation</hu-button
           >
-        </sc-section-header>
-      </sc-page-hero>
+        </hu-section-header>
+      </hu-page-hero>
 
       ${this._renderStats()}
       ${this.runChartData.labels.length > 0
         ? html`
-            <sc-card class="run-chart-card">
+            <hu-card class="run-chart-card">
               <h3 class="run-chart-title">Run outcomes over time</h3>
-              <sc-chart type="line" .data=${this.runChartData} height=${200}></sc-chart>
-            </sc-card>
+              <hu-chart type="line" .data=${this.runChartData} height=${200}></hu-chart>
+            </hu-card>
           `
         : nothing}
 
-      <sc-tabs
+      <hu-tabs
         .tabs=${[
           { id: "agent", label: "Agent Tasks" },
           { id: "shell", label: "Shell Jobs" },
         ]}
         .value=${this.activeTab}
         @tab-change=${(e: CustomEvent<string>) => (this.activeTab = e.detail)}
-      ></sc-tabs>
+      ></hu-tabs>
 
       ${this.error
-        ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <sc-button
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <hu-button
               variant="primary"
               @click=${() => this.load()}
               aria-label="Retry loading automations"
-              >Retry</sc-button
+              >Retry</hu-button
             >
-          </sc-empty-state>`
+          </hu-empty-state>`
         : this.loading
           ? this._renderSkeleton()
           : this._renderJobList()}
@@ -652,6 +652,6 @@ export class ScAutomationsView extends GatewayAwareLitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-automations-view": ScAutomationsView;
+    "hu-automations-view": ScAutomationsView;
   }
 }

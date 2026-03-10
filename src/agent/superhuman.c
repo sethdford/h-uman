@@ -1,40 +1,40 @@
 /*
  * Superhuman services registry — build_context and observe_all.
  */
-#include "seaclaw/agent/superhuman.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/superhuman.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-sc_error_t sc_superhuman_registry_init(sc_superhuman_registry_t *reg) {
+hu_error_t hu_superhuman_registry_init(hu_superhuman_registry_t *reg) {
     if (!reg)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(reg, 0, sizeof(*reg));
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_superhuman_register(sc_superhuman_registry_t *reg, sc_superhuman_service_t service) {
+hu_error_t hu_superhuman_register(hu_superhuman_registry_t *reg, hu_superhuman_service_t service) {
     if (!reg)
-        return SC_ERR_INVALID_ARGUMENT;
-    if (reg->count >= SC_SUPERHUMAN_MAX_SERVICES)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_INVALID_ARGUMENT;
+    if (reg->count >= HU_SUPERHUMAN_MAX_SERVICES)
+        return HU_ERR_OUT_OF_MEMORY;
     reg->services[reg->count] = service;
     reg->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_superhuman_build_context(sc_superhuman_registry_t *reg, sc_allocator_t *alloc,
+hu_error_t hu_superhuman_build_context(hu_superhuman_registry_t *reg, hu_allocator_t *alloc,
                                         char **out, size_t *out_len) {
     if (!reg || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
     size_t cap = 128;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t len = 0;
     buf[0] = '\0';
 
@@ -45,7 +45,7 @@ sc_error_t sc_superhuman_build_context(sc_superhuman_registry_t *reg, sc_allocat
         char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
         if (!nb) {
             alloc->free(alloc->ctx, buf, cap);
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         buf = nb;
         cap = new_cap;
@@ -54,14 +54,14 @@ sc_error_t sc_superhuman_build_context(sc_superhuman_registry_t *reg, sc_allocat
     len = hlen;
 
     for (size_t i = 0; i < reg->count; i++) {
-        const sc_superhuman_service_t *svc = &reg->services[i];
+        const hu_superhuman_service_t *svc = &reg->services[i];
         if (!svc->build_context || !svc->name)
             continue;
 
         char *ctx = NULL;
         size_t ctx_len = 0;
-        sc_error_t err = svc->build_context(svc->ctx, alloc, &ctx, &ctx_len);
-        if (err != SC_OK || !ctx || ctx_len == 0) {
+        hu_error_t err = svc->build_context(svc->ctx, alloc, &ctx, &ctx_len);
+        if (err != HU_OK || !ctx || ctx_len == 0) {
             if (ctx)
                 alloc->free(alloc->ctx, ctx, ctx_len + 1);
             continue;
@@ -75,7 +75,7 @@ sc_error_t sc_superhuman_build_context(sc_superhuman_registry_t *reg, sc_allocat
             if (!nb) {
                 alloc->free(alloc->ctx, ctx, ctx_len + 1);
                 alloc->free(alloc->ctx, buf, cap);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf = nb;
             cap = new_cap;
@@ -97,22 +97,22 @@ sc_error_t sc_superhuman_build_context(sc_superhuman_registry_t *reg, sc_allocat
         alloc->free(alloc->ctx, buf, cap);
         *out = NULL;
         *out_len = 0;
-        return SC_OK;
+        return HU_OK;
     }
     *out = buf;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_superhuman_observe_all(sc_superhuman_registry_t *reg, sc_allocator_t *alloc,
+hu_error_t hu_superhuman_observe_all(hu_superhuman_registry_t *reg, hu_allocator_t *alloc,
                                       const char *text, size_t text_len, const char *role,
                                       size_t role_len) {
     if (!reg)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < reg->count; i++) {
-        const sc_superhuman_service_t *svc = &reg->services[i];
+        const hu_superhuman_service_t *svc = &reg->services[i];
         if (svc->observe)
             (void)svc->observe(svc->ctx, alloc, text, text_len, role ? role : "", role_len);
     }
-    return SC_OK;
+    return HU_OK;
 }

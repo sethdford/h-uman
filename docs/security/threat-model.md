@@ -1,10 +1,10 @@
 ---
-title: seaclaw Threat Model
-description: STRIDE threat model and security architecture for seaclaw
+title: human Threat Model
+description: STRIDE threat model and security architecture for human
 updated: 2026-03-02
 ---
 
-# seaclaw Threat Model
+# human Threat Model
 
 **Document Version:** 1.0  
 **Date:** 2026-03-02  
@@ -16,9 +16,9 @@ updated: 2026-03-02
 
 ## 1. System Overview
 
-### 1.1 What seaclaw Is
+### 1.1 What human Is
 
-seaclaw is a C11 autonomous AI assistant runtime optimized for:
+human is a C11 autonomous AI assistant runtime optimized for:
 
 - **Minimal binary size:** 267 KB (MinSizeRel build)
 - **Minimal memory footprint:** Target &lt; 5 MB peak RSS
@@ -33,9 +33,9 @@ All extension work is done by implementing vtable structs and registering them i
 
 | Component         | Path                 | Purpose                                                                   |
 | ----------------- | -------------------- | ------------------------------------------------------------------------- |
-| **Providers**     | `src/providers/`     | AI model providers (`sc_provider_t`) — 50+ implementations                |
-| **Channels**      | `src/channels/`      | Messaging channels (`sc_channel_t`) — CLI, Telegram, Discord, Slack, etc. |
-| **Tools**         | `src/tools/`         | Tool execution surface (`sc_tool_t`) — 30+ tools                          |
+| **Providers**     | `src/providers/`     | AI model providers (`hu_provider_t`) — 50+ implementations                |
+| **Channels**      | `src/channels/`      | Messaging channels (`hu_channel_t`) — CLI, Telegram, Discord, Slack, etc. |
+| **Tools**         | `src/tools/`         | Tool execution surface (`hu_tool_t`) — 30+ tools                          |
 | **Memory**        | `src/memory/`        | SQLite, markdown, LRU backends, embeddings, vector search                 |
 | **Security**      | `src/security/`      | Policy engine, pairing, secrets, sandbox backends                         |
 | **Runtime**       | `src/runtime/`       | Native, Docker, WASM, Cloudflare adapters                                 |
@@ -67,14 +67,14 @@ Trust boundaries exist at:
 
 | Asset                                | Location                                         | Sensitivity                                  |
 | ------------------------------------ | ------------------------------------------------ | -------------------------------------------- |
-| **API keys and OAuth tokens**        | `~/.seaclaw/auth.json`, `~/.seaclaw/config.json` | CRITICAL — Full provider account access      |
+| **API keys and OAuth tokens**        | `~/.human/auth.json`, `~/.human/config.json` | CRITICAL — Full provider account access      |
 | **User conversation data**           | In-memory, SQLite/memory backends, session state | HIGH — PII, confidential context             |
 | **Agent execution state and memory** | `src/memory/`, `src/agent/`                      | HIGH — Context poisoning, inference abuse    |
-| **Configuration and policy data**    | `~/.seaclaw/config.json`, policy structs         | HIGH — Privilege escalation, scope expansion |
+| **Configuration and policy data**    | `~/.human/config.json`, policy structs         | HIGH — Privilege escalation, scope expansion |
 | **Audit logs**                       | `src/security/audit.c`, configured output        | MEDIUM — Tampering enables repudiation       |
 | **Hardware peripheral access**       | `src/peripherals/` (Arduino, STM32, RPi)         | HIGH — Physical device control               |
-| **Webhook HMAC secrets**             | Config, `SEACLAW_WEBHOOK_HMAC_SECRET` env        | CRITICAL — Webhook forgery prevention        |
-| **Pairing tokens**                   | In-memory hashes, `sc_pairing_guard_t`           | CRITICAL — Control UI access                 |
+| **Webhook HMAC secrets**             | Config, `HUMAN_WEBHOOK_HMAC_SECRET` env        | CRITICAL — Webhook forgery prevention        |
+| **Pairing tokens**                   | In-memory hashes, `hu_pairing_guard_t`           | CRITICAL — Control UI access                 |
 
 ---
 
@@ -96,7 +96,7 @@ Trust boundaries exist at:
 
 - **Capability:** File system access, process inspection, shared host
 - **Objectives:** Read plaintext credentials, modify config, tamper audit logs
-- **Attack paths:** `~/.seaclaw/` files, config injection, workspace path manipulation
+- **Attack paths:** `~/.human/` files, config injection, workspace path manipulation
 
 ### 3.4 Supply Chain
 
@@ -135,7 +135,7 @@ Trust boundaries exist at:
 | -------------------------- | ---------------------------------------- | -------------- | ----------------------------------------------------------------------------- |
 | **Spoofing**               | N/A (tools execute as agent)             | —              | —                                                                             |
 | **Tampering**              | CRLF injection in `http_request` headers | **VULNERABLE** | `parse_headers()` does not sanitize `\r\n`. C-04                              |
-| **Tampering**              | Path traversal in git tool               | **VULNERABLE** | `paths`, `files`, `branch` not validated with `sc_tool_validate_path()`. C-05 |
+| **Tampering**              | Path traversal in git tool               | **VULNERABLE** | `paths`, `files`, `branch` not validated with `hu_tool_validate_path()`. C-05 |
 | **Tampering**              | Snapshot export/import path traversal    | **VULNERABLE** | No `..` or symlink checks. H-09                                               |
 | **Information Disclosure** | Git tool arbitrary file read             | **VULNERABLE** | `{"operation": "diff", "files": "../../../etc/passwd"}`. C-05                 |
 | **Denial of Service**      | Large payloads, unbounded allocations    | **PARTIAL**    | Some limits; integer overflow in arena. H-13                                  |
@@ -178,9 +178,9 @@ Trust boundaries exist at:
 | **Tampering**              | Audit log tampering                                             | **PARTIAL**    | No HMAC chain/signing. L-02 — full commands in audit                                                 |
 | **Tampering**              | Sensitive material not securely cleared                         | **VULNERABLE** | `memset()` may be optimized away. H-02                                                               |
 | **Information Disclosure** | Secret key file created without `0600`                          | **VULNERABLE** | M-07                                                                                                 |
-| **Elevation of Privilege** | Path access control: policy NULL bypass                         | **CONTEXT**    | `file_*` tools: `if (c->policy && !sc_security_path_allowed(...))` — when policy NULL, check skipped |
-| **Elevation of Privilege** | `allowed_paths` NULL → `sc_security_path_allowed` returns false | **FIXED**      | `security.c` line 8: `return false` when no allowed_paths                                            |
-| **Elevation of Privilege** | Firecracker socket path uses PID 0                              | **VULNERABLE** | All instances share `/tmp/sc_fc_0.sock`. C-07                                                        |
+| **Elevation of Privilege** | Path access control: policy NULL bypass                         | **CONTEXT**    | `file_*` tools: `if (c->policy && !hu_security_path_allowed(...))` — when policy NULL, check skipped |
+| **Elevation of Privilege** | `allowed_paths` NULL → `hu_security_path_allowed` returns false | **FIXED**      | `security.c` line 8: `return false` when no allowed_paths                                            |
+| **Elevation of Privilege** | Firecracker socket path uses PID 0                              | **VULNERABLE** | All instances share `/tmp/hu_fc_0.sock`. C-07                                                        |
 
 ### 4.7 Runtime (`src/runtime/`)
 
@@ -202,11 +202,11 @@ Trust boundaries exist at:
 
 | STRIDE                     | Threat                                           | Status         | Notes                         |
 | -------------------------- | ------------------------------------------------ | -------------- | ----------------------------- |
-| **Tampering**              | NULL pointer dereference in `sc_json_string_new` | **VULNERABLE** | C-08                          |
-| **Tampering**              | Buffer overread in `sc_json_append_key`          | **VULNERABLE** | C-09                          |
+| **Tampering**              | NULL pointer dereference in `hu_json_string_new` | **VULNERABLE** | C-08                          |
+| **Tampering**              | Buffer overread in `hu_json_append_key`          | **VULNERABLE** | C-09                          |
 | **Tampering**              | Integer overflow in arena                        | **VULNERABLE** | H-13                          |
 | **Tampering**              | Integer overflow in JSON buffer growth           | **PARTIAL**    | M-03                          |
-| **Information Disclosure** | Format string risk in `sc_sprintf`               | **PARTIAL**    | M-04 — `fmt` must be constant |
+| **Information Disclosure** | Format string risk in `hu_sprintf`               | **PARTIAL**    | M-04 — `fmt` must be constant |
 
 ---
 
@@ -228,7 +228,7 @@ Trust boundaries exist at:
 | Surface          | Path                                  | Risk                               |
 | ---------------- | ------------------------------------- | ---------------------------------- |
 | CLI              | `main.c`, argv                        | Medium — config loading, workspace |
-| Config files     | `~/.seaclaw/config.json`, `auth.json` | High — plaintext, path injection   |
+| Config files     | `~/.human/config.json`, `auth.json` | High — plaintext, path injection   |
 | SQLite databases | Workspace, memory backends            | Medium — FTS5 injection            |
 | Audit logs       | Configured output                     | Medium — tampering, secrets        |
 | Secrets store    | `src/security/secrets.c`              | High — key file permissions        |
@@ -281,7 +281,7 @@ Trust boundaries exist at:
 │ TB3: TOOL EXECUTION   │ │ TB4: AI PROVIDER │ │ TB5: MEMORY STORE            │
 │ src/tools/*           │ │ src/providers/*  │ │ src/memory/*                 │
 │ Mitigations:          │ │ Mitigations:     │ │ Mitigations:                │
-│ - sc_tool_validate_   │ │ - HTTPS only     │ │ - Parameterized queries      │
+│ - hu_tool_validate_   │ │ - HTTPS only     │ │ - Parameterized queries      │
 │   path (some tools)   │ │ - API key in     │ │ Gaps: pg identifier inj,     │
 │ - Policy command      │ │   config         │ │ FTS5, snapshot paths         │
 │   allowlist           │ │ Gaps: Plaintext  │ │                              │
@@ -317,7 +317,7 @@ Trust boundaries exist at:
 | Control                 | Implementation                                           | Status                                     |
 | ----------------------- | -------------------------------------------------------- | ------------------------------------------ |
 | AC-2 Account Management | Pairing guard, token hashes                              | Partial — WebSocket not enforced           |
-| AC-3 Access Enforcement | `sc_security_path_allowed`, `sc_policy_validate_command` | Partial — policy NULL bypass in file tools |
+| AC-3 Access Enforcement | `hu_security_path_allowed`, `hu_policy_validate_command` | Partial — policy NULL bypass in file tools |
 | AC-6 Least Privilege    | Sandbox backends (Landlock, seccomp, bwrap, Firecracker) | Implemented                                |
 | AC-17 Remote Access     | Gateway, WebSocket                                       | **Gap** — auth optional                    |
 
@@ -342,8 +342,8 @@ Trust boundaries exist at:
 
 | Control                           | Implementation                                           | Status          |
 | --------------------------------- | -------------------------------------------------------- | --------------- |
-| SC-8 Transmission Confidentiality | HTTPS for tools (`sc_validate_url`), libcurl TLS         | Implemented     |
-| SC-13 Cryptographic Protection    | ChaCha20+HMAC in `sc_secret_store`, HMAC-SHA256 webhooks | Implemented     |
+| SC-8 Transmission Confidentiality | HTTPS for tools (`hu_validate_url`), libcurl TLS         | Implemented     |
+| SC-13 Cryptographic Protection    | ChaCha20+HMAC in `hu_secret_store`, HMAC-SHA256 webhooks | Implemented     |
 | SC-28 Protection at Rest          | **Gap** — credentials plaintext (C-03)                   | Not implemented |
 | SC-39 Process Isolation           | Landlock, seccomp, Firecracker, bwrap, WASI              | Implemented     |
 
@@ -351,7 +351,7 @@ Trust boundaries exist at:
 
 | Control                            | Implementation                                                    | Status                                        |
 | ---------------------------------- | ----------------------------------------------------------------- | --------------------------------------------- |
-| SI-10 Information Input Validation | `sc_tool_validate_path`, URL validation                           | Partial — gaps in git, http_request, snapshot |
+| SI-10 Information Input Validation | `hu_tool_validate_path`, URL validation                           | Partial — gaps in git, http_request, snapshot |
 | SI-11 Error Handling               | Error codes, no sensitive data in errors                          | Partial — H-10 LLM errors                     |
 | SI-16 Memory Protection            | `explicit_bzero` pattern in pairing; **gap** — `memset` elsewhere | Partial                                       |
 
@@ -384,7 +384,7 @@ Trust boundaries exist at:
 
 1. **Authentication optional on all network surfaces** — WebSocket and webhooks accept unauthenticated requests when not explicitly configured. Defense/mandatory-auth deployments require configuration discipline.
 
-2. **Plaintext credential storage** — API keys and OAuth tokens in `auth.json` and `config.json`. `sc_secret_store` exists but is not used for persistence.
+2. **Plaintext credential storage** — API keys and OAuth tokens in `auth.json` and `config.json`. `hu_secret_store` exists but is not used for persistence.
 
 3. **Memory safety in core** — Integer overflow (arena, JSON), NULL dereference, buffer overread. AddressSanitizer in CI helps; formal verification or safer allocator not in place.
 
@@ -392,7 +392,7 @@ Trust boundaries exist at:
 
 5. **Audit log transparency** — No cryptographic integrity; logs can be modified. Full command strings may include secrets (L-02).
 
-6. **Timing side channels** — HMAC comparison not constant-time (H-01). Pairing uses `sc_pairing_guard_constant_time_eq` — pattern exists but not applied to webhooks.
+6. **Timing side channels** — HMAC comparison not constant-time (H-01). Pairing uses `hu_pairing_guard_constant_time_eq` — pattern exists but not applied to webhooks.
 
 ### 8.2 Accepted Risks (with Justification)
 
@@ -424,19 +424,19 @@ Trust boundaries exist at:
 | Webhook HMAC constant-time comparison | IA-6        | **Not implemented** | strncmp used (H-01)                                                     |
 | WebSocket Origin validation           | AC-17       | **Not implemented** | H-06                                                                    |
 | Credential encryption at rest         | SC-28       | **Not implemented** | Plaintext in auth.json, config.json (C-03)                              |
-| Path access control                   | AC-3        | Implemented         | sc_security_path_allowed; returns false when no allowed_paths           |
+| Path access control                   | AC-3        | Implemented         | hu_security_path_allowed; returns false when no allowed_paths           |
 | Path access when policy NULL          | AC-3        | **Bypass**          | file\_\* tools skip check when c->policy is NULL                        |
-| Command allowlist                     | AC-6        | Implemented         | sc_policy_validate_command, allowed_commands                            |
-| Tool path validation                  | SI-10       | Partial             | sc_tool_validate_path used by file_read, file_write; git, snapshot gaps |
-| HTTPS enforcement for tools           | SC-8        | Implemented         | sc_validate_url, net_security.c — HTTP rejected except localhost        |
+| Command allowlist                     | AC-6        | Implemented         | hu_policy_validate_command, allowed_commands                            |
+| Tool path validation                  | SI-10       | Partial             | hu_tool_validate_path used by file_read, file_write; git, snapshot gaps |
+| HTTPS enforcement for tools           | SC-8        | Implemented         | hu_validate_url, net_security.c — HTTP rejected except localhost        |
 | libcurl TLS verification              | SC-8        | Implemented         | CURLOPT_SSL_VERIFYPEER, CURLOPT_SSL_VERIFYHOST in http.c                |
 | Pairing guard                         | IA-2        | Implemented         | 6–8 digit code, lockout, constant-time token comparison                 |
 | Audit logging                         | AU-2, AU-3  | Implemented         | command_execution, file_access, auth, policy_violation                  |
 | Audit integrity                       | AU-9        | **Not implemented** | No HMAC chain or signing                                                |
 | Sandbox backends                      | AC-6, SC-39 | Implemented         | Landlock, seccomp, bwrap, Firecracker, WASI                             |
-| Secret store (sc_secret_store)        | SC-13       | Implemented         | ChaCha20+HMAC; not used for auth.json persistence                       |
+| Secret store (hu_secret_store)        | SC-13       | Implemented         | ChaCha20+HMAC; not used for auth.json persistence                       |
 | Secure memory clearing                | IA-5        | Partial             | pairing.c uses volatile/asm; secrets.c uses memset (H-02)               |
-| Private IP blocking                   | SC-8        | Implemented         | sc_is_private_ip, sc_validate_url for tools                             |
+| Private IP blocking                   | SC-8        | Implemented         | hu_is_private_ip, hu_validate_url for tools                             |
 | SQLite parameterized queries          | SI-10       | Implemented         | Prevents most SQL injection                                             |
 | PostgreSQL identifier validation      | SI-10       | **Not implemented** | C-06                                                                    |
 | FTS5 query escaping                   | SI-10       | **Not implemented** | H-11                                                                    |
@@ -453,4 +453,4 @@ Trust boundaries exist at:
 
 ---
 
-_This document is intended for defense industry security review and compliance alignment. It reflects the state of the seaclaw codebase as of 2026-03-02 and should be updated when significant architectural or security changes occur._
+_This document is intended for defense industry security review and compliance alignment. It reflects the state of the human codebase as of 2026-03-02 and should be updated when significant architectural or security changes occur._

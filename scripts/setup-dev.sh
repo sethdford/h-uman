@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# setup-dev.sh — one-time dev environment setup for seaclaw
+# setup-dev.sh — one-time dev environment setup for human
 set -euo pipefail
 
-echo "Setting up seaclaw development environment..."
+echo "Setting up human development environment..."
 
 # 1. Activate git hooks
 echo "  Activating git hooks (.githooks/)..."
@@ -52,4 +52,4 @@ echo "Setup complete. Build with:"
 echo "  mkdir -p build && cd build"
 echo "  cmake .. -DSC_ENABLE_ALL_CHANNELS=ON"
 echo "  cmake --build . -j\$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
-echo "  ./seaclaw_tests"
+echo "  ./human_tests"

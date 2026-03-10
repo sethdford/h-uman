@@ -48,7 +48,7 @@ Delete requires confirmation modal with run count context.
 
 ### Creation Flow
 
-Modal form (using `sc-modal` for focus trap, Escape, aria):
+Modal form (using `hu-modal` for focus trap, Escape, aria):
 
 - **Prompt** (agent): "What should the agent do?" — textarea
 - **Channel** (agent): "Where should it respond?" — dropdown from `channels.status`
@@ -94,9 +94,9 @@ Edit uses the same modal pre-populated.
 
 #### `cron.run` Agent Dispatch
 
-When `job.type == SC_CRON_JOB_AGENT`:
+When `job.type == HU_CRON_JOB_AGENT`:
 
-- Call `sc_agent_turn(agent, job->command, ...)` (command holds the prompt)
+- Call `hu_agent_turn(agent, job->command, ...)` (command holds the prompt)
 - Publish response to the job's channel via bus
 - Record run in history
 
@@ -157,7 +157,7 @@ Backend:
 - `src/gateway/control_protocol.c` — cron handlers
 - `src/crontab.c` — format extension + load-on-startup
 - `src/main.c` — wire crontab loading
-- `include/seaclaw/crontab.h` — struct extension
+- `include/human/crontab.h` — struct extension
 
 UI:
 
@@ -165,5 +165,5 @@ UI:
 - `ui/src/app.ts` — routing rename
 - `ui/src/components/sidebar.ts` — label/icon
 - `ui/src/components/command-palette.ts` — label/icon
-- New: `ui/src/components/sc-schedule-builder.ts`
-- New: `ui/src/components/sc-automation-card.ts`
+- New: `ui/src/components/hu-schedule-builder.ts`
+- New: `ui/src/components/hu-automation-card.ts`

@@ -1,7 +1,7 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/retrieval.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
+#include "human/memory/retrieval.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@ static int char_tolower_cmp(char a, char b) {
 
 /* Count words in string (space-separated) */
 static size_t count_query_words(const char *query, size_t query_len, char **words_out,
-                                size_t max_words, sc_allocator_t *alloc) {
+                                size_t max_words, hu_allocator_t *alloc) {
     size_t count = 0;
     const char *p = query;
     const char *end = query + query_len;
@@ -64,7 +64,7 @@ static bool word_in_text(const char *word, size_t word_len, const char *text, si
 }
 
 /* Score entry: matches / total_query_words. Search in key+content. */
-static double score_entry_keyword(const sc_memory_entry_t *e, char **query_words,
+static double score_entry_keyword(const hu_memory_entry_t *e, char **query_words,
                                   size_t query_word_count) {
     if (query_word_count == 0)
         return 0.0;
@@ -84,20 +84,20 @@ static double score_entry_keyword(const sc_memory_entry_t *e, char **query_words
     return (double)matches / (double)query_word_count;
 }
 
-sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, const char *query,
-                               size_t query_len, const sc_retrieval_options_t *opts,
-                               sc_retrieval_result_t *out) {
+hu_error_t hu_keyword_retrieve(hu_allocator_t *alloc, hu_memory_t *backend, const char *query,
+                               size_t query_len, const hu_retrieval_options_t *opts,
+                               hu_retrieval_result_t *out) {
     out->entries = NULL;
     out->count = 0;
     out->scores = NULL;
 
     if (!backend || !backend->ctx || !backend->vtable || !query || query_len == 0)
-        return SC_OK;
+        return HU_OK;
 
-    sc_memory_entry_t *all = NULL;
+    hu_memory_entry_t *all = NULL;
     size_t all_count = 0;
-    sc_error_t err = backend->vtable->list(backend->ctx, alloc, NULL, NULL, 0, &all, &all_count);
-    if (err != SC_OK || !all || all_count == 0)
+    hu_error_t err = backend->vtable->list(backend->ctx, alloc, NULL, NULL, 0, &all, &all_count);
+    if (err != HU_OK || !all || all_count == 0)
         return err;
 
     /* Split query into words */
@@ -105,10 +105,10 @@ sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, cons
     size_t word_count = count_query_words(query, query_len, words, 64, alloc);
     if (word_count == 0) {
         for (size_t i = 0; i < all_count; i++) {
-            sc_memory_entry_free_fields(alloc, &all[i]);
+            hu_memory_entry_free_fields(alloc, &all[i]);
         }
-        alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
-        return SC_OK;
+        alloc->free(alloc->ctx, all, all_count * sizeof(hu_memory_entry_t));
+        return HU_OK;
     }
 
     /* Score each entry, collect those above min_score */
@@ -121,9 +121,9 @@ sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, cons
         for (size_t w = 0; w < word_count; w++)
             alloc->free(alloc->ctx, words[w], strlen(words[w]) + 1);
         for (size_t i = 0; i < all_count; i++)
-            sc_memory_entry_free_fields(alloc, &all[i]);
-        alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, &all[i]);
+        alloc->free(alloc->ctx, all, all_count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     for (size_t i = 0; i < all_count; i++) {
@@ -140,9 +140,9 @@ sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, cons
     if (!idx) {
         alloc->free(alloc->ctx, scores, all_count * sizeof(double));
         for (size_t i = 0; i < all_count; i++)
-            sc_memory_entry_free_fields(alloc, &all[i]);
-        alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, &all[i]);
+        alloc->free(alloc->ctx, all, all_count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t pass_count = 0;
     for (size_t i = 0; i < all_count; i++) {
@@ -166,25 +166,25 @@ sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, cons
         alloc->free(alloc->ctx, idx, all_count * sizeof(size_t));
         alloc->free(alloc->ctx, scores, all_count * sizeof(double));
         for (size_t i = 0; i < all_count; i++)
-            sc_memory_entry_free_fields(alloc, &all[i]);
-        alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
-        return SC_OK;
+            hu_memory_entry_free_fields(alloc, &all[i]);
+        alloc->free(alloc->ctx, all, all_count * sizeof(hu_memory_entry_t));
+        return HU_OK;
     }
 
-    sc_memory_entry_t *result_entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, pass_count * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *result_entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, pass_count * sizeof(hu_memory_entry_t));
     double *result_scores = (double *)alloc->alloc(alloc->ctx, pass_count * sizeof(double));
     if (!result_entries || !result_scores) {
         if (result_entries)
-            alloc->free(alloc->ctx, result_entries, pass_count * sizeof(sc_memory_entry_t));
+            alloc->free(alloc->ctx, result_entries, pass_count * sizeof(hu_memory_entry_t));
         if (result_scores)
             alloc->free(alloc->ctx, result_scores, pass_count * sizeof(double));
         alloc->free(alloc->ctx, idx, all_count * sizeof(size_t));
         alloc->free(alloc->ctx, scores, all_count * sizeof(double));
         for (size_t i = 0; i < all_count; i++)
-            sc_memory_entry_free_fields(alloc, &all[i]);
-        alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+            hu_memory_entry_free_fields(alloc, &all[i]);
+        alloc->free(alloc->ctx, all, all_count * sizeof(hu_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     for (size_t i = 0; i < pass_count; i++) {
@@ -197,14 +197,14 @@ sc_error_t sc_keyword_retrieve(sc_allocator_t *alloc, sc_memory_t *backend, cons
         for (size_t k = 0; k < pass_count && !kept; k++)
             kept = (idx[k] == i);
         if (!kept)
-            sc_memory_entry_free_fields(alloc, &all[i]);
+            hu_memory_entry_free_fields(alloc, &all[i]);
     }
-    alloc->free(alloc->ctx, all, all_count * sizeof(sc_memory_entry_t));
+    alloc->free(alloc->ctx, all, all_count * sizeof(hu_memory_entry_t));
     alloc->free(alloc->ctx, scores, all_count * sizeof(double));
     alloc->free(alloc->ctx, idx, all_count * sizeof(size_t));
 
     out->entries = result_entries;
     out->count = pass_count;
     out->scores = result_scores;
-    return SC_OK;
+    return HU_OK;
 }

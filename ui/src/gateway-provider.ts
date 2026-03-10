@@ -1,6 +1,6 @@
 import type { GatewayClient } from "./gateway.js";
 
-export const GATEWAY_CHANGED = "sc-gateway-changed";
+export const GATEWAY_CHANGED = "hu-gateway-changed";
 
 export interface GatewayChangedDetail {
   previous: GatewayClient | null;

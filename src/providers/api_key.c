@@ -1,5 +1,5 @@
-#include "seaclaw/providers/api_key.h"
-#include "seaclaw/core/string.h"
+#include "human/providers/api_key.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +40,7 @@ static const char *provider_env(const char *name, size_t name_len, char *buf, si
                 return v;
         }
     }
-    const char *v = getenv_safe("SEACLAW_API_KEY");
+    const char *v = getenv_safe("HUMAN_API_KEY");
     if (v && strlen(v) > 0)
         return v;
     v = getenv_safe("API_KEY");
@@ -51,13 +51,13 @@ static const char *provider_env(const char *name, size_t name_len, char *buf, si
     return NULL;
 }
 
-char *sc_api_key_resolve(sc_allocator_t *alloc, const char *provider_name, size_t provider_name_len,
+char *hu_api_key_resolve(hu_allocator_t *alloc, const char *provider_name, size_t provider_name_len,
                          const char *api_key, size_t api_key_len) {
     size_t start, end;
     if (api_key && api_key_len > 0) {
         trim(api_key, api_key_len, &start, &end);
         if (end > start)
-            return sc_strndup(alloc, api_key + start, end - start);
+            return hu_strndup(alloc, api_key + start, end - start);
     }
     char dummy[1];
     const char *v = provider_env(provider_name, provider_name_len, dummy, 0);
@@ -65,12 +65,12 @@ char *sc_api_key_resolve(sc_allocator_t *alloc, const char *provider_name, size_
         size_t n = strlen(v);
         trim(v, n, &start, &end);
         if (end > start)
-            return sc_strndup(alloc, v + start, end - start);
+            return hu_strndup(alloc, v + start, end - start);
     }
     return NULL;
 }
 
-bool sc_api_key_valid(const char *key, size_t key_len) {
+bool hu_api_key_valid(const char *key, size_t key_len) {
     if (!key)
         return false;
     size_t start, end;
@@ -78,11 +78,11 @@ bool sc_api_key_valid(const char *key, size_t key_len) {
     return end > start;
 }
 
-char *sc_api_key_mask(sc_allocator_t *alloc, const char *key, size_t key_len) {
+char *hu_api_key_mask(hu_allocator_t *alloc, const char *key, size_t key_len) {
     if (!key || key_len == 0)
-        return sc_strndup(alloc, "[no key]", 8);
+        return hu_strndup(alloc, "[no key]", 8);
     if (key_len <= 4)
-        return sc_strndup(alloc, "****", 4);
+        return hu_strndup(alloc, "****", 4);
     size_t n = 4 + 3 + 1;
     char *buf = (char *)alloc->alloc(alloc->ctx, n);
     if (!buf)

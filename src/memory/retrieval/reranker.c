@@ -1,13 +1,13 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/retrieval.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
+#include "human/memory/retrieval.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_MMR_LAMBDA_DEFAULT 0.7
+#define HU_MMR_LAMBDA_DEFAULT 0.7
 
 /* Extract words from text into a simple structure for Jaccard */
 typedef struct {
@@ -22,7 +22,7 @@ static void word_set_init(word_set_t *ws) {
     ws->cap = 0;
 }
 
-static void word_set_add(word_set_t *ws, const char *start, size_t len, sc_allocator_t *alloc) {
+static void word_set_add(word_set_t *ws, const char *start, size_t len, hu_allocator_t *alloc) {
     if (len == 0)
         return;
     if (ws->count >= ws->cap) {
@@ -45,7 +45,7 @@ static void word_set_add(word_set_t *ws, const char *start, size_t len, sc_alloc
 }
 
 static void word_set_from_text(word_set_t *ws, const char *text, size_t len,
-                               sc_allocator_t *alloc) {
+                               hu_allocator_t *alloc) {
     word_set_init(ws);
     const char *p = text;
     const char *end = text + len;
@@ -61,7 +61,7 @@ static void word_set_from_text(word_set_t *ws, const char *text, size_t len,
     }
 }
 
-static void word_set_cleanup(word_set_t *ws, sc_allocator_t *alloc) {
+static void word_set_cleanup(word_set_t *ws, hu_allocator_t *alloc) {
     if (ws->words) {
         for (size_t i = 0; i < ws->count; i++)
             alloc->free(alloc->ctx, ws->words[i], strlen(ws->words[i]) + 1);
@@ -95,7 +95,7 @@ static double jaccard_similarity(const word_set_t *a, const word_set_t *b) {
 }
 
 /* Text form for query/entry - combine key + content */
-static void entry_to_text(const sc_memory_entry_t *e, const char **out, size_t *len) {
+static void entry_to_text(const hu_memory_entry_t *e, const char **out, size_t *len) {
     if (e->key && e->key_len > 0 && e->content && e->content_len > 0) {
         *out = e->content; /* use content as primary for similarity */
         *len = e->content_len;
@@ -111,12 +111,12 @@ static void entry_to_text(const sc_memory_entry_t *e, const char **out, size_t *
     }
 }
 
-sc_error_t sc_mmr_rerank(sc_allocator_t *alloc, const char *query, size_t query_len,
-                         sc_memory_entry_t *entries, double *scores, size_t count, double lambda) {
+hu_error_t hu_mmr_rerank(hu_allocator_t *alloc, const char *query, size_t query_len,
+                         hu_memory_entry_t *entries, double *scores, size_t count, double lambda) {
     if (!entries || !scores || count == 0)
-        return SC_OK;
+        return HU_OK;
 
-    double lam = (lambda >= 0.0 && lambda <= 1.0) ? lambda : SC_MMR_LAMBDA_DEFAULT;
+    double lam = (lambda >= 0.0 && lambda <= 1.0) ? lambda : HU_MMR_LAMBDA_DEFAULT;
 
     word_set_t query_ws;
     word_set_from_text(&query_ws, query, query_len, alloc);
@@ -124,7 +124,7 @@ sc_error_t sc_mmr_rerank(sc_allocator_t *alloc, const char *query, size_t query_
     word_set_t *doc_sets = (word_set_t *)alloc->alloc(alloc->ctx, count * sizeof(word_set_t));
     if (!doc_sets) {
         word_set_cleanup(&query_ws, alloc);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     for (size_t i = 0; i < count; i++) {
         const char *text;
@@ -140,17 +140,17 @@ sc_error_t sc_mmr_rerank(sc_allocator_t *alloc, const char *query, size_t query_
             word_set_cleanup(&doc_sets[i], alloc);
         alloc->free(alloc->ctx, doc_sets, count * sizeof(word_set_t));
         word_set_cleanup(&query_ws, alloc);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     for (size_t i = 0; i < count; i++)
         selected[i] = false;
 
-    sc_memory_entry_t *out_entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, count * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *out_entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, count * sizeof(hu_memory_entry_t));
     double *out_scores = (double *)alloc->alloc(alloc->ctx, count * sizeof(double));
     if (!out_entries || !out_scores) {
         if (out_entries)
-            alloc->free(alloc->ctx, out_entries, count * sizeof(sc_memory_entry_t));
+            alloc->free(alloc->ctx, out_entries, count * sizeof(hu_memory_entry_t));
         if (out_scores)
             alloc->free(alloc->ctx, out_scores, count * sizeof(double));
         alloc->free(alloc->ctx, selected, count * sizeof(bool));
@@ -158,7 +158,7 @@ sc_error_t sc_mmr_rerank(sc_allocator_t *alloc, const char *query, size_t query_
             word_set_cleanup(&doc_sets[i], alloc);
         alloc->free(alloc->ctx, doc_sets, count * sizeof(word_set_t));
         word_set_cleanup(&query_ws, alloc);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     for (size_t out_i = 0; out_i < count; out_i++) {
@@ -187,15 +187,15 @@ sc_error_t sc_mmr_rerank(sc_allocator_t *alloc, const char *query, size_t query_
         out_scores[out_i] = scores[best_idx];
     }
 
-    memcpy(entries, out_entries, count * sizeof(sc_memory_entry_t));
+    memcpy(entries, out_entries, count * sizeof(hu_memory_entry_t));
     memcpy(scores, out_scores, count * sizeof(double));
 
     alloc->free(alloc->ctx, out_scores, count * sizeof(double));
-    alloc->free(alloc->ctx, out_entries, count * sizeof(sc_memory_entry_t));
+    alloc->free(alloc->ctx, out_entries, count * sizeof(hu_memory_entry_t));
     alloc->free(alloc->ctx, selected, count * sizeof(bool));
     for (size_t i = 0; i < count; i++)
         word_set_cleanup(&doc_sets[i], alloc);
     alloc->free(alloc->ctx, doc_sets, count * sizeof(word_set_t));
     word_set_cleanup(&query_ws, alloc);
-    return SC_OK;
+    return HU_OK;
 }

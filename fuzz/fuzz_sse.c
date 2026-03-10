@@ -1,10 +1,10 @@
-/* libFuzzer harness for sc_sse_parser_feed. Must not crash on any input. */
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/providers/sse.h"
+/* libFuzzer harness for hu_sse_parser_feed. Must not crash on any input. */
+#include "human/core/allocator.h"
+#include "human/providers/sse.h"
 #include <stddef.h>
 #include <stdint.h>
 
-#define SC_FUZZ_SSE_MAX_INPUT 65536
+#define HU_FUZZ_SSE_MAX_INPUT 65536
 
 static void sse_count_cb(const char *event_type, size_t event_type_len, const char *data,
                          size_t data_len, void *userdata) {
@@ -16,18 +16,18 @@ static void sse_count_cb(const char *event_type, size_t event_type_len, const ch
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    if (size > SC_FUZZ_SSE_MAX_INPUT)
+    if (size > HU_FUZZ_SSE_MAX_INPUT)
         return 0;
 
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_sse_parser_t p;
-    sc_error_t err = sc_sse_parser_init(&p, &alloc);
-    if (err != SC_OK)
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_sse_parser_t p;
+    hu_error_t err = hu_sse_parser_init(&p, &alloc);
+    if (err != HU_OK)
         return 0;
 
-    err = sc_sse_parser_feed(&p, (const char *)data, size, sse_count_cb, NULL);
+    err = hu_sse_parser_feed(&p, (const char *)data, size, sse_count_cb, NULL);
     (void)err;
 
-    sc_sse_parser_deinit(&p);
+    hu_sse_parser_deinit(&p);
     return 0;
 }

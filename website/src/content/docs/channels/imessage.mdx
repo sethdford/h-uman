@@ -5,7 +5,7 @@ description: Apple iMessage on macOS via Messages.app and chat.db.
 
 # iMessage Channel
 
-SeaClaw can send and receive Apple iMessage on macOS. Sends go through AppleScript to Messages.app; receives poll the Messages SQLite database at `~/Library/Messages/chat.db`.
+Human can send and receive Apple iMessage on macOS. Sends go through AppleScript to Messages.app; receives poll the Messages SQLite database at `~/Library/Messages/chat.db`.
 
 ## Prerequisites
 
@@ -13,11 +13,11 @@ SeaClaw can send and receive Apple iMessage on macOS. Sends go through AppleScri
 - **macOS only** — not supported on Linux or Windows
 - Messages.app installed and signed in to an Apple ID
 - SQLite support enabled (`SC_ENABLE_SQLITE`)
-- **Full Disk Access** granted to the seaclaw binary (or terminal) in System Settings → Privacy & Security
+- **Full Disk Access** granted to the human binary (or terminal) in System Settings → Privacy & Security
 
 ## Configuration
 
-Add to `~/.seaclaw/config.json` under `channels.imessage`:
+Add to `~/.human/config.json` under `channels.imessage`:
 
 ```json
 {

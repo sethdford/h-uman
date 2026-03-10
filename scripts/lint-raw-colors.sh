@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lints staged CSS, Astro, and TS files for raw hex color values that should use
-# --sc-* design tokens instead. Runs as part of .githooks/pre-commit.
+# --hu-* design tokens instead. Runs as part of .githooks/pre-commit.
 #
 # Usage:
 #   lint-raw-colors.sh        Check only staged files (default, for pre-commit)
@@ -12,7 +12,7 @@ if [ "${1:-}" = "--all" ]; then
   MODE="all"
 fi
 
-EXCLUDE='_tokens\.css|design-tokens/|generate-assets|\.svg$|\.json$|docs/tokens\.|DesignTokens\.|design_tokens\.|website/src/pages/index\.astro|ui/index\.html|ui/src/components/sc-chart\.ts'
+EXCLUDE='_tokens\.css|design-tokens/|generate-assets|\.svg$|\.json$|docs/tokens\.|DesignTokens\.|design_tokens\.|website/src/pages/index\.astro|ui/index\.html|ui/src/components/hu-chart\.ts'
 
 if [ "$MODE" = "all" ]; then
   FILES=$(find ui/src website/src -type f \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' -o -name '*.astro' -o -name '*.html' \) 2>/dev/null | grep -Ev "$EXCLUDE" || true)
@@ -55,7 +55,7 @@ while IFS= read -r file; do
       -e 's/bg-\[#[0-9a-fA-F]{3,8}\]//g')
 
     if printf '%s' "$cleaned" | grep -qE '#[0-9a-fA-F]{3,8}([^0-9a-zA-Z_-]|$)'; then
-      echo "  $file:$lineno: raw hex color -- use a --sc-* token instead"
+      echo "  $file:$lineno: raw hex color -- use a --hu-* token instead"
       echo "    $line"
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
@@ -64,7 +64,7 @@ done <<< "$FILES"
 
 if [ "$VIOLATIONS" -gt 0 ]; then
   echo ""
-  echo "Found $VIOLATIONS raw hex color(s). Use --sc-* or --sc-web-* tokens instead."
+  echo "Found $VIOLATIONS raw hex color(s). Use --hu-* or --hu-web-* tokens instead."
   echo "If intentional, add to the allowlist in scripts/lint-raw-colors.sh"
   exit 1
 fi

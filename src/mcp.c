@@ -1,15 +1,15 @@
-#include "seaclaw/mcp.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/tool.h"
+#include "human/mcp.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/tool.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -21,10 +21,10 @@
 #define MCP_LINE_BUF_INIT    256
 #define MCP_REQUEST_BUF_INIT 512
 
-struct sc_mcp_server {
-    sc_allocator_t *alloc;
-    sc_mcp_server_config_t config;
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+struct hu_mcp_server {
+    hu_allocator_t *alloc;
+    hu_mcp_server_config_t config;
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     pid_t child_pid;
 #endif
     int stdin_fd;
@@ -33,16 +33,16 @@ struct sc_mcp_server {
     bool connected;
 };
 
-/* ── send_request helper (only used when !SC_IS_TEST) ─────────────────────── */
+/* ── send_request helper (only used when !HU_IS_TEST) ─────────────────────── */
 
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
 
-static sc_error_t read_line(sc_mcp_server_t *srv, sc_allocator_t *alloc, char **out_line,
+static hu_error_t read_line(hu_mcp_server_t *srv, hu_allocator_t *alloc, char **out_line,
                             size_t *out_len) {
     size_t cap = MCP_LINE_BUF_INIT;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t len = 0;
 
     while (1) {
@@ -50,7 +50,7 @@ static sc_error_t read_line(sc_mcp_server_t *srv, sc_allocator_t *alloc, char **
         ssize_t n = read(srv->stdout_fd, &byte, 1);
         if (n <= 0) {
             alloc->free(alloc->ctx, buf, cap);
-            return n == 0 ? SC_ERR_IO : SC_ERR_IO;
+            return n == 0 ? HU_ERR_IO : HU_ERR_IO;
         }
         if (byte == '\n' || byte == '\r') {
             if (byte == '\r')
@@ -62,7 +62,7 @@ static sc_error_t read_line(sc_mcp_server_t *srv, sc_allocator_t *alloc, char **
             char *nb = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
             if (!nb) {
                 alloc->free(alloc->ctx, buf, cap);
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             buf = nb;
             cap = new_cap;
@@ -72,53 +72,53 @@ static sc_error_t read_line(sc_mcp_server_t *srv, sc_allocator_t *alloc, char **
     buf[len] = '\0';
     *out_line = buf;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t send_request(sc_mcp_server_t *srv, sc_allocator_t *alloc, const char *method,
+static hu_error_t send_request(hu_mcp_server_t *srv, hu_allocator_t *alloc, const char *method,
                                const char *params_json, bool is_notification,
-                               sc_json_value_t **out_result) {
-    sc_json_buf_t req_buf;
-    if (sc_json_buf_init(&req_buf, alloc) != SC_OK)
-        return SC_ERR_OUT_OF_MEMORY;
+                               hu_json_value_t **out_result) {
+    hu_json_buf_t req_buf;
+    if (hu_json_buf_init(&req_buf, alloc) != HU_OK)
+        return HU_ERR_OUT_OF_MEMORY;
 
-    sc_error_t err;
+    hu_error_t err;
     if (is_notification) {
-        err = sc_json_buf_append_raw(&req_buf, "{\"jsonrpc\":\"2.0\",\"method\":\"", 27);
+        err = hu_json_buf_append_raw(&req_buf, "{\"jsonrpc\":\"2.0\",\"method\":\"", 27);
     } else {
         char id_buf[16];
         int id_len = snprintf(id_buf, sizeof(id_buf), "%u", (unsigned)srv->next_id);
-        err = sc_json_buf_append_raw(&req_buf, "{\"jsonrpc\":\"2.0\",\"id\":", 22);
-        if (err == SC_OK)
-            err = sc_json_buf_append_raw(&req_buf, id_buf, (size_t)id_len);
-        if (err == SC_OK)
-            err = sc_json_buf_append_raw(&req_buf, ",\"method\":\"", 11);
+        err = hu_json_buf_append_raw(&req_buf, "{\"jsonrpc\":\"2.0\",\"id\":", 22);
+        if (err == HU_OK)
+            err = hu_json_buf_append_raw(&req_buf, id_buf, (size_t)id_len);
+        if (err == HU_OK)
+            err = hu_json_buf_append_raw(&req_buf, ",\"method\":\"", 11);
     }
-    if (err != SC_OK)
+    if (err != HU_OK)
         goto fail;
-    err = sc_json_buf_append_raw(&req_buf, method, strlen(method));
-    if (err != SC_OK)
+    err = hu_json_buf_append_raw(&req_buf, method, strlen(method));
+    if (err != HU_OK)
         goto fail;
-    err = sc_json_buf_append_raw(&req_buf, "\",\"params\":", 11);
-    if (err != SC_OK)
+    err = hu_json_buf_append_raw(&req_buf, "\",\"params\":", 11);
+    if (err != HU_OK)
         goto fail;
-    err = sc_json_buf_append_raw(&req_buf, params_json ? params_json : "{}",
+    err = hu_json_buf_append_raw(&req_buf, params_json ? params_json : "{}",
                                  params_json ? strlen(params_json) : 2);
-    if (err != SC_OK)
+    if (err != HU_OK)
         goto fail;
-    err = sc_json_buf_append_raw(&req_buf, "}\n", 2);
-    if (err != SC_OK)
+    err = hu_json_buf_append_raw(&req_buf, "}\n", 2);
+    if (err != HU_OK)
         goto fail;
 
     size_t req_len = req_buf.len;
     ssize_t written = write(srv->stdin_fd, req_buf.ptr, req_len);
-    sc_json_buf_free(&req_buf);
+    hu_json_buf_free(&req_buf);
     if (written < 0 || (size_t)written != req_len)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     if (is_notification) {
         *out_result = NULL;
-        return SC_OK;
+        return HU_OK;
     }
 
     srv->next_id++;
@@ -126,48 +126,48 @@ static sc_error_t send_request(sc_mcp_server_t *srv, sc_allocator_t *alloc, cons
     char *line = NULL;
     size_t line_len = 0;
     err = read_line(srv, alloc, &line, &line_len);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
-    sc_json_value_t *parsed = NULL;
-    err = sc_json_parse(alloc, line, line_len, &parsed);
+    hu_json_value_t *parsed = NULL;
+    err = hu_json_parse(alloc, line, line_len, &parsed);
     alloc->free(alloc->ctx, line, line_len + 1);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
-    sc_json_value_t *err_val = parsed ? sc_json_object_get(parsed, "error") : NULL;
+    hu_json_value_t *err_val = parsed ? hu_json_object_get(parsed, "error") : NULL;
     if (err_val) {
-        sc_json_free(alloc, parsed);
-        return SC_ERR_TOOL_EXECUTION;
+        hu_json_free(alloc, parsed);
+        return HU_ERR_TOOL_EXECUTION;
     }
 
-    sc_json_value_t *result = parsed ? sc_json_object_get(parsed, "result") : NULL;
+    hu_json_value_t *result = parsed ? hu_json_object_get(parsed, "result") : NULL;
     if (!result) {
-        sc_json_free(alloc, parsed);
-        return SC_ERR_TOOL_EXECUTION;
+        hu_json_free(alloc, parsed);
+        return HU_ERR_TOOL_EXECUTION;
     }
 
     *out_result = parsed;
-    return SC_OK;
+    return HU_OK;
 fail:
-    sc_json_buf_free(&req_buf);
+    hu_json_buf_free(&req_buf);
     return err;
 }
 
-#endif /* !SC_IS_TEST */
+#endif /* !HU_IS_TEST */
 
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
-sc_mcp_server_t *sc_mcp_server_create(sc_allocator_t *alloc, const sc_mcp_server_config_t *config) {
+hu_mcp_server_t *hu_mcp_server_create(hu_allocator_t *alloc, const hu_mcp_server_config_t *config) {
     if (!alloc || !config || !config->command)
         return NULL;
-    sc_mcp_server_t *srv = (sc_mcp_server_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
+    hu_mcp_server_t *srv = (hu_mcp_server_t *)alloc->alloc(alloc->ctx, sizeof(*srv));
     if (!srv)
         return NULL;
     memset(srv, 0, sizeof(*srv));
     srv->alloc = alloc;
     srv->config = *config;
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     srv->child_pid = -1;
 #endif
     srv->stdin_fd = -1;
@@ -177,17 +177,17 @@ sc_mcp_server_t *sc_mcp_server_create(sc_allocator_t *alloc, const sc_mcp_server
     return srv;
 }
 
-sc_error_t sc_mcp_server_connect(sc_mcp_server_t *srv) {
+hu_error_t hu_mcp_server_connect(hu_mcp_server_t *srv) {
     if (!srv)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST != 0
+#if defined(HU_IS_TEST) && HU_IS_TEST != 0
     srv->connected = true;
-    return SC_OK;
+    return HU_OK;
 #else
     int stdin_pipe[2], stdout_pipe[2];
     if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -195,7 +195,7 @@ sc_error_t sc_mcp_server_connect(sc_mcp_server_t *srv) {
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
     if (pid == 0) {
@@ -227,49 +227,49 @@ sc_error_t sc_mcp_server_connect(sc_mcp_server_t *srv) {
 
     /* Send initialize request */
     const char *init_params = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{}}";
-    sc_json_value_t *init_resp = NULL;
-    sc_error_t err = send_request(srv, srv->alloc, "initialize", init_params, false, &init_resp);
-    if (err != SC_OK) {
-        sc_mcp_server_destroy(srv);
+    hu_json_value_t *init_resp = NULL;
+    hu_error_t err = send_request(srv, srv->alloc, "initialize", init_params, false, &init_resp);
+    if (err != HU_OK) {
+        hu_mcp_server_destroy(srv);
         return err;
     }
 
     if (!init_resp) {
-        sc_mcp_server_destroy(srv);
-        return SC_ERR_IO;
+        hu_mcp_server_destroy(srv);
+        return HU_ERR_IO;
     }
-    sc_json_value_t *result = sc_json_object_get(init_resp, "result");
-    if (!result || result->type != SC_JSON_OBJECT) {
-        sc_json_free(srv->alloc, init_resp);
-        sc_mcp_server_destroy(srv);
-        return SC_ERR_IO;
+    hu_json_value_t *result = hu_json_object_get(init_resp, "result");
+    if (!result || result->type != HU_JSON_OBJECT) {
+        hu_json_free(srv->alloc, init_resp);
+        hu_mcp_server_destroy(srv);
+        return HU_ERR_IO;
     }
-    if (!sc_json_object_get(result, "protocolVersion")) {
-        sc_json_free(srv->alloc, init_resp);
-        sc_mcp_server_destroy(srv);
-        return SC_ERR_IO;
+    if (!hu_json_object_get(result, "protocolVersion")) {
+        hu_json_free(srv->alloc, init_resp);
+        hu_mcp_server_destroy(srv);
+        return HU_ERR_IO;
     }
-    sc_json_free(srv->alloc, init_resp);
+    hu_json_free(srv->alloc, init_resp);
 
     /* Send initialized notification */
     err = send_request(srv, srv->alloc, "notifications/initialized", "{}", true, NULL);
-    if (err != SC_OK) {
-        sc_mcp_server_destroy(srv);
+    if (err != HU_OK) {
+        hu_mcp_server_destroy(srv);
         return err;
     }
 
     srv->connected = true;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-sc_error_t sc_mcp_server_list_tools(sc_mcp_server_t *srv, sc_allocator_t *alloc, char ***out_names,
+hu_error_t hu_mcp_server_list_tools(hu_mcp_server_t *srv, hu_allocator_t *alloc, char ***out_names,
                                     char ***out_descriptions, char ***out_params,
                                     size_t *out_count) {
     if (!srv || !alloc || !out_names || !out_descriptions || !out_params || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST != 0
+#if defined(HU_IS_TEST) && HU_IS_TEST != 0
     *out_count = 1;
     char **names = (char **)alloc->alloc(alloc->ctx, sizeof(char *));
     char **descs = (char **)alloc->alloc(alloc->ctx, sizeof(char *));
@@ -281,7 +281,7 @@ sc_error_t sc_mcp_server_list_tools(sc_mcp_server_t *srv, sc_allocator_t *alloc,
             alloc->free(alloc->ctx, descs, sizeof(char *));
         if (params)
             alloc->free(alloc->ctx, params, sizeof(char *));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     const char *mock_name = "mock_tool";
     const char *mock_desc = "Mock MCP tool";
@@ -300,7 +300,7 @@ sc_error_t sc_mcp_server_list_tools(sc_mcp_server_t *srv, sc_allocator_t *alloc,
         alloc->free(alloc->ctx, names, sizeof(char *));
         alloc->free(alloc->ctx, descs, sizeof(char *));
         alloc->free(alloc->ctx, params, sizeof(char *));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(names[0], mock_name, strlen(mock_name) + 1);
     memcpy(descs[0], mock_desc, strlen(mock_desc) + 1);
@@ -308,25 +308,25 @@ sc_error_t sc_mcp_server_list_tools(sc_mcp_server_t *srv, sc_allocator_t *alloc,
     *out_names = names;
     *out_descriptions = descs;
     *out_params = params;
-    return SC_OK;
+    return HU_OK;
 #else
     if (!srv->connected)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_json_value_t *resp = NULL;
-    sc_error_t err = send_request(srv, alloc, "tools/list", "{}", false, &resp);
-    if (err != SC_OK || !resp)
+    hu_json_value_t *resp = NULL;
+    hu_error_t err = send_request(srv, alloc, "tools/list", "{}", false, &resp);
+    if (err != HU_OK || !resp)
         return err;
 
-    sc_json_value_t *result = sc_json_object_get(resp, "result");
-    if (!result || result->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, resp);
-        return SC_ERR_TOOL_EXECUTION;
+    hu_json_value_t *result = hu_json_object_get(resp, "result");
+    if (!result || result->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, resp);
+        return HU_ERR_TOOL_EXECUTION;
     }
-    sc_json_value_t *tools_arr = sc_json_object_get(result, "tools");
-    if (!tools_arr || tools_arr->type != SC_JSON_ARRAY) {
-        sc_json_free(alloc, resp);
-        return SC_ERR_TOOL_EXECUTION;
+    hu_json_value_t *tools_arr = hu_json_object_get(result, "tools");
+    if (!tools_arr || tools_arr->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, resp);
+        return HU_ERR_TOOL_EXECUTION;
     }
 
     size_t n = tools_arr->data.array.len;
@@ -340,35 +340,35 @@ sc_error_t sc_mcp_server_list_tools(sc_mcp_server_t *srv, sc_allocator_t *alloc,
             alloc->free(alloc->ctx, descs, n * sizeof(char *));
         if (params)
             alloc->free(alloc->ctx, params, n * sizeof(char *));
-        sc_json_free(alloc, resp);
-        return SC_ERR_OUT_OF_MEMORY;
+        hu_json_free(alloc, resp);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memset(names, 0, n * sizeof(char *));
     memset(descs, 0, n * sizeof(char *));
     memset(params, 0, n * sizeof(char *));
 
     for (size_t i = 0; i < n; i++) {
-        sc_json_value_t *item = tools_arr->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
+        hu_json_value_t *item = tools_arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
             continue;
 
-        sc_json_value_t *name_val = sc_json_object_get(item, "name");
+        hu_json_value_t *name_val = hu_json_object_get(item, "name");
         const char *name_str =
-            (name_val && name_val->type == SC_JSON_STRING) ? name_val->data.string.ptr : "";
+            (name_val && name_val->type == HU_JSON_STRING) ? name_val->data.string.ptr : "";
         size_t name_len =
-            (name_val && name_val->type == SC_JSON_STRING) ? name_val->data.string.len : 0;
+            (name_val && name_val->type == HU_JSON_STRING) ? name_val->data.string.len : 0;
 
-        sc_json_value_t *desc_val = sc_json_object_get(item, "description");
+        hu_json_value_t *desc_val = hu_json_object_get(item, "description");
         const char *desc_str =
-            (desc_val && desc_val->type == SC_JSON_STRING) ? desc_val->data.string.ptr : "";
+            (desc_val && desc_val->type == HU_JSON_STRING) ? desc_val->data.string.ptr : "";
         size_t desc_len =
-            (desc_val && desc_val->type == SC_JSON_STRING) ? desc_val->data.string.len : 0;
+            (desc_val && desc_val->type == HU_JSON_STRING) ? desc_val->data.string.len : 0;
 
-        sc_json_value_t *schema_val = sc_json_object_get(item, "inputSchema");
+        hu_json_value_t *schema_val = hu_json_object_get(item, "inputSchema");
         char *schema_str = NULL;
         size_t schema_len = 0;
-        if (schema_val && schema_val->type == SC_JSON_OBJECT)
-            sc_json_stringify(alloc, schema_val, &schema_str, &schema_len);
+        if (schema_val && schema_val->type == HU_JSON_OBJECT)
+            hu_json_stringify(alloc, schema_val, &schema_str, &schema_len);
 
         names[i] = (char *)alloc->alloc(alloc->ctx, name_len + 1);
         descs[i] = (char *)alloc->alloc(alloc->ctx, desc_len + 1);
@@ -391,130 +391,130 @@ sc_error_t sc_mcp_server_list_tools(sc_mcp_server_t *srv, sc_allocator_t *alloc,
             alloc->free(alloc->ctx, names, n * sizeof(char *));
             alloc->free(alloc->ctx, descs, n * sizeof(char *));
             alloc->free(alloc->ctx, params, n * sizeof(char *));
-            sc_json_free(alloc, resp);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_json_free(alloc, resp);
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(names[i], name_str, name_len + 1);
         memcpy(descs[i], desc_str, desc_len + 1);
     }
 
-    sc_json_free(alloc, resp);
+    hu_json_free(alloc, resp);
     *out_names = names;
     *out_descriptions = descs;
     *out_params = params;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
-sc_error_t sc_mcp_server_call_tool(sc_mcp_server_t *srv, sc_allocator_t *alloc,
+hu_error_t hu_mcp_server_call_tool(hu_mcp_server_t *srv, hu_allocator_t *alloc,
                                    const char *tool_name, const char *args_json, char **out_result,
                                    size_t *out_result_len) {
     if (!srv || !alloc || !tool_name || !out_result || !out_result_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST != 0
+#if defined(HU_IS_TEST) && HU_IS_TEST != 0
     (void)args_json;
     const char *mock = "mock result";
     size_t len = strlen(mock);
     char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(buf, mock, len + 1);
     *out_result = buf;
     *out_result_len = len;
-    return SC_OK;
+    return HU_OK;
 #else
     if (!srv->connected)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_json_buf_t params_buf;
-    if (sc_json_buf_init(&params_buf, alloc) != SC_OK)
-        return SC_ERR_OUT_OF_MEMORY;
-    sc_error_t err = sc_json_buf_append_raw(&params_buf, "{\"name\":", 8);
-    if (err == SC_OK)
-        err = sc_json_append_string(&params_buf, tool_name, strlen(tool_name));
-    if (err == SC_OK)
-        err = sc_json_buf_append_raw(&params_buf, ",\"arguments\":", 13);
-    if (err == SC_OK)
-        err = sc_json_buf_append_raw(&params_buf, args_json ? args_json : "{}",
+    hu_json_buf_t params_buf;
+    if (hu_json_buf_init(&params_buf, alloc) != HU_OK)
+        return HU_ERR_OUT_OF_MEMORY;
+    hu_error_t err = hu_json_buf_append_raw(&params_buf, "{\"name\":", 8);
+    if (err == HU_OK)
+        err = hu_json_append_string(&params_buf, tool_name, strlen(tool_name));
+    if (err == HU_OK)
+        err = hu_json_buf_append_raw(&params_buf, ",\"arguments\":", 13);
+    if (err == HU_OK)
+        err = hu_json_buf_append_raw(&params_buf, args_json ? args_json : "{}",
                                      args_json ? strlen(args_json) : 2);
-    if (err == SC_OK)
-        err = sc_json_buf_append_raw(&params_buf, "}", 1);
-    if (err != SC_OK) {
-        sc_json_buf_free(&params_buf);
+    if (err == HU_OK)
+        err = hu_json_buf_append_raw(&params_buf, "}", 1);
+    if (err != HU_OK) {
+        hu_json_buf_free(&params_buf);
         return err;
     }
 
-    sc_json_value_t *resp = NULL;
+    hu_json_value_t *resp = NULL;
     err = send_request(srv, alloc, "tools/call", params_buf.ptr, false, &resp);
-    sc_json_buf_free(&params_buf);
-    if (err != SC_OK || !resp)
+    hu_json_buf_free(&params_buf);
+    if (err != HU_OK || !resp)
         return err;
 
-    sc_json_value_t *result = sc_json_object_get(resp, "result");
-    if (!result || result->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, resp);
-        return SC_ERR_TOOL_EXECUTION;
+    hu_json_value_t *result = hu_json_object_get(resp, "result");
+    if (!result || result->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, resp);
+        return HU_ERR_TOOL_EXECUTION;
     }
-    sc_json_value_t *content = sc_json_object_get(result, "content");
-    if (!content || content->type != SC_JSON_ARRAY) {
-        sc_json_free(alloc, resp);
-        return SC_ERR_TOOL_EXECUTION;
+    hu_json_value_t *content = hu_json_object_get(result, "content");
+    if (!content || content->type != HU_JSON_ARRAY) {
+        hu_json_free(alloc, resp);
+        return HU_ERR_TOOL_EXECUTION;
     }
 
     /* Collect text from content array */
-    sc_json_buf_t out_buf;
-    if (sc_json_buf_init(&out_buf, alloc) != SC_OK) {
-        sc_json_free(alloc, resp);
-        return SC_ERR_OUT_OF_MEMORY;
+    hu_json_buf_t out_buf;
+    if (hu_json_buf_init(&out_buf, alloc) != HU_OK) {
+        hu_json_free(alloc, resp);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     for (size_t i = 0; i < content->data.array.len; i++) {
-        sc_json_value_t *item = content->data.array.items[i];
-        if (!item || item->type != SC_JSON_OBJECT)
+        hu_json_value_t *item = content->data.array.items[i];
+        if (!item || item->type != HU_JSON_OBJECT)
             continue;
-        sc_json_value_t *text_val = sc_json_object_get(item, "text");
-        if (!text_val || text_val->type != SC_JSON_STRING)
+        hu_json_value_t *text_val = hu_json_object_get(item, "text");
+        if (!text_val || text_val->type != HU_JSON_STRING)
             continue;
         if (out_buf.len > 0) {
-            err = sc_json_buf_append_raw(&out_buf, "\n", 1);
-            if (err != SC_OK)
+            err = hu_json_buf_append_raw(&out_buf, "\n", 1);
+            if (err != HU_OK)
                 goto call_tool_fail;
         }
         err =
-            sc_json_buf_append_raw(&out_buf, text_val->data.string.ptr, text_val->data.string.len);
-        if (err != SC_OK)
+            hu_json_buf_append_raw(&out_buf, text_val->data.string.ptr, text_val->data.string.len);
+        if (err != HU_OK)
             goto call_tool_fail;
     }
 
     size_t len = out_buf.len;
     char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!buf) {
-        sc_json_buf_free(&out_buf);
-        sc_json_free(alloc, resp);
-        return SC_ERR_OUT_OF_MEMORY;
+        hu_json_buf_free(&out_buf);
+        hu_json_free(alloc, resp);
+        return HU_ERR_OUT_OF_MEMORY;
     }
     memcpy(buf, out_buf.ptr, len);
     buf[len] = '\0';
-    sc_json_buf_free(&out_buf);
-    sc_json_free(alloc, resp);
+    hu_json_buf_free(&out_buf);
+    hu_json_free(alloc, resp);
 
     *out_result = buf;
     *out_result_len = len;
-    return SC_OK;
+    return HU_OK;
 
 call_tool_fail:
-    sc_json_buf_free(&out_buf);
-    sc_json_free(alloc, resp);
+    hu_json_buf_free(&out_buf);
+    hu_json_free(alloc, resp);
     return err;
 #endif
 }
 
-void sc_mcp_server_destroy(sc_mcp_server_t *srv) {
+void hu_mcp_server_destroy(hu_mcp_server_t *srv) {
     if (!srv)
         return;
 
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     if (srv->stdin_fd >= 0) {
         close(srv->stdin_fd);
         srv->stdin_fd = -1;
@@ -529,34 +529,34 @@ void sc_mcp_server_destroy(sc_mcp_server_t *srv) {
         srv->child_pid = -1;
     }
 #endif
-    sc_allocator_t *alloc = srv->alloc;
+    hu_allocator_t *alloc = srv->alloc;
     alloc->free(alloc->ctx, srv, sizeof(*srv));
 }
 
 /* ── MCP tool wrapper (vtable) ────────────────────────────────────────────── */
 
-typedef struct sc_mcp_tool_wrapper {
-    sc_allocator_t *alloc;
-    sc_mcp_server_t *server;
+typedef struct hu_mcp_tool_wrapper {
+    hu_allocator_t *alloc;
+    hu_mcp_server_t *server;
     bool owns_server;
     char *original_name;
     char *prefixed_name;
     char *desc;
     char *params_json;
     size_t server_index;
-} sc_mcp_tool_wrapper_t;
+} hu_mcp_tool_wrapper_t;
 
-static sc_error_t mcp_tool_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                   sc_tool_result_t *out) {
-    sc_mcp_tool_wrapper_t *w = (sc_mcp_tool_wrapper_t *)ctx;
+static hu_error_t mcp_tool_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                   hu_tool_result_t *out) {
+    hu_mcp_tool_wrapper_t *w = (hu_mcp_tool_wrapper_t *)ctx;
     char *args_json = NULL;
     size_t args_len = 0;
     bool args_allocated = false;
-    if (args && args->type == SC_JSON_OBJECT) {
-        sc_error_t err = sc_json_stringify(alloc, args, &args_json, &args_len);
-        if (err != SC_OK) {
-            *out = sc_tool_result_fail("Failed to serialize args", 24);
-            return SC_OK;
+    if (args && args->type == HU_JSON_OBJECT) {
+        hu_error_t err = hu_json_stringify(alloc, args, &args_json, &args_len);
+        if (err != HU_OK) {
+            *out = hu_tool_result_fail("Failed to serialize args", 24);
+            return HU_OK;
         }
         args_allocated = true;
     }
@@ -565,39 +565,39 @@ static sc_error_t mcp_tool_execute(void *ctx, sc_allocator_t *alloc, const sc_js
 
     char *result = NULL;
     size_t result_len = 0;
-    sc_error_t err = sc_mcp_server_call_tool(w->server, alloc, w->original_name, args_json, &result,
+    hu_error_t err = hu_mcp_server_call_tool(w->server, alloc, w->original_name, args_json, &result,
                                              &result_len);
     if (args_allocated && args_json)
         alloc->free(alloc->ctx, args_json, args_len + 1);
 
-    if (err != SC_OK) {
+    if (err != HU_OK) {
         char buf[128];
         int n = snprintf(buf, sizeof(buf), "MCP tool '%s' failed", w->original_name);
         char *msg = (char *)alloc->alloc(alloc->ctx, (size_t)n + 1);
         if (msg) {
             memcpy(msg, buf, (size_t)n + 1);
-            *out = sc_tool_result_fail_owned(msg, (size_t)n);
+            *out = hu_tool_result_fail_owned(msg, (size_t)n);
         } else {
-            *out = sc_tool_result_fail("MCP tool call failed", 20);
+            *out = hu_tool_result_fail("MCP tool call failed", 20);
         }
-        return SC_OK;
+        return HU_OK;
     }
-    *out = sc_tool_result_ok_owned(result, result_len);
-    return SC_OK;
+    *out = hu_tool_result_ok_owned(result, result_len);
+    return HU_OK;
 }
 
 static const char *mcp_tool_name(void *ctx) {
-    return ((sc_mcp_tool_wrapper_t *)ctx)->prefixed_name;
+    return ((hu_mcp_tool_wrapper_t *)ctx)->prefixed_name;
 }
 static const char *mcp_tool_description(void *ctx) {
-    return ((sc_mcp_tool_wrapper_t *)ctx)->desc;
+    return ((hu_mcp_tool_wrapper_t *)ctx)->desc;
 }
 static const char *mcp_tool_parameters_json(void *ctx) {
-    return ((sc_mcp_tool_wrapper_t *)ctx)->params_json;
+    return ((hu_mcp_tool_wrapper_t *)ctx)->params_json;
 }
 
-static void mcp_tool_deinit(void *ctx, sc_allocator_t *alloc) {
-    sc_mcp_tool_wrapper_t *w = (sc_mcp_tool_wrapper_t *)ctx;
+static void mcp_tool_deinit(void *ctx, hu_allocator_t *alloc) {
+    hu_mcp_tool_wrapper_t *w = (hu_mcp_tool_wrapper_t *)ctx;
     if (w->original_name)
         alloc->free(alloc->ctx, w->original_name, strlen(w->original_name) + 1);
     if (w->prefixed_name)
@@ -607,11 +607,11 @@ static void mcp_tool_deinit(void *ctx, sc_allocator_t *alloc) {
     if (w->params_json)
         alloc->free(alloc->ctx, w->params_json, strlen(w->params_json) + 1);
     if (w->owns_server)
-        sc_mcp_server_destroy(w->server);
+        hu_mcp_server_destroy(w->server);
     alloc->free(alloc->ctx, w, sizeof(*w));
 }
 
-static const sc_tool_vtable_t mcp_tool_vtable = {
+static const hu_tool_vtable_t mcp_tool_vtable = {
     .execute = mcp_tool_execute,
     .name = mcp_tool_name,
     .description = mcp_tool_description,
@@ -619,51 +619,51 @@ static const sc_tool_vtable_t mcp_tool_vtable = {
     .deinit = mcp_tool_deinit,
 };
 
-/* ── sc_mcp_init_tools / sc_mcp_free_tools ─────────────────────────────────── */
+/* ── hu_mcp_init_tools / hu_mcp_free_tools ─────────────────────────────────── */
 
-sc_error_t sc_mcp_init_tools(sc_allocator_t *alloc, const sc_mcp_server_config_t *server_configs,
-                             size_t config_count, sc_tool_t **out_tools, size_t *out_count) {
+hu_error_t hu_mcp_init_tools(hu_allocator_t *alloc, const hu_mcp_server_config_t *server_configs,
+                             size_t config_count, hu_tool_t **out_tools, size_t *out_count) {
     if (!alloc || !out_tools || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_tools = NULL;
     *out_count = 0;
 
     if (config_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t total = 0;
-    sc_tool_t *all = NULL;
-    sc_mcp_server_t **servers = NULL;
+    hu_tool_t *all = NULL;
+    hu_mcp_server_t **servers = NULL;
     size_t *counts = NULL;
 
     servers =
-        (sc_mcp_server_t **)alloc->alloc(alloc->ctx, config_count * sizeof(sc_mcp_server_t *));
+        (hu_mcp_server_t **)alloc->alloc(alloc->ctx, config_count * sizeof(hu_mcp_server_t *));
     counts = (size_t *)alloc->alloc(alloc->ctx, config_count * sizeof(size_t));
     if (!servers || !counts) {
         if (servers)
-            alloc->free(alloc->ctx, servers, config_count * sizeof(sc_mcp_server_t *));
+            alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_server_t *));
         if (counts)
             alloc->free(alloc->ctx, counts, config_count * sizeof(size_t));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    memset(servers, 0, config_count * sizeof(sc_mcp_server_t *));
+    memset(servers, 0, config_count * sizeof(hu_mcp_server_t *));
     memset(counts, 0, config_count * sizeof(size_t));
 
     for (size_t i = 0; i < config_count; i++) {
-        sc_mcp_server_t *srv = sc_mcp_server_create(alloc, &server_configs[i]);
+        hu_mcp_server_t *srv = hu_mcp_server_create(alloc, &server_configs[i]);
         if (!srv)
             continue;
-        sc_error_t err = sc_mcp_server_connect(srv);
-        if (err != SC_OK) {
-            sc_mcp_server_destroy(srv);
+        hu_error_t err = hu_mcp_server_connect(srv);
+        if (err != HU_OK) {
+            hu_mcp_server_destroy(srv);
             continue;
         }
 
         char **names = NULL, **descs = NULL, **tool_params = NULL;
         size_t n = 0;
-        err = sc_mcp_server_list_tools(srv, alloc, &names, &descs, &tool_params, &n);
-        if (err != SC_OK || n == 0) {
-            sc_mcp_server_destroy(srv);
+        err = hu_mcp_server_list_tools(srv, alloc, &names, &descs, &tool_params, &n);
+        if (err != HU_OK || n == 0) {
+            hu_mcp_server_destroy(srv);
             continue;
         }
 
@@ -688,14 +688,14 @@ sc_error_t sc_mcp_init_tools(sc_allocator_t *alloc, const sc_mcp_server_config_t
                 if (tool_params)
                     alloc->free(alloc->ctx, tool_params, n * sizeof(char *));
                 if (j == 0)
-                    sc_mcp_server_destroy(srv);
+                    hu_mcp_server_destroy(srv);
                 servers[i] = NULL;
                 goto fail;
             }
             snprintf(prefixed, pref_len, "mcp_%zu_%s", i, names[j]);
 
-            sc_mcp_tool_wrapper_t *w =
-                (sc_mcp_tool_wrapper_t *)alloc->alloc(alloc->ctx, sizeof(sc_mcp_tool_wrapper_t));
+            hu_mcp_tool_wrapper_t *w =
+                (hu_mcp_tool_wrapper_t *)alloc->alloc(alloc->ctx, sizeof(hu_mcp_tool_wrapper_t));
             if (!w) {
                 alloc->free(alloc->ctx, prefixed, pref_len);
                 for (size_t k = j; k < n; k++) {
@@ -709,7 +709,7 @@ sc_error_t sc_mcp_init_tools(sc_allocator_t *alloc, const sc_mcp_server_config_t
                 if (tool_params)
                     alloc->free(alloc->ctx, tool_params, n * sizeof(char *));
                 if (j == 0)
-                    sc_mcp_server_destroy(srv);
+                    hu_mcp_server_destroy(srv);
                 servers[i] = NULL;
                 goto fail;
             }
@@ -728,8 +728,8 @@ sc_error_t sc_mcp_init_tools(sc_allocator_t *alloc, const sc_mcp_server_config_t
             }
             w->server_index = i;
 
-            sc_tool_t *tools_buf = (sc_tool_t *)alloc->realloc(
-                alloc->ctx, all, (total - 1) * sizeof(sc_tool_t), total * sizeof(sc_tool_t));
+            hu_tool_t *tools_buf = (hu_tool_t *)alloc->realloc(
+                alloc->ctx, all, (total - 1) * sizeof(hu_tool_t), total * sizeof(hu_tool_t));
             if (!tools_buf) {
                 mcp_tool_deinit(
                     w, alloc); /* frees w, names[j], descs[j], prefixed; destroys server if j==0 */
@@ -756,11 +756,11 @@ sc_error_t sc_mcp_init_tools(sc_allocator_t *alloc, const sc_mcp_server_config_t
             alloc->free(alloc->ctx, tool_params, n * sizeof(char *));
     }
 
-    alloc->free(alloc->ctx, servers, config_count * sizeof(sc_mcp_server_t *));
+    alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_server_t *));
     alloc->free(alloc->ctx, counts, config_count * sizeof(size_t));
     *out_tools = all;
     *out_count = total;
-    return SC_OK;
+    return HU_OK;
 
 fail:
     if (all) {
@@ -768,25 +768,25 @@ fail:
             if (all[i].vtable && all[i].vtable->deinit)
                 all[i].vtable->deinit(all[i].ctx, alloc);
         }
-        alloc->free(alloc->ctx, all, total * sizeof(sc_tool_t));
+        alloc->free(alloc->ctx, all, total * sizeof(hu_tool_t));
     }
     for (size_t i = 0; i < config_count; i++) {
         if (servers && servers[i])
-            sc_mcp_server_destroy(servers[i]);
+            hu_mcp_server_destroy(servers[i]);
     }
     if (servers)
-        alloc->free(alloc->ctx, servers, config_count * sizeof(sc_mcp_server_t *));
+        alloc->free(alloc->ctx, servers, config_count * sizeof(hu_mcp_server_t *));
     if (counts)
         alloc->free(alloc->ctx, counts, config_count * sizeof(size_t));
-    return SC_ERR_OUT_OF_MEMORY;
+    return HU_ERR_OUT_OF_MEMORY;
 }
 
-void sc_mcp_free_tools(sc_allocator_t *alloc, sc_tool_t *tools, size_t count) {
+void hu_mcp_free_tools(hu_allocator_t *alloc, hu_tool_t *tools, size_t count) {
     if (!alloc || !tools)
         return;
     for (size_t i = 0; i < count; i++) {
         if (tools[i].vtable && tools[i].vtable->deinit)
             tools[i].vtable->deinit(tools[i].ctx, alloc);
     }
-    alloc->free(alloc->ctx, tools, count * sizeof(sc_tool_t));
+    alloc->free(alloc->ctx, tools, count * sizeof(hu_tool_t));
 }

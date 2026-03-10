@@ -6,13 +6,13 @@ updated: 2026-03-02
 
 # Sandbox Isolation System
 
-seaclaw provides a multi-tier sandbox system for isolating child processes spawned by the agent.
+human provides a multi-tier sandbox system for isolating child processes spawned by the agent.
 The system is designed to be cross-platform, composable, and secure-by-default.
 
 ## Quick Start
 
 ```json
-// ~/.seaclaw/config.json
+// ~/.human/config.json
 {
   "security": {
     "sandbox": "auto",
@@ -31,7 +31,7 @@ The system is designed to be cross-platform, composable, and secure-by-default.
 Check what's available on your system:
 
 ```bash
-seaclaw sandbox
+human sandbox
 ```
 
 ## Backends
@@ -68,7 +68,7 @@ seaclaw sandbox
 
 ## Auto-detection
 
-When `"sandbox": "auto"` (the default), seaclaw selects the strongest available backend:
+When `"sandbox": "auto"` (the default), human selects the strongest available backend:
 
 **macOS**: Seatbelt → Docker → WASI → noop
 
@@ -78,7 +78,7 @@ When `"sandbox": "auto"` (the default), seaclaw selects the strongest available 
 
 ## How It Works
 
-Sandbox backends implement the `sc_sandbox_vtable_t` interface with two isolation mechanisms:
+Sandbox backends implement the `hu_sandbox_vtable_t` interface with two isolation mechanisms:
 
 1. **`wrap_command`** — Prefixes the child argv with a sandbox tool
    (e.g., `sandbox-exec -p <profile> ...`, `bwrap --ro-bind ...`, `docker run ...`).
@@ -162,7 +162,7 @@ The spawn path applies them in order:
 ## CLI
 
 ```bash
-seaclaw sandbox          # Show sandbox status, available backends, active config
+human sandbox          # Show sandbox status, available backends, active config
 ```
 
 Output includes:

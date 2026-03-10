@@ -32,13 +32,13 @@ test.describe("Wave 1: Layout Archetypes", () => {
   test.describe("Conversational — Chat", () => {
     test.beforeEach(async ({ page }) => {
       await page.goto("/?demo#chat");
-      await waitForViewReady(page, "sc-chat-view");
+      await waitForViewReady(page, "hu-chat-view");
     });
 
     test("message thread appears before composer in DOM order", async ({ page }) => {
       await expect(async () => {
         const order = await page.evaluate(
-          shadowDomOrder("sc-chat-view", "sc-message-thread", "sc-chat-composer"),
+          shadowDomOrder("hu-chat-view", "hu-message-thread", "hu-chat-composer"),
         );
         expect(order).toBe(true);
       }).toPass({ timeout: POLL });
@@ -46,7 +46,7 @@ test.describe("Wave 1: Layout Archetypes", () => {
 
     test("composer is present at bottom of view", async ({ page }) => {
       await expect(async () => {
-        expect(await page.evaluate(shadowExists("sc-chat-view", "sc-chat-composer"))).toBe(true);
+        expect(await page.evaluate(shadowExists("hu-chat-view", "hu-chat-composer"))).toBe(true);
       }).toPass({ timeout: POLL });
     });
   });
@@ -56,13 +56,13 @@ test.describe("Wave 1: Layout Archetypes", () => {
   test.describe("Conversational — Voice", () => {
     test.beforeEach(async ({ page }) => {
       await page.goto("/?demo#voice");
-      await waitForViewReady(page, "sc-voice-view");
+      await waitForViewReady(page, "hu-voice-view");
     });
 
     test("conversation area appears before controls in DOM", async ({ page }) => {
       await expect(async () => {
         const order = await page.evaluate(
-          shadowDomOrder("sc-voice-view", "sc-voice-conversation", ".controls-zone"),
+          shadowDomOrder("hu-voice-view", "hu-voice-conversation", ".controls-zone"),
         );
         expect(order).toBe(true);
       }).toPass({ timeout: POLL });
@@ -71,7 +71,7 @@ test.describe("Wave 1: Layout Archetypes", () => {
     test("status bar appears before conversation in DOM", async ({ page }) => {
       await expect(async () => {
         const order = await page.evaluate(
-          shadowDomOrder("sc-voice-view", ".status-bar", "sc-voice-conversation"),
+          shadowDomOrder("hu-voice-view", ".status-bar", "hu-voice-conversation"),
         );
         expect(order).toBe(true);
       }).toPass({ timeout: POLL });
@@ -80,7 +80,7 @@ test.describe("Wave 1: Layout Archetypes", () => {
     test("conversation area uses flex-grow", async ({ page }) => {
       await expect(async () => {
         const flexGrow = await page.evaluate(
-          shadowComputedStyle("sc-voice-view", "sc-voice-conversation", "flex-grow"),
+          shadowComputedStyle("hu-voice-view", "hu-voice-conversation", "flex-grow"),
         );
         expect(Number(flexGrow)).toBeGreaterThanOrEqual(1);
       }).toPass({ timeout: POLL });
@@ -89,7 +89,7 @@ test.describe("Wave 1: Layout Archetypes", () => {
     test("conversation has no fixed max-height", async ({ page }) => {
       await expect(async () => {
         const maxHeight = await page.evaluate(
-          shadowComputedStyle("sc-voice-view", "sc-voice-conversation", "max-height"),
+          shadowComputedStyle("hu-voice-view", "hu-voice-conversation", "max-height"),
         );
         expect(maxHeight).toBe("none");
       }).toPass({ timeout: POLL });
@@ -99,9 +99,9 @@ test.describe("Wave 1: Layout Archetypes", () => {
   // ── Dashboard: Overview, Usage, Security ──────────────────────
 
   const DASHBOARD_VIEWS = [
-    { name: "Overview", hash: "overview", tag: "sc-overview-view" },
-    { name: "Usage", hash: "usage", tag: "sc-usage-view" },
-    { name: "Security", hash: "security", tag: "sc-security-view" },
+    { name: "Overview", hash: "overview", tag: "hu-overview-view" },
+    { name: "Usage", hash: "usage", tag: "hu-usage-view" },
+    { name: "Security", hash: "security", tag: "hu-security-view" },
   ];
 
   for (const view of DASHBOARD_VIEWS) {
@@ -113,7 +113,7 @@ test.describe("Wave 1: Layout Archetypes", () => {
 
       test("has page hero or header section", async ({ page }) => {
         await expect(async () => {
-          const hasHero = await page.evaluate(shadowExists(view.tag, "sc-page-hero"));
+          const hasHero = await page.evaluate(shadowExists(view.tag, "hu-page-hero"));
           const hasHeader = await page.evaluate(shadowExists(view.tag, ".hero"));
           expect(hasHero || hasHeader).toBe(true);
         }).toPass({ timeout: POLL });
@@ -126,13 +126,13 @@ test.describe("Wave 1: Layout Archetypes", () => {
   test.describe("Log — Logs", () => {
     test.beforeEach(async ({ page }) => {
       await page.goto("/?demo#logs");
-      await waitForViewReady(page, "sc-logs-view");
+      await waitForViewReady(page, "hu-logs-view");
     });
 
     test("log area uses monospace font", async ({ page }) => {
       await expect(async () => {
         const fontFamily = await page.evaluate(
-          shadowComputedStyle("sc-logs-view", ".log-area", "font-family"),
+          shadowComputedStyle("hu-logs-view", ".log-area", "font-family"),
         );
         const mono = fontFamily.toLowerCase();
         expect(mono.includes("mono") || mono.includes("menlo") || mono.includes("courier")).toBe(
@@ -144,10 +144,10 @@ test.describe("Wave 1: Layout Archetypes", () => {
     test("filter controls appear before log output in DOM", async ({ page }) => {
       await expect(async () => {
         const order = await page.evaluate(
-          shadowDomOrder("sc-logs-view", ".filter-bar, .controls", ".log-area"),
+          shadowDomOrder("hu-logs-view", ".filter-bar, .controls", ".log-area"),
         );
         // order might be null if exact selector doesn't match; check for log-area existence
-        const hasLogArea = await page.evaluate(shadowExists("sc-logs-view", ".log-area"));
+        const hasLogArea = await page.evaluate(shadowExists("hu-logs-view", ".log-area"));
         expect(hasLogArea).toBe(true);
       }).toPass({ timeout: POLL });
     });
@@ -175,7 +175,7 @@ test.describe("Wave 1: Layout Archetypes", () => {
   for (const hash of ALL_VIEW_HASHES) {
     test(`${hash}: no horizontal overflow`, async ({ page }) => {
       await page.goto(`/?demo#${hash}`);
-      const tag = VIEW_TAGS[hash] ?? `sc-${hash}-view`;
+      const tag = VIEW_TAGS[hash] ?? `hu-${hash}-view`;
       await waitForViewReady(page, tag);
       await expect(async () => {
         const overflow = await page.evaluate(() => {
@@ -193,15 +193,15 @@ test.describe("Wave 1: Layout Archetypes", () => {
 
 test.describe("Wave 2: Touch Targets & Accessibility", () => {
   const VIEWS_TO_CHECK = [
-    { hash: "overview", tag: "sc-overview-view" },
-    { hash: "chat", tag: "sc-chat-view" },
-    { hash: "voice", tag: "sc-voice-view" },
-    { hash: "config", tag: "sc-config-view" },
-    { hash: "tools", tag: "sc-tools-view" },
-    { hash: "channels", tag: "sc-channels-view" },
-    { hash: "skills", tag: "sc-skills-view" },
-    { hash: "logs", tag: "sc-logs-view" },
-    { hash: "security", tag: "sc-security-view" },
+    { hash: "overview", tag: "hu-overview-view" },
+    { hash: "chat", tag: "hu-chat-view" },
+    { hash: "voice", tag: "hu-voice-view" },
+    { hash: "config", tag: "hu-config-view" },
+    { hash: "tools", tag: "hu-tools-view" },
+    { hash: "channels", tag: "hu-channels-view" },
+    { hash: "skills", tag: "hu-skills-view" },
+    { hash: "logs", tag: "hu-logs-view" },
+    { hash: "security", tag: "hu-security-view" },
   ];
 
   // Hard floor: 20px (WCAG absolute desktop minimum).
@@ -287,21 +287,21 @@ test.describe("Wave 2: Touch Targets & Accessibility", () => {
 
 test.describe("Wave 3: Loading & Empty States", () => {
   const VIEWS_WITH_SKELETON = [
-    { hash: "overview", tag: "sc-overview-view" },
-    { hash: "tools", tag: "sc-tools-view" },
-    { hash: "channels", tag: "sc-channels-view" },
-    { hash: "voice", tag: "sc-voice-view" },
-    { hash: "nodes", tag: "sc-nodes-view" },
-    { hash: "usage", tag: "sc-usage-view" },
-    { hash: "security", tag: "sc-security-view" },
-    { hash: "automations", tag: "sc-automations-view" },
+    { hash: "overview", tag: "hu-overview-view" },
+    { hash: "tools", tag: "hu-tools-view" },
+    { hash: "channels", tag: "hu-channels-view" },
+    { hash: "voice", tag: "hu-voice-view" },
+    { hash: "nodes", tag: "hu-nodes-view" },
+    { hash: "usage", tag: "hu-usage-view" },
+    { hash: "security", tag: "hu-security-view" },
+    { hash: "automations", tag: "hu-automations-view" },
   ];
 
   for (const view of VIEWS_WITH_SKELETON) {
     test(`${view.hash}: shows skeleton during initial load`, async ({ page }) => {
       await page.goto(`/?demo#${view.hash}`);
       // Check immediately — skeleton should be visible before data loads
-      const hasSkeleton = await page.evaluate(shadowExists(view.tag, "sc-skeleton"));
+      const hasSkeleton = await page.evaluate(shadowExists(view.tag, "hu-skeleton"));
       if (hasSkeleton) {
         expect(hasSkeleton).toBe(true);
       } else {
@@ -311,7 +311,7 @@ test.describe("Wave 3: Loading & Empty States", () => {
         });
         await waitForViewReady(page, view.tag);
         const hasContent = await page.evaluate(`(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const v = app?.shadowRoot?.querySelector("${view.tag}");
           return v && (v?.shadowRoot?.children.length ?? 0) > 0;
         })()`);
@@ -322,13 +322,13 @@ test.describe("Wave 3: Loading & Empty States", () => {
 
   test("voice: shows empty conversation state when no messages", async ({ page }) => {
     await page.goto("/?demo#voice");
-    await waitForViewReady(page, "sc-voice-view");
+    await waitForViewReady(page, "hu-voice-view");
     await expect(async () => {
       const hasConversation = await page.evaluate(
-        shadowExists("sc-voice-view", "sc-voice-conversation"),
+        shadowExists("hu-voice-view", "hu-voice-conversation"),
       );
       const hasEmptyState = await page.evaluate(
-        shadowExistsIn("sc-voice-view", "sc-voice-conversation", "sc-empty-state"),
+        shadowExistsIn("hu-voice-view", "hu-voice-conversation", "hu-empty-state"),
       );
       expect(hasConversation && hasEmptyState).toBe(true);
     }).toPass({ timeout: POLL });
@@ -343,23 +343,23 @@ test.describe("Wave 4: Reduced Motion", () => {
   test("duration tokens resolve to 0ms under reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/?demo#overview");
-    await waitForViewReady(page, "sc-overview-view");
+    await waitForViewReady(page, "hu-overview-view");
 
     const durations = await page.evaluate(() => {
       const style = getComputedStyle(document.documentElement);
       return {
-        instant: style.getPropertyValue("--sc-duration-instant").trim(),
-        fast: style.getPropertyValue("--sc-duration-fast").trim(),
-        normal: style.getPropertyValue("--sc-duration-normal").trim(),
-        moderate: style.getPropertyValue("--sc-duration-moderate").trim(),
-        slow: style.getPropertyValue("--sc-duration-slow").trim(),
-        slower: style.getPropertyValue("--sc-duration-slower").trim(),
-        slowest: style.getPropertyValue("--sc-duration-slowest").trim(),
+        instant: style.getPropertyValue("--hu-duration-instant").trim(),
+        fast: style.getPropertyValue("--hu-duration-fast").trim(),
+        normal: style.getPropertyValue("--hu-duration-normal").trim(),
+        moderate: style.getPropertyValue("--hu-duration-moderate").trim(),
+        slow: style.getPropertyValue("--hu-duration-slow").trim(),
+        slower: style.getPropertyValue("--hu-duration-slower").trim(),
+        slowest: style.getPropertyValue("--hu-duration-slowest").trim(),
       };
     });
 
     for (const [name, value] of Object.entries(durations)) {
-      expect(value, `--sc-duration-${name} should be 0ms`).toBe("0ms");
+      expect(value, `--hu-duration-${name} should be 0ms`).toBe("0ms");
     }
   });
 
@@ -374,7 +374,7 @@ test.describe("Wave 4: Reduced Motion", () => {
       await expect(async () => {
         const tag = VIEW_TAGS[hash];
         const runningAnimations = await page.evaluate(`(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const view = app?.shadowRoot?.querySelector("${tag}");
           if (!view?.shadowRoot) return 0;
           const all = view.shadowRoot.querySelectorAll("*");
@@ -399,13 +399,13 @@ test.describe("Wave 4: Reduced Motion", () => {
 
 test.describe("Wave 5: Theme Parity", () => {
   const THEME_VIEWS = [
-    { hash: "overview", tag: "sc-overview-view" },
-    { hash: "chat", tag: "sc-chat-view" },
-    { hash: "voice", tag: "sc-voice-view" },
-    { hash: "config", tag: "sc-config-view" },
-    { hash: "tools", tag: "sc-tools-view" },
-    { hash: "skills", tag: "sc-skills-view" },
-    { hash: "logs", tag: "sc-logs-view" },
+    { hash: "overview", tag: "hu-overview-view" },
+    { hash: "chat", tag: "hu-chat-view" },
+    { hash: "voice", tag: "hu-voice-view" },
+    { hash: "config", tag: "hu-config-view" },
+    { hash: "tools", tag: "hu-tools-view" },
+    { hash: "skills", tag: "hu-skills-view" },
+    { hash: "logs", tag: "hu-logs-view" },
   ];
 
   for (const view of THEME_VIEWS) {
@@ -418,7 +418,7 @@ test.describe("Wave 5: Theme Parity", () => {
 
       await expect(async () => {
         const hasContent = await page.evaluate(`(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const v = app?.shadowRoot?.querySelector("${view.tag}");
           return (v?.shadowRoot?.children.length ?? 0) > 0;
         })()`);
@@ -444,7 +444,7 @@ test.describe("Wave 5: Theme Parity", () => {
 
       await expect(async () => {
         const hasContent = await page.evaluate(`(() => {
-          const app = document.querySelector("sc-app");
+          const app = document.querySelector("hu-app");
           const v = app?.shadowRoot?.querySelector("${view.tag}");
           return (v?.shadowRoot?.children.length ?? 0) > 0;
         })()`);
@@ -457,13 +457,13 @@ test.describe("Wave 5: Theme Parity", () => {
 
   test("text is readable in dark mode (not same as background)", async ({ page }) => {
     await page.goto("/?demo#overview");
-    await waitForViewReady(page, "sc-overview-view");
+    await waitForViewReady(page, "hu-overview-view");
 
     const colors = await page.evaluate(() => {
       const style = getComputedStyle(document.documentElement);
       return {
-        text: style.getPropertyValue("--sc-text").trim(),
-        bg: style.getPropertyValue("--sc-bg").trim(),
+        text: style.getPropertyValue("--hu-text").trim(),
+        bg: style.getPropertyValue("--hu-bg").trim(),
       };
     });
 
@@ -474,7 +474,7 @@ test.describe("Wave 5: Theme Parity", () => {
 
   test("text is readable in light mode (not same as background)", async ({ page }) => {
     await page.goto("/?demo#overview");
-    await waitForViewReady(page, "sc-overview-view");
+    await waitForViewReady(page, "hu-overview-view");
     await page.evaluate(() => {
       document.documentElement.setAttribute("data-theme", "light");
     });
@@ -484,8 +484,8 @@ test.describe("Wave 5: Theme Parity", () => {
     const colors = await page.evaluate(() => {
       const style = getComputedStyle(document.documentElement);
       return {
-        text: style.getPropertyValue("--sc-text").trim(),
-        bg: style.getPropertyValue("--sc-bg").trim(),
+        text: style.getPropertyValue("--hu-text").trim(),
+        bg: style.getPropertyValue("--hu-bg").trim(),
       };
     });
 
@@ -501,12 +501,12 @@ test.describe("Wave 5: Theme Parity", () => {
 
 test.describe("Wave 6: Error States", () => {
   const ERROR_BOUNDARY_VIEWS = [
-    { hash: "overview", tag: "sc-overview-view" },
-    { hash: "chat", tag: "sc-chat-view" },
-    { hash: "tools", tag: "sc-tools-view" },
+    { hash: "overview", tag: "hu-overview-view" },
+    { hash: "chat", tag: "hu-chat-view" },
+    { hash: "tools", tag: "hu-tools-view" },
   ];
 
-  test("sc-error-boundary exists on every view and renders fallback when triggered", async ({
+  test("hu-error-boundary exists on every view and renders fallback when triggered", async ({
     page,
   }) => {
     for (const view of ERROR_BOUNDARY_VIEWS) {
@@ -515,21 +515,21 @@ test.describe("Wave 6: Error States", () => {
 
       await expect(async () => {
         const hasBoundary = await page.evaluate(() => {
-          const app = document.querySelector("sc-app");
-          return !!app?.shadowRoot?.querySelector("sc-error-boundary");
+          const app = document.querySelector("hu-app");
+          return !!app?.shadowRoot?.querySelector("hu-error-boundary");
         });
         expect(hasBoundary).toBe(true);
       }).toPass({ timeout: POLL });
 
       await page.evaluate(() => {
-        const app = document.querySelector("sc-app") as HTMLElement & { _viewError?: Error };
+        const app = document.querySelector("hu-app") as HTMLElement & { _viewError?: Error };
         app._viewError = new Error("E2E test");
         (app as unknown as { requestUpdate?: () => void }).requestUpdate?.();
       });
       await expect(async () => {
         const hasFallback = await page.evaluate(() => {
-          const app = document.querySelector("sc-app");
-          const boundary = app?.shadowRoot?.querySelector("sc-error-boundary");
+          const app = document.querySelector("hu-app");
+          const boundary = app?.shadowRoot?.querySelector("hu-error-boundary");
           const fallback = boundary?.shadowRoot?.querySelector(".fallback");
           const text = boundary?.shadowRoot?.textContent ?? "";
           return !!fallback || text.includes("Something went wrong");
@@ -538,7 +538,7 @@ test.describe("Wave 6: Error States", () => {
       }).toPass({ timeout: POLL });
 
       await page.evaluate(() => {
-        const app = document.querySelector("sc-app") as HTMLElement & { _viewError?: Error };
+        const app = document.querySelector("hu-app") as HTMLElement & { _viewError?: Error };
         app._viewError = null;
         (app as unknown as { requestUpdate?: () => void }).requestUpdate?.();
       });
@@ -548,9 +548,9 @@ test.describe("Wave 6: Error States", () => {
   });
 
   const GATEWAY_ERROR_VIEWS = [
-    { hash: "overview", tag: "sc-overview-view" },
-    { hash: "agents", tag: "sc-agents-view" },
-    { hash: "security", tag: "sc-security-view" },
+    { hash: "overview", tag: "hu-overview-view" },
+    { hash: "agents", tag: "hu-agents-view" },
+    { hash: "security", tag: "hu-security-view" },
   ];
 
   test("views display error state when gateway is unavailable", async ({ page }) => {
@@ -561,8 +561,8 @@ test.describe("Wave 6: Error States", () => {
       await expect(async () => {
         const hasError = await page.evaluate(
           ({ viewTag }) => {
-            const app = document.querySelector("sc-app");
-            const boundary = app?.shadowRoot?.querySelector("sc-error-boundary");
+            const app = document.querySelector("hu-app");
+            const boundary = app?.shadowRoot?.querySelector("hu-error-boundary");
             const viewEl = boundary?.querySelector(viewTag) as HTMLElement & { error?: string };
             if (!viewEl) return false;
             viewEl.error = "Not connected";
@@ -576,7 +576,7 @@ test.describe("Wave 6: Error States", () => {
 
       await expect(async () => {
         const hasErrorUI = await page.evaluate(
-          shadowExistsIn(view.tag, "sc-empty-state", ".heading"),
+          shadowExistsIn(view.tag, "hu-empty-state", ".heading"),
         );
         const txt = await page.evaluate(shadowText(view.tag));
         const showsError = hasErrorUI || txt.toLowerCase().includes("error");

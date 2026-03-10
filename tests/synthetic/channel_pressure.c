@@ -13,13 +13,13 @@ typedef struct pressure_result {
     double max_latency_ms;
 } pressure_result_t;
 
-static void worker_loop(sc_allocator_t *alloc, const sc_channel_test_entry_t *entry,
+static void worker_loop(hu_allocator_t *alloc, const hu_channel_test_entry_t *entry,
                         int duration_secs, int pipe_fd) {
     pressure_result_t res = {0};
     time_t start = time(NULL);
 
-    sc_channel_t ch = {0};
-    if (entry->create(alloc, &ch) != SC_OK) {
+    hu_channel_t ch = {0};
+    if (entry->create(alloc, &ch) != HU_OK) {
         res.failed = 1;
         (void)write(pipe_fd, &res, sizeof(res));
         close(pipe_fd);
@@ -27,20 +27,20 @@ static void worker_loop(sc_allocator_t *alloc, const sc_channel_test_entry_t *en
     }
 
     while ((time(NULL) - start) < duration_secs) {
-        double t0 = sc_synth_now_ms();
+        double t0 = hu_synth_now_ms();
         const char *msg = "pressure test message";
-        sc_error_t err = entry->inject(&ch, "pressure_user", 13, msg, 21);
-        if (err != SC_OK) {
+        hu_error_t err = entry->inject(&ch, "pressure_user", 13, msg, 21);
+        if (err != HU_OK) {
             res.failed++;
             res.total++;
             continue;
         }
 
         if (entry->poll) {
-            sc_channel_loop_msg_t msgs[16];
+            hu_channel_loop_msg_t msgs[16];
             size_t count = 0;
             err = entry->poll(ch.ctx, alloc, msgs, 16, &count);
-            if (err != SC_OK || count == 0) {
+            if (err != HU_OK || count == 0) {
                 res.failed++;
                 res.total++;
                 continue;
@@ -49,14 +49,14 @@ static void worker_loop(sc_allocator_t *alloc, const sc_channel_test_entry_t *en
 
         if (ch.vtable && ch.vtable->send) {
             err = ch.vtable->send(ch.ctx, "pressure_user", 13, "reply", 5, NULL, 0);
-            if (err != SC_OK) {
+            if (err != HU_OK) {
                 res.failed++;
                 res.total++;
                 continue;
             }
         }
 
-        double lat = sc_synth_now_ms() - t0;
+        double lat = hu_synth_now_ms() - t0;
         res.total++;
         res.passed++;
         res.total_latency_ms += lat;
@@ -69,26 +69,26 @@ static void worker_loop(sc_allocator_t *alloc, const sc_channel_test_entry_t *en
     close(pipe_fd);
 }
 
-sc_error_t sc_channel_run_pressure(sc_allocator_t *alloc, const sc_channel_test_config_t *cfg,
-                                   sc_synth_gemini_ctx_t *gemini, sc_synth_metrics_t *metrics) {
+hu_error_t hu_channel_run_pressure(hu_allocator_t *alloc, const hu_channel_test_config_t *cfg,
+                                   hu_synth_gemini_ctx_t *gemini, hu_synth_metrics_t *metrics) {
     (void)gemini;
-    sc_synth_metrics_init(metrics);
+    hu_synth_metrics_init(metrics);
 
     size_t reg_count = 0;
-    const sc_channel_test_entry_t *reg = sc_channel_test_registry(&reg_count);
+    const hu_channel_test_entry_t *reg = hu_channel_test_registry(&reg_count);
     if (reg_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     int workers = cfg->concurrency > 0 ? cfg->concurrency : 4;
     int duration = cfg->duration_secs > 0 ? cfg->duration_secs : 10;
-    SC_CH_LOG("launching %d pressure workers for %ds", workers, duration);
+    HU_CH_LOG("launching %d pressure workers for %ds", workers, duration);
 
     int *pipes = (int *)malloc((size_t)workers * 2 * sizeof(int));
     pid_t *pids = (pid_t *)malloc((size_t)workers * sizeof(pid_t));
     if (!pipes || !pids) {
         free(pipes);
         free(pids);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     for (int w = 0; w < workers; w++) {
@@ -118,7 +118,7 @@ sc_error_t sc_channel_run_pressure(sc_allocator_t *alloc, const sc_channel_test_
         pid_t pid = fork();
         if (pid == 0) {
             close(pfd[0]);
-            sc_allocator_t child_alloc = sc_system_allocator();
+            hu_allocator_t child_alloc = hu_system_allocator();
             worker_loop(&child_alloc, &reg[ci], duration, pfd[1]);
             _exit(0);
         }
@@ -148,16 +148,16 @@ sc_error_t sc_channel_run_pressure(sc_allocator_t *alloc, const sc_channel_test_
 
     double avg_lat = total_ops > 0 ? total_lat / (double)total_ops : 0;
     double rate = duration > 0 ? (double)total_ops / (double)duration : 0;
-    SC_CH_LOG(
+    HU_CH_LOG(
         "Pressure: %d workers, %ds, %d ops, %.1f ops/s, %d ok, %d fail, avg %.1fms, max %.1fms",
         workers, duration, total_ops, rate, total_pass, total_fail, avg_lat, max_lat);
 
     for (int i = 0; i < total_pass; i++)
-        sc_synth_metrics_record(alloc, metrics, avg_lat, SC_SYNTH_PASS);
+        hu_synth_metrics_record(alloc, metrics, avg_lat, HU_SYNTH_PASS);
     for (int i = 0; i < total_fail; i++)
-        sc_synth_metrics_record(alloc, metrics, 0, SC_SYNTH_FAIL);
+        hu_synth_metrics_record(alloc, metrics, 0, HU_SYNTH_FAIL);
 
     free(pipes);
     free(pids);
-    return SC_OK;
+    return HU_OK;
 }

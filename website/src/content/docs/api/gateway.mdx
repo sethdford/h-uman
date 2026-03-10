@@ -1,21 +1,21 @@
 ---
 title: Gateway API
-description: HTTP and WebSocket API reference for the SeaClaw gateway server.
+description: HTTP and WebSocket API reference for the Human gateway server.
 ---
 
-The gateway is SeaClaw's HTTP server. It serves the Control UI, handles webhooks from messaging channels, and provides a WebSocket control protocol for real-time control.
+The gateway is Human's HTTP server. It serves the Control UI, handles webhooks from messaging channels, and provides a WebSocket control protocol for real-time control.
 
 ## Starting the gateway
 
 ```bash
-seaclaw gateway                      # Default: 127.0.0.1:3000
-seaclaw gateway --port 8080          # Custom port
-seaclaw gateway --host 127.0.0.1     # Bind to localhost only
+human gateway                      # Default: 127.0.0.1:3000
+human gateway --port 8080          # Custom port
+human gateway --host 127.0.0.1     # Bind to localhost only
 ```
 
 ## Configuration
 
-Gateway settings in `~/.seaclaw/config.json`:
+Gateway settings in `~/.human/config.json`:
 
 ```json
 {
@@ -44,7 +44,7 @@ Gateway settings in `~/.seaclaw/config.json`:
 
 Webhooks can verify request integrity with HMAC-SHA256:
 
-- Set `webhook_hmac_secret` in config or `SEACLAW_WEBHOOK_HMAC_SECRET`
+- Set `webhook_hmac_secret` in config or `HUMAN_WEBHOOK_HMAC_SECRET`
 - Incoming webhook requests are checked against the `X-Signature` header (or similar) using the secret and request body
 - Invalid signatures receive `401 Unauthorized`
 

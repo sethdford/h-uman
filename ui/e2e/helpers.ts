@@ -2,12 +2,12 @@
  * Shared Shadow DOM traversal helpers for Playwright e2e tests.
  *
  * Each function returns a JS expression string for use with page.evaluate().
- * All helpers traverse: document → sc-app shadowRoot → <viewTag> shadowRoot.
+ * All helpers traverse: document → hu-app shadowRoot → <viewTag> shadowRoot.
  */
 
 export function shadowExists(viewTag: string, selector: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     return !!view?.shadowRoot?.querySelector("${selector}");
   })()`;
@@ -20,7 +20,7 @@ export function shadowExistsIn(
   innerSelector: string,
 ): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const container = view?.shadowRoot?.querySelector("${containerSelector}");
     return !!container?.shadowRoot?.querySelector("${innerSelector}");
@@ -34,7 +34,7 @@ export function shadowCountIn(
   innerSelector: string,
 ): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const container = view?.shadowRoot?.querySelector("${containerSelector}");
     return container?.shadowRoot?.querySelectorAll("${innerSelector}").length ?? 0;
@@ -44,7 +44,7 @@ export function shadowCountIn(
 /** Get text content inside a nested container's shadow root. */
 export function shadowTextIn(viewTag: string, containerSelector: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const container = view?.shadowRoot?.querySelector("${containerSelector}");
     return container?.shadowRoot?.textContent ?? "";
@@ -53,7 +53,7 @@ export function shadowTextIn(viewTag: string, containerSelector: string): string
 
 export function shadowCount(viewTag: string, selector: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     return view?.shadowRoot?.querySelectorAll("${selector}").length ?? 0;
   })()`;
@@ -61,7 +61,7 @@ export function shadowCount(viewTag: string, selector: string): string {
 
 export function shadowText(viewTag: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     return view?.shadowRoot?.textContent ?? "";
   })()`;
@@ -70,7 +70,7 @@ export function shadowText(viewTag: string): string {
 /** Returns text content of a specific element within a view's shadow DOM. */
 export function shadowElementText(viewTag: string, selector: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const el = view?.shadowRoot?.querySelector("${selector}");
     return el?.textContent?.trim() ?? "";
@@ -80,7 +80,7 @@ export function shadowElementText(viewTag: string, selector: string): string {
 /** Clicks an element within a view's shadow DOM. Returns a JS expression for page.evaluate. */
 export function shadowClick(viewTag: string, selector: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const el = view?.shadowRoot?.querySelector("${selector}");
     el?.click();
@@ -89,7 +89,7 @@ export function shadowClick(viewTag: string, selector: string): string {
 
 export function shadowComputedStyle(viewTag: string, selector: string, prop: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const el = view?.shadowRoot?.querySelector("${selector}");
     if (!el) return "";
@@ -99,7 +99,7 @@ export function shadowComputedStyle(viewTag: string, selector: string, prop: str
 
 export function shadowBoundingRect(viewTag: string, selector: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const el = view?.shadowRoot?.querySelector("${selector}");
     if (!el) return null;
@@ -111,7 +111,7 @@ export function shadowBoundingRect(viewTag: string, selector: string): string {
 /** Check DOM order: returns true if elA appears before elB in tree order. */
 export function shadowDomOrder(viewTag: string, selectorA: string, selectorB: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     const a = view?.shadowRoot?.querySelector("${selectorA}");
     const b = view?.shadowRoot?.querySelector("${selectorB}");
@@ -123,7 +123,7 @@ export function shadowDomOrder(viewTag: string, selectorA: string, selectorB: st
 /** Get all interactive element bounding rects within a view's shadow root. */
 export function shadowInteractiveRects(viewTag: string): string {
   return `(() => {
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     if (!view?.shadowRoot) return [];
     const sels = 'button, a[href], input, select, textarea, [role="button"], [role="tab"], [role="link"]';
@@ -142,21 +142,21 @@ export function shadowInteractiveRects(viewTag: string): string {
 
 /** View tags for each view name. */
 export const VIEW_TAGS: Record<string, string> = {
-  overview: "sc-overview-view",
-  chat: "sc-chat-view",
-  agents: "sc-agents-view",
-  models: "sc-models-view",
-  config: "sc-config-view",
-  tools: "sc-tools-view",
-  channels: "sc-channels-view",
-  automations: "sc-automations-view",
-  skills: "sc-skills-view",
-  voice: "sc-voice-view",
-  nodes: "sc-nodes-view",
-  usage: "sc-usage-view",
-  metrics: "sc-metrics-view",
-  security: "sc-security-view",
-  logs: "sc-logs-view",
+  overview: "hu-overview-view",
+  chat: "hu-chat-view",
+  agents: "hu-agents-view",
+  models: "hu-models-view",
+  config: "hu-config-view",
+  tools: "hu-tools-view",
+  channels: "hu-channels-view",
+  automations: "hu-automations-view",
+  skills: "hu-skills-view",
+  voice: "hu-voice-view",
+  nodes: "hu-nodes-view",
+  usage: "hu-usage-view",
+  metrics: "hu-metrics-view",
+  security: "hu-security-view",
+  logs: "hu-logs-view",
 };
 
 export const ALL_VIEWS = Object.keys(VIEW_TAGS);
@@ -189,7 +189,7 @@ export function deepText(viewTag: string): string {
       }
       return text;
     }
-    const app = document.querySelector("sc-app");
+    const app = document.querySelector("hu-app");
     const view = app?.shadowRoot?.querySelector("${viewTag}");
     return view?.shadowRoot ? collectText(view.shadowRoot) : "";
   })()`;
@@ -207,7 +207,7 @@ export async function waitForViewReady(
   await page.waitForLoadState("domcontentloaded");
   await page.waitForFunction(
     (tag) => {
-      const app = document.querySelector("sc-app");
+      const app = document.querySelector("hu-app");
       const view = app?.shadowRoot?.querySelector(tag);
       return !!view && (view?.shadowRoot?.children.length ?? 0) > 0;
     },
@@ -228,7 +228,7 @@ export async function waitForShadowSelector(
 ): Promise<void> {
   await page.waitForFunction(
     ([tag, sel]) => {
-      const app = document.querySelector("sc-app");
+      const app = document.querySelector("hu-app");
       const view = app?.shadowRoot?.querySelector(tag);
       return !!view?.shadowRoot?.querySelector(sel);
     },

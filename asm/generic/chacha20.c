@@ -48,7 +48,7 @@ static uint32_t le_to_u32(const uint8_t *src) {
          | ((uint32_t)src[3] << 24);
 }
 
-void sc_chacha20_encrypt_generic(const uint8_t key[32], const uint8_t nonce[12],
+void hu_chacha20_encrypt_generic(const uint8_t key[32], const uint8_t nonce[12],
                                  uint32_t counter, const uint8_t *in, uint8_t *out,
                                  size_t len) {
     uint32_t state[16];
@@ -85,8 +85,8 @@ void sc_chacha20_encrypt_generic(const uint8_t key[32], const uint8_t nonce[12],
     }
 }
 
-void sc_chacha20_decrypt_generic(const uint8_t key[32], const uint8_t nonce[12],
+void hu_chacha20_decrypt_generic(const uint8_t key[32], const uint8_t nonce[12],
                                  uint32_t counter, const uint8_t *in, uint8_t *out,
                                  size_t len) {
-    sc_chacha20_encrypt_generic(key, nonce, counter, in, out, len);
+    hu_chacha20_encrypt_generic(key, nonce, counter, in, out, len);
 }

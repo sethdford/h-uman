@@ -1,9 +1,9 @@
-#include "seaclaw/tools/homeassistant.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/tools/homeassistant.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,176 +27,176 @@ typedef struct {
     char _unused;
 } homeassistant_ctx_t;
 
-static sc_error_t homeassistant_execute(void *ctx, sc_allocator_t *alloc,
-                                        const sc_json_value_t *args, sc_tool_result_t *out) {
+static hu_error_t homeassistant_execute(void *ctx, hu_allocator_t *alloc,
+                                        const hu_json_value_t *args, hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *operation = sc_json_get_string(args, "operation");
+    const char *operation = hu_json_get_string(args, "operation");
     if (!operation) {
-        *out = sc_tool_result_fail("missing operation", 16);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing operation", 16);
+        return HU_OK;
     }
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (strcmp(operation, "get_states") == 0) {
         const char *resp =
             "{\"states\":[{\"entity_id\":\"light.living_room\",\"state\":\"on\",\"attributes\":{"
             "\"brightness\":255}},{\"entity_id\":\"switch.plug\",\"state\":\"off\"}]}";
-        *out = sc_tool_result_ok(resp, strlen(resp));
+        *out = hu_tool_result_ok(resp, strlen(resp));
     } else if (strcmp(operation, "get_entity") == 0) {
-        const char *entity_id = sc_json_get_string(args, "entity_id");
-        char *msg = sc_sprintf(alloc,
+        const char *entity_id = hu_json_get_string(args, "entity_id");
+        char *msg = hu_sprintf(alloc,
                                "{\"entity_id\":\"%s\",\"state\":\"on\",\"attributes\":{"
                                "\"friendly_name\":\"Living Room Light\"}}",
                                entity_id ? entity_id : "light.living_room");
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else if (strcmp(operation, "call_service") == 0) {
-        *out = sc_tool_result_ok("{\"success\":true}", 16);
+        *out = hu_tool_result_ok("{\"success\":true}", 16);
     } else if (strcmp(operation, "fire_event") == 0) {
-        *out = sc_tool_result_ok("{\"event_fired\":true}", 19);
+        *out = hu_tool_result_ok("{\"event_fired\":true}", 19);
     } else {
-        *out = sc_tool_result_fail("unknown operation", 17);
+        *out = hu_tool_result_fail("unknown operation", 17);
     }
-    return SC_OK;
+    return HU_OK;
 #else
-    const char *url = sc_json_get_string(args, "url");
-    const char *token = sc_json_get_string(args, "token");
+    const char *url = hu_json_get_string(args, "url");
+    const char *token = hu_json_get_string(args, "token");
     if (!url || strlen(url) == 0 || !token || strlen(token) == 0) {
-        *out = sc_tool_result_fail(
+        *out = hu_tool_result_fail(
             "missing url or token — configure Home Assistant URL and long-lived access token", 72);
-        return SC_OK;
+        return HU_OK;
     }
     if (strncmp(url, "https://", 8) != 0) {
         if (strncmp(url, "http://localhost", 16) == 0 ||
             strncmp(url, "http://127.0.0.1", 16) == 0 || strncmp(url, "http://[::1]", 12) == 0) {
             /* Allow HTTP for local Home Assistant instances only */
         } else {
-            *out = sc_tool_result_fail("url must use https:// (http:// only allowed for localhost)",
+            *out = hu_tool_result_fail("url must use https:// (http:// only allowed for localhost)",
                                        58);
-            return SC_OK;
+            return HU_OK;
         }
     }
     if (strlen(url) > 400) {
-        *out = sc_tool_result_fail("url too long", 12);
-        return SC_OK;
+        *out = hu_tool_result_fail("url too long", 12);
+        return HU_OK;
     }
 
     if (strlen(token) > 500) {
-        *out = sc_tool_result_fail("token too long", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("token too long", 14);
+        return HU_OK;
     }
     char auth[512];
     int auth_n = snprintf(auth, sizeof(auth), "Bearer %s", token);
     if (auth_n < 0 || (size_t)auth_n >= sizeof(auth)) {
-        *out = sc_tool_result_fail("token too long", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("token too long", 14);
+        return HU_OK;
     }
 
     if (strcmp(operation, "get_states") == 0) {
         char api_url[512];
         int url_n = snprintf(api_url, sizeof(api_url), "%s/api/states", url);
         if (url_n < 0 || (size_t)url_n >= sizeof(api_url)) {
-            *out = sc_tool_result_fail("url too long", 12);
-            return SC_OK;
+            *out = hu_tool_result_fail("url too long", 12);
+            return HU_OK;
         }
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_get(alloc, api_url, auth, &resp);
-        if (err != SC_OK || resp.status_code != 200) {
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_get(alloc, api_url, auth, &resp);
+        if (err != HU_OK || resp.status_code != 200) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to get states", 20);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to get states", 20);
+            return HU_OK;
         }
-        char *body = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(body, body ? strlen(body) : 0);
+        char *body = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(body, body ? strlen(body) : 0);
     } else if (strcmp(operation, "get_entity") == 0) {
-        const char *entity_id = sc_json_get_string(args, "entity_id");
+        const char *entity_id = hu_json_get_string(args, "entity_id");
         if (!entity_id || strlen(entity_id) == 0) {
-            *out = sc_tool_result_fail("get_entity requires entity_id", 28);
-            return SC_OK;
+            *out = hu_tool_result_fail("get_entity requires entity_id", 28);
+            return HU_OK;
         }
         if (strlen(entity_id) > 128) {
-            *out = sc_tool_result_fail("entity_id too long", 18);
-            return SC_OK;
+            *out = hu_tool_result_fail("entity_id too long", 18);
+            return HU_OK;
         }
         if (strchr(entity_id, '/') || strstr(entity_id, "..")) {
-            *out = sc_tool_result_fail("invalid entity_id", 17);
-            return SC_OK;
+            *out = hu_tool_result_fail("invalid entity_id", 17);
+            return HU_OK;
         }
         char api_url[512];
         int eid_n = snprintf(api_url, sizeof(api_url), "%s/api/states/%s", url, entity_id);
         if (eid_n < 0 || (size_t)eid_n >= sizeof(api_url)) {
-            *out = sc_tool_result_fail("url too long", 12);
-            return SC_OK;
+            *out = hu_tool_result_fail("url too long", 12);
+            return HU_OK;
         }
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_get(alloc, api_url, auth, &resp);
-        if (err != SC_OK || resp.status_code != 200) {
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_get(alloc, api_url, auth, &resp);
+        if (err != HU_OK || resp.status_code != 200) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to get entity", 19);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to get entity", 19);
+            return HU_OK;
         }
-        char *body = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(body, body ? strlen(body) : 0);
+        char *body = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(body, body ? strlen(body) : 0);
     } else if (strcmp(operation, "call_service") == 0) {
-        const char *domain = sc_json_get_string(args, "domain");
-        const char *service = sc_json_get_string(args, "service");
-        const char *service_data = sc_json_get_string(args, "service_data");
+        const char *domain = hu_json_get_string(args, "domain");
+        const char *service = hu_json_get_string(args, "service");
+        const char *service_data = hu_json_get_string(args, "service_data");
         if (!domain || strlen(domain) == 0 || !service || strlen(service) == 0) {
-            *out = sc_tool_result_fail("call_service requires domain and service", 39);
-            return SC_OK;
+            *out = hu_tool_result_fail("call_service requires domain and service", 39);
+            return HU_OK;
         }
         char api_url[512];
         snprintf(api_url, sizeof(api_url), "%s/api/services/%s/%s", url, domain, service);
         const char *body_str = service_data && strlen(service_data) > 0 ? service_data : "{}";
         size_t body_len = strlen(body_str);
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, api_url, auth, body_str, body_len, &resp);
-        if (err != SC_OK) {
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, api_url, auth, body_str, body_len, &resp);
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to call service", 23);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to call service", 23);
+            return HU_OK;
         }
-        char *rbody = resp.body && resp.body_len > 0 ? sc_strndup(alloc, resp.body, resp.body_len)
-                                                     : sc_strndup(alloc, "[]", 2);
+        char *rbody = resp.body && resp.body_len > 0 ? hu_strndup(alloc, resp.body, resp.body_len)
+                                                     : hu_strndup(alloc, "[]", 2);
         if (resp.owned && resp.body)
-            sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
+            hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
     } else if (strcmp(operation, "fire_event") == 0) {
-        const char *event_type = sc_json_get_string(args, "event_type");
-        const char *event_data = sc_json_get_string(args, "event_data");
+        const char *event_type = hu_json_get_string(args, "event_type");
+        const char *event_data = hu_json_get_string(args, "event_data");
         if (!event_type || strlen(event_type) == 0) {
-            *out = sc_tool_result_fail("fire_event requires event_type", 30);
-            return SC_OK;
+            *out = hu_tool_result_fail("fire_event requires event_type", 30);
+            return HU_OK;
         }
         char api_url[512];
         snprintf(api_url, sizeof(api_url), "%s/api/events/%s", url, event_type);
         const char *body_str = event_data && strlen(event_data) > 0 ? event_data : "{}";
         size_t body_len = strlen(body_str);
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, api_url, auth, body_str, body_len, &resp);
-        if (err != SC_OK) {
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, api_url, auth, body_str, body_len, &resp);
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to fire event", 20);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to fire event", 20);
+            return HU_OK;
         }
-        *out = sc_tool_result_ok("{\"event_fired\":true}", 19);
+        *out = hu_tool_result_ok("{\"event_fired\":true}", 19);
         if (resp.owned && resp.body)
-            sc_http_response_free(alloc, &resp);
+            hu_http_response_free(alloc, &resp);
     } else {
-        *out = sc_tool_result_fail("unknown operation", 17);
+        *out = hu_tool_result_fail("unknown operation", 17);
     }
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -212,12 +212,12 @@ static const char *homeassistant_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void homeassistant_deinit(void *ctx, sc_allocator_t *alloc) {
+static void homeassistant_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
         alloc->free(alloc->ctx, ctx, sizeof(homeassistant_ctx_t));
 }
 
-static const sc_tool_vtable_t homeassistant_vtable = {
+static const hu_tool_vtable_t homeassistant_vtable = {
     .execute = homeassistant_execute,
     .name = homeassistant_name,
     .description = homeassistant_desc,
@@ -225,14 +225,14 @@ static const sc_tool_vtable_t homeassistant_vtable = {
     .deinit = homeassistant_deinit,
 };
 
-sc_error_t sc_homeassistant_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_homeassistant_create(hu_allocator_t *alloc, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     void *ctx = alloc->alloc(alloc->ctx, sizeof(homeassistant_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(homeassistant_ctx_t));
     out->ctx = ctx;
     out->vtable = &homeassistant_vtable;
-    return SC_OK;
+    return HU_OK;
 }

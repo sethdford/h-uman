@@ -1,11 +1,11 @@
-#include "seaclaw/hardware.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/hardware.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
 #if defined(__linux__) || defined(__APPLE__)
 #include <dirent.h>
 #include <fcntl.h>
@@ -14,13 +14,13 @@
 #endif
 #endif
 
-sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *results, size_t *count) {
+hu_error_t hu_hardware_discover(hu_allocator_t *alloc, hu_hardware_info_t *results, size_t *count) {
     if (!alloc || !results || !count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t max_count = *count;
     size_t found = 0;
 
-#ifndef SC_IS_TEST
+#ifndef HU_IS_TEST
 #ifdef __linux__
     /* Scan /dev for ttyUSB*, ttyACM* */
     const char *dev_prefixes[] = {"/dev/ttyUSB", "/dev/ttyACM"};
@@ -31,7 +31,7 @@ sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *resul
             snprintf(path, sizeof(path), "%s%d", dev_prefixes[p], i);
             struct stat st;
             if (stat(path, &st) == 0) {
-                sc_hardware_info_t *r = &results[found];
+                hu_hardware_info_t *r = &results[found];
                 strncpy(r->board_name, "arduino", sizeof(r->board_name) - 1);
                 r->board_name[sizeof(r->board_name) - 1] = '\0';
                 strncpy(r->board_type, "arduino", sizeof(r->board_type) - 1);
@@ -46,7 +46,7 @@ sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *resul
 
     /* Check for probe-rs (STM32). Constant string: no user input, safe from shell injection. */
     if (system("probe-rs --version >/dev/null 2>&1") == 0 && found < max_count) {
-        sc_hardware_info_t *r = &results[found];
+        hu_hardware_info_t *r = &results[found];
         strncpy(r->board_name, "STM32F401RETx", sizeof(r->board_name) - 1);
         r->board_name[sizeof(r->board_name) - 1] = '\0';
         strncpy(r->board_type, "nucleo", sizeof(r->board_type) - 1);
@@ -61,7 +61,7 @@ sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *resul
     if (gpio_fd >= 0) {
         close(gpio_fd);
         if (found < max_count) {
-            sc_hardware_info_t *r = &results[found];
+            hu_hardware_info_t *r = &results[found];
             strncpy(r->board_name, "rpi-gpio", sizeof(r->board_name) - 1);
             r->board_name[sizeof(r->board_name) - 1] = '\0';
             strncpy(r->board_type, "rpi-gpio", sizeof(r->board_type) - 1);
@@ -82,7 +82,7 @@ sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *resul
             snprintf(path, sizeof(path), "%s%d", dev_prefixes[p], i);
             struct stat st;
             if (stat(path, &st) == 0) {
-                sc_hardware_info_t *r = &results[found];
+                hu_hardware_info_t *r = &results[found];
                 strncpy(r->board_name, "arduino", sizeof(r->board_name) - 1);
                 r->board_name[sizeof(r->board_name) - 1] = '\0';
                 strncpy(r->board_type, "arduino", sizeof(r->board_type) - 1);
@@ -114,5 +114,5 @@ sc_error_t sc_hardware_discover(sc_allocator_t *alloc, sc_hardware_info_t *resul
 #endif
 
     *count = found;
-    return SC_OK;
+    return HU_OK;
 }

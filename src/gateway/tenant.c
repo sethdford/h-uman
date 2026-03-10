@@ -1,4 +1,4 @@
-#include "seaclaw/gateway/tenant.h"
+#include "human/gateway/tenant.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,32 +11,32 @@ typedef struct rate_bucket {
     uint32_t count;
 } rate_bucket_t;
 
-struct sc_tenant_store {
-    sc_allocator_t *alloc;
-    sc_tenant_t tenants[MAX_TENANTS];
+struct hu_tenant_store {
+    hu_allocator_t *alloc;
+    hu_tenant_t tenants[MAX_TENANTS];
     rate_bucket_t rate_buckets[MAX_TENANTS];
     size_t count;
 };
 
-sc_error_t sc_tenant_store_init(sc_allocator_t *alloc, sc_tenant_store_t **out) {
+hu_error_t hu_tenant_store_init(hu_allocator_t *alloc, hu_tenant_store_t **out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_tenant_store_t *s = (sc_tenant_store_t *)alloc->alloc(alloc->ctx, sizeof(sc_tenant_store_t));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_tenant_store_t *s = (hu_tenant_store_t *)alloc->alloc(alloc->ctx, sizeof(hu_tenant_store_t));
     if (!s)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(s, 0, sizeof(*s));
     s->alloc = alloc;
     *out = s;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_tenant_store_destroy(sc_tenant_store_t *store) {
+void hu_tenant_store_destroy(hu_tenant_store_t *store) {
     if (!store || !store->alloc)
         return;
-    store->alloc->free(store->alloc->ctx, store, sizeof(sc_tenant_store_t));
+    store->alloc->free(store->alloc->ctx, store, sizeof(hu_tenant_store_t));
 }
 
-static int find_tenant(sc_tenant_store_t *store, const char *user_id) {
+static int find_tenant(hu_tenant_store_t *store, const char *user_id) {
     if (!store || !user_id)
         return -1;
     for (size_t i = 0; i < store->count; i++) {
@@ -46,75 +46,75 @@ static int find_tenant(sc_tenant_store_t *store, const char *user_id) {
     return -1;
 }
 
-sc_error_t sc_tenant_create(sc_tenant_store_t *store, const sc_tenant_t *tenant) {
+hu_error_t hu_tenant_create(hu_tenant_store_t *store, const hu_tenant_t *tenant) {
     if (!store || !tenant || tenant->user_id[0] == '\0')
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (find_tenant(store, tenant->user_id) >= 0)
-        return SC_ERR_ALREADY_EXISTS;
+        return HU_ERR_ALREADY_EXISTS;
     if (store->count >= MAX_TENANTS)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     store->tenants[store->count] = *tenant;
     memset(&store->rate_buckets[store->count], 0, sizeof(rate_bucket_t));
     store->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_tenant_get(sc_tenant_store_t *store, const char *user_id, sc_tenant_t *out) {
+hu_error_t hu_tenant_get(hu_tenant_store_t *store, const char *user_id, hu_tenant_t *out) {
     if (!store || !user_id || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     int idx = find_tenant(store, user_id);
     if (idx < 0)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     *out = store->tenants[idx];
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_tenant_update(sc_tenant_store_t *store, const sc_tenant_t *tenant) {
+hu_error_t hu_tenant_update(hu_tenant_store_t *store, const hu_tenant_t *tenant) {
     if (!store || !tenant)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     int idx = find_tenant(store, tenant->user_id);
     if (idx < 0)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     store->tenants[idx] = *tenant;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_tenant_delete(sc_tenant_store_t *store, const char *user_id) {
+hu_error_t hu_tenant_delete(hu_tenant_store_t *store, const char *user_id) {
     if (!store || !user_id)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     int idx = find_tenant(store, user_id);
     if (idx < 0)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     if ((size_t)idx < store->count - 1) {
         store->tenants[idx] = store->tenants[store->count - 1];
         store->rate_buckets[idx] = store->rate_buckets[store->count - 1];
     }
     store->count--;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_tenant_list(sc_tenant_store_t *store, sc_tenant_t *out, size_t max, size_t *count) {
+hu_error_t hu_tenant_list(hu_tenant_store_t *store, hu_tenant_t *out, size_t max, size_t *count) {
     if (!store || !out || !count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t n = store->count < max ? store->count : max;
     for (size_t i = 0; i < n; i++)
         out[i] = store->tenants[i];
     *count = n;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_tenant_increment_usage(sc_tenant_store_t *store, const char *user_id,
+hu_error_t hu_tenant_increment_usage(hu_tenant_store_t *store, const char *user_id,
                                      uint64_t tokens) {
     if (!store || !user_id)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     int idx = find_tenant(store, user_id);
     if (idx < 0)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     store->tenants[idx].usage_current_tokens += tokens;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_tenant_check_quota(sc_tenant_store_t *store, const char *user_id) {
+bool hu_tenant_check_quota(hu_tenant_store_t *store, const char *user_id) {
     if (!store || !user_id)
         return false;
     int idx = find_tenant(store, user_id);
@@ -125,7 +125,7 @@ bool sc_tenant_check_quota(sc_tenant_store_t *store, const char *user_id) {
     return store->tenants[idx].usage_current_tokens < store->tenants[idx].usage_quota_tokens;
 }
 
-bool sc_tenant_check_rate_limit(sc_tenant_store_t *store, const char *user_id) {
+bool hu_tenant_check_rate_limit(hu_tenant_store_t *store, const char *user_id) {
     if (!store || !user_id)
         return false;
     int idx = find_tenant(store, user_id);

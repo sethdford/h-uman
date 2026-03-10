@@ -1,18 +1,18 @@
-#include "seaclaw/gateway/rate_limit.h"
+#include "human/gateway/rate_limit.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
 #include <pthread.h>
 #endif
 
-#define SC_RATE_IP_MAX      64
-#define SC_RATE_ENTRIES_MAX 512
+#define HU_RATE_IP_MAX      64
+#define HU_RATE_ENTRIES_MAX 512
 
 typedef struct rate_entry {
-    char ip[SC_RATE_IP_MAX];
+    char ip[HU_RATE_IP_MAX];
     time_t *timestamps;
     size_t count;
     size_t cap;
@@ -20,13 +20,13 @@ typedef struct rate_entry {
     time_t window_secs;
 } rate_entry_t;
 
-struct sc_rate_limiter {
-    sc_allocator_t *alloc;
-    rate_entry_t entries[SC_RATE_ENTRIES_MAX];
+struct hu_rate_limiter {
+    hu_allocator_t *alloc;
+    rate_entry_t entries[HU_RATE_ENTRIES_MAX];
     size_t count;
     int max_requests;
     int window_secs;
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     pthread_mutex_t mutex;
 #endif
 };
@@ -44,17 +44,17 @@ static void prune_entry(rate_entry_t *e) {
     e->count = write;
 }
 
-static rate_entry_t *find_or_create(sc_rate_limiter_t *lim, const char *ip) {
+static rate_entry_t *find_or_create(hu_rate_limiter_t *lim, const char *ip) {
     for (size_t i = 0; i < lim->count; i++) {
         if (strcmp(lim->entries[i].ip, ip) == 0)
             return &lim->entries[i];
     }
-    if (lim->count >= SC_RATE_ENTRIES_MAX)
+    if (lim->count >= HU_RATE_ENTRIES_MAX)
         return NULL;
     rate_entry_t *e = &lim->entries[lim->count];
     memset(e, 0, sizeof(*e));
-    strncpy(e->ip, ip, SC_RATE_IP_MAX - 1);
-    e->ip[SC_RATE_IP_MAX - 1] = '\0';
+    strncpy(e->ip, ip, HU_RATE_IP_MAX - 1);
+    e->ip[HU_RATE_IP_MAX - 1] = '\0';
     e->max_requests = lim->max_requests;
     e->window_secs = (time_t)lim->window_secs;
     e->cap = 64;
@@ -65,7 +65,7 @@ static rate_entry_t *find_or_create(sc_rate_limiter_t *lim, const char *ip) {
     return e;
 }
 
-sc_rate_limiter_t *sc_rate_limiter_create(sc_allocator_t *alloc, int requests_per_window,
+hu_rate_limiter_t *hu_rate_limiter_create(hu_allocator_t *alloc, int requests_per_window,
                                           int window_secs) {
     if (!alloc)
         return NULL;
@@ -74,15 +74,15 @@ sc_rate_limiter_t *sc_rate_limiter_create(sc_allocator_t *alloc, int requests_pe
     if (window_secs <= 0)
         window_secs = 60;
 
-    sc_rate_limiter_t *lim =
-        (sc_rate_limiter_t *)alloc->alloc(alloc->ctx, sizeof(sc_rate_limiter_t));
+    hu_rate_limiter_t *lim =
+        (hu_rate_limiter_t *)alloc->alloc(alloc->ctx, sizeof(hu_rate_limiter_t));
     if (!lim)
         return NULL;
     memset(lim, 0, sizeof(*lim));
     lim->alloc = alloc;
     lim->max_requests = requests_per_window;
     lim->window_secs = window_secs;
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     if (pthread_mutex_init(&lim->mutex, NULL) != 0) {
         alloc->free(alloc->ctx, lim, sizeof(*lim));
         return NULL;
@@ -91,16 +91,16 @@ sc_rate_limiter_t *sc_rate_limiter_create(sc_allocator_t *alloc, int requests_pe
     return lim;
 }
 
-bool sc_rate_limiter_allow(sc_rate_limiter_t *lim, const char *ip) {
+bool hu_rate_limiter_allow(hu_rate_limiter_t *lim, const char *ip) {
     if (!lim || !ip)
         return true;
 
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     pthread_mutex_lock(&lim->mutex);
 #endif
     rate_entry_t *e = find_or_create(lim, ip);
     if (!e) {
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
         pthread_mutex_unlock(&lim->mutex);
 #endif
         return false;
@@ -111,7 +111,7 @@ bool sc_rate_limiter_allow(sc_rate_limiter_t *lim, const char *ip) {
     time_t now = time(NULL);
     if (e->count >= e->cap) {
         if (e->cap > SIZE_MAX / 2) {
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
             pthread_mutex_unlock(&lim->mutex);
 #endif
             return false;
@@ -120,7 +120,7 @@ bool sc_rate_limiter_allow(sc_rate_limiter_t *lim, const char *ip) {
         time_t *n = (time_t *)lim->alloc->realloc(
             lim->alloc->ctx, e->timestamps, e->cap * sizeof(time_t), new_cap * sizeof(time_t));
         if (!n) {
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
             pthread_mutex_unlock(&lim->mutex);
 #endif
             return false;
@@ -130,16 +130,16 @@ bool sc_rate_limiter_allow(sc_rate_limiter_t *lim, const char *ip) {
     }
     e->timestamps[e->count++] = now;
     bool ok = e->count <= (size_t)e->max_requests;
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     pthread_mutex_unlock(&lim->mutex);
 #endif
     return ok;
 }
 
-void sc_rate_limiter_destroy(sc_rate_limiter_t *lim) {
+void hu_rate_limiter_destroy(hu_rate_limiter_t *lim) {
     if (!lim)
         return;
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     pthread_mutex_destroy(&lim->mutex);
 #endif
     for (size_t i = 0; i < lim->count; i++) {

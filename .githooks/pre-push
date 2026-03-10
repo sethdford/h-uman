@@ -7,7 +7,7 @@ JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 BUILD_DIR="build-check"
 
 if [ -f "CMakeLists.txt" ]; then
-    echo "Running seaclaw tests..."
+    echo "Running human tests..."
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR" || exit 1
     if [ ! -f "CMakeCache.txt" ]; then
@@ -18,7 +18,7 @@ if [ -f "CMakeLists.txt" ]; then
         echo "Build failed. Fix before pushing."
         exit 1
     fi
-    ./seaclaw_tests
+    ./human_tests
     if [ $? -ne 0 ]; then
         echo "Tests failed. Fix before pushing."
         exit 1

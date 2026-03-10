@@ -1,10 +1,10 @@
 ---
-title: seaclaw Security Audit Report
+title: human Security Audit Report
 description: Full codebase security audit per OWASP Top 10 and CWE
 updated: 2026-03-02
 ---
 
-# seaclaw Security Audit Report
+# human Security Audit Report
 
 **Date:** 2026-03-02
 **Scope:** Full codebase (~52K lines C, ~415 source + header files)
@@ -60,9 +60,9 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **Files:** `src/auth.c` (~lines 80–100, 117), `src/config.c` (~lines 164–166, 581–592)
 - **OWASP:** A02:2021 — Cryptographic Failures
 - **CWE:** CWE-312 (Cleartext Storage of Sensitive Information)
-- **Description:** Credentials are written to `~/.seaclaw/auth.json` and `~/.seaclaw/config.json` as plaintext JSON. File permissions not explicitly set (depends on umask). `sc_secret_store` exists but is not used for these files.
+- **Description:** Credentials are written to `~/.human/auth.json` and `~/.human/config.json` as plaintext JSON. File permissions not explicitly set (depends on umask). `hu_secret_store` exists but is not used for these files.
 - **Exploit:** Local access (malware, shared system, backups) exposes all API keys and OAuth tokens.
-- **Fix:** Use `sc_secret_store_encrypt` for persisting credentials. Set file mode `0600`. Directory mode `0700`. Never write raw `api_key` values to config.json.
+- **Fix:** Use `hu_secret_store_encrypt` for persisting credentials. Set file mode `0600`. Directory mode `0700`. Never write raw `api_key` values to config.json.
 
 ### C-04: HTTP Header CRLF Injection via `http_request` Tool
 
@@ -78,9 +78,9 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **File:** `src/tools/git.c` (~lines 154–173)
 - **OWASP:** A01:2021 — Broken Access Control
 - **CWE:** CWE-22 (Path Traversal)
-- **Description:** The git tool does not use `sc_tool_validate_path()` for `paths`, `files`, `branch`, and similar inputs. These are passed directly to git commands.
+- **Description:** The git tool does not use `hu_tool_validate_path()` for `paths`, `files`, `branch`, and similar inputs. These are passed directly to git commands.
 - **Exploit:** `{"operation": "diff", "files": "../../../etc/passwd"}` — exposes files outside workspace.
-- **Fix:** Validate all path-like inputs with `sc_tool_validate_path()` before passing them to git.
+- **Fix:** Validate all path-like inputs with `hu_tool_validate_path()` before passing them to git.
 
 ### C-06: PostgreSQL/pgvector Identifier Injection
 
@@ -96,11 +96,11 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **File:** `src/security/firecracker.c` (~lines 159–161)
 - **OWASP:** A04:2021 — Insecure Design
 - **CWE:** CWE-362 (Race Condition)
-- **Description:** Socket path uses `(int)0` instead of `getpid()`. All Firecracker instances share `/tmp/sc_fc_0.sock`.
+- **Description:** Socket path uses `(int)0` instead of `getpid()`. All Firecracker instances share `/tmp/hu_fc_0.sock`.
 - **Exploit:** Attacker races to bind the socket before the legitimate process — full sandbox control.
 - **Fix:** Replace `(int)0` with `getpid()` and add a unique per-sandbox counter.
 
-### C-08: NULL Pointer Dereference in `sc_json_string_new`
+### C-08: NULL Pointer Dereference in `hu_json_string_new`
 
 - **File:** `src/core/json.c` (~lines 390–399)
 - **OWASP:** A04:2021 — Insecure Design
@@ -108,14 +108,14 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **Description:** No check for `s == NULL` before `memcpy`. Callers passing `NULL` with `len > 0` trigger undefined behavior.
 - **Fix:** Add `if (len > 0 && !s) return NULL;` before memcpy.
 
-### C-09: Buffer Overread in `sc_json_append_key`
+### C-09: Buffer Overread in `hu_json_append_key`
 
 - **File:** `src/core/json.c` (~lines 716–721)
 - **OWASP:** A04:2021 — Insecure Design
 - **CWE:** CWE-125 (Out-of-bounds Read)
 - **Description:** When `key == NULL` and `key_len > 0`, the function passes `""` but reads `key_len` bytes past the 1-byte string literal.
 - **Exploit:** Out-of-bounds read → information disclosure from process memory.
-- **Fix:** Add `if (!key && key_len > 0) return SC_ERR_INVALID_ARGUMENT;`
+- **Fix:** Add `if (!key && key_len > 0) return HU_ERR_INVALID_ARGUMENT;`
 
 ---
 
@@ -135,14 +135,14 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **OWASP:** A02:2021 — Cryptographic Failures
 - **CWE:** CWE-316 (Cleartext Storage in Memory)
 - **Description:** Keys, nonces, and plaintext are cleared with `memset()` which compilers may optimize away.
-- **Fix:** Use `explicit_bzero()` (POSIX) or create `sc_secure_zero()` wrapper used for all secret material.
+- **Fix:** Use `explicit_bzero()` (POSIX) or create `hu_secure_zero()` wrapper used for all secret material.
 
 ### H-03: Path-Based Access Control Defaults to Allow
 
 - **File:** `src/security/security.c` (~lines 7–9)
 - **OWASP:** A01:2021 — Broken Access Control
 - **CWE:** CWE-284 (Improper Access Control)
-- **Description:** When `allowed_paths` is NULL or empty, `sc_security_path_allowed` returns `true`. Default is open, not closed.
+- **Description:** When `allowed_paths` is NULL or empty, `hu_security_path_allowed` returns `true`. Default is open, not closed.
 - **Fix:** Return `false` when no allowed paths are configured. Default deny.
 
 ### H-04: Pairing Code Has Limited Entropy (6 Digits)
@@ -158,7 +158,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **File:** `src/providers/api_key.c` (~lines 76–86)
 - **OWASP:** A04:2021 — Insecure Design
 - **CWE:** CWE-532 (Sensitive Info in Log File)
-- **Description:** `sc_api_key_mask()` reveals first 4 characters. Combined with known provider key formats, reduces brute-force space.
+- **Description:** `hu_api_key_mask()` reveals first 4 characters. Combined with known provider key formats, reduces brute-force space.
 - **Fix:** Show only last 4 characters (`****...XXXX`) or use `[REDACTED]`.
 
 ### H-06: WebSocket Upgrade Without Origin Validation
@@ -199,7 +199,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 - **OWASP:** A09:2021 — Security Logging and Monitoring Failures
 - **CWE:** CWE-532 (Sensitive Info in Log File)
 - **Description:** Provider error messages (which may contain API keys) are written to logs without sanitization.
-- **Fix:** Apply `sc_scrub_sanitize_api_error()` before logging all error text.
+- **Fix:** Apply `hu_scrub_sanitize_api_error()` before logging all error text.
 
 ### H-11: FTS5 Query Built from User Input Without Escaping
 
@@ -249,7 +249,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 
 - **File:** `src/core/json.c` (~lines 520–521, 493–494, 195–198) | CWE-190 | Add overflow checks before growth arithmetic.
 
-### M-04: Format String Risk in `sc_sprintf`
+### M-04: Format String Risk in `hu_sprintf`
 
 - **File:** `src/core/string.c` (~lines 80–96) | CWE-134 | Document `fmt` must be constant. Consider compiler attributes.
 
@@ -328,7 +328,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 
 1. Compile with `-Wall -Wextra -Wpedantic -Werror` — strong baseline
 2. AddressSanitizer in CI — catches many memory bugs
-3. `SC_IS_TEST` guards — good isolation in tests
+3. `HU_IS_TEST` guards — good isolation in tests
 4. Parameterized SQLite queries — prevents most SQL injection
 5. HTTPS enforcement policy — good network security stance
 6. Deny-by-default design intent in security policy
@@ -403,7 +403,7 @@ The audit identified **47 unique findings** across 4 security domains. After ded
 
 This audit was conducted via manual static analysis across 4 parallel streams:
 
-1. **Core memory safety** — `src/core/`, `include/seaclaw/`
+1. **Core memory safety** — `src/core/`, `include/human/`
 2. **Security/crypto/auth** — `src/security/`, `src/auth.c`, `src/gateway/`
 3. **Input surfaces/injection** — `src/tools/`, `src/gateway/`, `src/channels/`, `src/sse/`, `src/websocket/`
 4. **Data/config/providers** — `src/memory/`, `src/providers/`, `src/config.c`, `src/observability/`, `src/agent/`

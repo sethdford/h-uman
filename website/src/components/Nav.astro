@@ -10,15 +10,15 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
   <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
     <a href={`${base}`} class="flex items-center gap-3 group">
       <img
-        src={`${base}seaclaw.svg`}
-        alt="SeaClaw logo"
+        src={`${base}human.svg`}
+        alt="Human logo"
         width="28"
         height="28"
         class="w-7 h-7 transition-transform duration-300 group-hover:scale-110"
       />
       <span
         class="text-[15px] font-semibold tracking-tight"
-        style="color: var(--sc-web-text)">SeaClaw</span
+        style="color: var(--hu-web-text)">Human</span
       >
     </a>
     <div class="flex items-center gap-8">
@@ -35,7 +35,7 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
         >
       </div>
       <a
-        href="https://github.com/sethdford/seaclaw"
+        href="https://github.com/sethdford/human"
         target="_blank"
         rel="noopener noreferrer"
         class="nav-link transition-colors"
@@ -76,23 +76,23 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
   <div
     id="mobile-menu"
     class="md:hidden hidden"
-    style="background: var(--sc-web-surface-elevated); backdrop-filter: blur(24px) saturate(1.8); -webkit-backdrop-filter: blur(24px) saturate(1.8); border-bottom: 1px solid var(--sc-web-border);"
+    style="background: var(--hu-web-surface-elevated); backdrop-filter: blur(24px) saturate(1.8); -webkit-backdrop-filter: blur(24px) saturate(1.8); border-bottom: 1px solid var(--hu-web-border);"
   >
     <div class="max-w-6xl mx-auto px-6 py-4 flex flex-col gap-3">
       <a
         href="#use-cases"
         class="mobile-menu-link text-[15px] py-2 transition-colors"
-        style="color: var(--sc-web-text-secondary)">Use Cases</a
+        style="color: var(--hu-web-text-secondary)">Use Cases</a
       >
       <a
         href="#architecture"
         class="mobile-menu-link text-[15px] py-2 transition-colors"
-        style="color: var(--sc-web-text-secondary)">Architecture</a
+        style="color: var(--hu-web-text-secondary)">Architecture</a
       >
       <a
         href={`${base}getting-started/installation/`}
         class="mobile-menu-link text-[15px] py-2 transition-colors"
-        style="color: var(--sc-web-text-secondary)">Docs</a
+        style="color: var(--hu-web-text-secondary)">Docs</a
       >
     </div>
   </div>
@@ -100,11 +100,11 @@ const base = rawBase.endsWith("/") ? rawBase : rawBase + "/";
 
 <style>
   .nav-link {
-    color: var(--sc-web-text-secondary);
+    color: var(--hu-web-text-secondary);
   }
   .nav-link:hover,
   .nav-link:focus-visible {
-    color: var(--sc-web-text);
+    color: var(--hu-web-text);
   }
 </style>
 

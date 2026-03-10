@@ -1,15 +1,15 @@
 /* Strict config schema validation — unknown keys, type checks, value validation. */
-#include "seaclaw/config.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/providers/factory.h"
+#include "human/config.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/providers/factory.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Top-level keys read by sc_config_parse_json (derive from config.c) */
-static const char *const sc_config_top_keys[] = {
+/* Top-level keys read by hu_config_parse_json (derive from config.c) */
+static const char *const hu_config_top_keys[] = {
     "workspace",     "default_provider",
     "default_model", "default_temperature",
     "max_tokens",    "api_key",
@@ -28,11 +28,11 @@ static const char *const sc_config_top_keys[] = {
     "security",      "secrets",
     "identity",
 };
-static const size_t sc_config_top_keys_len =
-    sizeof(sc_config_top_keys) / sizeof(sc_config_top_keys[0]);
+static const size_t hu_config_top_keys_len =
+    sizeof(hu_config_top_keys) / sizeof(hu_config_top_keys[0]);
 
 /* Nested keys per section */
-static const char *const sc_gateway_keys[] = {
+static const char *const hu_gateway_keys[] = {
     "enabled",
     "port",
     "host",
@@ -46,30 +46,30 @@ static const char *const sc_gateway_keys[] = {
     "control_ui_dir",
     "cors_origins",
 };
-static const size_t sc_gateway_keys_len = sizeof(sc_gateway_keys) / sizeof(sc_gateway_keys[0]);
+static const size_t hu_gateway_keys_len = sizeof(hu_gateway_keys) / sizeof(hu_gateway_keys[0]);
 
-static const char *const sc_memory_keys[] = {
+static const char *const hu_memory_keys[] = {
     "profile",      "backend",         "sqlite_path",
     "max_entries",  "auto_save",       "consolidation_interval_hours",
     "postgres_url", "postgres_schema", "postgres_table",
     "redis_host",   "redis_port",      "redis_key_prefix",
     "api_base_url", "api_key",         "api_timeout_ms",
 };
-static const size_t sc_memory_keys_len = sizeof(sc_memory_keys) / sizeof(sc_memory_keys[0]);
+static const size_t hu_memory_keys_len = sizeof(hu_memory_keys) / sizeof(hu_memory_keys[0]);
 
-static const char *const sc_security_keys[] = {
+static const char *const hu_security_keys[] = {
     "autonomy_level", "sandbox", "sandbox_config", "resources", "audit",
 };
-static const size_t sc_security_keys_len = sizeof(sc_security_keys) / sizeof(sc_security_keys[0]);
+static const size_t hu_security_keys_len = sizeof(hu_security_keys) / sizeof(hu_security_keys[0]);
 
 /* Core provider names */
-static const char *const sc_known_providers[] = {
+static const char *const hu_known_providers[] = {
     "openai",       "anthropic",  "gemini",     "google",     "google-gemini",
     "ollama",       "openrouter", "compatible", "claude_cli", "codex_cli",
     "openai-codex", "router",     "reliable",
 };
-static const size_t sc_known_providers_len =
-    sizeof(sc_known_providers) / sizeof(sc_known_providers[0]);
+static const size_t hu_known_providers_len =
+    sizeof(hu_known_providers) / sizeof(hu_known_providers[0]);
 
 static bool key_in_list(const char *key, const char *const *list, size_t len) {
     for (size_t i = 0; i < len; i++) {
@@ -82,21 +82,21 @@ static bool key_in_list(const char *key, const char *const *list, size_t len) {
 static bool is_provider_valid(const char *name) {
     if (!name || !name[0])
         return false;
-    if (key_in_list(name, sc_known_providers, sc_known_providers_len))
+    if (key_in_list(name, hu_known_providers, hu_known_providers_len))
         return true;
     if (strncmp(name, "custom:", 7) == 0 || strncmp(name, "anthropic-custom:", 17) == 0)
         return true;
-    return sc_compatible_provider_url(name) != NULL;
+    return hu_compatible_provider_url(name) != NULL;
 }
 
-static void check_unknown_top_keys(const sc_json_value_t *root, bool strict, bool *has_error) {
-    if (!root || root->type != SC_JSON_OBJECT || !root->data.object.pairs)
+static void check_unknown_top_keys(const hu_json_value_t *root, bool strict, bool *has_error) {
+    if (!root || root->type != HU_JSON_OBJECT || !root->data.object.pairs)
         return;
     for (size_t i = 0; i < root->data.object.len; i++) {
-        sc_json_pair_t *p = &root->data.object.pairs[i];
+        hu_json_pair_t *p = &root->data.object.pairs[i];
         if (!p->key)
             continue;
-        if (!key_in_list(p->key, sc_config_top_keys, sc_config_top_keys_len)) {
+        if (!key_in_list(p->key, hu_config_top_keys, hu_config_top_keys_len)) {
             fprintf(stderr, "[config] unknown key: '%s' (ignored)\n", p->key);
             if (strict)
                 *has_error = true;
@@ -104,13 +104,13 @@ static void check_unknown_top_keys(const sc_json_value_t *root, bool strict, boo
     }
 }
 
-static void check_unknown_nested_keys(const sc_json_value_t *obj, const char *section,
+static void check_unknown_nested_keys(const hu_json_value_t *obj, const char *section,
                                       const char *const *allowed, size_t allowed_len, bool strict,
                                       bool *has_error) {
-    if (!obj || obj->type != SC_JSON_OBJECT || !obj->data.object.pairs)
+    if (!obj || obj->type != HU_JSON_OBJECT || !obj->data.object.pairs)
         return;
     for (size_t i = 0; i < obj->data.object.len; i++) {
-        sc_json_pair_t *p = &obj->data.object.pairs[i];
+        hu_json_pair_t *p = &obj->data.object.pairs[i];
         if (!p->key)
             continue;
         if (!key_in_list(p->key, allowed, allowed_len)) {
@@ -121,20 +121,20 @@ static void check_unknown_nested_keys(const sc_json_value_t *obj, const char *se
     }
 }
 
-static sc_error_t check_type(const sc_json_value_t *obj, const char *key, sc_json_type_t expected,
+static hu_error_t check_type(const hu_json_value_t *obj, const char *key, hu_json_type_t expected,
                              const char *ctx, bool strict) {
-    sc_json_value_t *v = sc_json_object_get(obj, key);
+    hu_json_value_t *v = hu_json_object_get(obj, key);
     if (!v)
-        return SC_OK;
+        return HU_OK;
     if (v->type != expected) {
-        const char *want = (expected == SC_JSON_STRING)   ? "string"
-                           : (expected == SC_JSON_NUMBER) ? "number"
-                           : (expected == SC_JSON_BOOL)   ? "boolean"
+        const char *want = (expected == HU_JSON_STRING)   ? "string"
+                           : (expected == HU_JSON_NUMBER) ? "number"
+                           : (expected == HU_JSON_BOOL)   ? "boolean"
                                                           : "unknown";
         fprintf(stderr, "[config] %s: '%s' must be %s\n", ctx, key, want);
-        return strict ? SC_ERR_CONFIG_INVALID : SC_OK;
+        return strict ? HU_ERR_CONFIG_INVALID : HU_OK;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool starts_with(const char *s, const char *prefix) {
@@ -145,46 +145,46 @@ static bool has_path_traversal(const char *path) {
     return path && strstr(path, "..") != NULL;
 }
 
-sc_error_t sc_config_validate_strict(const sc_config_t *cfg, const sc_json_value_t *root,
+hu_error_t hu_config_validate_strict(const hu_config_t *cfg, const hu_json_value_t *root,
                                      bool strict) {
     if (!cfg)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     bool has_error = false;
 
     /* Unknown key detection */
     if (root)
         check_unknown_top_keys(root, strict, &has_error);
     if (root) {
-        sc_json_value_t *gw = sc_json_object_get(root, "gateway");
+        hu_json_value_t *gw = hu_json_object_get(root, "gateway");
         if (gw)
-            check_unknown_nested_keys(gw, "gateway", sc_gateway_keys, sc_gateway_keys_len, strict,
+            check_unknown_nested_keys(gw, "gateway", hu_gateway_keys, hu_gateway_keys_len, strict,
                                       &has_error);
-        sc_json_value_t *mem = sc_json_object_get(root, "memory");
+        hu_json_value_t *mem = hu_json_object_get(root, "memory");
         if (mem)
-            check_unknown_nested_keys(mem, "memory", sc_memory_keys, sc_memory_keys_len, strict,
+            check_unknown_nested_keys(mem, "memory", hu_memory_keys, hu_memory_keys_len, strict,
                                       &has_error);
-        sc_json_value_t *sec = sc_json_object_get(root, "security");
+        hu_json_value_t *sec = hu_json_object_get(root, "security");
         if (sec)
-            check_unknown_nested_keys(sec, "security", sc_security_keys, sc_security_keys_len,
+            check_unknown_nested_keys(sec, "security", hu_security_keys, hu_security_keys_len,
                                       strict, &has_error);
     }
 
     /* Type checking */
     if (root) {
-        sc_error_t err;
-        err = check_type(root, "default_provider", SC_JSON_STRING, "default_provider", strict);
-        if (err != SC_OK)
+        hu_error_t err;
+        err = check_type(root, "default_provider", HU_JSON_STRING, "default_provider", strict);
+        if (err != HU_OK)
             return err;
-        err = check_type(root, "default_model", SC_JSON_STRING, "default_model", strict);
-        if (err != SC_OK)
+        err = check_type(root, "default_model", HU_JSON_STRING, "default_model", strict);
+        if (err != HU_OK)
             return err;
-        err = check_type(root, "max_tokens", SC_JSON_NUMBER, "max_tokens", strict);
-        if (err != SC_OK)
+        err = check_type(root, "max_tokens", HU_JSON_NUMBER, "max_tokens", strict);
+        if (err != HU_OK)
             return err;
-        sc_json_value_t *gw = sc_json_object_get(root, "gateway");
+        hu_json_value_t *gw = hu_json_object_get(root, "gateway");
         if (gw) {
-            err = check_type(gw, "port", SC_JSON_NUMBER, "gateway.port", strict);
-            if (err != SC_OK)
+            err = check_type(gw, "port", HU_JSON_NUMBER, "gateway.port", strict);
+            if (err != HU_OK)
                 return err;
         }
     }
@@ -263,14 +263,14 @@ sc_error_t sc_config_validate_strict(const sc_config_t *cfg, const sc_json_value
 
     /* Run base validation (provider, model, port) */
     if (has_error)
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (!cfg->default_provider || !cfg->default_provider[0])
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (!cfg->default_model || !cfg->default_model[0])
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (cfg->gateway.port == 0)
-        return SC_ERR_CONFIG_INVALID;
+        return HU_ERR_CONFIG_INVALID;
     if (cfg->security.autonomy_level > 4)
-        return SC_ERR_CONFIG_INVALID;
-    return SC_OK;
+        return HU_ERR_CONFIG_INVALID;
+    return HU_OK;
 }

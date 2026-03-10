@@ -1,5 +1,5 @@
-#include "seaclaw/multimodal.h"
-#include "seaclaw/core/allocator.h"
+#include "human/multimodal.h"
+#include "human/core/allocator.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,17 +25,17 @@ static bool match_marker(const char *s, size_t len, const char *marker, size_t m
     return true;
 }
 
-sc_error_t sc_multimodal_encode_base64(sc_allocator_t *alloc, const void *data, size_t data_len,
+hu_error_t hu_multimodal_encode_base64(hu_allocator_t *alloc, const void *data, size_t data_len,
                                        char **out_base64, size_t *out_len) {
     if (!alloc || !out_base64 || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_base64 = NULL;
     *out_len = 0;
 
     size_t out_size = ((data_len + 2) / 3) * 4;
     char *buf = (char *)alloc->alloc(alloc->ctx, out_size + 1);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     const unsigned char *src = (const unsigned char *)data;
     size_t j = 0;
@@ -67,10 +67,10 @@ sc_error_t sc_multimodal_encode_base64(sc_allocator_t *alloc, const void *data, 
     buf[j] = '\0';
     *out_base64 = buf;
     *out_len = j;
-    return SC_OK;
+    return HU_OK;
 }
 
-const char *sc_multimodal_detect_audio_mime(const char *path, size_t path_len) {
+const char *hu_multimodal_detect_audio_mime(const char *path, size_t path_len) {
     if (!path || path_len == 0)
         return "audio/wav";
     const char *dot = NULL;
@@ -104,7 +104,7 @@ const char *sc_multimodal_detect_audio_mime(const char *path, size_t path_len) {
     return "audio/wav";
 }
 
-const char *sc_multimodal_detect_mime(const void *header, size_t header_len) {
+const char *hu_multimodal_detect_mime(const void *header, size_t header_len) {
     const unsigned char *h = (const unsigned char *)header;
     if (header_len >= 4 && h[0] == 0x89 && h[1] == 'P' && h[2] == 'N' && h[3] == 'G')
         return "image/png";
@@ -120,58 +120,58 @@ const char *sc_multimodal_detect_mime(const void *header, size_t header_len) {
     return "application/octet-stream";
 }
 
-sc_error_t sc_multimodal_encode_image(sc_allocator_t *alloc, const char *file_path,
+hu_error_t hu_multimodal_encode_image(hu_allocator_t *alloc, const char *file_path,
                                       char **out_data_uri, size_t *out_len) {
     if (!alloc || !file_path || !out_data_uri || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_data_uri = NULL;
     *out_len = 0;
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     (void)file_path;
     const char *mock = "data:image/png;base64,iVBORw0KGgo=";
     size_t len = strlen(mock);
     char *out = (char *)alloc->alloc(alloc->ctx, len + 1);
     if (!out)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memcpy(out, mock, len + 1);
     *out_data_uri = out;
     *out_len = len;
-    return SC_OK;
+    return HU_OK;
 #else
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__CYGWIN__)
     struct stat st;
     if (stat(file_path, &st) != 0)
-        return SC_ERR_NOT_FOUND;
+        return HU_ERR_NOT_FOUND;
     if (!S_ISREG(st.st_mode))
-        return SC_ERR_INVALID_ARGUMENT;
-    if ((size_t)st.st_size > SC_MULTIMODAL_MAX_IMAGE_SIZE)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
+    if ((size_t)st.st_size > HU_MULTIMODAL_MAX_IMAGE_SIZE)
+        return HU_ERR_INVALID_ARGUMENT;
 
     FILE *f = fopen(file_path, "rb");
     if (!f)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     size_t file_size = (size_t)st.st_size;
     unsigned char *buf = (unsigned char *)alloc->alloc(alloc->ctx, file_size);
     if (!buf) {
         fclose(f);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t nr = fread(buf, 1, file_size, f);
     fclose(f);
     if (nr != file_size) {
         alloc->free(alloc->ctx, buf, file_size);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
 
-    const char *mime = sc_multimodal_detect_mime(buf, file_size);
+    const char *mime = hu_multimodal_detect_mime(buf, file_size);
 
     char *b64 = NULL;
     size_t b64_len = 0;
-    sc_error_t err = sc_multimodal_encode_base64(alloc, buf, file_size, &b64, &b64_len);
+    hu_error_t err = hu_multimodal_encode_base64(alloc, buf, file_size, &b64, &b64_len);
     alloc->free(alloc->ctx, buf, file_size);
-    if (err != SC_OK)
+    if (err != HU_OK)
         return err;
 
     size_t prefix_len = strlen("data:") + strlen(mime) + strlen(";base64,");
@@ -179,44 +179,44 @@ sc_error_t sc_multimodal_encode_image(sc_allocator_t *alloc, const char *file_pa
     char *data_uri = (char *)alloc->alloc(alloc->ctx, total);
     if (!data_uri) {
         alloc->free(alloc->ctx, b64, b64_len + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     int n = snprintf(data_uri, total, "data:%s;base64,%s", mime, b64);
     alloc->free(alloc->ctx, b64, b64_len + 1);
     if (n < 0 || (size_t)n >= total) {
         alloc->free(alloc->ctx, data_uri, total);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
     *out_data_uri = data_uri;
     *out_len = (size_t)n;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)file_path;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 #endif
 }
 
-sc_error_t sc_multimodal_encode_image_raw(const void *img_data, size_t len, char **out_base64) {
+hu_error_t hu_multimodal_encode_image_raw(const void *img_data, size_t len, char **out_base64) {
     if (!img_data || !out_base64)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_allocator_t alloc = sc_system_allocator();
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_allocator_t alloc = hu_system_allocator();
     size_t out_len = 0;
-    sc_error_t err = sc_multimodal_encode_base64(&alloc, img_data, len, out_base64, &out_len);
+    hu_error_t err = hu_multimodal_encode_base64(&alloc, img_data, len, out_base64, &out_len);
     return err;
 }
 
-static sc_image_ref_type_t classify_ref(const char *val, size_t len) {
+static hu_image_ref_type_t classify_ref(const char *val, size_t len) {
     if (len >= 5 && to_lower(val[0]) == 'd' && to_lower(val[1]) == 'a' && to_lower(val[2]) == 't' &&
         to_lower(val[3]) == 'a' && val[4] == ':')
-        return SC_IMAGE_REF_DATA_URI;
+        return HU_IMAGE_REF_DATA_URI;
     if (len >= 8 && val[0] == 'h' && val[1] == 't' && val[2] == 't' && val[3] == 'p' &&
         val[4] == 's' && val[5] == ':' && val[6] == '/' && val[7] == '/')
-        return SC_IMAGE_REF_URL;
+        return HU_IMAGE_REF_URL;
     if (len >= 7 && val[0] == 'h' && val[1] == 't' && val[2] == 't' && val[3] == 'p' &&
         val[4] == ':' && val[5] == '/' && val[6] == '/')
-        return SC_IMAGE_REF_URL;
-    return SC_IMAGE_REF_LOCAL;
+        return HU_IMAGE_REF_URL;
+    return HU_IMAGE_REF_LOCAL;
 }
 
 static bool is_image_kind(const char *s, size_t len) {
@@ -229,11 +229,11 @@ static bool is_image_kind(const char *s, size_t len) {
     return false;
 }
 
-sc_error_t sc_multimodal_parse_markers(sc_allocator_t *alloc, const char *text, size_t text_len,
-                                       sc_image_ref_t **out_refs, size_t *out_ref_count,
+hu_error_t hu_multimodal_parse_markers(hu_allocator_t *alloc, const char *text, size_t text_len,
+                                       hu_image_ref_t **out_refs, size_t *out_ref_count,
                                        char **out_cleaned_text, size_t *out_cleaned_len) {
     if (!alloc || !text || !out_refs || !out_ref_count || !out_cleaned_text || !out_cleaned_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_refs = NULL;
     *out_ref_count = 0;
     *out_cleaned_text = NULL;
@@ -241,17 +241,17 @@ sc_error_t sc_multimodal_parse_markers(sc_allocator_t *alloc, const char *text, 
 
     /* Simple two-pass: first count refs and measure cleaned size, then allocate and fill */
     size_t ref_cap = 4;
-    sc_image_ref_t *refs =
-        (sc_image_ref_t *)alloc->alloc(alloc->ctx, ref_cap * sizeof(sc_image_ref_t));
+    hu_image_ref_t *refs =
+        (hu_image_ref_t *)alloc->alloc(alloc->ctx, ref_cap * sizeof(hu_image_ref_t));
     if (!refs)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t ref_count = 0;
 
     size_t cleaned_cap = text_len + 1;
     char *cleaned = (char *)alloc->alloc(alloc->ctx, cleaned_cap);
     if (!cleaned) {
-        alloc->free(alloc->ctx, refs, ref_cap * sizeof(sc_image_ref_t));
-        return SC_ERR_OUT_OF_MEMORY;
+        alloc->free(alloc->ctx, refs, ref_cap * sizeof(hu_image_ref_t));
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t cleaned_pos = 0;
 
@@ -264,9 +264,9 @@ sc_error_t sc_multimodal_parse_markers(sc_allocator_t *alloc, const char *text, 
                 if (!n) {
                     for (size_t r = 0; r < ref_count; r++)
                         alloc->free(alloc->ctx, (void *)refs[r].value, refs[r].value_len + 1);
-                    alloc->free(alloc->ctx, refs, ref_cap * sizeof(sc_image_ref_t));
+                    alloc->free(alloc->ctx, refs, ref_cap * sizeof(hu_image_ref_t));
                     alloc->free(alloc->ctx, cleaned, cleaned_cap);
-                    return SC_ERR_OUT_OF_MEMORY;
+                    return HU_ERR_OUT_OF_MEMORY;
                 }
                 cleaned = n;
                 cleaned_cap = new_cap;
@@ -315,9 +315,9 @@ sc_error_t sc_multimodal_parse_markers(sc_allocator_t *alloc, const char *text, 
         if (val_len > 0 && is_image_kind(marker, kind_len)) {
             if (ref_count >= ref_cap) {
                 size_t new_ref_cap = ref_cap * 2;
-                sc_image_ref_t *nr = (sc_image_ref_t *)alloc->realloc(
-                    alloc->ctx, refs, ref_cap * sizeof(sc_image_ref_t),
-                    new_ref_cap * sizeof(sc_image_ref_t));
+                hu_image_ref_t *nr = (hu_image_ref_t *)alloc->realloc(
+                    alloc->ctx, refs, ref_cap * sizeof(hu_image_ref_t),
+                    new_ref_cap * sizeof(hu_image_ref_t));
                 if (!nr)
                     goto parse_fail;
                 refs = nr;
@@ -354,74 +354,74 @@ sc_error_t sc_multimodal_parse_markers(sc_allocator_t *alloc, const char *text, 
     *out_ref_count = ref_count;
     *out_cleaned_text = cleaned;
     *out_cleaned_len = cleaned_pos;
-    return SC_OK;
+    return HU_OK;
 
 parse_fail:
     for (size_t r = 0; r < ref_count; r++)
         alloc->free(alloc->ctx, (void *)refs[r].value, refs[r].value_len + 1);
-    alloc->free(alloc->ctx, refs, ref_cap * sizeof(sc_image_ref_t));
+    alloc->free(alloc->ctx, refs, ref_cap * sizeof(hu_image_ref_t));
     alloc->free(alloc->ctx, cleaned, cleaned_cap);
-    return SC_ERR_OUT_OF_MEMORY;
+    return HU_ERR_OUT_OF_MEMORY;
 }
 
-sc_error_t sc_multimodal_build_openai_image(sc_allocator_t *alloc, const char *data_uri,
+hu_error_t hu_multimodal_build_openai_image(hu_allocator_t *alloc, const char *data_uri,
                                             size_t data_uri_len, char **out_json,
                                             size_t *out_json_len) {
     if (!alloc || !data_uri || !out_json || !out_json_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t need = 64 + data_uri_len * 2;
     char *buf = (char *)alloc->alloc(alloc->ctx, need);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     int n = snprintf(buf, need, "{\"type\":\"image_url\",\"image_url\":{\"url\":\"%.*s\"}}",
                      (int)data_uri_len, data_uri);
     if (n < 0 || (size_t)n >= need) {
         alloc->free(alloc->ctx, buf, need);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
     *out_json = buf;
     *out_json_len = (size_t)n;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_multimodal_build_anthropic_image(sc_allocator_t *alloc, const char *mime_type,
+hu_error_t hu_multimodal_build_anthropic_image(hu_allocator_t *alloc, const char *mime_type,
                                                const char *base64_data, size_t base64_len,
                                                char **out_json, size_t *out_json_len) {
     if (!alloc || !mime_type || !base64_data || !out_json || !out_json_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t need = 80 + strlen(mime_type) + base64_len * 2;
     char *buf = (char *)alloc->alloc(alloc->ctx, need);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     int n = snprintf(buf, need,
                      "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"%s\","
                      "\"data\":\"%.*s\"}}",
                      mime_type, (int)base64_len, base64_data);
     if (n < 0 || (size_t)n >= need) {
         alloc->free(alloc->ctx, buf, need);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
     *out_json = buf;
     *out_json_len = (size_t)n;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_multimodal_build_gemini_image(sc_allocator_t *alloc, const char *mime_type,
+hu_error_t hu_multimodal_build_gemini_image(hu_allocator_t *alloc, const char *mime_type,
                                             const char *base64_data, size_t base64_len,
                                             char **out_json, size_t *out_json_len) {
     if (!alloc || !mime_type || !base64_data || !out_json || !out_json_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t need = 64 + strlen(mime_type) + base64_len * 2;
     char *buf = (char *)alloc->alloc(alloc->ctx, need);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     int n = snprintf(buf, need, "{\"inlineData\":{\"mimeType\":\"%s\",\"data\":\"%.*s\"}}",
                      mime_type, (int)base64_len, base64_data);
     if (n < 0 || (size_t)n >= need) {
         alloc->free(alloc->ctx, buf, need);
-        return SC_ERR_INTERNAL;
+        return HU_ERR_INTERNAL;
     }
     *out_json = buf;
     *out_json_len = (size_t)n;
-    return SC_OK;
+    return HU_OK;
 }

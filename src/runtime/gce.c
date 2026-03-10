@@ -1,18 +1,18 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/runtime.h"
+#include "human/core/error.h"
+#include "human/runtime.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-typedef struct sc_gce_ctx {
+typedef struct hu_gce_ctx {
     char project[256];
     char zone[128];
     char instance[256];
     uint64_t memory_limit_mb;
-} sc_gce_ctx_t;
+} hu_gce_ctx_t;
 
-static sc_gce_ctx_t *get_ctx(void *ctx) {
-    return (sc_gce_ctx_t *)ctx;
+static hu_gce_ctx_t *get_ctx(void *ctx) {
+    return (hu_gce_ctx_t *)ctx;
 }
 
 static const char *gce_name(void *ctx) {
@@ -32,7 +32,7 @@ static bool gce_has_filesystem_access(void *ctx) {
 
 static const char *gce_storage_path(void *ctx) {
     (void)ctx;
-    return "/workspace/.seaclaw";
+    return "/workspace/.human";
 }
 
 static bool gce_supports_long_running(void *ctx) {
@@ -41,19 +41,19 @@ static bool gce_supports_long_running(void *ctx) {
 }
 
 static uint64_t gce_memory_budget(void *ctx) {
-    sc_gce_ctx_t *g = get_ctx(ctx);
+    hu_gce_ctx_t *g = get_ctx(ctx);
     if (g->memory_limit_mb > 0)
         return g->memory_limit_mb * 1024 * 1024;
     return 0;
 }
 
-static sc_error_t gce_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
+static hu_error_t gce_wrap_command(void *ctx, const char **argv_in, size_t argc_in,
                                    const char **argv_out, size_t max_out, size_t *argc_out) {
-    sc_gce_ctx_t *g = (sc_gce_ctx_t *)ctx;
+    hu_gce_ctx_t *g = (hu_gce_ctx_t *)ctx;
     if (!g->instance[0])
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
     if (!argv_out || !argc_out || max_out < 8)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char zone_arg[160];
     char project_arg[288];
@@ -93,10 +93,10 @@ static sc_error_t gce_wrap_command(void *ctx, const char **argv_in, size_t argc_
 
     argv_out[idx] = NULL;
     *argc_out = idx;
-    return SC_OK;
+    return HU_OK;
 }
 
-static const sc_runtime_vtable_t gce_vtable = {
+static const hu_runtime_vtable_t gce_vtable = {
     .name = gce_name,
     .has_shell_access = gce_has_shell_access,
     .has_filesystem_access = gce_has_filesystem_access,
@@ -106,9 +106,9 @@ static const sc_runtime_vtable_t gce_vtable = {
     .wrap_command = gce_wrap_command,
 };
 
-sc_runtime_t sc_runtime_gce(const char *project, const char *zone, const char *instance,
+hu_runtime_t hu_runtime_gce(const char *project, const char *zone, const char *instance,
                             uint64_t memory_limit_mb) {
-    static sc_gce_ctx_t s_gce = {{0}, {0}, {0}, 0};
+    static hu_gce_ctx_t s_gce = {{0}, {0}, {0}, 0};
     if (project) {
         size_t len = strlen(project);
         if (len >= sizeof(s_gce.project))
@@ -137,7 +137,7 @@ sc_runtime_t sc_runtime_gce(const char *project, const char *zone, const char *i
         s_gce.instance[0] = '\0';
     }
     s_gce.memory_limit_mb = memory_limit_mb;
-    return (sc_runtime_t){
+    return (hu_runtime_t){
         .ctx = &s_gce,
         .vtable = &gce_vtable,
     };

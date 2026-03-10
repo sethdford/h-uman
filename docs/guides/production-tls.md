@@ -3,11 +3,11 @@ title: Production TLS / Reverse Proxy Setup
 ---
 # Production TLS / Reverse Proxy Setup
 
-SeaClaw gateway serves HTTP. Terminate TLS at a reverse proxy.
+Human gateway serves HTTP. Terminate TLS at a reverse proxy.
 
 ## Caddy (recommended)
 ```
-seaclaw.example.com { reverse_proxy localhost:8420 }
+human.example.com { reverse_proxy localhost:8420 }
 ```
 
 ## nginx + certbot

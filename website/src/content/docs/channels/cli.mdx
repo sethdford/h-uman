@@ -3,12 +3,12 @@ title: CLI Channel
 description: Terminal-based chat channel.
 ---
 
-The CLI channel is the default interface for SeaClaw. It is always built by default and requires no configuration.
+The CLI channel is the default interface for Human. It is always built by default and requires no configuration.
 
 ## Usage
 
 ```bash
-./seaclaw agent
+./human agent
 ```
 
 This starts an interactive chat session. Type messages and receive responses. The agent can use tools (shell, file read/write, memory, etc.) based on your security policy.
@@ -16,11 +16,11 @@ This starts an interactive chat session. Type messages and receive responses. Th
 ## Options
 
 ```bash
-./seaclaw agent -m "Your message"          # Single message, exit after response
-./seaclaw agent --provider ollama          # Override provider
-./seaclaw agent --model llama3             # Override model
-./seaclaw agent --session my-session        # Session ID for continuity
-./seaclaw agent --temperature 0.5           # Override temperature
+./human agent -m "Your message"          # Single message, exit after response
+./human agent --provider ollama          # Override provider
+./human agent --model llama3             # Override model
+./human agent --session my-session        # Session ID for continuity
+./human agent --temperature 0.5           # Override temperature
 ```
 
 ## Behavior

@@ -2,18 +2,18 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import { ScToast } from "../components/sc-toast.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-card.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-badge.js";
-import "../components/sc-select.js";
-import "../components/sc-switch.js";
-import "../components/sc-button.js";
+import { ScToast } from "../components/hu-toast.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-card.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-badge.js";
+import "../components/hu-select.js";
+import "../components/hu-switch.js";
+import "../components/hu-button.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -56,149 +56,149 @@ const AUTONOMY_OPTIONS = [
 const AUTONOMY_LABELS: Record<number, { label: string; color: string; description: string }> = {
   0: {
     label: "Read-Only",
-    color: "var(--sc-success)",
+    color: "var(--hu-success)",
     description: "Agent can only observe and report. No side effects.",
   },
   1: {
     label: "Supervised",
-    color: "var(--sc-success)",
+    color: "var(--hu-success)",
     description: "Agent proposes actions. User must approve before execution.",
   },
   2: {
     label: "Full Autonomy",
-    color: "var(--sc-error)",
+    color: "var(--hu-error)",
     description: "Agent executes tool calls without confirmation.",
   },
 };
 
-@customElement("sc-security-view")
+@customElement("hu-security-view")
 export class ScSecurityView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-security;
       display: block;
-      color: var(--sc-text);
+      color: var(--hu-text);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
-      gap: var(--sc-space-xl);
-      margin-bottom: var(--sc-space-2xl);
+      gap: var(--hu-space-xl);
+      margin-bottom: var(--hu-space-2xl);
     }
     .card-inner {
-      padding: var(--sc-space-md);
+      padding: var(--hu-space-md);
     }
     .card-title {
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
-      margin-bottom: var(--sc-space-sm);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
+      margin-bottom: var(--hu-space-sm);
     }
     .domains-label {
-      margin-top: var(--sc-space-xs);
+      margin-top: var(--hu-space-xs);
     }
     .autonomy-badge-wrap {
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
     .risk-indicator {
       display: inline-flex;
       align-items: center;
-      gap: var(--sc-space-xs);
-      padding: var(--sc-space-xs) var(--sc-space-sm);
-      border-radius: var(--sc-radius);
-      font-size: var(--sc-text-sm);
-      font-weight: var(--sc-weight-medium);
-      margin-bottom: var(--sc-space-sm);
+      gap: var(--hu-space-xs);
+      padding: var(--hu-space-xs) var(--hu-space-sm);
+      border-radius: var(--hu-radius);
+      font-size: var(--hu-text-sm);
+      font-weight: var(--hu-weight-medium);
+      margin-bottom: var(--hu-space-sm);
     }
     .risk-indicator.success {
-      background: color-mix(in srgb, var(--sc-success) 20%, transparent);
-      color: var(--sc-success);
+      background: color-mix(in srgb, var(--hu-success) 20%, transparent);
+      color: var(--hu-success);
     }
     .risk-indicator.warning {
-      background: color-mix(in srgb, var(--sc-warning) 20%, transparent);
-      color: var(--sc-warning);
+      background: color-mix(in srgb, var(--hu-warning) 20%, transparent);
+      color: var(--hu-warning);
     }
     .risk-indicator.error {
-      background: color-mix(in srgb, var(--sc-error) 20%, transparent);
-      color: var(--sc-error);
+      background: color-mix(in srgb, var(--hu-error) 20%, transparent);
+      color: var(--hu-error);
     }
     .description {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
       line-height: 1.5;
     }
     .policy-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: var(--sc-space-xs) 0;
-      border-bottom: 1px solid var(--sc-border-subtle);
-      font-size: var(--sc-text-sm);
+      padding: var(--hu-space-xs) 0;
+      border-bottom: 1px solid var(--hu-border-subtle);
+      font-size: var(--hu-text-sm);
     }
     .policy-row:last-child {
       border-bottom: none;
     }
     .policy-label {
-      color: var(--sc-text-muted);
+      color: var(--hu-text-muted);
     }
     .policy-value {
-      font-weight: var(--sc-weight-medium);
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-xs);
+      font-weight: var(--hu-weight-medium);
+      font-family: var(--hu-font-mono);
+      font-size: var(--hu-text-xs);
     }
     .policy-value.enabled {
-      color: var(--sc-success);
+      color: var(--hu-success);
     }
     .policy-value.disabled {
-      color: var(--sc-text-muted);
+      color: var(--hu-text-muted);
     }
     .policy-value.warning {
-      color: var(--sc-warning);
+      color: var(--hu-warning);
     }
     .control-row {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
-      margin-top: var(--sc-space-md);
+      gap: var(--hu-space-sm);
+      margin-top: var(--hu-space-md);
     }
     .switch-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: var(--sc-space-sm) 0;
+      padding: var(--hu-space-sm) 0;
     }
     .domain-list {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--sc-space-xs);
-      margin-top: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
+      margin-top: var(--hu-space-xs);
     }
     .domain-tag {
-      font-family: var(--sc-font-mono);
-      font-size: var(--sc-text-xs);
-      padding: var(--sc-space-2xs) var(--sc-space-xs);
-      background: var(--sc-bg-elevated);
-      border-radius: var(--sc-radius-sm);
-      color: var(--sc-text-muted);
+      font-family: var(--hu-font-mono);
+      font-size: var(--hu-text-xs);
+      padding: var(--hu-space-2xs) var(--hu-space-xs);
+      background: var(--hu-bg-elevated);
+      border-radius: var(--hu-radius-sm);
+      color: var(--hu-text-muted);
     }
     .section-title {
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
-      margin: var(--sc-space-2xl) 0 var(--sc-space-sm);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
+      margin: var(--hu-space-2xl) 0 var(--hu-space-sm);
     }
     .checklist {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-xs);
+      gap: var(--hu-space-xs);
     }
     .check-item {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      gap: var(--hu-space-sm);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
     }
     .check-icon {
       flex-shrink: 0;
@@ -213,22 +213,22 @@ export class ScSecurityView extends GatewayAwareLitElement {
       height: 100%;
     }
     .check-icon.pass {
-      color: var(--sc-success);
+      color: var(--hu-success);
     }
     .check-icon.warn {
-      color: var(--sc-warning);
+      color: var(--hu-warning);
     }
     .pairing-info {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
-      margin-top: var(--sc-space-xs);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
+      margin-top: var(--hu-space-xs);
     }
-    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-lg */ {
       .grid {
         grid-template-columns: 1fr 1fr;
       }
     }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       .grid {
         grid-template-columns: 1fr;
       }
@@ -324,14 +324,14 @@ export class ScSecurityView extends GatewayAwareLitElement {
   }
 
   private _renderSkeleton() {
-    return html`<sc-skeleton variant="card" height="200px"></sc-skeleton>`;
+    return html`<hu-skeleton variant="card" height="200px"></hu-skeleton>`;
   }
 
   private _renderAutonomy() {
     const info = this.autonomyInfo;
     const variant = this.riskVariant;
     return html`
-      <sc-card>
+      <hu-card>
         <div class="card-inner">
           <div class="card-title">Autonomy Level</div>
           <div class="risk-indicator ${variant}">
@@ -339,15 +339,15 @@ export class ScSecurityView extends GatewayAwareLitElement {
           </div>
           <div class="description">${info.description}</div>
           <div class="control-row">
-            <sc-select
+            <hu-select
               label="Change level"
               .options=${AUTONOMY_OPTIONS}
               .value=${String(this.autonomyLevel)}
-              @sc-change=${this._onAutonomyChange}
-            ></sc-select>
+              @hu-change=${this._onAutonomyChange}
+            ></hu-select>
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
@@ -435,7 +435,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
   private _renderSandbox() {
     if (!this.config) return nothing;
     return html`
-      <sc-card>
+      <hu-card>
         <div class="card-inner">
           <div class="card-title">Sandbox</div>
           <div class="policy-row">
@@ -444,30 +444,30 @@ export class ScSecurityView extends GatewayAwareLitElement {
           </div>
           <div class="switch-row">
             <span class="policy-label">Enabled</span>
-            <sc-switch
+            <hu-switch
               checked=${this.sandboxEnabled}
               label="Enable sandbox"
-              @sc-change=${this._onSandboxToggle}
-            ></sc-switch>
+              @hu-change=${this._onSandboxToggle}
+            ></hu-switch>
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
   private _renderNetwork() {
     const proxy = this.config?.sandbox_config?.net_proxy;
     return html`
-      <sc-card>
+      <hu-card>
         <div class="card-inner">
           <div class="card-title">Network Proxy</div>
           <div class="switch-row">
             <span class="policy-label">Enabled</span>
-            <sc-switch
+            <hu-switch
               checked=${this.netProxyEnabled}
               label="Enable network proxy"
-              @sc-change=${this._onNetProxyToggle}
-            ></sc-switch>
+              @hu-change=${this._onNetProxyToggle}
+            ></hu-switch>
           </div>
           ${proxy?.enabled
             ? html`
@@ -507,7 +507,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
                 </div>
               `}
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
@@ -520,7 +520,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
         })
       : null;
     return html`
-      <sc-card>
+      <hu-card>
         <div class="card-inner">
           <div class="card-title">Pairing</div>
           <div class="policy-row">
@@ -536,16 +536,16 @@ export class ScSecurityView extends GatewayAwareLitElement {
               `
             : nothing}
           <div class="control-row">
-            <sc-button
+            <hu-button
               variant="secondary"
               size="sm"
               @click=${this._onUnpair}
               aria-label="Unpair device"
-              >Unpair</sc-button
+              >Unpair</hu-button
             >
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
@@ -578,7 +578,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
   private _renderDefaults() {
     return html`
       <div class="section-title">Security Defaults</div>
-      <sc-card>
+      <hu-card>
         <div class="card-inner">
           <div class="checklist">
             <div class="check-item">
@@ -607,18 +607,18 @@ export class ScSecurityView extends GatewayAwareLitElement {
             </div>
           </div>
         </div>
-      </sc-card>
+      </hu-card>
     `;
   }
 
   override render() {
     const hero = html`
-      <sc-page-hero role="region" aria-label="Security">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Security">
+        <hu-section-header
           heading="Security"
           description="Access control, pairing, and security policies"
-        ></sc-section-header>
-      </sc-page-hero>
+        ></hu-section-header>
+      </hu-page-hero>
     `;
 
     if (this.loading) {
@@ -627,25 +627,25 @@ export class ScSecurityView extends GatewayAwareLitElement {
 
     if (this.error) {
       return html`${hero}
-        <sc-empty-state
+        <hu-empty-state
           .icon=${icons.warning}
           heading="Error"
           description=${this.error}
-        ></sc-empty-state>`;
+        ></hu-empty-state>`;
     }
 
     if (!this.config) {
       return html`${hero}
-        <sc-empty-state
+        <hu-empty-state
           heading="Security Policy"
-          description="Connect to a SeaClaw gateway to view security settings."
-        ></sc-empty-state>`;
+          description="Connect to a Human gateway to view security settings."
+        ></hu-empty-state>`;
     }
 
     return html`
       ${hero}
-      <sc-stats-row>
-        <sc-stat-card
+      <hu-stats-row>
+        <hu-stat-card
           .value=${this.securityScore}
           label="Security Score"
           accent=${this.securityScore >= 75
@@ -653,27 +653,27 @@ export class ScSecurityView extends GatewayAwareLitElement {
             : this.securityScore >= 50
               ? "secondary"
               : "error"}
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.pairingEnabled ? 1 : 0}
           label="Pairing"
           accent=${this.pairingEnabled ? "primary" : "error"}
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.httpsOnly ? 1 : 0}
           label="HTTPS Only"
           accent=${this.httpsOnly ? "primary" : "error"}
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.sandboxEnabled ? 1 : 0}
           label="Sandbox"
           accent=${this.sandboxEnabled ? "primary" : "error"}
-          style="--sc-stagger-delay: 150ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 150ms"
+        ></hu-stat-card>
+      </hu-stats-row>
       <div class="grid">
         ${this._renderAutonomy()} ${this._renderSandbox()} ${this._renderNetwork()}
         ${this._renderPairing()}

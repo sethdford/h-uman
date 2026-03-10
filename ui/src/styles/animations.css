@@ -1,4 +1,4 @@
-/* ─── SeaClaw Micro-Interaction Library ─────────────────────────────
+/* ─── Human Micro-Interaction Library ─────────────────────────────
    Import into Lit components via:
      import animCSS from "../styles/animations.css?inline";
      static styles = [css`${unsafeCSS(animCSS)}`, css`...`];
@@ -6,7 +6,7 @@
 ──────────────────────────────────────────────────────────────────── */
 
 /* Fade */
-@keyframes sc-fade-in {
+@keyframes hu-fade-in {
   from {
     opacity: 0;
   }
@@ -14,7 +14,7 @@
     opacity: 1;
   }
 }
-@keyframes sc-fade-out {
+@keyframes hu-fade-out {
   from {
     opacity: 1;
   }
@@ -24,7 +24,7 @@
 }
 
 /* Slide */
-@keyframes sc-slide-up {
+@keyframes hu-slide-up {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -34,7 +34,7 @@
     transform: translateY(0);
   }
 }
-@keyframes sc-slide-down {
+@keyframes hu-slide-down {
   from {
     opacity: 0;
     transform: translateY(-8px);
@@ -46,7 +46,7 @@
 }
 
 /* Scale */
-@keyframes sc-scale-in {
+@keyframes hu-scale-in {
   from {
     opacity: 0;
     transform: scale(0.95);
@@ -56,7 +56,7 @@
     transform: scale(1);
   }
 }
-@keyframes sc-scale-out {
+@keyframes hu-scale-out {
   from {
     opacity: 1;
     transform: scale(1);
@@ -68,7 +68,7 @@
 }
 
 /* Utility */
-@keyframes sc-shimmer {
+@keyframes hu-shimmer {
   0% {
     background-position: -200% 0;
   }
@@ -76,7 +76,7 @@
     background-position: 200% 0;
   }
 }
-@keyframes sc-pulse {
+@keyframes hu-pulse {
   0%,
   100% {
     opacity: 1;
@@ -85,7 +85,7 @@
     opacity: 0.4;
   }
 }
-@keyframes sc-bounce-dot {
+@keyframes hu-bounce-dot {
   0%,
   80%,
   100% {
@@ -97,46 +97,46 @@
 }
 
 /* Stagger delays */
-.sc-delay-1 {
-  animation-delay: var(--sc-duration-instant);
+.hu-delay-1 {
+  animation-delay: var(--hu-duration-instant);
 }
-.sc-delay-2 {
-  animation-delay: var(--sc-duration-fast);
+.hu-delay-2 {
+  animation-delay: var(--hu-duration-fast);
 }
-.sc-delay-3 {
-  animation-delay: var(--sc-duration-normal);
+.hu-delay-3 {
+  animation-delay: var(--hu-duration-normal);
 }
-.sc-delay-4 {
-  animation-delay: var(--sc-duration-normal);
+.hu-delay-4 {
+  animation-delay: var(--hu-duration-normal);
 }
-.sc-delay-5 {
-  animation-delay: var(--sc-duration-slow);
+.hu-delay-5 {
+  animation-delay: var(--hu-duration-slow);
 }
 
 /* Card hover micro-interaction */
-.sc-card-hover {
+.hu-card-hover {
   transition:
-    transform var(--sc-duration-fast) var(--sc-ease-out),
-    box-shadow var(--sc-duration-fast) var(--sc-ease-out);
+    transform var(--hu-duration-fast) var(--hu-ease-out),
+    box-shadow var(--hu-duration-fast) var(--hu-ease-out);
 }
-.sc-card-hover:hover {
+.hu-card-hover:hover {
   transform: translateY(-1px);
-  box-shadow: var(--sc-shadow-sm);
+  box-shadow: var(--hu-shadow-sm);
 }
 
 /* Button press micro-interaction */
-.sc-btn-press:active {
+.hu-btn-press:active {
   transform: scale(0.98);
 }
 
 /* Input focus glow */
-.sc-input-glow:focus {
+.hu-input-glow:focus {
   outline: none;
-  border-color: var(--sc-accent);
-  box-shadow: 0 0 0 3px var(--sc-accent-subtle);
+  border-color: var(--hu-accent);
+  box-shadow: 0 0 0 3px var(--hu-accent-subtle);
 }
 
 /* Entrance animation for lists */
-.sc-enter {
-  animation: sc-slide-up var(--sc-duration-normal) var(--sc-ease-out) both;
+.hu-enter {
+  animation: hu-slide-up var(--hu-duration-normal) var(--hu-ease-out) both;
 }

@@ -13,7 +13,7 @@ npm run docs           # generate token reference docs
 
 - Edit `.tokens.json` files only — never hand-edit generated outputs
 - Token format: `$value`, `$type`, `$description` (W3C standard)
-- Token names map to `--sc-*` CSS custom properties
+- Token names map to `--hu-*` CSS custom properties
 - After editing, run `npm run build` to regenerate: CSS, Kotlin, Swift, C, Dart
 - `check-drift.sh` verifies generated outputs match source — runs in pre-commit and CI
 
@@ -35,6 +35,6 @@ npm run docs           # generate token reference docs
 
 - `ui/src/styles/_tokens.css` — CSS custom properties
 - `website/src/styles/_tokens.css` — CSS (website)
-- `apps/shared/SeaClawKit/Sources/SeaClawChatUI/DesignTokens.swift` — Swift constants
-- `apps/android/app/src/main/java/ai/seaclaw/app/ui/DesignTokens.kt` — Kotlin constants
-- `include/seaclaw/design_tokens.h` — C macros
+- `apps/shared/HumanKit/Sources/HumanChatUI/DesignTokens.swift` — Swift constants
+- `apps/android/app/src/main/java/ai/human/app/ui/DesignTokens.kt` — Kotlin constants
+- `include/human/design_tokens.h` — C macros

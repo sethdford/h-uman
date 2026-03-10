@@ -1,9 +1,9 @@
 #include "test_framework.h"
 
-int sc__total = 0;
-int sc__passed = 0;
-int sc__failed = 0;
-jmp_buf sc__jmp;
+int hu__total = 0;
+int hu__passed = 0;
+int hu__failed = 0;
+jmp_buf hu__jmp;
 
 void run_allocator_tests(void);
 void run_agent_modules_tests(void);
@@ -47,7 +47,7 @@ void run_net_security_tests(void);
 void run_path_security_tests(void);
 void run_process_util_tests(void);
 void run_prompt_tests(void);
-#ifdef SC_ENABLE_PERSONA
+#ifdef HU_ENABLE_PERSONA
 void run_persona_tests(void);
 void run_circadian_tests(void);
 void run_relationship_tests(void);
@@ -132,12 +132,12 @@ void run_mood_tests(void);
 void run_bth_e2e_tests(void);
 void run_bth_metrics_tests(void);
 void run_memory_features_tests(void);
-#ifdef SC_ENABLE_CURL
+#ifdef HU_ENABLE_CURL
 void run_paperclip_tests(void);
 #endif
 
 int main(void) {
-    printf("SeaClaw Test Suite\n");
+    printf("Human Test Suite\n");
     fflush(stdout);
     printf("==================\n");
 
@@ -183,7 +183,7 @@ int main(void) {
     run_path_security_tests();
     run_process_util_tests();
     run_prompt_tests();
-#ifdef SC_ENABLE_PERSONA
+#ifdef HU_ENABLE_PERSONA
     run_persona_tests();
     run_circadian_tests();
     run_relationship_tests();
@@ -268,10 +268,10 @@ int main(void) {
     run_bth_e2e_tests();
     run_bth_metrics_tests();
     run_memory_features_tests();
-#ifdef SC_ENABLE_CURL
+#ifdef HU_ENABLE_CURL
     run_paperclip_tests();
 #endif
 
-    SC_TEST_REPORT();
-    SC_TEST_EXIT();
+    HU_TEST_REPORT();
+    HU_TEST_EXIT();
 }

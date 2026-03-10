@@ -1,9 +1,9 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,193 +29,193 @@ typedef struct {
     char _unused;
 } crm_ctx_t;
 
-static sc_error_t crm_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                              sc_tool_result_t *out) {
+static hu_error_t crm_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                              hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (strcmp(action, "contacts") == 0) {
-        *out = sc_tool_result_ok(
+        *out = hu_tool_result_ok(
             "{\"contacts\":[{\"id\":\"101\",\"name\":\"Alice Smith\",\"email\":\"alice@acme.com\","
             "\"company\":\"Acme Corp\"},{\"id\":\"102\",\"name\":\"Bob Jones\","
             "\"email\":\"bob@widgets.io\",\"company\":\"Widgets Inc\"}]}",
             199);
     } else if (strcmp(action, "contact_create") == 0) {
-        const char *name = sc_json_get_string(args, "name");
-        char *msg = sc_sprintf(alloc, "{\"created\":true,\"id\":\"103\",\"name\":\"%s\"}",
+        const char *name = hu_json_get_string(args, "name");
+        char *msg = hu_sprintf(alloc, "{\"created\":true,\"id\":\"103\",\"name\":\"%s\"}",
                                name ? name : "Unknown");
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else if (strcmp(action, "deals") == 0) {
-        *out = sc_tool_result_ok(
+        *out = hu_tool_result_ok(
             "{\"deals\":[{\"id\":\"d1\",\"name\":\"Enterprise License\",\"amount\":50000,"
             "\"stage\":\"negotiation\"},{\"id\":\"d2\",\"name\":\"Starter Plan\","
             "\"amount\":5000,\"stage\":\"closed_won\"}]}",
             182);
     } else if (strcmp(action, "deal_create") == 0) {
-        const char *deal_name = sc_json_get_string(args, "deal_name");
-        char *msg = sc_sprintf(alloc, "{\"created\":true,\"id\":\"d3\",\"name\":\"%s\"}",
+        const char *deal_name = hu_json_get_string(args, "deal_name");
+        char *msg = hu_sprintf(alloc, "{\"created\":true,\"id\":\"d3\",\"name\":\"%s\"}",
                                deal_name ? deal_name : "New Deal");
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else if (strcmp(action, "deal_update") == 0) {
-        *out = sc_tool_result_ok("{\"updated\":true}", 17);
+        *out = hu_tool_result_ok("{\"updated\":true}", 17);
     } else if (strcmp(action, "notes") == 0) {
-        *out = sc_tool_result_ok("{\"added\":true}", 15);
+        *out = hu_tool_result_ok("{\"added\":true}", 15);
     } else {
-        *out = sc_tool_result_fail("unknown action", 14);
+        *out = hu_tool_result_fail("unknown action", 14);
     }
-    return SC_OK;
+    return HU_OK;
 #else
-    const char *api_key = sc_json_get_string(args, "api_key");
+    const char *api_key = hu_json_get_string(args, "api_key");
     if (!api_key || strlen(api_key) == 0) {
-        *out = sc_tool_result_fail("missing api_key for HubSpot", 27);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing api_key for HubSpot", 27);
+        return HU_OK;
     }
     char auth[256];
     snprintf(auth, sizeof(auth), "Bearer %s", api_key);
 
     if (strcmp(action, "contacts") == 0) {
-        sc_http_response_t resp = {0};
-        sc_error_t err =
-            sc_http_get(alloc, HUBSPOT_API "/crm/v3/objects/contacts?limit=20", auth, &resp);
-        if (err != SC_OK || resp.status_code != 200) {
+        hu_http_response_t resp = {0};
+        hu_error_t err =
+            hu_http_get(alloc, HUBSPOT_API "/crm/v3/objects/contacts?limit=20", auth, &resp);
+        if (err != HU_OK || resp.status_code != 200) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to list contacts", 23);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to list contacts", 23);
+            return HU_OK;
         }
-        char *body = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(body, body ? strlen(body) : 0);
+        char *body = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(body, body ? strlen(body) : 0);
     } else if (strcmp(action, "deals") == 0) {
-        sc_http_response_t resp = {0};
-        sc_error_t err =
-            sc_http_get(alloc, HUBSPOT_API "/crm/v3/objects/deals?limit=20", auth, &resp);
-        if (err != SC_OK || resp.status_code != 200) {
+        hu_http_response_t resp = {0};
+        hu_error_t err =
+            hu_http_get(alloc, HUBSPOT_API "/crm/v3/objects/deals?limit=20", auth, &resp);
+        if (err != HU_OK || resp.status_code != 200) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to list deals", 20);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to list deals", 20);
+            return HU_OK;
         }
-        char *body = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(body, body ? strlen(body) : 0);
+        char *body = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(body, body ? strlen(body) : 0);
     } else if (strcmp(action, "contact_create") == 0) {
-        const char *email_val = sc_json_get_string(args, "email");
-        const char *name_val = sc_json_get_string(args, "name");
-        const char *company = sc_json_get_string(args, "company");
-        const char *phone = sc_json_get_string(args, "phone");
+        const char *email_val = hu_json_get_string(args, "email");
+        const char *name_val = hu_json_get_string(args, "name");
+        const char *company = hu_json_get_string(args, "company");
+        const char *phone = hu_json_get_string(args, "phone");
         char *body =
-            sc_sprintf(alloc, "{\"properties\":{%s%s%s%s%s%s%s%s%s%s%s%s%s%s}}",
+            hu_sprintf(alloc, "{\"properties\":{%s%s%s%s%s%s%s%s%s%s%s%s%s%s}}",
                        email_val ? "\"email\":\"" : "", email_val ? email_val : "",
                        email_val ? "\"" : "", (email_val && name_val) ? "," : "",
                        name_val ? "\"firstname\":\"" : "", name_val ? name_val : "",
                        name_val ? "\"" : "", ((name_val || email_val) && company) ? "," : "",
                        company ? "\"company\":\"" : "", company ? company : "", company ? "\"" : "",
                        phone ? ",\"phone\":\"" : "", phone ? phone : "", phone ? "\"" : "");
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, HUBSPOT_API "/crm/v3/objects/contacts", auth,
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, HUBSPOT_API "/crm/v3/objects/contacts", auth,
                                            body, body ? strlen(body) : 0, &resp);
         if (body)
             alloc->free(alloc->ctx, body, strlen(body) + 1);
-        if (err != SC_OK) {
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to create contact", 24);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to create contact", 24);
+            return HU_OK;
         }
-        char *rbody = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
+        char *rbody = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
     } else if (strcmp(action, "deal_create") == 0) {
-        const char *deal_name = sc_json_get_string(args, "deal_name");
-        double amount = sc_json_get_number(args, "amount", 0);
-        const char *stage = sc_json_get_string(args, "stage");
+        const char *deal_name = hu_json_get_string(args, "deal_name");
+        double amount = hu_json_get_number(args, "amount", 0);
+        const char *stage = hu_json_get_string(args, "stage");
         char *body =
-            sc_sprintf(alloc, "{\"properties\":{\"dealname\":\"%s\",\"amount\":\"%.2f\"%s%s%s}}",
+            hu_sprintf(alloc, "{\"properties\":{\"dealname\":\"%s\",\"amount\":\"%.2f\"%s%s%s}}",
                        deal_name ? deal_name : "New Deal", amount, stage ? ",\"dealstage\":\"" : "",
                        stage ? stage : "", stage ? "\"" : "");
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, HUBSPOT_API "/crm/v3/objects/deals", auth, body,
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, HUBSPOT_API "/crm/v3/objects/deals", auth, body,
                                            body ? strlen(body) : 0, &resp);
         if (body)
             alloc->free(alloc->ctx, body, strlen(body) + 1);
-        if (err != SC_OK) {
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to create deal", 21);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to create deal", 21);
+            return HU_OK;
         }
-        char *rbody = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
+        char *rbody = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
     } else if (strcmp(action, "deal_update") == 0) {
-        const char *deal_id = sc_json_get_string(args, "deal_id");
+        const char *deal_id = hu_json_get_string(args, "deal_id");
         if (!deal_id) {
-            *out = sc_tool_result_fail("missing deal_id", 15);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing deal_id", 15);
+            return HU_OK;
         }
-        const char *stage = sc_json_get_string(args, "stage");
-        double amount = sc_json_get_number(args, "amount", -1);
+        const char *stage = hu_json_get_string(args, "stage");
+        double amount = hu_json_get_number(args, "amount", -1);
         char *body =
-            sc_sprintf(alloc, "{\"properties\":{%s%s%s%s}}", stage ? "\"dealstage\":\"" : "",
+            hu_sprintf(alloc, "{\"properties\":{%s%s%s%s}}", stage ? "\"dealstage\":\"" : "",
                        stage ? stage : "", stage ? "\"" : "", amount >= 0 ? ",\"amount\":\"" : "");
         char url[256];
         snprintf(url, sizeof(url), HUBSPOT_API "/crm/v3/objects/deals/%s", deal_id);
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, url, auth, body, body ? strlen(body) : 0, &resp);
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, url, auth, body, body ? strlen(body) : 0, &resp);
         if (body)
             alloc->free(alloc->ctx, body, strlen(body) + 1);
-        if (err != SC_OK) {
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to update deal", 21);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to update deal", 21);
+            return HU_OK;
         }
         if (resp.owned && resp.body)
-            sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok("{\"updated\":true}", 17);
+            hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok("{\"updated\":true}", 17);
     } else if (strcmp(action, "notes") == 0) {
-        const char *note = sc_json_get_string(args, "note");
-        const char *contact_id = sc_json_get_string(args, "contact_id");
+        const char *note = hu_json_get_string(args, "note");
+        const char *contact_id = hu_json_get_string(args, "contact_id");
         if (!note) {
-            *out = sc_tool_result_fail("missing note", 12);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing note", 12);
+            return HU_OK;
         }
-        char *body = sc_sprintf(
+        char *body = hu_sprintf(
             alloc, "{\"properties\":{\"hs_note_body\":\"%s\"}%s%s%s}", note,
             contact_id ? ",\"associations\":[{\"to\":{\"id\":\"" : "", contact_id ? contact_id : "",
             contact_id ? "\"},\"types\":[{\"associationCategory\":\"HUBSPOT_DEFINED\","
                          "\"associationTypeId\":202}]}]"
                        : "");
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, HUBSPOT_API "/crm/v3/objects/notes", auth, body,
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, HUBSPOT_API "/crm/v3/objects/notes", auth, body,
                                            body ? strlen(body) : 0, &resp);
         if (body)
             alloc->free(alloc->ctx, body, strlen(body) + 1);
-        if (err != SC_OK) {
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to add note", 18);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to add note", 18);
+            return HU_OK;
         }
-        char *rbody = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
+        char *rbody = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
     } else {
-        *out = sc_tool_result_fail("unknown action", 14);
+        *out = hu_tool_result_fail("unknown action", 14);
     }
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -231,12 +231,12 @@ static const char *crm_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void crm_deinit(void *ctx, sc_allocator_t *alloc) {
+static void crm_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx && alloc)
         alloc->free(alloc->ctx, ctx, sizeof(crm_ctx_t));
 }
 
-static const sc_tool_vtable_t crm_vtable = {
+static const hu_tool_vtable_t crm_vtable = {
     .execute = crm_execute,
     .name = crm_name,
     .description = crm_desc,
@@ -244,14 +244,14 @@ static const sc_tool_vtable_t crm_vtable = {
     .deinit = crm_deinit,
 };
 
-sc_error_t sc_crm_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_crm_create(hu_allocator_t *alloc, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     void *ctx = alloc->alloc(alloc->ctx, sizeof(crm_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(crm_ctx_t));
     out->ctx = ctx;
     out->vtable = &crm_vtable;
-    return SC_OK;
+    return HU_OK;
 }

@@ -2,19 +2,19 @@ import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import type { DataTableColumnV2 } from "../components/sc-data-table-v2.js";
-import type { SegmentOption } from "../components/sc-segmented-control.js";
-import "../components/sc-badge.js";
-import "../components/sc-data-table-v2.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-sheet.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-segmented-control.js";
-import "../components/sc-button.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
+import type { DataTableColumnV2 } from "../components/hu-data-table-v2.js";
+import type { SegmentOption } from "../components/hu-segmented-control.js";
+import "../components/hu-badge.js";
+import "../components/hu-data-table-v2.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-sheet.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-segmented-control.js";
+import "../components/hu-button.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -42,7 +42,7 @@ interface ChannelStatus {
 
 type FilterValue = "all" | "configured" | "unconfigured";
 
-@customElement("sc-channels-view")
+@customElement("hu-channels-view")
 export class ScChannelsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
   static override styles = css`
@@ -52,33 +52,33 @@ export class ScChannelsView extends GatewayAwareLitElement {
       max-width: 75rem;
     }
     .filters {
-      margin-bottom: var(--sc-space-lg);
+      margin-bottom: var(--hu-space-lg);
     }
     .table-section {
-      margin-top: var(--sc-space-xl);
+      margin-top: var(--hu-space-xl);
     }
     .sheet-detail-row {
       display: flex;
       justify-content: space-between;
-      padding: var(--sc-space-sm) 0;
-      border-bottom: 1px solid var(--sc-border-subtle);
+      padding: var(--hu-space-sm) 0;
+      border-bottom: 1px solid var(--hu-border-subtle);
     }
     .sheet-detail-row:last-child {
       border-bottom: none;
     }
     .sheet-detail-label {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
     }
     .sheet-detail-value {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text);
     }
     .sheet-title {
-      font-weight: var(--sc-weight-semibold);
-      font-size: var(--sc-text-lg);
-      color: var(--sc-text);
-      margin-bottom: var(--sc-space-lg);
+      font-weight: var(--hu-weight-semibold);
+      font-size: var(--hu-text-lg);
+      color: var(--hu-text);
+      margin-bottom: var(--hu-space-lg);
     }
     @media (prefers-reduced-motion: reduce) {
       * {
@@ -167,7 +167,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
       render: (_v, row) => {
         const variant = row.statusVariant as "success" | "error" | "neutral";
         const label = String(row.status ?? "");
-        return html`<sc-badge variant=${variant}>${label}</sc-badge>`;
+        return html`<hu-badge variant=${variant}>${label}</hu-badge>`;
       },
     },
     { key: "health", label: "Health" },
@@ -189,32 +189,32 @@ export class ScChannelsView extends GatewayAwareLitElement {
 
   private _renderSkeleton(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Channels overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Channels overview">
+        <hu-section-header
           heading="Channels"
           description="Messaging integrations and their connection status"
-        ></sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
+        ></hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
       <div class="table-section">
-        <sc-skeleton variant="card" height="200px"></sc-skeleton>
+        <hu-skeleton variant="card" height="200px"></hu-skeleton>
       </div>
     `;
   }
 
   private _renderContent(): TemplateResult {
     return html`
-      <sc-page-hero role="region" aria-label="Channels overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Channels overview">
+        <hu-section-header
           heading="Channels"
           description="Messaging integrations and their connection status"
         >
-          <sc-button
+          <hu-button
             variant="ghost"
             size="sm"
             ?disabled=${this._refreshing}
@@ -222,68 +222,68 @@ export class ScChannelsView extends GatewayAwareLitElement {
             aria-label="Refresh channels"
           >
             ${icons.refresh} ${this._refreshing ? "Refreshing..." : "Refresh"}
-          </sc-button>
-        </sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-stat-card
+          </hu-button>
+        </hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-stat-card
           .value=${this.channels.length}
           label="Total Channels"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.channels.filter((ch) => ch.configured === true).length}
           label="Configured"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.channels.filter((ch) => ch.healthy === true).length}
           label="Healthy"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.messagesToday}
           label="Messages Today"
-          style="--sc-stagger-delay: 150ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 150ms"
+        ></hu-stat-card>
+      </hu-stats-row>
       ${this.error
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.warning}
             heading="Error"
             description=${this.error}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : nothing}
       <div class="filters" role="group" aria-label="Filter channels by status">
-        <sc-segmented-control
+        <hu-segmented-control
           .options=${this.filterOptions}
           .value=${this.filter}
-          @sc-change=${(e: CustomEvent<{ value: string }>) => {
+          @hu-change=${(e: CustomEvent<{ value: string }>) => {
             this.filter = e.detail.value as FilterValue;
           }}
-        ></sc-segmented-control>
+        ></hu-segmented-control>
       </div>
       <div class="table-section" role="region" aria-label="Channels table">
         ${this.filteredChannels.length === 0
           ? html`
-              <sc-empty-state
+              <hu-empty-state
                 .icon=${icons.radio}
                 heading=${this.filter !== "all" ? "No matching channels" : "No channels configured"}
                 description=${this.filter !== "all"
                   ? "Try a different filter."
                   : "Configure messaging channels to receive and send messages."}
-              ></sc-empty-state>
+              ></hu-empty-state>
             `
           : html`
-              <sc-data-table-v2
+              <hu-data-table-v2
                 .columns=${this.columns}
                 .rows=${this.tableRows}
                 searchable
-                @sc-row-click=${this._onRowClick}
-              ></sc-data-table-v2>
+                @hu-row-click=${this._onRowClick}
+              ></hu-data-table-v2>
             `}
       </div>
-      <sc-sheet ?open=${this._sheetChannel != null} @close=${this._onSheetClose}>
+      <hu-sheet ?open=${this._sheetChannel != null} @close=${this._onSheetClose}>
         ${this._sheetChannel
           ? html`
               <div class="sheet-title">
@@ -316,7 +316,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
                 ? html`
                     <div class="sheet-detail-row">
                       <span class="sheet-detail-label">Error</span>
-                      <span class="sheet-detail-value" style="color: var(--sc-error)"
+                      <span class="sheet-detail-value" style="color: var(--hu-error)"
                         >${this._sheetChannel.error}</span
                       >
                     </div>
@@ -324,7 +324,7 @@ export class ScChannelsView extends GatewayAwareLitElement {
                 : nothing}
             `
           : nothing}
-      </sc-sheet>
+      </hu-sheet>
     `;
   }
 

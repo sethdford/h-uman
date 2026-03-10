@@ -1,9 +1,9 @@
-#include "seaclaw/channels/voice_channel.h"
+#include "human/channels/voice_channel.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef SC_HAS_SONATA
+#ifdef HU_HAS_SONATA
 /* FFI declarations for Sonata Rust pipeline.
  * Rust FFI uses *const u8 / *mut u8 for byte buffers, which maps to uint8_t
  * in C (not char, which may be signed on some platforms). */
@@ -17,38 +17,38 @@ extern void sonata_pipeline_deinit(void);
 
 #define VOICE_MAX_SAMPLES (24000u * 10u) /* 10s at 24kHz */
 
-typedef struct sc_voice_ctx {
-    sc_allocator_t *alloc;
-    sc_channel_voice_config_t config;
+typedef struct hu_voice_ctx {
+    hu_allocator_t *alloc;
+    hu_channel_voice_config_t config;
     bool initialized;
     bool running;
-} sc_voice_ctx_t;
+} hu_voice_ctx_t;
 
-static sc_error_t voice_start(void *ctx) {
-    sc_voice_ctx_t *v = (sc_voice_ctx_t *)ctx;
+static hu_error_t voice_start(void *ctx) {
+    hu_voice_ctx_t *v = (hu_voice_ctx_t *)ctx;
     if (!v)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-#ifdef SC_HAS_SONATA
+#ifdef HU_HAS_SONATA
     if (!v->initialized) {
         int32_t err = sonata_pipeline_init(NULL, 0);
         if (err != 0)
-            return SC_ERR_CHANNEL_START;
+            return HU_ERR_CHANNEL_START;
         v->initialized = true;
     }
 #endif
 
     v->running = true;
-    return SC_OK;
+    return HU_OK;
 }
 
 static void voice_stop(void *ctx) {
-    sc_voice_ctx_t *v = (sc_voice_ctx_t *)ctx;
+    hu_voice_ctx_t *v = (hu_voice_ctx_t *)ctx;
     if (!v)
         return;
     v->running = false;
 
-#ifdef SC_HAS_SONATA
+#ifdef HU_HAS_SONATA
     if (v->initialized) {
         sonata_pipeline_deinit();
         v->initialized = false;
@@ -56,11 +56,11 @@ static void voice_stop(void *ctx) {
 #endif
 }
 
-static sc_error_t voice_send(void *ctx, const char *target, size_t target_len, const char *message,
+static hu_error_t voice_send(void *ctx, const char *target, size_t target_len, const char *message,
                              size_t message_len, const char *const *media, size_t media_count) {
-    sc_voice_ctx_t *v = (sc_voice_ctx_t *)ctx;
+    hu_voice_ctx_t *v = (hu_voice_ctx_t *)ctx;
     if (!v || !message)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     (void)target;
     (void)target_len;
@@ -68,15 +68,15 @@ static sc_error_t voice_send(void *ctx, const char *target, size_t target_len, c
     (void)media_count;
     (void)message_len;
 
-#ifdef SC_HAS_SONATA
+#ifdef HU_HAS_SONATA
     const size_t buf_samples = VOICE_MAX_SAMPLES;
     const size_t buf_bytes = buf_samples * sizeof(float);
     float *audio_buf = (float *)v->alloc->alloc(v->alloc->ctx, buf_bytes);
     if (!audio_buf) {
-#if !SC_IS_TEST
+#if !HU_IS_TEST
         fprintf(stderr, "voice_channel: failed to allocate audio buffer (%zu bytes)\n", buf_bytes);
 #endif
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
     size_t audio_len = buf_samples;
@@ -85,11 +85,11 @@ static sc_error_t voice_send(void *ctx, const char *target, size_t target_len, c
     int32_t err = sonata_tts((const uint8_t *)message, message_len,
                              (const uint8_t *)v->config.speaker_id, exag, audio_buf, &audio_len);
     if (err != 0) {
-#if !SC_IS_TEST
+#if !HU_IS_TEST
         fprintf(stderr, "voice_channel: sonata_tts failed (err=%d)\n", err);
 #endif
         v->alloc->free(v->alloc->ctx, audio_buf, buf_bytes);
-        return SC_ERR_CHANNEL_SEND;
+        return HU_ERR_CHANNEL_SEND;
     }
 
     if (v->config.on_audio_ready) {
@@ -99,7 +99,7 @@ static sc_error_t voice_send(void *ctx, const char *target, size_t target_len, c
     v->alloc->free(v->alloc->ctx, audio_buf, buf_bytes);
 #endif
 
-    return SC_OK;
+    return HU_OK;
 }
 
 static const char *voice_name(void *ctx) {
@@ -108,11 +108,11 @@ static const char *voice_name(void *ctx) {
 }
 
 static bool voice_health_check(void *ctx) {
-    sc_voice_ctx_t *v = (sc_voice_ctx_t *)ctx;
+    hu_voice_ctx_t *v = (hu_voice_ctx_t *)ctx;
     return v && v->running;
 }
 
-static const sc_channel_vtable_t voice_vtable = {
+static const hu_channel_vtable_t voice_vtable = {
     .start = voice_start,
     .stop = voice_stop,
     .send = voice_send,
@@ -123,14 +123,14 @@ static const sc_channel_vtable_t voice_vtable = {
     .stop_typing = NULL,
 };
 
-sc_error_t sc_channel_voice_create(sc_allocator_t *alloc, const sc_channel_voice_config_t *config,
-                                   sc_channel_t *out) {
+hu_error_t hu_channel_voice_create(hu_allocator_t *alloc, const hu_channel_voice_config_t *config,
+                                   hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
-    sc_voice_ctx_t *v = (sc_voice_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*v));
+    hu_voice_ctx_t *v = (hu_voice_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*v));
     if (!v)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(v, 0, sizeof(*v));
 
     v->alloc = alloc;
@@ -145,13 +145,13 @@ sc_error_t sc_channel_voice_create(sc_allocator_t *alloc, const sc_channel_voice
 
     out->ctx = v;
     out->vtable = &voice_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_channel_voice_destroy(sc_channel_t *ch) {
+void hu_channel_voice_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_voice_ctx_t *v = (sc_voice_ctx_t *)ch->ctx;
-        sc_allocator_t *a = v->alloc;
+        hu_voice_ctx_t *v = (hu_voice_ctx_t *)ch->ctx;
+        hu_allocator_t *a = v->alloc;
         if (v->running)
             voice_stop(v);
         a->free(a->ctx, v, sizeof(*v));

@@ -1,5 +1,5 @@
-#include "seaclaw/context/event_extract.h"
-#include "seaclaw/core/string.h"
+#include "human/context/event_extract.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdbool.h>
 #include <string.h>
@@ -35,9 +35,9 @@ typedef struct {
     const char *pattern;
     size_t pattern_len;
     double confidence;
-} sc_temporal_pattern_t;
+} hu_temporal_pattern_t;
 
-static const sc_temporal_pattern_t TEMPORAL_PATTERNS[] = {
+static const hu_temporal_pattern_t TEMPORAL_PATTERNS[] = {
     /* Relative - high specificity */
     {"tomorrow", 8, 0.85},
     {"today", 5, 0.85},
@@ -391,10 +391,10 @@ static void extract_event_before(const char *text, size_t text_len, size_t tempo
     }
 }
 
-static void add_event(sc_allocator_t *alloc, sc_event_extract_result_t *out, const char *desc,
+static void add_event(hu_allocator_t *alloc, hu_event_extract_result_t *out, const char *desc,
                       size_t desc_len, const char *temporal, size_t temporal_len,
                       double confidence) {
-    if (out->event_count >= SC_EVENT_MAX_EVENTS)
+    if (out->event_count >= HU_EVENT_MAX_EVENTS)
         return;
     if (desc_len == 0 && temporal_len == 0)
         return;
@@ -409,10 +409,10 @@ static void add_event(sc_allocator_t *alloc, sc_event_extract_result_t *out, con
         }
     }
 
-    sc_extracted_event_t *ev = &out->events[out->event_count];
-    ev->description = (desc_len > 0) ? sc_strndup(alloc, desc, desc_len) : NULL;
+    hu_extracted_event_t *ev = &out->events[out->event_count];
+    ev->description = (desc_len > 0) ? hu_strndup(alloc, desc, desc_len) : NULL;
     ev->description_len = ev->description ? desc_len : 0;
-    ev->temporal_ref = (temporal_len > 0) ? sc_strndup(alloc, temporal, temporal_len) : NULL;
+    ev->temporal_ref = (temporal_len > 0) ? hu_strndup(alloc, temporal, temporal_len) : NULL;
     ev->temporal_ref_len = ev->temporal_ref ? temporal_len : 0;
     ev->confidence = confidence;
 
@@ -426,22 +426,22 @@ static void add_event(sc_allocator_t *alloc, sc_event_extract_result_t *out, con
     }
 }
 
-sc_error_t sc_event_extract(sc_allocator_t *alloc, const char *text, size_t text_len,
-                            sc_event_extract_result_t *out) {
+hu_error_t hu_event_extract(hu_allocator_t *alloc, const char *text, size_t text_len,
+                            hu_event_extract_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     if (!text) {
         if (text_len > 0)
-            return SC_ERR_INVALID_ARGUMENT;
-        return SC_OK;
+            return HU_ERR_INVALID_ARGUMENT;
+        return HU_OK;
     }
 
     if (text_len == 0)
-        return SC_OK;
+        return HU_OK;
 
-    for (size_t i = 0; i < text_len && out->event_count < SC_EVENT_MAX_EVENTS; i++) {
+    for (size_t i = 0; i < text_len && out->event_count < HU_EVENT_MAX_EVENTS; i++) {
         while (i < text_len && (unsigned char)text[i] <= 32)
             i++;
         if (i >= text_len)
@@ -472,7 +472,7 @@ sc_error_t sc_event_extract(sc_allocator_t *alloc, const char *text, size_t text
 
         if (!found) {
             for (size_t p = 0; p < TEMPORAL_PATTERN_COUNT; p++) {
-                const sc_temporal_pattern_t *pat = &TEMPORAL_PATTERNS[p];
+                const hu_temporal_pattern_t *pat = &TEMPORAL_PATTERNS[p];
                 if (text_len - i >= pat->pattern_len &&
                     prefix_match_ci(text + i, text_len - i, pat->pattern, pat->pattern_len)) {
                     if (pat->pattern_len < text_len - i &&
@@ -502,10 +502,10 @@ sc_error_t sc_event_extract(sc_allocator_t *alloc, const char *text, size_t text
         i = temporal_start + temporal_len - 1;
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_event_extract_result_deinit(sc_event_extract_result_t *result, sc_allocator_t *alloc) {
+void hu_event_extract_result_deinit(hu_event_extract_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
     for (size_t i = 0; i < result->event_count; i++) {

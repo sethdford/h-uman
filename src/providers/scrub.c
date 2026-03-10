@@ -1,12 +1,12 @@
-#include "seaclaw/providers/scrub.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/providers/scrub.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_SCRUB_REDACTED  "[REDACTED]"
-#define SC_SCRUB_MAX_ERROR 200
+#define HU_SCRUB_REDACTED  "[REDACTED]"
+#define HU_SCRUB_MAX_ERROR 200
 
 static bool is_secret_char(char c) {
     return isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == ':';
@@ -40,24 +40,24 @@ static const char *secret_prefixes[] = {
 };
 #define NUM_PREFIXES (sizeof(secret_prefixes) / sizeof(secret_prefixes[0]))
 
-char *sc_scrub_secret_patterns(sc_allocator_t *alloc, const char *input, size_t input_len) {
+char *hu_scrub_secret_patterns(hu_allocator_t *alloc, const char *input, size_t input_len) {
     if (!input)
         input = "";
     if (input_len == 0)
         input_len = strlen(input);
 
-    sc_json_buf_t buf;
-    if (sc_json_buf_init(&buf, alloc) != 0)
+    hu_json_buf_t buf;
+    if (hu_json_buf_init(&buf, alloc) != 0)
         return NULL;
 
     size_t i = 0;
     while (i < input_len) {
         size_t prefix_len, end;
         if (match_bearer(input, input_len, i, &prefix_len, &end)) {
-            sc_json_buf_append_raw(&buf, input + i, prefix_len);
+            hu_json_buf_append_raw(&buf, input + i, prefix_len);
             if (end - (i + prefix_len) > 4)
-                sc_json_buf_append_raw(&buf, input + i + prefix_len, 4);
-            sc_json_buf_append_raw(&buf, SC_SCRUB_REDACTED, sizeof(SC_SCRUB_REDACTED) - 1);
+                hu_json_buf_append_raw(&buf, input + i + prefix_len, 4);
+            hu_json_buf_append_raw(&buf, HU_SCRUB_REDACTED, sizeof(HU_SCRUB_REDACTED) - 1);
             i = end;
             continue;
         }
@@ -68,7 +68,7 @@ char *sc_scrub_secret_patterns(sc_allocator_t *alloc, const char *input, size_t 
             if (i + pl <= input_len && memcmp(input + i, secret_prefixes[p], pl) == 0) {
                 size_t tok = token_end(input, i + pl, input_len);
                 if (tok > i + pl) {
-                    sc_json_buf_append_raw(&buf, SC_SCRUB_REDACTED, sizeof(SC_SCRUB_REDACTED) - 1);
+                    hu_json_buf_append_raw(&buf, HU_SCRUB_REDACTED, sizeof(HU_SCRUB_REDACTED) - 1);
                     i = tok;
                     matched = true;
                     break;
@@ -77,7 +77,7 @@ char *sc_scrub_secret_patterns(sc_allocator_t *alloc, const char *input, size_t 
         }
         if (!matched) {
             char c = input[i];
-            sc_json_buf_append_raw(&buf, &c, 1);
+            hu_json_buf_append_raw(&buf, &c, 1);
             i++;
         }
     }
@@ -85,30 +85,30 @@ char *sc_scrub_secret_patterns(sc_allocator_t *alloc, const char *input, size_t 
     size_t n = buf.len;
     char *out = (char *)alloc->alloc(alloc->ctx, n + 1);
     if (!out) {
-        sc_json_buf_free(&buf);
+        hu_json_buf_free(&buf);
         return NULL;
     }
     memcpy(out, buf.ptr, n);
     out[n] = '\0';
-    sc_json_buf_free(&buf);
+    hu_json_buf_free(&buf);
     return out;
 }
 
-char *sc_scrub_sanitize_api_error(sc_allocator_t *alloc, const char *input, size_t input_len) {
-    char *scrubbed = sc_scrub_secret_patterns(alloc, input, input_len);
+char *hu_scrub_sanitize_api_error(hu_allocator_t *alloc, const char *input, size_t input_len) {
+    char *scrubbed = hu_scrub_secret_patterns(alloc, input, input_len);
     if (!scrubbed)
         return NULL;
     size_t len = strlen(scrubbed);
-    if (len <= SC_SCRUB_MAX_ERROR)
+    if (len <= HU_SCRUB_MAX_ERROR)
         return scrubbed;
-    char *trunc = (char *)alloc->alloc(alloc->ctx, SC_SCRUB_MAX_ERROR + 4);
+    char *trunc = (char *)alloc->alloc(alloc->ctx, HU_SCRUB_MAX_ERROR + 4);
     if (!trunc) {
         alloc->free(alloc->ctx, scrubbed, len + 1);
         return NULL;
     }
-    memcpy(trunc, scrubbed, SC_SCRUB_MAX_ERROR);
-    memcpy(trunc + SC_SCRUB_MAX_ERROR, "...", 3);
-    trunc[SC_SCRUB_MAX_ERROR + 3] = '\0';
+    memcpy(trunc, scrubbed, HU_SCRUB_MAX_ERROR);
+    memcpy(trunc + HU_SCRUB_MAX_ERROR, "...", 3);
+    trunc[HU_SCRUB_MAX_ERROR + 3] = '\0';
     alloc->free(alloc->ctx, scrubbed, len + 1);
     return trunc;
 }

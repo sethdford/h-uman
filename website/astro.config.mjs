@@ -5,7 +5,7 @@ import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  site: "https://seaclaw.ai",
+  site: "https://h-uman.ai",
   base: "/",
   prefetch: {
     prefetchAll: true,
@@ -14,16 +14,16 @@ export default defineConfig({
   integrations: [
     starlight({
       disable404Route: true,
-      title: "SeaClaw",
+      title: "Human",
       logo: {
-        src: "./public/seaclaw.svg",
-        alt: "SeaClaw",
+        src: "./public/human.svg",
+        alt: "Human",
       },
       social: [
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/sethdford/seaclaw",
+          href: "https://github.com/sethdford/human",
         },
       ],
       customCss: ["./src/styles/global.css"],

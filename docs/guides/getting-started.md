@@ -1,10 +1,10 @@
 ---
-title: Getting Started with SeaClaw
+title: Getting Started with Human
 description: Quick setup guide from zero to first AI chat in under 5 minutes
 updated: 2026-03-02
 ---
 
-# Getting Started with SeaClaw
+# Getting Started with Human
 
 Get from zero to your first AI chat in under 5 minutes.
 
@@ -18,29 +18,29 @@ Get from zero to your first AI chat in under 5 minutes.
 - **Linux:** `sudo apt-get install cmake libsqlite3-dev libcurl4-openssl-dev`
 
 ```bash
-git clone https://github.com/sethdford/seaclaw.git
-cd seaclaw
+git clone https://github.com/sethdford/human.git
+cd human
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON -DSC_ENABLE_ALL_CHANNELS=ON
 cmake --build .
 ```
 
-The binary is `build/seaclaw`. Add it to your PATH or copy it:
+The binary is `build/human`. Add it to your PATH or copy it:
 
 ```bash
-sudo cp build/seaclaw /usr/local/bin/
+sudo cp build/human /usr/local/bin/
 ```
 
 ### Option B: Download binary (when available)
 
-Check [releases](https://github.com/sethdford/seaclaw/releases) for your platform. Download and place `seaclaw` in your PATH.
+Check [releases](https://github.com/sethdford/human/releases) for your platform. Download and place `human` in your PATH.
 
 ## 2. Quick setup
 
 Run the interactive wizard to create your config:
 
 ```bash
-seaclaw onboard --interactive
+human onboard --interactive
 ```
 
 The wizard will:
@@ -49,12 +49,12 @@ The wizard will:
 - Prompt for an API key (or skip for local providers)
 - Pick a default model
 - Optionally configure channels (Telegram, Discord, Nostr, etc.)
-- Create `~/.seaclaw/config.json` and workspace templates
+- Create `~/.human/config.json` and workspace templates
 
 **Fast path** (skip wizard):
 
 ```bash
-seaclaw onboard --api-key sk-... --provider openrouter
+human onboard --api-key sk-... --provider openrouter
 ```
 
 ## 3. First chat
@@ -62,13 +62,13 @@ seaclaw onboard --api-key sk-... --provider openrouter
 Send a single message:
 
 ```bash
-seaclaw agent -m "Hello!"
+human agent -m "Hello!"
 ```
 
 Or start an interactive session:
 
 ```bash
-seaclaw agent
+human agent
 ```
 
 Type messages and press Enter. Use `Ctrl+C` to exit.
@@ -76,7 +76,7 @@ Type messages and press Enter. Use `Ctrl+C` to exit.
 **Full-screen TUI** (split panes, tabs, streaming):
 
 ```bash
-seaclaw agent --tui
+human agent --tui
 ```
 
 ## 4. Gateway mode
@@ -84,19 +84,19 @@ seaclaw agent --tui
 To receive webhooks (Telegram, Slack, Discord, etc.), start the gateway:
 
 ```bash
-seaclaw gateway
+human gateway
 ```
 
 By default it binds to `127.0.0.1:3000`. To pair:
 
-1. Get the 6-digit pairing code from logs or `seaclaw status`
+1. Get the 6-digit pairing code from logs or `human status`
 2. `curl -X POST http://127.0.0.1:3000/pair -H "X-Pairing-Code: 123456"`
 3. Use the returned bearer token for `/webhook` requests
 
 Custom port:
 
 ```bash
-seaclaw gateway --port 8080
+human gateway --port 8080
 ```
 
 ## 5. Channel setup (Telegram example)
@@ -120,12 +120,12 @@ seaclaw gateway --port 8080
 }
 ```
 
-3. Start the gateway (`seaclaw gateway`). Configure Telegram’s webhook to point at your gateway (use a tunnel like ngrok or Tailscale if not on localhost).
+3. Start the gateway (`human gateway`). Configure Telegram’s webhook to point at your gateway (use a tunnel like ngrok or Tailscale if not on localhost).
 
 Or use the interactive wizard:
 
 ```bash
-seaclaw onboard --channels-only
+human onboard --channels-only
 ```
 
 ## 6. Install skills
@@ -133,36 +133,36 @@ seaclaw onboard --channels-only
 Search the skill registry and install:
 
 ```bash
-seaclaw skills search code
-seaclaw skills install code-review
-seaclaw skills list
+human skills search code
+human skills install code-review
+human skills list
 ```
 
 Update installed skills:
 
 ```bash
-seaclaw skills update
+human skills update
 ```
 
-Skill registry: [https://github.com/seaclaw/skill-registry](https://github.com/seaclaw/skill-registry)
+Skill registry: [https://github.com/human/skill-registry](https://github.com/human/skill-registry)
 
 ## 7. MCP server mode
 
-Expose SeaClaw tools via the Model Context Protocol for Claude Desktop, Cursor, or other MCP clients:
+Expose Human tools via the Model Context Protocol for Claude Desktop, Cursor, or other MCP clients:
 
 ```bash
-seaclaw mcp
+human mcp
 ```
 
-Configure your MCP client to run `seaclaw mcp` as the server command. SeaClaw will provide its tools (file read, shell, git, memory, etc.) to the host application.
+Configure your MCP client to run `human mcp` as the server command. Human will provide its tools (file read, shell, git, memory, etc.) to the host application.
 
 **Example** (Claude Desktop `claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
-    "seaclaw": {
-      "command": "seaclaw",
+    "human": {
+      "command": "human",
       "args": ["mcp"]
     }
   }
@@ -173,8 +173,8 @@ Configure your MCP client to run `seaclaw mcp` as the server command. SeaClaw wi
 
 - **Security hardening:** Enable `secrets.encrypt`, set `gateway.require_pairing`, configure `allow_from` per channel. See [security/threat-model.md](security/threat-model.md).
 - **Memory:** Use SQLite with embeddings for richer recall. Configure `memory.backend`, `embedding_provider`, and `vector_weight` in config.
-- **Peripherals:** Flash Arduino, STM32, or Raspberry Pi with `seaclaw hardware scan` and `seaclaw hardware flash`.
-- **Background service:** `seaclaw service install` to run gateway + channels as a system service.
-- **Cron tasks:** `seaclaw cron add "0 9 * * *" "daily digest"` for scheduled jobs.
+- **Peripherals:** Flash Arduino, STM32, or Raspberry Pi with `human hardware scan` and `human hardware flash`.
+- **Background service:** `human service install` to run gateway + channels as a system service.
+- **Cron tasks:** `human cron add "0 9 * * *" "daily digest"` for scheduled jobs.
 
-Run `seaclaw --help` for the full command reference.
+Run `human --help` for the full command reference.

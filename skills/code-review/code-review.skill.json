@@ -2,7 +2,7 @@
   "name": "code-review",
   "version": "1.0.0",
   "description": "Automated code review with configurable rules and multi-language support",
-  "author": "seaclaw",
+  "author": "human",
   "license": "MIT",
   "tools": ["file_read", "shell", "git"],
   "system_prompt": "You are a code reviewer. Analyze code changes for bugs, security issues, style violations, and suggest improvements. Be constructive and specific.",

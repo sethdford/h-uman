@@ -1,52 +1,52 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/lifecycle.h"
-#include "seaclaw/provider.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/memory/lifecycle.h"
+#include "human/provider.h"
 #include <string.h>
 #include <time.h>
 
-#ifdef SC_IS_TEST
-#define SC_SUMMARIZER_USE_LLM 0
+#ifdef HU_IS_TEST
+#define HU_SUMMARIZER_USE_LLM 0
 #else
-#define SC_SUMMARIZER_USE_LLM 1
+#define HU_SUMMARIZER_USE_LLM 1
 #endif
 
-static const char SC_SUMMARIZER_SYSTEM[] =
+static const char HU_SUMMARIZER_SYSTEM[] =
     "Summarize the following memories into one concise paragraph. Preserve key facts.";
-static const char SC_SUMMARIZER_MODEL[] = "gpt-4o-mini";
+static const char HU_SUMMARIZER_MODEL[] = "gpt-4o-mini";
 
-sc_error_t sc_memory_summarize(sc_allocator_t *alloc, sc_memory_t *memory,
-                               const sc_summarizer_config_t *config, sc_summarizer_stats_t *stats) {
+hu_error_t hu_memory_summarize(hu_allocator_t *alloc, hu_memory_t *memory,
+                               const hu_summarizer_config_t *config, hu_summarizer_stats_t *stats) {
     if (!alloc || !memory || !memory->vtable || !config || !stats)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     memset(stats, 0, sizeof(*stats));
 
-    sc_memory_entry_t *entries = NULL;
+    hu_memory_entry_t *entries = NULL;
     size_t count = 0;
-    sc_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
-    if (err != SC_OK)
+    hu_error_t err = memory->vtable->list(memory->ctx, alloc, NULL, NULL, 0, &entries, &count);
+    if (err != HU_OK)
         return err;
     if (!entries || count == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t max_len = config->max_summary_len > 0 ? config->max_summary_len : 512;
-    bool use_llm = SC_SUMMARIZER_USE_LLM && config->provider && config->provider->vtable;
+    bool use_llm = HU_SUMMARIZER_USE_LLM && config->provider && config->provider->vtable;
 
     if (!use_llm) {
         for (size_t i = 0; i < count; i++) {
-            sc_memory_entry_t *e = &entries[i];
+            hu_memory_entry_t *e = &entries[i];
             if (!e->content || e->content_len <= max_len)
                 continue;
 
             char *truncated = (char *)alloc->alloc(alloc->ctx, max_len + 1);
             if (!truncated) {
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             memcpy(truncated, e->content, max_len);
             truncated[max_len] = '\0';
@@ -58,10 +58,10 @@ sc_error_t sc_memory_summarize(sc_allocator_t *alloc, sc_memory_t *memory,
             err = memory->vtable->store(memory->ctx, e->key, e->key_len, truncated, max_len,
                                         &e->category, e->session_id, e->session_id_len);
             alloc->free(alloc->ctx, truncated, max_len + 1);
-            if (err != SC_OK) {
+            if (err != HU_OK) {
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
                 return err;
             }
             stats->entries_summarized++;
@@ -87,9 +87,9 @@ sc_error_t sc_memory_summarize(sc_allocator_t *alloc, sc_memory_t *memory,
             char *batch_msg = (char *)alloc->alloc(alloc->ctx, total_len + 1);
             if (!batch_msg) {
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             size_t pos = 0;
             size_t processed = 0;
@@ -107,38 +107,38 @@ sc_error_t sc_memory_summarize(sc_allocator_t *alloc, sc_memory_t *memory,
             char *summary = NULL;
             size_t summary_len = 0;
             err = config->provider->vtable->chat_with_system(
-                config->provider->ctx, alloc, SC_SUMMARIZER_SYSTEM,
-                sizeof(SC_SUMMARIZER_SYSTEM) - 1, batch_msg, pos, SC_SUMMARIZER_MODEL,
-                sizeof(SC_SUMMARIZER_MODEL) - 1, 0.3, &summary, &summary_len);
+                config->provider->ctx, alloc, HU_SUMMARIZER_SYSTEM,
+                sizeof(HU_SUMMARIZER_SYSTEM) - 1, batch_msg, pos, HU_SUMMARIZER_MODEL,
+                sizeof(HU_SUMMARIZER_MODEL) - 1, 0.3, &summary, &summary_len);
             alloc->free(alloc->ctx, batch_msg, total_len + 1);
-            if (err != SC_OK || !summary) {
+            if (err != HU_OK || !summary) {
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-                return err != SC_OK ? err : SC_ERR_PROVIDER_RESPONSE;
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+                return err != HU_OK ? err : HU_ERR_PROVIDER_RESPONSE;
             }
 
             if (summary_len > max_len)
                 summary_len = max_len;
             char *key_buf =
-                sc_sprintf(alloc, "summary_%ld_%zu", (long)time(NULL), stats->entries_summarized);
+                hu_sprintf(alloc, "summary_%ld_%zu", (long)time(NULL), stats->entries_summarized);
             if (!key_buf) {
                 alloc->free(alloc->ctx, summary, summary_len + 1);
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             size_t key_len = strlen(key_buf);
-            sc_memory_category_t cat = {.tag = SC_MEMORY_CATEGORY_CORE};
+            hu_memory_category_t cat = {.tag = HU_MEMORY_CATEGORY_CORE};
             err = memory->vtable->store(memory->ctx, key_buf, key_len, summary, summary_len, &cat,
                                         NULL, 0);
-            sc_str_free(alloc, key_buf);
+            hu_str_free(alloc, key_buf);
             alloc->free(alloc->ctx, summary, summary_len + 1);
-            if (err != SC_OK) {
+            if (err != HU_OK) {
                 for (size_t j = 0; j < count; j++)
-                    sc_memory_entry_free_fields(alloc, &entries[j]);
-                alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
+                    hu_memory_entry_free_fields(alloc, &entries[j]);
+                alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
                 return err;
             }
 
@@ -160,7 +160,7 @@ sc_error_t sc_memory_summarize(sc_allocator_t *alloc, sc_memory_t *memory,
     }
 
     for (size_t i = 0; i < count; i++)
-        sc_memory_entry_free_fields(alloc, &entries[i]);
-    alloc->free(alloc->ctx, entries, count * sizeof(sc_memory_entry_t));
-    return SC_OK;
+        hu_memory_entry_free_fields(alloc, &entries[i]);
+    alloc->free(alloc->ctx, entries, count * sizeof(hu_memory_entry_t));
+    return HU_OK;
 }

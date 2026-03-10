@@ -1,6 +1,6 @@
-#include "seaclaw/core/error.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/security/sandbox_internal.h"
+#include "human/core/error.h"
+#include "human/security/sandbox.h"
+#include "human/security/sandbox_internal.h"
 #include <string.h>
 
 #ifdef __linux__
@@ -14,7 +14,7 @@ static bool bwrap_binary_exists(void) {
 }
 #endif
 
-static sc_error_t bubblewrap_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
+static hu_error_t bubblewrap_wrap(void *ctx, const char *const *argv, size_t argc, const char **buf,
                                   size_t buf_count, size_t *out_count) {
 #ifndef __linux__
     (void)ctx;
@@ -23,9 +23,9 @@ static sc_error_t bubblewrap_wrap(void *ctx, const char *const *argv, size_t arg
     (void)buf;
     (void)buf_count;
     (void)out_count;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #else
-    sc_bubblewrap_ctx_t *bw = (sc_bubblewrap_ctx_t *)ctx;
+    hu_bubblewrap_ctx_t *bw = (hu_bubblewrap_ctx_t *)ctx;
     /* bwrap --ro-bind /usr /usr --dev /dev --proc /proc --bind /tmp /tmp
        --bind WORKSPACE /workspace --unshare-all --die-with-parent <argv...> */
     const char *prefix[] = {
@@ -37,23 +37,23 @@ static sc_error_t bubblewrap_wrap(void *ctx, const char *const *argv, size_t arg
     const size_t prefix_len = sizeof(prefix) / sizeof(prefix[0]);
 
     if (!buf || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (buf_count < prefix_len + argc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     for (size_t i = 0; i < prefix_len; i++)
         buf[i] = prefix[i];
     for (size_t i = 0; i < argc; i++)
         buf[prefix_len + i] = argv[i];
     *out_count = prefix_len + argc;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
 static bool bubblewrap_available(void *ctx) {
     (void)ctx;
-#if defined(__linux__) && defined(SC_GATEWAY_POSIX)
-#if SC_IS_TEST
+#if defined(__linux__) && defined(HU_GATEWAY_POSIX)
+#if HU_IS_TEST
     return true; /* Skip binary check in tests */
 #else
     return bwrap_binary_exists();
@@ -73,7 +73,7 @@ static const char *bubblewrap_desc(void *ctx) {
     return "User namespace sandbox (requires bwrap)";
 }
 
-static const sc_sandbox_vtable_t bubblewrap_vtable = {
+static const hu_sandbox_vtable_t bubblewrap_vtable = {
     .wrap_command = bubblewrap_wrap,
     .apply = NULL,
     .is_available = bubblewrap_available,
@@ -81,15 +81,15 @@ static const sc_sandbox_vtable_t bubblewrap_vtable = {
     .description = bubblewrap_desc,
 };
 
-sc_sandbox_t sc_bubblewrap_sandbox_get(sc_bubblewrap_ctx_t *ctx) {
-    sc_sandbox_t sb = {
+hu_sandbox_t hu_bubblewrap_sandbox_get(hu_bubblewrap_ctx_t *ctx) {
+    hu_sandbox_t sb = {
         .ctx = ctx,
         .vtable = &bubblewrap_vtable,
     };
     return sb;
 }
 
-void sc_bubblewrap_sandbox_init(sc_bubblewrap_ctx_t *ctx, const char *workspace_dir) {
+void hu_bubblewrap_sandbox_init(hu_bubblewrap_ctx_t *ctx, const char *workspace_dir) {
     memset(ctx, 0, sizeof(*ctx));
     if (workspace_dir) {
         size_t len = strlen(workspace_dir);

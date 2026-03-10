@@ -1,5 +1,5 @@
 # Example: Weather tool
-# Links against seaclaw (or include in main build)
+# Links against human (or include in main build)
 cmake_minimum_required(VERSION 3.20)
 project(weather_tool C)
 

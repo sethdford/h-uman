@@ -1,7 +1,7 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,37 +11,37 @@
 
 #ifdef _WIN32
 #include <direct.h>
-#define sc_mkdir(path) _mkdir(path)
+#define hu_mkdir(path) _mkdir(path)
 #else
 #include <dirent.h>
 #include <unistd.h>
-#define sc_mkdir(path) mkdir((path), 0755)
+#define hu_mkdir(path) mkdir((path), 0755)
 #endif
 
-typedef struct sc_markdown_memory {
+typedef struct hu_markdown_memory {
     char *dir;
     size_t dir_len;
-    sc_allocator_t *alloc;
-} sc_markdown_memory_t;
+    hu_allocator_t *alloc;
+} hu_markdown_memory_t;
 
 static const char *impl_name(void *ctx) {
     (void)ctx;
     return "markdown";
 }
 
-static const char *category_to_string(const sc_memory_category_t *cat) {
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -50,7 +50,7 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
     }
 }
 
-static char *key_to_filename(const char *key, size_t key_len, sc_allocator_t *alloc) {
+static char *key_to_filename(const char *key, size_t key_len, hu_allocator_t *alloc) {
     /* Sanitize key for filename: replace invalid chars with _ */
     char *out = (char *)alloc->alloc(alloc->ctx, key_len + 8);
     if (!out)
@@ -78,27 +78,27 @@ static void ensure_dir(const char *path) {
         if (*p == '/' || *p == '\\') {
             char save = *p;
             *p = '\0';
-            sc_mkdir(tmp);
+            hu_mkdir(tmp);
             *p = save;
         }
     }
-    sc_mkdir(tmp);
+    hu_mkdir(tmp);
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     const char *cat_str = category_to_string(category);
 
     char *filename = key_to_filename(key, key_len, self->alloc);
     if (!filename)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-    char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
+    char *fullpath = hu_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
     if (!fullpath)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     ensure_dir(self->dir);
 
@@ -110,31 +110,31 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     FILE *f = fopen(fullpath, "w");
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
     if (!f)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
 
     fprintf(f, "---\nkey: %.*s\ncategory: %s\ntimestamp: %s\n", (int)key_len, key, cat_str, ts);
     if (session_id && session_id_len > 0)
         fprintf(f, "session_id: %.*s\n", (int)session_id_len, session_id);
     fprintf(f, "---\n\n%.*s", (int)content_len, content);
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, const char *content,
-                                size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, const char *content,
+                                size_t content_len, const hu_memory_category_t *category,
                                 const char *session_id, size_t session_id_len,
-                                const sc_memory_store_opts_t *opts) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+                                const hu_memory_store_opts_t *opts) {
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     const char *cat_str = category_to_string(category);
 
     char *filename = key_to_filename(key, key_len, self->alloc);
     if (!filename)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-    char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
+    char *fullpath = hu_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
     if (!fullpath)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     ensure_dir(self->dir);
 
@@ -145,7 +145,7 @@ static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
     FILE *f = fopen(fullpath, "w");
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
     if (!f)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
 
     fprintf(f, "---\nkey: %.*s\ncategory: %s\ntimestamp: %s\n", (int)key_len, key, cat_str, ts);
     if (session_id && session_id_len > 0)
@@ -154,27 +154,27 @@ static sc_error_t impl_store_ex(void *ctx, const char *key, size_t key_len, cons
         fprintf(f, "source: %.*s\n", (int)opts->source_len, opts->source);
     fprintf(f, "---\n\n%.*s", (int)content_len, content);
     fclose(f);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
 
-    sc_memory_entry_t *entries =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *entries =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, limit * sizeof(hu_memory_entry_t));
     if (!entries)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     size_t count = 0;
 #ifndef _WIN32
     DIR *d = opendir(self->dir);
     if (!d) {
-        alloc->free(alloc->ctx, entries, limit * sizeof(sc_memory_entry_t));
-        return SC_OK;
+        alloc->free(alloc->ctx, entries, limit * sizeof(hu_memory_entry_t));
+        return HU_OK;
     }
 
     struct dirent *e;
@@ -183,7 +183,7 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
         if (nlen < 4 || strcmp(e->d_name + nlen - 3, ".md") != 0)
             continue;
 
-        char *path = sc_sprintf(self->alloc, "%s/%s", self->dir, e->d_name);
+        char *path = hu_sprintf(self->alloc, "%s/%s", self->dir, e->d_name);
         if (!path)
             continue;
 
@@ -286,22 +286,22 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
             continue;
 
         /* path was freed above; reconstruct for id to avoid use-after-free */
-        entries[count].id = sc_sprintf(alloc, "%s/%s", self->dir, e->d_name);
+        entries[count].id = hu_sprintf(alloc, "%s/%s", self->dir, e->d_name);
         if (!entries[count].id)
             continue;
         entries[count].id_len = strlen(entries[count].id);
-        entries[count].key = sc_strdup(alloc, key);
+        entries[count].key = hu_strdup(alloc, key);
         entries[count].key_len = strlen(key);
-        entries[count].content = sc_strndup(alloc, content_buf, content_len);
+        entries[count].content = hu_strndup(alloc, content_buf, content_len);
         entries[count].content_len = content_len;
-        entries[count].category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        entries[count].category.data.custom.name = sc_strdup(alloc, category);
+        entries[count].category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        entries[count].category.data.custom.name = hu_strdup(alloc, category);
         entries[count].category.data.custom.name_len = strlen(category);
-        entries[count].timestamp = sc_strdup(alloc, timestamp);
+        entries[count].timestamp = hu_strdup(alloc, timestamp);
         entries[count].timestamp_len = strlen(timestamp);
-        entries[count].session_id = sess[0] ? sc_strdup(alloc, sess) : NULL;
+        entries[count].session_id = sess[0] ? hu_strdup(alloc, sess) : NULL;
         entries[count].session_id_len = sess[0] ? strlen(sess) : 0;
-        entries[count].source = source_buf[0] ? sc_strdup(alloc, source_buf) : NULL;
+        entries[count].source = source_buf[0] ? hu_strdup(alloc, source_buf) : NULL;
         entries[count].source_len = source_buf[0] ? strlen(source_buf) : 0;
         entries[count].score = NAN;
         count++;
@@ -312,32 +312,32 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     (void)session_id_len;
     (void)query;
     (void)query_len;
-    alloc->free(alloc->ctx, entries, limit * sizeof(sc_memory_entry_t));
-    return SC_OK;
+    alloc->free(alloc->ctx, entries, limit * sizeof(hu_memory_entry_t));
+    return HU_OK;
 #endif
 
     *out = entries;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     *found = false;
 
     char *filename = key_to_filename(key, key_len, self->alloc);
     if (!filename)
-        return SC_ERR_OUT_OF_MEMORY;
-    char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
+        return HU_ERR_OUT_OF_MEMORY;
+    char *fullpath = hu_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
     if (!fullpath)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     FILE *f = fopen(fullpath, "r");
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
     if (!f)
-        return SC_OK;
+        return HU_OK;
 
     char line[4096];
     char category[64] = "core";
@@ -390,56 +390,56 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     }
     fclose(f);
 
-    out->id = sc_strndup(alloc, key, key_len);
+    out->id = hu_strndup(alloc, key, key_len);
     out->id_len = key_len;
-    out->key = sc_strndup(alloc, key, key_len);
+    out->key = hu_strndup(alloc, key, key_len);
     out->key_len = key_len;
-    out->content = sc_strndup(alloc, content_buf, content_len);
+    out->content = hu_strndup(alloc, content_buf, content_len);
     out->content_len = content_len;
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-    out->category.data.custom.name = sc_strdup(alloc, category);
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+    out->category.data.custom.name = hu_strdup(alloc, category);
     out->category.data.custom.name_len = strlen(category);
-    out->timestamp = sc_strdup(alloc, timestamp);
+    out->timestamp = hu_strdup(alloc, timestamp);
     out->timestamp_len = strlen(timestamp);
     out->session_id = NULL;
     out->session_id_len = 0;
-    out->source = get_source[0] ? sc_strdup(alloc, get_source) : NULL;
+    out->source = get_source[0] ? hu_strdup(alloc, get_source) : NULL;
     out->source_len = get_source[0] ? strlen(get_source) : 0;
     out->score = NAN;
     *found = true;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
     (void)category;
     return impl_recall(ctx, alloc, "", 0, 1024, session_id, session_id_len, out, out_count);
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     *deleted = false;
     char *filename = key_to_filename(key, key_len, self->alloc);
     if (!filename)
-        return SC_ERR_OUT_OF_MEMORY;
-    char *fullpath = sc_sprintf(self->alloc, "%s/%s", self->dir, filename);
+        return HU_ERR_OUT_OF_MEMORY;
+    char *fullpath = hu_sprintf(self->alloc, "%s/%s", self->dir, filename);
     self->alloc->free(self->alloc->ctx, filename, strlen(filename) + 1);
     if (!fullpath)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     if (remove(fullpath) == 0)
         *deleted = true;
     self->alloc->free(self->alloc->ctx, fullpath, strlen(fullpath) + 1);
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     *out = 0;
 #ifndef _WIN32
     DIR *d = opendir(self->dir);
     if (!d)
-        return SC_OK;
+        return HU_OK;
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         size_t nlen = strlen(e->d_name);
@@ -448,22 +448,22 @@ static sc_error_t impl_count(void *ctx, size_t *out) {
     }
     closedir(d);
 #endif
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool impl_health_check(void *ctx) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     struct stat st;
     return stat(self->dir, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
 static void impl_deinit(void *ctx) {
-    sc_markdown_memory_t *self = (sc_markdown_memory_t *)ctx;
+    hu_markdown_memory_t *self = (hu_markdown_memory_t *)ctx;
     self->alloc->free(self->alloc->ctx, self->dir, self->dir_len + 1);
-    self->alloc->free(self->alloc->ctx, self, sizeof(sc_markdown_memory_t));
+    self->alloc->free(self->alloc->ctx, self, sizeof(hu_markdown_memory_t));
 }
 
-static const sc_memory_vtable_t markdown_vtable = {
+static const hu_memory_vtable_t markdown_vtable = {
     .name = impl_name,
     .store = impl_store,
     .store_ex = impl_store_ex,
@@ -476,25 +476,25 @@ static const sc_memory_vtable_t markdown_vtable = {
     .deinit = impl_deinit,
 };
 
-sc_memory_t sc_markdown_memory_create(sc_allocator_t *alloc, const char *dir_path) {
+hu_memory_t hu_markdown_memory_create(hu_allocator_t *alloc, const char *dir_path) {
     if (!alloc || !dir_path)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     ensure_dir(dir_path);
     size_t len = strlen(dir_path);
-    char *dir = sc_strndup(alloc, dir_path, len);
+    char *dir = hu_strndup(alloc, dir_path, len);
     if (!dir)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
 
-    sc_markdown_memory_t *self =
-        (sc_markdown_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_markdown_memory_t));
+    hu_markdown_memory_t *self =
+        (hu_markdown_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_markdown_memory_t));
     if (!self) {
         alloc->free(alloc->ctx, dir, len + 1);
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
     self->dir = dir;
     self->dir_len = len;
     self->alloc = alloc;
-    return (sc_memory_t){
+    return (hu_memory_t){
         .ctx = self,
         .vtable = &markdown_vtable,
     };

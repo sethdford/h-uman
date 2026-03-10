@@ -3,143 +3,143 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SeaClaw Component Catalog</title>
+    <title>Human Component Catalog</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       :root { --catalog-sidebar-width: 220px; }
-      body { font-family: var(--sc-font); background: var(--sc-bg); color: var(--sc-text); min-height: 100vh; display: flex; }
-      .catalog-nav { position: fixed; left: 0; top: 0; bottom: 0; width: var(--catalog-sidebar-width); background: var(--sc-bg-surface); border-right: 1px solid var(--sc-border); padding: var(--sc-space-lg); overflow-y: auto; z-index: 100; }
-      .catalog-nav h3 { font-size: var(--sc-text-sm); font-weight: var(--sc-weight-semibold); color: var(--sc-text-muted); text-transform: uppercase; letter-spacing: var(--sc-tracking-xs); margin-bottom: var(--sc-space-md); }
-      .catalog-nav a { display: block; font-size: var(--sc-text-sm); color: var(--sc-text-muted); text-decoration: none; padding: var(--sc-space-xs) var(--sc-space-sm); border-radius: var(--sc-radius-sm); margin-bottom: var(--sc-space-xs); transition: color var(--sc-duration-fast), background var(--sc-duration-fast); }
-      .catalog-nav a:hover { color: var(--sc-text); background: var(--sc-bg-elevated); }
-      .catalog-nav a:focus-visible { outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring); outline-offset: 2px; }
-      .catalog-main { flex: 1; margin-left: var(--catalog-sidebar-width); padding: var(--sc-space-xl); }
-      .catalog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sc-space-2xl); flex-wrap: wrap; gap: var(--sc-space-md); }
-      .catalog-header h1 { font-size: var(--sc-text-2xl); font-weight: var(--sc-weight-bold); }
-      .theme-toggle { display: flex; gap: var(--sc-space-xs); padding: var(--sc-space-xs); background: var(--sc-bg-elevated); border: 1px solid var(--sc-border); border-radius: var(--sc-radius); }
-      .theme-toggle button { padding: var(--sc-space-sm) var(--sc-space-md); background: transparent; border: none; border-radius: var(--sc-radius-sm); font-family: var(--sc-font); font-size: var(--sc-text-sm); color: var(--sc-text-muted); cursor: pointer; transition: all var(--sc-duration-fast); }
-      .theme-toggle button:hover { color: var(--sc-text); }
-      .theme-toggle button[aria-pressed="true"] { background: var(--sc-accent); color: var(--sc-on-accent); }
-      .component-section { margin-bottom: var(--sc-space-2xl); scroll-margin-top: var(--sc-space-md); }
-      .component-section h2 { font-size: var(--sc-text-xl); font-weight: var(--sc-weight-semibold); color: var(--sc-accent-text, var(--sc-accent)); margin-bottom: var(--sc-space-lg); }
-      .playground { display: grid; grid-template-columns: 1fr auto; gap: var(--sc-space-xl); align-items: start; margin-bottom: var(--sc-space-lg); }
+      body { font-family: var(--hu-font); background: var(--hu-bg); color: var(--hu-text); min-height: 100vh; display: flex; }
+      .catalog-nav { position: fixed; left: 0; top: 0; bottom: 0; width: var(--catalog-sidebar-width); background: var(--hu-bg-surface); border-right: 1px solid var(--hu-border); padding: var(--hu-space-lg); overflow-y: auto; z-index: 100; }
+      .catalog-nav h3 { font-size: var(--hu-text-sm); font-weight: var(--hu-weight-semibold); color: var(--hu-text-muted); text-transform: uppercase; letter-spacing: var(--hu-tracking-xs); margin-bottom: var(--hu-space-md); }
+      .catalog-nav a { display: block; font-size: var(--hu-text-sm); color: var(--hu-text-muted); text-decoration: none; padding: var(--hu-space-xs) var(--hu-space-sm); border-radius: var(--hu-radius-sm); margin-bottom: var(--hu-space-xs); transition: color var(--hu-duration-fast), background var(--hu-duration-fast); }
+      .catalog-nav a:hover { color: var(--hu-text); background: var(--hu-bg-elevated); }
+      .catalog-nav a:focus-visible { outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring); outline-offset: 2px; }
+      .catalog-main { flex: 1; margin-left: var(--catalog-sidebar-width); padding: var(--hu-space-xl); }
+      .catalog-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--hu-space-2xl); flex-wrap: wrap; gap: var(--hu-space-md); }
+      .catalog-header h1 { font-size: var(--hu-text-2xl); font-weight: var(--hu-weight-bold); }
+      .theme-toggle { display: flex; gap: var(--hu-space-xs); padding: var(--hu-space-xs); background: var(--hu-bg-elevated); border: 1px solid var(--hu-border); border-radius: var(--hu-radius); }
+      .theme-toggle button { padding: var(--hu-space-sm) var(--hu-space-md); background: transparent; border: none; border-radius: var(--hu-radius-sm); font-family: var(--hu-font); font-size: var(--hu-text-sm); color: var(--hu-text-muted); cursor: pointer; transition: all var(--hu-duration-fast); }
+      .theme-toggle button:hover { color: var(--hu-text); }
+      .theme-toggle button[aria-pressed="true"] { background: var(--hu-accent); color: var(--hu-on-accent); }
+      .component-section { margin-bottom: var(--hu-space-2xl); scroll-margin-top: var(--hu-space-md); }
+      .component-section h2 { font-size: var(--hu-text-xl); font-weight: var(--hu-weight-semibold); color: var(--hu-accent-text, var(--hu-accent)); margin-bottom: var(--hu-space-lg); }
+      .playground { display: grid; grid-template-columns: 1fr auto; gap: var(--hu-space-xl); align-items: start; margin-bottom: var(--hu-space-lg); }
       @media (max-width: 640px) { .playground { grid-template-columns: 1fr; } }
-      .preview { min-height: 80px; display: flex; align-items: center; justify-content: center; padding: var(--sc-space-lg); background: var(--sc-bg); border-radius: var(--sc-radius-lg); border: 1px solid var(--sc-border-subtle); }
-      .controls { min-width: 200px; padding: var(--sc-space-md); background: var(--sc-bg-elevated); border: 1px solid var(--sc-border); border-radius: var(--sc-radius-lg); }
-      .controls label { display: flex; flex-direction: column; gap: var(--sc-space-xs); margin-bottom: var(--sc-space-md); font-size: var(--sc-text-sm); font-weight: var(--sc-weight-medium); }
+      .preview { min-height: 80px; display: flex; align-items: center; justify-content: center; padding: var(--hu-space-lg); background: var(--hu-bg); border-radius: var(--hu-radius-lg); border: 1px solid var(--hu-border-subtle); }
+      .controls { min-width: 200px; padding: var(--hu-space-md); background: var(--hu-bg-elevated); border: 1px solid var(--hu-border); border-radius: var(--hu-radius-lg); }
+      .controls label { display: flex; flex-direction: column; gap: var(--hu-space-xs); margin-bottom: var(--hu-space-md); font-size: var(--hu-text-sm); font-weight: var(--hu-weight-medium); }
       .controls label:last-child { margin-bottom: 0; }
-      .controls select, .controls input[type="text"], .controls input[type="number"] { padding: var(--sc-space-sm) var(--sc-space-md); font-family: var(--sc-font); font-size: var(--sc-text-sm); background: var(--sc-bg-inset); border: 1px solid var(--sc-border); border-radius: var(--sc-radius-sm); color: var(--sc-text); }
-      .controls input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--sc-accent); }
-      .variants { margin-top: var(--sc-space-lg); }
-      .variants h3 { font-size: var(--sc-text-sm); font-weight: var(--sc-weight-medium); color: var(--sc-text-muted); margin-bottom: var(--sc-space-md); }
-      .variants .row { display: flex; gap: var(--sc-space-md); flex-wrap: wrap; align-items: center; }
-      .code-snippet { margin-top: var(--sc-space-lg); padding: var(--sc-space-md); background: var(--sc-bg-inset); border-radius: var(--sc-radius); font-family: var(--sc-font-mono); font-size: var(--sc-text-sm); overflow-x: auto; }
-      .code-snippet code { color: var(--sc-text); }
+      .controls select, .controls input[type="text"], .controls input[type="number"] { padding: var(--hu-space-sm) var(--hu-space-md); font-family: var(--hu-font); font-size: var(--hu-text-sm); background: var(--hu-bg-inset); border: 1px solid var(--hu-border); border-radius: var(--hu-radius-sm); color: var(--hu-text); }
+      .controls input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--hu-accent); }
+      .variants { margin-top: var(--hu-space-lg); }
+      .variants h3 { font-size: var(--hu-text-sm); font-weight: var(--hu-weight-medium); color: var(--hu-text-muted); margin-bottom: var(--hu-space-md); }
+      .variants .row { display: flex; gap: var(--hu-space-md); flex-wrap: wrap; align-items: center; }
+      .code-snippet { margin-top: var(--hu-space-lg); padding: var(--hu-space-md); background: var(--hu-bg-inset); border-radius: var(--hu-radius); font-family: var(--hu-font-mono); font-size: var(--hu-text-sm); overflow-x: auto; }
+      .code-snippet code { color: var(--hu-text); }
     </style>
   </head>
   <body>
     <nav class="catalog-nav">
       <h3>Components</h3>
-      <a href="#sc-button">sc-button</a>
-      <a href="#sc-badge">sc-badge</a>
-      <a href="#sc-card">sc-card</a>
-      <a href="#sc-modal">sc-modal</a>
-      <a href="#sc-tooltip">sc-tooltip</a>
-      <a href="#sc-empty-state">sc-empty-state</a>
-      <a href="#sc-skeleton">sc-skeleton</a>
-      <a href="#sc-sheet">sc-sheet</a>
-      <a href="#sc-toast">sc-toast</a>
-      <a href="#sc-tabs">sc-tabs</a>
-      <a href="#sc-avatar">sc-avatar</a>
-      <a href="#sc-status-dot">sc-status-dot</a>
-      <a href="#sc-progress">sc-progress</a>
-      <a href="#sc-input">sc-input</a>
-      <a href="#sc-select">sc-select</a>
-      <a href="#sc-dropdown">sc-dropdown</a>
-      <a href="#sc-dialog">sc-dialog</a>
-      <a href="#sc-switch">sc-switch</a>
-      <a href="#sc-checkbox">sc-checkbox</a>
-      <a href="#sc-combobox">sc-combobox</a>
-      <a href="#sc-radio">sc-radio</a>
-      <a href="#sc-textarea">sc-textarea</a>
-      <a href="#sc-popover">sc-popover</a>
-      <a href="#sc-breadcrumb">sc-breadcrumb</a>
-      <a href="#sc-slider">sc-slider</a>
-      <a href="#sc-search">sc-search</a>
-      <a href="#sc-chat-search">sc-chat-search</a>
-      <a href="#sc-chat-composer">sc-chat-composer</a>
-      <a href="#sc-segmented-control">sc-segmented-control</a>
-      <a href="#sc-pagination">sc-pagination</a>
-      <a href="#sc-data-table-v2">sc-data-table-v2</a>
-      <a href="#sc-date-picker">sc-date-picker</a>
-      <a href="#sc-sparkline">sc-sparkline</a>
-      <a href="#sc-animated-number">sc-animated-number</a>
-      <a href="#sc-animated-icon">sc-animated-icon</a>
-      <a href="#sc-activity-feed">sc-activity-feed</a>
-      <a href="#sc-welcome">sc-welcome</a>
-      <a href="#sc-welcome-card">sc-welcome-card</a>
-      <a href="#sc-error-boundary">sc-error-boundary</a>
-      <a href="#sc-thinking">sc-thinking</a>
-      <a href="#sc-tool-result">sc-tool-result</a>
-      <a href="#sc-message-stream">sc-message-stream</a>
-      <a href="#sc-message-branch">sc-message-branch</a>
-      <a href="#sc-reasoning-block">sc-reasoning-block</a>
-      <a href="#sc-code-block">sc-code-block</a>
-      <a href="#sc-latex">sc-latex</a>
-      <a href="#sc-shortcut-overlay">sc-shortcut-overlay</a>
-      <a href="#sc-context-menu">sc-context-menu</a>
-      <a href="#sc-stat-card">sc-stat-card</a>
-      <a href="#sc-stats-row">sc-stats-row</a>
-      <a href="#sc-section-header">sc-section-header</a>
-      <a href="#sc-metric-row">sc-metric-row</a>
-      <a href="#sc-timeline">sc-timeline</a>
-      <a href="#sc-sparkline-enhanced">sc-sparkline-enhanced</a>
-      <a href="#sc-forecast-chart">sc-forecast-chart</a>
-      <a href="#sc-page-hero">sc-page-hero</a>
-      <a href="#sc-schedule-builder">sc-schedule-builder</a>
-      <a href="#sc-message-actions">sc-message-actions</a>
-      <a href="#sc-tapback-menu">sc-tapback-menu</a>
-      <a href="#sc-automation-card">sc-automation-card</a>
-      <a href="#sc-automation-form">sc-automation-form</a>
-      <a href="#sc-voice-orb">sc-voice-orb</a>
-      <a href="#sc-voice-conversation">sc-voice-conversation</a>
-      <a href="#sc-chat-sessions-panel">sc-chat-sessions-panel</a>
-      <a href="#sc-file-preview">sc-file-preview</a>
-      <a href="#sc-json-viewer">sc-json-viewer</a>
-      <a href="#sc-chat-bubble">sc-chat-bubble</a>
-      <a href="#sc-typing-indicator">sc-typing-indicator</a>
-      <a href="#sc-delivery-status">sc-delivery-status</a>
-      <a href="#sc-link-preview">sc-link-preview</a>
-      <a href="#sc-message-thread">sc-message-thread</a>
-      <a href="#sc-branch-tree">sc-branch-tree</a>
-      <a href="#sc-message-group">sc-message-group</a>
-      <a href="#sc-skill-card">sc-skill-card</a>
-      <a href="#sc-skill-detail">sc-skill-detail</a>
-      <a href="#sc-skill-registry">sc-skill-registry</a>
-      <a href="#sc-overview-stats">sc-overview-stats</a>
-      <a href="#sc-chart">sc-chart</a>
-      <a href="#sc-model-selector">sc-model-selector</a>
-      <a href="#sc-form-group">sc-form-group</a>
-      <a href="#sc-sidebar">sc-sidebar</a>
-      <a href="#sc-command-palette">sc-command-palette</a>
-      <a href="#sc-floating-mic">sc-floating-mic</a>
-      <a href="#sc-activity-timeline">sc-activity-timeline</a>
-      <a href="#sc-sessions-table">sc-sessions-table</a>
+      <a href="#hu-button">hu-button</a>
+      <a href="#hu-badge">hu-badge</a>
+      <a href="#hu-card">hu-card</a>
+      <a href="#hu-modal">hu-modal</a>
+      <a href="#hu-tooltip">hu-tooltip</a>
+      <a href="#hu-empty-state">hu-empty-state</a>
+      <a href="#hu-skeleton">hu-skeleton</a>
+      <a href="#hu-sheet">hu-sheet</a>
+      <a href="#hu-toast">hu-toast</a>
+      <a href="#hu-tabs">hu-tabs</a>
+      <a href="#hu-avatar">hu-avatar</a>
+      <a href="#hu-status-dot">hu-status-dot</a>
+      <a href="#hu-progress">hu-progress</a>
+      <a href="#hu-input">hu-input</a>
+      <a href="#hu-select">hu-select</a>
+      <a href="#hu-dropdown">hu-dropdown</a>
+      <a href="#hu-dialog">hu-dialog</a>
+      <a href="#hu-switch">hu-switch</a>
+      <a href="#hu-checkbox">hu-checkbox</a>
+      <a href="#hu-combobox">hu-combobox</a>
+      <a href="#hu-radio">hu-radio</a>
+      <a href="#hu-textarea">hu-textarea</a>
+      <a href="#hu-popover">hu-popover</a>
+      <a href="#hu-breadcrumb">hu-breadcrumb</a>
+      <a href="#hu-slider">hu-slider</a>
+      <a href="#hu-search">hu-search</a>
+      <a href="#hu-chat-search">hu-chat-search</a>
+      <a href="#hu-chat-composer">hu-chat-composer</a>
+      <a href="#hu-segmented-control">hu-segmented-control</a>
+      <a href="#hu-pagination">hu-pagination</a>
+      <a href="#hu-data-table-v2">hu-data-table-v2</a>
+      <a href="#hu-date-picker">hu-date-picker</a>
+      <a href="#hu-sparkline">hu-sparkline</a>
+      <a href="#hu-animated-number">hu-animated-number</a>
+      <a href="#hu-animated-icon">hu-animated-icon</a>
+      <a href="#hu-activity-feed">hu-activity-feed</a>
+      <a href="#hu-welcome">hu-welcome</a>
+      <a href="#hu-welcome-card">hu-welcome-card</a>
+      <a href="#hu-error-boundary">hu-error-boundary</a>
+      <a href="#hu-thinking">hu-thinking</a>
+      <a href="#hu-tool-result">hu-tool-result</a>
+      <a href="#hu-message-stream">hu-message-stream</a>
+      <a href="#hu-message-branch">hu-message-branch</a>
+      <a href="#hu-reasoning-block">hu-reasoning-block</a>
+      <a href="#hu-code-block">hu-code-block</a>
+      <a href="#hu-latex">hu-latex</a>
+      <a href="#hu-shortcut-overlay">hu-shortcut-overlay</a>
+      <a href="#hu-context-menu">hu-context-menu</a>
+      <a href="#hu-stat-card">hu-stat-card</a>
+      <a href="#hu-stats-row">hu-stats-row</a>
+      <a href="#hu-section-header">hu-section-header</a>
+      <a href="#hu-metric-row">hu-metric-row</a>
+      <a href="#hu-timeline">hu-timeline</a>
+      <a href="#hu-sparkline-enhanced">hu-sparkline-enhanced</a>
+      <a href="#hu-forecast-chart">hu-forecast-chart</a>
+      <a href="#hu-page-hero">hu-page-hero</a>
+      <a href="#hu-schedule-builder">hu-schedule-builder</a>
+      <a href="#hu-message-actions">hu-message-actions</a>
+      <a href="#hu-tapback-menu">hu-tapback-menu</a>
+      <a href="#hu-automation-card">hu-automation-card</a>
+      <a href="#hu-automation-form">hu-automation-form</a>
+      <a href="#hu-voice-orb">hu-voice-orb</a>
+      <a href="#hu-voice-conversation">hu-voice-conversation</a>
+      <a href="#hu-chat-sessions-panel">hu-chat-sessions-panel</a>
+      <a href="#hu-file-preview">hu-file-preview</a>
+      <a href="#hu-json-viewer">hu-json-viewer</a>
+      <a href="#hu-chat-bubble">hu-chat-bubble</a>
+      <a href="#hu-typing-indicator">hu-typing-indicator</a>
+      <a href="#hu-delivery-status">hu-delivery-status</a>
+      <a href="#hu-link-preview">hu-link-preview</a>
+      <a href="#hu-message-thread">hu-message-thread</a>
+      <a href="#hu-branch-tree">hu-branch-tree</a>
+      <a href="#hu-message-group">hu-message-group</a>
+      <a href="#hu-skill-card">hu-skill-card</a>
+      <a href="#hu-skill-detail">hu-skill-detail</a>
+      <a href="#hu-skill-registry">hu-skill-registry</a>
+      <a href="#hu-overview-stats">hu-overview-stats</a>
+      <a href="#hu-chart">hu-chart</a>
+      <a href="#hu-model-selector">hu-model-selector</a>
+      <a href="#hu-form-group">hu-form-group</a>
+      <a href="#hu-sidebar">hu-sidebar</a>
+      <a href="#hu-command-palette">hu-command-palette</a>
+      <a href="#hu-floating-mic">hu-floating-mic</a>
+      <a href="#hu-activity-timeline">hu-activity-timeline</a>
+      <a href="#hu-sessions-table">hu-sessions-table</a>
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
-        <h1>SeaClaw Component Catalog</h1>
+        <h1>Human Component Catalog</h1>
         <div class="theme-toggle" role="group" aria-label="Theme">
           <button type="button" id="theme-dark" aria-pressed="true">Dark</button>
           <button type="button" id="theme-light" aria-pressed="false">Light</button>
         </div>
       </header>
 
-      <section class="component-section" id="sc-button">
-        <h2>sc-button</h2>
+      <section class="component-section" id="hu-button">
+        <h2>hu-button</h2>
         <div class="playground">
           <div class="preview">
-            <sc-button id="btn-preview" variant="primary">Button</sc-button>
+            <hu-button id="btn-preview" variant="primary">Button</hu-button>
           </div>
           <div class="controls">
             <label>variant
@@ -168,25 +168,25 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-button variant="primary"&gt;Click me&lt;/sc-button&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-button variant="primary"&gt;Click me&lt;/hu-button&gt;</code></pre></div>
         <div class="variants">
           <h3>All Variants</h3>
           <div class="row">
-            <sc-button variant="primary">Primary</sc-button>
-            <sc-button variant="secondary">Secondary</sc-button>
-            <sc-button variant="ghost">Ghost</sc-button>
-            <sc-button variant="destructive">Destructive</sc-button>
-            <sc-button disabled>Disabled</sc-button>
-            <sc-button loading>Loading</sc-button>
+            <hu-button variant="primary">Primary</hu-button>
+            <hu-button variant="secondary">Secondary</hu-button>
+            <hu-button variant="ghost">Ghost</hu-button>
+            <hu-button variant="destructive">Destructive</hu-button>
+            <hu-button disabled>Disabled</hu-button>
+            <hu-button loading>Loading</hu-button>
           </div>
         </div>
       </section>
 
-      <section class="component-section" id="sc-badge">
-        <h2>sc-badge</h2>
+      <section class="component-section" id="hu-badge">
+        <h2>hu-badge</h2>
         <div class="playground">
           <div class="preview">
-            <sc-badge id="badge-preview" variant="success">Badge</sc-badge>
+            <hu-badge id="badge-preview" variant="success">Badge</hu-badge>
           </div>
           <div class="controls">
             <label>variant
@@ -206,22 +206,22 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-badge variant="success"&gt;Success&lt;/sc-badge&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-badge variant="success"&gt;Success&lt;/hu-badge&gt;</code></pre></div>
         <div class="variants"><h3>All Variants</h3><div class="row">
-          <sc-badge variant="success">Success</sc-badge>
-          <sc-badge variant="warning">Warning</sc-badge>
-          <sc-badge variant="error">Error</sc-badge>
-          <sc-badge variant="info">Info</sc-badge>
-          <sc-badge variant="neutral">Neutral</sc-badge>
-          <sc-badge variant="success" dot>With dot</sc-badge>
+          <hu-badge variant="success">Success</hu-badge>
+          <hu-badge variant="warning">Warning</hu-badge>
+          <hu-badge variant="error">Error</hu-badge>
+          <hu-badge variant="info">Info</hu-badge>
+          <hu-badge variant="neutral">Neutral</hu-badge>
+          <hu-badge variant="success" dot>With dot</hu-badge>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-card">
-        <h2>sc-card</h2>
+      <section class="component-section" id="hu-card">
+        <h2>hu-card</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 280px;">
-            <sc-card id="card-preview">Card content goes here.</sc-card>
+            <hu-card id="card-preview">Card content goes here.</hu-card>
           </div>
           <div class="controls">
             <label>hoverable
@@ -232,18 +232,18 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-card hoverable&gt;Card content&lt;/sc-card&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-card hoverable&gt;Card content&lt;/hu-card&gt;</code></pre></div>
         <div class="variants"><h3>All Variants</h3><div class="row">
-        <sc-card style="width: 200px; padding: var(--sc-space-md)">Default card</sc-card>
-        <sc-card hoverable style="width: 200px; padding: var(--sc-space-md)">Hoverable card</sc-card>
+        <hu-card style="width: 200px; padding: var(--hu-space-md)">Default card</hu-card>
+        <hu-card hoverable style="width: 200px; padding: var(--hu-space-md)">Hoverable card</hu-card>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-input">
-        <h2>sc-input</h2>
+      <section class="component-section" id="hu-input">
+        <h2>hu-input</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 200px;">
-            <sc-input id="input-preview" label="Email" placeholder="you@example.com" style="min-width: 200px"></sc-input>
+            <hu-input id="input-preview" label="Email" placeholder="you@example.com" style="min-width: 200px"></hu-input>
           </div>
           <div class="controls">
             <label>label
@@ -267,21 +267,21 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-input label="Email" placeholder="you@example.com"&gt;&lt;/sc-input&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-input label="Email" placeholder="you@example.com"&gt;&lt;/hu-input&gt;</code></pre></div>
         <div class="variants"><h3>All Variants</h3><div class="row">
-          <sc-input size="sm" placeholder="Small" style="min-width: 160px"></sc-input>
-          <sc-input size="md" placeholder="Medium" style="min-width: 200px"></sc-input>
-          <sc-input size="lg" placeholder="Large" style="min-width: 200px"></sc-input>
-          <sc-input placeholder="With error" error="This field is required" style="min-width: 200px"></sc-input>
-          <sc-input placeholder="Disabled" disabled style="min-width: 200px"></sc-input>
+          <hu-input size="sm" placeholder="Small" style="min-width: 160px"></hu-input>
+          <hu-input size="md" placeholder="Medium" style="min-width: 200px"></hu-input>
+          <hu-input size="lg" placeholder="Large" style="min-width: 200px"></hu-input>
+          <hu-input placeholder="With error" error="This field is required" style="min-width: 200px"></hu-input>
+          <hu-input placeholder="Disabled" disabled style="min-width: 200px"></hu-input>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-select">
-        <h2>sc-select</h2>
+      <section class="component-section" id="hu-select">
+        <h2>hu-select</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 200px;">
-            <sc-select id="select-preview" label="Choose an option" placeholder="Select..." style="min-width: 200px"></sc-select>
+            <hu-select id="select-preview" label="Choose an option" placeholder="Select..." style="min-width: 200px"></hu-select>
           </div>
           <div class="controls">
             <label>label
@@ -305,20 +305,20 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-select label="Choose" placeholder="Select..." options='[{"value":"a","label":"Option A"}]'&gt;&lt;/sc-select&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-select label="Choose" placeholder="Select..." options='[{"value":"a","label":"Option A"}]'&gt;&lt;/hu-select&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-select id="catalog-select" label="Choose an option" placeholder="Select..." style="min-width: 200px"></sc-select>
-          <sc-select label="Status" placeholder="Select status" error="Please select a status" style="min-width: 200px"></sc-select>
+          <hu-select id="catalog-select" label="Choose an option" placeholder="Select..." style="min-width: 200px"></hu-select>
+          <hu-select label="Status" placeholder="Select status" error="Please select a status" style="min-width: 200px"></hu-select>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-dropdown">
-        <h2>sc-dropdown</h2>
+      <section class="component-section" id="hu-dropdown">
+        <h2>hu-dropdown</h2>
         <div class="playground">
           <div class="preview">
-            <sc-dropdown id="dropdown-preview" align="start">
-              <sc-button id="dropdown-trigger">Actions</sc-button>
-            </sc-dropdown>
+            <hu-dropdown id="dropdown-preview" align="start">
+              <hu-button id="dropdown-trigger">Actions</hu-button>
+            </hu-dropdown>
           </div>
           <div class="controls">
             <label>align
@@ -329,19 +329,19 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-dropdown align="start"&gt;&lt;sc-button&gt;Actions&lt;/sc-button&gt;&lt;/sc-dropdown&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-dropdown align="start"&gt;&lt;hu-button&gt;Actions&lt;/hu-button&gt;&lt;/hu-dropdown&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-dropdown id="catalog-dropdown" align="start">
-            <sc-button id="dropdown-trigger-demo">Actions</sc-button>
-          </sc-dropdown>
+          <hu-dropdown id="catalog-dropdown" align="start">
+            <hu-button id="dropdown-trigger-demo">Actions</hu-button>
+          </hu-dropdown>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-switch">
-        <h2>sc-switch</h2>
+      <section class="component-section" id="hu-switch">
+        <h2>hu-switch</h2>
         <div class="playground">
           <div class="preview">
-            <sc-switch id="switch-preview" label="Enable notifications"></sc-switch>
+            <hu-switch id="switch-preview" label="Enable notifications"></hu-switch>
           </div>
           <div class="controls">
             <label>checked
@@ -355,14 +355,14 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-switch label="Enable" checked&gt;&lt;/sc-switch&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-switch label="Enable" checked&gt;&lt;/hu-switch&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-checkbox">
-        <h2>sc-checkbox</h2>
+      <section class="component-section" id="hu-checkbox">
+        <h2>hu-checkbox</h2>
         <div class="playground">
           <div class="preview">
-            <sc-checkbox id="checkbox-preview" label="Accept terms"></sc-checkbox>
+            <hu-checkbox id="checkbox-preview" label="Accept terms"></hu-checkbox>
           </div>
           <div class="controls">
             <label>checked
@@ -376,14 +376,14 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-checkbox label="Accept terms"&gt;&lt;/sc-checkbox&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-checkbox label="Accept terms"&gt;&lt;/hu-checkbox&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-combobox">
-        <h2>sc-combobox</h2>
+      <section class="component-section" id="hu-combobox">
+        <h2>hu-combobox</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 200px;">
-            <sc-combobox id="combobox-preview" label="Choose option"></sc-combobox>
+            <hu-combobox id="combobox-preview" label="Choose option"></hu-combobox>
           </div>
           <div class="controls">
             <label>disabled
@@ -394,14 +394,14 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-combobox label="Choose" .options=${'[{value:"a",label:"Alpha"}]'} &gt;&lt;/sc-combobox&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-combobox label="Choose" .options=${'[{value:"a",label:"Alpha"}]'} &gt;&lt;/hu-combobox&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-radio">
-        <h2>sc-radio</h2>
+      <section class="component-section" id="hu-radio">
+        <h2>hu-radio</h2>
         <div class="playground">
           <div class="preview">
-            <sc-radio id="radio-preview" name="demo"></sc-radio>
+            <hu-radio id="radio-preview" name="demo"></hu-radio>
           </div>
           <div class="controls">
             <label>disabled
@@ -409,14 +409,14 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-radio name="choice" value="a" .options=${'[{value:"a",label:"A"}]'} &gt;&lt;/sc-radio&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-radio name="choice" value="a" .options=${'[{value:"a",label:"A"}]'} &gt;&lt;/hu-radio&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-textarea">
-        <h2>sc-textarea</h2>
+      <section class="component-section" id="hu-textarea">
+        <h2>hu-textarea</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 240px;">
-            <sc-textarea id="textarea-preview" label="Description" placeholder="Enter text..." rows="4" style="min-width: 240px"></sc-textarea>
+            <hu-textarea id="textarea-preview" label="Description" placeholder="Enter text..." rows="4" style="min-width: 240px"></hu-textarea>
           </div>
           <div class="controls">
             <label>label
@@ -446,19 +446,19 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-textarea label="Description" placeholder="Enter text..." rows="4"&gt;&lt;/sc-textarea&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-textarea label="Description" placeholder="Enter text..." rows="4"&gt;&lt;/hu-textarea&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-popover">
-        <h2>sc-popover</h2>
+      <section class="component-section" id="hu-popover">
+        <h2>hu-popover</h2>
         <div class="playground">
           <div class="preview">
-            <sc-popover id="popover-preview" position="bottom" arrow>
-              <sc-button id="popover-trigger">Open popover</sc-button>
+            <hu-popover id="popover-preview" position="bottom" arrow>
+              <hu-button id="popover-trigger">Open popover</hu-button>
               <div slot="content">
-                <p style="margin: 0; font-size: var(--sc-text-sm);">Popover content goes here.</p>
+                <p style="margin: 0; font-size: var(--hu-text-sm);">Popover content goes here.</p>
               </div>
-            </sc-popover>
+            </hu-popover>
           </div>
           <div class="controls">
             <label>position
@@ -474,124 +474,124 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-popover&gt;&lt;sc-button&gt;Open&lt;/sc-button&gt;&lt;div slot="content"&gt;Content&lt;/div&gt;&lt;/sc-popover&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-popover&gt;&lt;hu-button&gt;Open&lt;/hu-button&gt;&lt;div slot="content"&gt;Content&lt;/div&gt;&lt;/hu-popover&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-breadcrumb">
-        <h2>sc-breadcrumb</h2>
+      <section class="component-section" id="hu-breadcrumb">
+        <h2>hu-breadcrumb</h2>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-breadcrumb id="breadcrumb-preview"></sc-breadcrumb>
+            <hu-breadcrumb id="breadcrumb-preview"></hu-breadcrumb>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-breadcrumb .items=${'[{"label":"Home","href":"/"},{"label":"Profile"}]'} &gt;&lt;/sc-breadcrumb&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-breadcrumb .items=${'[{"label":"Home","href":"/"},{"label":"Profile"}]'} &gt;&lt;/hu-breadcrumb&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-breadcrumb id="breadcrumb-demo"></sc-breadcrumb>
+          <hu-breadcrumb id="breadcrumb-demo"></hu-breadcrumb>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-dialog">
-        <h2>sc-dialog</h2>
+      <section class="component-section" id="hu-dialog">
+        <h2>hu-dialog</h2>
         <div class="playground">
           <div class="preview">
-            <sc-button variant="primary" id="dialog-default">Default Dialog</sc-button>
-            <sc-button variant="destructive" id="dialog-danger">Danger Dialog</sc-button>
-            <sc-dialog id="catalog-dialog"></sc-dialog>
+            <hu-button variant="primary" id="dialog-default">Default Dialog</hu-button>
+            <hu-button variant="destructive" id="dialog-danger">Danger Dialog</hu-button>
+            <hu-dialog id="catalog-dialog"></hu-dialog>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-dialog open title="Confirm" message="Are you sure?"&gt;&lt;/sc-dialog&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-dialog open title="Confirm" message="Are you sure?"&gt;&lt;/hu-dialog&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-button variant="primary" id="dialog-demo-default">Default</sc-button>
-          <sc-button variant="destructive" id="dialog-demo-danger">Danger</sc-button>
+          <hu-button variant="primary" id="dialog-demo-default">Default</hu-button>
+          <hu-button variant="destructive" id="dialog-demo-danger">Danger</hu-button>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-modal">
-        <h2>sc-modal</h2>
+      <section class="component-section" id="hu-modal">
+        <h2>hu-modal</h2>
         <div class="playground">
           <div class="preview">
-            <sc-button id="modal-trigger">Open Modal</sc-button>
-            <sc-modal id="modal-preview" heading="Example Modal">
+            <hu-button id="modal-trigger">Open Modal</hu-button>
+            <hu-modal id="modal-preview" heading="Example Modal">
               <p>This is the modal body content.</p>
-            </sc-modal>
+            </hu-modal>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-modal heading="Title" open&gt;Content&lt;/sc-modal&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-modal heading="Title" open&gt;Content&lt;/hu-modal&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-button id="modal-demo">Launch Demo Modal</sc-button>
+          <hu-button id="modal-demo">Launch Demo Modal</hu-button>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-tooltip">
-        <h2>sc-tooltip</h2>
+      <section class="component-section" id="hu-tooltip">
+        <h2>hu-tooltip</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-lg); display: flex;">
-            <sc-tooltip text="Top tooltip" position="top"><sc-button variant="secondary">Top</sc-button></sc-tooltip>
-            <sc-tooltip text="Bottom tooltip" position="bottom"><sc-button variant="secondary">Bottom</sc-button></sc-tooltip>
-            <sc-tooltip text="Left tooltip" position="left"><sc-button variant="secondary">Left</sc-button></sc-tooltip>
-            <sc-tooltip text="Right tooltip" position="right"><sc-button variant="secondary">Right</sc-button></sc-tooltip>
+          <div class="preview" style="gap: var(--hu-space-lg); display: flex;">
+            <hu-tooltip text="Top tooltip" position="top"><hu-button variant="secondary">Top</hu-button></hu-tooltip>
+            <hu-tooltip text="Bottom tooltip" position="bottom"><hu-button variant="secondary">Bottom</hu-button></hu-tooltip>
+            <hu-tooltip text="Left tooltip" position="left"><hu-button variant="secondary">Left</hu-button></hu-tooltip>
+            <hu-tooltip text="Right tooltip" position="right"><hu-button variant="secondary">Right</hu-button></hu-tooltip>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-tooltip text="Helpful tip" position="top"&gt;&lt;button&gt;Hover me&lt;/button&gt;&lt;/sc-tooltip&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-tooltip text="Helpful tip" position="top"&gt;&lt;button&gt;Hover me&lt;/button&gt;&lt;/hu-tooltip&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-empty-state">
-        <h2>sc-empty-state</h2>
+      <section class="component-section" id="hu-empty-state">
+        <h2>hu-empty-state</h2>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-empty-state id="empty-preview" heading="No items" description="Items will appear here when available."></sc-empty-state>
+            <hu-empty-state id="empty-preview" heading="No items" description="Items will appear here when available."></hu-empty-state>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-empty-state heading="No items" description="..."&gt;&lt;/sc-empty-state&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-empty-state heading="No items" description="..."&gt;&lt;/hu-empty-state&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-skeleton">
-        <h2>sc-skeleton</h2>
+      <section class="component-section" id="hu-skeleton">
+        <h2>hu-skeleton</h2>
         <div class="playground">
-          <div class="preview" style="width: 100%; flex-direction: column; gap: var(--sc-space-md);">
-            <sc-skeleton variant="line" width="80%"></sc-skeleton>
-            <sc-skeleton variant="line" width="60%"></sc-skeleton>
-            <sc-skeleton variant="card" height="80px"></sc-skeleton>
-            <sc-skeleton variant="circle" width="48px" height="48px"></sc-skeleton>
+          <div class="preview" style="width: 100%; flex-direction: column; gap: var(--hu-space-md);">
+            <hu-skeleton variant="line" width="80%"></hu-skeleton>
+            <hu-skeleton variant="line" width="60%"></hu-skeleton>
+            <hu-skeleton variant="card" height="80px"></hu-skeleton>
+            <hu-skeleton variant="circle" width="48px" height="48px"></hu-skeleton>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-skeleton variant="line" width="80%"&gt;&lt;/sc-skeleton&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-skeleton variant="line" width="80%"&gt;&lt;/hu-skeleton&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-sheet">
-        <h2>sc-sheet</h2>
+      <section class="component-section" id="hu-sheet">
+        <h2>hu-sheet</h2>
         <div class="playground">
           <div class="preview">
-            <sc-button id="sheet-trigger">Open Sheet</sc-button>
-            <sc-sheet id="sheet-preview">
+            <hu-button id="sheet-trigger">Open Sheet</hu-button>
+            <hu-sheet id="sheet-preview">
               <p>Sheet content goes here. Drag the handle or press Escape to close.</p>
-            </sc-sheet>
+            </hu-sheet>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-sheet open&gt;Sheet content&lt;/sc-sheet&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-sheet open&gt;Sheet content&lt;/hu-sheet&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-button id="sheet-demo">Launch Demo Sheet</sc-button>
+          <hu-button id="sheet-demo">Launch Demo Sheet</hu-button>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-toast">
-        <h2>sc-toast</h2>
+      <section class="component-section" id="hu-toast">
+        <h2>hu-toast</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-sm); display: flex; flex-wrap: wrap;">
-            <sc-button id="toast-success-v" variant="secondary">Success</sc-button>
-            <sc-button id="toast-error-v" variant="secondary">Error</sc-button>
-            <sc-button id="toast-info-v" variant="secondary">Info</sc-button>
-            <sc-button id="toast-warning-v" variant="secondary">Warning</sc-button>
+          <div class="preview" style="gap: var(--hu-space-sm); display: flex; flex-wrap: wrap;">
+            <hu-button id="toast-success-v" variant="secondary">Success</hu-button>
+            <hu-button id="toast-error-v" variant="secondary">Error</hu-button>
+            <hu-button id="toast-info-v" variant="secondary">Info</hu-button>
+            <hu-button id="toast-warning-v" variant="secondary">Warning</hu-button>
           </div>
         </div>
         <div class="code-snippet"><pre><code>ScToast.show({ message: "Saved!", variant: "success" });</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-tabs">
-        <h2>sc-tabs</h2>
+      <section class="component-section" id="hu-tabs">
+        <h2>hu-tabs</h2>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-tabs id="tabs-preview"></sc-tabs>
+            <hu-tabs id="tabs-preview"></hu-tabs>
           </div>
           <div class="controls">
             <label>value
@@ -603,58 +603,58 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-tabs .tabs=${'[{id:"tab1",label:"Tab 1"}]'} value="tab1"&gt;&lt;/sc-tabs&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-tabs .tabs=${'[{id:"tab1",label:"Tab 1"}]'} value="tab1"&gt;&lt;/hu-tabs&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row" style="width: 100%;">
-          <sc-tabs id="catalog-tabs"></sc-tabs>
+          <hu-tabs id="catalog-tabs"></hu-tabs>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-avatar">
-        <h2>sc-avatar</h2>
+      <section class="component-section" id="hu-avatar">
+        <h2>hu-avatar</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-md); display: flex;">
-            <sc-avatar name="Alice Smith" size="sm"></sc-avatar>
-            <sc-avatar name="Bob Jones" size="md"></sc-avatar>
-            <sc-avatar name="Charlie" size="lg"></sc-avatar>
+          <div class="preview" style="gap: var(--hu-space-md); display: flex;">
+            <hu-avatar name="Alice Smith" size="sm"></hu-avatar>
+            <hu-avatar name="Bob Jones" size="md"></hu-avatar>
+            <hu-avatar name="Charlie" size="lg"></hu-avatar>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-avatar name="Alice Smith" size="md"&gt;&lt;/sc-avatar&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-avatar name="Alice Smith" size="md"&gt;&lt;/hu-avatar&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-status-dot">
-        <h2>sc-status-dot</h2>
+      <section class="component-section" id="hu-status-dot">
+        <h2>hu-status-dot</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-md); display: flex; align-items: center;">
-            <sc-status-dot status="connected"></sc-status-dot>
-            <sc-status-dot status="connecting"></sc-status-dot>
-            <sc-status-dot status="disconnected"></sc-status-dot>
-            <sc-status-dot status="operational" size="md"></sc-status-dot>
-            <sc-status-dot status="online"></sc-status-dot>
-            <sc-status-dot status="busy"></sc-status-dot>
-            <sc-status-dot status="away"></sc-status-dot>
+          <div class="preview" style="gap: var(--hu-space-md); display: flex; align-items: center;">
+            <hu-status-dot status="connected"></hu-status-dot>
+            <hu-status-dot status="connecting"></hu-status-dot>
+            <hu-status-dot status="disconnected"></hu-status-dot>
+            <hu-status-dot status="operational" size="md"></hu-status-dot>
+            <hu-status-dot status="online"></hu-status-dot>
+            <hu-status-dot status="busy"></hu-status-dot>
+            <hu-status-dot status="away"></hu-status-dot>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-status-dot status="connected" size="sm"&gt;&lt;/sc-status-dot&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-status-dot status="connected" size="sm"&gt;&lt;/hu-status-dot&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-progress">
-        <h2>sc-progress</h2>
+      <section class="component-section" id="hu-progress">
+        <h2>hu-progress</h2>
         <div class="playground">
-          <div class="preview" style="width: 100%; flex-direction: column; gap: var(--sc-space-md);">
-            <sc-progress value="25" label="Upload progress"></sc-progress>
-            <sc-progress value="60" variant="success" label="Success"></sc-progress>
-            <sc-progress value="90" variant="warning" label="Warning"></sc-progress>
-            <sc-progress label="Indeterminate"></sc-progress>
+          <div class="preview" style="width: 100%; flex-direction: column; gap: var(--hu-space-md);">
+            <hu-progress value="25" label="Upload progress"></hu-progress>
+            <hu-progress value="60" variant="success" label="Success"></hu-progress>
+            <hu-progress value="90" variant="warning" label="Warning"></hu-progress>
+            <hu-progress label="Indeterminate"></hu-progress>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-progress value="60" variant="success" label="Upload"&gt;&lt;/sc-progress&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-progress value="60" variant="success" label="Upload"&gt;&lt;/hu-progress&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-slider">
-        <h2>sc-slider</h2>
+      <section class="component-section" id="hu-slider">
+        <h2>hu-slider</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 240px;">
-            <sc-slider id="slider-preview" value="50" label="Volume" min="0" max="100"></sc-slider>
+            <hu-slider id="slider-preview" value="50" label="Volume" min="0" max="100"></hu-slider>
           </div>
           <div class="controls">
             <label>value
@@ -671,14 +671,14 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-slider value="50" label="Volume" min="0" max="100"&gt;&lt;/sc-slider&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-slider value="50" label="Volume" min="0" max="100"&gt;&lt;/hu-slider&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-search">
-        <h2>sc-search</h2>
+      <section class="component-section" id="hu-search">
+        <h2>hu-search</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 240px;">
-            <sc-search id="search-preview" placeholder="Search..." style="min-width: 200px"></sc-search>
+            <hu-search id="search-preview" placeholder="Search..." style="min-width: 200px"></hu-search>
           </div>
           <div class="controls">
             <label>placeholder
@@ -696,29 +696,29 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-search placeholder="Search..."&gt;&lt;/sc-search&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-search placeholder="Search..."&gt;&lt;/hu-search&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-chat-search">
-        <h2>sc-chat-search</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Inline search bar for chat conversations. Use Cmd+F / Ctrl+F in chat view to open.</p>
+      <section class="component-section" id="hu-chat-search">
+        <h2>hu-chat-search</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Inline search bar for chat conversations. Use Cmd+F / Ctrl+F in chat view to open.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 320px;">
-            <sc-chat-search id="chat-search-preview"></sc-chat-search>
+            <hu-chat-search id="chat-search-preview"></hu-chat-search>
           </div>
           <div class="controls">
             <label><input type="checkbox" data-target="chat-search-preview" data-prop="open" checked /> Open</label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-chat-search .open=${true} .query=${"test"} .matchCount=${3} .currentMatch=${1}&gt;&lt;/sc-chat-search&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-chat-search .open=${true} .query=${"test"} .matchCount=${3} .currentMatch=${1}&gt;&lt;/hu-chat-search&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-chat-composer">
-        <h2>sc-chat-composer</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Rich iMessage-style chat composer with pill-shaped input, model selector, slash commands, image paste, and send/stop morphing button.</p>
+      <section class="component-section" id="hu-chat-composer">
+        <h2>hu-chat-composer</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Rich iMessage-style chat composer with pill-shaped input, model selector, slash commands, image paste, and send/stop morphing button.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 320px;">
-            <sc-chat-composer id="chat-composer-preview" placeholder="Type a message..." model="Gemini 2.5 Pro" show-suggestions></sc-chat-composer>
+            <hu-chat-composer id="chat-composer-preview" placeholder="Type a message..." model="Gemini 2.5 Pro" show-suggestions></hu-chat-composer>
           </div>
           <div class="controls">
             <label><input type="checkbox" data-target="chat-composer-preview" data-prop="showSuggestions" checked /> Show suggestions</label>
@@ -726,14 +726,14 @@
             <label><input type="checkbox" data-target="chat-composer-preview" data-prop="disabled" /> Disabled</label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-chat-composer .value=${""} .waiting=${false} .model=${"Gemini 2.5 Pro"} .showSuggestions=${true} placeholder="Type a message..."&gt;&lt;/sc-chat-composer&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-chat-composer .value=${""} .waiting=${false} .model=${"Gemini 2.5 Pro"} .showSuggestions=${true} placeholder="Type a message..."&gt;&lt;/hu-chat-composer&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-segmented-control">
-        <h2>sc-segmented-control</h2>
+      <section class="component-section" id="hu-segmented-control">
+        <h2>hu-segmented-control</h2>
         <div class="playground">
           <div class="preview">
-            <sc-segmented-control id="segmented-preview"></sc-segmented-control>
+            <hu-segmented-control id="segmented-preview"></hu-segmented-control>
           </div>
           <div class="controls">
             <label>value
@@ -755,18 +755,18 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-segmented-control .options=${'[{value:"day",label:"Day"}]'} value="day"&gt;&lt;/sc-segmented-control&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-segmented-control .options=${'[{value:"day",label:"Day"}]'} value="day"&gt;&lt;/hu-segmented-control&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row">
-          <sc-segmented-control id="catalog-segmented"></sc-segmented-control>
+          <hu-segmented-control id="catalog-segmented"></hu-segmented-control>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-pagination">
-        <h2>sc-pagination</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Pagination controls with page numbers, prev/next, page size selector, and "Showing X–Y of Z" label.</p>
+      <section class="component-section" id="hu-pagination">
+        <h2>hu-pagination</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Pagination controls with page numbers, prev/next, page size selector, and "Showing X–Y of Z" label.</p>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-pagination id="pagination-preview" total="100" page="1" pageSize="10"></sc-pagination>
+            <hu-pagination id="pagination-preview" total="100" page="1" pageSize="10"></hu-pagination>
           </div>
           <div class="controls">
             <label>total <input type="number" data-target="pagination-preview" data-prop="total" value="100"></label>
@@ -774,15 +774,15 @@
             <label>pageSize <input type="number" data-target="pagination-preview" data-prop="pageSize" value="10"></label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-pagination .total=${100} .page=${1} .pageSize=${10} @sc-page-change=${handler}&gt;&lt;/sc-pagination&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-pagination .total=${100} .page=${1} .pageSize=${10} @hu-page-change=${handler}&gt;&lt;/hu-pagination&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-data-table-v2">
-        <h2>sc-data-table-v2</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Data table with sort, filter, pagination, search, custom cell render, sticky header, and mobile card layout.</p>
+      <section class="component-section" id="hu-data-table-v2">
+        <h2>hu-data-table-v2</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Data table with sort, filter, pagination, search, custom cell render, sticky header, and mobile card layout.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; overflow-x: auto;">
-            <sc-data-table-v2 id="table-v2-preview"></sc-data-table-v2>
+            <hu-data-table-v2 id="table-v2-preview"></hu-data-table-v2>
           </div>
           <div class="controls">
             <label>paginated <input type="checkbox" data-target="table-v2-preview" data-prop="paginated" checked></label>
@@ -791,17 +791,17 @@
             <label>hoverable <input type="checkbox" data-target="table-v2-preview" data-prop="hoverable" checked></label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-data-table-v2 .columns=${cols} .rows=${rows} paginated searchable&gt;&lt;/sc-data-table-v2&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-data-table-v2 .columns=${cols} .rows=${rows} paginated searchable&gt;&lt;/hu-data-table-v2&gt;</code></pre></div>
         <div class="variants"><h3>Demo</h3><div class="row" style="width: 100%;">
-          <sc-data-table-v2 id="catalog-table-v2"></sc-data-table-v2>
+          <hu-data-table-v2 id="catalog-table-v2"></hu-data-table-v2>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-date-picker">
-        <h2>sc-date-picker</h2>
+      <section class="component-section" id="hu-date-picker">
+        <h2>hu-date-picker</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 200px;">
-            <sc-date-picker id="date-picker-preview" label="Select date" style="min-width: 200px"></sc-date-picker>
+            <hu-date-picker id="date-picker-preview" label="Select date" style="min-width: 200px"></hu-date-picker>
           </div>
           <div class="controls">
             <label>label
@@ -815,68 +815,68 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-date-picker label="Date" value="2025-01-15"&gt;&lt;/sc-date-picker&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-date-picker label="Date" value="2025-01-15"&gt;&lt;/hu-date-picker&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-sparkline">
-        <h2>sc-sparkline</h2>
+      <section class="component-section" id="hu-sparkline">
+        <h2>hu-sparkline</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-xl); display: flex; align-items: center;">
+          <div class="preview" style="gap: var(--hu-space-xl); display: flex; align-items: center;">
             <div style="text-align: center">
-              <sc-sparkline id="spark-up" color="var(--sc-success)"></sc-sparkline>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Uptrend</div>
+              <hu-sparkline id="spark-up" color="var(--hu-success)"></hu-sparkline>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Uptrend</div>
             </div>
             <div style="text-align: center">
-              <sc-sparkline id="spark-down" color="var(--sc-error)"></sc-sparkline>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Downtrend</div>
+              <hu-sparkline id="spark-down" color="var(--hu-error)"></hu-sparkline>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Downtrend</div>
             </div>
             <div style="text-align: center">
-              <sc-sparkline id="spark-flat" color="var(--sc-text-muted)"></sc-sparkline>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Stable</div>
+              <hu-sparkline id="spark-flat" color="var(--hu-text-muted)"></hu-sparkline>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Stable</div>
             </div>
             <div style="text-align: center">
-              <sc-sparkline id="spark-volatile" color="var(--sc-accent)" width="120" height="36"></sc-sparkline>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Volatile (wide)</div>
+              <hu-sparkline id="spark-volatile" color="var(--hu-accent)" width="120" height="36"></hu-sparkline>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Volatile (wide)</div>
             </div>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-sparkline .data=${'{[3, 5, 4, 7, 6, 8, 10]}'} color="var(--sc-success)"&gt;&lt;/sc-sparkline&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-sparkline .data=${'{[3, 5, 4, 7, 6, 8, 10]}'} color="var(--hu-success)"&gt;&lt;/hu-sparkline&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-animated-number">
-        <h2>sc-animated-number</h2>
+      <section class="component-section" id="hu-animated-number">
+        <h2>hu-animated-number</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-xl); display: flex; align-items: baseline;">
+          <div class="preview" style="gap: var(--hu-space-xl); display: flex; align-items: baseline;">
             <div style="text-align: center">
-              <div style="font-size: var(--sc-text-3xl); font-weight: bold;">
-                <sc-animated-number id="anum-preview" value="0"></sc-animated-number>
+              <div style="font-size: var(--hu-text-3xl); font-weight: bold;">
+                <hu-animated-number id="anum-preview" value="0"></hu-animated-number>
               </div>
-              <sc-button variant="secondary" id="anum-trigger" style="margin-top: var(--sc-space-sm);">Animate to 50</sc-button>
+              <hu-button variant="secondary" id="anum-trigger" style="margin-top: var(--hu-space-sm);">Animate to 50</hu-button>
             </div>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-animated-number .value=${'{42}'} suffix="%"&gt;&lt;/sc-animated-number&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-animated-number .value=${'{42}'} suffix="%"&gt;&lt;/hu-animated-number&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-animated-icon">
-        <h2>sc-animated-icon</h2>
+      <section class="component-section" id="hu-animated-icon">
+        <h2>hu-animated-icon</h2>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-xl); display: flex; align-items: center;">
+          <div class="preview" style="gap: var(--hu-space-xl); display: flex; align-items: center;">
             <div style="text-align: center;">
-              <sc-animated-icon icon="check" state="idle" size="2rem"></sc-animated-icon>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Idle</div>
+              <hu-animated-icon icon="check" state="idle" size="2rem"></hu-animated-icon>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Idle</div>
             </div>
             <div style="text-align: center;">
-              <sc-animated-icon icon="refresh" state="loading" size="2rem"></sc-animated-icon>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Loading</div>
+              <hu-animated-icon icon="refresh" state="loading" size="2rem"></hu-animated-icon>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Loading</div>
             </div>
             <div style="text-align: center;">
-              <sc-animated-icon icon="check" state="success" size="2rem"></sc-animated-icon>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Success</div>
+              <hu-animated-icon icon="check" state="success" size="2rem"></hu-animated-icon>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Success</div>
             </div>
             <div style="text-align: center;">
-              <sc-animated-icon icon="warning" state="error" size="2rem"></sc-animated-icon>
-              <div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Error</div>
+              <hu-animated-icon icon="warning" state="error" size="2rem"></hu-animated-icon>
+              <div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Error</div>
             </div>
           </div>
           <div class="controls">
@@ -890,45 +890,45 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-animated-icon icon="check" state="success" size="2rem"&gt;&lt;/sc-animated-icon&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-animated-icon icon="check" state="success" size="2rem"&gt;&lt;/hu-animated-icon&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-activity-feed">
-        <h2>sc-activity-feed</h2>
+      <section class="component-section" id="hu-activity-feed">
+        <h2>hu-activity-feed</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-activity-feed id="feed-preview"></sc-activity-feed>
+            <hu-activity-feed id="feed-preview"></hu-activity-feed>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-activity-feed .events=${'{[{type:"message",channel:"Telegram",user:"Alice",preview:"Hello!",time:Date.now()}]}'}&gt;&lt;/sc-activity-feed&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-activity-feed .events=${'{[{type:"message",channel:"Telegram",user:"Alice",preview:"Hello!",time:Date.now()}]}'}&gt;&lt;/hu-activity-feed&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-welcome">
-        <h2>sc-welcome</h2>
+      <section class="component-section" id="hu-welcome">
+        <h2>hu-welcome</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 640px;">
-            <sc-welcome></sc-welcome>
+            <hu-welcome></hu-welcome>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-welcome&gt;&lt;/sc-welcome&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-welcome&gt;&lt;/hu-welcome&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-welcome-card">
-        <h2>sc-welcome-card</h2>
+      <section class="component-section" id="hu-welcome-card">
+        <h2>hu-welcome-card</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-welcome-card></sc-welcome-card>
+            <hu-welcome-card></hu-welcome-card>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-welcome-card&gt;&lt;/sc-welcome-card&gt;
-&lt;sc-welcome-card .userName=${"Alex"}&gt;&lt;/sc-welcome-card&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-welcome-card&gt;&lt;/hu-welcome-card&gt;
+&lt;hu-welcome-card .userName=${"Alex"}&gt;&lt;/hu-welcome-card&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-error-boundary">
-        <h2>sc-error-boundary</h2>
+      <section class="component-section" id="hu-error-boundary">
+        <h2>hu-error-boundary</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 400px;">
-            <sc-error-boundary id="error-boundary-preview"></sc-error-boundary>
+            <hu-error-boundary id="error-boundary-preview"></hu-error-boundary>
           </div>
           <div class="controls">
             <label>
@@ -940,112 +940,112 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-error-boundary .error=${error} @retry=${onRetry}&gt;
+        <div class="code-snippet"><pre><code>&lt;hu-error-boundary .error=${error} @retry=${onRetry}&gt;
   &lt;your-view&gt;&lt;/your-view&gt;
-&lt;/sc-error-boundary&gt;</code></pre></div>
+&lt;/hu-error-boundary&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-thinking">
-        <h2>sc-thinking</h2>
+      <section class="component-section" id="hu-thinking">
+        <h2>hu-thinking</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-thinking active .steps=${["Analyzing request", "Planning steps"]} duration="3200"></sc-thinking>
+            <hu-thinking active .steps=${["Analyzing request", "Planning steps"]} duration="3200"></hu-thinking>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-thinking active .steps=&#x27;["Analyzing..."]&#x27;&gt;&lt;/sc-thinking&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-thinking active .steps=&#x27;["Analyzing..."]&#x27;&gt;&lt;/hu-thinking&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-tool-result">
-        <h2>sc-tool-result</h2>
+      <section class="component-section" id="hu-tool-result">
+        <h2>hu-tool-result</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-tool-result tool="shell" status="success" content="File created successfully"></sc-tool-result>
+            <hu-tool-result tool="shell" status="success" content="File created successfully"></hu-tool-result>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-tool-result tool=&quot;shell&quot; status=&quot;success&quot;&gt;&lt;/sc-tool-result&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-tool-result tool=&quot;shell&quot; status=&quot;success&quot;&gt;&lt;/hu-tool-result&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-message-stream">
-        <h2>sc-message-stream</h2>
+      <section class="component-section" id="hu-message-stream">
+        <h2>hu-message-stream</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-message-stream content="Hello! This supports **bold**, *italic*, and `code`." role="assistant"></sc-message-stream>
+            <hu-message-stream content="Hello! This supports **bold**, *italic*, and `code`." role="assistant"></hu-message-stream>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-message-stream content=&quot;...&quot; role=&quot;assistant&quot;&gt;&lt;/sc-message-stream&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-message-stream content=&quot;...&quot; role=&quot;assistant&quot;&gt;&lt;/hu-message-stream&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-message-branch">
-        <h2>sc-message-branch</h2>
+      <section class="component-section" id="hu-message-branch">
+        <h2>hu-message-branch</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-message-branch branches="3" current="1"></sc-message-branch>
+            <hu-message-branch branches="3" current="1"></hu-message-branch>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-message-branch branches=&quot;3&quot; current=&quot;1&quot;&gt;&lt;/sc-message-branch&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-message-branch branches=&quot;3&quot; current=&quot;1&quot;&gt;&lt;/hu-message-branch&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-reasoning-block">
-        <h2>sc-reasoning-block</h2>
+      <section class="component-section" id="hu-reasoning-block">
+        <h2>hu-reasoning-block</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-reasoning-block
+            <hu-reasoning-block
               content="The user asked about deployment. I will consider: 1) CI/CD pipeline status, 2) environment variables, 3) rollback strategy."
               duration="Thought for 12s"
-            ></sc-reasoning-block>
+            ></hu-reasoning-block>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-reasoning-block content=&quot;...&quot; duration=&quot;Thought for 12s&quot;&gt;&lt;/sc-reasoning-block&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-reasoning-block content=&quot;...&quot; duration=&quot;Thought for 12s&quot;&gt;&lt;/hu-reasoning-block&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-code-block">
-        <h2>sc-code-block</h2>
+      <section class="component-section" id="hu-code-block">
+        <h2>hu-code-block</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-code-block code="const greet = (name) => `Hello, ${name}!`;" language="javascript"></sc-code-block>
+            <hu-code-block code="const greet = (name) => `Hello, ${name}!`;" language="javascript"></hu-code-block>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-code-block code=&quot;...&quot; language=&quot;javascript&quot;&gt;&lt;/sc-code-block&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-code-block code=&quot;...&quot; language=&quot;javascript&quot;&gt;&lt;/hu-code-block&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-latex">
-        <h2>sc-latex</h2>
+      <section class="component-section" id="hu-latex">
+        <h2>hu-latex</h2>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-latex content="E = mc^2"></sc-latex>
+            <hu-latex content="E = mc^2"></hu-latex>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-latex content=&quot;E = mc^2&quot;&gt;&lt;/sc-latex&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-latex content=&quot;E = mc^2&quot;&gt;&lt;/hu-latex&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-shortcut-overlay">
-        <h2>sc-shortcut-overlay</h2>
+      <section class="component-section" id="hu-shortcut-overlay">
+        <h2>hu-shortcut-overlay</h2>
         <div class="playground">
           <div class="preview">
             <button type="button" id="shortcut-overlay-trigger">Press ? or click to open</button>
-            <sc-shortcut-overlay id="shortcut-overlay-preview"></sc-shortcut-overlay>
+            <hu-shortcut-overlay id="shortcut-overlay-preview"></hu-shortcut-overlay>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-shortcut-overlay .open=${open} @close=${...}&gt;&lt;/sc-shortcut-overlay&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-shortcut-overlay .open=${open} @close=${...}&gt;&lt;/hu-shortcut-overlay&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-context-menu">
-        <h2>sc-context-menu</h2>
+      <section class="component-section" id="hu-context-menu">
+        <h2>hu-context-menu</h2>
         <div class="playground">
           <div class="preview" id="context-menu-target" style="min-height: 120px;">
             Right-click here or use the button to open context menu
             <button type="button" id="context-menu-trigger">Open menu</button>
-            <sc-context-menu id="context-menu-preview"></sc-context-menu>
+            <hu-context-menu id="context-menu-preview"></hu-context-menu>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-context-menu .open=${open} .x=${x} .y=${y} .items=${items} @close=${...}&gt;&lt;/sc-context-menu&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-context-menu .open=${open} .x=${x} .y=${y} .items=${items} @close=${...}&gt;&lt;/hu-context-menu&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-stat-card">
-        <h2>sc-stat-card</h2>
+      <section class="component-section" id="hu-stat-card">
+        <h2>hu-stat-card</h2>
         <div class="playground">
           <div class="preview">
-            <sc-stat-card value="2895" label="Tests" trend="+12%" trendDirection="up" accent="primary"></sc-stat-card>
+            <hu-stat-card value="2895" label="Tests" trend="+12%" trendDirection="up" accent="primary"></hu-stat-card>
           </div>
           <div class="controls">
             <label>Value <input type="number" value="2895" id="stat-card-value" /></label>
@@ -1053,287 +1053,287 @@
             <label>Trend <input type="text" value="+12%" id="stat-card-trend" /></label>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-stat-card value="2895" label="Tests" trend="+12%" trendDirection="up"&gt;&lt;/sc-stat-card&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-stat-card value="2895" label="Tests" trend="+12%" trendDirection="up"&gt;&lt;/hu-stat-card&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-section-header">
-        <h2>sc-section-header</h2>
+      <section class="component-section" id="hu-section-header">
+        <h2>hu-section-header</h2>
         <div class="playground">
           <div class="preview" style="width:100%">
-            <sc-section-header heading="Overview" description="System health and activity"></sc-section-header>
+            <hu-section-header heading="Overview" description="System health and activity"></hu-section-header>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-section-header heading="Overview" description="System health"&gt;&lt;/sc-section-header&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-section-header heading="Overview" description="System health"&gt;&lt;/hu-section-header&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-metric-row">
-        <h2>sc-metric-row</h2>
+      <section class="component-section" id="hu-metric-row">
+        <h2>hu-metric-row</h2>
         <div class="playground">
           <div class="preview" style="width:100%" id="metric-row-preview">
-            <sc-metric-row></sc-metric-row>
+            <hu-metric-row></hu-metric-row>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-metric-row .items=\${[{label:"CPU",value:"23%"},{label:"RAM",value:"1.2GB"}]}&gt;&lt;/sc-metric-row&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-metric-row .items=\${[{label:"CPU",value:"23%"},{label:"RAM",value:"1.2GB"}]}&gt;&lt;/hu-metric-row&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-timeline">
-        <h2>sc-timeline</h2>
+      <section class="component-section" id="hu-timeline">
+        <h2>hu-timeline</h2>
         <div class="playground">
           <div class="preview" style="width:100%" id="timeline-preview">
-            <sc-timeline></sc-timeline>
+            <hu-timeline></hu-timeline>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-timeline .items=\${[{time:"2m ago",message:"Test passed",status:"success"}]}&gt;&lt;/sc-timeline&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-timeline .items=\${[{time:"2m ago",message:"Test passed",status:"success"}]}&gt;&lt;/hu-timeline&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-sparkline-enhanced">
-        <h2>sc-sparkline-enhanced</h2>
+      <section class="component-section" id="hu-sparkline-enhanced">
+        <h2>hu-sparkline-enhanced</h2>
         <div class="playground">
           <div class="preview" id="sparkline-enhanced-preview">
-            <sc-sparkline-enhanced></sc-sparkline-enhanced>
+            <hu-sparkline-enhanced></hu-sparkline-enhanced>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-sparkline-enhanced .data=\${[10,20,15,25,30]} fillGradient showTooltip&gt;&lt;/sc-sparkline-enhanced&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-sparkline-enhanced .data=\${[10,20,15,25,30]} fillGradient showTooltip&gt;&lt;/hu-sparkline-enhanced&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-forecast-chart">
-        <h2>sc-forecast-chart</h2>
+      <section class="component-section" id="hu-forecast-chart">
+        <h2>hu-forecast-chart</h2>
         <div class="playground">
           <div class="preview" id="forecast-chart-preview" style="width:100%">
-            <sc-forecast-chart></sc-forecast-chart>
+            <hu-forecast-chart></hu-forecast-chart>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-forecast-chart .history=\${[...]} .projectedTotal=\${81.53} .daysInMonth=\${31}&gt;&lt;/sc-forecast-chart&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-forecast-chart .history=\${[...]} .projectedTotal=\${81.53} .daysInMonth=\${31}&gt;&lt;/hu-forecast-chart&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-page-hero">
-        <h2>sc-page-hero</h2>
+      <section class="component-section" id="hu-page-hero">
+        <h2>hu-page-hero</h2>
         <div class="playground">
           <div class="preview" style="width:100%">
-            <sc-page-hero><h2 style="margin:0;font-size:1.5rem">Welcome</h2><p style="color:var(--sc-text-muted)">Gradient mesh hero section</p></sc-page-hero>
+            <hu-page-hero><h2 style="margin:0;font-size:1.5rem">Welcome</h2><p style="color:var(--hu-text-muted)">Gradient mesh hero section</p></hu-page-hero>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-page-hero&gt;...content...&lt;/sc-page-hero&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-page-hero&gt;...content...&lt;/hu-page-hero&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-schedule-builder">
-        <h2>sc-schedule-builder</h2>
+      <section class="component-section" id="hu-schedule-builder">
+        <h2>hu-schedule-builder</h2>
         <p>Interactive cron schedule builder with natural language input and visual interval selector.</p>
         <div class="playground">
           <div class="preview" style="width:100%">
-            <sc-schedule-builder></sc-schedule-builder>
+            <hu-schedule-builder></hu-schedule-builder>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-schedule-builder&gt;&lt;/sc-schedule-builder&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-schedule-builder&gt;&lt;/hu-schedule-builder&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-message-actions">
-        <h2>sc-message-actions</h2>
+      <section class="component-section" id="hu-message-actions">
+        <h2>hu-message-actions</h2>
         <p>Floating action bar for chat messages — copy, retry, regenerate. Appears on hover.</p>
         <div class="playground">
           <div class="preview">
-            <sc-message-actions role="assistant" content="Hello from the catalog demo"></sc-message-actions>
+            <hu-message-actions role="assistant" content="Hello from the catalog demo"></hu-message-actions>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-message-actions role="assistant" content="Hello"&gt;&lt;/sc-message-actions&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-message-actions role="assistant" content="Hello"&gt;&lt;/hu-message-actions&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-tapback-menu">
-        <h2>sc-tapback-menu</h2>
+      <section class="component-section" id="hu-tapback-menu">
+        <h2>hu-tapback-menu</h2>
         <p>Floating reaction picker overlay (iMessage-style tapback) — thumbs up/down, heart, copy, bookmark.</p>
         <div class="playground">
           <div class="preview" style="position:relative;min-height:120px;display:flex;align-items:center;justify-content:center">
             <button type="button" id="catalog-tapback-trigger">Show tapback menu</button>
-            <sc-tapback-menu id="catalog-tapback-menu" messageContent="Sample message to copy" messageIndex="0"></sc-tapback-menu>
+            <hu-tapback-menu id="catalog-tapback-menu" messageContent="Sample message to copy" messageIndex="0"></hu-tapback-menu>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-tapback-menu open .x=${100} .y=${80} messageIndex="0" messageContent="..."&gt;&lt;/sc-tapback-menu&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-tapback-menu open .x=${100} .y=${80} messageIndex="0" messageContent="..."&gt;&lt;/hu-tapback-menu&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-automation-card">
-        <h2>sc-automation-card</h2>
+      <section class="component-section" id="hu-automation-card">
+        <h2>hu-automation-card</h2>
         <p>Card for displaying a cron/automation job with status, schedule, cost, and run history sparkline.</p>
         <div class="playground">
           <div class="preview" style="width:100%">
-            <sc-automation-card></sc-automation-card>
+            <hu-automation-card></hu-automation-card>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-automation-card .job=${"{ ... }"} .runs=${"[...]"}&gt;&lt;/sc-automation-card&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-automation-card .job=${"{ ... }"} .runs=${"[...]"}&gt;&lt;/hu-automation-card&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-automation-form">
-        <h2>sc-automation-form</h2>
+      <section class="component-section" id="hu-automation-form">
+        <h2>hu-automation-form</h2>
         <p>Form for creating/editing agent or shell automations with template pre-fill, schedule builder, and validation.</p>
         <div class="playground">
           <div class="preview" style="width:100%;max-width:480px">
-            <sc-automation-form type="agent"></sc-automation-form>
+            <hu-automation-form type="agent"></hu-automation-form>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-automation-form type="agent" .template=${"..."} .editingJob=${"..."} .channels=${"[...]"}&gt;&lt;/sc-automation-form&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-automation-form type="agent" .template=${"..."} .editingJob=${"..."} .channels=${"[...]"}&gt;&lt;/hu-automation-form&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-voice-orb">
-        <h2>sc-voice-orb</h2>
-        <p>Voice visualization orb with mic button, listening state animation, and status text. Dispatches sc-voice-mic-toggle on click.</p>
+      <section class="component-section" id="hu-voice-orb">
+        <h2>hu-voice-orb</h2>
+        <p>Voice visualization orb with mic button, listening state animation, and status text. Dispatches hu-voice-mic-toggle on click.</p>
         <div class="playground">
-          <div class="preview" style="width:100%;display:flex;justify-content:center;padding:var(--sc-space-xl)">
-            <sc-voice-orb state="idle"></sc-voice-orb>
+          <div class="preview" style="width:100%;display:flex;justify-content:center;padding:var(--hu-space-xl)">
+            <hu-voice-orb state="idle"></hu-voice-orb>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-voice-orb .state=${"idle"} .audioLevel=${0} ?disabled=${false} @sc-voice-mic-toggle=${"..."}&gt;&lt;/sc-voice-orb&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-voice-orb .state=${"idle"} .audioLevel=${0} ?disabled=${false} @hu-voice-mic-toggle=${"..."}&gt;&lt;/hu-voice-orb&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-voice-conversation">
-        <h2>sc-voice-conversation</h2>
+      <section class="component-section" id="hu-voice-conversation">
+        <h2>hu-voice-conversation</h2>
         <p>Conversation display for voice view: empty state or message thread with scroll-to-bottom.</p>
         <div class="playground">
           <div class="preview" style="width:100%;min-height:200px">
-            <sc-voice-conversation></sc-voice-conversation>
+            <hu-voice-conversation></hu-voice-conversation>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-voice-conversation .items=${"[...]"} .isWaiting=${false}&gt;&lt;/sc-voice-conversation&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-voice-conversation .items=${"[...]"} .isWaiting=${false}&gt;&lt;/hu-voice-conversation&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-chat-sessions-panel">
-        <h2>sc-chat-sessions-panel</h2>
+      <section class="component-section" id="hu-chat-sessions-panel">
+        <h2>hu-chat-sessions-panel</h2>
         <p>Slide-out panel listing chat sessions with time groups, inline rename, and spring entrance animations.</p>
         <div class="playground">
           <div class="preview" style="width:100%;position:relative;min-height:120px">
-            <sc-chat-sessions-panel open></sc-chat-sessions-panel>
+            <hu-chat-sessions-panel open></hu-chat-sessions-panel>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-chat-sessions-panel open .sessions=${"[...]"}&gt;&lt;/sc-chat-sessions-panel&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-chat-sessions-panel open .sessions=${"[...]"}&gt;&lt;/hu-chat-sessions-panel&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-file-preview">
-        <h2>sc-file-preview</h2>
+      <section class="component-section" id="hu-file-preview">
+        <h2>hu-file-preview</h2>
         <p>Displays attached file previews (images, documents) in the chat composer area.</p>
         <div class="playground">
           <div class="preview">
-            <sc-file-preview></sc-file-preview>
+            <hu-file-preview></hu-file-preview>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-file-preview .files=${"[{ name: 'doc.pdf', size: 1024, type: 'application/pdf' }]"}&gt;&lt;/sc-file-preview&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-file-preview .files=${"[{ name: 'doc.pdf', size: 1024, type: 'application/pdf' }]"}&gt;&lt;/hu-file-preview&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-json-viewer">
-        <h2>sc-json-viewer</h2>
+      <section class="component-section" id="hu-json-viewer">
+        <h2>hu-json-viewer</h2>
         <p>Collapsible tree for structured JSON data with syntax highlighting and copy-to-clipboard.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-json-viewer id="json-viewer-preview"></sc-json-viewer>
+            <hu-json-viewer id="json-viewer-preview"></hu-json-viewer>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-json-viewer .data=\${data} expanded-depth="2"&gt;&lt;/sc-json-viewer&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-json-viewer .data=\${data} expanded-depth="2"&gt;&lt;/hu-json-viewer&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-chat-bubble">
-        <h2>sc-chat-bubble</h2>
+      <section class="component-section" id="hu-chat-bubble">
+        <h2>hu-chat-bubble</h2>
         <p>Chat message bubble with markdown support, user/assistant roles, streaming cursor, and optional tail.</p>
         <div class="playground">
-          <div class="preview" style="width: 100%; max-width: 480px; flex-direction: column; gap: var(--sc-space-md); align-items: flex-start;">
-            <sc-chat-bubble content="Hello! How can I help you today?" role="assistant" show-tail></sc-chat-bubble>
-            <sc-chat-bubble content="Can you explain **markdown** and `code` in messages?" role="user" show-tail></sc-chat-bubble>
-            <sc-chat-bubble content="Sure! Here's a list:\n\n- **Bold** text\n- *Italic* text\n- `inline code`" role="assistant"></sc-chat-bubble>
-            <sc-chat-bubble content="Streaming response..." role="assistant" streaming></sc-chat-bubble>
+          <div class="preview" style="width: 100%; max-width: 480px; flex-direction: column; gap: var(--hu-space-md); align-items: flex-start;">
+            <hu-chat-bubble content="Hello! How can I help you today?" role="assistant" show-tail></hu-chat-bubble>
+            <hu-chat-bubble content="Can you explain **markdown** and `code` in messages?" role="user" show-tail></hu-chat-bubble>
+            <hu-chat-bubble content="Sure! Here's a list:\n\n- **Bold** text\n- *Italic* text\n- `inline code`" role="assistant"></hu-chat-bubble>
+            <hu-chat-bubble content="Streaming response..." role="assistant" streaming></hu-chat-bubble>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-chat-bubble content="Hello" role="assistant" .streaming=${false} .showTail=${true}&gt;&lt;/sc-chat-bubble&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-chat-bubble content="Hello" role="assistant" .streaming=${false} .showTail=${true}&gt;&lt;/hu-chat-bubble&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-typing-indicator">
-        <h2>sc-typing-indicator</h2>
+      <section class="component-section" id="hu-typing-indicator">
+        <h2>hu-typing-indicator</h2>
         <p>Animated typing indicator with optional elapsed time display.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 320px; justify-content: flex-start;">
-            <sc-typing-indicator elapsed="12s"></sc-typing-indicator>
+            <hu-typing-indicator elapsed="12s"></hu-typing-indicator>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-typing-indicator elapsed="12s"&gt;&lt;/sc-typing-indicator&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-typing-indicator elapsed="12s"&gt;&lt;/hu-typing-indicator&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-delivery-status">
-        <h2>sc-delivery-status</h2>
+      <section class="component-section" id="hu-delivery-status">
+        <h2>hu-delivery-status</h2>
         <p>Message delivery status indicator: sending, sent, streaming, complete, or failed (with retry).</p>
         <div class="playground">
-          <div class="preview" style="gap: var(--sc-space-lg); flex-wrap: wrap;">
-            <sc-delivery-status status="sending"></sc-delivery-status>
-            <sc-delivery-status status="sent"></sc-delivery-status>
-            <sc-delivery-status status="streaming"></sc-delivery-status>
-            <sc-delivery-status status="complete"></sc-delivery-status>
-            <sc-delivery-status status="failed"></sc-delivery-status>
+          <div class="preview" style="gap: var(--hu-space-lg); flex-wrap: wrap;">
+            <hu-delivery-status status="sending"></hu-delivery-status>
+            <hu-delivery-status status="sent"></hu-delivery-status>
+            <hu-delivery-status status="streaming"></hu-delivery-status>
+            <hu-delivery-status status="complete"></hu-delivery-status>
+            <hu-delivery-status status="failed"></hu-delivery-status>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-delivery-status status="sent"&gt;&lt;/sc-delivery-status&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-delivery-status status="sent"&gt;&lt;/hu-delivery-status&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-link-preview">
-        <h2>sc-link-preview</h2>
+      <section class="component-section" id="hu-link-preview">
+        <h2>hu-link-preview</h2>
         <p>Rich link preview card for URLs detected in messages.</p>
         <div class="playground">
-          <div class="preview" style="width: 100%; max-width: 360px; flex-direction: column; gap: var(--sc-space-md); align-items: flex-start;">
-            <sc-link-preview
-              url="https://github.com/seaclaw/seaclaw"
-              title="seaclaw/seaclaw"
+          <div class="preview" style="width: 100%; max-width: 360px; flex-direction: column; gap: var(--hu-space-md); align-items: flex-start;">
+            <hu-link-preview
+              url="https://github.com/human/human"
+              title="human/human"
               description="C11 autonomous AI assistant runtime. Minimal binary, zero dependencies."
               favicon="https://github.com/favicon.ico"
-              image="https://opengraph.githubassets.com/1/seaclaw/seaclaw"
-            ></sc-link-preview>
-            <sc-link-preview
+              image="https://opengraph.githubassets.com/1/human/human"
+            ></hu-link-preview>
+            <hu-link-preview
               url="https://example.com/article"
               title="Example Article Title"
               description="A short description of the linked page content."
-            ></sc-link-preview>
+            ></hu-link-preview>
           </div>
         </div>
-        <div class="code-snippet"><code>&lt;sc-link-preview url="https://example.com" title="Title" description="Description"&gt;&lt;/sc-link-preview&gt;</code></div>
+        <div class="code-snippet"><code>&lt;hu-link-preview url="https://example.com" title="Title" description="Description"&gt;&lt;/hu-link-preview&gt;</code></div>
       </section>
 
-      <section class="component-section" id="sc-message-thread">
-        <h2>sc-message-thread</h2>
+      <section class="component-section" id="hu-message-thread">
+        <h2>hu-message-thread</h2>
         <p>Scrollable message thread with user/assistant bubbles, tool results, typing indicator, and load-earlier support.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px; height: 280px; flex-direction: column;">
-            <sc-message-thread id="catalog-message-thread"></sc-message-thread>
+            <hu-message-thread id="catalog-message-thread"></hu-message-thread>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-message-thread .items=${items} .isWaiting=${false} .hasEarlierMessages=${false}&gt;&lt;/sc-message-thread&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-message-thread .items=${items} .isWaiting=${false} .hasEarlierMessages=${false}&gt;&lt;/hu-message-thread&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-branch-tree">
-        <h2>sc-branch-tree</h2>
+      <section class="component-section" id="hu-branch-tree">
+        <h2>hu-branch-tree</h2>
         <p>Vertical timeline/tree for conversation branches with collapsible subtrees.</p>
         <div class="playground">
           <div class="preview">
-            <sc-branch-tree id="catalog-branch-tree"></sc-branch-tree>
+            <hu-branch-tree id="catalog-branch-tree"></hu-branch-tree>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-branch-tree .branches=${branches} activeId="1b"&gt;&lt;/sc-branch-tree&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-branch-tree .branches=${branches} activeId="1b"&gt;&lt;/hu-branch-tree&gt;</code></pre></div>
       </section>
-      <section class="component-section" id="sc-message-group">
-        <h2>sc-message-group</h2>
+      <section class="component-section" id="hu-message-group">
+        <h2>hu-message-group</h2>
         <p>Groups consecutive messages from the same role with avatar and optional timestamp slot.</p>
         <div class="playground">
-          <div class="preview" style="width: 100%; max-width: 480px; flex-direction: column; gap: var(--sc-space-md); align-items: flex-start;">
-            <sc-message-group role="assistant">
-              <sc-chat-bubble content="Hello! How can I help?" role="assistant" show-tail></sc-chat-bubble>
-              <sc-chat-bubble content="Here's more context." role="assistant"></sc-chat-bubble>
-            </sc-message-group>
-            <sc-message-group role="user">
-              <sc-chat-bubble content="Can you explain that?" role="user" show-tail></sc-chat-bubble>
-            </sc-message-group>
+          <div class="preview" style="width: 100%; max-width: 480px; flex-direction: column; gap: var(--hu-space-md); align-items: flex-start;">
+            <hu-message-group role="assistant">
+              <hu-chat-bubble content="Hello! How can I help?" role="assistant" show-tail></hu-chat-bubble>
+              <hu-chat-bubble content="Here's more context." role="assistant"></hu-chat-bubble>
+            </hu-message-group>
+            <hu-message-group role="user">
+              <hu-chat-bubble content="Can you explain that?" role="user" show-tail></hu-chat-bubble>
+            </hu-message-group>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-message-group role="assistant"&gt;&lt;sc-chat-bubble content="..." role="assistant"&gt;&lt;/sc-chat-bubble&gt;&lt;/sc-message-group&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-message-group role="assistant"&gt;&lt;hu-chat-bubble content="..." role="assistant"&gt;&lt;/hu-chat-bubble&gt;&lt;/hu-message-group&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-skill-card">
-        <h2>sc-skill-card</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Card for displaying installed or registry skills with toggle, install button, and tags.</p>
+      <section class="component-section" id="hu-skill-card">
+        <h2>hu-skill-card</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Card for displaying installed or registry skills with toggle, install button, and tags.</p>
         <div class="playground">
-          <div class="preview" style="width: 100%; display: flex; gap: var(--sc-space-lg); flex-wrap: wrap;">
-            <sc-skill-card id="skill-card-installed" variant="installed"></sc-skill-card>
-            <sc-skill-card id="skill-card-registry" variant="registry"></sc-skill-card>
+          <div class="preview" style="width: 100%; display: flex; gap: var(--hu-space-lg); flex-wrap: wrap;">
+            <hu-skill-card id="skill-card-installed" variant="installed"></hu-skill-card>
+            <hu-skill-card id="skill-card-registry" variant="registry"></hu-skill-card>
           </div>
           <div class="controls">
             <label>variant
@@ -1344,59 +1344,59 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "...", enabled: true }'}&gt;&lt;/sc-skill-card&gt;</code></pre></div>
-        <div class="variants"><h3>All Variants</h3><div class="row" style="display: flex; gap: var(--sc-space-md); flex-wrap: wrap;">
-          <sc-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "Automated PR review and suggestions.", enabled: true }'}></sc-skill-card>
-          <sc-skill-card variant="installed" .skill=${'{ name: "Disabled Skill", description: "A skill that is turned off.", enabled: false }'}></sc-skill-card>
-          <sc-skill-card variant="registry" .skill=${'{ name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" }'} .installed=${false}></sc-skill-card>
-          <sc-skill-card variant="registry" .skill=${'{ name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "SeaClaw", tags: "demo" }'} .installed=${true}></sc-skill-card>
+        <div class="code-snippet"><pre><code>&lt;hu-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "...", enabled: true }'}&gt;&lt;/hu-skill-card&gt;</code></pre></div>
+        <div class="variants"><h3>All Variants</h3><div class="row" style="display: flex; gap: var(--hu-space-md); flex-wrap: wrap;">
+          <hu-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "Automated PR review and suggestions.", enabled: true }'}></hu-skill-card>
+          <hu-skill-card variant="installed" .skill=${'{ name: "Disabled Skill", description: "A skill that is turned off.", enabled: false }'}></hu-skill-card>
+          <hu-skill-card variant="registry" .skill=${'{ name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" }'} .installed=${false}></hu-skill-card>
+          <hu-skill-card variant="registry" .skill=${'{ name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "Human", tags: "demo" }'} .installed=${true}></hu-skill-card>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-skill-detail">
-        <h2>sc-skill-detail</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Sheet detail view for a selected skill with enable/disable, install/uninstall actions.</p>
+      <section class="component-section" id="hu-skill-detail">
+        <h2>hu-skill-detail</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Sheet detail view for a selected skill with enable/disable, install/uninstall actions.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; position: relative; min-height: 120px;">
-            <sc-button id="skill-detail-trigger-installed">Open installed skill</sc-button>
-            <sc-button variant="secondary" id="skill-detail-trigger-registry">Open registry skill</sc-button>
-            <sc-skill-detail id="skill-detail-preview"></sc-skill-detail>
+            <hu-button id="skill-detail-trigger-installed">Open installed skill</hu-button>
+            <hu-button variant="secondary" id="skill-detail-trigger-registry">Open registry skill</hu-button>
+            <hu-skill-detail id="skill-detail-preview"></hu-skill-detail>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-skill-detail .skill=${'{ source: "installed", skill: {...} }'} .installedNames=${'["other"]'}&gt;&lt;/sc-skill-detail&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-skill-detail .skill=${'{ source: "installed", skill: {...} }'} .installedNames=${'["other"]'}&gt;&lt;/hu-skill-detail&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-skill-registry">
-        <h2>sc-skill-registry</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Searchable registry grid of skills with tag filters and install actions.</p>
+      <section class="component-section" id="hu-skill-registry">
+        <h2>hu-skill-registry</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Searchable registry grid of skills with tag filters and install actions.</p>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-skill-registry id="skill-registry-preview"></sc-skill-registry>
+            <hu-skill-registry id="skill-registry-preview"></hu-skill-registry>
           </div>
           <div class="controls">
             <label><input type="checkbox" id="skill-registry-loading" /> loading</label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-skill-registry .results=${skills} .tags=${'["slack","ai"]'} .installedNames=${'["slack-notify"]'}&gt;&lt;/sc-skill-registry&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-skill-registry .results=${skills} .tags=${'["slack","ai"]'} .installedNames=${'["slack-notify"]'}&gt;&lt;/hu-skill-registry&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-overview-stats">
-        <h2>sc-overview-stats</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Overview dashboard stats: stat cards grid plus metric row.</p>
+      <section class="component-section" id="hu-overview-stats">
+        <h2>hu-overview-stats</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Overview dashboard stats: stat cards grid plus metric row.</p>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-overview-stats id="overview-stats-preview"></sc-overview-stats>
+            <hu-overview-stats id="overview-stats-preview"></hu-overview-stats>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-overview-stats .metrics=${'[{ label: "Tests", value: 2895 }, { label: "Channels", valueStr: "12" }]'} .metricRowItems=${'[{ label: "CPU", value: "23%" }, { label: "RAM", value: "1.2 GB" }]'}&gt;&lt;/sc-overview-stats&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-overview-stats .metrics=${'[{ label: "Tests", value: 2895 }, { label: "Channels", valueStr: "12" }]'} .metricRowItems=${'[{ label: "CPU", value: "23%" }, { label: "RAM", value: "1.2 GB" }]'}&gt;&lt;/hu-overview-stats&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-chart">
-        <h2>sc-chart</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Chart.js wrapper for bar, line, area, and doughnut charts. Uses design token colors.</p>
+      <section class="component-section" id="hu-chart">
+        <h2>hu-chart</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Chart.js wrapper for bar, line, area, and doughnut charts. Uses design token colors.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; min-width: 320px;">
-            <sc-chart id="chart-preview" type="bar" height="200"></sc-chart>
+            <hu-chart id="chart-preview" type="bar" height="200"></hu-chart>
           </div>
           <div class="controls">
             <label>type
@@ -1415,21 +1415,21 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-chart type="bar" .data=${'{ labels: ["A","B","C"], datasets: [{ data: [10,20,15] }] }'} height="200"&gt;&lt;/sc-chart&gt;</code></pre></div>
-        <div class="variants"><h3>All Types</h3><div class="row" style="display: flex; gap: var(--sc-space-xl); flex-wrap: wrap;">
-          <div><sc-chart id="chart-variant-bar" type="bar" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Bar</div></div>
-          <div><sc-chart id="chart-variant-line" type="line" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Line</div></div>
-          <div><sc-chart id="chart-variant-area" type="area" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Area</div></div>
-          <div><sc-chart id="chart-variant-doughnut" type="doughnut" height="160"></sc-chart><div style="font-size: var(--sc-text-xs); color: var(--sc-text-muted); margin-top: 4px;">Doughnut</div></div>
+        <div class="code-snippet"><pre><code>&lt;hu-chart type="bar" .data=${'{ labels: ["A","B","C"], datasets: [{ data: [10,20,15] }] }'} height="200"&gt;&lt;/hu-chart&gt;</code></pre></div>
+        <div class="variants"><h3>All Types</h3><div class="row" style="display: flex; gap: var(--hu-space-xl); flex-wrap: wrap;">
+          <div><hu-chart id="chart-variant-bar" type="bar" height="160"></hu-chart><div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Bar</div></div>
+          <div><hu-chart id="chart-variant-line" type="line" height="160"></hu-chart><div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Line</div></div>
+          <div><hu-chart id="chart-variant-area" type="area" height="160"></hu-chart><div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Area</div></div>
+          <div><hu-chart id="chart-variant-doughnut" type="doughnut" height="160"></hu-chart><div style="font-size: var(--hu-text-xs); color: var(--hu-text-muted); margin-top: 4px;">Doughnut</div></div>
         </div></div>
       </section>
 
-      <section class="component-section" id="sc-model-selector">
-        <h2>sc-model-selector</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Compact model picker dropdown for chat composer. Dispatches sc-model-change.</p>
+      <section class="component-section" id="hu-model-selector">
+        <h2>hu-model-selector</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Compact model picker dropdown for chat composer. Dispatches hu-model-change.</p>
         <div class="playground">
           <div class="preview" style="width: 100%;">
-            <sc-model-selector id="model-selector-preview"></sc-model-selector>
+            <hu-model-selector id="model-selector-preview"></hu-model-selector>
           </div>
           <div class="controls">
             <label>value
@@ -1441,18 +1441,18 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-model-selector .value=${"gpt-4o"} .models=${models} @sc-model-change=${handler}&gt;&lt;/sc-model-selector&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-model-selector .value=${"gpt-4o"} .models=${models} @hu-model-change=${handler}&gt;&lt;/hu-model-selector&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-form-group">
-        <h2>sc-form-group</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Form wrapper with title, description, dirty indicator, and validation. Wraps sc-input, sc-select, sc-textarea, etc.</p>
+      <section class="component-section" id="hu-form-group">
+        <h2>hu-form-group</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Form wrapper with title, description, dirty indicator, and validation. Wraps hu-input, hu-select, hu-textarea, etc.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 400px;">
-            <sc-form-group id="form-group-preview" title="Profile Settings" description="Update your account details.">
-              <sc-input label="Name" placeholder="Your name"></sc-input>
-              <sc-input label="Email" placeholder="you@example.com" type="email"></sc-input>
-            </sc-form-group>
+            <hu-form-group id="form-group-preview" title="Profile Settings" description="Update your account details.">
+              <hu-input label="Name" placeholder="Your name"></hu-input>
+              <hu-input label="Email" placeholder="you@example.com" type="email"></hu-input>
+            </hu-form-group>
           </div>
           <div class="controls">
             <label>title
@@ -1463,16 +1463,16 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-form-group title="Settings" description="..."&gt;&lt;sc-input label="Name"&gt;&lt;/sc-input&gt;&lt;/sc-form-group&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-form-group title="Settings" description="..."&gt;&lt;hu-input label="Name"&gt;&lt;/hu-input&gt;&lt;/hu-form-group&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-sidebar">
-        <h2>sc-sidebar</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">App navigation sidebar with sections, connection status, theme toggle, and collapse.</p>
+      <section class="component-section" id="hu-sidebar">
+        <h2>hu-sidebar</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">App navigation sidebar with sections, connection status, theme toggle, and collapse.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; min-height: 400px; display: flex;">
-            <sc-sidebar id="sidebar-preview" activeTab="overview" connectionStatus="connected"></sc-sidebar>
-            <div style="flex: 1; padding: var(--sc-space-lg); color: var(--sc-text-muted);">Main content area</div>
+            <hu-sidebar id="sidebar-preview" activeTab="overview" connectionStatus="connected"></hu-sidebar>
+            <div style="flex: 1; padding: var(--hu-space-lg); color: var(--hu-text-muted);">Main content area</div>
           </div>
           <div class="controls">
             <label>activeTab
@@ -1490,145 +1490,145 @@
             </label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-sidebar activeTab="overview" connectionStatus="connected"&gt;&lt;/sc-sidebar&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-sidebar activeTab="overview" connectionStatus="connected"&gt;&lt;/hu-sidebar&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-command-palette">
-        <h2>sc-command-palette</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Command palette overlay for navigation and actions. Open with Cmd+K / Ctrl+K.</p>
+      <section class="component-section" id="hu-command-palette">
+        <h2>hu-command-palette</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Command palette overlay for navigation and actions. Open with Cmd+K / Ctrl+K.</p>
         <div class="playground">
           <div class="preview">
-            <sc-button id="command-palette-trigger">Open command palette</sc-button>
-            <sc-command-palette id="command-palette-preview"></sc-command-palette>
+            <hu-button id="command-palette-trigger">Open command palette</hu-button>
+            <hu-command-palette id="command-palette-preview"></hu-command-palette>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-command-palette .open=${open} @close=${onClose} @execute=${onExecute}&gt;&lt;/sc-command-palette&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-command-palette .open=${open} @close=${onClose} @execute=${onExecute}&gt;&lt;/hu-command-palette&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-floating-mic">
-        <h2>sc-floating-mic</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Floating voice input button. Cmd+Shift+M to toggle. Injects transcript into focused input.</p>
+      <section class="component-section" id="hu-floating-mic">
+        <h2>hu-floating-mic</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Floating voice input button. Cmd+Shift+M to toggle. Injects transcript into focused input.</p>
         <div class="playground" style="position: relative; min-height: 120px;">
           <div class="preview" style="position: relative;">
-            <sc-floating-mic></sc-floating-mic>
+            <hu-floating-mic></hu-floating-mic>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-floating-mic&gt;&lt;/sc-floating-mic&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-floating-mic&gt;&lt;/hu-floating-mic&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-activity-timeline">
-        <h2>sc-activity-timeline</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Live activity with sparkline and timeline. Converts ActivityEvent[] to timeline items.</p>
+      <section class="component-section" id="hu-activity-timeline">
+        <h2>hu-activity-timeline</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Live activity with sparkline and timeline. Converts ActivityEvent[] to timeline items.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 480px;">
-            <sc-activity-timeline id="activity-timeline-preview"></sc-activity-timeline>
+            <hu-activity-timeline id="activity-timeline-preview"></hu-activity-timeline>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-activity-timeline .events=${events} maxItems="10"&gt;&lt;/sc-activity-timeline&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-activity-timeline .events=${events} maxItems="10"&gt;&lt;/hu-activity-timeline&gt;</code></pre></div>
       </section>
 
-      <section class="component-section" id="sc-sessions-table">
-        <h2>sc-sessions-table</h2>
-        <p style="margin-bottom: var(--sc-space-md); color: var(--sc-text-muted);">Table of chat sessions with empty state. Dispatches session-select and navigate.</p>
+      <section class="component-section" id="hu-sessions-table">
+        <h2>hu-sessions-table</h2>
+        <p style="margin-bottom: var(--hu-space-md); color: var(--hu-text-muted);">Table of chat sessions with empty state. Dispatches session-select and navigate.</p>
         <div class="playground">
           <div class="preview" style="width: 100%; max-width: 560px;">
-            <sc-sessions-table id="sessions-table-preview"></sc-sessions-table>
+            <hu-sessions-table id="sessions-table-preview"></hu-sessions-table>
           </div>
           <div class="controls">
             <label><input type="checkbox" id="sessions-table-has-data" checked /> Has data</label>
           </div>
         </div>
-        <div class="code-snippet"><pre><code>&lt;sc-sessions-table .sessions=${sessions} @session-select=${handler}&gt;&lt;/sc-sessions-table&gt;</code></pre></div>
+        <div class="code-snippet"><pre><code>&lt;hu-sessions-table .sessions=${sessions} @session-select=${handler}&gt;&lt;/hu-sessions-table&gt;</code></pre></div>
       </section>
 
-    <sc-toast></sc-toast>
+    <hu-toast></hu-toast>
 
     <script type="module">
       import "/src/styles/theme.css";
-      import "/src/components/sc-button.js";
-      import "/src/components/sc-card.js";
-      import "/src/components/sc-badge.js";
-      import "/src/components/sc-modal.js";
-      import "/src/components/sc-tooltip.js";
-      import "/src/components/sc-empty-state.js";
-      import "/src/components/sc-skeleton.js";
-      import "/src/components/sc-sheet.js";
-      import "/src/components/sc-toast.js";
-      import "/src/components/sc-avatar.js";
-      import "/src/components/sc-status-dot.js";
-      import "/src/components/sc-tabs.js";
-      import "/src/components/sc-progress.js";
-      import "/src/components/sc-input.js";
-      import "/src/components/sc-select.js";
-      import "/src/components/sc-dropdown.js";
-      import "/src/components/sc-dialog.js";
-      import "/src/components/sc-switch.js";
-      import "/src/components/sc-checkbox.js";
-      import "/src/components/sc-combobox.js";
-      import "/src/components/sc-radio.js";
-      import "/src/components/sc-textarea.js";
-      import "/src/components/sc-popover.js";
-      import "/src/components/sc-breadcrumb.js";
-      import "/src/components/sc-slider.js";
-      import "/src/components/sc-search.js";
-      import "/src/components/sc-chat-search.js";
-      import "/src/components/sc-chat-composer.js";
-      import "/src/components/sc-segmented-control.js";
-      import "/src/components/sc-pagination.js";
-      import "/src/components/sc-data-table-v2.js";
-      import "/src/components/sc-date-picker.js";
-      import "/src/components/sc-sparkline.js";
-      import "/src/components/sc-animated-number.js";
-      import "/src/components/sc-animated-icon.js";
-      import "/src/components/sc-activity-feed.js";
-      import "/src/components/sc-welcome.js";
-      import "/src/components/sc-welcome-card.js";
-      import "/src/components/sc-error-boundary.js";
-      import "/src/components/sc-thinking.js";
-      import "/src/components/sc-tool-result.js";
-      import "/src/components/sc-message-branch.js";
-      import "/src/components/sc-message-stream.js";
-      import "/src/components/sc-reasoning-block.js";
-      import "/src/components/sc-code-block.js";
-      import "/src/components/sc-latex.js";
-      import "/src/components/sc-shortcut-overlay.js";
-      import "/src/components/sc-context-menu.js";
-      import "/src/components/sc-stat-card.js";
-      import "/src/components/sc-stats-row.js";
-      import "/src/components/sc-section-header.js";
-      import "/src/components/sc-metric-row.js";
-      import "/src/components/sc-timeline.js";
-      import "/src/components/sc-sparkline-enhanced.js";
-      import "/src/components/sc-forecast-chart.js";
-      import "/src/components/sc-page-hero.js";
-      import "/src/components/sc-schedule-builder.js";
-      import "/src/components/sc-message-actions.js";
-      import "/src/components/sc-tapback-menu.js";
-      import "/src/components/sc-automation-card.js";
-      import "/src/components/sc-automation-form.js";
-      import "/src/components/sc-voice-orb.js";
-      import "/src/components/sc-voice-conversation.js";
-      import "/src/components/sc-chat-sessions-panel.js";
-      import "/src/components/sc-file-preview.js";
-      import "/src/components/sc-json-viewer.js";
-      import "/src/components/sc-chat-bubble.js";
-      import "/src/components/sc-typing-indicator.js";
-      import "/src/components/sc-delivery-status.js";
-      import "/src/components/sc-link-preview.js";
-      import "/src/components/sc-message-thread.js";
-      import "/src/components/sc-message-group.js";
-      import "/src/components/sc-skill-card.js";
-      import "/src/components/sc-skill-detail.js";
-      import "/src/components/sc-skill-registry.js";
-      import "/src/components/sc-overview-stats.js";
-      import "/src/components/sc-chart.js";
-      import "/src/components/sc-model-selector.js";
-      import "/src/components/sc-form-group.js";
+      import "/src/components/hu-button.js";
+      import "/src/components/hu-card.js";
+      import "/src/components/hu-badge.js";
+      import "/src/components/hu-modal.js";
+      import "/src/components/hu-tooltip.js";
+      import "/src/components/hu-empty-state.js";
+      import "/src/components/hu-skeleton.js";
+      import "/src/components/hu-sheet.js";
+      import "/src/components/hu-toast.js";
+      import "/src/components/hu-avatar.js";
+      import "/src/components/hu-status-dot.js";
+      import "/src/components/hu-tabs.js";
+      import "/src/components/hu-progress.js";
+      import "/src/components/hu-input.js";
+      import "/src/components/hu-select.js";
+      import "/src/components/hu-dropdown.js";
+      import "/src/components/hu-dialog.js";
+      import "/src/components/hu-switch.js";
+      import "/src/components/hu-checkbox.js";
+      import "/src/components/hu-combobox.js";
+      import "/src/components/hu-radio.js";
+      import "/src/components/hu-textarea.js";
+      import "/src/components/hu-popover.js";
+      import "/src/components/hu-breadcrumb.js";
+      import "/src/components/hu-slider.js";
+      import "/src/components/hu-search.js";
+      import "/src/components/hu-chat-search.js";
+      import "/src/components/hu-chat-composer.js";
+      import "/src/components/hu-segmented-control.js";
+      import "/src/components/hu-pagination.js";
+      import "/src/components/hu-data-table-v2.js";
+      import "/src/components/hu-date-picker.js";
+      import "/src/components/hu-sparkline.js";
+      import "/src/components/hu-animated-number.js";
+      import "/src/components/hu-animated-icon.js";
+      import "/src/components/hu-activity-feed.js";
+      import "/src/components/hu-welcome.js";
+      import "/src/components/hu-welcome-card.js";
+      import "/src/components/hu-error-boundary.js";
+      import "/src/components/hu-thinking.js";
+      import "/src/components/hu-tool-result.js";
+      import "/src/components/hu-message-branch.js";
+      import "/src/components/hu-message-stream.js";
+      import "/src/components/hu-reasoning-block.js";
+      import "/src/components/hu-code-block.js";
+      import "/src/components/hu-latex.js";
+      import "/src/components/hu-shortcut-overlay.js";
+      import "/src/components/hu-context-menu.js";
+      import "/src/components/hu-stat-card.js";
+      import "/src/components/hu-stats-row.js";
+      import "/src/components/hu-section-header.js";
+      import "/src/components/hu-metric-row.js";
+      import "/src/components/hu-timeline.js";
+      import "/src/components/hu-sparkline-enhanced.js";
+      import "/src/components/hu-forecast-chart.js";
+      import "/src/components/hu-page-hero.js";
+      import "/src/components/hu-schedule-builder.js";
+      import "/src/components/hu-message-actions.js";
+      import "/src/components/hu-tapback-menu.js";
+      import "/src/components/hu-automation-card.js";
+      import "/src/components/hu-automation-form.js";
+      import "/src/components/hu-voice-orb.js";
+      import "/src/components/hu-voice-conversation.js";
+      import "/src/components/hu-chat-sessions-panel.js";
+      import "/src/components/hu-file-preview.js";
+      import "/src/components/hu-json-viewer.js";
+      import "/src/components/hu-chat-bubble.js";
+      import "/src/components/hu-typing-indicator.js";
+      import "/src/components/hu-delivery-status.js";
+      import "/src/components/hu-link-preview.js";
+      import "/src/components/hu-message-thread.js";
+      import "/src/components/hu-message-group.js";
+      import "/src/components/hu-skill-card.js";
+      import "/src/components/hu-skill-detail.js";
+      import "/src/components/hu-skill-registry.js";
+      import "/src/components/hu-overview-stats.js";
+      import "/src/components/hu-chart.js";
+      import "/src/components/hu-model-selector.js";
+      import "/src/components/hu-form-group.js";
       import "/src/components/sidebar.js";
       import "/src/components/command-palette.js";
       import "/src/components/floating-mic.js";
-      import "/src/components/sc-activity-timeline.js";
-      import "/src/components/sc-sessions-table.js";
+      import "/src/components/hu-activity-timeline.js";
+      import "/src/components/hu-sessions-table.js";
 
       // Theme toggle
       function setTheme(theme) {
@@ -1646,15 +1646,15 @@
       document.getElementById("theme-dark")?.addEventListener("click", () => setTheme("dark"));
       document.getElementById("theme-light")?.addEventListener("click", () => setTheme("light"));
 
-      // sc-combobox demo options
-      customElements.whenDefined("sc-combobox").then(() => {
+      // hu-combobox demo options
+      customElements.whenDefined("hu-combobox").then(() => {
         const comboboxPreview = document.getElementById("combobox-preview");
         if (comboboxPreview) {
           comboboxPreview.options = [{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }];
         }
       });
 
-      // sc-tapback-menu demo
+      // hu-tapback-menu demo
       const tapbackTrigger = document.getElementById("catalog-tapback-trigger");
       const tapbackMenu = document.getElementById("catalog-tapback-menu");
       if (tapbackTrigger && tapbackMenu) {
@@ -1664,9 +1664,9 @@
           tapbackMenu.y = rect.top;
           tapbackMenu.open = true;
         });
-        tapbackMenu.addEventListener("sc-tapback-close", () => { tapbackMenu.open = false; });
-        tapbackMenu.addEventListener("sc-react", (e) => {
-          console.log("sc-react", e.detail);
+        tapbackMenu.addEventListener("hu-tapback-close", () => { tapbackMenu.open = false; });
+        tapbackMenu.addEventListener("hu-react", (e) => {
+          console.log("hu-react", e.detail);
         });
       }
 
@@ -1699,7 +1699,7 @@
         document.getElementById("modal-preview").open = true;
       });
       document.getElementById("modal-demo")?.addEventListener("click", () => {
-        const demo = document.createElement("sc-modal");
+        const demo = document.createElement("hu-modal");
         demo.heading = "Demo Modal";
         const p = document.createElement("p");
         p.textContent = "This is a demo modal.";
@@ -1720,7 +1720,7 @@
         document.getElementById("sheet-preview").open = true;
       });
       document.getElementById("sheet-demo")?.addEventListener("click", () => {
-        const demo = document.createElement("sc-sheet");
+        const demo = document.createElement("hu-sheet");
         const p = document.createElement("p");
         p.textContent = "Demo sheet content.";
         demo.appendChild(p);
@@ -1771,7 +1771,7 @@
       }
 
       // Toast
-      const ScToastClass = customElements.get("sc-toast");
+      const ScToastClass = customElements.get("hu-toast");
       function showToast(variant) {
         if (ScToastClass?.show) {
           ScToastClass.show({ message: `This is a ${variant} notification`, variant, duration: 3000 });
@@ -1815,8 +1815,8 @@
         e.stopPropagation();
         if (catalogDropdown) catalogDropdown.open = !catalogDropdown.open;
       });
-      dropdownPreview?.addEventListener("sc-close", () => { dropdownPreview.open = false; });
-      catalogDropdown?.addEventListener("sc-close", () => { catalogDropdown.open = false; });
+      dropdownPreview?.addEventListener("hu-close", () => { dropdownPreview.open = false; });
+      catalogDropdown?.addEventListener("hu-close", () => { catalogDropdown.open = false; });
 
       // Dialog
       const catalogDialog = document.getElementById("catalog-dialog");
@@ -1844,13 +1844,13 @@
         title: "Delete item", message: "Cannot be undone.", variant: "danger",
         confirmLabel: "Delete", cancelLabel: "Cancel",
       }));
-      catalogDialog?.addEventListener("sc-confirm", () => { catalogDialog.open = false; });
-      catalogDialog?.addEventListener("sc-cancel", () => { catalogDialog.open = false; });
+      catalogDialog?.addEventListener("hu-confirm", () => { catalogDialog.open = false; });
+      catalogDialog?.addEventListener("hu-cancel", () => { catalogDialog.open = false; });
 
       // Switch
       const switchPreview = document.getElementById("switch-preview");
       if (switchPreview) {
-        switchPreview.addEventListener("sc-change", (e) => {
+        switchPreview.addEventListener("hu-change", (e) => {
           switchPreview.checked = e.detail.checked;
         });
       }
@@ -1873,7 +1873,7 @@
         const popover = document.getElementById("popover-preview");
         if (popover) popover.open = !popover.open;
       });
-      document.getElementById("popover-preview")?.addEventListener("sc-close", () => {
+      document.getElementById("popover-preview")?.addEventListener("hu-close", () => {
         const popover = document.getElementById("popover-preview");
         if (popover) popover.open = false;
       });
@@ -1881,7 +1881,7 @@
       // Slider
       const sliderPreview = document.getElementById("slider-preview");
       if (sliderPreview) {
-        sliderPreview.addEventListener("sc-change", (e) => {
+        sliderPreview.addEventListener("hu-change", (e) => {
           sliderPreview.value = e.detail.value;
         });
       }
@@ -1932,7 +1932,7 @@
       // Pagination
       const paginationPreview = document.getElementById("pagination-preview");
       if (paginationPreview) {
-        paginationPreview.addEventListener("sc-page-change", (e) => {
+        paginationPreview.addEventListener("hu-page-change", (e) => {
           paginationPreview.page = e.detail.page;
           paginationPreview.pageSize = e.detail.pageSize;
         });
@@ -2060,7 +2060,7 @@
       }
 
       // Metric row
-      const metricRowPreview = document.getElementById("metric-row-preview")?.querySelector("sc-metric-row");
+      const metricRowPreview = document.getElementById("metric-row-preview")?.querySelector("hu-metric-row");
       if (metricRowPreview) {
         metricRowPreview.items = [
           { label: "CPU", value: "23%" },
@@ -2070,7 +2070,7 @@
       }
 
       // Timeline
-      const timelinePreview = document.getElementById("timeline-preview")?.querySelector("sc-timeline");
+      const timelinePreview = document.getElementById("timeline-preview")?.querySelector("hu-timeline");
       if (timelinePreview) {
         timelinePreview.items = [
           { time: "2m ago", message: "Test suite passed", status: "success" },
@@ -2079,14 +2079,14 @@
         ];
       }
 
-      // sc-branch-tree — lazy-load when section scrolls into view
-      const branchTreeSection = document.getElementById("sc-branch-tree");
+      // hu-branch-tree — lazy-load when section scrolls into view
+      const branchTreeSection = document.getElementById("hu-branch-tree");
       if (branchTreeSection) {
         const branchTreeObserver = new IntersectionObserver(
           (entries) => {
             if (!entries[0].isIntersecting) return;
             branchTreeObserver.disconnect();
-            import("/src/components/sc-branch-tree.js").then(() => {
+            import("/src/components/hu-branch-tree.js").then(() => {
               const catalogBranchTree = document.getElementById("catalog-branch-tree");
               if (catalogBranchTree) {
                 catalogBranchTree.branches = [
@@ -2110,26 +2110,26 @@
         branchTreeObserver.observe(branchTreeSection);
       }
 
-      // sc-message-thread
+      // hu-message-thread
       const catalogMessageThread = document.getElementById("catalog-message-thread");
       if (catalogMessageThread) {
         const now = Date.now();
         catalogMessageThread.items = [
-          { type: "message", role: "user", content: "What is SeaClaw?", ts: now - 60000 },
-          { type: "message", role: "assistant", content: "SeaClaw is a C11 autonomous AI assistant runtime with minimal binary size and zero dependencies beyond libc.", ts: now - 55000 },
+          { type: "message", role: "user", content: "What is Human?", ts: now - 60000 },
+          { type: "message", role: "assistant", content: "Human is a C11 autonomous AI assistant runtime with minimal binary size and zero dependencies beyond libc.", ts: now - 55000 },
           { type: "message", role: "user", content: "How do I build it?", ts: now - 30000 },
           { type: "message", role: "assistant", content: "Run `cmake -B build && cmake --build build` from the project root.", ts: now - 25000 },
         ];
       }
 
       // Sparkline enhanced
-      const sparklineEnhPreview = document.getElementById("sparkline-enhanced-preview")?.querySelector("sc-sparkline-enhanced");
+      const sparklineEnhPreview = document.getElementById("sparkline-enhanced-preview")?.querySelector("hu-sparkline-enhanced");
       if (sparklineEnhPreview) {
         sparklineEnhPreview.data = [10, 20, 15, 25, 18, 30, 28];
       }
 
       // Forecast chart
-      const forecastPreview = document.getElementById("forecast-chart-preview")?.querySelector("sc-forecast-chart");
+      const forecastPreview = document.getElementById("forecast-chart-preview")?.querySelector("hu-forecast-chart");
       if (forecastPreview) {
         forecastPreview.history = [
           { date: "2026-03-01", cost: 1.83 },
@@ -2147,17 +2147,17 @@
       // JSON viewer
       const jsonViewerPreview = document.getElementById("json-viewer-preview");
       if (jsonViewerPreview) {
-        jsonViewerPreview.data = { name: "SeaClaw", version: "1.0", features: ["AI", "Channels", "Tools"] };
+        jsonViewerPreview.data = { name: "Human", version: "1.0", features: ["AI", "Channels", "Tools"] };
       }
 
-      // sc-skill-card
+      // hu-skill-card
       const skillCardInstalled = document.getElementById("skill-card-installed");
       const skillCardRegistry = document.getElementById("skill-card-registry");
       if (skillCardInstalled) {
         skillCardInstalled.skill = { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true };
       }
       if (skillCardRegistry) {
-        skillCardRegistry.skill = { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" };
+        skillCardRegistry.skill = { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" };
         skillCardRegistry.installed = false;
       }
       ["skill-card-v1", "skill-card-v2", "skill-card-v3", "skill-card-v4"].forEach((id, i) => {
@@ -2167,20 +2167,20 @@
         const skills = [
           { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true },
           { name: "Disabled Skill", description: "A skill that is turned off.", enabled: false },
-          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" },
-          { name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "SeaClaw", tags: "demo" },
+          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" },
+          { name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "Human", tags: "demo" },
         ];
         el.skill = skills[i];
         if (variant === "registry") el.installed = i === 3;
       });
 
-      // sc-skill-detail
+      // hu-skill-detail
       const skillDetailPreview = document.getElementById("skill-detail-preview");
       const skillDetailTriggerInstalled = document.getElementById("skill-detail-trigger-installed");
       const skillDetailTriggerRegistry = document.getElementById("skill-detail-trigger-registry");
       if (skillDetailPreview) {
         skillDetailPreview.installedNames = ["other-skill"];
-        skillDetailPreview.addEventListener("sc-close", () => { skillDetailPreview.skill = null; });
+        skillDetailPreview.addEventListener("hu-close", () => { skillDetailPreview.skill = null; });
       }
       if (skillDetailTriggerInstalled && skillDetailPreview) {
         skillDetailTriggerInstalled.addEventListener("click", () => {
@@ -2189,17 +2189,17 @@
       }
       if (skillDetailTriggerRegistry && skillDetailPreview) {
         skillDetailTriggerRegistry.addEventListener("click", () => {
-          skillDetailPreview.skill = { source: "registry", skill: { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" } };
+          skillDetailPreview.skill = { source: "registry", skill: { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" } };
         });
       }
 
-      // sc-skill-registry
+      // hu-skill-registry
       const skillRegistryPreview = document.getElementById("skill-registry-preview");
       if (skillRegistryPreview) {
         skillRegistryPreview.results = [
-          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "SeaClaw", tags: "slack,notifications" },
-          { name: "GitHub PR", description: "Create and manage pull requests.", version: "2.1.0", author: "SeaClaw", tags: "github,pr" },
-          { name: "Calendar Sync", description: "Sync with Google Calendar.", version: "1.0.0", author: "SeaClaw", tags: "calendar,google" },
+          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" },
+          { name: "GitHub PR", description: "Create and manage pull requests.", version: "2.1.0", author: "Human", tags: "github,pr" },
+          { name: "Calendar Sync", description: "Sync with Google Calendar.", version: "1.0.0", author: "Human", tags: "calendar,google" },
         ];
         skillRegistryPreview.tags = ["slack", "github", "calendar", "pr", "notifications"];
         skillRegistryPreview.installedNames = ["slack-notify"];
@@ -2208,7 +2208,7 @@
         if (skillRegistryPreview) skillRegistryPreview.loading = (e.target).checked;
       });
 
-      // sc-overview-stats
+      // hu-overview-stats
       const overviewStatsPreview = document.getElementById("overview-stats-preview");
       if (overviewStatsPreview) {
         overviewStatsPreview.metrics = [
@@ -2223,7 +2223,7 @@
         ];
       }
 
-      // sc-chart
+      // hu-chart
       const chartDemoData = { labels: ["A", "B", "C", "D"], datasets: [{ label: "Series 1", data: [10, 20, 15, 25] }] };
       const chartPreview = document.getElementById("chart-preview");
       if (chartPreview) chartPreview.data = chartDemoData;
@@ -2232,7 +2232,7 @@
         if (el) el.data = chartDemoData;
       });
 
-      // sc-model-selector
+      // hu-model-selector
       const modelSelectorPreview = document.getElementById("model-selector-preview");
       if (modelSelectorPreview) {
         modelSelectorPreview.models = [
@@ -2246,7 +2246,7 @@
         if (modelSelectorPreview) modelSelectorPreview.value = (e.target).value;
       });
 
-      // sc-sidebar
+      // hu-sidebar
       const sidebarPreview = document.getElementById("sidebar-preview");
       if (sidebarPreview) {
         sidebarPreview.addEventListener("tab-change", (e) => {
@@ -2254,7 +2254,7 @@
         });
       }
 
-      // sc-command-palette
+      // hu-command-palette
       const commandPalettePreview = document.getElementById("command-palette-preview");
       if (commandPalettePreview) {
         commandPalettePreview.addEventListener("close", () => { commandPalettePreview.open = false; });
@@ -2263,7 +2263,7 @@
         if (commandPalettePreview) commandPalettePreview.open = true;
       });
 
-      // sc-activity-timeline
+      // hu-activity-timeline
       const activityTimelinePreview = document.getElementById("activity-timeline-preview");
       if (activityTimelinePreview) {
         activityTimelinePreview.events = [
@@ -2275,7 +2275,7 @@
         ];
       }
 
-      // sc-sessions-table
+      // hu-sessions-table
       const sessionsTablePreview = document.getElementById("sessions-table-preview");
       if (sessionsTablePreview) {
         sessionsTablePreview.sessions = [

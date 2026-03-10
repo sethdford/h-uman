@@ -1,16 +1,16 @@
 ---
 title: Quick Start
-description: Get SeaClaw running in your first 5 minutes.
+description: Get Human running in your first 5 minutes.
 ---
 
-This guide gets you from a fresh build to your first chat. Ensure you've completed [Installation](/getting-started/installation/). Use `./build/seaclaw` if running from the project directory, or `seaclaw` if the binary is on your PATH.
+This guide gets you from a fresh build to your first chat. Ensure you've completed [Installation](/getting-started/installation/). Use `./build/human` if running from the project directory, or `human` if the binary is on your PATH.
 
 ## 1. Create your config
 
-SeaClaw reads config from `~/.seaclaw/config.json`. Create the directory and file:
+Human reads config from `~/.human/config.json`. Create the directory and file:
 
 ```bash
-mkdir -p ~/.seaclaw
+mkdir -p ~/.human
 ```
 
 ### Option A: Interactive wizard
@@ -18,7 +18,7 @@ mkdir -p ~/.seaclaw
 Run the onboard wizard to generate a config interactively:
 
 ```bash
-seaclaw onboard
+human onboard
 ```
 
 The wizard will:
@@ -26,11 +26,11 @@ The wizard will:
 - Ask you to choose a provider (OpenAI, Anthropic, Ollama, OpenRouter)
 - Prompt for an API key (or you can set it via environment variable)
 - Ask for a default model (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `llama3`)
-- Create `~/.seaclaw/config.json` and workspace templates
+- Create `~/.human/config.json` and workspace templates
 
 ### Option B: Manual config
 
-Create `~/.seaclaw/config.json` with your chosen provider.
+Create `~/.human/config.json` with your chosen provider.
 
 **OpenAI (cloud, requires API key):**
 
@@ -84,13 +84,13 @@ Ensure Ollama is running (`ollama serve`) and you've pulled a model (`ollama pul
 Run diagnostics to confirm your setup:
 
 ```bash
-seaclaw doctor
+human doctor
 ```
 
 Example output (local provider):
 
 ```
-[doctor] config: ok (loaded from /Users/you/.seaclaw/config.json)
+[doctor] config: ok (loaded from /Users/you/.human/config.json)
 [doctor] provider (ollama): ok (local — no API key required)
 [doctor] memory engine: markdown
 ```
@@ -98,7 +98,7 @@ Example output (local provider):
 Example output (cloud provider with API key):
 
 ```
-[doctor] config: ok (loaded from /Users/you/.seaclaw/config.json)
+[doctor] config: ok (loaded from /Users/you/.human/config.json)
 [doctor] provider (openai): ok (API key configured)
 [doctor] memory engine: sqlite
 ```
@@ -110,7 +110,7 @@ If you see `warning — no API key`, add the key to your provider config or set 
 Run a one-off message:
 
 ```bash
-seaclaw agent -m "hello"
+human agent -m "hello"
 ```
 
 Example output:
@@ -124,7 +124,7 @@ Hello! How can I help you today?
 Or start an interactive chat:
 
 ```bash
-seaclaw agent
+human agent
 ```
 
 Type messages and press Enter. Use `Ctrl+C` to exit.
@@ -134,7 +134,7 @@ Type messages and press Enter. Use `Ctrl+C` to exit.
 Use `--provider` and `--model` to switch without editing config:
 
 ```bash
-seaclaw agent -m "What is 2 + 2?" --provider ollama --model mistral
+human agent -m "What is 2 + 2?" --provider ollama --model mistral
 ```
 
 ## 5. Start the gateway (optional)
@@ -142,7 +142,7 @@ seaclaw agent -m "What is 2 + 2?" --provider ollama --model mistral
 If you want to receive webhooks (e.g. Telegram, Slack, Discord):
 
 ```bash
-seaclaw gateway
+human gateway
 ```
 
 By default it listens on `127.0.0.1:3000`. Pair with a 6-digit code to get a bearer token for authenticated requests.
@@ -151,9 +151,9 @@ By default it listens on `127.0.0.1:3000`. Pair with a 6-digit code to get a bea
 
 | Command                                          | Description              |
 | ------------------------------------------------ | ------------------------ |
-| `seaclaw agent`                                  | Interactive chat session |
-| `seaclaw agent -m "message"`                     | Single message           |
-| `seaclaw agent --provider ollama --model llama3` | Override provider/model  |
-| `seaclaw onboard`                                | First-run setup wizard   |
-| `seaclaw doctor`                                 | Diagnostics              |
-| `seaclaw gateway`                                | Start webhook server     |
+| `human agent`                                  | Interactive chat session |
+| `human agent -m "message"`                     | Single message           |
+| `human agent --provider ollama --model llama3` | Override provider/model  |
+| `human onboard`                                | First-run setup wizard   |
+| `human doctor`                                 | Diagnostics              |
+| `human gateway`                                | Start webhook server     |

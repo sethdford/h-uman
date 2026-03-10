@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { icons } from "../icons.js";
-import "./sc-status-dot.js";
+import "./hu-status-dot.js";
 
 type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
@@ -55,62 +55,62 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-@customElement("sc-sidebar")
+@customElement("hu-sidebar")
 export class ScSidebar extends LitElement {
   static override styles = css`
     :host {
       display: flex;
       flex-direction: column;
-      width: var(--sc-sidebar-width);
-      min-width: var(--sc-sidebar-width);
+      width: var(--hu-sidebar-width);
+      min-width: var(--hu-sidebar-width);
       background: color-mix(
         in srgb,
-        var(--sc-bg-surface) var(--sc-glass-standard-bg-opacity, 8%),
+        var(--hu-bg-surface) var(--hu-glass-standard-bg-opacity, 8%),
         transparent
       );
-      backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-        saturate(var(--sc-glass-standard-saturate, 180%));
-      -webkit-backdrop-filter: blur(var(--sc-glass-standard-blur, 24px))
-        saturate(var(--sc-glass-standard-saturate, 180%));
+      backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+        saturate(var(--hu-glass-standard-saturate, 180%));
+      -webkit-backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+        saturate(var(--hu-glass-standard-saturate, 180%));
       border-right: 1px solid
         color-mix(
           in srgb,
-          var(--sc-border) var(--sc-glass-standard-border-opacity, 10%),
+          var(--hu-border) var(--hu-glass-standard-border-opacity, 10%),
           transparent
         );
       transition:
-        width var(--sc-duration-normal) var(--sc-ease-out),
-        min-width var(--sc-duration-normal) var(--sc-ease-out);
+        width var(--hu-duration-normal) var(--hu-ease-out),
+        min-width var(--hu-duration-normal) var(--hu-ease-out);
       overflow: hidden;
     }
 
     :host([collapsed]) {
-      width: var(--sc-sidebar-collapsed);
-      min-width: var(--sc-sidebar-collapsed);
+      width: var(--hu-sidebar-collapsed);
+      min-width: var(--hu-sidebar-collapsed);
     }
 
     @media (prefers-reduced-transparency: reduce) {
       :host {
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
-        background: var(--sc-surface-container);
-        border-right: 1px solid var(--sc-border);
+        background: var(--hu-surface-container);
+        border-right: 1px solid var(--hu-border);
       }
     }
 
     .header {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
-      padding: var(--sc-space-md);
+      gap: var(--hu-space-sm);
+      padding: var(--hu-space-md);
       flex-shrink: 0;
     }
 
     .logo {
       flex-shrink: 0;
-      width: var(--sc-icon-lg);
-      height: var(--sc-icon-lg);
-      color: var(--sc-accent-text, var(--sc-accent));
+      width: var(--hu-icon-lg);
+      height: var(--hu-icon-lg);
+      color: var(--hu-accent-text, var(--hu-accent));
     }
 
     .logo svg {
@@ -119,13 +119,13 @@ export class ScSidebar extends LitElement {
     }
 
     .brand {
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
       white-space: nowrap;
       overflow: hidden;
       opacity: 1;
-      transition: opacity var(--sc-duration-normal) var(--sc-ease-out);
+      transition: opacity var(--hu-duration-normal) var(--hu-ease-out);
     }
 
     :host([collapsed]) .brand {
@@ -139,24 +139,24 @@ export class ScSidebar extends LitElement {
       flex: 1;
       overflow-y: auto;
       overflow-x: hidden;
-      padding: var(--sc-space-sm);
+      padding: var(--hu-space-sm);
     }
 
     .section {
-      margin-bottom: var(--sc-space-md);
+      margin-bottom: var(--hu-space-md);
     }
 
     .section-title {
-      font-size: var(--sc-text-xs);
-      font-weight: var(--sc-weight-medium);
-      letter-spacing: var(--sc-tracking-xs);
+      font-size: var(--hu-text-xs);
+      font-weight: var(--hu-weight-medium);
+      letter-spacing: var(--hu-tracking-xs);
       text-transform: uppercase;
-      color: var(--sc-text-muted);
-      padding: var(--sc-space-xs) var(--sc-space-md);
-      margin-bottom: var(--sc-space-xs);
+      color: var(--hu-text-muted);
+      padding: var(--hu-space-xs) var(--hu-space-md);
+      margin-bottom: var(--hu-space-xs);
       white-space: nowrap;
       overflow: hidden;
-      transition: opacity var(--sc-duration-normal) var(--sc-ease-out);
+      transition: opacity var(--hu-duration-normal) var(--hu-ease-out);
     }
 
     :host([collapsed]) .section-title {
@@ -170,24 +170,24 @@ export class ScSidebar extends LitElement {
     .nav-item {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       width: 100%;
-      padding: var(--sc-space-sm) var(--sc-space-md);
+      padding: var(--hu-space-sm) var(--hu-space-md);
       background: transparent;
       border: none;
       border-left: 3px solid transparent;
-      border-radius: var(--sc-radius-sm);
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
+      border-radius: var(--hu-radius-sm);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
       cursor: pointer;
       transition:
-        background var(--sc-duration-fast),
-        color var(--sc-duration-fast),
-        border-color var(--sc-duration-fast),
-        transform var(--sc-duration-normal) var(--sc-spring-out);
-      margin-bottom: var(--sc-space-xs);
+        background var(--hu-duration-fast),
+        color var(--hu-duration-fast),
+        border-color var(--hu-duration-fast),
+        transform var(--hu-duration-normal) var(--hu-spring-out);
+      margin-bottom: var(--hu-space-xs);
       text-align: left;
-      font-family: var(--sc-font);
+      font-family: var(--hu-font);
     }
 
     .nav-item:active {
@@ -195,25 +195,25 @@ export class ScSidebar extends LitElement {
     }
 
     .nav-item:focus-visible {
-      outline: var(--sc-focus-ring-width) solid var(--sc-accent);
-      outline-offset: calc(-1 * var(--sc-focus-ring-width));
-      border-radius: var(--sc-radius);
+      outline: var(--hu-focus-ring-width) solid var(--hu-accent);
+      outline-offset: calc(-1 * var(--hu-focus-ring-width));
+      border-radius: var(--hu-radius);
     }
 
     .nav-item:hover:not(.active) {
-      background: var(--sc-hover-overlay);
-      color: var(--sc-text);
+      background: var(--hu-hover-overlay);
+      color: var(--hu-text);
     }
 
     .nav-item.active {
-      background: var(--sc-accent-subtle);
-      border-left: 3px solid var(--sc-accent);
-      color: var(--sc-accent-text, var(--sc-accent));
+      background: var(--hu-accent-subtle);
+      border-left: 3px solid var(--hu-accent);
+      color: var(--hu-accent-text, var(--hu-accent));
     }
 
     :host([collapsed]) .nav-item {
       justify-content: center;
-      padding: var(--sc-space-sm);
+      padding: var(--hu-space-sm);
     }
 
     :host([collapsed]) .nav-item .label {
@@ -222,8 +222,8 @@ export class ScSidebar extends LitElement {
 
     .nav-item .icon {
       flex-shrink: 0;
-      width: var(--sc-icon-md);
-      height: var(--sc-icon-md);
+      width: var(--hu-icon-md);
+      height: var(--hu-icon-md);
     }
 
     .nav-item .icon svg,
@@ -235,19 +235,19 @@ export class ScSidebar extends LitElement {
 
     .footer {
       flex-shrink: 0;
-      padding: var(--sc-space-md);
-      border-top: 1px solid var(--sc-border-subtle);
+      padding: var(--hu-space-md);
+      border-top: 1px solid var(--hu-border-subtle);
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
 
     .status-row {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      gap: var(--hu-space-sm);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
     :host([collapsed]) .status-row .status-label {
@@ -261,29 +261,29 @@ export class ScSidebar extends LitElement {
     .theme-toggle {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       width: 100%;
-      padding: var(--sc-space-sm);
+      padding: var(--hu-space-sm);
       background: transparent;
       border: none;
-      border-radius: var(--sc-radius-sm);
-      color: var(--sc-text-muted);
+      border-radius: var(--hu-radius-sm);
+      color: var(--hu-text-muted);
       cursor: pointer;
-      font-size: var(--sc-text-xs);
-      font-family: var(--sc-font);
+      font-size: var(--hu-text-xs);
+      font-family: var(--hu-font);
       transition:
-        background var(--sc-duration-fast),
-        color var(--sc-duration-fast);
+        background var(--hu-duration-fast),
+        color var(--hu-duration-fast);
     }
 
     .theme-toggle:hover {
-      background: var(--sc-hover-overlay);
-      color: var(--sc-text);
+      background: var(--hu-hover-overlay);
+      color: var(--hu-text);
     }
 
     .theme-toggle .icon {
-      width: var(--sc-icon-sm);
-      height: var(--sc-icon-sm);
+      width: var(--hu-icon-sm);
+      height: var(--hu-icon-sm);
       flex-shrink: 0;
     }
 
@@ -301,16 +301,16 @@ export class ScSidebar extends LitElement {
       align-items: center;
       justify-content: center;
       width: 100%;
-      padding: var(--sc-space-sm);
+      padding: var(--hu-space-sm);
       background: transparent;
       border: none;
-      border-radius: var(--sc-radius-sm);
-      color: var(--sc-text-muted);
+      border-radius: var(--hu-radius-sm);
+      color: var(--hu-text-muted);
       cursor: pointer;
       transition:
-        background var(--sc-duration-fast),
-        color var(--sc-duration-fast),
-        transform var(--sc-duration-normal) var(--sc-ease-out);
+        background var(--hu-duration-fast),
+        color var(--hu-duration-fast),
+        transform var(--hu-duration-normal) var(--hu-ease-out);
     }
 
     .collapse-btn:active {
@@ -318,8 +318,8 @@ export class ScSidebar extends LitElement {
     }
 
     .collapse-btn:hover {
-      background: var(--sc-hover-overlay);
-      color: var(--sc-text);
+      background: var(--hu-hover-overlay);
+      color: var(--hu-text);
     }
 
     :host([collapsed]) .collapse-btn .icon {
@@ -327,8 +327,8 @@ export class ScSidebar extends LitElement {
     }
 
     .collapse-btn .icon {
-      width: var(--sc-icon-md);
-      height: var(--sc-icon-md);
+      width: var(--hu-icon-md);
+      height: var(--hu-icon-md);
     }
 
     .collapse-btn .icon svg {
@@ -341,7 +341,7 @@ export class ScSidebar extends LitElement {
     }
 
     .collapse-btn .label {
-      margin-left: var(--sc-space-sm);
+      margin-left: var(--hu-space-sm);
     }
   `;
 
@@ -350,7 +350,7 @@ export class ScSidebar extends LitElement {
   @property({ type: String }) connectionStatus: ConnectionStatus = "disconnected";
   @property({ type: String }) theme: "system" | "dark" | "light" = (() => {
     try {
-      return (localStorage.getItem("sc-theme") as "system" | "dark" | "light") || "system";
+      return (localStorage.getItem("hu-theme") as "system" | "dark" | "light") || "system";
     } catch {
       return "system";
     }
@@ -389,7 +389,7 @@ export class ScSidebar extends LitElement {
               <circle cx="16" cy="27" r="2" fill="currentColor" />
             </svg>
           </div>
-          <span class="brand">SeaClaw</span>
+          <span class="brand">Human</span>
         </header>
 
         <nav class="nav">
@@ -418,7 +418,7 @@ export class ScSidebar extends LitElement {
 
         <footer class="footer">
           <div class="status-row">
-            <sc-status-dot status=${this.connectionStatus}></sc-status-dot>
+            <hu-status-dot status=${this.connectionStatus}></hu-status-dot>
             <span class="status-label">${this.connectionStatus}</span>
           </div>
           <button
@@ -473,7 +473,7 @@ export class ScSidebar extends LitElement {
     const order: Array<"system" | "light" | "dark"> = ["system", "light", "dark"];
     const idx = order.indexOf(this.theme);
     this.theme = order[(idx + 1) % order.length];
-    localStorage.setItem("sc-theme", this.theme);
+    localStorage.setItem("hu-theme", this.theme);
     this._applyTheme();
   };
 
@@ -513,6 +513,6 @@ export class ScSidebar extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-sidebar": ScSidebar;
+    "hu-sidebar": ScSidebar;
   }
 }

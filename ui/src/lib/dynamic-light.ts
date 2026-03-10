@@ -59,15 +59,15 @@ export class DynamicLight {
     }
 
     const root = document.documentElement;
-    root.style.removeProperty("--sc-light-x");
-    root.style.removeProperty("--sc-light-y");
-    root.style.removeProperty("--sc-light-intensity");
+    root.style.removeProperty("--hu-light-x");
+    root.style.removeProperty("--hu-light-y");
+    root.style.removeProperty("--hu-light-intensity");
   }
 
   setIntensity(value: number): void {
     this.intensity = value;
     if (this.reducedMotion || this.rafId !== null) {
-      document.documentElement.style.setProperty("--sc-light-intensity", String(value));
+      document.documentElement.style.setProperty("--hu-light-intensity", String(value));
     }
   }
 
@@ -92,16 +92,16 @@ export class DynamicLight {
 
   private applyProperties(): void {
     const root = document.documentElement;
-    root.style.setProperty("--sc-light-x", `${this.currentX}%`);
-    root.style.setProperty("--sc-light-y", `${this.currentY}%`);
-    root.style.setProperty("--sc-light-intensity", String(this.intensity));
+    root.style.setProperty("--hu-light-x", `${this.currentX}%`);
+    root.style.setProperty("--hu-light-y", `${this.currentY}%`);
+    root.style.setProperty("--hu-light-intensity", String(this.intensity));
   }
 
   private setStaticPosition(x: number, y: number): void {
     const root = document.documentElement;
-    root.style.setProperty("--sc-light-x", `${x}%`);
-    root.style.setProperty("--sc-light-y", `${y}%`);
-    root.style.setProperty("--sc-light-intensity", String(this.intensity));
+    root.style.setProperty("--hu-light-x", `${x}%`);
+    root.style.setProperty("--hu-light-y", `${y}%`);
+    root.style.setProperty("--hu-light-intensity", String(this.intensity));
   }
 }
 

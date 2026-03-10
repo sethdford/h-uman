@@ -1,7 +1,7 @@
-#include "seaclaw/channel.h"
-#include "seaclaw/channel_loop.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/channel.h"
+#include "human/channel_loop.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 #include <netdb.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,8 +14,8 @@
 #define IRC_CONTENT_MAX     4095
 #define IRC_RECV_BUF_SIZE   4096
 
-typedef struct sc_irc_ctx {
-    sc_allocator_t *alloc;
+typedef struct hu_irc_ctx {
+    hu_allocator_t *alloc;
     char *server;
     size_t server_len;
     uint16_t port;
@@ -26,7 +26,7 @@ typedef struct sc_irc_ctx {
     char *channel;
     char recv_buf[IRC_RECV_BUF_SIZE];
     size_t recv_len;
-#if SC_IS_TEST
+#if HU_IS_TEST
     char last_message[4096];
     size_t last_message_len;
     struct {
@@ -35,18 +35,18 @@ typedef struct sc_irc_ctx {
     } mock_msgs[8];
     size_t mock_count;
 #endif
-} sc_irc_ctx_t;
+} hu_irc_ctx_t;
 
-static sc_error_t irc_start(void *ctx) {
-    sc_irc_ctx_t *c = (sc_irc_ctx_t *)ctx;
+static hu_error_t irc_start(void *ctx) {
+    hu_irc_ctx_t *c = (hu_irc_ctx_t *)ctx;
     if (!c)
-        return SC_ERR_INVALID_ARGUMENT;
-#if SC_IS_TEST
+        return HU_ERR_INVALID_ARGUMENT;
+#if HU_IS_TEST
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 #else
     if (!c->server || c->server_len == 0)
-        return SC_ERR_CHANNEL_NOT_CONFIGURED;
+        return HU_ERR_CHANNEL_NOT_CONFIGURED;
 
     struct addrinfo hints = {0}, *res = NULL;
     hints.ai_family = AF_INET;
@@ -54,30 +54,30 @@ static sc_error_t irc_start(void *ctx) {
     char port_str[8];
     snprintf(port_str, sizeof(port_str), "%u", c->port);
     if (getaddrinfo(c->server, port_str, &hints, &res) != 0)
-        return SC_ERR_IO;
+        return HU_ERR_IO;
 
     c->sock_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (c->sock_fd < 0) {
         freeaddrinfo(res);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     if (connect(c->sock_fd, res->ai_addr, res->ai_addrlen) < 0) {
         close(c->sock_fd);
         c->sock_fd = -1;
         freeaddrinfo(res);
-        return SC_ERR_IO;
+        return HU_ERR_IO;
     }
     freeaddrinfo(res);
     c->connected = true;
     c->running = true;
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
 static void irc_stop(void *ctx) {
-    sc_irc_ctx_t *c = (sc_irc_ctx_t *)ctx;
+    hu_irc_ctx_t *c = (hu_irc_ctx_t *)ctx;
     if (c) {
-#if !SC_IS_TEST
+#if !HU_IS_TEST
         if (c->connected && c->sock_fd >= 0) {
             close(c->sock_fd);
             c->sock_fd = -1;
@@ -88,24 +88,24 @@ static void irc_stop(void *ctx) {
     }
 }
 
-static sc_error_t irc_send(void *ctx, const char *target, size_t target_len, const char *message,
+static hu_error_t irc_send(void *ctx, const char *target, size_t target_len, const char *message,
                            size_t message_len, const char *const *media, size_t media_count) {
     (void)media;
     (void)media_count;
-#if SC_IS_TEST
+#if HU_IS_TEST
     {
-        sc_irc_ctx_t *c = (sc_irc_ctx_t *)ctx;
+        hu_irc_ctx_t *c = (hu_irc_ctx_t *)ctx;
         size_t len = message_len > 4095 ? 4095 : message_len;
         if (message && len > 0)
             memcpy(c->last_message, message, len);
         c->last_message[len] = '\0';
         c->last_message_len = len;
-        return SC_OK;
+        return HU_OK;
     }
 #else
-    sc_irc_ctx_t *c = (sc_irc_ctx_t *)ctx;
+    hu_irc_ctx_t *c = (hu_irc_ctx_t *)ctx;
     if (!c || !c->connected || c->sock_fd < 0)
-        return SC_ERR_NOT_SUPPORTED;
+        return HU_ERR_NOT_SUPPORTED;
 
     /* IRC max line 512 bytes: PRIVMSG target :message\r\n */
     size_t overhead = 10 + target_len; /* "PRIVMSG " + target + " :" */
@@ -123,14 +123,14 @@ static sc_error_t irc_send(void *ctx, const char *target, size_t target_len, con
         int n = snprintf(line, sizeof(line), "PRIVMSG %.*s :%.*s\r\n", (int)target_len, target,
                          (int)chunk_len, message + sent);
         if (n <= 0 || (size_t)n >= sizeof(line))
-            return SC_ERR_IO;
+            return HU_ERR_IO;
 
         ssize_t w = write(c->sock_fd, line, (size_t)n);
         if (w < 0)
-            return SC_ERR_IO;
+            return HU_ERR_IO;
         sent += (size_t)chunk_len;
     }
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -143,7 +143,7 @@ static bool irc_health_check(void *ctx) {
     return true;
 }
 
-static const sc_channel_vtable_t irc_vtable = {
+static const hu_channel_vtable_t irc_vtable = {
     .start = irc_start,
     .stop = irc_stop,
     .send = irc_send,
@@ -154,13 +154,13 @@ static const sc_channel_vtable_t irc_vtable = {
     .stop_typing = NULL,
 };
 
-sc_error_t sc_irc_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop_msg_t *msgs,
+hu_error_t hu_irc_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                        size_t max_msgs, size_t *out_count) {
-    sc_irc_ctx_t *ctx = (sc_irc_ctx_t *)channel_ctx;
+    hu_irc_ctx_t *ctx = (hu_irc_ctx_t *)channel_ctx;
     if (!ctx || !msgs || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_count = 0;
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (ctx->mock_count > 0) {
         size_t n = ctx->mock_count < max_msgs ? ctx->mock_count : max_msgs;
         for (size_t i = 0; i < n; i++) {
@@ -169,26 +169,26 @@ sc_error_t sc_irc_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop
         }
         *out_count = n;
         ctx->mock_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
-    return SC_OK;
+    return HU_OK;
 #else
-#ifdef SC_GATEWAY_POSIX
+#ifdef HU_GATEWAY_POSIX
     if (!ctx->connected || ctx->sock_fd < 0 || !ctx->running)
-        return SC_OK;
+        return HU_OK;
     struct timeval tv = {0, 100000};
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(ctx->sock_fd, &rfds);
     int ready = select(ctx->sock_fd + 1, &rfds, NULL, NULL, &tv);
     if (ready <= 0)
-        return SC_OK;
+        return HU_OK;
     size_t space = IRC_RECV_BUF_SIZE - ctx->recv_len - 1;
     if (space == 0)
         ctx->recv_len = 0, space = IRC_RECV_BUF_SIZE - 1;
     ssize_t n = recv(ctx->sock_fd, ctx->recv_buf + ctx->recv_len, space, 0);
     if (n <= 0)
-        return SC_OK;
+        return HU_OK;
     ctx->recv_len += (size_t)n;
     ctx->recv_buf[ctx->recv_len] = '\0';
     size_t cnt = 0;
@@ -234,29 +234,29 @@ sc_error_t sc_irc_poll(void *channel_ctx, sc_allocator_t *alloc, sc_channel_loop
     }
     *out_count = cnt;
     (void)alloc;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)alloc;
     (void)max_msgs;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 #endif
 }
 
-sc_error_t sc_irc_create(sc_allocator_t *alloc, const char *server, size_t server_len,
-                         uint16_t port, sc_channel_t *out) {
+hu_error_t hu_irc_create(hu_allocator_t *alloc, const char *server, size_t server_len,
+                         uint16_t port, hu_channel_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_irc_ctx_t *c = (sc_irc_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_irc_ctx_t *c = (hu_irc_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     if (server && server_len > 0) {
         c->server = (char *)malloc(server_len + 1);
         if (!c->server) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(c->server, server, server_len);
         c->server[server_len] = '\0';
@@ -267,14 +267,14 @@ sc_error_t sc_irc_create(sc_allocator_t *alloc, const char *server, size_t serve
     c->connected = false;
     out->ctx = c;
     out->vtable = &irc_vtable;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_irc_destroy(sc_channel_t *ch) {
+void hu_irc_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
-        sc_irc_ctx_t *c = (sc_irc_ctx_t *)ch->ctx;
-        sc_allocator_t *a = c->alloc;
-#if !SC_IS_TEST
+        hu_irc_ctx_t *c = (hu_irc_ctx_t *)ch->ctx;
+        hu_allocator_t *a = c->alloc;
+#if !HU_IS_TEST
         if (c->connected && c->sock_fd >= 0) {
             close(c->sock_fd);
             c->sock_fd = -1;
@@ -289,15 +289,15 @@ void sc_irc_destroy(sc_channel_t *ch) {
     }
 }
 
-#if SC_IS_TEST
-sc_error_t sc_irc_test_inject_mock(sc_channel_t *ch, const char *session_key,
+#if HU_IS_TEST
+hu_error_t hu_irc_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                    size_t session_key_len, const char *content,
                                    size_t content_len) {
     if (!ch || !ch->ctx)
-        return SC_ERR_INVALID_ARGUMENT;
-    sc_irc_ctx_t *c = (sc_irc_ctx_t *)ch->ctx;
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_irc_ctx_t *c = (hu_irc_ctx_t *)ch->ctx;
     if (c->mock_count >= 8)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t i = c->mock_count++;
     size_t sk = session_key_len > 127 ? 127 : session_key_len;
     size_t ct = content_len > 4095 ? 4095 : content_len;
@@ -307,12 +307,12 @@ sc_error_t sc_irc_test_inject_mock(sc_channel_t *ch, const char *session_key,
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
-const char *sc_irc_test_get_last_message(sc_channel_t *ch, size_t *out_len) {
+const char *hu_irc_test_get_last_message(hu_channel_t *ch, size_t *out_len) {
     if (!ch || !ch->ctx)
         return NULL;
-    sc_irc_ctx_t *c = (sc_irc_ctx_t *)ch->ctx;
+    hu_irc_ctx_t *c = (hu_irc_ctx_t *)ch->ctx;
     if (out_len)
         *out_len = c->last_message_len;
     return c->last_message;

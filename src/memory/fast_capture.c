@@ -1,5 +1,5 @@
-#include "seaclaw/memory/fast_capture.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/fast_capture.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,29 +38,29 @@ static const char *EMOTION_PREFIXES[] = {"I feel ", "I'm feeling ", "I am ", "I'
 struct emotion_adj {
     const char *word;
     size_t word_len;
-    sc_emotion_tag_t tag;
+    hu_emotion_tag_t tag;
 };
 static const struct emotion_adj EMOTION_ADJECTIVES[] = {
-    {"great", 5, SC_EMOTION_JOY},
-    {"happy", 5, SC_EMOTION_JOY},
-    {"excited", 7, SC_EMOTION_EXCITEMENT},
-    {"wonderful", 9, SC_EMOTION_JOY},
-    {"amazing", 7, SC_EMOTION_JOY},
-    {"sad", 3, SC_EMOTION_SADNESS},
-    {"depressed", 9, SC_EMOTION_SADNESS},
-    {"down", 4, SC_EMOTION_SADNESS},
-    {"heartbroken", 11, SC_EMOTION_SADNESS},
-    {"angry", 5, SC_EMOTION_ANGER},
-    {"furious", 7, SC_EMOTION_ANGER},
-    {"scared", 6, SC_EMOTION_FEAR},
-    {"afraid", 6, SC_EMOTION_FEAR},
-    {"terrified", 9, SC_EMOTION_FEAR},
-    {"frightened", 10, SC_EMOTION_FEAR},
-    {"frustrated", 10, SC_EMOTION_FRUSTRATION},
-    {"frustrating", 11, SC_EMOTION_FRUSTRATION},
-    {"anxious", 7, SC_EMOTION_ANXIETY},
-    {"worried", 7, SC_EMOTION_ANXIETY},
-    {"stressed", 8, SC_EMOTION_ANXIETY},
+    {"great", 5, HU_EMOTION_JOY},
+    {"happy", 5, HU_EMOTION_JOY},
+    {"excited", 7, HU_EMOTION_EXCITEMENT},
+    {"wonderful", 9, HU_EMOTION_JOY},
+    {"amazing", 7, HU_EMOTION_JOY},
+    {"sad", 3, HU_EMOTION_SADNESS},
+    {"depressed", 9, HU_EMOTION_SADNESS},
+    {"down", 4, HU_EMOTION_SADNESS},
+    {"heartbroken", 11, HU_EMOTION_SADNESS},
+    {"angry", 5, HU_EMOTION_ANGER},
+    {"furious", 7, HU_EMOTION_ANGER},
+    {"scared", 6, HU_EMOTION_FEAR},
+    {"afraid", 6, HU_EMOTION_FEAR},
+    {"terrified", 9, HU_EMOTION_FEAR},
+    {"frightened", 10, HU_EMOTION_FEAR},
+    {"frustrated", 10, HU_EMOTION_FRUSTRATION},
+    {"frustrating", 11, HU_EMOTION_FRUSTRATION},
+    {"anxious", 7, HU_EMOTION_ANXIETY},
+    {"worried", 7, HU_EMOTION_ANXIETY},
+    {"stressed", 8, HU_EMOTION_ANXIETY},
     {NULL, 0, 0},
 };
 
@@ -103,17 +103,17 @@ static const char *COMMITMENT_PREFIXES[] = {"I will ",       "I'll ",      "I pr
                                             "I'm going to ", "I plan to ", "remind me to ",
                                             "I'm gonna ",    NULL};
 
-static void add_entity(sc_fc_result_t *out, sc_allocator_t *alloc, const char *name,
+static void add_entity(hu_fc_result_t *out, hu_allocator_t *alloc, const char *name,
                        size_t name_len, const char *type, size_t type_len, double confidence,
                        size_t offset) {
-    if (out->entity_count >= SC_FC_MAX_RESULTS)
+    if (out->entity_count >= HU_FC_MAX_RESULTS)
         return;
-    sc_fc_entity_match_t *e = &out->entities[out->entity_count];
-    e->name = sc_strndup(alloc, name, name_len);
+    hu_fc_entity_match_t *e = &out->entities[out->entity_count];
+    e->name = hu_strndup(alloc, name, name_len);
     if (!e->name)
         return;
     e->name_len = name_len;
-    e->type = sc_strndup(alloc, type, type_len);
+    e->type = hu_strndup(alloc, type, type_len);
     if (!e->type) {
         alloc->free(alloc->ctx, e->name, name_len + 1);
         e->name = NULL;
@@ -125,8 +125,8 @@ static void add_entity(sc_fc_result_t *out, sc_allocator_t *alloc, const char *n
     out->entity_count++;
 }
 
-static void add_emotion(sc_fc_result_t *out, sc_emotion_tag_t tag, double intensity) {
-    if (out->emotion_count >= SC_STM_MAX_EMOTIONS)
+static void add_emotion(hu_fc_result_t *out, hu_emotion_tag_t tag, double intensity) {
+    if (out->emotion_count >= HU_STM_MAX_EMOTIONS)
         return;
     for (size_t i = 0; i < out->emotion_count; i++) {
         if (out->emotions[i].tag == tag)
@@ -138,8 +138,8 @@ static void add_emotion(sc_fc_result_t *out, sc_emotion_tag_t tag, double intens
 }
 
 /* Structural: find "my " then check if next word is a relationship word. */
-static void scan_relationships(const char *text, size_t text_len, sc_fc_result_t *out,
-                               sc_allocator_t *alloc) {
+static void scan_relationships(const char *text, size_t text_len, hu_fc_result_t *out,
+                               hu_allocator_t *alloc) {
     const char *prefix = "my ";
     size_t prefix_len = 3;
     if (text_len < prefix_len + 1)
@@ -173,7 +173,7 @@ static void scan_relationships(const char *text, size_t text_len, sc_fc_result_t
 }
 
 /* Structural: find "I feel/I'm feeling/I am/I'm " then look for emotion adjective in remainder. */
-static void scan_emotions(const char *text, size_t text_len, sc_fc_result_t *out) {
+static void scan_emotions(const char *text, size_t text_len, hu_fc_result_t *out) {
     for (int p = 0; EMOTION_PREFIXES[p]; p++) {
         const char *prefix = EMOTION_PREFIXES[p];
         size_t plen = strlen(prefix);
@@ -194,8 +194,8 @@ static void scan_emotions(const char *text, size_t text_len, sc_fc_result_t *out
 }
 
 /* Structural: match prefix+word or standalone word for topic. */
-static void scan_topics(const char *text, size_t text_len, sc_fc_result_t *out,
-                        sc_allocator_t *alloc) {
+static void scan_topics(const char *text, size_t text_len, hu_fc_result_t *out,
+                        hu_allocator_t *alloc) {
     if (out->primary_topic)
         return;
     for (int t = 0; TOPIC_PATTERNS[t].topic; t++) {
@@ -211,20 +211,20 @@ static void scan_topics(const char *text, size_t text_len, sc_fc_result_t *out,
                 fc_strncasecmp(text + after, tp->word, tp->word_len) == 0) {
                 int next = (int)after + (int)tp->word_len;
                 if (next >= (int)text_len || !isalnum((unsigned char)text[(size_t)next])) {
-                    out->primary_topic = sc_strndup(alloc, tp->topic, tp->topic_len);
+                    out->primary_topic = hu_strndup(alloc, tp->topic, tp->topic_len);
                     return;
                 }
             }
         } else {
             if (fc_strstr_case(text, text_len, tp->word, tp->word_len)) {
-                out->primary_topic = sc_strndup(alloc, tp->topic, tp->topic_len);
+                out->primary_topic = hu_strndup(alloc, tp->topic, tp->topic_len);
                 return;
             }
         }
     }
 }
 
-static void scan_commitments(const char *text, size_t text_len, sc_fc_result_t *out) {
+static void scan_commitments(const char *text, size_t text_len, hu_fc_result_t *out) {
     for (int i = 0; COMMITMENT_PREFIXES[i]; i++) {
         const char *pat = COMMITMENT_PREFIXES[i];
         size_t plen = strlen(pat);
@@ -235,7 +235,7 @@ static void scan_commitments(const char *text, size_t text_len, sc_fc_result_t *
     }
 }
 
-static void scan_question(const char *text, size_t text_len, sc_fc_result_t *out) {
+static void scan_question(const char *text, size_t text_len, hu_fc_result_t *out) {
     for (size_t i = 0; i < text_len; i++) {
         if (text[i] == '?') {
             out->has_question = true;
@@ -244,23 +244,23 @@ static void scan_question(const char *text, size_t text_len, sc_fc_result_t *out
     }
 }
 
-sc_error_t sc_fast_capture(sc_allocator_t *alloc, const char *text, size_t text_len,
-                           sc_fc_result_t *out) {
+hu_error_t hu_fast_capture(hu_allocator_t *alloc, const char *text, size_t text_len,
+                           hu_fc_result_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
     if (!text || text_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     scan_relationships(text, text_len, out, alloc);
     scan_emotions(text, text_len, out);
     scan_topics(text, text_len, out, alloc);
     scan_commitments(text, text_len, out);
     scan_question(text, text_len, out);
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_fc_result_deinit(sc_fc_result_t *result, sc_allocator_t *alloc) {
+void hu_fc_result_deinit(hu_fc_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
     for (size_t i = 0; i < result->entity_count; i++) {

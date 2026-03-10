@@ -1,17 +1,17 @@
 ---
 title: Docker Deployment
-description: Deploy SeaClaw using Docker containers.
+description: Deploy Human using Docker containers.
 ---
 
-SeaClaw can run in Docker for isolated, reproducible deployments. The official Dockerfile produces a minimal image with the gateway as the default command.
+Human can run in Docker for isolated, reproducible deployments. The official Dockerfile produces a minimal image with the gateway as the default command.
 
 ## Quick start
 
 ```bash
 docker run -it --rm \
-  -v ~/.seaclaw:/seaclaw-data/.seaclaw \
+  -v ~/.human:/human-data/.human \
   -p 3000:3000 \
-  ghcr.io/sethdford/seaclaw:latest \
+  ghcr.io/sethdford/human:latest \
   gateway
 ```
 
@@ -22,17 +22,17 @@ Mount your config directory so the container uses your existing config and data.
 ```yaml
 version: "3.8"
 services:
-  seaclaw:
-    image: ghcr.io/sethdford/seaclaw:latest
+  human:
+    image: ghcr.io/sethdford/human:latest
     ports:
       - "3000:3000"
     volumes:
-      - ./config:/seaclaw-data/.seaclaw
-      - ./workspace:/seaclaw-data/workspace
+      - ./config:/human-data/.human
+      - ./workspace:/human-data/workspace
     environment:
-      - HOME=/seaclaw-data
-      - SEACLAW_WORKSPACE=/seaclaw-data/workspace
-      - SEACLAW_GATEWAY_PORT=3000
+      - HOME=/human-data
+      - HUMAN_WORKSPACE=/human-data/workspace
+      - HUMAN_GATEWAY_PORT=3000
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     restart: unless-stopped
@@ -55,30 +55,30 @@ RUN mkdir build && cd build && \
 # Stage 2: Runtime
 FROM alpine:3.23 AS release-base
 RUN apk add --no-cache ca-certificates curl tzdata libsqlite3
-COPY --from=builder /app/build/seaclaw /usr/local/bin/seaclaw
-ENV SEACLAW_WORKSPACE=/seaclaw-data/workspace
-ENV HOME=/seaclaw-data
-ENV SEACLAW_GATEWAY_PORT=3000
-WORKDIR /seaclaw-data
+COPY --from=builder /app/build/human /usr/local/bin/human
+ENV HUMAN_WORKSPACE=/human-data/workspace
+ENV HOME=/human-data
+ENV HUMAN_GATEWAY_PORT=3000
+WORKDIR /human-data
 EXPOSE 3000
-ENTRYPOINT ["seaclaw"]
+ENTRYPOINT ["human"]
 CMD ["gateway", "--port", "3000", "--host", "::"]
 ```
 
 Build:
 
 ```bash
-docker build -t seaclaw:local .
+docker build -t human:local .
 ```
 
 ## Environment variables
 
 | Variable                      | Description                       | Default                   |
 | ----------------------------- | --------------------------------- | ------------------------- |
-| `HOME`                        | Home directory (config path base) | `/seaclaw-data`           |
-| `SEACLAW_WORKSPACE`           | Workspace directory               | `/seaclaw-data/workspace` |
-| `SEACLAW_GATEWAY_PORT`        | Gateway port                      | `3000`                    |
-| `SEACLAW_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret (optional)    | -                         |
+| `HOME`                        | Home directory (config path base) | `/human-data`           |
+| `HUMAN_WORKSPACE`           | Workspace directory               | `/human-data/workspace` |
+| `HUMAN_GATEWAY_PORT`        | Gateway port                      | `3000`                    |
+| `HUMAN_WEBHOOK_HMAC_SECRET` | Webhook HMAC secret (optional)    | -                         |
 | `OPENAI_API_KEY`              | OpenAI API key (if using)         | -                         |
 | `ANTHROPIC_API_KEY`           | Anthropic API key (if using)      | -                         |
 
@@ -92,14 +92,14 @@ API keys and secrets can be passed via environment variables or a mounted config
 Build root image:
 
 ```bash
-docker build --target release-root -t seaclaw:root .
+docker build --target release-root -t human:root .
 ```
 
 ## Volumes
 
 | Mount                     | Purpose                            |
 | ------------------------- | ---------------------------------- |
-| `/seaclaw-data/.seaclaw`  | Config, crontab, skills, memory DB |
-| `/seaclaw-data/workspace` | Agent workspace files              |
+| `/human-data/.human`  | Config, crontab, skills, memory DB |
+| `/human-data/workspace` | Agent workspace files              |
 
 Ensure these directories exist and have correct permissions for the container user.

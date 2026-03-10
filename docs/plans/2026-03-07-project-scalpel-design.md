@@ -15,19 +15,19 @@ management, and file handling.
 ## Target Component Tree
 
 ```
-sc-chat-view (~200 lines, thin orchestrator)
-├── sc-chat-sessions-panel (inline session list, new chat)
-├── sc-chat-search (exists)
-├── sc-message-list (scroll container, auto-scroll, grouping)
-│   ├── sc-message-group (grouped by sender + 2-min window)
-│   │   ├── sc-message-stream (exists — content rendering)
-│   │   └── sc-message-actions (hover: copy, retry, regenerate, edit)
-│   ├── sc-tool-result (exists)
-│   └── sc-reasoning-block (exists)
-├── sc-composer (input, send, file attach, suggestions)
-│   ├── sc-file-preview (attachment thumbnails)
+hu-chat-view (~200 lines, thin orchestrator)
+├── hu-chat-sessions-panel (inline session list, new chat)
+├── hu-chat-search (exists)
+├── hu-message-list (scroll container, auto-scroll, grouping)
+│   ├── hu-message-group (grouped by sender + 2-min window)
+│   │   ├── hu-message-stream (exists — content rendering)
+│   │   └── hu-message-actions (hover: copy, retry, regenerate, edit)
+│   ├── hu-tool-result (exists)
+│   └── hu-reasoning-block (exists)
+├── hu-composer (input, send, file attach, suggestions)
+│   ├── hu-file-preview (attachment thumbnails)
 │   └── suggested prompts (empty state)
-├── sc-context-menu (exists — wire it)
+├── hu-context-menu (exists — wire it)
 └── ChatController (reactive controller — gateway, streaming, cache)
 ```
 
@@ -44,54 +44,54 @@ Owns all non-UI logic:
 - Methods: `send()`, `abort()`, `retry()`, `regenerate()`
 - Fully unit-testable without DOM
 
-### sc-composer (~250 lines)
+### hu-composer (~250 lines)
 
 - Auto-resizing textarea (max 5 lines)
 - File attachment button (opens file picker)
-- Drag-and-drop zone with `sc-file-preview` thumbnails
+- Drag-and-drop zone with `hu-file-preview` thumbnails
 - Send button (disabled when empty/disconnected/waiting)
 - Character count
 - Suggested prompt pills (shown in empty state)
-- Events: `sc-send`, `sc-abort`, `sc-use-suggestion`
+- Events: `hu-send`, `hu-abort`, `hu-use-suggestion`
 
-### sc-message-list (~200 lines)
+### hu-message-list (~200 lines)
 
 - Scroll container with auto-scroll on new messages
 - "New messages" pill when scrolled up
 - Message grouping by sender + 2-minute time window
-- Renders `sc-message-group` wrappers around consecutive same-sender messages
-- Delegates to `sc-message-stream`, `sc-tool-result`, `sc-reasoning-block`
+- Renders `hu-message-group` wrappers around consecutive same-sender messages
+- Delegates to `hu-message-stream`, `hu-tool-result`, `hu-reasoning-block`
 
-### sc-message-actions (~150 lines)
+### hu-message-actions (~150 lines)
 
 - Hover bar on each message (appears on mouseenter)
 - Actions: Copy (clipboard), Retry (user), Regenerate (assistant), Edit (user)
 - Phosphor icons, design token styling
-- Events: `sc-copy`, `sc-retry`, `sc-regenerate`, `sc-edit`
+- Events: `hu-copy`, `hu-retry`, `hu-regenerate`, `hu-edit`
 
-### sc-chat-sessions-panel (~250 lines)
+### hu-chat-sessions-panel (~250 lines)
 
 - Collapsible panel on left (drawer on mobile)
 - Lists recent sessions with titles and timestamps
 - "New Chat" button at top
 - Rename and delete per session
 - Active session highlighted
-- Events: `sc-session-select`, `sc-session-new`, `sc-session-delete`
+- Events: `hu-session-select`, `hu-session-new`, `hu-session-delete`
 
-### sc-file-preview (~80 lines)
+### hu-file-preview (~80 lines)
 
 - Thumbnail grid for attached files
 - Image preview for image types
 - File icon + name for other types
 - Remove button per file
-- Events: `sc-file-remove`
+- Events: `hu-file-remove`
 
 ## Fixes Included
 
-1. **Context menu**: Wire `<sc-context-menu>` into chat-view render template
+1. **Context menu**: Wire `<hu-context-menu>` into chat-view render template
 2. **Dead CSS**: Remove ~60 lines of unused `.tool-card` styles
-3. **Double bubble**: Remove overlapping message styles between chat-view and sc-message-stream
-4. **Adaptive code theme**: sc-code-block switches Shiki theme based on prefers-color-scheme
+3. **Double bubble**: Remove overlapping message styles between chat-view and hu-message-stream
+4. **Adaptive code theme**: hu-code-block switches Shiki theme based on prefers-color-scheme
 
 ## Phases
 
@@ -105,17 +105,17 @@ Owns all non-UI logic:
 
 ### Phase 2: Component Decomposition
 
-- Extract `sc-composer` (input bar, file upload, suggestions)
-- Extract `sc-message-list` (scroll, grouping, rendering)
+- Extract `hu-composer` (input bar, file upload, suggestions)
+- Extract `hu-message-list` (scroll, grouping, rendering)
 - Rewrite `chat-view.ts` as thin orchestrator (~200 lines)
-- Component tests for sc-composer and sc-message-list
+- Component tests for hu-composer and hu-message-list
 - E2E tests still pass
 
 ### Phase 3: SOTA Features
 
-- `sc-message-actions` (hover copy/retry/regenerate/edit)
-- `sc-chat-sessions-panel` (inline session list + new chat)
-- `sc-file-preview` (attachment thumbnails)
+- `hu-message-actions` (hover copy/retry/regenerate/edit)
+- `hu-chat-sessions-panel` (inline session list + new chat)
+- `hu-file-preview` (attachment thumbnails)
 - Message grouping by sender + 2-min time window
 - Adaptive code block theme (light/dark)
 - Component tests + E2E for new features

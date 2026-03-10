@@ -1,6 +1,6 @@
 #!/bin/sh
-# SeaClaw local benchmarking harness
-# Usage: ./scripts/benchmark.sh [path/to/seaclaw] [--compare FILE]
+# Human local benchmarking harness
+# Usage: ./scripts/benchmark.sh [path/to/human] [--compare FILE]
 # Measures: binary size, symbols, sections, startup time, memory, test metrics.
 
 set -eu
@@ -17,26 +17,26 @@ warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
 
 case "${1:-}" in
     --help|-h)
-        printf "Usage: %s [path/to/seaclaw] [--compare FILE] [--save-history]\n" "$0"
+        printf "Usage: %s [path/to/human] [--compare FILE] [--save-history]\n" "$0"
         printf "Measures: binary size, symbols, sections, startup time, memory, test metrics.\n"
         printf "  --save-history  Append results to benchmark-history.json\n"
         exit 0
         ;;
 esac
 
-# Default paths (release seaclaw, tests often in build-check with ASan)
+# Default paths (release human, tests often in build-check with ASan)
 SCRIPTS_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT_DIR=$(cd "$SCRIPTS_DIR/.." && pwd)
-DEFAULT_SEACLAW="${ROOT_DIR}/build/seaclaw"
-DEFAULT_TESTS="${ROOT_DIR}/build-check/seaclaw_tests"
+DEFAULT_HUMAN="${ROOT_DIR}/build/human"
+DEFAULT_TESTS="${ROOT_DIR}/build-check/human_tests"
 
 # If build-check doesn't exist, try build/ for tests (common single-dir setup)
-if [ ! -x "$DEFAULT_TESTS" ] && [ -x "${ROOT_DIR}/build/seaclaw_tests" ]; then
-    DEFAULT_TESTS="${ROOT_DIR}/build/seaclaw_tests"
+if [ ! -x "$DEFAULT_TESTS" ] && [ -x "${ROOT_DIR}/build/human_tests" ]; then
+    DEFAULT_TESTS="${ROOT_DIR}/build/human_tests"
 fi
 
 COMPARE_FILE=""
-SEACLAW_BIN=""
+HUMAN_BIN=""
 TESTS_BIN=""
 SAVE_HISTORY=0
 
@@ -56,8 +56,8 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         *)
-            if [ -z "$SEACLAW_BIN" ]; then
-                SEACLAW_BIN="$1"
+            if [ -z "$HUMAN_BIN" ]; then
+                HUMAN_BIN="$1"
             fi
             shift
             ;;
@@ -65,26 +65,26 @@ while [ $# -gt 0 ]; do
 done
 
 # Resolve paths
-if [ -z "$SEACLAW_BIN" ]; then
-    SEACLAW_BIN="$DEFAULT_SEACLAW"
+if [ -z "$HUMAN_BIN" ]; then
+    HUMAN_BIN="$DEFAULT_HUMAN"
 fi
 
 # Resolve relative paths to absolute
-case "$SEACLAW_BIN" in
+case "$HUMAN_BIN" in
     /*) ;;
-    *) SEACLAW_BIN="${ROOT_DIR}/${SEACLAW_BIN}"
+    *) HUMAN_BIN="${ROOT_DIR}/${HUMAN_BIN}"
 esac
 
-# Tests: same dir as seaclaw first, else default
-BIN_DIR=$(dirname "$SEACLAW_BIN")
-if [ -x "${BIN_DIR}/seaclaw_tests" ]; then
-    TESTS_BIN="${BIN_DIR}/seaclaw_tests"
+# Tests: same dir as human first, else default
+BIN_DIR=$(dirname "$HUMAN_BIN")
+if [ -x "${BIN_DIR}/human_tests" ]; then
+    TESTS_BIN="${BIN_DIR}/human_tests"
 else
     TESTS_BIN="$DEFAULT_TESTS"
 fi
 
-if [ ! -f "$SEACLAW_BIN" ]; then
-    die "seaclaw binary not found at $SEACLAW_BIN. Build with: mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel && cmake --build ."
+if [ ! -f "$HUMAN_BIN" ]; then
+    die "human binary not found at $HUMAN_BIN. Build with: mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel && cmake --build ."
 fi
 
 # Detect OS for time/memory
@@ -153,7 +153,7 @@ fi
 # --- Collect metrics ---
 
 # Binary size
-BINARY_SIZE=$(wc -c < "$SEACLAW_BIN" | tr -d ' ')
+BINARY_SIZE=$(wc -c < "$HUMAN_BIN" | tr -d ' ')
 BINARY_SIZE_HR=$(printf "%'d" "$BINARY_SIZE")
 if [ "$BINARY_SIZE" -ge 1024 ]; then
     BINARY_SIZE_KB=$((BINARY_SIZE / 1024))
@@ -165,7 +165,7 @@ fi
 # Exported symbols
 SYMBOL_COUNT=0
 if command -v nm >/dev/null 2>&1; then
-    SYMBOL_COUNT=$(nm -g "$SEACLAW_BIN" 2>/dev/null | wc -l | tr -d ' ')
+    SYMBOL_COUNT=$(nm -g "$HUMAN_BIN" 2>/dev/null | wc -l | tr -d ' ')
 fi
 SYMBOL_HR=$(printf "%'d" "$SYMBOL_COUNT")
 
@@ -174,7 +174,7 @@ TEXT_SIZE=0
 DATA_SIZE=0
 BSS_SIZE=0
 if command -v size >/dev/null 2>&1; then
-    size_out=$(size "$SEACLAW_BIN" 2>/dev/null)
+    size_out=$(size "$HUMAN_BIN" 2>/dev/null)
     TEXT_SIZE=$(echo "$size_out" | tail -1 | awk '{print $1}')
     DATA_SIZE=$(echo "$size_out" | tail -1 | awk '{print $2}')
     BSS_SIZE=$(echo "$size_out" | tail -1 | awk '{print $3}')
@@ -190,7 +190,7 @@ STARTUP_RUNS=10
 i=0
 while [ "$i" -lt "$STARTUP_RUNS" ]; do
     t0=$(get_nanos)
-    "$SEACLAW_BIN" --version >/dev/null 2>&1
+    "$HUMAN_BIN" --version >/dev/null 2>&1
     t1=$(get_nanos)
     # Handle both nanoseconds and seconds (perl fallback)
     if [ "${#t0}" -ge 10 ]; then
@@ -231,7 +231,7 @@ fi
 
 # Memory: peak RSS during --version
 VERSION_RSS=0
-time_out=$("$TIME_CMD" $TIME_ARGS "$SEACLAW_BIN" --version 2>&1 || true)
+time_out=$("$TIME_CMD" $TIME_ARGS "$HUMAN_BIN" --version 2>&1 || true)
 VERSION_RSS=$(parse_rss "$time_out")
 
 # Test count and duration (if we ran tests and got output)
@@ -282,7 +282,7 @@ JSON_FILE="${ROOT_DIR}/benchmark-results.json"
 cat > "$JSON_FILE" << EOF
 {
   "binary": {
-    "path": "$SEACLAW_BIN",
+    "path": "$HUMAN_BIN",
     "size_bytes": $BINARY_SIZE,
     "size_human": "$BINARY_HR",
     "symbols_exported": $SYMBOL_COUNT,
@@ -319,7 +319,7 @@ print_section() {
 
 echo ""
 echo "═══════════════════════════════════════════════"
-echo "  SeaClaw Benchmark Report"
+echo "  Human Benchmark Report"
 echo "═══════════════════════════════════════════════"
 
 print_section "Binary"

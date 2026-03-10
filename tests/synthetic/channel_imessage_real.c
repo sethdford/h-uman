@@ -10,7 +10,7 @@ static bool messages_app_running(void) {
     return system("pgrep -q Messages") == 0;
 }
 
-static sc_error_t send_imessage_osascript(const char *target, const char *message) {
+static hu_error_t send_imessage_osascript(const char *target, const char *message) {
     char cmd[8192];
     snprintf(cmd, sizeof(cmd),
              "osascript -e '"
@@ -20,23 +20,23 @@ static sc_error_t send_imessage_osascript(const char *target, const char *messag
              "end tell' 2>/dev/null",
              target, message);
     int ret = system(cmd);
-    return ret == 0 ? SC_OK : SC_ERR_IO;
+    return ret == 0 ? HU_OK : HU_ERR_IO;
 }
 
-sc_error_t sc_channel_run_real_imessage(sc_allocator_t *alloc, const sc_channel_test_config_t *cfg,
-                                        sc_synth_gemini_ctx_t *gemini,
-                                        sc_synth_metrics_t *metrics) {
-    sc_synth_metrics_init(metrics);
+hu_error_t hu_channel_run_real_imessage(hu_allocator_t *alloc, const hu_channel_test_config_t *cfg,
+                                        hu_synth_gemini_ctx_t *gemini,
+                                        hu_synth_metrics_t *metrics) {
+    hu_synth_metrics_init(metrics);
 
     if (!cfg->real_imessage_target) {
-        SC_CH_LOG("no --real-imessage target specified, skipping");
-        return SC_OK;
+        HU_CH_LOG("no --real-imessage target specified, skipping");
+        return HU_OK;
     }
 
-    SC_CH_LOG("Real iMessage test to: %s", cfg->real_imessage_target);
+    HU_CH_LOG("Real iMessage test to: %s", cfg->real_imessage_target);
 
     if (!messages_app_running()) {
-        SC_CH_LOG("WARNING: Messages.app not running, test may fail");
+        HU_CH_LOG("WARNING: Messages.app not running, test may fail");
     }
 
     /* Generate a conversation starter via Gemini */
@@ -46,11 +46,11 @@ sc_error_t sc_channel_run_real_imessage(sc_allocator_t *alloc, const sc_channel_
         "so we can verify the response references it. Return ONLY the message text, no JSON.";
     char *response = NULL;
     size_t response_len = 0;
-    sc_error_t err =
-        sc_synth_gemini_generate(alloc, gemini, prompt, strlen(prompt), &response, &response_len);
-    if (err != SC_OK) {
-        SC_CH_LOG("Gemini failed to generate message: %s", sc_error_string(err));
-        sc_synth_metrics_record(alloc, metrics, 0, SC_SYNTH_ERROR);
+    hu_error_t err =
+        hu_synth_gemini_generate(alloc, gemini, prompt, strlen(prompt), &response, &response_len);
+    if (err != HU_OK) {
+        HU_CH_LOG("Gemini failed to generate message: %s", hu_error_string(err));
+        hu_synth_metrics_record(alloc, metrics, 0, HU_SYNTH_ERROR);
         return err;
     }
 
@@ -63,43 +63,43 @@ sc_error_t sc_channel_run_real_imessage(sc_allocator_t *alloc, const sc_channel_
         mlen--;
     msg[mlen] = '\0';
 
-    SC_CH_LOG("sending: \"%s\"", msg);
+    HU_CH_LOG("sending: \"%s\"", msg);
 
-    double t0 = sc_synth_now_ms();
+    double t0 = hu_synth_now_ms();
     err = send_imessage_osascript(cfg->real_imessage_target, msg);
-    double send_lat = sc_synth_now_ms() - t0;
+    double send_lat = hu_synth_now_ms() - t0;
 
-    if (err != SC_OK) {
-        SC_CH_LOG("FAIL: osascript send failed (%.1fms)", send_lat);
-        sc_synth_metrics_record(alloc, metrics, send_lat, SC_SYNTH_FAIL);
+    if (err != HU_OK) {
+        HU_CH_LOG("FAIL: osascript send failed (%.1fms)", send_lat);
+        hu_synth_metrics_record(alloc, metrics, send_lat, HU_SYNTH_FAIL);
         if (cfg->regression_dir) {
-            sc_synth_test_case_t tc = {.name = (char *)"real_imessage_send",
+            hu_synth_test_case_t tc = {.name = (char *)"real_imessage_send",
                                        .category = (char *)"real_imessage",
                                        .input_json = msg,
-                                       .verdict = SC_SYNTH_FAIL,
+                                       .verdict = HU_SYNTH_FAIL,
                                        .verdict_reason = (char *)"osascript failed"};
-            sc_synth_regression_save(alloc, cfg->regression_dir, &tc);
+            hu_synth_regression_save(alloc, cfg->regression_dir, &tc);
         }
     } else {
-        SC_CH_LOG("PASS: message sent successfully (%.1fms)", send_lat);
-        sc_synth_metrics_record(alloc, metrics, send_lat, SC_SYNTH_PASS);
+        HU_CH_LOG("PASS: message sent successfully (%.1fms)", send_lat);
+        hu_synth_metrics_record(alloc, metrics, send_lat, HU_SYNTH_PASS);
     }
 
-    sc_synth_strfree(alloc, response, response_len);
-    return SC_OK;
+    hu_synth_strfree(alloc, response, response_len);
+    return HU_OK;
 }
 
 #else /* Not macOS */
 
-sc_error_t sc_channel_run_real_imessage(sc_allocator_t *alloc, const sc_channel_test_config_t *cfg,
-                                        sc_synth_gemini_ctx_t *gemini,
-                                        sc_synth_metrics_t *metrics) {
+hu_error_t hu_channel_run_real_imessage(hu_allocator_t *alloc, const hu_channel_test_config_t *cfg,
+                                        hu_synth_gemini_ctx_t *gemini,
+                                        hu_synth_metrics_t *metrics) {
     (void)alloc;
     (void)cfg;
     (void)gemini;
-    sc_synth_metrics_init(metrics);
-    SC_CH_LOG("real iMessage not supported on this platform");
-    return SC_ERR_NOT_SUPPORTED;
+    hu_synth_metrics_init(metrics);
+    HU_CH_LOG("real iMessage not supported on this platform");
+    return HU_ERR_NOT_SUPPORTED;
 }
 
 #endif

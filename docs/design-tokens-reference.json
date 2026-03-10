@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-10T03:28:03.349Z",
+  "generated": "2026-03-10T09:08:12.721Z",
   "groups": {
     "color.neutral": [
       {
@@ -1913,7 +1913,7 @@
       },
       {
         "name": "shadow-glow-accent",
-        "value": "0 0 0 1px var(--sc-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)"
+        "value": "0 0 0 1px var(--hu-accent-subtle), 0 4px 16px rgba(122,182,72,0.15)"
       },
       {
         "name": "shadow-glow-blue",

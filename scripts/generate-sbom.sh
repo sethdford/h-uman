@@ -1,5 +1,5 @@
 #!/bin/sh
-# Generate CycloneDX SBOM for seaclaw
+# Generate CycloneDX SBOM for human
 # Usage: ./scripts/generate-sbom.sh [--help] [<source_dir>] [<output_file>]
 
 set -eu
@@ -17,7 +17,7 @@ warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
 case "${1:-}" in
     --help|-h)
         printf "Usage: %s [<source_dir>] [<output_file>]\n" "$0"
-        printf "Generate CycloneDX SBOM for seaclaw. Defaults: source_dir=., output_file=sbom.json\n"
+        printf "Generate CycloneDX SBOM for human. Defaults: source_dir=., output_file=sbom.json\n"
         exit 0
         ;;
 esac
@@ -47,10 +47,10 @@ cat > "$OUT" << SBOM_EOF
   "version": 1,
   "metadata": {
     "timestamp": "$TIMESTAMP",
-    "tools": [{ "name": "seaclaw-sbom-generator", "version": "1.0.0" }],
+    "tools": [{ "name": "human-sbom-generator", "version": "1.0.0" }],
     "component": {
       "type": "application",
-      "name": "seaclaw",
+      "name": "human",
       "version": "$VERSION",
       "description": "Autonomous AI assistant runtime",
       "licenses": [{ "license": { "id": "MIT" } }]
@@ -68,21 +68,21 @@ cat > "$OUT" << SBOM_EOF
       "name": "sqlite3",
       "description": "SQLite database engine",
       "scope": "optional",
-      "properties": [{ "name": "build-flag", "value": "SC_ENABLE_SQLITE" }]
+      "properties": [{ "name": "build-flag", "value": "HU_ENABLE_SQLITE" }]
     },
     {
       "type": "library",
       "name": "libcurl",
       "description": "HTTP client library",
       "scope": "optional",
-      "properties": [{ "name": "build-flag", "value": "SC_ENABLE_CURL" }]
+      "properties": [{ "name": "build-flag", "value": "HU_ENABLE_CURL" }]
     },
     {
       "type": "library",
       "name": "openssl",
       "description": "Cryptographic library (FIPS mode)",
       "scope": "optional",
-      "properties": [{ "name": "build-flag", "value": "SC_ENABLE_FIPS_CRYPTO" }]
+      "properties": [{ "name": "build-flag", "value": "HU_ENABLE_FIPS_CRYPTO" }]
     }
   ]
 }

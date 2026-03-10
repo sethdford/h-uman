@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# deploy-bth.sh — Configure seaclaw for optimal "Better Than Human" iMessage conversations
+# deploy-bth.sh — Configure human for optimal "Better Than Human" iMessage conversations
 #
 # Usage: ./scripts/deploy-bth.sh [persona_name]
 #
 # This script creates/updates:
-# - ~/.seaclaw/personas/<persona_name>.json with BTH-optimized settings
+# - ~/.human/personas/<persona_name>.json with BTH-optimized settings
 # - Enables all conversational intelligence features
 
 set -euo pipefail
 
 PERSONA_NAME="${1:-default}"
-PERSONAS_DIR="$HOME/.seaclaw/personas"
+PERSONAS_DIR="$HOME/.human/personas"
 
 # Validate persona_name: only allow alphanumeric, hyphens, underscores
 if ! [[ "$PERSONA_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
@@ -108,7 +108,7 @@ echo "  - Typo simulation (occasional_typos quirk)"
 echo "  - Self-correction messages"
 echo "  - Thinking responses (for complex questions)"
 echo "  - Thread callbacks (returning to earlier topics)"
-echo "  - Tapback reactions (if SC_IMESSAGE_TAPBACK_ENABLED)"
+echo "  - Tapback reactions (if HU_IMESSAGE_TAPBACK_ENABLED)"
 echo "  - URL/link sharing context"
 echo "  - Attachment awareness + vision (if provider supports it)"
 echo "  - A/B response generation (quality < 70 threshold)"
@@ -122,4 +122,4 @@ echo "    -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=
 echo "  cmake --build build-release -j\$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 echo ""
 echo "Run:"
-echo "  ./build-release/seaclaw --persona $PERSONA_NAME --channel imessage"
+echo "  ./build-release/human --persona $PERSONA_NAME --channel imessage"

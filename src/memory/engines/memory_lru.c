@@ -2,24 +2,24 @@
  * Pure in-memory store with LRU eviction — no disk I/O.
  * Uses doubly-linked list + hash table for O(1) lookup and eviction. */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#define SC_LRU_BUCKETS   64
-#define SC_LRU_HASH_MULT 31
+#define HU_LRU_BUCKETS   64
+#define HU_LRU_HASH_MULT 31
 
 typedef struct lru_entry {
     char *key;
     char *content;
-    sc_memory_category_t category;
+    hu_memory_category_t category;
     char *session_id;
     char *created_at;
     char *updated_at;
@@ -29,15 +29,15 @@ typedef struct lru_entry {
     struct lru_entry *lru_next;
 } lru_entry_t;
 
-typedef struct sc_lru_memory {
-    sc_allocator_t *alloc;
-    lru_entry_t *buckets[SC_LRU_BUCKETS];
+typedef struct hu_lru_memory {
+    hu_allocator_t *alloc;
+    lru_entry_t *buckets[HU_LRU_BUCKETS];
     lru_entry_t *lru_head; /* most recently used */
     lru_entry_t *lru_tail; /* least recently used */
     size_t count;
     size_t max_entries;
     uint64_t access_counter;
-} sc_lru_memory_t;
+} hu_lru_memory_t;
 
 static int contains_substring(const char *haystack, size_t hlen, const char *needle, size_t nlen) {
     if (nlen == 0)
@@ -54,11 +54,11 @@ static int contains_substring(const char *haystack, size_t hlen, const char *nee
 static uint32_t hash_key(const char *key, size_t len) {
     uint32_t h = 5381;
     for (size_t i = 0; i < len && key[i]; i++)
-        h = (h * SC_LRU_HASH_MULT) + (unsigned char)key[i];
-    return h % SC_LRU_BUCKETS;
+        h = (h * HU_LRU_HASH_MULT) + (unsigned char)key[i];
+    return h % HU_LRU_BUCKETS;
 }
 
-static lru_entry_t *find_entry(sc_lru_memory_t *self, const char *key, size_t key_len) {
+static lru_entry_t *find_entry(hu_lru_memory_t *self, const char *key, size_t key_len) {
     uint32_t b = hash_key(key, key_len);
     for (lru_entry_t *e = self->buckets[b]; e; e = e->hash_next) {
         if (e->key && strlen(e->key) == key_len && memcmp(e->key, key, key_len) == 0)
@@ -67,7 +67,7 @@ static lru_entry_t *find_entry(sc_lru_memory_t *self, const char *key, size_t ke
     return NULL;
 }
 
-static void free_stored_entry(sc_lru_memory_t *self, lru_entry_t *e) {
+static void free_stored_entry(hu_lru_memory_t *self, lru_entry_t *e) {
     if (!e || !self->alloc)
         return;
     if (e->key)
@@ -80,12 +80,12 @@ static void free_stored_entry(sc_lru_memory_t *self, lru_entry_t *e) {
         self->alloc->free(self->alloc->ctx, e->updated_at, strlen(e->updated_at) + 1);
     if (e->session_id)
         self->alloc->free(self->alloc->ctx, e->session_id, strlen(e->session_id) + 1);
-    if (e->category.tag == SC_MEMORY_CATEGORY_CUSTOM && e->category.data.custom.name)
+    if (e->category.tag == HU_MEMORY_CATEGORY_CUSTOM && e->category.data.custom.name)
         self->alloc->free(self->alloc->ctx, (void *)e->category.data.custom.name,
                           e->category.data.custom.name_len + 1);
 }
 
-static void unlink_lru(sc_lru_memory_t *self, lru_entry_t *e) {
+static void unlink_lru(hu_lru_memory_t *self, lru_entry_t *e) {
     if (e->lru_prev)
         e->lru_prev->lru_next = e->lru_next;
     else
@@ -97,7 +97,7 @@ static void unlink_lru(sc_lru_memory_t *self, lru_entry_t *e) {
     e->lru_prev = e->lru_next = NULL;
 }
 
-static void link_mru(sc_lru_memory_t *self, lru_entry_t *e) {
+static void link_mru(hu_lru_memory_t *self, lru_entry_t *e) {
     e->lru_next = self->lru_head;
     e->lru_prev = NULL;
     if (self->lru_head)
@@ -107,7 +107,7 @@ static void link_mru(sc_lru_memory_t *self, lru_entry_t *e) {
     self->lru_head = e;
 }
 
-static void evict_lru(sc_lru_memory_t *self) {
+static void evict_lru(hu_lru_memory_t *self) {
     lru_entry_t *victim = self->lru_tail;
     if (!victim)
         return;
@@ -127,35 +127,35 @@ static void evict_lru(sc_lru_memory_t *self) {
     self->count--;
 }
 
-static uint64_t next_access(sc_lru_memory_t *self) {
+static uint64_t next_access(hu_lru_memory_t *self) {
     return ++self->access_counter;
 }
 
-static char *now_timestamp(sc_lru_memory_t *self) {
+static char *now_timestamp(hu_lru_memory_t *self) {
     time_t t = time(NULL);
-    return sc_sprintf(self->alloc, "%ld", (long)t);
+    return hu_sprintf(self->alloc, "%ld", (long)t);
 }
 
-static sc_error_t dup_category(sc_allocator_t *alloc, const sc_memory_category_t *cat,
-                               sc_memory_category_t *out) {
+static hu_error_t dup_category(hu_allocator_t *alloc, const hu_memory_category_t *cat,
+                               hu_memory_category_t *out) {
     out->tag = cat->tag;
-    if (cat->tag == SC_MEMORY_CATEGORY_CUSTOM && cat->data.custom.name) {
+    if (cat->tag == HU_MEMORY_CATEGORY_CUSTOM && cat->data.custom.name) {
         size_t n = cat->data.custom.name_len;
         char *name = (char *)alloc->alloc(alloc->ctx, n + 1);
         if (!name)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         memcpy(name, cat->data.custom.name, n);
         name[n] = '\0';
         out->data.custom.name = name;
         out->data.custom.name_len = n;
     }
-    return SC_OK;
+    return HU_OK;
 }
 
-static void category_to_out(const sc_memory_category_t *src, sc_memory_entry_t *out,
-                            sc_allocator_t *alloc) {
+static void category_to_out(const hu_memory_category_t *src, hu_memory_entry_t *out,
+                            hu_allocator_t *alloc) {
     out->category.tag = src->tag;
-    if (src->tag == SC_MEMORY_CATEGORY_CUSTOM && src->data.custom.name) {
+    if (src->tag == HU_MEMORY_CATEGORY_CUSTOM && src->data.custom.name) {
         size_t n = src->data.custom.name_len;
         char *name = (char *)alloc->alloc(alloc->ctx, n + 1);
         if (name) {
@@ -172,25 +172,25 @@ static const char *impl_name(void *ctx) {
     return "memory_lru";
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
-    sc_allocator_t *alloc = self->alloc;
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
+    hu_allocator_t *alloc = self->alloc;
 
     lru_entry_t *existing = find_entry(self, key, key_len);
     if (existing) {
         alloc->free(alloc->ctx, (void *)existing->content, strlen(existing->content) + 1);
-        existing->content = sc_strndup(alloc, content, content_len);
+        existing->content = hu_strndup(alloc, content, content_len);
         if (!existing->content)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
 
         alloc->free(alloc->ctx, (void *)existing->updated_at, strlen(existing->updated_at) + 1);
         existing->updated_at = now_timestamp(self);
         if (!existing->updated_at)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
 
-        if (existing->category.tag == SC_MEMORY_CATEGORY_CUSTOM &&
+        if (existing->category.tag == HU_MEMORY_CATEGORY_CUSTOM &&
             existing->category.data.custom.name)
             alloc->free(alloc->ctx, (void *)existing->category.data.custom.name,
                         existing->category.data.custom.name_len + 1);
@@ -199,35 +199,35 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
         if (existing->session_id)
             alloc->free(alloc->ctx, (void *)existing->session_id, strlen(existing->session_id) + 1);
         existing->session_id =
-            session_id && session_id_len > 0 ? sc_strndup(alloc, session_id, session_id_len) : NULL;
+            session_id && session_id_len > 0 ? hu_strndup(alloc, session_id, session_id_len) : NULL;
 
         existing->last_access = next_access(self);
         unlink_lru(self, existing);
         link_mru(self, existing);
-        return SC_OK;
+        return HU_OK;
     }
 
     if (self->max_entries == 0)
-        return SC_OK;
+        return HU_OK;
     while (self->count >= self->max_entries)
         evict_lru(self);
 
     lru_entry_t *e = (lru_entry_t *)alloc->alloc(alloc->ctx, sizeof(lru_entry_t));
     if (!e)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(e, 0, sizeof(lru_entry_t));
 
-    e->key = sc_strndup(alloc, key, key_len);
-    e->content = sc_strndup(alloc, content, content_len);
+    e->key = hu_strndup(alloc, key, key_len);
+    e->content = hu_strndup(alloc, content, content_len);
     e->created_at = now_timestamp(self);
-    e->updated_at = sc_strndup(alloc, e->created_at, strlen(e->created_at));
+    e->updated_at = hu_strndup(alloc, e->created_at, strlen(e->created_at));
     e->session_id =
-        session_id && session_id_len > 0 ? sc_strndup(alloc, session_id, session_id_len) : NULL;
+        session_id && session_id_len > 0 ? hu_strndup(alloc, session_id, session_id_len) : NULL;
 
     if (!e->key || !e->content || !e->created_at || !e->updated_at) {
         free_stored_entry(self, e);
         alloc->free(alloc->ctx, e, sizeof(lru_entry_t));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     dup_category(alloc, category, &e->category);
     e->last_access = next_access(self);
@@ -237,13 +237,13 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     self->buckets[b] = e;
     link_mru(self, e);
     self->count++;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
 
@@ -257,9 +257,9 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
 
     matches = (pair_t *)alloc->alloc(alloc->ctx, cap * sizeof(pair_t));
     if (!matches)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
-    for (uint32_t b = 0; b < SC_LRU_BUCKETS; b++) {
+    for (uint32_t b = 0; b < HU_LRU_BUCKETS; b++) {
         for (lru_entry_t *e = self->buckets[b]; e; e = e->hash_next) {
             if (session_id && session_id_len > 0) {
                 if (!e->session_id || strlen(e->session_id) != session_id_len ||
@@ -300,26 +300,26 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     }
 
     size_t take = limit < nmatches ? limit : nmatches;
-    sc_memory_entry_t *results =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, take * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *results =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, take * sizeof(hu_memory_entry_t));
     if (!results)
         goto fail;
 
     for (size_t i = 0; i < take; i++) {
         lru_entry_t *src = matches[i].e;
-        sc_memory_entry_t *r = &results[i];
+        hu_memory_entry_t *r = &results[i];
         memset(r, 0, sizeof(*r));
-        r->id = sc_strndup(alloc, src->key, strlen(src->key));
+        r->id = hu_strndup(alloc, src->key, strlen(src->key));
         r->id_len = strlen(src->key);
-        r->key = sc_strndup(alloc, src->key, strlen(src->key));
+        r->key = hu_strndup(alloc, src->key, strlen(src->key));
         r->key_len = strlen(src->key);
-        r->content = sc_strndup(alloc, src->content, strlen(src->content));
+        r->content = hu_strndup(alloc, src->content, strlen(src->content));
         r->content_len = strlen(src->content);
         category_to_out(&src->category, r, alloc);
-        r->timestamp = sc_strndup(alloc, src->updated_at, strlen(src->updated_at));
+        r->timestamp = hu_strndup(alloc, src->updated_at, strlen(src->updated_at));
         r->timestamp_len = strlen(src->updated_at);
         r->session_id =
-            src->session_id ? sc_strndup(alloc, src->session_id, strlen(src->session_id)) : NULL;
+            src->session_id ? hu_strndup(alloc, src->session_id, strlen(src->session_id)) : NULL;
         r->session_id_len = r->session_id ? strlen(r->session_id) : 0;
         r->score = NAN;
     }
@@ -327,50 +327,50 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     alloc->free(alloc->ctx, matches, cap * sizeof(pair_t));
     *out = results;
     *out_count = take;
-    return SC_OK;
+    return HU_OK;
 fail:
     if (matches)
         alloc->free(alloc->ctx, matches, cap * sizeof(pair_t));
-    return SC_ERR_OUT_OF_MEMORY;
+    return HU_ERR_OUT_OF_MEMORY;
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
     *found = false;
 
     lru_entry_t *e = find_entry(self, key, key_len);
     if (!e)
-        return SC_OK;
+        return HU_OK;
 
     e->last_access = next_access(self);
     unlink_lru(self, e);
     link_mru(self, e);
 
     memset(out, 0, sizeof(*out));
-    out->id = sc_strndup(alloc, e->key, strlen(e->key));
+    out->id = hu_strndup(alloc, e->key, strlen(e->key));
     out->id_len = strlen(e->key);
-    out->key = sc_strndup(alloc, e->key, strlen(e->key));
+    out->key = hu_strndup(alloc, e->key, strlen(e->key));
     out->key_len = strlen(e->key);
-    out->content = sc_strndup(alloc, e->content, strlen(e->content));
+    out->content = hu_strndup(alloc, e->content, strlen(e->content));
     out->content_len = strlen(e->content);
     category_to_out(&e->category, out, alloc);
-    out->timestamp = sc_strndup(alloc, e->updated_at, strlen(e->updated_at));
+    out->timestamp = hu_strndup(alloc, e->updated_at, strlen(e->updated_at));
     out->timestamp_len = strlen(e->updated_at);
     out->session_id =
-        e->session_id ? sc_strndup(alloc, e->session_id, strlen(e->session_id)) : NULL;
+        e->session_id ? hu_strndup(alloc, e->session_id, strlen(e->session_id)) : NULL;
     out->session_id_len = out->session_id ? strlen(out->session_id) : 0;
     out->score = NAN;
     *found = true;
-    return SC_OK;
+    return HU_OK;
 }
 
-static int category_matches(const sc_memory_category_t *filter, const sc_memory_category_t *entry) {
+static int category_matches(const hu_memory_category_t *filter, const hu_memory_category_t *entry) {
     if (!filter)
         return 1;
     if (filter->tag != entry->tag)
         return 0;
-    if (filter->tag == SC_MEMORY_CATEGORY_CUSTOM) {
+    if (filter->tag == HU_MEMORY_CATEGORY_CUSTOM) {
         if (!filter->data.custom.name || !entry->data.custom.name)
             return 0;
         if (filter->data.custom.name_len != entry->data.custom.name_len)
@@ -381,20 +381,20 @@ static int category_matches(const sc_memory_category_t *filter, const sc_memory_
     return 1;
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
 
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
     size_t n = 0;
     size_t cap = 16;
 
-    results = (sc_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_memory_entry_t));
+    results = (hu_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_memory_entry_t));
     if (!results)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     for (lru_entry_t *e = self->lru_head; e; e = e->lru_next) {
         if (!category_matches(category, &e->category))
@@ -406,31 +406,31 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
         }
         if (n >= cap) {
             size_t new_cap = cap * 2;
-            sc_memory_entry_t *r = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *r = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!r) {
                 for (size_t i = 0; i < n; i++)
-                    sc_memory_entry_free_fields(alloc, &results[i]);
-                alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    hu_memory_entry_free_fields(alloc, &results[i]);
+                alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = r;
             cap = new_cap;
         }
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = hu_strndup(alloc, e->key, strlen(e->key));
         r->id_len = strlen(e->key);
-        r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
         category_to_out(&e->category, r, alloc);
-        r->timestamp = sc_strndup(alloc, e->updated_at, strlen(e->updated_at));
+        r->timestamp = hu_strndup(alloc, e->updated_at, strlen(e->updated_at));
         r->timestamp_len = strlen(e->updated_at);
         r->session_id =
-            e->session_id ? sc_strndup(alloc, e->session_id, strlen(e->session_id)) : NULL;
+            e->session_id ? hu_strndup(alloc, e->session_id, strlen(e->session_id)) : NULL;
         r->session_id_len = r->session_id ? strlen(r->session_id) : 0;
         r->score = NAN;
         n++;
@@ -438,16 +438,16 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
 
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
     *deleted = false;
 
     lru_entry_t *e = find_entry(self, key, key_len);
     if (!e)
-        return SC_OK;
+        return HU_OK;
 
     uint32_t b = hash_key(key, key_len);
     lru_entry_t **pp = &self->buckets[b];
@@ -462,13 +462,13 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
     self->alloc->free(self->alloc->ctx, e, sizeof(lru_entry_t));
     self->count--;
     *deleted = true;
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
     *out = self->count;
-    return SC_OK;
+    return HU_OK;
 }
 
 static bool impl_health_check(void *ctx) {
@@ -477,8 +477,8 @@ static bool impl_health_check(void *ctx) {
 }
 
 static void impl_deinit(void *ctx) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)ctx;
-    for (uint32_t b = 0; b < SC_LRU_BUCKETS; b++) {
+    hu_lru_memory_t *self = (hu_lru_memory_t *)ctx;
+    for (uint32_t b = 0; b < HU_LRU_BUCKETS; b++) {
         while (self->buckets[b]) {
             lru_entry_t *e = self->buckets[b];
             self->buckets[b] = e->hash_next;
@@ -486,10 +486,10 @@ static void impl_deinit(void *ctx) {
             self->alloc->free(self->alloc->ctx, e, sizeof(lru_entry_t));
         }
     }
-    self->alloc->free(self->alloc->ctx, self, sizeof(sc_lru_memory_t));
+    self->alloc->free(self->alloc->ctx, self, sizeof(hu_lru_memory_t));
 }
 
-static const sc_memory_vtable_t lru_vtable = {
+static const hu_memory_vtable_t lru_vtable = {
     .name = impl_name,
     .store = impl_store,
     .recall = impl_recall,
@@ -501,14 +501,14 @@ static const sc_memory_vtable_t lru_vtable = {
     .deinit = impl_deinit,
 };
 
-sc_memory_t sc_memory_lru_create(sc_allocator_t *alloc, size_t max_entries) {
-    sc_lru_memory_t *self = (sc_lru_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_lru_memory_t));
+hu_memory_t hu_memory_lru_create(hu_allocator_t *alloc, size_t max_entries) {
+    hu_lru_memory_t *self = (hu_lru_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_lru_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_lru_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_lru_memory_t));
     self->alloc = alloc;
     self->max_entries = max_entries;
-    return (sc_memory_t){
+    return (hu_memory_t){
         .ctx = self,
         .vtable = &lru_vtable,
     };

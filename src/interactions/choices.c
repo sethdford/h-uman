@@ -1,16 +1,16 @@
-#include "seaclaw/interactions.h"
+#include "human/interactions.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_CHOICE_BUF_SIZE 64
+#define HU_CHOICE_BUF_SIZE 64
 
-#ifdef SC_IS_TEST
-sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, size_t count,
-                             sc_choice_result_t *out) {
+#ifdef HU_IS_TEST
+hu_error_t hu_choices_prompt(const char *question, const hu_choice_t *choices, size_t count,
+                             hu_choice_result_t *out) {
     (void)question;
     if (!choices || !out || count == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t default_idx = 0;
     for (size_t i = 0; i < count; i++) {
         if (choices[i].is_default) {
@@ -20,18 +20,18 @@ sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, s
     }
     out->selected_index = default_idx;
     out->selected_value = choices[default_idx].value;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_choices_confirm(const char *question, bool default_yes) {
+bool hu_choices_confirm(const char *question, bool default_yes) {
     (void)question;
     return default_yes;
 }
 #else
-sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, size_t count,
-                             sc_choice_result_t *out) {
+hu_error_t hu_choices_prompt(const char *question, const hu_choice_t *choices, size_t count,
+                             hu_choice_result_t *out) {
     if (!question || !choices || !out || count == 0)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t default_idx = 0;
     for (size_t i = 0; i < count; i++) {
@@ -51,11 +51,11 @@ sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, s
     printf("Choice [%zu]: ", default_idx + 1);
     fflush(stdout);
 
-    char buf[SC_CHOICE_BUF_SIZE];
+    char buf[HU_CHOICE_BUF_SIZE];
     if (!fgets(buf, (int)sizeof(buf), stdin)) {
         out->selected_index = default_idx;
         out->selected_value = choices[default_idx].value;
-        return SC_OK;
+        return HU_OK;
     }
 
     /* Trim trailing newline */
@@ -67,7 +67,7 @@ sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, s
     if (len == 0) {
         out->selected_index = default_idx;
         out->selected_value = choices[default_idx].value;
-        return SC_OK;
+        return HU_OK;
     }
 
     char *end;
@@ -75,19 +75,19 @@ sc_error_t sc_choices_prompt(const char *question, const sc_choice_t *choices, s
     if (end == buf || n < 1 || n > count) {
         out->selected_index = default_idx;
         out->selected_value = choices[default_idx].value;
-        return SC_OK;
+        return HU_OK;
     }
     size_t idx = (size_t)(n - 1);
     out->selected_index = idx;
     out->selected_value = choices[idx].value;
-    return SC_OK;
+    return HU_OK;
 }
 
-bool sc_choices_confirm(const char *question, bool default_yes) {
+bool hu_choices_confirm(const char *question, bool default_yes) {
     printf("%s [%s]: ", question, default_yes ? "Y/n" : "y/N");
     fflush(stdout);
 
-    char buf[SC_CHOICE_BUF_SIZE];
+    char buf[HU_CHOICE_BUF_SIZE];
     if (!fgets(buf, (int)sizeof(buf), stdin))
         return default_yes;
 

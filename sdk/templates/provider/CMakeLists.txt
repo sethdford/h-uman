@@ -1,5 +1,5 @@
-# Build my_provider as a static library for linking into seaclaw.
-# Adjust include path to match your seaclaw installation.
+# Build my_provider as a static library for linking into human.
+# Adjust include path to match your human installation.
 cmake_minimum_required(VERSION 3.20)
 project(my_provider C)
 

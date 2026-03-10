@@ -1,18 +1,18 @@
 import { test, expect } from "@playwright/test";
 
-const LIVE = process.env.SEACLAW_LIVE_E2E === "1";
+const LIVE = process.env.HUMAN_LIVE_E2E === "1";
 
 test.describe("Live Gateway E2E", () => {
-  test.skip(!LIVE, "Set SEACLAW_LIVE_E2E=1 to run live gateway tests");
+  test.skip(!LIVE, "Set HUMAN_LIVE_E2E=1 to run live gateway tests");
 
   test.beforeEach(async ({ page }) => {
     await page.goto("/#chat");
-    const chatView = page.locator("sc-app").locator("sc-chat-view");
+    const chatView = page.locator("hu-app").locator("hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 10000 });
   });
 
   test("gateway connection established", async ({ page }) => {
-    const chatView = page.locator("sc-app").locator("sc-chat-view");
+    const chatView = page.locator("hu-app").locator("hu-chat-view");
     const statusDot = chatView.locator(".status-dot.connected");
     await expect(statusDot).toBeAttached({ timeout: 15000 });
 
@@ -24,7 +24,7 @@ test.describe("Live Gateway E2E", () => {
   });
 
   test("send message and receive AI response", async ({ page }) => {
-    const chatView = page.locator("sc-app").locator("sc-chat-view");
+    const chatView = page.locator("hu-app").locator("hu-chat-view");
     await expect(chatView.locator(".status-dot.connected")).toBeAttached({
       timeout: 15000,
     });
@@ -35,12 +35,12 @@ test.describe("Live Gateway E2E", () => {
     await sendBtn.click();
 
     const assistantMsg = chatView
-      .locator("sc-message-thread sc-message-group[role='assistant'] sc-chat-bubble")
+      .locator("hu-message-thread hu-message-group[role='assistant'] hu-chat-bubble")
       .first();
     await expect(assistantMsg).toBeVisible({ timeout: 30000 });
 
     const content = await assistantMsg.evaluate((el) => {
-      const stream = el.querySelector("sc-message-stream");
+      const stream = el.querySelector("hu-message-stream");
       const streamText = stream?.shadowRoot?.querySelector(".content")?.textContent ?? "";
       const bubbleText =
         (el as HTMLElement).shadowRoot?.querySelector(".content")?.textContent ?? "";
@@ -50,7 +50,7 @@ test.describe("Live Gateway E2E", () => {
   });
 
   test("streaming indicator appears during response", async ({ page }) => {
-    const chatView = page.locator("sc-app").locator("sc-chat-view");
+    const chatView = page.locator("hu-app").locator("hu-chat-view");
     await expect(chatView.locator(".status-dot.connected")).toBeAttached({
       timeout: 15000,
     });
@@ -61,18 +61,18 @@ test.describe("Live Gateway E2E", () => {
     await sendBtn.click();
 
     const thinkingOrStream = chatView.locator(
-      "sc-thinking, sc-message-thread sc-message-group[role='assistant'] sc-chat-bubble",
+      "hu-thinking, hu-message-thread hu-message-group[role='assistant'] hu-chat-bubble",
     );
     await expect(thinkingOrStream.first()).toBeVisible({ timeout: 15000 });
 
     const assistantMsg = chatView
-      .locator("sc-message-thread sc-message-group[role='assistant'] sc-chat-bubble")
+      .locator("hu-message-thread hu-message-group[role='assistant'] hu-chat-bubble")
       .first();
     await expect(assistantMsg).toBeVisible({ timeout: 30000 });
   });
 
   test("multi-turn conversation maintains context", async ({ page }) => {
-    const chatView = page.locator("sc-app").locator("sc-chat-view");
+    const chatView = page.locator("hu-app").locator("hu-chat-view");
     await expect(chatView.locator(".status-dot.connected")).toBeAttached({
       timeout: 15000,
     });
@@ -83,7 +83,7 @@ test.describe("Live Gateway E2E", () => {
     await textarea.fill("Remember this number: 42. Reply with just OK.");
     await sendBtn.click();
     const firstReply = chatView
-      .locator("sc-message-thread sc-message-group[role='assistant'] sc-chat-bubble")
+      .locator("hu-message-thread hu-message-group[role='assistant'] hu-chat-bubble")
       .first();
     await expect(firstReply).toBeVisible({ timeout: 30000 });
 
@@ -91,7 +91,7 @@ test.describe("Live Gateway E2E", () => {
     await sendBtn.click();
 
     const replies = chatView.locator(
-      "sc-message-thread sc-message-group[role='assistant'] sc-chat-bubble",
+      "hu-message-thread hu-message-group[role='assistant'] hu-chat-bubble",
     );
     await expect(async () => {
       const count = await replies.count();
@@ -102,7 +102,7 @@ test.describe("Live Gateway E2E", () => {
     await expect(lastReply).toBeVisible({ timeout: 30000 });
 
     const content = await lastReply.evaluate((el) => {
-      const stream = el.querySelector("sc-message-stream");
+      const stream = el.querySelector("hu-message-stream");
       const streamText = stream?.shadowRoot?.querySelector(".content")?.textContent ?? "";
       const bubbleText =
         (el as HTMLElement).shadowRoot?.querySelector(".content")?.textContent ?? "";
@@ -112,7 +112,7 @@ test.describe("Live Gateway E2E", () => {
   });
 
   test("connected chat screenshot", async ({ page }) => {
-    const chatView = page.locator("sc-app").locator("sc-chat-view");
+    const chatView = page.locator("hu-app").locator("hu-chat-view");
     await expect(chatView.locator(".status-dot.connected")).toBeAttached({
       timeout: 15000,
     });
@@ -123,7 +123,7 @@ test.describe("Live Gateway E2E", () => {
     await sendBtn.click();
 
     const assistantMsg = chatView
-      .locator("sc-message-thread sc-message-group[role='assistant'] sc-chat-bubble")
+      .locator("hu-message-thread hu-message-group[role='assistant'] hu-chat-bubble")
       .first();
     await expect(assistantMsg).toBeVisible({ timeout: 30000 });
 

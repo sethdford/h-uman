@@ -1,23 +1,23 @@
 # ui/ — Web Dashboard
 
-LitElement web components for the seaclaw dashboard.
+LitElement web components for the human dashboard.
 
 ## Rules
 
-- Component tag: `sc-<name>`, registered with `@customElement("sc-<name>")`
+- Component tag: `hu-<name>`, registered with `@customElement("hu-<name>")`
 - Base class: LitElement with `static styles = css\`...\``
-- All styles use `--sc-*` tokens — no raw hex, px spacing, or font-family
+- All styles use `--hu-*` tokens — no raw hex, px spacing, or font-family
 - Icons: import from `src/icons.ts` (Phosphor Regular). Never use emoji as UI icons.
 - ARIA: every interactive component needs `role`, `aria-label` or `aria-labelledby`
-- Focus: visible focus ring with `outline: 2px solid var(--sc-accent)` on `:focus-visible`
+- Focus: visible focus ring with `outline: 2px solid var(--hu-accent)` on `:focus-visible`
 - Keyboard: Tab, Escape (overlays), Enter/Space (buttons), Arrow keys (lists/tabs)
 - Events fire upward via `CustomEvent`; data flows down via `@property`
 - Use slots for composition, not string props for content
-- Animation: use `--sc-duration-*` and `--sc-ease-*` tokens. Respect `prefers-reduced-motion`.
+- Animation: use `--hu-duration-*` and `--hu-ease-*` tokens. Respect `prefers-reduced-motion`.
 
 ## New Component Checklist
 
-1. Create `src/components/sc-<name>.ts`
+1. Create `src/components/hu-<name>.ts`
 2. Add test in `components.test.ts` or `extra-components.test.ts`
 3. Add entry in `catalog.html`
 4. Add TypeScript types to `HTMLElementTagNameMap`
@@ -27,7 +27,7 @@ LitElement web components for the seaclaw dashboard.
 
 LitElement renders inside Shadow DOM. Playwright selectors must account for this.
 
-- Use `page.locator("sc-component-name")` then `.locator(":scope .inner-class")`
+- Use `page.locator("hu-component-name")` then `.locator(":scope .inner-class")`
 - Never use bare `.class-name` selectors — always scope to the host component first
 - Prefer `data-testid` attributes for stable E2E anchors
 
@@ -43,7 +43,7 @@ LitElement renders inside Shadow DOM. Playwright selectors must account for this
 ## Error & State Handling
 
 - Every view must handle 3 states: loading (skeleton), populated, error
-- Use `<sc-toast>` for transient notifications; inline error banners for persistent failures
+- Use `<hu-toast>` for transient notifications; inline error banners for persistent failures
 - Never show raw error messages — map to human-friendly text
 - Never render a blank screen
 
@@ -68,4 +68,4 @@ npm run lint:tokens  # detect raw hex, rgba, hardcoded durations, raw breakpoint
 - `npm run lint:tokens` — flags design token drift in all `.ts` files
 - `bash scripts/lint-raw-colors.sh --all` (from repo root) — flags raw hex colors
 - Run both before any UI commit
-- Approved alpha pattern: `color-mix(in srgb, var(--sc-token) XX%, transparent)` — not `rgba()`
+- Approved alpha pattern: `color-mix(in srgb, var(--hu-token) XX%, transparent)` — not `rgba()`

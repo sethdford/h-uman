@@ -35,7 +35,7 @@ test.describe("Visual Regression — Dark Theme", () => {
       const snapName = `${view.name}-dark-${testInfo.project.name}-${process.platform}.png`;
       const url = view.hash ? `/?demo${view.hash}` : "/?demo";
       await page.goto(url);
-      const viewTag = view.hash ? `sc-${view.name}-view` : "sc-overview-view";
+      const viewTag = view.hash ? `hu-${view.name}-view` : "hu-overview-view";
       await waitForViewReady(page, viewTag);
       const updating = testInfo.config.updateSnapshots !== "none";
       if (!updating && !snapshotExists(testInfo, snapName)) {
@@ -54,7 +54,7 @@ test.describe("Visual Regression — Light Theme", () => {
       const snapName = `${view.name}-light-${testInfo.project.name}-${process.platform}.png`;
       const url = view.hash ? `/?demo${view.hash}` : "/?demo";
       await page.goto(url);
-      const viewTag = view.hash ? `sc-${view.name}-view` : "sc-overview-view";
+      const viewTag = view.hash ? `hu-${view.name}-view` : "hu-overview-view";
       await waitForViewReady(page, viewTag);
       await page.evaluate(() => {
         document.documentElement.setAttribute("data-theme", "light");

@@ -1,16 +1,16 @@
-#include "seaclaw/agent.h"
-#include "seaclaw/agent/prompt.h"
-#include "seaclaw/agent/spawn.h"
-#include "seaclaw/agent/tool_context.h"
-#include "seaclaw/config.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/arena.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/persona.h"
-#include "seaclaw/persona/auto_profile.h"
-#include "seaclaw/providers/factory.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/persona.h"
+#include "human/agent.h"
+#include "human/agent/prompt.h"
+#include "human/agent/spawn.h"
+#include "human/agent/tool_context.h"
+#include "human/config.h"
+#include "human/core/allocator.h"
+#include "human/core/arena.h"
+#include "human/core/string.h"
+#include "human/persona.h"
+#include "human/persona/auto_profile.h"
+#include "human/providers/factory.h"
+#include "human/tool.h"
+#include "human/tools/persona.h"
 #include "test_framework.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,77 +20,77 @@
 #endif
 
 static void test_persona_types_exist(void) {
-    sc_persona_t p;
-    sc_persona_overlay_t ov;
-    sc_persona_example_t ex;
-    sc_persona_example_bank_t bank;
+    hu_persona_t p;
+    hu_persona_overlay_t ov;
+    hu_persona_example_t ex;
+    hu_persona_example_bank_t bank;
 
     memset(&p, 0, sizeof(p));
     memset(&ov, 0, sizeof(ov));
     memset(&ex, 0, sizeof(ex));
     memset(&bank, 0, sizeof(bank));
 
-    SC_ASSERT_NULL(p.name);
-    SC_ASSERT_NULL(p.identity);
-    SC_ASSERT_NULL(p.overlays);
-    SC_ASSERT_EQ(p.overlays_count, 0);
-    SC_ASSERT_NULL(ov.channel);
-    SC_ASSERT_NULL(ex.context);
-    SC_ASSERT_NULL(bank.examples);
+    HU_ASSERT_NULL(p.name);
+    HU_ASSERT_NULL(p.identity);
+    HU_ASSERT_NULL(p.overlays);
+    HU_ASSERT_EQ(p.overlays_count, 0);
+    HU_ASSERT_NULL(ov.channel);
+    HU_ASSERT_NULL(ex.context);
+    HU_ASSERT_NULL(bank.examples);
 }
 
 static void test_persona_find_overlay_found(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t persona;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
     memset(&persona, 0, sizeof(persona));
 
-    persona.overlays = (sc_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(sc_persona_overlay_t));
-    SC_ASSERT_NOT_NULL(persona.overlays);
-    memset(persona.overlays, 0, sizeof(sc_persona_overlay_t));
+    persona.overlays = (hu_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(hu_persona_overlay_t));
+    HU_ASSERT_NOT_NULL(persona.overlays);
+    memset(persona.overlays, 0, sizeof(hu_persona_overlay_t));
     persona.overlays_count = 1;
 
-    persona.overlays[0].channel = sc_strndup(&alloc, "telegram", 8);
+    persona.overlays[0].channel = hu_strndup(&alloc, "telegram", 8);
 
-    const sc_persona_overlay_t *found = sc_persona_find_overlay(&persona, "telegram", 8);
-    SC_ASSERT_NOT_NULL(found);
-    SC_ASSERT_STR_EQ(found->channel, "telegram");
+    const hu_persona_overlay_t *found = hu_persona_find_overlay(&persona, "telegram", 8);
+    HU_ASSERT_NOT_NULL(found);
+    HU_ASSERT_STR_EQ(found->channel, "telegram");
 
-    sc_persona_deinit(&alloc, &persona);
+    hu_persona_deinit(&alloc, &persona);
 }
 
 static void test_persona_find_overlay_not_found(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t persona;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
     memset(&persona, 0, sizeof(persona));
 
-    persona.overlays = (sc_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(sc_persona_overlay_t));
-    SC_ASSERT_NOT_NULL(persona.overlays);
-    memset(persona.overlays, 0, sizeof(sc_persona_overlay_t));
+    persona.overlays = (hu_persona_overlay_t *)alloc.alloc(alloc.ctx, sizeof(hu_persona_overlay_t));
+    HU_ASSERT_NOT_NULL(persona.overlays);
+    memset(persona.overlays, 0, sizeof(hu_persona_overlay_t));
     persona.overlays_count = 1;
-    persona.overlays[0].channel = sc_strndup(&alloc, "telegram", 8);
+    persona.overlays[0].channel = hu_strndup(&alloc, "telegram", 8);
 
-    const sc_persona_overlay_t *found = sc_persona_find_overlay(&persona, "discord", 7);
-    SC_ASSERT_NULL(found);
+    const hu_persona_overlay_t *found = hu_persona_find_overlay(&persona, "discord", 7);
+    HU_ASSERT_NULL(found);
 
-    found = sc_persona_find_overlay(&persona, "tel", 3);
-    SC_ASSERT_NULL(found);
+    found = hu_persona_find_overlay(&persona, "tel", 3);
+    HU_ASSERT_NULL(found);
 
-    sc_persona_deinit(&alloc, &persona);
+    hu_persona_deinit(&alloc, &persona);
 }
 
 static void test_persona_deinit_null_safe(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t persona;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t persona;
     memset(&persona, 0, sizeof(persona));
 
-    sc_persona_deinit(&alloc, &persona);
+    hu_persona_deinit(&alloc, &persona);
 
-    SC_ASSERT_NULL(persona.name);
-    SC_ASSERT_EQ(persona.overlays_count, 0);
+    HU_ASSERT_NULL(persona.name);
+    HU_ASSERT_EQ(persona.overlays_count, 0);
 }
 
 static void test_persona_load_json_basic(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{"
                        "  \"version\": 1,"
                        "  \"name\": \"test-user\","
@@ -116,46 +116,46 @@ static void test_persona_load_json_basic(void) {
                        "  }"
                        "}";
 
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(p.name, "test-user");
-    SC_ASSERT_EQ(p.traits_count, 2);
-    SC_ASSERT_STR_EQ(p.traits[0], "direct");
-    SC_ASSERT_STR_EQ(p.identity, "A test persona");
-    SC_ASSERT_EQ(p.preferred_vocab_count, 2);
-    SC_ASSERT_EQ(p.avoided_vocab_count, 1);
-    SC_ASSERT_EQ(p.slang_count, 1);
-    SC_ASSERT_EQ(p.communication_rules_count, 1);
-    SC_ASSERT_EQ(p.values_count, 1);
-    SC_ASSERT_STR_EQ(p.decision_style, "Decides fast");
-    SC_ASSERT_EQ(p.overlays_count, 1);
-    SC_ASSERT_STR_EQ(p.overlays[0].channel, "imessage");
-    SC_ASSERT_STR_EQ(p.overlays[0].formality, "casual");
-    SC_ASSERT_EQ(p.overlays[0].style_notes_count, 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(p.name, "test-user");
+    HU_ASSERT_EQ(p.traits_count, 2);
+    HU_ASSERT_STR_EQ(p.traits[0], "direct");
+    HU_ASSERT_STR_EQ(p.identity, "A test persona");
+    HU_ASSERT_EQ(p.preferred_vocab_count, 2);
+    HU_ASSERT_EQ(p.avoided_vocab_count, 1);
+    HU_ASSERT_EQ(p.slang_count, 1);
+    HU_ASSERT_EQ(p.communication_rules_count, 1);
+    HU_ASSERT_EQ(p.values_count, 1);
+    HU_ASSERT_STR_EQ(p.decision_style, "Decides fast");
+    HU_ASSERT_EQ(p.overlays_count, 1);
+    HU_ASSERT_STR_EQ(p.overlays[0].channel, "imessage");
+    HU_ASSERT_STR_EQ(p.overlays[0].formality, "casual");
+    HU_ASSERT_EQ(p.overlays[0].style_notes_count, 1);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_load_json_empty(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, "{}", 2, &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NULL(p.name);
-    SC_ASSERT_NULL(p.identity);
-    SC_ASSERT_EQ(p.traits_count, 0);
-    SC_ASSERT_EQ(p.overlays_count, 0);
-    sc_persona_deinit(&alloc, &p);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, "{}", 2, &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NULL(p.name);
+    HU_ASSERT_NULL(p.identity);
+    HU_ASSERT_EQ(p.traits_count, 0);
+    HU_ASSERT_EQ(p.overlays_count, 0);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_load_not_found(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load(&alloc, "nonexistent-persona-xyz", 23, &p);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load(&alloc, "nonexistent-persona-xyz", 23, &p);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
-static void free_example_bank(sc_allocator_t *a, sc_persona_example_bank_t *bank) {
+static void free_example_bank(hu_allocator_t *a, hu_persona_example_bank_t *bank) {
     if (!bank)
         return;
     if (bank->channel) {
@@ -164,7 +164,7 @@ static void free_example_bank(sc_allocator_t *a, sc_persona_example_bank_t *bank
     }
     if (bank->examples) {
         for (size_t i = 0; i < bank->examples_count; i++) {
-            sc_persona_example_t *e = &bank->examples[i];
+            hu_persona_example_t *e = &bank->examples[i];
             if (e->context) {
                 size_t len = strlen(e->context);
                 a->free(a->ctx, e->context, len + 1);
@@ -178,69 +178,69 @@ static void free_example_bank(sc_allocator_t *a, sc_persona_example_bank_t *bank
                 a->free(a->ctx, e->response, len + 1);
             }
         }
-        a->free(a->ctx, bank->examples, bank->examples_count * sizeof(sc_persona_example_t));
+        a->free(a->ctx, bank->examples, bank->examples_count * sizeof(hu_persona_example_t));
     }
 }
 
 static void test_persona_examples_load_json(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json =
         "{\"examples\":["
         "  {\"context\":\"casual\",\"incoming\":\"hey\",\"response\":\"yo\"},"
         "  {\"context\":\"work\",\"incoming\":\"meeting?\",\"response\":\"sure 3pm\"}"
         "]}";
-    sc_persona_example_bank_t bank = {0};
-    sc_error_t err =
-        sc_persona_examples_load_json(&alloc, "imessage", 8, json, strlen(json), &bank);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(bank.examples_count, 2);
-    SC_ASSERT_STR_EQ(bank.examples[0].context, "casual");
-    SC_ASSERT_STR_EQ(bank.examples[1].response, "sure 3pm");
+    hu_persona_example_bank_t bank = {0};
+    hu_error_t err =
+        hu_persona_examples_load_json(&alloc, "imessage", 8, json, strlen(json), &bank);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(bank.examples_count, 2);
+    HU_ASSERT_STR_EQ(bank.examples[0].context, "casual");
+    HU_ASSERT_STR_EQ(bank.examples[1].response, "sure 3pm");
     free_example_bank(&alloc, &bank);
 }
 
 static void test_persona_select_examples_match(void) {
-    sc_persona_example_t imsg_examples[] = {
+    hu_persona_example_t imsg_examples[] = {
         {.context = "casual greeting", .incoming = "hey", .response = "yo"},
         {.context = "making plans", .incoming = "dinner?", .response = "down"},
         {.context = "tech question", .incoming = "what lang?", .response = "C obviously"},
     };
-    sc_persona_example_bank_t banks[] = {
+    hu_persona_example_bank_t banks[] = {
         {.channel = "imessage", .examples = imsg_examples, .examples_count = 3},
     };
-    sc_persona_t p = {.example_banks = banks, .example_banks_count = 1};
+    hu_persona_t p = {.example_banks = banks, .example_banks_count = 1};
 
-    const sc_persona_example_t *selected[2];
+    const hu_persona_example_t *selected[2];
     size_t count = 0;
-    sc_error_t err =
-        sc_persona_select_examples(&p, "imessage", 8, "plans dinner", 12, selected, &count, 2);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(count <= 2);
-    SC_ASSERT_TRUE(count > 0);
+    hu_error_t err =
+        hu_persona_select_examples(&p, "imessage", 8, "plans dinner", 12, selected, &count, 2);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(count <= 2);
+    HU_ASSERT_TRUE(count > 0);
 }
 
 static void test_persona_select_examples_no_channel(void) {
-    sc_persona_t p = {0};
-    const sc_persona_example_t *selected[2];
+    hu_persona_t p = {0};
+    const hu_persona_example_t *selected[2];
     size_t count = 99;
-    sc_error_t err = sc_persona_select_examples(&p, "slack", 5, NULL, 0, selected, &count, 2);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, 0);
+    hu_error_t err = hu_persona_select_examples(&p, "slack", 5, NULL, 0, selected, &count, 2);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 0);
 }
 
 static void test_persona_prompt_overrides_default(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_prompt_config_t cfg;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.persona_prompt = "You are acting as TestUser. Direct and curious.";
     cfg.persona_prompt_len = strlen(cfg.persona_prompt);
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_prompt_build_system(&alloc, &cfg, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(out);
-    SC_ASSERT_TRUE(strstr(out, "TestUser") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "SeaClaw") == NULL);
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "TestUser") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "Human") == NULL);
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
@@ -248,181 +248,181 @@ static void test_analyzer_builds_prompt(void) {
     const char *messages[] = {"hey whats up", "down. where at", "thursday works"};
     char prompt[4096];
     size_t prompt_len = 0;
-    sc_error_t err = sc_persona_analyzer_build_prompt(messages, 3, "imessage", prompt,
+    hu_error_t err = hu_persona_analyzer_build_prompt(messages, 3, "imessage", prompt,
                                                       sizeof(prompt), &prompt_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(prompt_len > 0);
-    SC_ASSERT_NOT_NULL(strstr(prompt, "hey whats up"));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(prompt_len > 0);
+    HU_ASSERT_NOT_NULL(strstr(prompt, "hey whats up"));
 }
 
 static void test_persona_cli_parse_create(void) {
-    const char *argv[] = {"seaclaw", "persona", "create", "seth", "--from-imessage"};
-    sc_persona_cli_args_t args = {0};
-    sc_error_t err = sc_persona_cli_parse(5, argv, &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ((int)args.action, (int)SC_PERSONA_ACTION_CREATE);
-    SC_ASSERT_STR_EQ(args.name, "seth");
-    SC_ASSERT_TRUE(args.from_imessage);
-    SC_ASSERT_TRUE(!args.from_gmail);
+    const char *argv[] = {"human", "persona", "create", "seth", "--from-imessage"};
+    hu_persona_cli_args_t args = {0};
+    hu_error_t err = hu_persona_cli_parse(5, argv, &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)args.action, (int)HU_PERSONA_ACTION_CREATE);
+    HU_ASSERT_STR_EQ(args.name, "seth");
+    HU_ASSERT_TRUE(args.from_imessage);
+    HU_ASSERT_TRUE(!args.from_gmail);
 }
 
 static void test_persona_cli_parse_show(void) {
-    const char *argv[] = {"seaclaw", "persona", "show", "seth"};
-    sc_persona_cli_args_t args = {0};
-    sc_error_t err = sc_persona_cli_parse(4, argv, &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ((int)args.action, (int)SC_PERSONA_ACTION_SHOW);
-    SC_ASSERT_STR_EQ(args.name, "seth");
+    const char *argv[] = {"human", "persona", "show", "seth"};
+    hu_persona_cli_args_t args = {0};
+    hu_error_t err = hu_persona_cli_parse(4, argv, &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)args.action, (int)HU_PERSONA_ACTION_SHOW);
+    HU_ASSERT_STR_EQ(args.name, "seth");
 }
 
 static void test_persona_tool_create(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(tool.vtable);
-    SC_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "persona");
-    SC_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
-    SC_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(tool.vtable);
+    HU_ASSERT_STR_EQ(tool.vtable->name(tool.ctx), "persona");
+    HU_ASSERT_NOT_NULL(tool.vtable->description(tool.ctx));
+    HU_ASSERT_NOT_NULL(tool.vtable->parameters_json(tool.ctx));
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_cli_parse_list(void) {
-    const char *argv[] = {"seaclaw", "persona", "list"};
-    sc_persona_cli_args_t args = {0};
-    sc_error_t err = sc_persona_cli_parse(3, argv, &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ((int)args.action, (int)SC_PERSONA_ACTION_LIST);
+    const char *argv[] = {"human", "persona", "list"};
+    hu_persona_cli_args_t args = {0};
+    hu_error_t err = hu_persona_cli_parse(3, argv, &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((int)args.action, (int)HU_PERSONA_ACTION_LIST);
 }
 
 static void test_persona_validate_json_valid(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test person\",\"traits\":[\"direct\"]}}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_TRUE(err == NULL);
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_TRUE(err == NULL);
 }
 
 static void test_persona_validate_json_missing_name(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"core\":{\"identity\":\"X\",\"traits\":[]}}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_TRUE(err != NULL);
-    SC_ASSERT_TRUE(strstr(err, "name") != NULL);
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_TRUE(err != NULL);
+    HU_ASSERT_TRUE(strstr(err, "name") != NULL);
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_json_missing_core(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\"}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_TRUE(err != NULL);
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_TRUE(err != NULL);
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_json_malformed(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "not json at all";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_TRUE(err != NULL);
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_TRUE(err != NULL);
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_cli_parse_validate(void) {
-    const char *argv[] = {"seaclaw", "persona", "validate", "test_name"};
-    sc_persona_cli_args_t args;
+    const char *argv[] = {"human", "persona", "validate", "test_name"};
+    hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
-    sc_error_t e = sc_persona_cli_parse(4, argv, &args);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_VALIDATE);
-    SC_ASSERT_TRUE(strcmp(args.name, "test_name") == 0);
+    hu_error_t e = hu_persona_cli_parse(4, argv, &args);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_VALIDATE);
+    HU_ASSERT_TRUE(strcmp(args.name, "test_name") == 0);
 }
 
 static void test_persona_cli_parse_feedback_apply(void) {
-    const char *argv[] = {"seaclaw", "persona", "feedback", "apply", "mypersona"};
-    sc_persona_cli_args_t args;
+    const char *argv[] = {"human", "persona", "feedback", "apply", "mypersona"};
+    hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
-    sc_error_t e = sc_persona_cli_parse(5, argv, &args);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_FEEDBACK_APPLY);
-    SC_ASSERT_TRUE(strcmp(args.name, "mypersona") == 0);
+    hu_error_t e = hu_persona_cli_parse(5, argv, &args);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_FEEDBACK_APPLY);
+    HU_ASSERT_TRUE(strcmp(args.name, "mypersona") == 0);
 }
 
 static void test_cli_parse_diff(void) {
-    const char *argv[] = {"seaclaw", "persona", "diff", "a", "b"};
-    sc_persona_cli_args_t args = {0};
-    SC_ASSERT_EQ(sc_persona_cli_parse(5, argv, &args), SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_DIFF);
-    SC_ASSERT_TRUE(strcmp(args.name, "a") == 0);
-    SC_ASSERT_TRUE(strcmp(args.diff_name, "b") == 0);
+    const char *argv[] = {"human", "persona", "diff", "a", "b"};
+    hu_persona_cli_args_t args = {0};
+    HU_ASSERT_EQ(hu_persona_cli_parse(5, argv, &args), HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_DIFF);
+    HU_ASSERT_TRUE(strcmp(args.name, "a") == 0);
+    HU_ASSERT_TRUE(strcmp(args.diff_name, "b") == 0);
 }
 
 static void test_persona_cli_run_validate(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_cli_args_t args = {0};
-    args.action = SC_PERSONA_ACTION_VALIDATE;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_VALIDATE;
     args.name = "test_name";
-    sc_error_t err = sc_persona_cli_run(&alloc, &args);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_EQ(err, HU_OK);
 }
 
 static void test_persona_cli_run_feedback_apply(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_cli_args_t args = {0};
-    args.action = SC_PERSONA_ACTION_FEEDBACK_APPLY;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_FEEDBACK_APPLY;
     args.name = "test";
-    sc_error_t err = sc_persona_cli_run(&alloc, &args);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_EQ(err, HU_OK);
 }
 
 static void test_creator_synthesize_merges(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *traits1[] = {"direct", "casual"};
     char *traits2[] = {"curious", "direct"};
-    sc_persona_t partials[] = {
+    hu_persona_t partials[] = {
         {.traits = traits1, .traits_count = 2},
         {.traits = traits2, .traits_count = 2},
     };
-    sc_persona_t merged = {0};
-    sc_error_t err = sc_persona_creator_synthesize(&alloc, partials, 2, "testuser", 8, &merged);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(merged.name, "testuser");
-    SC_ASSERT_EQ(merged.traits_count, (size_t)3);
-    sc_persona_deinit(&alloc, &merged);
+    hu_persona_t merged = {0};
+    hu_error_t err = hu_persona_creator_synthesize(&alloc, partials, 2, "testuser", 8, &merged);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(merged.name, "testuser");
+    HU_ASSERT_EQ(merged.traits_count, (size_t)3);
+    hu_persona_deinit(&alloc, &merged);
 }
 
 static void test_analyzer_parses_response(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *response =
         "{\"traits\":[\"direct\",\"casual\"],"
         "\"vocabulary\":{\"preferred\":[\"down\",\"works\"],\"avoided\":[],\"slang\":[]},"
         "\"communication_rules\":[\"Keeps messages very short\"],"
         "\"formality\":\"casual\",\"avg_length\":\"short\","
         "\"emoji_usage\":\"none\"}";
-    sc_persona_t partial = {0};
-    sc_error_t err = sc_persona_analyzer_parse_response(&alloc, response, strlen(response),
+    hu_persona_t partial = {0};
+    hu_error_t err = hu_persona_analyzer_parse_response(&alloc, response, strlen(response),
                                                         "imessage", 8, &partial);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(partial.traits_count >= 1);
-    SC_ASSERT_TRUE(partial.overlays_count == 1);
-    sc_persona_deinit(&alloc, &partial);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(partial.traits_count >= 1);
+    HU_ASSERT_TRUE(partial.overlays_count == 1);
+    hu_persona_deinit(&alloc, &partial);
 }
 
 static void test_sampler_facebook_parse_basic(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"messages\":["
                        "{\"sender_name\":\"Alice\",\"content\":\"hey there\"},"
                        "{\"sender_name\":\"Bob\",\"content\":\"hi alice\"},"
@@ -431,12 +431,12 @@ static void test_sampler_facebook_parse_basic(void) {
                        "]}";
     char **msgs = NULL;
     size_t count = 0;
-    sc_error_t err = sc_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, (size_t)3);
-    SC_ASSERT_STR_EQ(msgs[0], "hey there");
-    SC_ASSERT_STR_EQ(msgs[1], "whats up");
-    SC_ASSERT_STR_EQ(msgs[2], "see you later");
+    hu_error_t err = hu_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, (size_t)3);
+    HU_ASSERT_STR_EQ(msgs[0], "hey there");
+    HU_ASSERT_STR_EQ(msgs[1], "whats up");
+    HU_ASSERT_STR_EQ(msgs[2], "see you later");
     for (size_t i = 0; i < count; i++)
         alloc.free(alloc.ctx, msgs[i], strlen(msgs[i]) + 1);
     alloc.free(alloc.ctx, msgs, count * sizeof(char *));
@@ -446,14 +446,14 @@ static void test_sampler_facebook_parse_empty(void) {
     const char *json = "{\"messages\":[]}";
     char **msgs = NULL;
     size_t count = 99;
-    sc_error_t err = sc_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, (size_t)0);
+    hu_error_t err = hu_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, (size_t)0);
 }
 
 static void test_sampler_facebook_parse_null(void) {
-    sc_error_t err = sc_persona_sampler_facebook_parse(NULL, 0, NULL, NULL);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_sampler_facebook_parse(NULL, 0, NULL, NULL);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_sampler_gmail_parse_basic(void) {
@@ -464,9 +464,9 @@ static void test_sampler_gmail_parse_basic(void) {
                        "]}";
     char **msgs = NULL;
     size_t count = 0;
-    sc_error_t e = sc_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(count, (size_t)2);
+    hu_error_t e = hu_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(count, (size_t)2);
     for (size_t i = 0; i < count; i++)
         free(msgs[i]);
     free(msgs);
@@ -476,99 +476,99 @@ static void test_sampler_gmail_parse_empty(void) {
     const char *json = "{\"messages\":[]}";
     char **msgs = NULL;
     size_t count = 0;
-    sc_error_t e = sc_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(count, (size_t)0);
+    hu_error_t e = hu_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(count, (size_t)0);
 }
 
 static void test_cli_parse_export(void) {
-    const char *argv[] = {"seaclaw", "persona", "export", "seth"};
-    sc_persona_cli_args_t args = {0};
-    SC_ASSERT_EQ(sc_persona_cli_parse(4, argv, &args), SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_EXPORT);
-    SC_ASSERT_TRUE(strcmp(args.name, "seth") == 0);
+    const char *argv[] = {"human", "persona", "export", "seth"};
+    hu_persona_cli_args_t args = {0};
+    HU_ASSERT_EQ(hu_persona_cli_parse(4, argv, &args), HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_EXPORT);
+    HU_ASSERT_TRUE(strcmp(args.name, "seth") == 0);
 }
 
 static void test_cli_parse_merge(void) {
-    const char *argv[] = {"seaclaw", "persona", "merge", "combined", "a", "b"};
-    sc_persona_cli_args_t args = {0};
-    SC_ASSERT_EQ(sc_persona_cli_parse(6, argv, &args), SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_MERGE);
-    SC_ASSERT_TRUE(strcmp(args.name, "combined") == 0);
-    SC_ASSERT_TRUE(args.merge_sources != NULL);
-    SC_ASSERT_EQ(args.merge_sources_count, (size_t)2);
-    SC_ASSERT_TRUE(strcmp(args.merge_sources[0], "a") == 0);
-    SC_ASSERT_TRUE(strcmp(args.merge_sources[1], "b") == 0);
+    const char *argv[] = {"human", "persona", "merge", "combined", "a", "b"};
+    hu_persona_cli_args_t args = {0};
+    HU_ASSERT_EQ(hu_persona_cli_parse(6, argv, &args), HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_MERGE);
+    HU_ASSERT_TRUE(strcmp(args.name, "combined") == 0);
+    HU_ASSERT_TRUE(args.merge_sources != NULL);
+    HU_ASSERT_EQ(args.merge_sources_count, (size_t)2);
+    HU_ASSERT_TRUE(strcmp(args.merge_sources[0], "a") == 0);
+    HU_ASSERT_TRUE(strcmp(args.merge_sources[1], "b") == 0);
 }
 
 static void test_cli_parse_import(void) {
-    const char *argv[] = {"seaclaw",    "persona",     "import",
+    const char *argv[] = {"human",    "persona",     "import",
                           "newpersona", "--from-file", "/tmp/p.json"};
-    sc_persona_cli_args_t args = {0};
-    SC_ASSERT_EQ(sc_persona_cli_parse(6, argv, &args), SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_IMPORT);
-    SC_ASSERT_TRUE(strcmp(args.name, "newpersona") == 0);
-    SC_ASSERT_TRUE(args.import_file != NULL);
-    SC_ASSERT_TRUE(strcmp(args.import_file, "/tmp/p.json") == 0);
+    hu_persona_cli_args_t args = {0};
+    HU_ASSERT_EQ(hu_persona_cli_parse(6, argv, &args), HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_IMPORT);
+    HU_ASSERT_TRUE(strcmp(args.name, "newpersona") == 0);
+    HU_ASSERT_TRUE(args.import_file != NULL);
+    HU_ASSERT_TRUE(strcmp(args.import_file, "/tmp/p.json") == 0);
 }
 
 static void test_cli_parse_from_facebook_file(void) {
-    const char *argv[] = {"seaclaw", "persona",         "create",
+    const char *argv[] = {"human", "persona",         "create",
                           "test",    "--from-facebook", "/tmp/fb.json"};
-    sc_persona_cli_args_t args;
+    hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
-    sc_error_t e = sc_persona_cli_parse(6, argv, &args);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_TRUE(args.from_facebook);
-    SC_ASSERT_TRUE(args.facebook_export_path != NULL);
-    SC_ASSERT_TRUE(strcmp(args.facebook_export_path, "/tmp/fb.json") == 0);
+    hu_error_t e = hu_persona_cli_parse(6, argv, &args);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_TRUE(args.from_facebook);
+    HU_ASSERT_TRUE(args.facebook_export_path != NULL);
+    HU_ASSERT_TRUE(strcmp(args.facebook_export_path, "/tmp/fb.json") == 0);
 }
 
 static void test_cli_parse_from_gmail(void) {
-    const char *argv[] = {"seaclaw", "persona",      "create",
+    const char *argv[] = {"human", "persona",      "create",
                           "test",    "--from-gmail", "/tmp/gmail.json"};
-    sc_persona_cli_args_t args;
+    hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
-    sc_error_t e = sc_persona_cli_parse(6, argv, &args);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_TRUE(args.from_gmail);
-    SC_ASSERT_TRUE(args.gmail_export_path != NULL);
-    SC_ASSERT_TRUE(strcmp(args.gmail_export_path, "/tmp/gmail.json") == 0);
+    hu_error_t e = hu_persona_cli_parse(6, argv, &args);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_TRUE(args.from_gmail);
+    HU_ASSERT_TRUE(args.gmail_export_path != NULL);
+    HU_ASSERT_TRUE(strcmp(args.gmail_export_path, "/tmp/gmail.json") == 0);
 }
 
 static void test_cli_parse_from_response(void) {
-    const char *argv[] = {"seaclaw", "persona",         "create",
+    const char *argv[] = {"human", "persona",         "create",
                           "test",    "--from-response", "/tmp/resp.json"};
-    sc_persona_cli_args_t args;
+    hu_persona_cli_args_t args;
     memset(&args, 0, sizeof(args));
-    sc_error_t err = sc_persona_cli_parse(6, argv, &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(args.action, SC_PERSONA_ACTION_CREATE);
-    SC_ASSERT_TRUE(args.response_file != NULL);
-    SC_ASSERT_TRUE(strcmp(args.response_file, "/tmp/resp.json") == 0);
+    hu_error_t err = hu_persona_cli_parse(6, argv, &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(args.action, HU_PERSONA_ACTION_CREATE);
+    HU_ASSERT_TRUE(args.response_file != NULL);
+    HU_ASSERT_TRUE(strcmp(args.response_file, "/tmp/resp.json") == 0);
 }
 
 static void test_sampler_imessage_query(void) {
     char query[512];
     size_t query_len = 0;
-    sc_error_t err = sc_persona_sampler_imessage_query(query, sizeof(query), &query_len, 500);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(query_len > 0);
-    SC_ASSERT_NOT_NULL(strstr(query, "message"));
-    SC_ASSERT_NOT_NULL(strstr(query, "LIMIT"));
+    hu_error_t err = hu_persona_sampler_imessage_query(query, sizeof(query), &query_len, 500);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(query_len > 0);
+    HU_ASSERT_NOT_NULL(strstr(query, "message"));
+    HU_ASSERT_NOT_NULL(strstr(query, "LIMIT"));
 }
 
 static void test_spawn_config_persona_field(void) {
-    sc_spawn_config_t cfg;
+    hu_spawn_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.persona_name = "seth";
     cfg.persona_name_len = 4;
-    SC_ASSERT_STR_EQ(cfg.persona_name, "seth");
-    SC_ASSERT_EQ(cfg.persona_name_len, 4);
+    HU_ASSERT_STR_EQ(cfg.persona_name, "seth");
+    HU_ASSERT_EQ(cfg.persona_name_len, 4);
 }
 
 static void test_persona_full_round_trip(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"roundtrip\","
                        "\"core\":{\"identity\":\"Integration test persona\","
                        "\"traits\":[\"direct\"],"
@@ -579,57 +579,57 @@ static void test_persona_full_round_trip(void) {
                        "\"avg_length\":\"short\",\"emoji_usage\":\"none\","
                        "\"style_notes\":[\"no caps\"]}}}";
 
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
     char *prompt = NULL;
     size_t prompt_len = 0;
-    err = sc_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &prompt, &prompt_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(strstr(prompt, "roundtrip") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "casual") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "no caps") != NULL);
+    err = hu_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &prompt, &prompt_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(prompt, "roundtrip") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "casual") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "no caps") != NULL);
 
-    sc_prompt_config_t cfg;
+    hu_prompt_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.persona_prompt = prompt;
     cfg.persona_prompt_len = prompt_len;
     char *sys = NULL;
     size_t sys_len = 0;
-    err = sc_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(strstr(sys, "roundtrip") != NULL);
-    SC_ASSERT_TRUE(strstr(sys, "SeaClaw") == NULL);
+    err = hu_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(sys, "roundtrip") != NULL);
+    HU_ASSERT_TRUE(strstr(sys, "Human") == NULL);
 
     alloc.free(alloc.ctx, sys, sys_len + 1);
     alloc.free(alloc.ctx, prompt, prompt_len + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_select_examples_no_match(void) {
-    sc_persona_example_t imsg_examples[] = {
+    hu_persona_example_t imsg_examples[] = {
         {.context = "casual greeting", .incoming = "hey", .response = "yo"},
     };
-    sc_persona_example_bank_t banks[] = {
+    hu_persona_example_bank_t banks[] = {
         {.channel = "imessage", .examples = imsg_examples, .examples_count = 1},
     };
-    sc_persona_t p = {.example_banks = banks, .example_banks_count = 1};
+    hu_persona_t p = {.example_banks = banks, .example_banks_count = 1};
 
-    const sc_persona_example_t *selected[2];
+    const hu_persona_example_t *selected[2];
     size_t count = 99;
-    sc_error_t err = sc_persona_select_examples(&p, "slack", 5, "greeting", 8, selected, &count, 2);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, 0);
+    hu_error_t err = hu_persona_select_examples(&p, "slack", 5, "greeting", 8, selected, &count, 2);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 0);
 }
 
 static void test_persona_build_prompt_core(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *traits[] = {"direct", "curious"};
     char *rules[] = {"Keep it short"};
     char *values[] = {"honesty"};
-    sc_persona_t p = {
+    hu_persona_t p = {
         .name = "testuser",
         .name_len = 8,
         .identity = "A test persona",
@@ -644,20 +644,20 @@ static void test_persona_build_prompt_core(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(out);
-    SC_ASSERT_TRUE(out_len > 0);
-    SC_ASSERT_NOT_NULL(strstr(out, "You are acting as"));
-    SC_ASSERT_NOT_NULL(strstr(out, "testuser"));
-    SC_ASSERT_NOT_NULL(strstr(out, "direct"));
-    SC_ASSERT_NOT_NULL(strstr(out, "Keep it short"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_NOT_NULL(strstr(out, "You are acting as"));
+    HU_ASSERT_NOT_NULL(strstr(out, "testuser"));
+    HU_ASSERT_NOT_NULL(strstr(out, "direct"));
+    HU_ASSERT_NOT_NULL(strstr(out, "Keep it short"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_agent_persona_prompt_injected(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_prompt_config_t cfg = {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_prompt_config_t cfg = {
         .provider_name = "openai",
         .provider_name_len = 6,
         .model_name = "gpt-4",
@@ -676,96 +676,96 @@ static void test_agent_persona_prompt_injected(void) {
     };
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_prompt_build_system(&alloc, &cfg, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "TestUser"));
+    hu_error_t err = hu_prompt_build_system(&alloc, &cfg, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "TestUser"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_spawn_config_has_persona(void) {
-    sc_spawn_config_t cfg = {
+    hu_spawn_config_t cfg = {
         .persona_name = "seth",
         .persona_name_len = 4,
     };
-    SC_ASSERT_NOT_NULL(cfg.persona_name);
-    SC_ASSERT_EQ(cfg.persona_name_len, (size_t)4);
+    HU_ASSERT_NOT_NULL(cfg.persona_name);
+    HU_ASSERT_EQ(cfg.persona_name_len, (size_t)4);
 }
 
 static void test_config_persona_field(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"agent\":{\"persona\":\"seth\"}}";
-    sc_config_t cfg;
+    hu_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    sc_arena_t *arena = sc_arena_create(alloc);
-    SC_ASSERT_NOT_NULL(arena);
+    hu_arena_t *arena = hu_arena_create(alloc);
+    HU_ASSERT_NOT_NULL(arena);
     cfg.arena = arena;
-    cfg.allocator = sc_arena_allocator(arena);
-    sc_error_t err = sc_config_parse_json(&cfg, json, strlen(json));
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(cfg.agent.persona);
-    SC_ASSERT_STR_EQ(cfg.agent.persona, "seth");
-    sc_config_deinit(&cfg);
+    cfg.allocator = hu_arena_allocator(arena);
+    hu_error_t err = hu_config_parse_json(&cfg, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(cfg.agent.persona);
+    HU_ASSERT_STR_EQ(cfg.agent.persona, "seth");
+    hu_config_deinit(&cfg);
 }
 
 static void test_persona_cli_run_list(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_cli_args_t args = {0};
-    args.action = SC_PERSONA_ACTION_LIST;
-    sc_error_t err = sc_persona_cli_run(&alloc, &args);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_LIST;
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_EQ(err, HU_OK);
 }
 
 static void test_persona_cli_run_show_not_found(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_cli_args_t args = {0};
-    args.action = SC_PERSONA_ACTION_SHOW;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_SHOW;
     args.name = "nonexistent_persona_xyz_test";
-    sc_error_t err = sc_persona_cli_run(&alloc, &args);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_persona_cli_run_delete_not_found(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_cli_args_t args = {0};
-    args.action = SC_PERSONA_ACTION_DELETE;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_DELETE;
     args.name = "nonexistent_persona_xyz_test";
-    sc_error_t err = sc_persona_cli_run(&alloc, &args);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_persona_cli_run_create_no_provider(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_cli_args_t args = {0};
-    args.action = SC_PERSONA_ACTION_CREATE;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_cli_args_t args = {0};
+    args.action = HU_PERSONA_ACTION_CREATE;
     args.name = "test_create";
     args.from_imessage = true;
-    sc_error_t err = sc_persona_cli_run(&alloc, &args);
-    /* In test mode: SC_OK. In non-test mode: SC_ERR_NOT_SUPPORTED */
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err = hu_persona_cli_run(&alloc, &args);
+    /* In test mode: HU_OK. In non-test mode: HU_ERR_NOT_SUPPORTED */
+    HU_ASSERT_EQ(err, HU_OK);
 }
 
 static void test_creator_write_and_load(void) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
-    p.name = sc_strdup(&alloc, "test_creator_write");
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    p.name = hu_strdup(&alloc, "test_creator_write");
     p.name_len = strlen("test_creator_write");
-    SC_ASSERT_NOT_NULL(p.name);
-    sc_error_t err = sc_persona_creator_write(&alloc, &p);
-    if (err != SC_OK) {
-        sc_persona_deinit(&alloc, &p);
+    HU_ASSERT_NOT_NULL(p.name);
+    hu_error_t err = hu_persona_creator_write(&alloc, &p);
+    if (err != HU_OK) {
+        hu_persona_deinit(&alloc, &p);
         return; /* Skip if filesystem not writable (e.g. sandbox) */
     }
-    sc_persona_t loaded = {0};
-    err = sc_persona_load(&alloc, "test_creator_write", 18, &loaded);
-    if (err != SC_OK) {
-        sc_persona_deinit(&alloc, &p);
+    hu_persona_t loaded = {0};
+    err = hu_persona_load(&alloc, "test_creator_write", 18, &loaded);
+    if (err != HU_OK) {
+        hu_persona_deinit(&alloc, &p);
 #if defined(__unix__) || defined(__APPLE__)
         {
             const char *home = getenv("HOME");
             if (home && home[0]) {
                 char path[512];
-                int n = snprintf(path, sizeof(path), "%s/.seaclaw/personas/test_creator_write.json",
+                int n = snprintf(path, sizeof(path), "%s/.human/personas/test_creator_write.json",
                                  home);
                 if (n > 0 && (size_t)n < sizeof(path))
                     (void)unlink(path);
@@ -774,17 +774,17 @@ static void test_creator_write_and_load(void) {
 #endif
         return; /* Skip if load fails (path mismatch or sandbox) */
     }
-    SC_ASSERT_NOT_NULL(loaded.name);
-    SC_ASSERT_STR_EQ(loaded.name, "test_creator_write");
-    sc_persona_deinit(&alloc, &loaded);
-    sc_persona_deinit(&alloc, &p);
+    HU_ASSERT_NOT_NULL(loaded.name);
+    HU_ASSERT_STR_EQ(loaded.name, "test_creator_write");
+    hu_persona_deinit(&alloc, &loaded);
+    hu_persona_deinit(&alloc, &p);
 #if defined(__unix__) || defined(__APPLE__)
     {
         const char *home = getenv("HOME");
         if (home && home[0]) {
             char path[512];
             int n =
-                snprintf(path, sizeof(path), "%s/.seaclaw/personas/test_creator_write.json", home);
+                snprintf(path, sizeof(path), "%s/.human/personas/test_creator_write.json", home);
             if (n > 0 && (size_t)n < sizeof(path))
                 (void)unlink(path);
         }
@@ -795,17 +795,17 @@ static void test_creator_write_and_load(void) {
 
 static void test_persona_base_dir_returns_override_when_set(void) {
 #if defined(__unix__) || defined(__APPLE__)
-    char tmpdir[] = "/tmp/seaclaw_base_dir_test_XXXXXX";
+    char tmpdir[] = "/tmp/human_base_dir_test_XXXXXX";
     if (!mkdtemp(tmpdir)) {
         return;
     }
-    setenv("SC_PERSONA_DIR", tmpdir, 1);
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
     char buf[512];
-    const char *got = sc_persona_base_dir(buf, sizeof(buf));
-    unsetenv("SC_PERSONA_DIR");
+    const char *got = hu_persona_base_dir(buf, sizeof(buf));
+    unsetenv("HU_PERSONA_DIR");
     rmdir(tmpdir);
-    SC_ASSERT_NOT_NULL(got);
-    SC_ASSERT_STR_EQ(got, tmpdir);
+    HU_ASSERT_NOT_NULL(got);
+    HU_ASSERT_STR_EQ(got, tmpdir);
 #else
     (void)0;
 #endif
@@ -813,35 +813,35 @@ static void test_persona_base_dir_returns_override_when_set(void) {
 
 #if defined(__unix__) || defined(__APPLE__)
 static void test_persona_load_save_roundtrip_with_temp_dir(void) {
-    char tmpdir[] = "/tmp/seaclaw_persona_test_XXXXXX";
+    char tmpdir[] = "/tmp/human_persona_test_XXXXXX";
     if (!mkdtemp(tmpdir))
         return; /* skip if can't create temp dir */
 
-    setenv("SC_PERSONA_DIR", tmpdir, 1);
+    setenv("HU_PERSONA_DIR", tmpdir, 1);
 
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
-    p.name = sc_strdup(&alloc, "roundtrip_test");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    p.name = hu_strdup(&alloc, "roundtrip_test");
     p.name_len = strlen(p.name);
-    p.identity = sc_strdup(&alloc, "Test identity");
+    p.identity = hu_strdup(&alloc, "Test identity");
     if (!p.name || !p.identity) {
-        sc_persona_deinit(&alloc, &p);
-        unsetenv("SC_PERSONA_DIR");
+        hu_persona_deinit(&alloc, &p);
+        unsetenv("HU_PERSONA_DIR");
         rmdir(tmpdir);
         return;
     }
-    sc_error_t err = sc_persona_creator_write(&alloc, &p);
-    sc_persona_deinit(&alloc, &p);
-    if (err != SC_OK) {
-        unsetenv("SC_PERSONA_DIR");
+    hu_error_t err = hu_persona_creator_write(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
+    if (err != HU_OK) {
+        unsetenv("HU_PERSONA_DIR");
         rmdir(tmpdir);
         return;
     }
 
-    sc_persona_t loaded = {0};
-    err = sc_persona_load(&alloc, "roundtrip_test", 14, &loaded);
-    unsetenv("SC_PERSONA_DIR");
-    if (err != SC_OK) {
+    hu_persona_t loaded = {0};
+    err = hu_persona_load(&alloc, "roundtrip_test", 14, &loaded);
+    unsetenv("HU_PERSONA_DIR");
+    if (err != HU_OK) {
         char path[512];
         snprintf(path, sizeof(path), "%s/roundtrip_test.json", tmpdir);
         unlink(path);
@@ -849,10 +849,10 @@ static void test_persona_load_save_roundtrip_with_temp_dir(void) {
         return;
     }
 
-    SC_ASSERT_STR_EQ(loaded.name, "roundtrip_test");
-    SC_ASSERT_STR_EQ(loaded.identity, "Test identity");
+    HU_ASSERT_STR_EQ(loaded.name, "roundtrip_test");
+    HU_ASSERT_STR_EQ(loaded.identity, "Test identity");
 
-    sc_persona_deinit(&alloc, &loaded);
+    hu_persona_deinit(&alloc, &loaded);
 
     char path[512];
     snprintf(path, sizeof(path), "%s/roundtrip_test.json", tmpdir);
@@ -862,111 +862,111 @@ static void test_persona_load_save_roundtrip_with_temp_dir(void) {
 #endif
 
 static void test_persona_prompt_with_channel_overlay(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"ch_test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
                        "\"channel_overlays\":{\"imessage\":{\"formality\":\"casual\","
                        "\"avg_length\":\"short\",\"emoji_usage\":\"minimal\","
                        "\"style_notes\":[\"no caps\"]}}}";
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
     /* Without channel — no overlay */
     char *prompt1 = NULL;
     size_t len1 = 0;
-    err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &prompt1, &len1);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(strstr(prompt1, "imessage") == NULL);
+    err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &prompt1, &len1);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(prompt1, "imessage") == NULL);
 
     /* With channel — overlay applied */
     char *prompt2 = NULL;
     size_t len2 = 0;
-    err = sc_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &prompt2, &len2);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(strstr(prompt2, "casual") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt2, "no caps") != NULL);
-    SC_ASSERT_TRUE(len2 > len1);
+    err = hu_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &prompt2, &len2);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(prompt2, "casual") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt2, "no caps") != NULL);
+    HU_ASSERT_TRUE(len2 > len1);
 
     alloc.free(alloc.ctx, prompt1, len1 + 1);
     alloc.free(alloc.ctx, prompt2, len2 + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_build_prompt_includes_examples(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"ex_test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]}}";
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
     /* Manually add an example bank */
-    p.example_banks = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_bank_t));
-    SC_ASSERT_TRUE(p.example_banks != NULL);
-    memset(p.example_banks, 0, sizeof(sc_persona_example_bank_t));
+    p.example_banks = alloc.alloc(alloc.ctx, sizeof(hu_persona_example_bank_t));
+    HU_ASSERT_TRUE(p.example_banks != NULL);
+    memset(p.example_banks, 0, sizeof(hu_persona_example_bank_t));
     p.example_banks_count = 1;
-    p.example_banks[0].channel = sc_strdup(&alloc, "cli");
-    p.example_banks[0].examples = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_t));
-    memset(p.example_banks[0].examples, 0, sizeof(sc_persona_example_t));
+    p.example_banks[0].channel = hu_strdup(&alloc, "cli");
+    p.example_banks[0].examples = alloc.alloc(alloc.ctx, sizeof(hu_persona_example_t));
+    memset(p.example_banks[0].examples, 0, sizeof(hu_persona_example_t));
     p.example_banks[0].examples_count = 1;
-    p.example_banks[0].examples[0].incoming = sc_strdup(&alloc, "Hey what's up");
-    p.example_banks[0].examples[0].response = sc_strdup(&alloc, "Not much, you?");
+    p.example_banks[0].examples[0].incoming = hu_strdup(&alloc, "Hey what's up");
+    p.example_banks[0].examples[0].response = hu_strdup(&alloc, "Not much, you?");
 
     char *prompt = NULL;
     size_t plen = 0;
-    err = sc_persona_build_prompt(&alloc, &p, "cli", 3, NULL, 0, &prompt, &plen);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(strstr(prompt, "Hey what's up") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "Not much, you?") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "Example conversations") != NULL);
+    err = hu_persona_build_prompt(&alloc, &p, "cli", 3, NULL, 0, &prompt, &plen);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(strstr(prompt, "Hey what's up") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Not much, you?") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Example conversations") != NULL);
 
     alloc.free(alloc.ctx, prompt, plen + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_agent_set_persona_clears(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov = {0};
-    SC_ASSERT_EQ(sc_provider_create(&alloc, "openai", 6, "test-key", 8, "", 0, &prov), SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "test-key", 8, "", 0, &prov), HU_OK);
 
-    sc_agent_t agent = {0};
-    SC_ASSERT_EQ(sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL,
+    hu_agent_t agent = {0};
+    HU_ASSERT_EQ(hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL,
                                       "gpt-4o-mini", 10, "openai", 6, 0.7, ".", 1, 5, 20, false, 2,
                                       NULL, 0, NULL, 0, NULL),
-                 SC_OK);
+                 HU_OK);
 
     /* Clearing with NULL/empty should succeed */
-    SC_ASSERT_EQ(sc_agent_set_persona(&agent, NULL, 0), SC_OK);
-    SC_ASSERT_NULL(agent.persona);
-    SC_ASSERT_NULL(agent.persona_name);
+    HU_ASSERT_EQ(hu_agent_set_persona(&agent, NULL, 0), HU_OK);
+    HU_ASSERT_NULL(agent.persona);
+    HU_ASSERT_NULL(agent.persona_name);
 
-    sc_agent_deinit(&agent);
+    hu_agent_deinit(&agent);
 }
 
 static void test_agent_set_persona_not_found(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov = {0};
-    SC_ASSERT_EQ(sc_provider_create(&alloc, "openai", 6, "test-key", 8, "", 0, &prov), SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "test-key", 8, "", 0, &prov), HU_OK);
 
-    sc_agent_t agent = {0};
-    SC_ASSERT_EQ(sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL,
+    hu_agent_t agent = {0};
+    HU_ASSERT_EQ(hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL,
                                       "gpt-4o-mini", 10, "openai", 6, 0.7, ".", 1, 5, 20, false, 2,
                                       NULL, 0, NULL, 0, NULL),
-                 SC_OK);
+                 HU_OK);
 
-    sc_error_t err = sc_agent_set_persona(&agent, "nonexistent-persona-xyz", 23);
-    SC_ASSERT_NEQ(err, SC_OK);
-    SC_ASSERT_NULL(agent.persona);
+    hu_error_t err = hu_agent_set_persona(&agent, "nonexistent-persona-xyz", 23);
+    HU_ASSERT_NEQ(err, HU_OK);
+    HU_ASSERT_NULL(agent.persona);
 
-    sc_agent_deinit(&agent);
+    hu_agent_deinit(&agent);
 }
 
 static void test_persona_feedback_record_and_apply(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_feedback_t fb;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_feedback_t fb;
     memset(&fb, 0, sizeof(fb));
     fb.channel = "cli";
     fb.channel_len = 3;
@@ -977,19 +977,19 @@ static void test_persona_feedback_record_and_apply(void) {
     fb.context = "greeting";
     fb.context_len = 8;
 
-    /* In test mode, record no-ops on disk but returns SC_OK */
-    sc_error_t e = sc_persona_feedback_record(&alloc, "test", 4, &fb);
-    SC_ASSERT_EQ(e, SC_OK);
+    /* In test mode, record no-ops on disk but returns HU_OK */
+    hu_error_t e = hu_persona_feedback_record(&alloc, "test", 4, &fb);
+    HU_ASSERT_EQ(e, HU_OK);
 
     /* Apply also no-ops in test mode */
-    e = sc_persona_feedback_apply(&alloc, "test", 4);
-    SC_ASSERT_EQ(e, SC_OK);
+    e = hu_persona_feedback_apply(&alloc, "test", 4);
+    HU_ASSERT_EQ(e, HU_OK);
 }
 
 static void test_persona_build_prompt_with_overlay(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *notes[] = {"drops punctuation"};
-    sc_persona_overlay_t overlays[] = {
+    hu_persona_overlay_t overlays[] = {
         {.channel = "imessage",
          .formality = "casual",
          .avg_length = "short",
@@ -997,7 +997,7 @@ static void test_persona_build_prompt_with_overlay(void) {
          .style_notes = notes,
          .style_notes_count = 1},
     };
-    sc_persona_t p = {
+    hu_persona_t p = {
         .name = "testuser",
         .name_len = 8,
         .identity = "A test persona",
@@ -1007,51 +1007,51 @@ static void test_persona_build_prompt_with_overlay(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "imessage"));
-    SC_ASSERT_NOT_NULL(strstr(out, "casual"));
-    SC_ASSERT_NOT_NULL(strstr(out, "drops punctuation"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "imessage"));
+    HU_ASSERT_NOT_NULL(strstr(out, "casual"));
+    HU_ASSERT_NOT_NULL(strstr(out, "drops punctuation"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
-/* sc_persona_load_json */
+/* hu_persona_load_json */
 static void test_persona_load_json_malformed_returns_error(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t e = sc_persona_load_json(&alloc, "not json", 8, &p);
-    SC_ASSERT_TRUE(e != SC_OK);
+    hu_error_t e = hu_persona_load_json(&alloc, "not json", 8, &p);
+    HU_ASSERT_TRUE(e != HU_OK);
 }
 
 static void test_persona_load_json_missing_core(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
     const char *json = "{\"version\":1,\"name\":\"test\"}";
-    sc_error_t e = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    if (e == SC_OK) {
-        SC_ASSERT_TRUE(p.traits_count == 0);
-        sc_persona_deinit(&alloc, &p);
+    hu_error_t e = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    if (e == HU_OK) {
+        HU_ASSERT_TRUE(p.traits_count == 0);
+        hu_persona_deinit(&alloc, &p);
     }
 }
 
-/* sc_persona_load */
+/* hu_persona_load */
 static void test_persona_load_empty_name(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t e = sc_persona_load(&alloc, "", 0, &p);
-    SC_ASSERT_TRUE(e != SC_OK);
+    hu_error_t e = hu_persona_load(&alloc, "", 0, &p);
+    HU_ASSERT_TRUE(e != HU_OK);
 }
 
 static void test_persona_prompt_respects_size_cap(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     /* Build JSON with many long traits to exceed 8KB prompt */
     static const char pad[81] =
         "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     char *traits_json = alloc.alloc(alloc.ctx, 24 * 1024);
-    SC_ASSERT_NOT_NULL(traits_json);
+    HU_ASSERT_NOT_NULL(traits_json);
     size_t pos = 0;
     pos += (size_t)snprintf(traits_json + pos, 24 * 1024 - pos,
                             "{\"version\":1,\"name\":\"big\",\"core\":{"
@@ -1068,99 +1068,99 @@ static void test_persona_prompt_respects_size_cap(void) {
                          "\"communication_rules\":[],\"values\":[],\"decision_style\":\"fast\"}}}");
     traits_json[pos] = '\0';
 
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t err = sc_persona_load_json(&alloc, traits_json, pos, &p);
+    hu_error_t err = hu_persona_load_json(&alloc, traits_json, pos, &p);
     alloc.free(alloc.ctx, traits_json, 24 * 1024);
-    SC_ASSERT_EQ(err, SC_OK);
+    HU_ASSERT_EQ(err, HU_OK);
 
     char *out = NULL;
     size_t out_len = 0;
-    err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(out);
-    SC_ASSERT_TRUE(out_len <= SC_PERSONA_PROMPT_MAX_BYTES);
-    if (out_len == SC_PERSONA_PROMPT_MAX_BYTES)
-        SC_ASSERT_NOT_NULL(strstr(out, "[persona prompt truncated]"));
+    err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(out_len <= HU_PERSONA_PROMPT_MAX_BYTES);
+    if (out_len == HU_PERSONA_PROMPT_MAX_BYTES)
+        HU_ASSERT_NOT_NULL(strstr(out, "[persona prompt truncated]"));
 
     alloc.free(alloc.ctx, out, out_len + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
-/* sc_persona_build_prompt - edge cases */
+/* hu_persona_build_prompt - edge cases */
 static void test_persona_build_prompt_empty_persona(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
     p.name = "empty";
     p.name_len = 5;
     char *prompt = NULL;
     size_t len = 0;
-    sc_error_t e = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &prompt, &len);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_TRUE(prompt != NULL);
-    SC_ASSERT_TRUE(len > 0);
+    hu_error_t e = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &prompt, &len);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_TRUE(prompt != NULL);
+    HU_ASSERT_TRUE(len > 0);
     alloc.free(alloc.ctx, prompt, len + 1);
 }
 
-/* sc_persona_examples_load_json - edge cases */
+/* hu_persona_examples_load_json - edge cases */
 static void test_persona_examples_load_json_empty_bank(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_example_bank_t bank;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_example_bank_t bank;
     memset(&bank, 0, sizeof(bank));
     const char *json = "{\"examples\":[]}";
-    sc_error_t e = sc_persona_examples_load_json(&alloc, "test", 4, json, strlen(json), &bank);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(bank.examples_count, 0);
+    hu_error_t e = hu_persona_examples_load_json(&alloc, "test", 4, json, strlen(json), &bank);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(bank.examples_count, 0);
     if (bank.channel)
         alloc.free(alloc.ctx, bank.channel, strlen(bank.channel) + 1);
 }
 
 static void test_persona_examples_load_json_malformed(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_example_bank_t bank;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_example_bank_t bank;
     memset(&bank, 0, sizeof(bank));
-    sc_error_t e = sc_persona_examples_load_json(&alloc, "test", 4, "bad", 3, &bank);
-    SC_ASSERT_TRUE(e != SC_OK);
+    hu_error_t e = hu_persona_examples_load_json(&alloc, "test", 4, "bad", 3, &bank);
+    HU_ASSERT_TRUE(e != HU_OK);
 }
 
-/* sc_persona_select_examples - edge cases */
+/* hu_persona_select_examples - edge cases */
 static void test_persona_select_examples_null_topic_returns_some(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    p.example_banks = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_bank_t));
-    memset(p.example_banks, 0, sizeof(sc_persona_example_bank_t));
+    p.example_banks = alloc.alloc(alloc.ctx, sizeof(hu_persona_example_bank_t));
+    memset(p.example_banks, 0, sizeof(hu_persona_example_bank_t));
     p.example_banks_count = 1;
-    p.example_banks[0].channel = sc_strdup(&alloc, "test");
-    p.example_banks[0].examples = alloc.alloc(alloc.ctx, sizeof(sc_persona_example_t));
-    memset(p.example_banks[0].examples, 0, sizeof(sc_persona_example_t));
+    p.example_banks[0].channel = hu_strdup(&alloc, "test");
+    p.example_banks[0].examples = alloc.alloc(alloc.ctx, sizeof(hu_persona_example_t));
+    memset(p.example_banks[0].examples, 0, sizeof(hu_persona_example_t));
     p.example_banks[0].examples_count = 1;
-    p.example_banks[0].examples[0].incoming = sc_strdup(&alloc, "hello");
-    p.example_banks[0].examples[0].response = sc_strdup(&alloc, "hi");
+    p.example_banks[0].examples[0].incoming = hu_strdup(&alloc, "hello");
+    p.example_banks[0].examples[0].response = hu_strdup(&alloc, "hi");
 
-    const sc_persona_example_t *sel[4];
+    const hu_persona_example_t *sel[4];
     size_t sel_count = 0;
-    sc_error_t e = sc_persona_select_examples(&p, "test", 4, NULL, 0, sel, &sel_count, 4);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(sel_count, 1);
+    hu_error_t e = hu_persona_select_examples(&p, "test", 4, NULL, 0, sel, &sel_count, 4);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(sel_count, 1);
 
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_select_examples_max_zero(void) {
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    const sc_persona_example_t *sel[1];
+    const hu_persona_example_t *sel[1];
     size_t sel_count = 99;
-    sc_error_t e = sc_persona_select_examples(&p, "x", 1, NULL, 0, sel, &sel_count, 0);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_EQ(sel_count, 0);
+    hu_error_t e = hu_persona_select_examples(&p, "x", 1, NULL, 0, sel, &sel_count, 0);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_EQ(sel_count, 0);
 }
 
 /* Extracted iMessage example bank integration test */
 static void test_persona_extracted_imessage_bank_loads_and_selects(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
 
     static const char json[] =
         "{\"examples\":["
@@ -1181,378 +1181,378 @@ static void test_persona_extracted_imessage_bank_loads_and_selects(void) {
         " \"response\":\"That's my job as your little brother\"}"
         "]}";
 
-    sc_persona_example_bank_t bank = {0};
-    sc_error_t err =
-        sc_persona_examples_load_json(&alloc, "imessage", 8, json, strlen(json), &bank);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(bank.examples_count, 5);
-    SC_ASSERT_STR_EQ(bank.channel, "imessage");
-    SC_ASSERT_STR_EQ(bank.examples[0].context, "Friend suggesting plans");
-    SC_ASSERT_STR_EQ(bank.examples[4].response, "That's my job as your little brother");
+    hu_persona_example_bank_t bank = {0};
+    hu_error_t err =
+        hu_persona_examples_load_json(&alloc, "imessage", 8, json, strlen(json), &bank);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(bank.examples_count, 5);
+    HU_ASSERT_STR_EQ(bank.channel, "imessage");
+    HU_ASSERT_STR_EQ(bank.examples[0].context, "Friend suggesting plans");
+    HU_ASSERT_STR_EQ(bank.examples[4].response, "That's my job as your little brother");
 
-    sc_persona_t p = {.example_banks = &bank, .example_banks_count = 1};
+    hu_persona_t p = {.example_banks = &bank, .example_banks_count = 1};
 
-    const sc_persona_example_t *sel[3];
+    const hu_persona_example_t *sel[3];
     size_t sel_count = 0;
-    err = sc_persona_select_examples(&p, "imessage", 8, "lunch plans greeting", 20, sel, &sel_count,
+    err = hu_persona_select_examples(&p, "imessage", 8, "lunch plans greeting", 20, sel, &sel_count,
                                      3);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(sel_count > 0);
-    SC_ASSERT_TRUE(sel_count <= 3);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(sel_count > 0);
+    HU_ASSERT_TRUE(sel_count <= 3);
 
-    const sc_persona_example_t *sel2[3];
+    const hu_persona_example_t *sel2[3];
     size_t sel2_count = 0;
-    err = sc_persona_select_examples(&p, "imessage", 8, "sibling teasing banter", 22, sel2,
+    err = hu_persona_select_examples(&p, "imessage", 8, "sibling teasing banter", 22, sel2,
                                      &sel2_count, 3);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(sel2_count > 0);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(sel2_count > 0);
 
     free_example_bank(&alloc, &bank);
 }
 
-/* sc_persona_find_overlay - edge cases */
+/* hu_persona_find_overlay - edge cases */
 static void test_persona_find_overlay_null_channel(void) {
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    const sc_persona_overlay_t *o = sc_persona_find_overlay(&p, NULL, 0);
-    SC_ASSERT_TRUE(o == NULL);
+    const hu_persona_overlay_t *o = hu_persona_find_overlay(&p, NULL, 0);
+    HU_ASSERT_TRUE(o == NULL);
 }
 
-/* sc_persona_analyzer_parse_response - edge cases */
+/* hu_persona_analyzer_parse_response - edge cases */
 static void test_persona_analyzer_parse_response_empty_object(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t e = sc_persona_analyzer_parse_response(&alloc, "{}", 2, "test", 4, &p);
-    if (e == SC_OK)
-        sc_persona_deinit(&alloc, &p);
+    hu_error_t e = hu_persona_analyzer_parse_response(&alloc, "{}", 2, "test", 4, &p);
+    if (e == HU_OK)
+        hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_analyzer_parse_response_malformed(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t e = sc_persona_analyzer_parse_response(&alloc, "not json", 8, "test", 4, &p);
-    SC_ASSERT_TRUE(e != SC_OK);
+    hu_error_t e = hu_persona_analyzer_parse_response(&alloc, "not json", 8, "test", 4, &p);
+    HU_ASSERT_TRUE(e != HU_OK);
 }
 
-/* sc_persona_creator_synthesize - edge cases */
+/* hu_persona_creator_synthesize - edge cases */
 static void test_persona_creator_synthesize_single_partial(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t partial;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t partial;
     memset(&partial, 0, sizeof(partial));
     char *trait = "direct";
     partial.traits = &trait;
     partial.traits_count = 1;
 
-    sc_persona_t out;
+    hu_persona_t out;
     memset(&out, 0, sizeof(out));
-    sc_error_t e = sc_persona_creator_synthesize(&alloc, &partial, 1, "single", 6, &out);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_TRUE(out.traits_count >= 1);
-    sc_persona_deinit(&alloc, &out);
+    hu_error_t e = hu_persona_creator_synthesize(&alloc, &partial, 1, "single", 6, &out);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_TRUE(out.traits_count >= 1);
+    hu_persona_deinit(&alloc, &out);
 }
 
 static void test_persona_creator_synthesize_zero_partials(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t dummy;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t dummy;
     memset(&dummy, 0, sizeof(dummy));
-    sc_persona_t out;
+    hu_persona_t out;
     memset(&out, 0, sizeof(out));
-    sc_error_t e = sc_persona_creator_synthesize(&alloc, &dummy, 0, "empty", 5, &out);
+    hu_error_t e = hu_persona_creator_synthesize(&alloc, &dummy, 0, "empty", 5, &out);
     /* With count 0, succeeds with empty persona */
-    if (e == SC_OK) {
-        SC_ASSERT_TRUE(out.name != NULL);
-        sc_persona_deinit(&alloc, &out);
+    if (e == HU_OK) {
+        HU_ASSERT_TRUE(out.name != NULL);
+        hu_persona_deinit(&alloc, &out);
     }
 }
 
-/* sc_persona_sampler - edge cases */
+/* hu_persona_sampler - edge cases */
 static void test_sampler_imessage_query_small_cap(void) {
     char buf[16];
     size_t out_len = 0;
-    sc_error_t e = sc_persona_sampler_imessage_query(buf, 16, &out_len, 100);
-    SC_ASSERT_TRUE(e != SC_OK);
+    hu_error_t e = hu_persona_sampler_imessage_query(buf, 16, &out_len, 100);
+    HU_ASSERT_TRUE(e != HU_OK);
 }
 
 static void test_sampler_facebook_parse_malformed(void) {
     char **out = NULL;
     size_t count = 0;
-    sc_error_t e = sc_persona_sampler_facebook_parse("bad", 3, &out, &count);
-    SC_ASSERT_TRUE(e != SC_OK || count == 0);
+    hu_error_t e = hu_persona_sampler_facebook_parse("bad", 3, &out, &count);
+    HU_ASSERT_TRUE(e != HU_OK || count == 0);
 }
 
 static void test_sampler_facebook_parse_missing_messages(void) {
     char **out = NULL;
     size_t count = 0;
-    sc_error_t e = sc_persona_sampler_facebook_parse("{\"other\":1}", 11, &out, &count);
-    SC_ASSERT_TRUE(e != SC_OK || count == 0);
+    hu_error_t e = hu_persona_sampler_facebook_parse("{\"other\":1}", 11, &out, &count);
+    HU_ASSERT_TRUE(e != HU_OK || count == 0);
 }
 
-/* sc_persona_deinit - edge cases */
+/* hu_persona_deinit - edge cases */
 static void test_persona_deinit_double_call(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]}}";
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t e = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(e, SC_OK);
-    sc_persona_deinit(&alloc, &p);
-    sc_persona_deinit(&alloc, &p);
+    hu_error_t e = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(e, HU_OK);
+    hu_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 /* tool execute tests */
 static void test_persona_tool_execute_list(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(tool.vtable != NULL);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(tool.vtable != NULL);
 
     const char *args = "{\"action\":\"list\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args, strlen(args), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args, strlen(args), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_invalid_action(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args = "{\"action\":\"invalid\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args, strlen(args), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args, strlen(args), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(!result.success);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(!result.success);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_switch_no_agent(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     /* Switch without agent set returns "No active agent" */
     const char *args = "{\"action\":\"switch\",\"name\":\"test\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args, strlen(args), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args, strlen(args), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(!result.success);
-    SC_ASSERT_TRUE(result.error_msg != NULL);
-    SC_ASSERT_TRUE(strstr(result.error_msg, "active agent") != NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(!result.success);
+    HU_ASSERT_TRUE(result.error_msg != NULL);
+    HU_ASSERT_TRUE(strstr(result.error_msg, "active agent") != NULL);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_switch_with_agent(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_provider_t prov = {0};
-    SC_ASSERT_EQ(sc_provider_create(&alloc, "openai", 6, "test-key", 8, "", 0, &prov), SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov = {0};
+    HU_ASSERT_EQ(hu_provider_create(&alloc, "openai", 6, "test-key", 8, "", 0, &prov), HU_OK);
 
-    sc_agent_t agent = {0};
-    SC_ASSERT_EQ(sc_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL,
+    hu_agent_t agent = {0};
+    HU_ASSERT_EQ(hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL,
                                       "gpt-4o-mini", 10, "openai", 6, 0.7, ".", 1, 5, 20, false, 2,
                                       NULL, 0, NULL, 0, NULL),
-                 SC_OK);
+                 HU_OK);
 
-    sc_agent_set_current_for_tools(&agent);
+    hu_agent_set_current_for_tools(&agent);
 
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     /* Switch to clear: name empty or null */
     const char *args_clear = "{\"action\":\"switch\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args_clear, strlen(args_clear), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args_clear, strlen(args_clear), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(result.success);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result.success);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
 
-    sc_agent_clear_current_for_tools();
-    sc_agent_deinit(&agent);
+    hu_agent_clear_current_for_tools();
+    hu_agent_deinit(&agent);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_feedback(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args = "{\"action\":\"feedback\",\"name\":\"test\",\"original\":\"Hey there!\","
                        "\"corrected\":\"Hey what's up\",\"context\":\"greeting\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args, strlen(args), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args, strlen(args), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(result.success);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result.success);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_feedback_missing_corrected(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args = "{\"action\":\"feedback\",\"name\":\"test\",\"original\":\"Hey\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args, strlen(args), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args, strlen(args), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(!result.success);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(!result.success);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_create_redirects_to_cli(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args = "{\"action\":\"create\",\"name\":\"test\"}";
-    sc_json_value_t *val = NULL;
-    err = sc_json_parse(&alloc, args, strlen(args), &val);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_json_value_t *val = NULL;
+    err = hu_json_parse(&alloc, args, strlen(args), &val);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, val, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(result.output != NULL);
-    SC_ASSERT_TRUE(strstr(result.output, "CLI") != NULL || strstr(result.output, "cli") != NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result.output != NULL);
+    HU_ASSERT_TRUE(strstr(result.output, "CLI") != NULL || strstr(result.output, "cli") != NULL);
 
-    sc_json_free(&alloc, val);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, val);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_show(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args_str = "{\"action\":\"show\",\"name\":\"nonexistent_xyz\"}";
-    sc_json_value_t *args = NULL;
-    err = sc_json_parse(&alloc, args_str, strlen(args_str), &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(args != NULL);
+    hu_json_value_t *args = NULL;
+    err = hu_json_parse(&alloc, args_str, strlen(args_str), &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(args != NULL);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
-    SC_ASSERT_EQ(err, SC_OK);
+    HU_ASSERT_EQ(err, HU_OK);
     /* In test mode, show returns a stub message */
-    SC_ASSERT_TRUE(result.output != NULL);
+    HU_ASSERT_TRUE(result.output != NULL);
 
-    sc_json_free(&alloc, args);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, args);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_apply_feedback(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args_str = "{\"action\":\"apply_feedback\",\"name\":\"test\"}";
-    sc_json_value_t *args = NULL;
-    err = sc_json_parse(&alloc, args_str, strlen(args_str), &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(args != NULL);
+    hu_json_value_t *args = NULL;
+    err = hu_json_parse(&alloc, args_str, strlen(args_str), &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(args != NULL);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(result.success);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(result.success);
 
-    sc_json_free(&alloc, args);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, args);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
 
 static void test_persona_tool_execute_apply_feedback_no_name(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_tool_t tool = {0};
-    sc_error_t err = sc_persona_tool_create(&alloc, &tool);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_tool_t tool = {0};
+    hu_error_t err = hu_persona_tool_create(&alloc, &tool);
+    HU_ASSERT_EQ(err, HU_OK);
 
     const char *args_str = "{\"action\":\"apply_feedback\"}";
-    sc_json_value_t *args = NULL;
-    err = sc_json_parse(&alloc, args_str, strlen(args_str), &args);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(args != NULL);
+    hu_json_value_t *args = NULL;
+    err = hu_json_parse(&alloc, args_str, strlen(args_str), &args);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(args != NULL);
 
-    sc_tool_result_t result;
+    hu_tool_result_t result;
     memset(&result, 0, sizeof(result));
     err = tool.vtable->execute(tool.ctx, &alloc, args, &result);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(!result.success);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(!result.success);
 
-    sc_json_free(&alloc, args);
-    sc_tool_result_free(&alloc, &result);
+    hu_json_free(&alloc, args);
+    hu_tool_result_free(&alloc, &result);
     if (tool.vtable->deinit)
         tool.vtable->deinit(tool.ctx, &alloc);
 }
@@ -1561,61 +1561,61 @@ static void test_persona_tool_execute_apply_feedback_no_name(void) {
 static void test_sampler_imessage_query_basic(void) {
     char buf[512];
     size_t len = 0;
-    sc_error_t err = sc_persona_sampler_imessage_query(buf, 512, &len, 100);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(len > 0);
-    SC_ASSERT_NOT_NULL(strstr(buf, "SELECT"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "LIMIT 100"));
+    hu_error_t err = hu_persona_sampler_imessage_query(buf, 512, &len, 100);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "SELECT"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "LIMIT 100"));
 }
 
 static void test_sampler_imessage_query_null_buf(void) {
     size_t len = 0;
-    sc_error_t err = sc_persona_sampler_imessage_query(NULL, 512, &len, 100);
-    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    hu_error_t err = hu_persona_sampler_imessage_query(NULL, 512, &len, 100);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_sampler_imessage_query_escapes_quotes(void) {
     char buf[512];
     size_t len = 0;
     const char *handle_id = "o'brien";
-    sc_error_t err = sc_persona_sampler_imessage_conversation_query(handle_id, strlen(handle_id),
+    hu_error_t err = hu_persona_sampler_imessage_conversation_query(handle_id, strlen(handle_id),
                                                                     buf, sizeof(buf), &len, 50);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(len > 0);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(len > 0);
     /* Single quotes in handle_id must be escaped as '' for SQL safety. */
-    SC_ASSERT_NOT_NULL(strstr(buf, "o''brien"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "o''brien"));
     /* Must not contain unescaped injection pattern. */
-    SC_ASSERT_NULL(strstr(buf, "'; DROP TABLE"));
+    HU_ASSERT_NULL(strstr(buf, "'; DROP TABLE"));
 }
 
 static void test_sampler_facebook_parse_empty_object(void) {
     const char *json = "{\"messages\":[]}";
     char **msgs = NULL;
     size_t count = 99;
-    sc_error_t err = sc_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, (size_t)0);
+    hu_error_t err = hu_persona_sampler_facebook_parse(json, strlen(json), &msgs, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, (size_t)0);
 }
 
 static void test_sampler_gmail_parse_null(void) {
     char **out = NULL;
     size_t count = 0;
-    sc_error_t err = sc_persona_sampler_gmail_parse(NULL, 0, &out, &count);
-    SC_ASSERT_EQ(err, SC_ERR_INVALID_ARGUMENT);
+    hu_error_t err = hu_persona_sampler_gmail_parse(NULL, 0, &out, &count);
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_sampler_gmail_parse_empty_object(void) {
     const char *json = "{\"messages\":[]}";
     char **msgs = NULL;
     size_t count = 99;
-    sc_error_t err = sc_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(count, (size_t)0);
+    hu_error_t err = hu_persona_sampler_gmail_parse(json, strlen(json), &msgs, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, (size_t)0);
 }
 
 /* Feedback - null/error tests */
 static void test_feedback_record_null_alloc(void) {
-    sc_persona_feedback_t fb;
+    hu_persona_feedback_t fb;
     memset(&fb, 0, sizeof(fb));
     fb.channel = "cli";
     fb.channel_len = 3;
@@ -1623,13 +1623,13 @@ static void test_feedback_record_null_alloc(void) {
     fb.original_response_len = 1;
     fb.corrected_response = "b";
     fb.corrected_response_len = 1;
-    sc_error_t err = sc_persona_feedback_record(NULL, "test", 4, &fb);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_feedback_record(NULL, "test", 4, &fb);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_feedback_record_null_name(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_feedback_t fb;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_feedback_t fb;
     memset(&fb, 0, sizeof(fb));
     fb.channel = "cli";
     fb.channel_len = 3;
@@ -1637,25 +1637,25 @@ static void test_feedback_record_null_name(void) {
     fb.original_response_len = 1;
     fb.corrected_response = "b";
     fb.corrected_response_len = 1;
-    sc_error_t err = sc_persona_feedback_record(&alloc, NULL, 0, &fb);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_feedback_record(&alloc, NULL, 0, &fb);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_feedback_record_null_feedback(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_error_t err = sc_persona_feedback_record(&alloc, "test", 4, NULL);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_persona_feedback_record(&alloc, "test", 4, NULL);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_feedback_apply_null_alloc(void) {
-    sc_error_t err = sc_persona_feedback_apply(NULL, "test", 4);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_feedback_apply(NULL, "test", 4);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_feedback_apply_null_name(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_error_t err = sc_persona_feedback_apply(&alloc, NULL, 0);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_error_t err = hu_persona_feedback_apply(&alloc, NULL, 0);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 /* Analyzer - additional tests */
@@ -1663,81 +1663,81 @@ static void test_analyzer_build_prompt_basic(void) {
     const char *messages[] = {"hello", "world"};
     char buf[4096];
     size_t len = 0;
-    sc_error_t err =
-        sc_persona_analyzer_build_prompt(messages, 2, "discord", buf, sizeof(buf), &len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(len > 0);
+    hu_error_t err =
+        hu_persona_analyzer_build_prompt(messages, 2, "discord", buf, sizeof(buf), &len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(len > 0);
 }
 
 static void test_analyzer_build_prompt_null_messages(void) {
     char buf[4096];
     size_t len = 0;
-    sc_error_t err = sc_persona_analyzer_build_prompt(NULL, 2, "discord", buf, sizeof(buf), &len);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_analyzer_build_prompt(NULL, 2, "discord", buf, sizeof(buf), &len);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_analyzer_build_prompt_zero_count(void) {
     const char *messages[] = {"hello"};
     char buf[4096];
     size_t len = 0;
-    sc_error_t err =
-        sc_persona_analyzer_build_prompt(messages, 0, "discord", buf, sizeof(buf), &len);
-    /* Current implementation accepts 0 count and returns SC_OK */
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_TRUE(len > 0);
+    hu_error_t err =
+        hu_persona_analyzer_build_prompt(messages, 0, "discord", buf, sizeof(buf), &len);
+    /* Current implementation accepts 0 count and returns HU_OK */
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(len > 0);
 }
 
 static void test_analyzer_parse_response_null_alloc(void) {
-    sc_persona_t out;
+    hu_persona_t out;
     memset(&out, 0, sizeof(out));
     const char *response = "{\"traits\":[]}";
-    sc_error_t err =
-        sc_persona_analyzer_parse_response(NULL, response, strlen(response), "test", 4, &out);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err =
+        hu_persona_analyzer_parse_response(NULL, response, strlen(response), "test", 4, &out);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 /* Creator - null/error tests */
 static void test_creator_synthesize_null_alloc(void) {
-    sc_persona_t partial;
+    hu_persona_t partial;
     memset(&partial, 0, sizeof(partial));
-    sc_persona_t out;
+    hu_persona_t out;
     memset(&out, 0, sizeof(out));
-    sc_error_t err = sc_persona_creator_synthesize(NULL, &partial, 1, "test", 4, &out);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_creator_synthesize(NULL, &partial, 1, "test", 4, &out);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_creator_synthesize_null_partials(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t out;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t out;
     memset(&out, 0, sizeof(out));
-    sc_error_t err = sc_persona_creator_synthesize(&alloc, NULL, 1, "test", 4, &out);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_creator_synthesize(&alloc, NULL, 1, "test", 4, &out);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_creator_synthesize_zero_count(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t dummy;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t dummy;
     memset(&dummy, 0, sizeof(dummy));
-    sc_persona_t out;
+    hu_persona_t out;
     memset(&out, 0, sizeof(out));
-    sc_error_t err = sc_persona_creator_synthesize(&alloc, &dummy, 0, "test", 4, &out);
-    /* Current implementation accepts 0 count and returns SC_OK with empty persona */
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(out.name, "test");
-    sc_persona_deinit(&alloc, &out);
+    hu_error_t err = hu_persona_creator_synthesize(&alloc, &dummy, 0, "test", 4, &out);
+    /* Current implementation accepts 0 count and returns HU_OK with empty persona */
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(out.name, "test");
+    hu_persona_deinit(&alloc, &out);
 }
 
 static void test_creator_write_null_alloc(void) {
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
     p.name = "test";
     p.name_len = 4;
-    sc_error_t err = sc_persona_creator_write(NULL, &p);
-    SC_ASSERT_NEQ(err, SC_OK);
+    hu_error_t err = hu_persona_creator_write(NULL, &p);
+    HU_ASSERT_NEQ(err, HU_OK);
 }
 
 static void test_overlay_typing_quirks_parsed(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"quirk_test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
                        "\"channel_overlays\":{\"imessage\":{"
@@ -1745,39 +1745,39 @@ static void test_overlay_typing_quirks_parsed(void) {
                        "\"typing_quirks\":[\"lowercase\",\"no_periods\"],"
                        "\"message_splitting\":true,"
                        "\"max_segment_chars\":80}}}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(p.overlays_count, 1);
-    SC_ASSERT_TRUE(p.overlays[0].message_splitting);
-    SC_ASSERT_EQ(p.overlays[0].max_segment_chars, 80u);
-    SC_ASSERT_EQ(p.overlays[0].typing_quirks_count, 2);
-    SC_ASSERT_STR_EQ(p.overlays[0].typing_quirks[0], "lowercase");
-    SC_ASSERT_STR_EQ(p.overlays[0].typing_quirks[1], "no_periods");
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.overlays_count, 1);
+    HU_ASSERT_TRUE(p.overlays[0].message_splitting);
+    HU_ASSERT_EQ(p.overlays[0].max_segment_chars, 80u);
+    HU_ASSERT_EQ(p.overlays[0].typing_quirks_count, 2);
+    HU_ASSERT_STR_EQ(p.overlays[0].typing_quirks[0], "lowercase");
+    HU_ASSERT_STR_EQ(p.overlays[0].typing_quirks[1], "no_periods");
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_overlay_typing_quirks_default_when_absent(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"no_quirks\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
                        "\"channel_overlays\":{\"imessage\":{"
                        "\"formality\":\"formal\"}}}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(p.overlays_count, 1);
-    SC_ASSERT_FALSE(p.overlays[0].message_splitting);
-    SC_ASSERT_EQ(p.overlays[0].max_segment_chars, 0u);
-    SC_ASSERT_EQ(p.overlays[0].typing_quirks_count, 0);
-    SC_ASSERT_NULL(p.overlays[0].typing_quirks);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.overlays_count, 1);
+    HU_ASSERT_FALSE(p.overlays[0].message_splitting);
+    HU_ASSERT_EQ(p.overlays[0].max_segment_chars, 0u);
+    HU_ASSERT_EQ(p.overlays[0].typing_quirks_count, 0);
+    HU_ASSERT_NULL(p.overlays[0].typing_quirks);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_overlay_typing_quirks_in_prompt(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *quirks[] = {"lowercase", "no_periods"};
-    sc_persona_overlay_t overlays[] = {
+    hu_persona_overlay_t overlays[] = {
         {.channel = "imessage",
          .formality = "casual",
          .avg_length = NULL,
@@ -1789,7 +1789,7 @@ static void test_overlay_typing_quirks_in_prompt(void) {
          .typing_quirks = quirks,
          .typing_quirks_count = 2},
     };
-    sc_persona_t p = {
+    hu_persona_t p = {
         .name = "quirk_user",
         .name_len = 10,
         .identity = "A test persona",
@@ -1799,20 +1799,20 @@ static void test_overlay_typing_quirks_in_prompt(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Typing quirks"));
-    SC_ASSERT_NOT_NULL(strstr(out, "lowercase"));
-    SC_ASSERT_NOT_NULL(strstr(out, "no_periods"));
-    SC_ASSERT_NOT_NULL(strstr(out, "Message splitting: ON"));
-    SC_ASSERT_NOT_NULL(strstr(out, "80 chars"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, "imessage", 8, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Typing quirks"));
+    HU_ASSERT_NOT_NULL(strstr(out, "lowercase"));
+    HU_ASSERT_NOT_NULL(strstr(out, "no_periods"));
+    HU_ASSERT_NOT_NULL(strstr(out, "Message splitting: ON"));
+    HU_ASSERT_NOT_NULL(strstr(out, "80 chars"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 /* ── Rich persona elements (Tier 1–3) ── */
 
 static void test_persona_load_json_rich_persona(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json =
         "{"
         "  \"version\": 1, \"name\": \"rich_test\","
@@ -1878,82 +1878,82 @@ static void test_persona_load_json_rich_persona(void) {
         "  }"
         "}";
 
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
     /* Core anchor */
-    SC_ASSERT_NOT_NULL(p.core_anchor);
-    SC_ASSERT_NOT_NULL(strstr(p.core_anchor, "grounded warmth"));
+    HU_ASSERT_NOT_NULL(p.core_anchor);
+    HU_ASSERT_NOT_NULL(strstr(p.core_anchor, "grounded warmth"));
 
     /* Motivation */
-    SC_ASSERT_NOT_NULL(p.motivation.primary_drive);
-    SC_ASSERT_NOT_NULL(strstr(p.motivation.primary_drive, "understood"));
-    SC_ASSERT_NOT_NULL(p.motivation.protecting);
-    SC_ASSERT_NOT_NULL(p.motivation.avoiding);
-    SC_ASSERT_NOT_NULL(p.motivation.wanting);
+    HU_ASSERT_NOT_NULL(p.motivation.primary_drive);
+    HU_ASSERT_NOT_NULL(strstr(p.motivation.primary_drive, "understood"));
+    HU_ASSERT_NOT_NULL(p.motivation.protecting);
+    HU_ASSERT_NOT_NULL(p.motivation.avoiding);
+    HU_ASSERT_NOT_NULL(p.motivation.wanting);
 
     /* Situational directions */
-    SC_ASSERT_EQ(p.situational_directions_count, 2);
-    SC_ASSERT_NOT_NULL(strstr(p.situational_directions[0].trigger, "grieving"));
-    SC_ASSERT_NOT_NULL(strstr(p.situational_directions[0].instruction, "shorter"));
-    SC_ASSERT_NOT_NULL(strstr(p.situational_directions[1].trigger, "celebrating"));
+    HU_ASSERT_EQ(p.situational_directions_count, 2);
+    HU_ASSERT_NOT_NULL(strstr(p.situational_directions[0].trigger, "grieving"));
+    HU_ASSERT_NOT_NULL(strstr(p.situational_directions[0].instruction, "shorter"));
+    HU_ASSERT_NOT_NULL(strstr(p.situational_directions[1].trigger, "celebrating"));
 
     /* Humor */
-    SC_ASSERT_STR_EQ(p.humor.type, "dry");
-    SC_ASSERT_STR_EQ(p.humor.frequency, "occasional");
-    SC_ASSERT_EQ(p.humor.targets_count, 2);
-    SC_ASSERT_EQ(p.humor.boundaries_count, 2);
-    SC_ASSERT_STR_EQ(p.humor.timing, "tension-breaking");
+    HU_ASSERT_STR_EQ(p.humor.type, "dry");
+    HU_ASSERT_STR_EQ(p.humor.frequency, "occasional");
+    HU_ASSERT_EQ(p.humor.targets_count, 2);
+    HU_ASSERT_EQ(p.humor.boundaries_count, 2);
+    HU_ASSERT_STR_EQ(p.humor.timing, "tension-breaking");
 
     /* Conflict style */
-    SC_ASSERT_STR_EQ(p.conflict_style.pushback_response, "reframe");
-    SC_ASSERT_STR_EQ(p.conflict_style.confrontation_comfort, "selective");
-    SC_ASSERT_STR_EQ(p.conflict_style.apology_style, "direct");
-    SC_ASSERT_NOT_NULL(p.conflict_style.boundary_assertion);
-    SC_ASSERT_NOT_NULL(p.conflict_style.repair_behavior);
+    HU_ASSERT_STR_EQ(p.conflict_style.pushback_response, "reframe");
+    HU_ASSERT_STR_EQ(p.conflict_style.confrontation_comfort, "selective");
+    HU_ASSERT_STR_EQ(p.conflict_style.apology_style, "direct");
+    HU_ASSERT_NOT_NULL(p.conflict_style.boundary_assertion);
+    HU_ASSERT_NOT_NULL(p.conflict_style.repair_behavior);
 
     /* Emotional range */
-    SC_ASSERT_NOT_NULL(p.emotional_range.ceiling);
-    SC_ASSERT_NOT_NULL(p.emotional_range.floor);
-    SC_ASSERT_EQ(p.emotional_range.escalation_triggers_count, 2);
-    SC_ASSERT_EQ(p.emotional_range.de_escalation_count, 2);
-    SC_ASSERT_NOT_NULL(p.emotional_range.withdrawal_conditions);
-    SC_ASSERT_NOT_NULL(p.emotional_range.recovery_style);
+    HU_ASSERT_NOT_NULL(p.emotional_range.ceiling);
+    HU_ASSERT_NOT_NULL(p.emotional_range.floor);
+    HU_ASSERT_EQ(p.emotional_range.escalation_triggers_count, 2);
+    HU_ASSERT_EQ(p.emotional_range.de_escalation_count, 2);
+    HU_ASSERT_NOT_NULL(p.emotional_range.withdrawal_conditions);
+    HU_ASSERT_NOT_NULL(p.emotional_range.recovery_style);
 
     /* Voice rhythm */
-    SC_ASSERT_NOT_NULL(p.voice_rhythm.sentence_pattern);
-    SC_ASSERT_NOT_NULL(p.voice_rhythm.paragraph_cadence);
-    SC_ASSERT_STR_EQ(p.voice_rhythm.response_tempo, "thoughtful");
-    SC_ASSERT_STR_EQ(p.voice_rhythm.emphasis_style, "repetition");
-    SC_ASSERT_NOT_NULL(p.voice_rhythm.pause_behavior);
+    HU_ASSERT_NOT_NULL(p.voice_rhythm.sentence_pattern);
+    HU_ASSERT_NOT_NULL(p.voice_rhythm.paragraph_cadence);
+    HU_ASSERT_STR_EQ(p.voice_rhythm.response_tempo, "thoughtful");
+    HU_ASSERT_STR_EQ(p.voice_rhythm.emphasis_style, "repetition");
+    HU_ASSERT_NOT_NULL(p.voice_rhythm.pause_behavior);
 
     /* Character invariants */
-    SC_ASSERT_EQ(p.character_invariants_count, 2);
-    SC_ASSERT_NOT_NULL(strstr(p.character_invariants[0], "Never dismisses"));
+    HU_ASSERT_EQ(p.character_invariants_count, 2);
+    HU_ASSERT_NOT_NULL(strstr(p.character_invariants[0], "Never dismisses"));
 
     /* Intellectual */
-    SC_ASSERT_EQ(p.intellectual.expertise_count, 2);
-    SC_ASSERT_EQ(p.intellectual.curiosity_areas_count, 2);
-    SC_ASSERT_STR_EQ(p.intellectual.thinking_style, "analogy");
-    SC_ASSERT_NOT_NULL(p.intellectual.metaphor_sources);
+    HU_ASSERT_EQ(p.intellectual.expertise_count, 2);
+    HU_ASSERT_EQ(p.intellectual.curiosity_areas_count, 2);
+    HU_ASSERT_STR_EQ(p.intellectual.thinking_style, "analogy");
+    HU_ASSERT_NOT_NULL(p.intellectual.metaphor_sources);
 
     /* Backstory behaviors */
-    SC_ASSERT_EQ(p.backstory_behaviors_count, 1);
-    SC_ASSERT_NOT_NULL(strstr(p.backstory_behaviors[0].backstory_beat, "chaotic"));
-    SC_ASSERT_NOT_NULL(strstr(p.backstory_behaviors[0].behavioral_rule, "over-explains"));
+    HU_ASSERT_EQ(p.backstory_behaviors_count, 1);
+    HU_ASSERT_NOT_NULL(strstr(p.backstory_behaviors[0].backstory_beat, "chaotic"));
+    HU_ASSERT_NOT_NULL(strstr(p.backstory_behaviors[0].behavioral_rule, "over-explains"));
 
     /* Sensory */
-    SC_ASSERT_STR_EQ(p.sensory.dominant_sense, "tactile");
-    SC_ASSERT_EQ(p.sensory.metaphor_vocabulary_count, 2);
-    SC_ASSERT_NOT_NULL(p.sensory.grounding_patterns);
+    HU_ASSERT_STR_EQ(p.sensory.dominant_sense, "tactile");
+    HU_ASSERT_EQ(p.sensory.metaphor_vocabulary_count, 2);
+    HU_ASSERT_NOT_NULL(p.sensory.grounding_patterns);
 
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_prompt_includes_motivation(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
     p.name = "mottest";
     p.name_len = 7;
     p.identity = "Test";
@@ -1964,22 +1964,22 @@ static void test_persona_prompt_includes_motivation(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Motivation"));
-    SC_ASSERT_NOT_NULL(strstr(out, "connection"));
-    SC_ASSERT_NOT_NULL(strstr(out, "dignity"));
-    SC_ASSERT_NOT_NULL(strstr(out, "smalltalk"));
-    SC_ASSERT_NOT_NULL(strstr(out, "depth"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Motivation"));
+    HU_ASSERT_NOT_NULL(strstr(out, "connection"));
+    HU_ASSERT_NOT_NULL(strstr(out, "dignity"));
+    HU_ASSERT_NOT_NULL(strstr(out, "smalltalk"));
+    HU_ASSERT_NOT_NULL(strstr(out, "depth"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_situational_directions(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_situational_direction_t dirs[] = {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_situational_direction_t dirs[] = {
         {.trigger = "user is angry", .instruction = "stay calm, validate first"},
     };
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "sdtest";
     p.name_len = 6;
     p.identity = "Test";
@@ -1988,18 +1988,18 @@ static void test_persona_prompt_includes_situational_directions(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "WHEN user is angry"));
-    SC_ASSERT_NOT_NULL(strstr(out, "stay calm"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "WHEN user is angry"));
+    HU_ASSERT_NOT_NULL(strstr(out, "stay calm"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_humor(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *targets[] = {"self"};
     char *bounds[] = {"grief"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "humtest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2013,18 +2013,18 @@ static void test_persona_prompt_includes_humor(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Humor"));
-    SC_ASSERT_NOT_NULL(strstr(out, "dry"));
-    SC_ASSERT_NOT_NULL(strstr(out, "Never funny"));
-    SC_ASSERT_NOT_NULL(strstr(out, "grief"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Humor"));
+    HU_ASSERT_NOT_NULL(strstr(out, "dry"));
+    HU_ASSERT_NOT_NULL(strstr(out, "Never funny"));
+    HU_ASSERT_NOT_NULL(strstr(out, "grief"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_conflict_style(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
     p.name = "cftest";
     p.name_len = 6;
     p.identity = "Test";
@@ -2033,19 +2033,19 @@ static void test_persona_prompt_includes_conflict_style(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Conflict"));
-    SC_ASSERT_NOT_NULL(strstr(out, "reframe"));
-    SC_ASSERT_NOT_NULL(strstr(out, "high"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Conflict"));
+    HU_ASSERT_NOT_NULL(strstr(out, "reframe"));
+    HU_ASSERT_NOT_NULL(strstr(out, "high"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_emotional_range(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *triggers[] = {"injustice"};
     char *deesc[] = {"deep breath"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "ertest";
     p.name_len = 6;
     p.identity = "Test";
@@ -2058,18 +2058,18 @@ static void test_persona_prompt_includes_emotional_range(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Emotional Range"));
-    SC_ASSERT_NOT_NULL(strstr(out, "warm excitement"));
-    SC_ASSERT_NOT_NULL(strstr(out, "injustice"));
-    SC_ASSERT_NOT_NULL(strstr(out, "deep breath"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Emotional Range"));
+    HU_ASSERT_NOT_NULL(strstr(out, "warm excitement"));
+    HU_ASSERT_NOT_NULL(strstr(out, "injustice"));
+    HU_ASSERT_NOT_NULL(strstr(out, "deep breath"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_voice_rhythm(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
     p.name = "vrtest";
     p.name_len = 6;
     p.identity = "Test";
@@ -2078,17 +2078,17 @@ static void test_persona_prompt_includes_voice_rhythm(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Voice Rhythm"));
-    SC_ASSERT_NOT_NULL(strstr(out, "short bursts"));
-    SC_ASSERT_NOT_NULL(strstr(out, "quick"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Voice Rhythm"));
+    HU_ASSERT_NOT_NULL(strstr(out, "short bursts"));
+    HU_ASSERT_NOT_NULL(strstr(out, "quick"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_core_anchor(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
     p.name = "anchor";
     p.name_len = 6;
     p.identity = "Test";
@@ -2096,17 +2096,17 @@ static void test_persona_prompt_includes_core_anchor(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Core Anchor"));
-    SC_ASSERT_NOT_NULL(strstr(out, "grounded warmth"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Core Anchor"));
+    HU_ASSERT_NOT_NULL(strstr(out, "grounded warmth"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_character_invariants(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *invar[] = {"Never dismisses feelings", "Always listens first"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "citest";
     p.name_len = 6;
     p.identity = "Test";
@@ -2115,20 +2115,20 @@ static void test_persona_prompt_includes_character_invariants(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Character Invariants"));
-    SC_ASSERT_NOT_NULL(strstr(out, "NEVER break"));
-    SC_ASSERT_NOT_NULL(strstr(out, "Never dismisses"));
-    SC_ASSERT_NOT_NULL(strstr(out, "Always listens"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Character Invariants"));
+    HU_ASSERT_NOT_NULL(strstr(out, "NEVER break"));
+    HU_ASSERT_NOT_NULL(strstr(out, "Never dismisses"));
+    HU_ASSERT_NOT_NULL(strstr(out, "Always listens"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_intellectual(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *exp[] = {"psychology"};
     char *cur[] = {"cooking"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "iptest";
     p.name_len = 6;
     p.identity = "Test";
@@ -2141,22 +2141,22 @@ static void test_persona_prompt_includes_intellectual(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Intellectual"));
-    SC_ASSERT_NOT_NULL(strstr(out, "psychology"));
-    SC_ASSERT_NOT_NULL(strstr(out, "cooking"));
-    SC_ASSERT_NOT_NULL(strstr(out, "analogy"));
-    SC_ASSERT_NOT_NULL(strstr(out, "nature"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Intellectual"));
+    HU_ASSERT_NOT_NULL(strstr(out, "psychology"));
+    HU_ASSERT_NOT_NULL(strstr(out, "cooking"));
+    HU_ASSERT_NOT_NULL(strstr(out, "analogy"));
+    HU_ASSERT_NOT_NULL(strstr(out, "nature"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_backstory_behaviors(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_backstory_behavior_t bbs[] = {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_backstory_behavior_t bbs[] = {
         {.backstory_beat = "grew up poor", .behavioral_rule = "values resourcefulness"},
     };
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "bbtest";
     p.name_len = 6;
     p.identity = "Test";
@@ -2165,18 +2165,18 @@ static void test_persona_prompt_includes_backstory_behaviors(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Backstory"));
-    SC_ASSERT_NOT_NULL(strstr(out, "Because grew up poor"));
-    SC_ASSERT_NOT_NULL(strstr(out, "values resourcefulness"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Backstory"));
+    HU_ASSERT_NOT_NULL(strstr(out, "Because grew up poor"));
+    HU_ASSERT_NOT_NULL(strstr(out, "values resourcefulness"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_sensory(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *vocab[] = {"hits hard", "feels heavy"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "sentest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2187,45 +2187,45 @@ static void test_persona_prompt_includes_sensory(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Sensory"));
-    SC_ASSERT_NOT_NULL(strstr(out, "tactile"));
-    SC_ASSERT_NOT_NULL(strstr(out, "hits hard"));
-    SC_ASSERT_NOT_NULL(strstr(out, "references weather"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Sensory"));
+    HU_ASSERT_NOT_NULL(strstr(out, "tactile"));
+    HU_ASSERT_NOT_NULL(strstr(out, "hits hard"));
+    HU_ASSERT_NOT_NULL(strstr(out, "references weather"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_validate_rejects_bad_motivation_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"motivation\":\"not an object\"}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "motivation"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "motivation"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_rejects_bad_humor_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"humor\":42}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "humor"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "humor"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_accepts_rich_persona(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json =
         "{\"version\":1,\"name\":\"rich\","
         "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
@@ -2242,17 +2242,17 @@ static void test_persona_validate_accepts_rich_persona(void) {
         "\"situational_directions\":[{\"trigger\":\"X\",\"instruction\":\"Y\"}]}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_NULL(err);
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_NULL(err);
 }
 
 /* --- Research-backed persona element tests --- */
 
 static void test_persona_prompt_includes_relational(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *bids[] = {"sharing interesting finds", "asking how their day went"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "reltest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2266,22 +2266,22 @@ static void test_persona_prompt_includes_relational(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Relational Intelligence"));
-    SC_ASSERT_NOT_NULL(strstr(out, "secure"));
-    SC_ASSERT_NOT_NULL(strstr(out, "turn toward"));
-    SC_ASSERT_NOT_NULL(strstr(out, "sharing interesting finds"));
-    SC_ASSERT_NOT_NULL(strstr(out, "anxious"));
-    SC_ASSERT_NOT_NULL(strstr(out, "inner circle"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Relational Intelligence"));
+    HU_ASSERT_NOT_NULL(strstr(out, "secure"));
+    HU_ASSERT_NOT_NULL(strstr(out, "turn toward"));
+    HU_ASSERT_NOT_NULL(strstr(out, "sharing interesting finds"));
+    HU_ASSERT_NOT_NULL(strstr(out, "anxious"));
+    HU_ASSERT_NOT_NULL(strstr(out, "inner circle"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_listening(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *techniques[] = {"open questions", "affirmations", "reflective listening",
                           "summary reflections"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "listest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2294,20 +2294,20 @@ static void test_persona_prompt_includes_listening(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Listening"));
-    SC_ASSERT_NOT_NULL(strstr(out, "support"));
-    SC_ASSERT_NOT_NULL(strstr(out, "reflective listening"));
-    SC_ASSERT_NOT_NULL(strstr(out, "observe without judgment"));
-    SC_ASSERT_NOT_NULL(strstr(out, "validate feelings"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Listening"));
+    HU_ASSERT_NOT_NULL(strstr(out, "support"));
+    HU_ASSERT_NOT_NULL(strstr(out, "reflective listening"));
+    HU_ASSERT_NOT_NULL(strstr(out, "observe without judgment"));
+    HU_ASSERT_NOT_NULL(strstr(out, "validate feelings"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_repair(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *phrases[] = {"I think I misread that", "let me try again", "I hear you"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "reptest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2319,20 +2319,20 @@ static void test_persona_prompt_includes_repair(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Repair Protocol"));
-    SC_ASSERT_NOT_NULL(strstr(out, "tone shifts"));
-    SC_ASSERT_NOT_NULL(strstr(out, "take ownership"));
-    SC_ASSERT_NOT_NULL(strstr(out, "face-saving"));
-    SC_ASSERT_NOT_NULL(strstr(out, "I think I misread that"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Repair Protocol"));
+    HU_ASSERT_NOT_NULL(strstr(out, "tone shifts"));
+    HU_ASSERT_NOT_NULL(strstr(out, "take ownership"));
+    HU_ASSERT_NOT_NULL(strstr(out, "face-saving"));
+    HU_ASSERT_NOT_NULL(strstr(out, "I think I misread that"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_mirroring(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *adapts[] = {"message_length", "formality", "emoji_usage", "pacing"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "mirtest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2344,21 +2344,21 @@ static void test_persona_prompt_includes_mirroring(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Linguistic Mirroring"));
-    SC_ASSERT_NOT_NULL(strstr(out, "moderate"));
-    SC_ASSERT_NOT_NULL(strstr(out, "message_length"));
-    SC_ASSERT_NOT_NULL(strstr(out, "gradual"));
-    SC_ASSERT_NOT_NULL(strstr(out, "higher-status"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Linguistic Mirroring"));
+    HU_ASSERT_NOT_NULL(strstr(out, "moderate"));
+    HU_ASSERT_NOT_NULL(strstr(out, "message_length"));
+    HU_ASSERT_NOT_NULL(strstr(out, "gradual"));
+    HU_ASSERT_NOT_NULL(strstr(out, "higher-status"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_prompt_includes_social(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *bonding[] = {"remembering small details", "checking in without agenda"};
     char *anti[] = {"shift responses", "unsolicited advice", "one-upping"};
-    sc_persona_t p = {0};
+    hu_persona_t p = {0};
     p.name = "soctest";
     p.name_len = 7;
     p.identity = "Test";
@@ -2371,19 +2371,19 @@ static void test_persona_prompt_includes_social(void) {
 
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(out, "Social Dynamics"));
-    SC_ASSERT_NOT_NULL(strstr(out, "adult with nurturing"));
-    SC_ASSERT_NOT_NULL(strstr(out, "small talk"));
-    SC_ASSERT_NOT_NULL(strstr(out, "remembering small details"));
-    SC_ASSERT_NOT_NULL(strstr(out, "NEVER"));
-    SC_ASSERT_NOT_NULL(strstr(out, "shift responses"));
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(out, "Social Dynamics"));
+    HU_ASSERT_NOT_NULL(strstr(out, "adult with nurturing"));
+    HU_ASSERT_NOT_NULL(strstr(out, "small talk"));
+    HU_ASSERT_NOT_NULL(strstr(out, "remembering small details"));
+    HU_ASSERT_NOT_NULL(strstr(out, "NEVER"));
+    HU_ASSERT_NOT_NULL(strstr(out, "shift responses"));
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void test_persona_load_json_research_fields(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"research\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"empathic\"]},"
                        "\"relational\":{\"bid_response_style\":\"turn toward\","
@@ -2407,112 +2407,112 @@ static void test_persona_load_json_research_fields(void) {
                        "\"phatic_style\":\"warm opener\","
                        "\"bonding_behaviors\":[\"remembering details\"],"
                        "\"anti_patterns\":[\"shift responses\",\"one-upping\"]}}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    SC_ASSERT_NOT_NULL(p.relational.bid_response_style);
-    SC_ASSERT_STR_EQ(p.relational.bid_response_style, "turn toward");
-    SC_ASSERT_EQ(p.relational.emotional_bids_count, 2);
-    SC_ASSERT_STR_EQ(p.relational.attachment_style, "secure");
-    SC_ASSERT_STR_EQ(p.relational.attachment_awareness, "detect anxious");
-    SC_ASSERT_STR_EQ(p.relational.dunbar_awareness, "invest deeply");
+    HU_ASSERT_NOT_NULL(p.relational.bid_response_style);
+    HU_ASSERT_STR_EQ(p.relational.bid_response_style, "turn toward");
+    HU_ASSERT_EQ(p.relational.emotional_bids_count, 2);
+    HU_ASSERT_STR_EQ(p.relational.attachment_style, "secure");
+    HU_ASSERT_STR_EQ(p.relational.attachment_awareness, "detect anxious");
+    HU_ASSERT_STR_EQ(p.relational.dunbar_awareness, "invest deeply");
 
-    SC_ASSERT_STR_EQ(p.listening.default_response_type, "support");
-    SC_ASSERT_EQ(p.listening.reflective_techniques_count, 2);
-    SC_ASSERT_STR_EQ(p.listening.nvc_style, "observe then feel");
-    SC_ASSERT_STR_EQ(p.listening.validation_style, "validate first");
+    HU_ASSERT_STR_EQ(p.listening.default_response_type, "support");
+    HU_ASSERT_EQ(p.listening.reflective_techniques_count, 2);
+    HU_ASSERT_STR_EQ(p.listening.nvc_style, "observe then feel");
+    HU_ASSERT_STR_EQ(p.listening.validation_style, "validate first");
 
-    SC_ASSERT_STR_EQ(p.repair.rupture_detection, "tone shifts");
-    SC_ASSERT_STR_EQ(p.repair.repair_approach, "name it");
-    SC_ASSERT_STR_EQ(p.repair.face_saving_style, "offer exits");
-    SC_ASSERT_EQ(p.repair.repair_phrases_count, 2);
+    HU_ASSERT_STR_EQ(p.repair.rupture_detection, "tone shifts");
+    HU_ASSERT_STR_EQ(p.repair.repair_approach, "name it");
+    HU_ASSERT_STR_EQ(p.repair.face_saving_style, "offer exits");
+    HU_ASSERT_EQ(p.repair.repair_phrases_count, 2);
 
-    SC_ASSERT_STR_EQ(p.mirroring.mirroring_level, "moderate");
-    SC_ASSERT_EQ(p.mirroring.adapts_to_count, 2);
-    SC_ASSERT_STR_EQ(p.mirroring.convergence_speed, "gradual");
-    SC_ASSERT_STR_EQ(p.mirroring.power_dynamic, "mirror more up");
+    HU_ASSERT_STR_EQ(p.mirroring.mirroring_level, "moderate");
+    HU_ASSERT_EQ(p.mirroring.adapts_to_count, 2);
+    HU_ASSERT_STR_EQ(p.mirroring.convergence_speed, "gradual");
+    HU_ASSERT_STR_EQ(p.mirroring.power_dynamic, "mirror more up");
 
-    SC_ASSERT_STR_EQ(p.social.default_ego_state, "adult");
-    SC_ASSERT_STR_EQ(p.social.phatic_style, "warm opener");
-    SC_ASSERT_EQ(p.social.bonding_behaviors_count, 1);
-    SC_ASSERT_EQ(p.social.anti_patterns_count, 2);
+    HU_ASSERT_STR_EQ(p.social.default_ego_state, "adult");
+    HU_ASSERT_STR_EQ(p.social.phatic_style, "warm opener");
+    HU_ASSERT_EQ(p.social.bonding_behaviors_count, 1);
+    HU_ASSERT_EQ(p.social.anti_patterns_count, 2);
 
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_validate_rejects_bad_relational_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"relational\":\"not an object\"}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "relational"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "relational"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_rejects_bad_listening_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"listening\":42}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "listening"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "listening"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_rejects_bad_repair_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"repair\":[1,2,3]}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "repair"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "repair"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_rejects_bad_mirroring_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"mirroring\":true}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "mirroring"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "mirroring"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_rejects_bad_social_type(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"test\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"social\":\"not an object\"}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_NOT_NULL(err);
-    SC_ASSERT_NOT_NULL(strstr(err, "social"));
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_NOT_NULL(err);
+    HU_ASSERT_NOT_NULL(strstr(err, "social"));
     alloc.free(alloc.ctx, err, err_len + 1);
 }
 
 static void test_persona_validate_accepts_research_persona(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"rp\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"relational\":{\"bid_response_style\":\"turn toward\"},"
@@ -2522,13 +2522,13 @@ static void test_persona_validate_accepts_research_persona(void) {
                        "\"social\":{\"default_ego_state\":\"adult\"}}";
     char *err = NULL;
     size_t err_len = 0;
-    sc_error_t e = sc_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
-    SC_ASSERT_EQ(e, SC_OK);
-    SC_ASSERT_NULL(err);
+    hu_error_t e = hu_persona_validate_json(&alloc, json, strlen(json), &err, &err_len);
+    HU_ASSERT_EQ(e, HU_OK);
+    HU_ASSERT_NULL(err);
 }
 
 static void test_persona_deinit_research_fields(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"deinit_research\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"relational\":{\"bid_response_style\":\"turn toward\","
@@ -2550,15 +2550,15 @@ static void test_persona_deinit_research_fields(void) {
                        "\"phatic_style\":\"warm\","
                        "\"bonding_behaviors\":[\"details\"],"
                        "\"anti_patterns\":[\"shift\",\"one-up\"]}}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    sc_persona_deinit(&alloc, &p);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_deinit_rich_persona(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json =
         "{\"version\":1,\"name\":\"deinit_rich\","
         "\"core\":{\"identity\":\"Test\",\"traits\":[\"warm\"]},"
@@ -2574,16 +2574,16 @@ static void test_persona_deinit_rich_persona(void) {
         "\"backstory_behaviors\":[{\"backstory_beat\":\"X\",\"behavioral_rule\":\"Y\"}],"
         "\"sensory\":{\"dominant_sense\":\"visual\",\"metaphor_vocabulary\":[\"bright\"]},"
         "\"situational_directions\":[{\"trigger\":\"X\",\"instruction\":\"Y\"}]}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_persona_deinit(&alloc, &p);
     /* Double deinit — should be safe */
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_analyzer_parses_research_fields(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *response = "{\"traits\":[\"empathic\"],"
                            "\"relational\":{\"bid_response_style\":\"turn toward\","
                            "\"attachment_style\":\"secure\",\"emotional_bids\":[\"sharing\"]},"
@@ -2597,29 +2597,29 @@ static void test_analyzer_parses_research_fields(void) {
                            "\"anti_patterns\":[\"shift responses\"]},"
                            "\"intellectual\":{\"thinking_style\":\"analytical\"},"
                            "\"sensory\":{\"dominant_sense\":\"visual\"}}";
-    sc_persona_t p = {0};
-    sc_error_t err =
-        sc_persona_analyzer_parse_response(&alloc, response, strlen(response), "imessage", 8, &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(p.relational.bid_response_style, "turn toward");
-    SC_ASSERT_STR_EQ(p.relational.attachment_style, "secure");
-    SC_ASSERT_EQ(p.relational.emotional_bids_count, 1);
-    SC_ASSERT_STR_EQ(p.listening.default_response_type, "support");
-    SC_ASSERT_EQ(p.listening.reflective_techniques_count, 1);
-    SC_ASSERT_STR_EQ(p.repair.rupture_detection, "tone shifts");
-    SC_ASSERT_EQ(p.repair.repair_phrases_count, 1);
-    SC_ASSERT_STR_EQ(p.mirroring.mirroring_level, "moderate");
-    SC_ASSERT_EQ(p.mirroring.adapts_to_count, 1);
-    SC_ASSERT_STR_EQ(p.social.default_ego_state, "adult");
-    SC_ASSERT_EQ(p.social.anti_patterns_count, 1);
-    SC_ASSERT_STR_EQ(p.intellectual.thinking_style, "analytical");
-    SC_ASSERT_STR_EQ(p.sensory.dominant_sense, "visual");
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_t p = {0};
+    hu_error_t err =
+        hu_persona_analyzer_parse_response(&alloc, response, strlen(response), "imessage", 8, &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(p.relational.bid_response_style, "turn toward");
+    HU_ASSERT_STR_EQ(p.relational.attachment_style, "secure");
+    HU_ASSERT_EQ(p.relational.emotional_bids_count, 1);
+    HU_ASSERT_STR_EQ(p.listening.default_response_type, "support");
+    HU_ASSERT_EQ(p.listening.reflective_techniques_count, 1);
+    HU_ASSERT_STR_EQ(p.repair.rupture_detection, "tone shifts");
+    HU_ASSERT_EQ(p.repair.repair_phrases_count, 1);
+    HU_ASSERT_STR_EQ(p.mirroring.mirroring_level, "moderate");
+    HU_ASSERT_EQ(p.mirroring.adapts_to_count, 1);
+    HU_ASSERT_STR_EQ(p.social.default_ego_state, "adult");
+    HU_ASSERT_EQ(p.social.anti_patterns_count, 1);
+    HU_ASSERT_STR_EQ(p.intellectual.thinking_style, "analytical");
+    HU_ASSERT_STR_EQ(p.sensory.dominant_sense, "visual");
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_creator_synthesize_merges_research_fields(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p1 = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p1 = {0};
     p1.relational.bid_response_style = "turn toward";
     p1.relational.attachment_style = "secure";
     p1.listening.default_response_type = "support";
@@ -2627,85 +2627,85 @@ static void test_creator_synthesize_merges_research_fields(void) {
     p1.mirroring.mirroring_level = "moderate";
     p1.social.default_ego_state = "adult";
 
-    sc_persona_t p2 = {0};
+    hu_persona_t p2 = {0};
     p2.relational.dunbar_awareness = "invest deeply";
     p2.listening.nvc_style = "observe then feel";
     p2.repair.repair_approach = "name it";
     p2.mirroring.convergence_speed = "gradual";
     p2.social.phatic_style = "warm opener";
 
-    sc_persona_t partials[] = {p1, p2};
-    sc_persona_t merged = {0};
-    sc_error_t err = sc_persona_creator_synthesize(&alloc, partials, 2, "merged", 6, &merged);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(merged.relational.bid_response_style, "turn toward");
-    SC_ASSERT_STR_EQ(merged.relational.attachment_style, "secure");
-    SC_ASSERT_STR_EQ(merged.relational.dunbar_awareness, "invest deeply");
-    SC_ASSERT_STR_EQ(merged.listening.default_response_type, "support");
-    SC_ASSERT_STR_EQ(merged.listening.nvc_style, "observe then feel");
-    SC_ASSERT_STR_EQ(merged.repair.rupture_detection, "tone shifts");
-    SC_ASSERT_STR_EQ(merged.repair.repair_approach, "name it");
-    SC_ASSERT_STR_EQ(merged.mirroring.mirroring_level, "moderate");
-    SC_ASSERT_STR_EQ(merged.mirroring.convergence_speed, "gradual");
-    SC_ASSERT_STR_EQ(merged.social.default_ego_state, "adult");
-    SC_ASSERT_STR_EQ(merged.social.phatic_style, "warm opener");
-    sc_persona_deinit(&alloc, &merged);
+    hu_persona_t partials[] = {p1, p2};
+    hu_persona_t merged = {0};
+    hu_error_t err = hu_persona_creator_synthesize(&alloc, partials, 2, "merged", 6, &merged);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(merged.relational.bid_response_style, "turn toward");
+    HU_ASSERT_STR_EQ(merged.relational.attachment_style, "secure");
+    HU_ASSERT_STR_EQ(merged.relational.dunbar_awareness, "invest deeply");
+    HU_ASSERT_STR_EQ(merged.listening.default_response_type, "support");
+    HU_ASSERT_STR_EQ(merged.listening.nvc_style, "observe then feel");
+    HU_ASSERT_STR_EQ(merged.repair.rupture_detection, "tone shifts");
+    HU_ASSERT_STR_EQ(merged.repair.repair_approach, "name it");
+    HU_ASSERT_STR_EQ(merged.mirroring.mirroring_level, "moderate");
+    HU_ASSERT_STR_EQ(merged.mirroring.convergence_speed, "gradual");
+    HU_ASSERT_STR_EQ(merged.social.default_ego_state, "adult");
+    HU_ASSERT_STR_EQ(merged.social.phatic_style, "warm opener");
+    hu_persona_deinit(&alloc, &merged);
 }
 
 static void test_contact_profile_attachment_and_dunbar(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{\"version\":1,\"name\":\"cptest\","
                        "\"core\":{\"identity\":\"Test\",\"traits\":[\"a\"]},"
                        "\"contacts\":{\"alice\":{\"name\":\"Alice\","
                        "\"relationship\":\"close friend\","
                        "\"attachment_style\":\"anxious\","
                        "\"dunbar_layer\":\"inner_circle\"}}}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(p.contacts_count, 1);
-    SC_ASSERT_STR_EQ(p.contacts[0].attachment_style, "anxious");
-    SC_ASSERT_STR_EQ(p.contacts[0].dunbar_layer, "inner_circle");
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.contacts_count, 1);
+    HU_ASSERT_STR_EQ(p.contacts[0].attachment_style, "anxious");
+    HU_ASSERT_STR_EQ(p.contacts[0].dunbar_layer, "inner_circle");
 
     char *ctx = NULL;
     size_t ctx_len = 0;
-    err = sc_contact_profile_build_context(&alloc, &p.contacts[0], &ctx, &ctx_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(ctx, "anxious"));
-    SC_ASSERT_NOT_NULL(strstr(ctx, "inner_circle"));
+    err = hu_contact_profile_build_context(&alloc, &p.contacts[0], &ctx, &ctx_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(ctx, "anxious"));
+    HU_ASSERT_NOT_NULL(strstr(ctx, "inner_circle"));
     alloc.free(alloc.ctx, ctx, ctx_len + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_analyzer_prompt_includes_research_fields(void) {
     const char *messages[] = {"hey", "what's up"};
     char buf[8192];
     size_t out_len = 0;
-    sc_error_t err =
-        sc_persona_analyzer_build_prompt(messages, 2, "imessage", buf, sizeof(buf), &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(strstr(buf, "relational"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "listening"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "repair"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "mirroring"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "social"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "intellectual"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "sensory"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "attachment_style"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "bid_response_style"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "ego_state"));
-    SC_ASSERT_NOT_NULL(strstr(buf, "nvc_style"));
+    hu_error_t err =
+        hu_persona_analyzer_build_prompt(messages, 2, "imessage", buf, sizeof(buf), &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(strstr(buf, "relational"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "listening"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "repair"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "mirroring"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "social"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "intellectual"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "sensory"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "attachment_style"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "bid_response_style"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "ego_state"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "nvc_style"));
 }
 
 static void test_auto_profile_returns_mock_overlay(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_overlay_t overlay;
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_overlay_t overlay;
     memset(&overlay, 0, sizeof(overlay));
-    sc_error_t err = sc_persona_auto_profile(&alloc, "+18001234567", 12, &overlay);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(overlay.formality);
-    SC_ASSERT_NOT_NULL(overlay.avg_length);
-    SC_ASSERT_NOT_NULL(overlay.emoji_usage);
+    hu_error_t err = hu_persona_auto_profile(&alloc, "+18001234567", 12, &overlay);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(overlay.formality);
+    HU_ASSERT_NOT_NULL(overlay.avg_length);
+    HU_ASSERT_NOT_NULL(overlay.emoji_usage);
     if (overlay.formality)
         alloc.free(alloc.ctx, (char *)overlay.formality, strlen(overlay.formality) + 1);
     if (overlay.avg_length)
@@ -2715,16 +2715,16 @@ static void test_auto_profile_returns_mock_overlay(void) {
 }
 
 static void test_auto_profile_null_args(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_overlay_t overlay;
-    SC_ASSERT_EQ(sc_persona_auto_profile(NULL, "+1", 2, &overlay), SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_EQ(sc_persona_auto_profile(&alloc, NULL, 0, &overlay), SC_ERR_INVALID_ARGUMENT);
-    SC_ASSERT_EQ(sc_persona_auto_profile(&alloc, "+1", 2, NULL), SC_ERR_INVALID_ARGUMENT);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_overlay_t overlay;
+    HU_ASSERT_EQ(hu_persona_auto_profile(NULL, "+1", 2, &overlay), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_auto_profile(&alloc, NULL, 0, &overlay), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_persona_auto_profile(&alloc, "+1", 2, NULL), HU_ERR_INVALID_ARGUMENT);
 }
 
 static void test_profile_describe_style_formats(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_sampler_contact_stats_t stats = {0};
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_sampler_contact_stats_t stats = {0};
     stats.their_msg_count = 100;
     stats.avg_their_len = 25;
     stats.uses_emoji = true;
@@ -2732,26 +2732,26 @@ static void test_profile_describe_style_formats(void) {
     stats.texts_in_bursts = true;
     stats.prefers_short = true;
     size_t out_len = 0;
-    char *desc = sc_persona_profile_describe_style(&alloc, &stats, "+1800", 5, &out_len);
-    SC_ASSERT_NOT_NULL(desc);
-    SC_ASSERT_TRUE(out_len > 0);
-    SC_ASSERT_TRUE(strstr(desc, "short") != NULL);
-    SC_ASSERT_TRUE(strstr(desc, "emoji") != NULL);
-    SC_ASSERT_TRUE(strstr(desc, "bursts") != NULL);
-    SC_ASSERT_TRUE(strstr(desc, "Mirror") != NULL);
+    char *desc = hu_persona_profile_describe_style(&alloc, &stats, "+1800", 5, &out_len);
+    HU_ASSERT_NOT_NULL(desc);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_TRUE(strstr(desc, "short") != NULL);
+    HU_ASSERT_TRUE(strstr(desc, "emoji") != NULL);
+    HU_ASSERT_TRUE(strstr(desc, "bursts") != NULL);
+    HU_ASSERT_TRUE(strstr(desc, "Mirror") != NULL);
     alloc.free(alloc.ctx, desc, out_len + 1);
 }
 
 static void test_profile_describe_style_null_args(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     size_t out_len = 0;
-    SC_ASSERT_NULL(sc_persona_profile_describe_style(NULL, NULL, NULL, 0, &out_len));
-    SC_ASSERT_NULL(sc_persona_profile_describe_style(&alloc, NULL, NULL, 0, &out_len));
+    HU_ASSERT_NULL(hu_persona_profile_describe_style(NULL, NULL, NULL, 0, &out_len));
+    HU_ASSERT_NULL(hu_persona_profile_describe_style(&alloc, NULL, NULL, 0, &out_len));
 }
 
 /* E2E dry run: simulate a Mindy message through the full persona pipeline */
 static void test_e2e_mindy_message_full_pipeline(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
 
     static const char json[] =
         "{\"version\":1,\"name\":\"seth\","
@@ -2838,48 +2838,48 @@ static void test_e2e_mindy_message_full_pipeline(void) {
         "\"schedule\":\"0 */4 * * *\"}}}}";
 
     /* Step 1: Parse the persona */
-    sc_persona_t p;
+    hu_persona_t p;
     memset(&p, 0, sizeof(p));
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_STR_EQ(p.name, "seth");
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(p.name, "seth");
 
     /* Step 2: Find the Mindy contact */
-    const sc_contact_profile_t *cp = sc_persona_find_contact(&p, "mindy", 5);
-    SC_ASSERT_NOT_NULL(cp);
-    SC_ASSERT_STR_EQ(cp->name, "Mindy");
-    SC_ASSERT_STR_EQ(cp->relationship_stage, "close_family");
-    SC_ASSERT_TRUE(cp->texts_in_bursts);
-    SC_ASSERT_TRUE(cp->prefers_short_texts);
+    const hu_contact_profile_t *cp = hu_persona_find_contact(&p, "mindy", 5);
+    HU_ASSERT_NOT_NULL(cp);
+    HU_ASSERT_STR_EQ(cp->name, "Mindy");
+    HU_ASSERT_STR_EQ(cp->relationship_stage, "close_family");
+    HU_ASSERT_TRUE(cp->texts_in_bursts);
+    HU_ASSERT_TRUE(cp->prefers_short_texts);
 
     /* Step 3: Build contact context */
     char *contact_ctx = NULL;
     size_t contact_ctx_len = 0;
-    err = sc_contact_profile_build_context(&alloc, cp, &contact_ctx, &contact_ctx_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(contact_ctx);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "Mindy") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "older sister") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "close_family") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "STAGE RULES") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "inner circle") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "relentless teasing") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "Hey Min!") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "bursts") != NULL);
-    SC_ASSERT_TRUE(strstr(contact_ctx, "short") != NULL);
+    err = hu_contact_profile_build_context(&alloc, cp, &contact_ctx, &contact_ctx_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(contact_ctx);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "Mindy") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "older sister") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "close_family") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "STAGE RULES") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "inner circle") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "relentless teasing") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "Hey Min!") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "bursts") != NULL);
+    HU_ASSERT_TRUE(strstr(contact_ctx, "short") != NULL);
 
     /* Step 4: Build inner world context (close_family should pass stage gate) */
     size_t iw_len = 0;
     char *iw_ctx =
-        sc_persona_build_inner_world_context(&alloc, &p, cp->relationship_stage, &iw_len);
-    SC_ASSERT_NOT_NULL(iw_ctx);
-    SC_ASSERT_TRUE(iw_len > 0);
-    SC_ASSERT_TRUE(strstr(iw_ctx, "Inner World") != NULL);
+        hu_persona_build_inner_world_context(&alloc, &p, cp->relationship_stage, &iw_len);
+    HU_ASSERT_NOT_NULL(iw_ctx);
+    HU_ASSERT_TRUE(iw_len > 0);
+    HU_ASSERT_TRUE(strstr(iw_ctx, "Inner World") != NULL);
 
     alloc.free(alloc.ctx, iw_ctx, iw_len + 1);
 
     /* Step 5: Attach example bank (simulating auto-load from disk) */
-    sc_persona_example_t examples[] = {
+    hu_persona_example_t examples[] = {
         {.context = "Quick check-in greeting",
          .incoming = "Hey! How's it going?",
          .response = "Hey there"},
@@ -2890,7 +2890,7 @@ static void test_e2e_mindy_message_full_pipeline(void) {
          .incoming = "How'd the trip go?",
          .response = "I won 1300! Trip paid for again"},
     };
-    sc_persona_example_bank_t bank = {
+    hu_persona_example_bank_t bank = {
         .channel = "imessage", .examples = examples, .examples_count = 3};
     p.example_banks = &bank;
     p.example_banks_count = 1;
@@ -2899,72 +2899,72 @@ static void test_e2e_mindy_message_full_pipeline(void) {
     char *prompt = NULL;
     size_t prompt_len = 0;
     const char *topic = "Hey! What are you up to today?";
-    err = sc_persona_build_prompt(&alloc, &p, "imessage", 8, topic, strlen(topic), &prompt,
+    err = hu_persona_build_prompt(&alloc, &p, "imessage", 8, topic, strlen(topic), &prompt,
                                   &prompt_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(prompt);
-    SC_ASSERT_TRUE(prompt_len > 200);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(prompt);
+    HU_ASSERT_TRUE(prompt_len > 200);
 
     /* Verify prompt contains all key pipeline outputs */
 
     /* Identity + biography */
-    SC_ASSERT_TRUE(strstr(prompt, "seth") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "Star Valley") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "seth") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Star Valley") != NULL);
 
     /* Traits */
-    SC_ASSERT_TRUE(strstr(prompt, "direct") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "teasing") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "direct") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "teasing") != NULL);
 
     /* Communication rules */
-    SC_ASSERT_TRUE(strstr(prompt, "Keep messages short") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Keep messages short") != NULL);
 
     /* Motivation */
-    SC_ASSERT_TRUE(strstr(prompt, "Building AI") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Building AI") != NULL);
 
     /* Humor */
-    SC_ASSERT_TRUE(strstr(prompt, "teasing") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "teasing") != NULL);
 
     /* Voice rhythm */
-    SC_ASSERT_TRUE(strstr(prompt, "Short fragments") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Short fragments") != NULL);
 
     /* Situational directions */
-    SC_ASSERT_TRUE(strstr(prompt, "Mindy shares") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Mindy shares") != NULL);
 
     /* Backstory behaviors */
-    SC_ASSERT_TRUE(strstr(prompt, "chaos") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "chaos") != NULL);
 
     /* Character invariants */
-    SC_ASSERT_TRUE(strstr(prompt, "Always responds to family") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Always responds to family") != NULL);
 
     /* Core anchor */
-    SC_ASSERT_TRUE(strstr(prompt, "nerdy mountain kid") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "nerdy mountain kid") != NULL);
 
     /* Directors notes */
-    SC_ASSERT_TRUE(strstr(prompt, "Never sound like an AI") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Never sound like an AI") != NULL);
 
     /* Channel overlay */
-    SC_ASSERT_TRUE(strstr(prompt, "very casual") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "lowercase") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "very casual") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "lowercase") != NULL);
 
     /* Example conversations from bank */
-    SC_ASSERT_TRUE(strstr(prompt, "Example conversations") != NULL);
-    SC_ASSERT_TRUE(strstr(prompt, "Hey there") != NULL ||
+    HU_ASSERT_TRUE(strstr(prompt, "Example conversations") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Hey there") != NULL ||
                    strstr(prompt, "little brother") != NULL || strstr(prompt, "1300") != NULL);
 
     /* Conflict style */
-    SC_ASSERT_TRUE(strstr(prompt, "Gets quiet") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Gets quiet") != NULL);
 
     /* Emotional range */
-    SC_ASSERT_TRUE(strstr(prompt, "exclamation") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "exclamation") != NULL);
 
-    /* Inner world is built separately (sc_persona_build_inner_world_context) and
-     * merged by the daemon, not by sc_persona_build_prompt. Verified in Step 4. */
+    /* Inner world is built separately (hu_persona_build_inner_world_context) and
+     * merged by the daemon, not by hu_persona_build_prompt. Verified in Step 4. */
 
     /* Intellectual */
-    SC_ASSERT_TRUE(strstr(prompt, "Agentic AI") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "Agentic AI") != NULL);
 
     /* Sensory */
-    SC_ASSERT_TRUE(strstr(prompt, "kinesthetic") != NULL);
+    HU_ASSERT_TRUE(strstr(prompt, "kinesthetic") != NULL);
 
     /* Detach example bank before deinit (stack-allocated) */
     p.example_banks = NULL;
@@ -2972,13 +2972,13 @@ static void test_e2e_mindy_message_full_pipeline(void) {
 
     alloc.free(alloc.ctx, contact_ctx, contact_ctx_len + 1);
     alloc.free(alloc.ctx, prompt, prompt_len + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 /* --- Externalized prompt field tests --- */
 
 static void test_persona_load_externalized_fields(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json =
         "{"
         "  \"name\": \"test-ext\","
@@ -2995,59 +2995,59 @@ static void test_persona_load_externalized_fields(void) {
         "    \"evening\": \"Wind down.\""
         "  }"
         "}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    SC_ASSERT_EQ(p.immersive_reinforcement_count, 3);
-    SC_ASSERT_STR_EQ(p.immersive_reinforcement[0], "rule-A");
-    SC_ASSERT_STR_EQ(p.immersive_reinforcement[1], "rule-B");
-    SC_ASSERT_STR_EQ(p.immersive_reinforcement[2], "rule-C");
+    HU_ASSERT_EQ(p.immersive_reinforcement_count, 3);
+    HU_ASSERT_STR_EQ(p.immersive_reinforcement[0], "rule-A");
+    HU_ASSERT_STR_EQ(p.immersive_reinforcement[1], "rule-B");
+    HU_ASSERT_STR_EQ(p.immersive_reinforcement[2], "rule-C");
 
-    SC_ASSERT_STR_EQ(p.identity_reinforcement, "You are real, not an AI.");
+    HU_ASSERT_STR_EQ(p.identity_reinforcement, "You are real, not an AI.");
 
-    SC_ASSERT_EQ(p.anti_patterns_count, 2);
-    SC_ASSERT_STR_EQ(p.anti_patterns[0], "no-exclamation");
-    SC_ASSERT_STR_EQ(p.anti_patterns[1], "no-emoji");
+    HU_ASSERT_EQ(p.anti_patterns_count, 2);
+    HU_ASSERT_STR_EQ(p.anti_patterns[0], "no-exclamation");
+    HU_ASSERT_STR_EQ(p.anti_patterns[1], "no-emoji");
 
-    SC_ASSERT_EQ(p.style_rules_count, 1);
-    SC_ASSERT_STR_EQ(p.style_rules[0], "lowercase only");
+    HU_ASSERT_EQ(p.style_rules_count, 1);
+    HU_ASSERT_STR_EQ(p.style_rules[0], "lowercase only");
 
-    SC_ASSERT_STR_EQ(p.proactive_rules, "Check in gently.");
+    HU_ASSERT_STR_EQ(p.proactive_rules, "Check in gently.");
 
-    SC_ASSERT_STR_EQ(p.time_overlay_late_night, "Be calm.");
-    SC_ASSERT_STR_EQ(p.time_overlay_early_morning, "Be gentle.");
-    SC_ASSERT_STR_EQ(p.time_overlay_afternoon, "Be productive.");
-    SC_ASSERT_STR_EQ(p.time_overlay_evening, "Wind down.");
+    HU_ASSERT_STR_EQ(p.time_overlay_late_night, "Be calm.");
+    HU_ASSERT_STR_EQ(p.time_overlay_early_morning, "Be gentle.");
+    HU_ASSERT_STR_EQ(p.time_overlay_afternoon, "Be productive.");
+    HU_ASSERT_STR_EQ(p.time_overlay_evening, "Wind down.");
 
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_externalized_fields_absent(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json = "{ \"name\": \"bare\", \"core\": { \"identity\": \"Bare\" } }";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    SC_ASSERT_EQ(p.immersive_reinforcement_count, 0);
-    SC_ASSERT_NULL(p.immersive_reinforcement);
-    SC_ASSERT_NULL(p.identity_reinforcement);
-    SC_ASSERT_EQ(p.anti_patterns_count, 0);
-    SC_ASSERT_NULL(p.anti_patterns);
-    SC_ASSERT_EQ(p.style_rules_count, 0);
-    SC_ASSERT_NULL(p.style_rules);
-    SC_ASSERT_NULL(p.proactive_rules);
-    SC_ASSERT_NULL(p.time_overlay_late_night);
-    SC_ASSERT_NULL(p.time_overlay_early_morning);
-    SC_ASSERT_NULL(p.time_overlay_afternoon);
-    SC_ASSERT_NULL(p.time_overlay_evening);
+    HU_ASSERT_EQ(p.immersive_reinforcement_count, 0);
+    HU_ASSERT_NULL(p.immersive_reinforcement);
+    HU_ASSERT_NULL(p.identity_reinforcement);
+    HU_ASSERT_EQ(p.anti_patterns_count, 0);
+    HU_ASSERT_NULL(p.anti_patterns);
+    HU_ASSERT_EQ(p.style_rules_count, 0);
+    HU_ASSERT_NULL(p.style_rules);
+    HU_ASSERT_NULL(p.proactive_rules);
+    HU_ASSERT_NULL(p.time_overlay_late_night);
+    HU_ASSERT_NULL(p.time_overlay_early_morning);
+    HU_ASSERT_NULL(p.time_overlay_afternoon);
+    HU_ASSERT_NULL(p.time_overlay_evening);
 
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_externalized_deinit_frees(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     const char *json =
         "{"
         "  \"name\": \"deinit-ext\","
@@ -3059,20 +3059,20 @@ static void test_persona_externalized_deinit_frees(void) {
         "  \"proactive_rules\": \"y\","
         "  \"time_overlays\": { \"late_night\": \"z\" }"
         "}";
-    sc_persona_t p = {0};
-    sc_error_t err = sc_persona_load_json(&alloc, json, strlen(json), &p);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_EQ(p.immersive_reinforcement_count, 1);
-    SC_ASSERT_NOT_NULL(p.identity_reinforcement);
-    sc_persona_deinit(&alloc, &p);
-    SC_ASSERT_EQ(p.immersive_reinforcement_count, 0);
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.immersive_reinforcement_count, 1);
+    HU_ASSERT_NOT_NULL(p.identity_reinforcement);
+    hu_persona_deinit(&alloc, &p);
+    HU_ASSERT_EQ(p.immersive_reinforcement_count, 0);
 }
 
 static void test_persona_immersive_in_prompt(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
-    p.name = sc_strndup(&alloc, "test-immersive", 14);
-    p.identity = sc_strndup(&alloc, "An immersive persona", 20);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    p.name = hu_strndup(&alloc, "test-immersive", 14);
+    p.identity = hu_strndup(&alloc, "An immersive persona", 20);
 
     char *reinforcement[] = {"You are Seth, not an AI", "Stay in character always"};
     p.immersive_reinforcement = reinforcement;
@@ -3080,11 +3080,11 @@ static void test_persona_immersive_in_prompt(void) {
 
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
-    sc_error_t err = sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt,
+    hu_error_t err = hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt,
                                              &persona_prompt_len);
-    SC_ASSERT_EQ(err, SC_OK);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_prompt_config_t cfg = {0};
+    hu_prompt_config_t cfg = {0};
     cfg.persona_prompt = persona_prompt;
     cfg.persona_prompt_len = persona_prompt_len;
     cfg.persona_immersive = true;
@@ -3092,33 +3092,33 @@ static void test_persona_immersive_in_prompt(void) {
 
     char *sys = NULL;
     size_t sys_len = 0;
-    err = sc_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(sys);
-    SC_ASSERT_TRUE(strstr(sys, "You are Seth, not an AI") != NULL);
-    SC_ASSERT_TRUE(strstr(sys, "Stay in character always") != NULL);
+    err = hu_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(sys);
+    HU_ASSERT_TRUE(strstr(sys, "You are Seth, not an AI") != NULL);
+    HU_ASSERT_TRUE(strstr(sys, "Stay in character always") != NULL);
 
     alloc.free(alloc.ctx, sys, sys_len + 1);
     alloc.free(alloc.ctx, persona_prompt, persona_prompt_len + 1);
 
     p.immersive_reinforcement = NULL;
     p.immersive_reinforcement_count = 0;
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 static void test_persona_immersive_fallback_when_no_reinforcement(void) {
-    sc_allocator_t alloc = sc_system_allocator();
-    sc_persona_t p = {0};
-    p.name = sc_strndup(&alloc, "test-fallback", 13);
-    p.identity = sc_strndup(&alloc, "Fallback persona", 16);
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_persona_t p = {0};
+    p.name = hu_strndup(&alloc, "test-fallback", 13);
+    p.identity = hu_strndup(&alloc, "Fallback persona", 16);
 
     char *persona_prompt = NULL;
     size_t persona_prompt_len = 0;
-    sc_error_t err =
-        sc_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt, &persona_prompt_len);
-    SC_ASSERT_EQ(err, SC_OK);
+    hu_error_t err =
+        hu_persona_build_prompt(&alloc, &p, NULL, 0, NULL, 0, &persona_prompt, &persona_prompt_len);
+    HU_ASSERT_EQ(err, HU_OK);
 
-    sc_prompt_config_t cfg = {0};
+    hu_prompt_config_t cfg = {0};
     cfg.persona_prompt = persona_prompt;
     cfg.persona_prompt_len = persona_prompt_len;
     cfg.persona_immersive = true;
@@ -3126,194 +3126,194 @@ static void test_persona_immersive_fallback_when_no_reinforcement(void) {
 
     char *sys = NULL;
     size_t sys_len = 0;
-    err = sc_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(sys);
-    SC_ASSERT_TRUE(strstr(sys, "real person") != NULL);
+    err = hu_prompt_build_system(&alloc, &cfg, &sys, &sys_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(sys);
+    HU_ASSERT_TRUE(strstr(sys, "real person") != NULL);
 
     alloc.free(alloc.ctx, sys, sys_len + 1);
     alloc.free(alloc.ctx, persona_prompt, persona_prompt_len + 1);
-    sc_persona_deinit(&alloc, &p);
+    hu_persona_deinit(&alloc, &p);
 }
 
 void run_persona_tests(void) {
-    SC_TEST_SUITE("Persona");
+    HU_TEST_SUITE("Persona");
 
-    SC_RUN_TEST(test_persona_types_exist);
-    SC_RUN_TEST(test_persona_find_overlay_found);
-    SC_RUN_TEST(test_persona_find_overlay_not_found);
-    SC_RUN_TEST(test_persona_deinit_null_safe);
-    SC_RUN_TEST(test_persona_load_json_basic);
-    SC_RUN_TEST(test_persona_load_json_empty);
-    SC_RUN_TEST(test_persona_load_not_found);
-    SC_RUN_TEST(test_agent_persona_prompt_injected);
-    SC_RUN_TEST(test_spawn_config_has_persona);
-    SC_RUN_TEST(test_config_persona_field);
-    SC_RUN_TEST(test_persona_build_prompt_core);
-    SC_RUN_TEST(test_persona_prompt_respects_size_cap);
-    SC_RUN_TEST(test_persona_build_prompt_includes_examples);
-    SC_RUN_TEST(test_persona_prompt_with_channel_overlay);
-    SC_RUN_TEST(test_agent_set_persona_clears);
-    SC_RUN_TEST(test_agent_set_persona_not_found);
-    SC_RUN_TEST(test_persona_feedback_record_and_apply);
-    SC_RUN_TEST(test_persona_build_prompt_with_overlay);
-    SC_RUN_TEST(test_persona_examples_load_json);
-    SC_RUN_TEST(test_persona_prompt_overrides_default);
-    SC_RUN_TEST(test_spawn_config_persona_field);
-    SC_RUN_TEST(test_persona_cli_parse_create);
-    SC_RUN_TEST(test_persona_cli_parse_show);
-    SC_RUN_TEST(test_persona_cli_parse_list);
-    SC_RUN_TEST(test_persona_cli_parse_validate);
-    SC_RUN_TEST(test_persona_cli_parse_feedback_apply);
-    SC_RUN_TEST(test_cli_parse_diff);
-    SC_RUN_TEST(test_persona_validate_json_valid);
-    SC_RUN_TEST(test_persona_validate_json_missing_name);
-    SC_RUN_TEST(test_persona_validate_json_missing_core);
-    SC_RUN_TEST(test_persona_validate_json_malformed);
-    SC_RUN_TEST(test_persona_cli_run_validate);
-    SC_RUN_TEST(test_persona_cli_run_feedback_apply);
-    SC_RUN_TEST(test_persona_cli_run_list);
-    SC_RUN_TEST(test_persona_cli_run_show_not_found);
-    SC_RUN_TEST(test_persona_cli_run_delete_not_found);
-    SC_RUN_TEST(test_persona_cli_run_create_no_provider);
-    SC_RUN_TEST(test_creator_write_and_load);
-    SC_RUN_TEST(test_persona_base_dir_returns_override_when_set);
+    HU_RUN_TEST(test_persona_types_exist);
+    HU_RUN_TEST(test_persona_find_overlay_found);
+    HU_RUN_TEST(test_persona_find_overlay_not_found);
+    HU_RUN_TEST(test_persona_deinit_null_safe);
+    HU_RUN_TEST(test_persona_load_json_basic);
+    HU_RUN_TEST(test_persona_load_json_empty);
+    HU_RUN_TEST(test_persona_load_not_found);
+    HU_RUN_TEST(test_agent_persona_prompt_injected);
+    HU_RUN_TEST(test_spawn_config_has_persona);
+    HU_RUN_TEST(test_config_persona_field);
+    HU_RUN_TEST(test_persona_build_prompt_core);
+    HU_RUN_TEST(test_persona_prompt_respects_size_cap);
+    HU_RUN_TEST(test_persona_build_prompt_includes_examples);
+    HU_RUN_TEST(test_persona_prompt_with_channel_overlay);
+    HU_RUN_TEST(test_agent_set_persona_clears);
+    HU_RUN_TEST(test_agent_set_persona_not_found);
+    HU_RUN_TEST(test_persona_feedback_record_and_apply);
+    HU_RUN_TEST(test_persona_build_prompt_with_overlay);
+    HU_RUN_TEST(test_persona_examples_load_json);
+    HU_RUN_TEST(test_persona_prompt_overrides_default);
+    HU_RUN_TEST(test_spawn_config_persona_field);
+    HU_RUN_TEST(test_persona_cli_parse_create);
+    HU_RUN_TEST(test_persona_cli_parse_show);
+    HU_RUN_TEST(test_persona_cli_parse_list);
+    HU_RUN_TEST(test_persona_cli_parse_validate);
+    HU_RUN_TEST(test_persona_cli_parse_feedback_apply);
+    HU_RUN_TEST(test_cli_parse_diff);
+    HU_RUN_TEST(test_persona_validate_json_valid);
+    HU_RUN_TEST(test_persona_validate_json_missing_name);
+    HU_RUN_TEST(test_persona_validate_json_missing_core);
+    HU_RUN_TEST(test_persona_validate_json_malformed);
+    HU_RUN_TEST(test_persona_cli_run_validate);
+    HU_RUN_TEST(test_persona_cli_run_feedback_apply);
+    HU_RUN_TEST(test_persona_cli_run_list);
+    HU_RUN_TEST(test_persona_cli_run_show_not_found);
+    HU_RUN_TEST(test_persona_cli_run_delete_not_found);
+    HU_RUN_TEST(test_persona_cli_run_create_no_provider);
+    HU_RUN_TEST(test_creator_write_and_load);
+    HU_RUN_TEST(test_persona_base_dir_returns_override_when_set);
 #if defined(__unix__) || defined(__APPLE__)
-    SC_RUN_TEST(test_persona_load_save_roundtrip_with_temp_dir);
+    HU_RUN_TEST(test_persona_load_save_roundtrip_with_temp_dir);
 #endif
-    SC_RUN_TEST(test_persona_tool_create);
-    SC_RUN_TEST(test_creator_synthesize_merges);
-    SC_RUN_TEST(test_analyzer_builds_prompt);
-    SC_RUN_TEST(test_analyzer_parses_response);
-    SC_RUN_TEST(test_sampler_imessage_query);
-    SC_RUN_TEST(test_sampler_facebook_parse_basic);
-    SC_RUN_TEST(test_sampler_facebook_parse_empty);
-    SC_RUN_TEST(test_sampler_facebook_parse_null);
-    SC_RUN_TEST(test_sampler_gmail_parse_basic);
-    SC_RUN_TEST(test_sampler_gmail_parse_empty);
-    SC_RUN_TEST(test_cli_parse_export);
-    SC_RUN_TEST(test_cli_parse_merge);
-    SC_RUN_TEST(test_cli_parse_import);
-    SC_RUN_TEST(test_cli_parse_from_facebook_file);
-    SC_RUN_TEST(test_cli_parse_from_gmail);
-    SC_RUN_TEST(test_cli_parse_from_response);
-    SC_RUN_TEST(test_persona_select_examples_match);
-    SC_RUN_TEST(test_persona_select_examples_no_channel);
-    SC_RUN_TEST(test_persona_select_examples_no_match);
-    SC_RUN_TEST(test_persona_full_round_trip);
+    HU_RUN_TEST(test_persona_tool_create);
+    HU_RUN_TEST(test_creator_synthesize_merges);
+    HU_RUN_TEST(test_analyzer_builds_prompt);
+    HU_RUN_TEST(test_analyzer_parses_response);
+    HU_RUN_TEST(test_sampler_imessage_query);
+    HU_RUN_TEST(test_sampler_facebook_parse_basic);
+    HU_RUN_TEST(test_sampler_facebook_parse_empty);
+    HU_RUN_TEST(test_sampler_facebook_parse_null);
+    HU_RUN_TEST(test_sampler_gmail_parse_basic);
+    HU_RUN_TEST(test_sampler_gmail_parse_empty);
+    HU_RUN_TEST(test_cli_parse_export);
+    HU_RUN_TEST(test_cli_parse_merge);
+    HU_RUN_TEST(test_cli_parse_import);
+    HU_RUN_TEST(test_cli_parse_from_facebook_file);
+    HU_RUN_TEST(test_cli_parse_from_gmail);
+    HU_RUN_TEST(test_cli_parse_from_response);
+    HU_RUN_TEST(test_persona_select_examples_match);
+    HU_RUN_TEST(test_persona_select_examples_no_channel);
+    HU_RUN_TEST(test_persona_select_examples_no_match);
+    HU_RUN_TEST(test_persona_full_round_trip);
 
     /* Error-path and edge-case tests */
-    SC_RUN_TEST(test_persona_load_json_malformed_returns_error);
-    SC_RUN_TEST(test_persona_load_json_missing_core);
-    SC_RUN_TEST(test_persona_load_empty_name);
-    SC_RUN_TEST(test_persona_build_prompt_empty_persona);
-    SC_RUN_TEST(test_persona_examples_load_json_empty_bank);
-    SC_RUN_TEST(test_persona_examples_load_json_malformed);
-    SC_RUN_TEST(test_persona_select_examples_null_topic_returns_some);
-    SC_RUN_TEST(test_persona_select_examples_max_zero);
-    SC_RUN_TEST(test_persona_extracted_imessage_bank_loads_and_selects);
-    SC_RUN_TEST(test_persona_find_overlay_null_channel);
-    SC_RUN_TEST(test_persona_analyzer_parse_response_empty_object);
-    SC_RUN_TEST(test_persona_analyzer_parse_response_malformed);
-    SC_RUN_TEST(test_persona_creator_synthesize_single_partial);
-    SC_RUN_TEST(test_persona_creator_synthesize_zero_partials);
-    SC_RUN_TEST(test_sampler_imessage_query_small_cap);
-    SC_RUN_TEST(test_sampler_facebook_parse_malformed);
-    SC_RUN_TEST(test_sampler_facebook_parse_missing_messages);
-    SC_RUN_TEST(test_persona_deinit_double_call);
+    HU_RUN_TEST(test_persona_load_json_malformed_returns_error);
+    HU_RUN_TEST(test_persona_load_json_missing_core);
+    HU_RUN_TEST(test_persona_load_empty_name);
+    HU_RUN_TEST(test_persona_build_prompt_empty_persona);
+    HU_RUN_TEST(test_persona_examples_load_json_empty_bank);
+    HU_RUN_TEST(test_persona_examples_load_json_malformed);
+    HU_RUN_TEST(test_persona_select_examples_null_topic_returns_some);
+    HU_RUN_TEST(test_persona_select_examples_max_zero);
+    HU_RUN_TEST(test_persona_extracted_imessage_bank_loads_and_selects);
+    HU_RUN_TEST(test_persona_find_overlay_null_channel);
+    HU_RUN_TEST(test_persona_analyzer_parse_response_empty_object);
+    HU_RUN_TEST(test_persona_analyzer_parse_response_malformed);
+    HU_RUN_TEST(test_persona_creator_synthesize_single_partial);
+    HU_RUN_TEST(test_persona_creator_synthesize_zero_partials);
+    HU_RUN_TEST(test_sampler_imessage_query_small_cap);
+    HU_RUN_TEST(test_sampler_facebook_parse_malformed);
+    HU_RUN_TEST(test_sampler_facebook_parse_missing_messages);
+    HU_RUN_TEST(test_persona_deinit_double_call);
 
     /* Persona tool execute tests */
-    SC_RUN_TEST(test_persona_tool_execute_list);
-    SC_RUN_TEST(test_persona_tool_execute_invalid_action);
-    SC_RUN_TEST(test_persona_tool_execute_create_redirects_to_cli);
-    SC_RUN_TEST(test_persona_tool_execute_switch_no_agent);
-    SC_RUN_TEST(test_persona_tool_execute_switch_with_agent);
-    SC_RUN_TEST(test_persona_tool_execute_feedback);
-    SC_RUN_TEST(test_persona_tool_execute_feedback_missing_corrected);
-    SC_RUN_TEST(test_persona_tool_execute_show);
-    SC_RUN_TEST(test_persona_tool_execute_apply_feedback);
-    SC_RUN_TEST(test_persona_tool_execute_apply_feedback_no_name);
+    HU_RUN_TEST(test_persona_tool_execute_list);
+    HU_RUN_TEST(test_persona_tool_execute_invalid_action);
+    HU_RUN_TEST(test_persona_tool_execute_create_redirects_to_cli);
+    HU_RUN_TEST(test_persona_tool_execute_switch_no_agent);
+    HU_RUN_TEST(test_persona_tool_execute_switch_with_agent);
+    HU_RUN_TEST(test_persona_tool_execute_feedback);
+    HU_RUN_TEST(test_persona_tool_execute_feedback_missing_corrected);
+    HU_RUN_TEST(test_persona_tool_execute_show);
+    HU_RUN_TEST(test_persona_tool_execute_apply_feedback);
+    HU_RUN_TEST(test_persona_tool_execute_apply_feedback_no_name);
 
     /* Sampler - additional tests */
-    SC_RUN_TEST(test_sampler_imessage_query_basic);
-    SC_RUN_TEST(test_sampler_imessage_query_null_buf);
-    SC_RUN_TEST(test_sampler_imessage_query_escapes_quotes);
-    SC_RUN_TEST(test_sampler_facebook_parse_empty_object);
-    SC_RUN_TEST(test_sampler_gmail_parse_null);
-    SC_RUN_TEST(test_sampler_gmail_parse_empty_object);
+    HU_RUN_TEST(test_sampler_imessage_query_basic);
+    HU_RUN_TEST(test_sampler_imessage_query_null_buf);
+    HU_RUN_TEST(test_sampler_imessage_query_escapes_quotes);
+    HU_RUN_TEST(test_sampler_facebook_parse_empty_object);
+    HU_RUN_TEST(test_sampler_gmail_parse_null);
+    HU_RUN_TEST(test_sampler_gmail_parse_empty_object);
 
     /* Feedback - null/error tests */
-    SC_RUN_TEST(test_feedback_record_null_alloc);
-    SC_RUN_TEST(test_feedback_record_null_name);
-    SC_RUN_TEST(test_feedback_record_null_feedback);
-    SC_RUN_TEST(test_feedback_apply_null_alloc);
-    SC_RUN_TEST(test_feedback_apply_null_name);
+    HU_RUN_TEST(test_feedback_record_null_alloc);
+    HU_RUN_TEST(test_feedback_record_null_name);
+    HU_RUN_TEST(test_feedback_record_null_feedback);
+    HU_RUN_TEST(test_feedback_apply_null_alloc);
+    HU_RUN_TEST(test_feedback_apply_null_name);
 
     /* Analyzer - additional tests */
-    SC_RUN_TEST(test_analyzer_build_prompt_basic);
-    SC_RUN_TEST(test_analyzer_build_prompt_null_messages);
-    SC_RUN_TEST(test_analyzer_build_prompt_zero_count);
-    SC_RUN_TEST(test_analyzer_parse_response_null_alloc);
+    HU_RUN_TEST(test_analyzer_build_prompt_basic);
+    HU_RUN_TEST(test_analyzer_build_prompt_null_messages);
+    HU_RUN_TEST(test_analyzer_build_prompt_zero_count);
+    HU_RUN_TEST(test_analyzer_parse_response_null_alloc);
 
     /* Creator - null/error tests */
-    SC_RUN_TEST(test_creator_synthesize_null_alloc);
-    SC_RUN_TEST(test_creator_synthesize_null_partials);
-    SC_RUN_TEST(test_creator_synthesize_zero_count);
-    SC_RUN_TEST(test_creator_write_null_alloc);
+    HU_RUN_TEST(test_creator_synthesize_null_alloc);
+    HU_RUN_TEST(test_creator_synthesize_null_partials);
+    HU_RUN_TEST(test_creator_synthesize_zero_count);
+    HU_RUN_TEST(test_creator_write_null_alloc);
 
     /* Overlay typing quirks */
-    SC_RUN_TEST(test_overlay_typing_quirks_parsed);
-    SC_RUN_TEST(test_overlay_typing_quirks_default_when_absent);
-    SC_RUN_TEST(test_overlay_typing_quirks_in_prompt);
+    HU_RUN_TEST(test_overlay_typing_quirks_parsed);
+    HU_RUN_TEST(test_overlay_typing_quirks_default_when_absent);
+    HU_RUN_TEST(test_overlay_typing_quirks_in_prompt);
 
     /* Rich persona elements (Tier 1–3) */
-    SC_RUN_TEST(test_persona_load_json_rich_persona);
-    SC_RUN_TEST(test_persona_prompt_includes_motivation);
-    SC_RUN_TEST(test_persona_prompt_includes_situational_directions);
-    SC_RUN_TEST(test_persona_prompt_includes_humor);
-    SC_RUN_TEST(test_persona_prompt_includes_conflict_style);
-    SC_RUN_TEST(test_persona_prompt_includes_emotional_range);
-    SC_RUN_TEST(test_persona_prompt_includes_voice_rhythm);
-    SC_RUN_TEST(test_persona_prompt_includes_core_anchor);
-    SC_RUN_TEST(test_persona_prompt_includes_character_invariants);
-    SC_RUN_TEST(test_persona_prompt_includes_intellectual);
-    SC_RUN_TEST(test_persona_prompt_includes_backstory_behaviors);
-    SC_RUN_TEST(test_persona_prompt_includes_sensory);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_motivation_type);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_humor_type);
-    SC_RUN_TEST(test_persona_validate_accepts_rich_persona);
-    SC_RUN_TEST(test_persona_deinit_rich_persona);
-    SC_RUN_TEST(test_persona_prompt_includes_relational);
-    SC_RUN_TEST(test_persona_prompt_includes_listening);
-    SC_RUN_TEST(test_persona_prompt_includes_repair);
-    SC_RUN_TEST(test_persona_prompt_includes_mirroring);
-    SC_RUN_TEST(test_persona_prompt_includes_social);
-    SC_RUN_TEST(test_persona_load_json_research_fields);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_relational_type);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_listening_type);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_repair_type);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_mirroring_type);
-    SC_RUN_TEST(test_persona_validate_rejects_bad_social_type);
-    SC_RUN_TEST(test_persona_validate_accepts_research_persona);
-    SC_RUN_TEST(test_persona_deinit_research_fields);
-    SC_RUN_TEST(test_analyzer_parses_research_fields);
-    SC_RUN_TEST(test_creator_synthesize_merges_research_fields);
-    SC_RUN_TEST(test_contact_profile_attachment_and_dunbar);
-    SC_RUN_TEST(test_analyzer_prompt_includes_research_fields);
+    HU_RUN_TEST(test_persona_load_json_rich_persona);
+    HU_RUN_TEST(test_persona_prompt_includes_motivation);
+    HU_RUN_TEST(test_persona_prompt_includes_situational_directions);
+    HU_RUN_TEST(test_persona_prompt_includes_humor);
+    HU_RUN_TEST(test_persona_prompt_includes_conflict_style);
+    HU_RUN_TEST(test_persona_prompt_includes_emotional_range);
+    HU_RUN_TEST(test_persona_prompt_includes_voice_rhythm);
+    HU_RUN_TEST(test_persona_prompt_includes_core_anchor);
+    HU_RUN_TEST(test_persona_prompt_includes_character_invariants);
+    HU_RUN_TEST(test_persona_prompt_includes_intellectual);
+    HU_RUN_TEST(test_persona_prompt_includes_backstory_behaviors);
+    HU_RUN_TEST(test_persona_prompt_includes_sensory);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_motivation_type);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_humor_type);
+    HU_RUN_TEST(test_persona_validate_accepts_rich_persona);
+    HU_RUN_TEST(test_persona_deinit_rich_persona);
+    HU_RUN_TEST(test_persona_prompt_includes_relational);
+    HU_RUN_TEST(test_persona_prompt_includes_listening);
+    HU_RUN_TEST(test_persona_prompt_includes_repair);
+    HU_RUN_TEST(test_persona_prompt_includes_mirroring);
+    HU_RUN_TEST(test_persona_prompt_includes_social);
+    HU_RUN_TEST(test_persona_load_json_research_fields);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_relational_type);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_listening_type);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_repair_type);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_mirroring_type);
+    HU_RUN_TEST(test_persona_validate_rejects_bad_social_type);
+    HU_RUN_TEST(test_persona_validate_accepts_research_persona);
+    HU_RUN_TEST(test_persona_deinit_research_fields);
+    HU_RUN_TEST(test_analyzer_parses_research_fields);
+    HU_RUN_TEST(test_creator_synthesize_merges_research_fields);
+    HU_RUN_TEST(test_contact_profile_attachment_and_dunbar);
+    HU_RUN_TEST(test_analyzer_prompt_includes_research_fields);
 
     /* Auto-profile tests */
-    SC_RUN_TEST(test_auto_profile_returns_mock_overlay);
-    SC_RUN_TEST(test_auto_profile_null_args);
-    SC_RUN_TEST(test_profile_describe_style_formats);
-    SC_RUN_TEST(test_profile_describe_style_null_args);
+    HU_RUN_TEST(test_auto_profile_returns_mock_overlay);
+    HU_RUN_TEST(test_auto_profile_null_args);
+    HU_RUN_TEST(test_profile_describe_style_formats);
+    HU_RUN_TEST(test_profile_describe_style_null_args);
 
     /* Externalized prompt fields */
-    SC_RUN_TEST(test_persona_load_externalized_fields);
-    SC_RUN_TEST(test_persona_externalized_fields_absent);
-    SC_RUN_TEST(test_persona_externalized_deinit_frees);
-    SC_RUN_TEST(test_persona_immersive_in_prompt);
-    SC_RUN_TEST(test_persona_immersive_fallback_when_no_reinforcement);
+    HU_RUN_TEST(test_persona_load_externalized_fields);
+    HU_RUN_TEST(test_persona_externalized_fields_absent);
+    HU_RUN_TEST(test_persona_externalized_deinit_frees);
+    HU_RUN_TEST(test_persona_immersive_in_prompt);
+    HU_RUN_TEST(test_persona_immersive_fallback_when_no_reinforcement);
 
     /* E2E dry run */
-    SC_RUN_TEST(test_e2e_mindy_message_full_pipeline);
+    HU_RUN_TEST(test_e2e_mindy_message_full_pipeline);
 }

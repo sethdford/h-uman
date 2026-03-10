@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # update-stats.sh — Sync all docs with actual repo metrics.
-# Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, seaclaw/STUBS.md, CLAUDE.md
+# Patches: AGENTS.md, README.md, CONTRIBUTING.md, PROJECT_STATUS.md, human/STUBS.md, CLAUDE.md
 # Usage: ./scripts/update-stats.sh [--apply]
 #   Without --apply: prints stats only (dry run).
 #   With --apply: patches all files in place.
@@ -33,7 +33,7 @@ TOOL_COUNT=$(find src/tools -maxdepth 1 -name '*.c' ! -name 'factory.c' | wc -l 
 
 # Get test count from binary (try multiple build dirs)
 TEST_COUNT="unknown"
-for test_bin in build/seaclaw_tests build2/seaclaw_tests build-check/seaclaw_tests build-release/seaclaw_tests; do
+for test_bin in build/human_tests build2/human_tests build-check/human_tests build-release/human_tests; do
     if [ -f "$test_bin" ]; then
         TEST_COUNT=$("$test_bin" 2>/dev/null | grep 'Results:' | sed 's|.*: \([0-9]*\)/.*|\1|' || echo "unknown")
         break
@@ -49,7 +49,7 @@ fi
 
 # Get binary size (prefer MinSizeRel builds, then release, then debug)
 BINARY_KB="unknown"
-for bin in build-size/seaclaw build2/seaclaw build-release/seaclaw build/seaclaw; do
+for bin in build-size/human build2/human build-release/human build/human; do
     if [ -f "$bin" ]; then
         BINARY_BYTES=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin" 2>/dev/null || echo 0)
         BINARY_KB=$((BINARY_BYTES / 1024))
@@ -57,7 +57,7 @@ for bin in build-size/seaclaw build2/seaclaw build-release/seaclaw build/seaclaw
     fi
 done
 
-echo "=== SeaClaw Stats ==="
+echo "=== Human Stats ==="
 echo "Source + header files: ${SRC_COUNT}"
 echo "Lines of C:           ~${C_LINES_K}K (${C_LINES_RAW})"
 echo "Test files:           ${TEST_FILES}"
@@ -212,28 +212,28 @@ if [ -f PROJECT_STATUS.md ]; then
         PROJECT_STATUS.md && rm -f PROJECT_STATUS.md.bak
 fi
 
-echo "Patching seaclaw/STUBS.md..."
+echo "Patching human/STUBS.md..."
 
-if [ -f seaclaw/STUBS.md ]; then
+if [ -f human/STUBS.md ]; then
     # Test count in header blurb
     sed -i.bak -E \
         "s/[0-9,]+ tests, ~[0-9]+ KB binary/${TEST_COUNT_FMT} tests, ~${BINARY_KB} KB binary/" \
-        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+        human/STUBS.md && rm -f human/STUBS.md.bak
 
     # Tests passing table row
     sed -i.bak -E \
         "s/Tests passing[[:space:]]+\| \*\*[^*]+\*\*/Tests passing                  | **${TEST_COUNT_FMT}\/${TEST_COUNT_FMT} (100%)**/" \
-        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+        human/STUBS.md && rm -f human/STUBS.md.bak
 
     # Test files
     sed -i.bak -E \
         "s/Test files[[:space:]]+\| [0-9]+/Test files                     | ${TEST_FILES}/" \
-        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+        human/STUBS.md && rm -f human/STUBS.md.bak
 
     # Update date
     sed -i.bak -E \
         "s/Last updated: [0-9]{4}-[0-9]{2}-[0-9]{2}/Last updated: $(date +%Y-%m-%d)/" \
-        seaclaw/STUBS.md && rm -f seaclaw/STUBS.md.bak
+        human/STUBS.md && rm -f human/STUBS.md.bak
 fi
 
 echo "Patching CLAUDE.md..."

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compare two SeaClaw benchmark JSON result files.
+# Compare two Human benchmark JSON result files.
 # Usage: ./scripts/compare-benchmarks.sh before.json after.json
 
 set -eu
@@ -17,7 +17,7 @@ warn() { printf "${YELLOW}warning:${NC} %s\n" "$1"; }
 case "${1:-}" in
     --help|-h)
         printf "Usage: %s before.json after.json\n" "$0"
-        printf "Compare two SeaClaw benchmark JSON result files.\n"
+        printf "Compare two Human benchmark JSON result files.\n"
         exit 0
         ;;
 esac

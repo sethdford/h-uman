@@ -1,4 +1,4 @@
-#include "seaclaw/memory/vector/circuit_breaker.h"
+#include "human/memory/vector/circuit_breaker.h"
 #include <stdint.h>
 #include <time.h>
 
@@ -21,8 +21,8 @@ static int64_t nano_ts(void) {
 }
 #endif
 
-void sc_circuit_breaker_init(sc_circuit_breaker_t *cb, uint32_t threshold, uint32_t cooldown_ms) {
-    cb->state = SC_CB_CLOSED;
+void hu_circuit_breaker_init(hu_circuit_breaker_t *cb, uint32_t threshold, uint32_t cooldown_ms) {
+    cb->state = HU_CB_CLOSED;
     cb->failure_count = 0;
     cb->threshold = threshold;
     cb->cooldown_ns = (uint64_t)cooldown_ms * 1000000;
@@ -30,20 +30,20 @@ void sc_circuit_breaker_init(sc_circuit_breaker_t *cb, uint32_t threshold, uint3
     cb->half_open_probe_sent = false;
 }
 
-bool sc_circuit_breaker_allow(sc_circuit_breaker_t *cb) {
+bool hu_circuit_breaker_allow(hu_circuit_breaker_t *cb) {
     switch (cb->state) {
-    case SC_CB_CLOSED:
+    case HU_CB_CLOSED:
         return true;
-    case SC_CB_OPEN: {
+    case HU_CB_OPEN: {
         int64_t now = nano_ts();
         if (now - cb->last_failure_ns >= (int64_t)cb->cooldown_ns) {
-            cb->state = SC_CB_HALF_OPEN;
+            cb->state = HU_CB_HALF_OPEN;
             cb->half_open_probe_sent = true;
             return true;
         }
         return false;
     }
-    case SC_CB_HALF_OPEN:
+    case HU_CB_HALF_OPEN:
         if (!cb->half_open_probe_sent) {
             cb->half_open_probe_sent = true;
             return true;
@@ -53,24 +53,24 @@ bool sc_circuit_breaker_allow(sc_circuit_breaker_t *cb) {
     return false;
 }
 
-void sc_circuit_breaker_record_success(sc_circuit_breaker_t *cb) {
-    cb->state = SC_CB_CLOSED;
+void hu_circuit_breaker_record_success(hu_circuit_breaker_t *cb) {
+    cb->state = HU_CB_CLOSED;
     cb->failure_count = 0;
     cb->half_open_probe_sent = false;
 }
 
-void sc_circuit_breaker_record_failure(sc_circuit_breaker_t *cb) {
+void hu_circuit_breaker_record_failure(hu_circuit_breaker_t *cb) {
     if (cb->failure_count < 0xFFFFFFFFu)
         cb->failure_count++;
     cb->last_failure_ns = nano_ts();
 
-    if (cb->state == SC_CB_HALF_OPEN ||
-        (cb->state == SC_CB_CLOSED && cb->failure_count >= cb->threshold)) {
-        cb->state = SC_CB_OPEN;
+    if (cb->state == HU_CB_HALF_OPEN ||
+        (cb->state == HU_CB_CLOSED && cb->failure_count >= cb->threshold)) {
+        cb->state = HU_CB_OPEN;
         cb->half_open_probe_sent = false;
     }
 }
 
-bool sc_circuit_breaker_is_open(const sc_circuit_breaker_t *cb) {
-    return cb->state == SC_CB_OPEN;
+bool hu_circuit_breaker_is_open(const hu_circuit_breaker_t *cb) {
+    return cb->state == HU_CB_OPEN;
 }

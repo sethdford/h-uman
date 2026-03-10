@@ -12,13 +12,13 @@ test.describe("Sidebar Transitions", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/?demo");
     await page.waitForLoadState("domcontentloaded");
-    await page.locator("sc-app >> .layout").waitFor({ timeout: 5000 });
+    await page.locator("hu-app >> .layout").waitFor({ timeout: 5000 });
   });
 
   function getSidebarMetrics() {
     return `(() => {
-      const app = document.querySelector("sc-app");
-      const sidebar = app?.shadowRoot?.querySelector("sc-sidebar");
+      const app = document.querySelector("hu-app");
+      const sidebar = app?.shadowRoot?.querySelector("hu-sidebar");
       if (!sidebar) return null;
       const host = sidebar;
       const style = getComputedStyle(host);
@@ -71,8 +71,8 @@ test.describe("Sidebar Transitions", () => {
     await page.waitForTimeout(400);
 
     const labelsHidden = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
-      const sidebar = app?.shadowRoot?.querySelector("sc-sidebar");
+      const app = document.querySelector("hu-app");
+      const sidebar = app?.shadowRoot?.querySelector("hu-sidebar");
       const labels = sidebar?.shadowRoot?.querySelectorAll(".label") ?? [];
       return [...labels].every(l => {
         const style = getComputedStyle(l);
@@ -89,8 +89,8 @@ test.describe("Sidebar Transitions", () => {
     await page.waitForTimeout(400);
 
     const labelsVisible = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
-      const sidebar = app?.shadowRoot?.querySelector("sc-sidebar");
+      const app = document.querySelector("hu-app");
+      const sidebar = app?.shadowRoot?.querySelector("hu-sidebar");
       const labels = sidebar?.shadowRoot?.querySelectorAll(".nav-item .label") ?? [];
       return [...labels].some(l => l.offsetWidth > 0);
     })()`);
@@ -99,7 +99,7 @@ test.describe("Sidebar Transitions", () => {
 
   test("grid layout adjusts on collapse/expand", async ({ page }) => {
     const expandedGridColumns = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
+      const app = document.querySelector("hu-app");
       const layout = app?.shadowRoot?.querySelector(".layout");
       return getComputedStyle(layout).gridTemplateColumns;
     })()`);
@@ -108,7 +108,7 @@ test.describe("Sidebar Transitions", () => {
     await page.waitForTimeout(400);
 
     const collapsedGridColumns = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
+      const app = document.querySelector("hu-app");
       const layout = app?.shadowRoot?.querySelector(".layout");
       return getComputedStyle(layout).gridTemplateColumns;
     })()`);
@@ -120,20 +120,20 @@ test.describe("Sidebar Transitions", () => {
     await page.keyboard.press("Control+b");
     await page.waitForTimeout(400);
 
-    const stored = await page.evaluate(() => localStorage.getItem("sc-sidebar-collapsed"));
+    const stored = await page.evaluate(() => localStorage.getItem("hu-sidebar-collapsed"));
     expect(stored).toBe("true");
 
     await page.keyboard.press("Control+b");
     await page.waitForTimeout(400);
 
-    const storedExpanded = await page.evaluate(() => localStorage.getItem("sc-sidebar-collapsed"));
+    const storedExpanded = await page.evaluate(() => localStorage.getItem("hu-sidebar-collapsed"));
     expect(storedExpanded).toBe("false");
   });
 
   test("collapse button chevron rotates on collapse", async ({ page }) => {
     const initialRotation = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
-      const sidebar = app?.shadowRoot?.querySelector("sc-sidebar");
+      const app = document.querySelector("hu-app");
+      const sidebar = app?.shadowRoot?.querySelector("hu-sidebar");
       const icon = sidebar?.shadowRoot?.querySelector(".collapse-btn .icon");
       return getComputedStyle(icon).transform;
     })()`);
@@ -142,8 +142,8 @@ test.describe("Sidebar Transitions", () => {
     await page.waitForTimeout(400);
 
     const collapsedRotation = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
-      const sidebar = app?.shadowRoot?.querySelector("sc-sidebar");
+      const app = document.querySelector("hu-app");
+      const sidebar = app?.shadowRoot?.querySelector("hu-sidebar");
       const icon = sidebar?.shadowRoot?.querySelector(".collapse-btn .icon");
       return getComputedStyle(icon).transform;
     })()`);

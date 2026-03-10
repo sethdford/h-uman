@@ -93,7 +93,7 @@ function highlightMatch(label: string, query: string): string | ReturnType<typeo
   return html`${before}<strong>${match}</strong>${after}`;
 }
 
-@customElement("sc-command-palette")
+@customElement("hu-command-palette")
 export class ScCommandPalette extends LitElement {
   static override styles = css`
     :host {
@@ -104,9 +104,9 @@ export class ScCommandPalette extends LitElement {
       position: fixed;
       inset: 0;
       z-index: 10000;
-      background: var(--sc-backdrop-overlay);
-      backdrop-filter: blur(var(--sc-blur-md, 12px));
-      -webkit-backdrop-filter: blur(var(--sc-blur-md, 12px));
+      background: var(--hu-backdrop-overlay);
+      backdrop-filter: blur(var(--hu-blur-md, 12px));
+      -webkit-backdrop-filter: blur(var(--hu-blur-md, 12px));
       display: flex;
       align-items: flex-start;
       justify-content: center;
@@ -119,64 +119,64 @@ export class ScCommandPalette extends LitElement {
     }
 
     .panel {
-      background: color-mix(in srgb, var(--sc-surface-container-highest) 85%, transparent);
-      backdrop-filter: blur(var(--sc-glass-prominent-blur))
-        saturate(var(--sc-glass-prominent-saturate));
-      -webkit-backdrop-filter: blur(var(--sc-glass-prominent-blur))
-        saturate(var(--sc-glass-prominent-saturate));
-      box-shadow: var(--sc-shadow-xl);
-      border: 1px solid var(--sc-glass-border-color);
-      border-radius: var(--sc-radius-xl);
+      background: color-mix(in srgb, var(--hu-surface-container-highest) 85%, transparent);
+      backdrop-filter: blur(var(--hu-glass-prominent-blur))
+        saturate(var(--hu-glass-prominent-saturate));
+      -webkit-backdrop-filter: blur(var(--hu-glass-prominent-blur))
+        saturate(var(--hu-glass-prominent-saturate));
+      box-shadow: var(--hu-shadow-xl);
+      border: 1px solid var(--hu-glass-border-color);
+      border-radius: var(--hu-radius-xl);
       max-width: 560px;
       width: 100%;
-      margin: 0 var(--sc-space-md);
+      margin: 0 var(--hu-space-md);
       box-sizing: border-box;
-      animation: sc-bounce-in var(--sc-duration-moderate) var(--sc-ease-out);
+      animation: hu-bounce-in var(--hu-duration-moderate) var(--hu-ease-out);
     }
 
     .input-wrap {
-      padding: var(--sc-space-md);
-      border-bottom: 1px solid var(--sc-border);
+      padding: var(--hu-space-md);
+      border-bottom: 1px solid var(--hu-border);
     }
 
     .input {
       width: 100%;
-      padding: var(--sc-space-md);
-      font-size: var(--sc-text-lg);
-      font-family: var(--sc-font);
-      color: var(--sc-text);
-      background: var(--sc-bg-overlay);
+      padding: var(--hu-space-md);
+      font-size: var(--hu-text-lg);
+      font-family: var(--hu-font);
+      color: var(--hu-text);
+      background: var(--hu-bg-overlay);
       border: none;
       outline: none;
     }
 
     .input::placeholder {
-      color: var(--sc-text-muted);
+      color: var(--hu-text-muted);
     }
 
     .results {
       max-height: min(24rem, 70vh);
       overflow-y: auto;
-      padding: var(--sc-space-xs);
+      padding: var(--hu-space-xs);
     }
 
     .item {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-md);
-      padding: var(--sc-space-sm) var(--sc-space-md);
-      font-size: var(--sc-text-base);
-      color: var(--sc-text);
+      gap: var(--hu-space-md);
+      padding: var(--hu-space-sm) var(--hu-space-md);
+      font-size: var(--hu-text-base);
+      color: var(--hu-text);
       cursor: pointer;
-      border-radius: var(--sc-radius);
+      border-radius: var(--hu-radius);
     }
 
     .item:hover {
-      background: var(--sc-hover-overlay);
+      background: var(--hu-hover-overlay);
     }
 
     .item.selected {
-      background: var(--sc-hover-overlay);
+      background: var(--hu-hover-overlay);
     }
 
     .icon {
@@ -186,7 +186,7 @@ export class ScCommandPalette extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--sc-text-muted);
+      color: var(--hu-text-muted);
     }
 
     .icon svg {
@@ -200,30 +200,30 @@ export class ScCommandPalette extends LitElement {
     }
 
     .label strong {
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
     }
 
     .meta {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
       flex-shrink: 0;
     }
 
     .badge {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-faint);
-      background: var(--sc-bg-elevated);
-      padding: var(--sc-space-2xs) var(--sc-space-xs);
-      border-radius: var(--sc-radius-sm);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-faint);
+      background: var(--hu-bg-elevated);
+      padding: var(--hu-space-2xs) var(--hu-space-xs);
+      border-radius: var(--hu-radius-sm);
       text-transform: lowercase;
     }
 
     .shortcut {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-faint);
-      font-family: var(--sc-font-mono);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-faint);
+      font-family: var(--hu-font-mono);
     }
     @media (prefers-reduced-motion: reduce) {
       .panel,
@@ -336,7 +336,7 @@ export class ScCommandPalette extends LitElement {
           </div>
           <div class="results">
             ${items.length === 0
-              ? html`<div class="item" style="color: var(--sc-text-muted)">No results</div>`
+              ? html`<div class="item" style="color: var(--hu-text-muted)">No results</div>`
               : items.map(
                   (cmd, i) => html`
                     <div
@@ -367,6 +367,6 @@ export class ScCommandPalette extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-command-palette": ScCommandPalette;
+    "hu-command-palette": ScCommandPalette;
   }
 }

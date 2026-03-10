@@ -1,5 +1,5 @@
-#include "seaclaw/multimodal/document.h"
-#include "seaclaw/core/string.h"
+#include "human/multimodal/document.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -19,62 +19,62 @@ static bool match_ext(const char *filename, size_t filename_len, const char *ext
     return true;
 }
 
-static const char *doc_type_name(sc_doc_type_t type) {
+static const char *doc_type_name(hu_doc_type_t type) {
     switch (type) {
-    case SC_DOC_PLAINTEXT:
+    case HU_DOC_PLAINTEXT:
         return "plaintext";
-    case SC_DOC_MARKDOWN:
+    case HU_DOC_MARKDOWN:
         return "markdown";
-    case SC_DOC_JSON:
+    case HU_DOC_JSON:
         return "json";
-    case SC_DOC_CSV:
+    case HU_DOC_CSV:
         return "csv";
-    case SC_DOC_CODE:
+    case HU_DOC_CODE:
         return "code";
     default:
         return "document";
     }
 }
 
-sc_doc_type_t sc_doc_detect_type(const char *filename, size_t filename_len) {
+hu_doc_type_t hu_doc_detect_type(const char *filename, size_t filename_len) {
     if (!filename || filename_len == 0)
-        return SC_DOC_UNKNOWN_TYPE;
+        return HU_DOC_UNKNOWN_TYPE;
     if (match_ext(filename, filename_len, "txt", 3))
-        return SC_DOC_PLAINTEXT;
+        return HU_DOC_PLAINTEXT;
     if (match_ext(filename, filename_len, "md", 2) ||
         match_ext(filename, filename_len, "markdown", 8))
-        return SC_DOC_MARKDOWN;
+        return HU_DOC_MARKDOWN;
     if (match_ext(filename, filename_len, "json", 4))
-        return SC_DOC_JSON;
+        return HU_DOC_JSON;
     if (match_ext(filename, filename_len, "csv", 3))
-        return SC_DOC_CSV;
+        return HU_DOC_CSV;
     if (match_ext(filename, filename_len, "py", 2) || match_ext(filename, filename_len, "c", 1) ||
         match_ext(filename, filename_len, "h", 1) || match_ext(filename, filename_len, "js", 2) ||
         match_ext(filename, filename_len, "ts", 2) || match_ext(filename, filename_len, "rs", 2) ||
         match_ext(filename, filename_len, "go", 2))
-        return SC_DOC_CODE;
-    return SC_DOC_UNKNOWN_TYPE;
+        return HU_DOC_CODE;
+    return HU_DOC_UNKNOWN_TYPE;
 }
 
-sc_error_t sc_doc_chunk(sc_allocator_t *alloc, const char *content, size_t content_len,
-                        size_t chunk_size, size_t overlap, sc_doc_chunk_t **out,
+hu_error_t hu_doc_chunk(hu_allocator_t *alloc, const char *content, size_t content_len,
+                        size_t chunk_size, size_t overlap, hu_doc_chunk_t **out,
                         size_t *out_count) {
     if (!alloc || !out || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
 
     if (!content || chunk_size == 0)
-        return SC_OK;
+        return HU_OK;
 
     if (overlap >= chunk_size)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t cap = 16;
-    sc_doc_chunk_t *chunks =
-        (sc_doc_chunk_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_doc_chunk_t));
+    hu_doc_chunk_t *chunks =
+        (hu_doc_chunk_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_doc_chunk_t));
     if (!chunks)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     size_t count = 0;
     size_t pos = 0;
@@ -110,20 +110,20 @@ sc_error_t sc_doc_chunk(sc_allocator_t *alloc, const char *content, size_t conte
         }
 
         size_t len = split_at - chunk_start;
-        char *dup = sc_strndup(alloc, content + chunk_start, len);
+        char *dup = hu_strndup(alloc, content + chunk_start, len);
         if (!dup) {
-            sc_doc_chunks_free(alloc, chunks, count);
-            return SC_ERR_OUT_OF_MEMORY;
+            hu_doc_chunks_free(alloc, chunks, count);
+            return HU_ERR_OUT_OF_MEMORY;
         }
 
         if (count >= cap) {
             size_t new_cap = cap * 2;
-            sc_doc_chunk_t *n = (sc_doc_chunk_t *)alloc->realloc(
-                alloc->ctx, chunks, cap * sizeof(sc_doc_chunk_t), new_cap * sizeof(sc_doc_chunk_t));
+            hu_doc_chunk_t *n = (hu_doc_chunk_t *)alloc->realloc(
+                alloc->ctx, chunks, cap * sizeof(hu_doc_chunk_t), new_cap * sizeof(hu_doc_chunk_t));
             if (!n) {
                 alloc->free(alloc->ctx, dup, len + 1);
-                sc_doc_chunks_free(alloc, chunks, count);
-                return SC_ERR_OUT_OF_MEMORY;
+                hu_doc_chunks_free(alloc, chunks, count);
+                return HU_ERR_OUT_OF_MEMORY;
             }
             chunks = n;
             cap = new_cap;
@@ -145,14 +145,14 @@ sc_error_t sc_doc_chunk(sc_allocator_t *alloc, const char *content, size_t conte
 
     *out = chunks;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_doc_build_extract_prompt(sc_allocator_t *alloc, const char *filename,
-                                       size_t filename_len, sc_doc_type_t type, const char *chunk,
+hu_error_t hu_doc_build_extract_prompt(hu_allocator_t *alloc, const char *filename,
+                                       size_t filename_len, hu_doc_type_t type, const char *chunk,
                                        size_t chunk_len, char **out, size_t *out_len) {
     if (!alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
@@ -162,19 +162,19 @@ sc_error_t sc_doc_build_extract_prompt(sc_allocator_t *alloc, const char *filena
     const char *chunk_str = chunk && chunk_len > 0 ? chunk : "";
     size_t chunk_str_len = chunk && chunk_len > 0 ? chunk_len : 0;
 
-    char *prompt = sc_sprintf(alloc,
+    char *prompt = hu_sprintf(alloc,
                               "Extract key facts, entities, and relationships from this %s "
                               "document (%.*s):\n\n%.*s\n\nReturn structured JSON with: "
                               "entities[], facts[], relationships[]",
                               type_str, (int)fname_len, fname, (int)chunk_str_len, chunk_str);
     if (!prompt)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     *out = prompt;
     *out_len = strlen(prompt);
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_doc_chunks_free(sc_allocator_t *alloc, sc_doc_chunk_t *chunks, size_t count) {
+void hu_doc_chunks_free(hu_allocator_t *alloc, hu_doc_chunk_t *chunks, size_t count) {
     if (!alloc || !chunks)
         return;
     for (size_t i = 0; i < count; i++) {
@@ -183,5 +183,5 @@ void sc_doc_chunks_free(sc_allocator_t *alloc, sc_doc_chunk_t *chunks, size_t co
             chunks[i].content = NULL;
         }
     }
-    alloc->free(alloc->ctx, chunks, count * sizeof(sc_doc_chunk_t));
+    alloc->free(alloc->ctx, chunks, count * sizeof(hu_doc_chunk_t));
 }

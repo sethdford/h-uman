@@ -1,34 +1,34 @@
-#include "seaclaw/providers/sse.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
+#include "human/providers/sse.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define SC_SSE_PARSER_INIT_CAP 256
+#define HU_SSE_PARSER_INIT_CAP 256
 
 static bool field_eq(const char *a, size_t alen, const char *b) {
     size_t blen = strlen(b);
     return alen == blen && memcmp(a, b, alen) == 0;
 }
 
-sc_error_t sc_sse_parser_init(sc_sse_parser_t *p, sc_allocator_t *alloc) {
+hu_error_t hu_sse_parser_init(hu_sse_parser_t *p, hu_allocator_t *alloc) {
     if (!p || !alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(p, 0, sizeof(*p));
     p->alloc = alloc;
-    p->buffer = (char *)alloc->alloc(alloc->ctx, SC_SSE_PARSER_INIT_CAP);
+    p->buffer = (char *)alloc->alloc(alloc->ctx, HU_SSE_PARSER_INIT_CAP);
     if (!p->buffer)
-        return SC_ERR_OUT_OF_MEMORY;
-    p->buf_cap = SC_SSE_PARSER_INIT_CAP;
+        return HU_ERR_OUT_OF_MEMORY;
+    p->buf_cap = HU_SSE_PARSER_INIT_CAP;
     p->buf_len = 0;
     p->buffer[0] = '\0';
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_sse_parser_deinit(sc_sse_parser_t *p) {
+void hu_sse_parser_deinit(hu_sse_parser_t *p) {
     if (!p)
         return;
     if (p->buffer && p->alloc) {
@@ -63,20 +63,20 @@ static void parse_field(const char *line, size_t line_len, const char **field_ou
     }
 }
 
-sc_error_t sc_sse_parser_feed(sc_sse_parser_t *p, const char *bytes, size_t len,
-                              sc_sse_event_cb callback, void *userdata) {
+hu_error_t hu_sse_parser_feed(hu_sse_parser_t *p, const char *bytes, size_t len,
+                              hu_sse_event_cb callback, void *userdata) {
     if (!p || !p->alloc || !callback)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (len == 0)
-        return SC_OK;
+        return HU_OK;
 
     while (p->buf_len + len + 1 > p->buf_cap) {
-        size_t new_cap = p->buf_cap ? p->buf_cap * 2 : SC_SSE_PARSER_INIT_CAP;
+        size_t new_cap = p->buf_cap ? p->buf_cap * 2 : HU_SSE_PARSER_INIT_CAP;
         while (new_cap < p->buf_len + len + 1)
             new_cap *= 2;
         char *nbuf = (char *)p->alloc->realloc(p->alloc->ctx, p->buffer, p->buf_cap, new_cap);
         if (!nbuf)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         p->buffer = nbuf;
         p->buf_cap = new_cap;
     }
@@ -149,7 +149,7 @@ sc_error_t sc_sse_parser_feed(sc_sse_parser_t *p, const char *bytes, size_t len,
                     if (!nd) {
                         if (data)
                             p->alloc->free(p->alloc->ctx, data, data_cap);
-                        return SC_ERR_OUT_OF_MEMORY;
+                        return HU_ERR_OUT_OF_MEMORY;
                     }
                     data = nd;
                     data_cap = new_cap;
@@ -183,12 +183,12 @@ sc_error_t sc_sse_parser_feed(sc_sse_parser_t *p, const char *bytes, size_t len,
     if (data && !has_data) {
         p->alloc->free(p->alloc->ctx, data, data_cap);
     }
-    return SC_OK;
+    return HU_OK;
 }
 
 /* Line-level parsing */
-#define SC_SSE_DATA_PREFIX     "data: "
-#define SC_SSE_DATA_PREFIX_LEN 6
+#define HU_SSE_DATA_PREFIX     "data: "
+#define HU_SSE_DATA_PREFIX_LEN 6
 
 static void trim_right(const char *s, size_t len, size_t *new_len) {
     while (len > 0 && (s[len - 1] == '\r' || s[len - 1] == '\n' || s[len - 1] == ' '))
@@ -196,78 +196,78 @@ static void trim_right(const char *s, size_t len, size_t *new_len) {
     *new_len = len;
 }
 
-sc_error_t sc_sse_parse_line(sc_allocator_t *alloc, const char *line, size_t line_len,
-                             sc_sse_line_result_t *out) {
+hu_error_t hu_sse_parse_line(hu_allocator_t *alloc, const char *line, size_t line_len,
+                             hu_sse_line_result_t *out) {
     if (!line || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(out, 0, sizeof(*out));
 
     trim_right(line, line_len, &line_len);
     if (line_len == 0) {
-        out->tag = SC_SSE_SKIP;
-        return SC_OK;
+        out->tag = HU_SSE_SKIP;
+        return HU_OK;
     }
     if (line[0] == ':') {
-        out->tag = SC_SSE_SKIP;
-        return SC_OK;
+        out->tag = HU_SSE_SKIP;
+        return HU_OK;
     }
 
-    if (line_len < SC_SSE_DATA_PREFIX_LEN ||
-        memcmp(line, SC_SSE_DATA_PREFIX, SC_SSE_DATA_PREFIX_LEN) != 0) {
-        out->tag = SC_SSE_SKIP;
-        return SC_OK;
+    if (line_len < HU_SSE_DATA_PREFIX_LEN ||
+        memcmp(line, HU_SSE_DATA_PREFIX, HU_SSE_DATA_PREFIX_LEN) != 0) {
+        out->tag = HU_SSE_SKIP;
+        return HU_OK;
     }
 
-    const char *data = line + SC_SSE_DATA_PREFIX_LEN;
-    size_t data_len = line_len - SC_SSE_DATA_PREFIX_LEN;
+    const char *data = line + HU_SSE_DATA_PREFIX_LEN;
+    size_t data_len = line_len - HU_SSE_DATA_PREFIX_LEN;
     while (data_len > 0 && (*data == ' ' || *data == '\t')) {
         data++;
         data_len--;
     }
 
     if (data_len == 6 && memcmp(data, "[DONE]", 6) == 0) {
-        out->tag = SC_SSE_DONE;
-        return SC_OK;
+        out->tag = HU_SSE_DONE;
+        return HU_OK;
     }
 
-    char *delta = sc_sse_extract_delta_content(alloc, data, data_len);
+    char *delta = hu_sse_extract_delta_content(alloc, data, data_len);
     if (!delta) {
-        out->tag = SC_SSE_SKIP;
-        return SC_OK;
+        out->tag = HU_SSE_SKIP;
+        return HU_OK;
     }
-    out->tag = SC_SSE_DELTA;
+    out->tag = HU_SSE_DELTA;
     out->delta = delta;
     out->delta_len = strlen(delta);
-    return SC_OK;
+    return HU_OK;
 }
 
-char *sc_sse_extract_delta_content(sc_allocator_t *alloc, const char *json_str, size_t json_len) {
-    sc_json_value_t *parsed = NULL;
-    if (sc_json_parse(alloc, json_str, json_len, &parsed) != SC_OK)
+char *hu_sse_extract_delta_content(hu_allocator_t *alloc, const char *json_str, size_t json_len) {
+    hu_json_value_t *parsed = NULL;
+    if (hu_json_parse(alloc, json_str, json_len, &parsed) != HU_OK)
         return NULL;
 
-    sc_json_value_t *choices = sc_json_object_get(parsed, "choices");
-    if (!choices || choices->type != SC_JSON_ARRAY || choices->data.array.len == 0) {
-        sc_json_free(alloc, parsed);
-        return NULL;
-    }
-
-    sc_json_value_t *first = choices->data.array.items[0];
-    if (first->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, parsed);
+    hu_json_value_t *choices = hu_json_object_get(parsed, "choices");
+    if (!choices || choices->type != HU_JSON_ARRAY || choices->data.array.len == 0) {
+        hu_json_free(alloc, parsed);
         return NULL;
     }
 
-    sc_json_value_t *delta = sc_json_object_get(first, "delta");
-    if (!delta || delta->type != SC_JSON_OBJECT) {
-        sc_json_free(alloc, parsed);
+    hu_json_value_t *first = choices->data.array.items[0];
+    if (first->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, parsed);
         return NULL;
     }
 
-    const char *content = sc_json_get_string(delta, "content");
+    hu_json_value_t *delta = hu_json_object_get(first, "delta");
+    if (!delta || delta->type != HU_JSON_OBJECT) {
+        hu_json_free(alloc, parsed);
+        return NULL;
+    }
+
+    const char *content = hu_json_get_string(delta, "content");
     char *out = NULL;
     if (content && strlen(content) > 0)
-        out = sc_strndup(alloc, content, strlen(content));
-    sc_json_free(alloc, parsed);
+        out = hu_strndup(alloc, content, strlen(content));
+    hu_json_free(alloc, parsed);
     return out;
 }

@@ -1,8 +1,8 @@
 {
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "$extensions": {
-    "com.seaclaw.platform": "all",
-    "com.seaclaw.version": "0.3.0"
+    "com.human.platform": "all",
+    "com.human.version": "0.3.0"
   },
   "$description": "Liquid Glass tokens \u2014 three tiers of glass depth inspired by Apple visionOS Liquid Glass, adapted for web/native",
   "glass": {
@@ -152,7 +152,7 @@
     "border-color": {
       "$value": "rgba(255, 255, 255, 0.08)",
       "$type": "color",
-      "$description": "Default glass surface border color \u2014 emitted as --sc-glass-border-color"
+      "$description": "Default glass surface border color \u2014 emitted as --hu-glass-border-color"
     }
   },
   "dynamic-light": {

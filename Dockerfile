@@ -20,9 +20,9 @@ RUN mkdir build && cd build && \
 # ── Stage 2: Config Prep ─────────────────────────────────────
 FROM busybox:1.37 AS config
 
-RUN mkdir -p /seaclaw-data/.seaclaw /seaclaw-data/workspace
+RUN mkdir -p /human-data/.human /human-data/workspace
 
-RUN cat > /seaclaw-data/.seaclaw/config.json << 'EOF'
+RUN cat > /human-data/.human/config.json << 'EOF'
 {
   "api_key": "",
   "default_provider": "openrouter",
@@ -36,29 +36,29 @@ RUN cat > /seaclaw-data/.seaclaw/config.json << 'EOF'
 }
 EOF
 
-RUN chown -R 65534:65534 /seaclaw-data
+RUN chown -R 65534:65534 /human-data
 
 # ── Stage 3: Runtime Base (shared) ────────────────────────────
 FROM alpine:3.23 AS release-base
 
-LABEL org.opencontainers.image.source=https://github.com/sethdford/seaclaw
+LABEL org.opencontainers.image.source=https://github.com/sethdford/human
 
 RUN apk add --no-cache ca-certificates curl tzdata sqlite-libs
 
-COPY --from=builder /app/build/seaclaw /usr/local/bin/seaclaw
-COPY --from=config /seaclaw-data /seaclaw-data
+COPY --from=builder /app/build/human /usr/local/bin/human
+COPY --from=config /human-data /human-data
 
-ENV SEACLAW_WORKSPACE=/seaclaw-data/workspace
-ENV HOME=/seaclaw-data
-ENV SEACLAW_GATEWAY_PORT=3000
+ENV HUMAN_WORKSPACE=/human-data/workspace
+ENV HOME=/human-data
+ENV HUMAN_GATEWAY_PORT=3000
 
-WORKDIR /seaclaw-data
+WORKDIR /human-data
 EXPOSE 3000
-ENTRYPOINT ["seaclaw"]
+ENTRYPOINT ["human"]
 CMD ["gateway", "--port", "3000", "--host", "::"]
 
 # Optional autonomous mode (explicit opt-in):
-#   docker build --target release-root -t seaclaw:root .
+#   docker build --target release-root -t human:root .
 FROM release-base AS release-root
 USER 0:0
 

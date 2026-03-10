@@ -1,21 +1,21 @@
-#ifndef SC_MY_TOOL_H
-#define SC_MY_TOOL_H
+#ifndef HU_MY_TOOL_H
+#define HU_MY_TOOL_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/tool.h"
 #include <stddef.h>
 
 /**
- * Create a custom tool implementing sc_tool_t.
+ * Create a custom tool implementing hu_tool_t.
  *
- * Add to your tool array and pass to sc_agent_from_config:
- *   sc_tool_t tools[N];
- *   sc_my_tool_create(&alloc, &tools[i]);
- *   sc_agent_from_config(&agent, &alloc, provider, tools, N, ...);
+ * Add to your tool array and pass to hu_agent_from_config:
+ *   hu_tool_t tools[N];
+ *   hu_my_tool_create(&alloc, &tools[i]);
+ *   hu_agent_from_config(&agent, &alloc, provider, tools, N, ...);
  *
- * Or add to src/tools/factory.c in sc_tools_create_default.
+ * Or add to src/tools/factory.c in hu_tools_create_default.
  */
-sc_error_t sc_my_tool_create(sc_allocator_t *alloc, sc_tool_t *out);
+hu_error_t hu_my_tool_create(hu_allocator_t *alloc, hu_tool_t *out);
 
-#endif /* SC_MY_TOOL_H */
+#endif /* HU_MY_TOOL_H */

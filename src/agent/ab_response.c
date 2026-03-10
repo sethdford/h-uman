@@ -1,26 +1,26 @@
 /* A/B response evaluation: score multiple candidates and pick the best. */
-#include "seaclaw/agent/ab_response.h"
-#include "seaclaw/context/conversation.h"
+#include "human/agent/ab_response.h"
+#include "human/context/conversation.h"
 #include <string.h>
 
-sc_error_t sc_ab_evaluate(sc_allocator_t *alloc, sc_ab_result_t *result,
-                          const sc_channel_history_entry_t *entries, size_t entry_count,
+hu_error_t hu_ab_evaluate(hu_allocator_t *alloc, hu_ab_result_t *result,
+                          const hu_channel_history_entry_t *entries, size_t entry_count,
                           uint32_t max_chars) {
     if (!alloc || !result)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     result->best_idx = 0;
     if (result->candidate_count == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t n = result->candidate_count;
-    if (n > SC_AB_MAX_CANDIDATES)
-        n = SC_AB_MAX_CANDIDATES;
+    if (n > HU_AB_MAX_CANDIDATES)
+        n = HU_AB_MAX_CANDIDATES;
     for (size_t i = 0; i < n; i++) {
-        sc_ab_candidate_t *c = &result->candidates[i];
+        hu_ab_candidate_t *c = &result->candidates[i];
         if (!c->response)
             continue;
-        sc_quality_score_t score = sc_conversation_evaluate_quality(
+        hu_quality_score_t score = hu_conversation_evaluate_quality(
             c->response, c->response_len, entries, entry_count, max_chars);
         c->quality_score = score.total;
         c->needs_revision = score.needs_revision;
@@ -35,14 +35,14 @@ sc_error_t sc_ab_evaluate(sc_allocator_t *alloc, sc_ab_result_t *result,
         }
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_ab_result_deinit(sc_ab_result_t *result, sc_allocator_t *alloc) {
+void hu_ab_result_deinit(hu_ab_result_t *result, hu_allocator_t *alloc) {
     if (!result || !alloc)
         return;
-    for (size_t i = 0; i < result->candidate_count && i < SC_AB_MAX_CANDIDATES; i++) {
-        sc_ab_candidate_t *c = &result->candidates[i];
+    for (size_t i = 0; i < result->candidate_count && i < HU_AB_MAX_CANDIDATES; i++) {
+        hu_ab_candidate_t *c = &result->candidates[i];
         if (c->response) {
             alloc->free(alloc->ctx, c->response, c->response_len + 1);
             c->response = NULL;

@@ -1,7 +1,7 @@
-#include "seaclaw/memory/retrieval/query_expansion.h"
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
+#include "human/memory/retrieval/query_expansion.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,13 +25,13 @@ static int is_stop_word(const char *s, size_t len) {
     return 0;
 }
 
-sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t raw_len,
-                           sc_expanded_query_t *out) {
+hu_error_t hu_query_expand(hu_allocator_t *alloc, const char *raw_query, size_t raw_len,
+                           hu_expanded_query_t *out) {
     memset(out, 0, sizeof(*out));
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!raw_query)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     /* Trim */
     while (raw_len > 0 && (raw_query[0] == ' ' || raw_query[0] == '\t' || raw_query[0] == '\n' ||
@@ -44,8 +44,8 @@ sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t 
         raw_len--;
 
     if (raw_len == 0) {
-        out->fts5_query = sc_strndup(alloc, "", 0);
-        return SC_OK;
+        out->fts5_query = hu_strndup(alloc, "", 0);
+        return HU_OK;
     }
 
     /* Simple tokenize: split on whitespace, filter stop words */
@@ -57,7 +57,7 @@ sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t 
             alloc->free(alloc->ctx, orig, cap * sizeof(char *));
         if (filt)
             alloc->free(alloc->ctx, filt, cap * sizeof(char *));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t no = 0, nf = 0;
 
@@ -75,13 +75,13 @@ sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t 
         if (tok_len == 0)
             continue;
 
-        char *tok = sc_strndup(alloc, start, tok_len);
+        char *tok = hu_strndup(alloc, start, tok_len);
         if (!tok)
             break;
         orig[no++] = tok;
 
         if (!is_stop_word(start, tok_len) && tok_len >= 2) {
-            filt[nf++] = sc_strndup(alloc, start, tok_len);
+            filt[nf++] = hu_strndup(alloc, start, tok_len);
         }
     }
 
@@ -99,7 +99,7 @@ sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t 
                 alloc->free(alloc->ctx, filt[i], strlen(filt[i]) + 1);
             alloc->free(alloc->ctx, orig, cap * sizeof(char *));
             alloc->free(alloc->ctx, filt, cap * sizeof(char *));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         char *q = fts5;
         for (size_t i = 0; i < nf; i++) {
@@ -111,13 +111,13 @@ sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t 
         }
         *q = '\0';
     } else {
-        fts5 = sc_strndup(alloc, raw_query, raw_len);
+        fts5 = hu_strndup(alloc, raw_query, raw_len);
         if (!fts5) {
             for (size_t i = 0; i < no; i++)
                 alloc->free(alloc->ctx, orig[i], strlen(orig[i]) + 1);
             alloc->free(alloc->ctx, orig, cap * sizeof(char *));
             alloc->free(alloc->ctx, filt, cap * sizeof(char *));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
     }
 
@@ -126,10 +126,10 @@ sc_error_t sc_query_expand(sc_allocator_t *alloc, const char *raw_query, size_t 
     out->original_count = no;
     out->filtered_tokens = filt;
     out->filtered_count = nf;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_expanded_query_free(sc_allocator_t *alloc, sc_expanded_query_t *eq) {
+void hu_expanded_query_free(hu_allocator_t *alloc, hu_expanded_query_t *eq) {
     if (!alloc || !eq)
         return;
     if (eq->fts5_query)

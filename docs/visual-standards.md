@@ -1,8 +1,8 @@
 ---
-title: SeaClaw Visual Design Standards
+title: Human Visual Design Standards
 ---
 
-# SeaClaw Visual Design Standards
+# Human Visual Design Standards
 
 > Normative reference for visual hierarchy, composition, depth, spacing, and aesthetic
 > quality. Agents must consult this document when creating or reviewing any visual UI change.
@@ -59,13 +59,13 @@ Rules:
 
 ### 1.3 Emphasis Levels (Material 3)
 
-Every element has an emphasis level. M3 defines three; SeaClaw maps them to tokens:
+Every element has an emphasis level. M3 defines three; Human maps them to tokens:
 
 | Emphasis | Visual Treatment                      | Token Pattern         | Example                            |
 | -------- | ------------------------------------- | --------------------- | ---------------------------------- |
-| High     | Accent color, bold weight, elevated   | `--sc-accent`, `bold` | Primary CTA, active nav            |
-| Medium   | Subtle accent, medium weight, surface | `--sc-text`, `medium` | Secondary actions, section headers |
-| Low      | Muted color, regular weight, flat     | `--sc-text-muted`     | Timestamps, metadata, hints        |
+| High     | Accent color, bold weight, elevated   | `--hu-accent`, `bold` | Primary CTA, active nav            |
+| Medium   | Subtle accent, medium weight, surface | `--hu-text`, `medium` | Secondary actions, section headers |
+| Low      | Muted color, regular weight, flat     | `--hu-text-muted`     | Timestamps, metadata, hints        |
 
 Rules:
 
@@ -81,7 +81,7 @@ measure against. See `docs/competitive-benchmarks.md` for the named brands we be
 
 #### Zero-Compromise Aesthetics
 
-Stripe proved beauty elevates utility by 20%. SeaClaw goes further: every pixel must
+Stripe proved beauty elevates utility by 20%. Human goes further: every pixel must
 simultaneously be the most functional AND the most beautiful version of that element in the
 developer tools space. No trade-off mentality. If a design choice requires choosing between
 craft and function, the design is wrong — find the third option.
@@ -159,11 +159,11 @@ Rules:
 
 Classic interior design proportion applied to UI:
 
-| Proportion | Role       | SeaClaw Token                                  |
+| Proportion | Role       | Human Token                                  |
 | ---------- | ---------- | ---------------------------------------------- |
-| 60%        | Background | `--sc-bg`, `--sc-bg-surface`                   |
-| 30%        | Secondary  | `--sc-text`, `--sc-border`, `--sc-bg-elevated` |
-| 10%        | Accent     | `--sc-accent`, `--sc-accent-secondary`         |
+| 60%        | Background | `--hu-bg`, `--hu-bg-surface`                   |
+| 30%        | Secondary  | `--hu-text`, `--hu-border`, `--hu-bg-elevated` |
+| 10%        | Accent     | `--hu-accent`, `--hu-accent-secondary`         |
 
 Rules:
 
@@ -178,35 +178,35 @@ Colors carry meaning. Never override semantic associations:
 
 | Color  | Meaning       | Token          | Usage                              |
 | ------ | ------------- | -------------- | ---------------------------------- |
-| Green  | Success, safe | `--sc-success` | Confirmations, connected status    |
-| Amber  | Warning       | `--sc-warning` | Caution, pending states            |
-| Coral  | Error, danger | `--sc-error`   | Errors, destructive actions ONLY   |
-| Blue   | Information   | `--sc-info`    | Help text, informational callouts  |
-| Accent | Brand, action | `--sc-accent`  | CTAs, links, focus, selected state |
+| Green  | Success, safe | `--hu-success` | Confirmations, connected status    |
+| Amber  | Warning       | `--hu-warning` | Caution, pending states            |
+| Coral  | Error, danger | `--hu-error`   | Errors, destructive actions ONLY   |
+| Blue   | Information   | `--hu-info`    | Help text, informational callouts  |
+| Accent | Brand, action | `--hu-accent`  | CTAs, links, focus, selected state |
 
 Rules:
 
 - Coral is NEVER used as a general accent — reserved exclusively for error/destructive
-- Green (accent) vs green (success): accent uses `--sc-accent`, success uses `--sc-success`
+- Green (accent) vs green (success): accent uses `--hu-accent`, success uses `--hu-success`
 - Don't rely on color alone — always pair with icon, label, or pattern (a11y requirement)
 
 ### 2.3 Dark Mode (Default)
 
-SeaClaw's default is dark mode. Light mode is secondary.
+Human's default is dark mode. Light mode is secondary.
 
 Dark mode rules:
 
 - Elevation is communicated through lighter surfaces (not shadows alone)
-- Higher elevation = lighter background (`--sc-bg` → `--sc-bg-surface` → `--sc-bg-elevated`)
+- Higher elevation = lighter background (`--hu-bg` → `--hu-bg-surface` → `--hu-bg-elevated`)
 - Shadows are subtle — primary depth cue is surface brightness
-- Text uses off-white (`--sc-text`), never pure `#ffffff` (reduces eye strain)
+- Text uses off-white (`--hu-text`), never pure `#ffffff` (reduces eye strain)
 - Accent colors may be slightly desaturated for comfortable viewing
 
 Light mode rules:
 
 - Elevation communicated through shadows primarily
 - Backgrounds are warm whites, not cold `#ffffff`
-- Text uses near-black (`--sc-text`), never pure `#000000`
+- Text uses near-black (`--hu-text`), never pure `#000000`
 - Accent colors slightly darkened for contrast compliance
 
 ---
@@ -215,27 +215,27 @@ Light mode rules:
 
 ### 3.1 The 4px Grid (Material 3)
 
-All spacing derives from a 4px base unit. SeaClaw's spacing tokens:
+All spacing derives from a 4px base unit. Human's spacing tokens:
 
 | Token            | Value | Use                                 |
 | ---------------- | ----- | ----------------------------------- |
-| `--sc-space-2xs` | 2px   | Hairline gaps, icon-to-label inline |
-| `--sc-space-xs`  | 4px   | Tight padding, inline element gaps  |
-| `--sc-space-sm`  | 8px   | Compact padding, small gaps         |
-| `--sc-space-md`  | 12px  | Standard padding, list item gaps    |
-| `--sc-space-lg`  | 16px  | Section padding, card padding       |
-| `--sc-space-xl`  | 24px  | Page-level padding, section margins |
-| `--sc-space-2xl` | 32px  | Hero padding, major section breaks  |
-| `--sc-space-3xl` | 48px  | Page margins, dramatic spacing      |
+| `--hu-space-2xs` | 2px   | Hairline gaps, icon-to-label inline |
+| `--hu-space-xs`  | 4px   | Tight padding, inline element gaps  |
+| `--hu-space-sm`  | 8px   | Compact padding, small gaps         |
+| `--hu-space-md`  | 12px  | Standard padding, list item gaps    |
+| `--hu-space-lg`  | 16px  | Section padding, card padding       |
+| `--hu-space-xl`  | 24px  | Page-level padding, section margins |
+| `--hu-space-2xl` | 32px  | Hero padding, major section breaks  |
+| `--hu-space-3xl` | 48px  | Page margins, dramatic spacing      |
 
 ### 3.2 Spacing Rhythm
 
 Consistent spacing creates visual rhythm and reduces cognitive load:
 
-- **Within a component**: Use `--sc-space-sm` to `--sc-space-md`
-- **Between components**: Use `--sc-space-lg` to `--sc-space-xl`
-- **Between sections**: Use `--sc-space-2xl` to `--sc-space-3xl`
-- **Page padding**: `--sc-space-xl` on desktop, `--sc-space-md` on mobile
+- **Within a component**: Use `--hu-space-sm` to `--hu-space-md`
+- **Between components**: Use `--hu-space-lg` to `--hu-space-xl`
+- **Between sections**: Use `--hu-space-2xl` to `--hu-space-3xl`
+- **Page padding**: `--hu-space-xl` on desktop, `--hu-space-md` on mobile
 
 Rules:
 
@@ -256,8 +256,8 @@ Empty space is not wasted space. It is a deliberate design choice that:
 Rules:
 
 - A view should never feel "cramped" — if it does, add spacing or reduce content
-- Cards should have generous internal padding (`--sc-space-lg` minimum)
-- Empty states should have extra vertical breathing room (`--sc-space-2xl`)
+- Cards should have generous internal padding (`--hu-space-lg` minimum)
+- Empty states should have extra vertical breathing room (`--hu-space-2xl`)
 - Don't fill space just because it's empty — emptiness communicates completeness
 
 ---
@@ -268,32 +268,32 @@ Rules:
 
 | Token              | Value  | Use                                  |
 | ------------------ | ------ | ------------------------------------ |
-| `--sc-radius-sm`   | 4px    | Small elements, tags, badges         |
-| `--sc-radius`      | 8px    | Buttons, inputs, standard components |
-| `--sc-radius-lg`   | 12px   | Cards, panels, modals                |
-| `--sc-radius-xl`   | 16px   | Hero sections, large containers      |
-| `--sc-radius-full` | 9999px | Pills, avatars, circular buttons     |
+| `--hu-radius-sm`   | 4px    | Small elements, tags, badges         |
+| `--hu-radius`      | 8px    | Buttons, inputs, standard components |
+| `--hu-radius-lg`   | 12px   | Cards, panels, modals                |
+| `--hu-radius-xl`   | 16px   | Hero sections, large containers      |
+| `--hu-radius-full` | 9999px | Pills, avatars, circular buttons     |
 
 Rules:
 
 - Nested elements use progressively smaller radii (container `lg`, child `md`, input `sm`)
 - Never mix sharp corners and rounded corners on the same element
 - Radius should feel proportional to element size
-- Interactive elements always have some radius (minimum `--sc-radius-sm`)
+- Interactive elements always have some radius (minimum `--hu-radius-sm`)
 
 ### 4.2 Border & Divider Usage
 
 | Token                | Use                                            |
 | -------------------- | ---------------------------------------------- |
-| `--sc-border`        | Standard borders (cards, inputs, separators)   |
-| `--sc-border-subtle` | Soft borders (elevated surfaces, hover states) |
-| `--sc-border-strong` | Emphasis borders (active states, focus)        |
+| `--hu-border`        | Standard borders (cards, inputs, separators)   |
+| `--hu-border-subtle` | Soft borders (elevated surfaces, hover states) |
+| `--hu-border-strong` | Emphasis borders (active states, focus)        |
 
 Rules:
 
-- Prefer `--sc-border-subtle` for surface delineation (less visual noise)
-- Reserve `--sc-border-strong` for active/focus states
-- Use `--sc-border` for form inputs and explicit boundaries
+- Prefer `--hu-border-subtle` for surface delineation (less visual noise)
+- Reserve `--hu-border-strong` for active/focus states
+- Use `--hu-border` for form inputs and explicit boundaries
 - Never use `border: 1px solid black` or any raw color value
 
 ---
@@ -304,11 +304,11 @@ Rules:
 
 | Token                     | Use                                    | Elevation Level |
 | ------------------------- | -------------------------------------- | --------------- |
-| `--sc-shadow-sm`          | Subtle lift, cards at rest             | Surface (1)     |
-| `--sc-shadow-md`          | Hover state, slight elevation          | Elevated (2)    |
-| `--sc-shadow-lg`          | Popovers, dropdowns, floating elements | Overlay (3)     |
-| `--sc-shadow-card`        | Default card shadow                    | Surface (1)     |
-| `--sc-shadow-glow-accent` | Accent glow for primary actions        | Interactive     |
+| `--hu-shadow-sm`          | Subtle lift, cards at rest             | Surface (1)     |
+| `--hu-shadow-md`          | Hover state, slight elevation          | Elevated (2)    |
+| `--hu-shadow-lg`          | Popovers, dropdowns, floating elements | Overlay (3)     |
+| `--hu-shadow-card`        | Default card shadow                    | Surface (1)     |
+| `--hu-shadow-glow-accent` | Accent glow for primary actions        | Interactive     |
 
 ### 5.2 Elevation Rules
 
@@ -338,7 +338,7 @@ Rules:
 
 ### 6.2 Icon + Text Pairing
 
-- Buttons: Icon left of label, `--sc-space-xs` gap
+- Buttons: Icon left of label, `--hu-space-xs` gap
 - Navigation: Icon above label (mobile) or left of label (desktop)
 - Status: Icon left of status text, colored semantically
 - Never use icon-only buttons without a tooltip or `aria-label`
@@ -353,12 +353,12 @@ Every screen should have clear typographic levels:
 
 | Level   | Token            | Weight   | Use                          |
 | ------- | ---------------- | -------- | ---------------------------- |
-| Display | `--sc-text-3xl`  | Bold     | Page titles, hero text       |
-| Heading | `--sc-text-xl`   | Semibold | Section headers              |
-| Title   | `--sc-text-lg`   | Semibold | Card titles, dialog titles   |
-| Body    | `--sc-text-base` | Regular  | Primary content              |
-| Caption | `--sc-text-sm`   | Regular  | Secondary text, descriptions |
-| Micro   | `--sc-text-xs`   | Regular  | Timestamps, metadata, badges |
+| Display | `--hu-text-3xl`  | Bold     | Page titles, hero text       |
+| Heading | `--hu-text-xl`   | Semibold | Section headers              |
+| Title   | `--hu-text-lg`   | Semibold | Card titles, dialog titles   |
+| Body    | `--hu-text-base` | Regular  | Primary content              |
+| Caption | `--hu-text-sm`   | Regular  | Secondary text, descriptions |
+| Micro   | `--hu-text-xs`   | Regular  | Timestamps, metadata, badges |
 
 Rules:
 
@@ -388,49 +388,49 @@ Rules:
 
 The foundational content container. Rules:
 
-- Background: `--sc-bg-surface` with `--sc-surface-gradient`
-- Border: `1px solid var(--sc-border)` or `--sc-border-subtle`
-- Radius: `--sc-radius-lg`
-- Padding: `--sc-space-lg` (minimum)
-- Shadow: `--sc-shadow-card`
-- Hover: lift to `--sc-shadow-md` + `translateY(-2px)`
+- Background: `--hu-bg-surface` with `--hu-surface-gradient`
+- Border: `1px solid var(--hu-border)` or `--hu-border-subtle`
+- Radius: `--hu-radius-lg`
+- Padding: `--hu-space-lg` (minimum)
+- Shadow: `--hu-shadow-card`
+- Hover: lift to `--hu-shadow-md` + `translateY(-2px)`
 - Clickable cards have `cursor: pointer` and focus ring
 
 ### 8.2 Buttons
 
 | Variant     | Background               | Text              | Border        | Use                      |
 | ----------- | ------------------------ | ----------------- | ------------- | ------------------------ |
-| Primary     | `--sc-accent` + gradient | `--sc-on-accent`  | none          | Primary CTA (1 per view) |
-| Secondary   | `--sc-bg-surface`        | `--sc-text`       | `--sc-border` | Secondary actions        |
-| Destructive | `--sc-error` + gradient  | `white`           | none          | Delete, remove           |
-| Ghost       | transparent              | `--sc-text-muted` | none          | Tertiary actions         |
+| Primary     | `--hu-accent` + gradient | `--hu-on-accent`  | none          | Primary CTA (1 per view) |
+| Secondary   | `--hu-bg-surface`        | `--hu-text`       | `--hu-border` | Secondary actions        |
+| Destructive | `--hu-error` + gradient  | `white`           | none          | Delete, remove           |
+| Ghost       | transparent              | `--hu-text-muted` | none          | Tertiary actions         |
 
 All buttons:
 
 - Minimum height: 44px (touch target)
-- Padding: `--sc-space-sm` vertical, `--sc-space-lg` horizontal
-- Radius: `--sc-radius`
+- Padding: `--hu-space-sm` vertical, `--hu-space-lg` horizontal
+- Radius: `--hu-radius`
 - Active: `translateY(1px) scaleY(0.97) scaleX(1.01)` (squash & stretch)
-- Focus: `outline: 2px solid var(--sc-accent); outline-offset: 2px`
-- Disabled: `opacity: var(--sc-opacity-disabled)`
+- Focus: `outline: 2px solid var(--hu-accent); outline-offset: 2px`
+- Disabled: `opacity: var(--hu-opacity-disabled)`
 
 ### 8.3 Forms & Inputs
 
-- Background: `--sc-bg` (inset, darker than surface)
-- Border: `--sc-border`, focus: `--sc-accent` + `0 0 0 3px var(--sc-accent-subtle)`
-- Label: above input, `--sc-text-sm`, `--sc-weight-medium`
-- Error: `--sc-error` border + inline error message below
-- Placeholder: `--sc-text-muted`
-- Font: `var(--sc-font)`, `var(--sc-text-base)`
+- Background: `--hu-bg` (inset, darker than surface)
+- Border: `--hu-border`, focus: `--hu-accent` + `0 0 0 3px var(--hu-accent-subtle)`
+- Label: above input, `--hu-text-sm`, `--hu-weight-medium`
+- Error: `--hu-error` border + inline error message below
+- Placeholder: `--hu-text-muted`
+- Font: `var(--hu-font)`, `var(--hu-text-base)`
 
 ### 8.4 Status Indicators
 
 | State        | Color          | Shape      | Animation                          |
 | ------------ | -------------- | ---------- | ---------------------------------- |
-| Connected    | `--sc-success` | Dot (10px) | Subtle glow pulse                  |
-| Disconnected | `--sc-error`   | Dot (10px) | None                               |
-| Connecting   | `--sc-warning` | Dot (10px) | `sc-status-pulse` (2s ease-in-out) |
-| Active       | `--sc-accent`  | Ring       | Spring pulse ring                  |
+| Connected    | `--hu-success` | Dot (10px) | Subtle glow pulse                  |
+| Disconnected | `--hu-error`   | Dot (10px) | None                               |
+| Connecting   | `--hu-warning` | Dot (10px) | `hu-status-pulse` (2s ease-in-out) |
+| Active       | `--hu-accent`  | Ring       | Spring pulse ring                  |
 
 ---
 
@@ -446,7 +446,7 @@ Rules:
 - Use direct labels instead of legends when practical
 - No 3D charts, no decorative gradients on data series
 - Axis labels: minimal but sufficient
-- Use `--sc-chart-categorical-*` tokens for series colors
+- Use `--hu-chart-categorical-*` tokens for series colors
 
 ### 9.2 Small Multiples
 
@@ -455,7 +455,7 @@ rather than one complex chart with many overlapping series.
 
 ### 9.3 Sparklines
 
-Inline mini-charts (`sc-sparkline`) for showing trends without full chart infrastructure.
+Inline mini-charts (`hu-sparkline`) for showing trends without full chart infrastructure.
 Use in stat cards, table cells, and dashboard tiles.
 
 ---

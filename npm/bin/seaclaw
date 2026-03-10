@@ -1,7 +1,0 @@
-#!/bin/sh
-BINARY="$(dirname "$0")/seaclaw.bin"
-if [ -x "$BINARY" ]; then
-  exec "$BINARY" "$@"
-fi
-echo "seaclaw binary not found. Run 'node install.js' in the package directory." >&2
-exit 1

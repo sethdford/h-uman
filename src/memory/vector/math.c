@@ -1,8 +1,8 @@
-#include "seaclaw/memory/vector_math.h"
+#include "human/memory/vector_math.h"
 #include <math.h>
 #include <string.h>
 
-float sc_vector_cosine_similarity(const float *a, const float *b, size_t len) {
+float hu_vector_cosine_similarity(const float *a, const float *b, size_t len) {
     if (!a || !b || len == 0)
         return 0.0f;
 
@@ -33,7 +33,7 @@ float sc_vector_cosine_similarity(const float *a, const float *b, size_t len) {
     return (float)raw;
 }
 
-unsigned char *sc_vector_to_bytes(sc_allocator_t *alloc, const float *v, size_t len) {
+unsigned char *hu_vector_to_bytes(hu_allocator_t *alloc, const float *v, size_t len) {
     if (!alloc || !v)
         return NULL;
     size_t byte_len = len * 4;
@@ -48,7 +48,7 @@ unsigned char *sc_vector_to_bytes(sc_allocator_t *alloc, const float *v, size_t 
     return bytes;
 }
 
-float *sc_vector_from_bytes(sc_allocator_t *alloc, const unsigned char *bytes, size_t byte_len) {
+float *hu_vector_from_bytes(hu_allocator_t *alloc, const unsigned char *bytes, size_t byte_len) {
     if (!alloc || !bytes)
         return NULL;
     size_t count = byte_len / 4;

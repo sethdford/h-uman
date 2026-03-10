@@ -1,109 +1,109 @@
 import { describe, it, expect } from "vitest";
 
-describe("sc-button", () => {
+describe("hu-button", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-button.js");
-    expect(customElements.get("sc-button")).toBeDefined();
+    await import("./hu-button.js");
+    expect(customElements.get("hu-button")).toBeDefined();
   });
 
   it("should reflect variant property", async () => {
-    const { ScButton } = await import("./sc-button.js");
+    const { ScButton } = await import("./hu-button.js");
     const el = new ScButton();
     el.variant = "primary";
     expect(el.variant).toBe("primary");
   });
 
   it("should reflect disabled property", async () => {
-    const { ScButton } = await import("./sc-button.js");
+    const { ScButton } = await import("./hu-button.js");
     const el = new ScButton();
     el.disabled = true;
     expect(el.disabled).toBe(true);
   });
 });
 
-describe("sc-card", () => {
+describe("hu-card", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-card.js");
-    expect(customElements.get("sc-card")).toBeDefined();
+    await import("./hu-card.js");
+    expect(customElements.get("hu-card")).toBeDefined();
   });
 });
 
-describe("sc-badge", () => {
+describe("hu-badge", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-badge.js");
-    expect(customElements.get("sc-badge")).toBeDefined();
+    await import("./hu-badge.js");
+    expect(customElements.get("hu-badge")).toBeDefined();
   });
 
   it("should reflect variant property", async () => {
-    const { ScBadge } = await import("./sc-badge.js");
+    const { ScBadge } = await import("./hu-badge.js");
     const el = new ScBadge();
     el.variant = "success";
     expect(el.variant).toBe("success");
   });
 });
 
-describe("sc-modal", () => {
+describe("hu-modal", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-modal.js");
-    expect(customElements.get("sc-modal")).toBeDefined();
+    await import("./hu-modal.js");
+    expect(customElements.get("hu-modal")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const { ScModal } = await import("./sc-modal.js");
+    const { ScModal } = await import("./hu-modal.js");
     const el = new ScModal();
     expect(el.open).toBe(false);
   });
 });
 
-describe("sc-tooltip", () => {
+describe("hu-tooltip", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-tooltip.js");
-    expect(customElements.get("sc-tooltip")).toBeDefined();
+    await import("./hu-tooltip.js");
+    expect(customElements.get("hu-tooltip")).toBeDefined();
   });
 });
 
-describe("sc-empty-state", () => {
+describe("hu-empty-state", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-empty-state.js");
-    expect(customElements.get("sc-empty-state")).toBeDefined();
+    await import("./hu-empty-state.js");
+    expect(customElements.get("hu-empty-state")).toBeDefined();
   });
 });
 
-describe("sc-skeleton", () => {
+describe("hu-skeleton", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-skeleton.js");
-    expect(customElements.get("sc-skeleton")).toBeDefined();
+    await import("./hu-skeleton.js");
+    expect(customElements.get("hu-skeleton")).toBeDefined();
   });
 });
 
-describe("sc-sheet", () => {
+describe("hu-sheet", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-sheet.js");
-    expect(customElements.get("sc-sheet")).toBeDefined();
+    await import("./hu-sheet.js");
+    expect(customElements.get("hu-sheet")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const { ScSheet } = await import("./sc-sheet.js");
+    const { ScSheet } = await import("./hu-sheet.js");
     const el = new ScSheet();
     expect(el.open).toBe(false);
   });
 });
 
-describe("sc-toast", () => {
+describe("hu-toast", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-toast.js");
-    expect(customElements.get("sc-toast")).toBeDefined();
+    await import("./hu-toast.js");
+    expect(customElements.get("hu-toast")).toBeDefined();
   });
 });
 
-describe("sc-tabs", () => {
+describe("hu-tabs", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-tabs.js");
-    expect(customElements.get("sc-tabs")).toBeDefined();
+    await import("./hu-tabs.js");
+    expect(customElements.get("hu-tabs")).toBeDefined();
   });
 
   it("should accept tabs array", async () => {
-    const { ScTabs } = await import("./sc-tabs.js");
+    const { ScTabs } = await import("./hu-tabs.js");
     const el = new ScTabs();
     el.tabs = [
       { id: "a", label: "A" },
@@ -113,35 +113,35 @@ describe("sc-tabs", () => {
   });
 });
 
-describe("sc-avatar", () => {
+describe("hu-avatar", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-avatar.js");
-    expect(customElements.get("sc-avatar")).toBeDefined();
+    await import("./hu-avatar.js");
+    expect(customElements.get("hu-avatar")).toBeDefined();
   });
 
   it("should store name property", async () => {
-    const { ScAvatar } = await import("./sc-avatar.js");
+    const { ScAvatar } = await import("./hu-avatar.js");
     const el = new ScAvatar();
     el.name = "John Doe";
     expect(el.name).toBe("John Doe");
   });
 });
 
-describe("sc-status-dot", () => {
+describe("hu-status-dot", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-status-dot.js");
-    expect(customElements.get("sc-status-dot")).toBeDefined();
+    await import("./hu-status-dot.js");
+    expect(customElements.get("hu-status-dot")).toBeDefined();
   });
 
   it("should default to disconnected status and sm size", async () => {
-    const { ScStatusDot } = await import("./sc-status-dot.js");
+    const { ScStatusDot } = await import("./hu-status-dot.js");
     const el = new ScStatusDot();
     expect(el.status).toBe("disconnected");
     expect(el.size).toBe("sm");
   });
 
   it("should reflect status and size properties", async () => {
-    const { ScStatusDot } = await import("./sc-status-dot.js");
+    const { ScStatusDot } = await import("./hu-status-dot.js");
     const el = new ScStatusDot();
     el.status = "connected";
     el.size = "md";
@@ -150,48 +150,48 @@ describe("sc-status-dot", () => {
   });
 });
 
-describe("sc-progress", () => {
+describe("hu-progress", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-progress.js");
-    expect(customElements.get("sc-progress")).toBeDefined();
+    await import("./hu-progress.js");
+    expect(customElements.get("hu-progress")).toBeDefined();
   });
 
   it("should default to 0 value", async () => {
-    const { ScProgress } = await import("./sc-progress.js");
+    const { ScProgress } = await import("./hu-progress.js");
     const el = new ScProgress();
     expect(el.value).toBe(0);
   });
 
   it("should accept indeterminate mode", async () => {
-    const { ScProgress } = await import("./sc-progress.js");
+    const { ScProgress } = await import("./hu-progress.js");
     const el = new ScProgress();
     el.indeterminate = true;
     expect(el.indeterminate).toBe(true);
   });
 });
 
-describe("sc-input", () => {
+describe("hu-input", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-input.js");
-    expect(customElements.get("sc-input")).toBeDefined();
+    await import("./hu-input.js");
+    expect(customElements.get("hu-input")).toBeDefined();
   });
 
   it("should reflect value and default properties", async () => {
-    const { ScInput } = await import("./sc-input.js");
+    const { ScInput } = await import("./hu-input.js");
     const el = new ScInput();
     expect(el.value).toBe("");
     expect(el.type).toBe("text");
     expect(el.size).toBe("md");
   });
 
-  it("should fire sc-input event on input", async () => {
-    const { ScInput } = await import("./sc-input.js");
+  it("should fire hu-input event on input", async () => {
+    const { ScInput } = await import("./hu-input.js");
     const el = new ScInput();
     document.body.appendChild(el);
     await el.updateComplete;
     const input = el.shadowRoot?.querySelector("input") as HTMLInputElement;
     let fired = false;
-    el.addEventListener("sc-input", () => {
+    el.addEventListener("hu-input", () => {
       fired = true;
     });
     input.value = "test";
@@ -202,14 +202,14 @@ describe("sc-input", () => {
   });
 });
 
-describe("sc-select", () => {
+describe("hu-select", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-select.js");
-    expect(customElements.get("sc-select")).toBeDefined();
+    await import("./hu-select.js");
+    expect(customElements.get("hu-select")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScSelect } = await import("./sc-select.js");
+    const { ScSelect } = await import("./hu-select.js");
     const el = new ScSelect();
     expect(el.value).toBe("");
     expect(el.size).toBe("md");
@@ -217,7 +217,7 @@ describe("sc-select", () => {
   });
 
   it("should accept options array", async () => {
-    const { ScSelect } = await import("./sc-select.js");
+    const { ScSelect } = await import("./hu-select.js");
     const el = new ScSelect();
     el.options = [
       { value: "a", label: "Option A" },
@@ -227,47 +227,47 @@ describe("sc-select", () => {
   });
 });
 
-describe("sc-dropdown", () => {
+describe("hu-dropdown", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-dropdown.js");
-    expect(customElements.get("sc-dropdown")).toBeDefined();
+    await import("./hu-dropdown.js");
+    expect(customElements.get("hu-dropdown")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const { ScDropdown } = await import("./sc-dropdown.js");
+    const { ScDropdown } = await import("./hu-dropdown.js");
     const el = new ScDropdown();
     expect(el.open).toBe(false);
   });
 
   it("should reflect align property", async () => {
-    const { ScDropdown } = await import("./sc-dropdown.js");
+    const { ScDropdown } = await import("./hu-dropdown.js");
     const el = new ScDropdown();
     el.align = "end";
     expect(el.align).toBe("end");
   });
 });
 
-describe("sc-switch", () => {
+describe("hu-switch", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-switch.js");
-    expect(customElements.get("sc-switch")).toBeDefined();
+    await import("./hu-switch.js");
+    expect(customElements.get("hu-switch")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScSwitch } = await import("./sc-switch.js");
+    const { ScSwitch } = await import("./hu-switch.js");
     const el = new ScSwitch();
     expect(el.checked).toBe(false);
     expect(el.disabled).toBe(false);
     expect(el.label).toBe("");
   });
 
-  it("should fire sc-change with checked when toggled", async () => {
-    const { ScSwitch } = await import("./sc-switch.js");
+  it("should fire hu-change with checked when toggled", async () => {
+    const { ScSwitch } = await import("./hu-switch.js");
     const el = new ScSwitch();
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { checked: boolean } | null = null;
-    el.addEventListener("sc-change", ((e: CustomEvent) => {
+    el.addEventListener("hu-change", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const switchEl = el.shadowRoot?.querySelector("[role='switch']") as HTMLElement;
@@ -278,14 +278,14 @@ describe("sc-switch", () => {
   });
 });
 
-describe("sc-radio", () => {
+describe("hu-radio", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-radio.js");
-    expect(customElements.get("sc-radio")).toBeDefined();
+    await import("./hu-radio.js");
+    expect(customElements.get("hu-radio")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScRadio } = await import("./sc-radio.js");
+    const { ScRadio } = await import("./hu-radio.js");
     const el = new ScRadio();
     expect(el.value).toBe("");
     expect(el.options).toEqual([]);
@@ -293,8 +293,8 @@ describe("sc-radio", () => {
     expect(el.disabled).toBe(false);
   });
 
-  it("should fire sc-change when option selected", async () => {
-    const { ScRadio } = await import("./sc-radio.js");
+  it("should fire hu-change when option selected", async () => {
+    const { ScRadio } = await import("./hu-radio.js");
     const el = new ScRadio();
     el.options = [
       { value: "a", label: "Option A" },
@@ -303,7 +303,7 @@ describe("sc-radio", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { value: string } | null = null;
-    el.addEventListener("sc-change", ((e: CustomEvent) => {
+    el.addEventListener("hu-change", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const input = el.shadowRoot?.querySelector('input[value="b"]') as HTMLInputElement;
@@ -314,14 +314,14 @@ describe("sc-radio", () => {
   });
 });
 
-describe("sc-textarea", () => {
+describe("hu-textarea", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-textarea.js");
-    expect(customElements.get("sc-textarea")).toBeDefined();
+    await import("./hu-textarea.js");
+    expect(customElements.get("hu-textarea")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScTextarea } = await import("./sc-textarea.js");
+    const { ScTextarea } = await import("./hu-textarea.js");
     const el = new ScTextarea();
     expect(el.value).toBe("");
     expect(el.rows).toBe(4);
@@ -329,14 +329,14 @@ describe("sc-textarea", () => {
   });
 });
 
-describe("sc-popover", () => {
+describe("hu-popover", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-popover.js");
-    expect(customElements.get("sc-popover")).toBeDefined();
+    await import("./hu-popover.js");
+    expect(customElements.get("hu-popover")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const { ScPopover } = await import("./sc-popover.js");
+    const { ScPopover } = await import("./hu-popover.js");
     const el = new ScPopover();
     expect(el.open).toBe(false);
     expect(el.position).toBe("bottom");
@@ -344,14 +344,14 @@ describe("sc-popover", () => {
   });
 });
 
-describe("sc-breadcrumb", () => {
+describe("hu-breadcrumb", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-breadcrumb.js");
-    expect(customElements.get("sc-breadcrumb")).toBeDefined();
+    await import("./hu-breadcrumb.js");
+    expect(customElements.get("hu-breadcrumb")).toBeDefined();
   });
 
   it("should accept items array", async () => {
-    const { ScBreadcrumb } = await import("./sc-breadcrumb.js");
+    const { ScBreadcrumb } = await import("./hu-breadcrumb.js");
     const el = new ScBreadcrumb();
     el.items = [
       { label: "Home", href: "/" },
@@ -362,20 +362,20 @@ describe("sc-breadcrumb", () => {
   });
 });
 
-describe("sc-dialog", () => {
+describe("hu-dialog", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-dialog.js");
-    expect(customElements.get("sc-dialog")).toBeDefined();
+    await import("./hu-dialog.js");
+    expect(customElements.get("hu-dialog")).toBeDefined();
   });
 
   it("should default to closed", async () => {
-    const { ScDialog } = await import("./sc-dialog.js");
+    const { ScDialog } = await import("./hu-dialog.js");
     const el = new ScDialog();
     expect(el.open).toBe(false);
   });
 
-  it("should fire sc-confirm on confirm button click", async () => {
-    const { ScDialog } = await import("./sc-dialog.js");
+  it("should fire hu-confirm on confirm button click", async () => {
+    const { ScDialog } = await import("./hu-dialog.js");
     const el = new ScDialog();
     el.open = true;
     el.title = "Test";
@@ -383,7 +383,7 @@ describe("sc-dialog", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-confirm", () => {
+    el.addEventListener("hu-confirm", () => {
       fired = true;
     });
     const confirmBtn = el.shadowRoot?.querySelector(".btn-confirm-default, .btn-confirm-danger");
@@ -392,8 +392,8 @@ describe("sc-dialog", () => {
     document.body.removeChild(el);
   });
 
-  it("should fire sc-cancel on cancel button click", async () => {
-    const { ScDialog } = await import("./sc-dialog.js");
+  it("should fire hu-cancel on cancel button click", async () => {
+    const { ScDialog } = await import("./hu-dialog.js");
     const el = new ScDialog();
     el.open = true;
     el.title = "Test";
@@ -401,7 +401,7 @@ describe("sc-dialog", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-cancel", () => {
+    el.addEventListener("hu-cancel", () => {
       fired = true;
     });
     const cancelBtn = el.shadowRoot?.querySelector(".btn-cancel");
@@ -411,14 +411,14 @@ describe("sc-dialog", () => {
   });
 });
 
-describe("sc-slider", () => {
+describe("hu-slider", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-slider.js");
-    expect(customElements.get("sc-slider")).toBeDefined();
+    await import("./hu-slider.js");
+    expect(customElements.get("hu-slider")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScSlider } = await import("./sc-slider.js");
+    const { ScSlider } = await import("./hu-slider.js");
     const el = new ScSlider();
     expect(el.value).toBe(50);
     expect(el.min).toBe(0);
@@ -428,7 +428,7 @@ describe("sc-slider", () => {
   });
 
   it("should have ARIA attributes", async () => {
-    const { ScSlider } = await import("./sc-slider.js");
+    const { ScSlider } = await import("./hu-slider.js");
     const el = new ScSlider();
     el.label = "Volume";
     document.body.appendChild(el);
@@ -441,13 +441,13 @@ describe("sc-slider", () => {
     document.body.removeChild(el);
   });
 
-  it("should fire sc-change when value changes", async () => {
-    const { ScSlider } = await import("./sc-slider.js");
+  it("should fire hu-change when value changes", async () => {
+    const { ScSlider } = await import("./hu-slider.js");
     const el = new ScSlider();
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { value: number } | undefined;
-    el.addEventListener("sc-change", ((e: CustomEvent) => {
+    el.addEventListener("hu-change", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const input = el.shadowRoot?.querySelector("input") as HTMLInputElement;
@@ -459,14 +459,14 @@ describe("sc-slider", () => {
   });
 });
 
-describe("sc-search", () => {
+describe("hu-search", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-search.js");
-    expect(customElements.get("sc-search")).toBeDefined();
+    await import("./hu-search.js");
+    expect(customElements.get("hu-search")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScSearch } = await import("./sc-search.js");
+    const { ScSearch } = await import("./hu-search.js");
     const el = new ScSearch();
     expect(el.value).toBe("");
     expect(el.placeholder).toBe("Search...");
@@ -474,7 +474,7 @@ describe("sc-search", () => {
   });
 
   it("should have role search", async () => {
-    const { ScSearch } = await import("./sc-search.js");
+    const { ScSearch } = await import("./hu-search.js");
     const el = new ScSearch();
     document.body.appendChild(el);
     await el.updateComplete;
@@ -484,14 +484,14 @@ describe("sc-search", () => {
   });
 });
 
-describe("sc-segmented-control", () => {
+describe("hu-segmented-control", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-segmented-control.js");
-    expect(customElements.get("sc-segmented-control")).toBeDefined();
+    await import("./hu-segmented-control.js");
+    expect(customElements.get("hu-segmented-control")).toBeDefined();
   });
 
   it("should reflect options and value", async () => {
-    const { ScSegmentedControl } = await import("./sc-segmented-control.js");
+    const { ScSegmentedControl } = await import("./hu-segmented-control.js");
     const el = new ScSegmentedControl();
     el.options = [
       { value: "a", label: "Option A" },
@@ -503,7 +503,7 @@ describe("sc-segmented-control", () => {
   });
 
   it("should have role tablist and tab", async () => {
-    const { ScSegmentedControl } = await import("./sc-segmented-control.js");
+    const { ScSegmentedControl } = await import("./hu-segmented-control.js");
     const el = new ScSegmentedControl();
     el.options = [
       { value: "a", label: "A" },
@@ -522,14 +522,14 @@ describe("sc-segmented-control", () => {
   });
 });
 
-describe("sc-chat-search", () => {
+describe("hu-chat-search", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-chat-search.js");
-    expect(customElements.get("sc-chat-search")).toBeDefined();
+    await import("./hu-chat-search.js");
+    expect(customElements.get("hu-chat-search")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     expect(el.open).toBe(false);
     expect(el.query).toBe("");
@@ -538,7 +538,7 @@ describe("sc-chat-search", () => {
   });
 
   it("should render when open", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     el.open = true;
     document.body.appendChild(el);
@@ -551,7 +551,7 @@ describe("sc-chat-search", () => {
   });
 
   it("should have search input when opened", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     el.open = true;
     document.body.appendChild(el);
@@ -563,14 +563,14 @@ describe("sc-chat-search", () => {
     document.body.removeChild(el);
   });
 
-  it("should fire sc-search-change when query changes", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+  it("should fire hu-search-change when query changes", async () => {
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     el.open = true;
     document.body.appendChild(el);
     await el.updateComplete;
     let detail: { query: string } | null = null;
-    el.addEventListener("sc-search-change", ((e: CustomEvent) => {
+    el.addEventListener("hu-search-change", ((e: CustomEvent) => {
       detail = e.detail;
     }) as EventListener);
     const input = el.shadowRoot?.querySelector("#search-input") as HTMLInputElement;
@@ -581,14 +581,14 @@ describe("sc-chat-search", () => {
     document.body.removeChild(el);
   });
 
-  it("should fire sc-search-close when close button clicked", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+  it("should fire hu-search-close when close button clicked", async () => {
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     el.open = true;
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-search-close", () => {
+    el.addEventListener("hu-search-close", () => {
       fired = true;
     });
     const closeBtn = el.shadowRoot?.querySelector(".close-btn") as HTMLElement;
@@ -597,15 +597,15 @@ describe("sc-chat-search", () => {
     document.body.removeChild(el);
   });
 
-  it("should fire sc-search-next when next button clicked", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+  it("should fire hu-search-next when next button clicked", async () => {
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     el.open = true;
     el.matchCount = 2;
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-search-next", () => {
+    el.addEventListener("hu-search-next", () => {
       fired = true;
     });
     const nextBtn = el.shadowRoot?.querySelectorAll(".nav-btn")[1] as HTMLElement;
@@ -614,15 +614,15 @@ describe("sc-chat-search", () => {
     document.body.removeChild(el);
   });
 
-  it("should fire sc-search-prev when prev button clicked", async () => {
-    const { ScChatSearch } = await import("./sc-chat-search.js");
+  it("should fire hu-search-prev when prev button clicked", async () => {
+    const { ScChatSearch } = await import("./hu-chat-search.js");
     const el = new ScChatSearch();
     el.open = true;
     el.matchCount = 2;
     document.body.appendChild(el);
     await el.updateComplete;
     let fired = false;
-    el.addEventListener("sc-search-prev", () => {
+    el.addEventListener("hu-search-prev", () => {
       fired = true;
     });
     const prevBtn = el.shadowRoot?.querySelectorAll(".nav-btn")[0] as HTMLElement;
@@ -632,14 +632,14 @@ describe("sc-chat-search", () => {
   });
 });
 
-describe("sc-date-picker", () => {
+describe("hu-date-picker", () => {
   it("should be defined as a custom element", async () => {
-    await import("./sc-date-picker.js");
-    expect(customElements.get("sc-date-picker")).toBeDefined();
+    await import("./hu-date-picker.js");
+    expect(customElements.get("hu-date-picker")).toBeDefined();
   });
 
   it("should reflect default properties", async () => {
-    const { ScDatePicker } = await import("./sc-date-picker.js");
+    const { ScDatePicker } = await import("./hu-date-picker.js");
     const el = new ScDatePicker();
     expect(el.value).toBe("");
     expect(el.label).toBe("");
@@ -647,7 +647,7 @@ describe("sc-date-picker", () => {
   });
 
   it("should have label associated with input", async () => {
-    const { ScDatePicker } = await import("./sc-date-picker.js");
+    const { ScDatePicker } = await import("./hu-date-picker.js");
     const el = new ScDatePicker();
     el.label = "Date";
     document.body.appendChild(el);

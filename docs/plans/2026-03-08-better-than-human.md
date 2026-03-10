@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make seaclaw genuinely superhuman — perfect memory, pattern detection, proactive intelligence, adaptive persona, parallel reasoning, and commitment tracking — all in a single 511KB binary.
+**Goal:** Make human genuinely superhuman — perfect memory, pattern detection, proactive intelligence, adaptive persona, parallel reasoning, and commitment tracking — all in a single 511KB binary.
 
-**Architecture:** Seven layers, each building on the last. Layer 1 (memory) is the foundation everything depends on. Each layer maps to seaclaw's existing vtable architecture: `sc_memory_t` for storage, `sc_tool_t` for actions, `sc_observer_t` for analysis, `sc_persona_t` for personality. New subsystems get their own headers in `include/seaclaw/` and implementations in `src/`.
+**Architecture:** Seven layers, each building on the last. Layer 1 (memory) is the foundation everything depends on. Each layer maps to human's existing vtable architecture: `hu_memory_t` for storage, `hu_tool_t` for actions, `hu_observer_t` for analysis, `hu_persona_t` for personality. New subsystems get their own headers in `include/human/` and implementations in `src/`.
 
-**Tech Stack:** C11, SQLite (for persistent tiers), PCRE2-compatible regex (or simple pattern matching), pthreads (for parallel execution), existing `sc_arena_t`/`sc_allocator_t`/`sc_json_*` utilities.
+**Tech Stack:** C11, SQLite (for persistent tiers), PCRE2-compatible regex (or simple pattern matching), pthreads (for parallel execution), existing `hu_arena_t`/`hu_allocator_t`/`hu_json_*` utilities.
 
 ---
 
@@ -20,7 +20,7 @@ Short-term memory: an in-memory ring buffer holding the last N turns of the curr
 
 **Files:**
 
-- Create: `include/seaclaw/memory/stm.h`
+- Create: `include/human/memory/stm.h`
 - Create: `src/memory/stm.c`
 - Test: `tests/test_stm.c`
 - Modify: `tests/test_main.c` — add `run_stm_tests()`
@@ -29,78 +29,78 @@ Short-term memory: an in-memory ring buffer holding the last N turns of the curr
 **Step 1: Write the header**
 
 ```c
-/* include/seaclaw/memory/stm.h */
-#ifndef SC_STM_H
-#define SC_STM_H
+/* include/human/memory/stm.h */
+#ifndef HU_STM_H
+#define HU_STM_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/slice.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/slice.h"
 
-#define SC_STM_MAX_TURNS     20
-#define SC_STM_MAX_ENTITIES  50
-#define SC_STM_MAX_TOPICS    10
-#define SC_STM_MAX_EMOTIONS   5
+#define HU_STM_MAX_TURNS     20
+#define HU_STM_MAX_ENTITIES  50
+#define HU_STM_MAX_TOPICS    10
+#define HU_STM_MAX_EMOTIONS   5
 
-typedef enum sc_emotion_tag {
-    SC_EMOTION_NEUTRAL,
-    SC_EMOTION_JOY,
-    SC_EMOTION_SADNESS,
-    SC_EMOTION_ANGER,
-    SC_EMOTION_FEAR,
-    SC_EMOTION_SURPRISE,
-    SC_EMOTION_FRUSTRATION,
-    SC_EMOTION_EXCITEMENT,
-    SC_EMOTION_ANXIETY,
-} sc_emotion_tag_t;
+typedef enum hu_emotion_tag {
+    HU_EMOTION_NEUTRAL,
+    HU_EMOTION_JOY,
+    HU_EMOTION_SADNESS,
+    HU_EMOTION_ANGER,
+    HU_EMOTION_FEAR,
+    HU_EMOTION_SURPRISE,
+    HU_EMOTION_FRUSTRATION,
+    HU_EMOTION_EXCITEMENT,
+    HU_EMOTION_ANXIETY,
+} hu_emotion_tag_t;
 
-typedef struct sc_stm_entity {
+typedef struct hu_stm_entity {
     char *name;            /* owned */
     size_t name_len;
     char *type;            /* "person", "place", "org", "date", "topic" — owned */
     size_t type_len;
     uint32_t mention_count;
     double importance;     /* 0.0–1.0, computed from frequency + recency + emotion */
-} sc_stm_entity_t;
+} hu_stm_entity_t;
 
-typedef struct sc_stm_emotion {
-    sc_emotion_tag_t tag;
+typedef struct hu_stm_emotion {
+    hu_emotion_tag_t tag;
     double intensity;      /* 0.0–1.0 */
-} sc_stm_emotion_t;
+} hu_stm_emotion_t;
 
-typedef struct sc_stm_turn {
+typedef struct hu_stm_turn {
     char *role;            /* "user" or "assistant" — owned */
     char *content;         /* owned */
     size_t content_len;
-    sc_stm_entity_t entities[SC_STM_MAX_ENTITIES];
+    hu_stm_entity_t entities[HU_STM_MAX_ENTITIES];
     size_t entity_count;
-    sc_stm_emotion_t emotions[SC_STM_MAX_EMOTIONS];
+    hu_stm_emotion_t emotions[HU_STM_MAX_EMOTIONS];
     size_t emotion_count;
     char *primary_topic;   /* owned, NULL if none */
     uint64_t timestamp_ms;
-} sc_stm_turn_t;
+} hu_stm_turn_t;
 
-typedef struct sc_stm_buffer {
-    sc_allocator_t alloc;
-    sc_stm_turn_t turns[SC_STM_MAX_TURNS];
+typedef struct hu_stm_buffer {
+    hu_allocator_t alloc;
+    hu_stm_turn_t turns[HU_STM_MAX_TURNS];
     size_t turn_count;       /* total turns added (wraps) */
     size_t head;             /* next write position */
-    char *topics[SC_STM_MAX_TOPICS]; /* LRU topic history — owned */
+    char *topics[HU_STM_MAX_TOPICS]; /* LRU topic history — owned */
     size_t topic_count;
     char *session_id;        /* owned */
     size_t session_id_len;
-} sc_stm_buffer_t;
+} hu_stm_buffer_t;
 
-sc_error_t sc_stm_init(sc_stm_buffer_t *buf, sc_allocator_t alloc,
+hu_error_t hu_stm_init(hu_stm_buffer_t *buf, hu_allocator_t alloc,
                         const char *session_id, size_t session_id_len);
-sc_error_t sc_stm_record_turn(sc_stm_buffer_t *buf, const char *role, size_t role_len,
+hu_error_t hu_stm_record_turn(hu_stm_buffer_t *buf, const char *role, size_t role_len,
                                const char *content, size_t content_len, uint64_t timestamp_ms);
-size_t sc_stm_count(const sc_stm_buffer_t *buf);
-const sc_stm_turn_t *sc_stm_get(const sc_stm_buffer_t *buf, size_t idx);
-sc_error_t sc_stm_build_context(const sc_stm_buffer_t *buf, sc_allocator_t *alloc,
+size_t hu_stm_count(const hu_stm_buffer_t *buf);
+const hu_stm_turn_t *hu_stm_get(const hu_stm_buffer_t *buf, size_t idx);
+hu_error_t hu_stm_build_context(const hu_stm_buffer_t *buf, hu_allocator_t *alloc,
                                  char **out, size_t *out_len);
-void sc_stm_clear(sc_stm_buffer_t *buf);
-void sc_stm_deinit(sc_stm_buffer_t *buf);
+void hu_stm_clear(hu_stm_buffer_t *buf);
+void hu_stm_deinit(hu_stm_buffer_t *buf);
 
 #endif
 ```
@@ -110,84 +110,84 @@ void sc_stm_deinit(sc_stm_buffer_t *buf);
 ```c
 /* tests/test_stm.c */
 #include "test_framework.h"
-#include "seaclaw/memory/stm.h"
-#include "seaclaw/core/allocator.h"
+#include "human/memory/stm.h"
+#include "human/core/allocator.h"
 
-static sc_allocator_t test_alloc(void) {
-    return sc_allocator_libc();
+static hu_allocator_t test_alloc(void) {
+    return hu_allocator_libc();
 }
 
 static void stm_init_sets_session_id(void) {
-    sc_stm_buffer_t buf;
-    SC_ASSERT_EQ(sc_stm_init(&buf, test_alloc(), "sess-1", 6), SC_OK);
-    SC_ASSERT_EQ(sc_stm_count(&buf), 0);
-    SC_ASSERT_STR_EQ(buf.session_id, "sess-1");
-    sc_stm_deinit(&buf);
+    hu_stm_buffer_t buf;
+    HU_ASSERT_EQ(hu_stm_init(&buf, test_alloc(), "sess-1", 6), HU_OK);
+    HU_ASSERT_EQ(hu_stm_count(&buf), 0);
+    HU_ASSERT_STR_EQ(buf.session_id, "sess-1");
+    hu_stm_deinit(&buf);
 }
 
 static void stm_record_turn_stores_content(void) {
-    sc_stm_buffer_t buf;
-    sc_stm_init(&buf, test_alloc(), "sess-1", 6);
-    SC_ASSERT_EQ(sc_stm_record_turn(&buf, "user", 4, "hello world", 11, 1000), SC_OK);
-    SC_ASSERT_EQ(sc_stm_count(&buf), 1);
-    const sc_stm_turn_t *t = sc_stm_get(&buf, 0);
-    SC_ASSERT_NOT_NULL(t);
-    SC_ASSERT_STR_EQ(t->content, "hello world");
-    SC_ASSERT_STR_EQ(t->role, "user");
-    sc_stm_deinit(&buf);
+    hu_stm_buffer_t buf;
+    hu_stm_init(&buf, test_alloc(), "sess-1", 6);
+    HU_ASSERT_EQ(hu_stm_record_turn(&buf, "user", 4, "hello world", 11, 1000), HU_OK);
+    HU_ASSERT_EQ(hu_stm_count(&buf), 1);
+    const hu_stm_turn_t *t = hu_stm_get(&buf, 0);
+    HU_ASSERT_NOT_NULL(t);
+    HU_ASSERT_STR_EQ(t->content, "hello world");
+    HU_ASSERT_STR_EQ(t->role, "user");
+    hu_stm_deinit(&buf);
 }
 
 static void stm_wraps_at_max_turns(void) {
-    sc_stm_buffer_t buf;
-    sc_stm_init(&buf, test_alloc(), "sess-1", 6);
-    for (size_t i = 0; i < SC_STM_MAX_TURNS + 5; i++) {
+    hu_stm_buffer_t buf;
+    hu_stm_init(&buf, test_alloc(), "sess-1", 6);
+    for (size_t i = 0; i < HU_STM_MAX_TURNS + 5; i++) {
         char msg[32];
         int len = snprintf(msg, sizeof(msg), "turn-%zu", i);
-        sc_stm_record_turn(&buf, "user", 4, msg, (size_t)len, 1000 + i);
+        hu_stm_record_turn(&buf, "user", 4, msg, (size_t)len, 1000 + i);
     }
-    SC_ASSERT_EQ(sc_stm_count(&buf), SC_STM_MAX_TURNS + 5);
+    HU_ASSERT_EQ(hu_stm_count(&buf), HU_STM_MAX_TURNS + 5);
     /* oldest should be turn-5 (first 5 were evicted) */
-    const sc_stm_turn_t *oldest = sc_stm_get(&buf, 0);
-    SC_ASSERT_NOT_NULL(oldest);
-    SC_ASSERT_STR_EQ(oldest->content, "turn-5");
-    sc_stm_deinit(&buf);
+    const hu_stm_turn_t *oldest = hu_stm_get(&buf, 0);
+    HU_ASSERT_NOT_NULL(oldest);
+    HU_ASSERT_STR_EQ(oldest->content, "turn-5");
+    hu_stm_deinit(&buf);
 }
 
 static void stm_build_context_formats_turns(void) {
-    sc_stm_buffer_t buf;
-    sc_allocator_t a = test_alloc();
-    sc_stm_init(&buf, a, "sess-1", 6);
-    sc_stm_record_turn(&buf, "user", 4, "What's the weather?", 19, 1000);
-    sc_stm_record_turn(&buf, "assistant", 9, "It's sunny today.", 17, 2000);
+    hu_stm_buffer_t buf;
+    hu_allocator_t a = test_alloc();
+    hu_stm_init(&buf, a, "sess-1", 6);
+    hu_stm_record_turn(&buf, "user", 4, "What's the weather?", 19, 1000);
+    hu_stm_record_turn(&buf, "assistant", 9, "It's sunny today.", 17, 2000);
     char *ctx = NULL;
     size_t ctx_len = 0;
-    SC_ASSERT_EQ(sc_stm_build_context(&buf, &a, &ctx, &ctx_len), SC_OK);
-    SC_ASSERT_NOT_NULL(ctx);
-    SC_ASSERT_TRUE(ctx_len > 0);
+    HU_ASSERT_EQ(hu_stm_build_context(&buf, &a, &ctx, &ctx_len), HU_OK);
+    HU_ASSERT_NOT_NULL(ctx);
+    HU_ASSERT_TRUE(ctx_len > 0);
     /* Should contain both turns */
-    SC_ASSERT_TRUE(strstr(ctx, "What's the weather?") != NULL);
-    SC_ASSERT_TRUE(strstr(ctx, "It's sunny today.") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "What's the weather?") != NULL);
+    HU_ASSERT_TRUE(strstr(ctx, "It's sunny today.") != NULL);
     a.free(a.ctx, ctx, ctx_len + 1);
-    sc_stm_deinit(&buf);
+    hu_stm_deinit(&buf);
 }
 
 static void stm_clear_resets_buffer(void) {
-    sc_stm_buffer_t buf;
-    sc_stm_init(&buf, test_alloc(), "sess-1", 6);
-    sc_stm_record_turn(&buf, "user", 4, "hello", 5, 1000);
-    SC_ASSERT_EQ(sc_stm_count(&buf), 1);
-    sc_stm_clear(&buf);
-    SC_ASSERT_EQ(sc_stm_count(&buf), 0);
-    sc_stm_deinit(&buf);
+    hu_stm_buffer_t buf;
+    hu_stm_init(&buf, test_alloc(), "sess-1", 6);
+    hu_stm_record_turn(&buf, "user", 4, "hello", 5, 1000);
+    HU_ASSERT_EQ(hu_stm_count(&buf), 1);
+    hu_stm_clear(&buf);
+    HU_ASSERT_EQ(hu_stm_count(&buf), 0);
+    hu_stm_deinit(&buf);
 }
 
 void run_stm_tests(void) {
-    SC_TEST_SUITE("stm_buffer");
-    SC_RUN_TEST(stm_init_sets_session_id);
-    SC_RUN_TEST(stm_record_turn_stores_content);
-    SC_RUN_TEST(stm_wraps_at_max_turns);
-    SC_RUN_TEST(stm_build_context_formats_turns);
-    SC_RUN_TEST(stm_clear_resets_buffer);
+    HU_TEST_SUITE("stm_buffer");
+    HU_RUN_TEST(stm_init_sets_session_id);
+    HU_RUN_TEST(stm_record_turn_stores_content);
+    HU_RUN_TEST(stm_wraps_at_max_turns);
+    HU_RUN_TEST(stm_build_context_formats_turns);
+    HU_RUN_TEST(stm_clear_resets_buffer);
 }
 ```
 
@@ -195,7 +195,7 @@ void run_stm_tests(void) {
 
 Ring buffer with FIFO eviction. On `record_turn`: free oldest if full, copy content, advance head. `build_context` formats recent turns as markdown. `get(idx)` maps logical index to physical position in ring.
 
-**Step 4:** Run: `cmake --build build && ./build/seaclaw_tests` — 5 new tests pass
+**Step 4:** Run: `cmake --build build && ./build/human_tests` — 5 new tests pass
 
 **Step 5:** Commit: `feat(memory): add STM buffer for short-term session memory`
 
@@ -207,7 +207,7 @@ Extract entities, emotions, topics, and dates from text in <1ms using pattern ma
 
 **Files:**
 
-- Create: `include/seaclaw/memory/fast_capture.h`
+- Create: `include/human/memory/fast_capture.h`
 - Create: `src/memory/fast_capture.c`
 - Test: `tests/test_fast_capture.c`
 - Modify: `tests/test_main.c`
@@ -216,36 +216,36 @@ Extract entities, emotions, topics, and dates from text in <1ms using pattern ma
 **Step 1: Write the header**
 
 ```c
-/* include/seaclaw/memory/fast_capture.h */
-#ifndef SC_FAST_CAPTURE_H
-#define SC_FAST_CAPTURE_H
+/* include/human/memory/fast_capture.h */
+#ifndef HU_FAST_CAPTURE_H
+#define HU_FAST_CAPTURE_H
 
-#include "seaclaw/memory/stm.h"
+#include "human/memory/stm.h"
 
-#define SC_FC_MAX_RESULTS 20
+#define HU_FC_MAX_RESULTS 20
 
-typedef struct sc_fc_entity_match {
+typedef struct hu_fc_entity_match {
     char *name;       /* owned */
     size_t name_len;
     char *type;       /* "person", "date", "topic", "emotion" — owned */
     size_t type_len;
     double confidence; /* 0.0–1.0 */
     size_t offset;     /* byte offset in source text */
-} sc_fc_entity_match_t;
+} hu_fc_entity_match_t;
 
-typedef struct sc_fc_result {
-    sc_fc_entity_match_t entities[SC_FC_MAX_RESULTS];
+typedef struct hu_fc_result {
+    hu_fc_entity_match_t entities[HU_FC_MAX_RESULTS];
     size_t entity_count;
-    sc_stm_emotion_t emotions[SC_STM_MAX_EMOTIONS];
+    hu_stm_emotion_t emotions[HU_STM_MAX_EMOTIONS];
     size_t emotion_count;
     char *primary_topic;  /* owned, NULL if none */
     bool has_commitment;  /* "I will", "I'm going to", "I promise" detected */
     bool has_question;    /* ends with ? or contains question patterns */
-} sc_fc_result_t;
+} hu_fc_result_t;
 
-sc_error_t sc_fast_capture(sc_allocator_t *alloc, const char *text, size_t text_len,
-                            sc_fc_result_t *out);
-void sc_fc_result_deinit(sc_fc_result_t *result, sc_allocator_t *alloc);
+hu_error_t hu_fast_capture(hu_allocator_t *alloc, const char *text, size_t text_len,
+                            hu_fc_result_t *out);
+void hu_fc_result_deinit(hu_fc_result_t *result, hu_allocator_t *alloc);
 
 #endif
 ```
@@ -256,7 +256,7 @@ Tests for: relationship words detection ("my mom", "my friend"), emotion pattern
 
 **Step 3: Implement**
 
-Pattern arrays: `RELATIONSHIP_PATTERNS[]` = `{"my mom", "my dad", "my wife", "my husband", "my friend", "my sister", "my brother", "my boss", "my coworker", ...}`, scanned with `strstr` or `sc_str_contains`. Emotion patterns: keyword → emotion + intensity. Topic patterns: keyword clusters → topic. Commitment: `"I will"`, `"I'm going to"`, `"I promise"`, `"remind me"`. All O(n) single pass.
+Pattern arrays: `RELATIONSHIP_PATTERNS[]` = `{"my mom", "my dad", "my wife", "my husband", "my friend", "my sister", "my brother", "my boss", "my coworker", ...}`, scanned with `strstr` or `hu_str_contains`. Emotion patterns: keyword → emotion + intensity. Topic patterns: keyword clusters → topic. Commitment: `"I will"`, `"I'm going to"`, `"I promise"`, `"remind me"`. All O(n) single pass.
 
 **Step 4:** Tests pass
 
@@ -271,35 +271,35 @@ Wire fast-capture into the agent turn so every user message is analyzed and enti
 **Files:**
 
 - Modify: `src/agent/agent_turn.c` — after user message append, run fast-capture + STM record
-- Modify: `include/seaclaw/agent.h` — add `sc_stm_buffer_t *stm` to `sc_agent_t`
+- Modify: `include/human/agent.h` — add `hu_stm_buffer_t *stm` to `hu_agent_t`
 - Modify: `src/agent/agent.c` — init/deinit STM buffer
 - Test: `tests/test_agent.c` — verify STM populated after turn
 
-**Step 1:** Add `sc_stm_buffer_t stm;` field to `sc_agent_t` in `include/seaclaw/agent.h`.
+**Step 1:** Add `hu_stm_buffer_t stm;` field to `hu_agent_t` in `include/human/agent.h`.
 
-**Step 2:** In `sc_agent_init` (`src/agent/agent.c`), call `sc_stm_init(&agent->stm, ...)`.
+**Step 2:** In `hu_agent_init` (`src/agent/agent.c`), call `hu_stm_init(&agent->stm, ...)`.
 
-**Step 3:** In `sc_agent_turn` (`src/agent/agent_turn.c`), after appending the user message to history (around line 176), add:
+**Step 3:** In `hu_agent_turn` (`src/agent/agent_turn.c`), after appending the user message to history (around line 176), add:
 
 ```c
-sc_fc_result_t fc;
+hu_fc_result_t fc;
 memset(&fc, 0, sizeof(fc));
-if (sc_fast_capture(agent->alloc, msg, msg_len, &fc) == SC_OK) {
-    sc_stm_turn_t *turn = /* current turn from stm */;
+if (hu_fast_capture(agent->alloc, msg, msg_len, &fc) == HU_OK) {
+    hu_stm_turn_t *turn = /* current turn from stm */;
     /* Copy extracted entities and emotions into the STM turn */
-    memcpy(turn->entities, fc.entities, sizeof(sc_stm_entity_t) * fc.entity_count);
+    memcpy(turn->entities, fc.entities, sizeof(hu_stm_entity_t) * fc.entity_count);
     turn->entity_count = fc.entity_count;
-    memcpy(turn->emotions, fc.emotions, sizeof(sc_stm_emotion_t) * fc.emotion_count);
+    memcpy(turn->emotions, fc.emotions, sizeof(hu_stm_emotion_t) * fc.emotion_count);
     turn->emotion_count = fc.emotion_count;
     turn->primary_topic = fc.primary_topic;
     fc.primary_topic = NULL; /* transfer ownership */
 }
-sc_fc_result_deinit(&fc, agent->alloc);
+hu_fc_result_deinit(&fc, agent->alloc);
 ```
 
-**Step 4:** In `sc_agent_deinit`, call `sc_stm_deinit(&agent->stm)`.
+**Step 4:** In `hu_agent_deinit`, call `hu_stm_deinit(&agent->stm)`.
 
-**Step 5:** Test: verify that after `sc_agent_turn`, the STM buffer contains the turn with extracted entities.
+**Step 5:** Test: verify that after `hu_agent_turn`, the STM buffer contains the turn with extracted entities.
 
 **Step 6:** Commit: `feat(agent): integrate fast-capture + STM into agent turn loop`
 
@@ -312,21 +312,21 @@ Inject the STM buffer's context into the system prompt so the LLM has awareness 
 **Files:**
 
 - Modify: `src/agent/agent_turn.c` — build STM context, pass to prompt config
-- Modify: `include/seaclaw/agent/prompt.h` — add `stm_context` field to `sc_prompt_config_t`
+- Modify: `include/human/agent/prompt.h` — add `stm_context` field to `hu_prompt_config_t`
 - Modify: `src/agent/prompt.c` — include STM context in system prompt
 
-**Step 1:** Add `const char *stm_context; size_t stm_context_len;` to `sc_prompt_config_t`.
+**Step 1:** Add `const char *stm_context; size_t stm_context_len;` to `hu_prompt_config_t`.
 
-**Step 2:** In `sc_prompt_build_system`, after memory context, append STM context:
+**Step 2:** In `hu_prompt_build_system`, after memory context, append STM context:
 
 ```c
 if (config->stm_context && config->stm_context_len > 0) {
-    sc_json_buf_append_str(buf, "\n\n### Session Context\n");
-    sc_json_buf_append(buf, config->stm_context, config->stm_context_len);
+    hu_json_buf_append_str(buf, "\n\n### Session Context\n");
+    hu_json_buf_append(buf, config->stm_context, config->stm_context_len);
 }
 ```
 
-**Step 3:** In `agent_turn.c`, before building system prompt, call `sc_stm_build_context` and set `prompt_config.stm_context`.
+**Step 3:** In `agent_turn.c`, before building system prompt, call `hu_stm_build_context` and set `prompt_config.stm_context`.
 
 **Step 4:** Tests pass
 
@@ -340,7 +340,7 @@ After the agent turn completes, dispatch an async LLM call to extract structured
 
 **Files:**
 
-- Create: `include/seaclaw/memory/deep_extract.h`
+- Create: `include/human/memory/deep_extract.h`
 - Create: `src/memory/deep_extract.c`
 - Test: `tests/test_deep_extract.c`
 - Modify: `tests/test_main.c`
@@ -349,63 +349,63 @@ After the agent turn completes, dispatch an async LLM call to extract structured
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_DEEP_EXTRACT_H
-#define SC_DEEP_EXTRACT_H
+#ifndef HU_DEEP_EXTRACT_H
+#define HU_DEEP_EXTRACT_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/provider.h"
-#include "seaclaw/memory.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/provider.h"
+#include "human/memory.h"
 
-#define SC_DE_MAX_FACTS      20
-#define SC_DE_MAX_ENTITIES   10
-#define SC_DE_MAX_RELATIONS  10
+#define HU_DE_MAX_FACTS      20
+#define HU_DE_MAX_ENTITIES   10
+#define HU_DE_MAX_RELATIONS  10
 
-typedef struct sc_extracted_fact {
+typedef struct hu_extracted_fact {
     char *subject;    /* owned */
     char *predicate;  /* owned */
     char *object;     /* owned */
     double confidence;
-} sc_extracted_fact_t;
+} hu_extracted_fact_t;
 
-typedef struct sc_extracted_relation {
+typedef struct hu_extracted_relation {
     char *entity_a;   /* owned */
     char *relation;   /* owned — "parent_of", "friend_of", "works_at", etc. */
     char *entity_b;   /* owned */
     double confidence;
-} sc_extracted_relation_t;
+} hu_extracted_relation_t;
 
-typedef struct sc_deep_extract_result {
-    sc_extracted_fact_t facts[SC_DE_MAX_FACTS];
+typedef struct hu_deep_extract_result {
+    hu_extracted_fact_t facts[HU_DE_MAX_FACTS];
     size_t fact_count;
-    sc_extracted_relation_t relations[SC_DE_MAX_RELATIONS];
+    hu_extracted_relation_t relations[HU_DE_MAX_RELATIONS];
     size_t relation_count;
     char *summary;     /* owned — 1-2 sentence session summary */
     size_t summary_len;
-} sc_deep_extract_result_t;
+} hu_deep_extract_result_t;
 
 /* Builds the extraction prompt from conversation turns */
-sc_error_t sc_deep_extract_build_prompt(sc_allocator_t *alloc,
+hu_error_t hu_deep_extract_build_prompt(hu_allocator_t *alloc,
                                          const char *conversation, size_t conversation_len,
                                          char **out, size_t *out_len);
 
 /* Parses the LLM response JSON into structured results */
-sc_error_t sc_deep_extract_parse(sc_allocator_t *alloc, const char *response, size_t response_len,
-                                  sc_deep_extract_result_t *out);
+hu_error_t hu_deep_extract_parse(hu_allocator_t *alloc, const char *response, size_t response_len,
+                                  hu_deep_extract_result_t *out);
 
 /* Stores extracted results into memory backend */
-sc_error_t sc_deep_extract_store(sc_allocator_t *alloc, sc_memory_t *memory,
+hu_error_t hu_deep_extract_store(hu_allocator_t *alloc, hu_memory_t *memory,
                                   const char *session_id, size_t session_id_len,
-                                  const sc_deep_extract_result_t *result);
+                                  const hu_deep_extract_result_t *result);
 
-void sc_deep_extract_result_deinit(sc_deep_extract_result_t *result, sc_allocator_t *alloc);
+void hu_deep_extract_result_deinit(hu_deep_extract_result_t *result, hu_allocator_t *alloc);
 
 #endif
 ```
 
 **Step 2:** Write tests: `deep_extract_build_prompt_includes_conversation`, `deep_extract_parse_extracts_facts`, `deep_extract_parse_extracts_relations`, `deep_extract_parse_handles_empty`.
 
-**Step 3:** Implement. The prompt instructs the LLM to return JSON with `facts[]`, `relations[]`, and `summary`. The parser uses `sc_json_parse`. The store function calls `memory->vtable->store()` for each fact with category `SC_MEMORY_CATEGORY_CONVERSATION`.
+**Step 3:** Implement. The prompt instructs the LLM to return JSON with `facts[]`, `relations[]`, and `summary`. The parser uses `hu_json_parse`. The store function calls `memory->vtable->store()` for each fact with category `HU_MEMORY_CATEGORY_CONVERSATION`.
 
 **Step 4:** Tests pass
 
@@ -419,7 +419,7 @@ When a session ends, promote important entities and patterns from STM to persist
 
 **Files:**
 
-- Create: `include/seaclaw/memory/promotion.h`
+- Create: `include/human/memory/promotion.h`
 - Create: `src/memory/promotion.c`
 - Test: `tests/test_promotion.c`
 - Modify: `tests/test_main.c`
@@ -428,27 +428,27 @@ When a session ends, promote important entities and patterns from STM to persist
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_MEMORY_PROMOTION_H
-#define SC_MEMORY_PROMOTION_H
+#ifndef HU_MEMORY_PROMOTION_H
+#define HU_MEMORY_PROMOTION_H
 
-#include "seaclaw/memory/stm.h"
-#include "seaclaw/memory.h"
+#include "human/memory/stm.h"
+#include "human/memory.h"
 
-typedef struct sc_promotion_config {
+typedef struct hu_promotion_config {
     uint32_t min_mention_count;   /* entities must be mentioned >= this many times */
     double min_importance;         /* minimum importance score (0.0–1.0) */
     uint32_t max_entities;         /* max entities to promote per session */
-} sc_promotion_config_t;
+} hu_promotion_config_t;
 
-#define SC_PROMOTION_DEFAULTS { .min_mention_count = 2, .min_importance = 0.3, .max_entities = 15 }
+#define HU_PROMOTION_DEFAULTS { .min_mention_count = 2, .min_importance = 0.3, .max_entities = 15 }
 
 /* Calculate importance score for an entity */
-double sc_promotion_entity_importance(const sc_stm_entity_t *entity,
-                                       const sc_stm_buffer_t *buf);
+double hu_promotion_entity_importance(const hu_stm_entity_t *entity,
+                                       const hu_stm_buffer_t *buf);
 
 /* Promote qualifying entities from STM to persistent memory */
-sc_error_t sc_promotion_run(sc_allocator_t *alloc, const sc_stm_buffer_t *buf,
-                             sc_memory_t *memory, const sc_promotion_config_t *config);
+hu_error_t hu_promotion_run(hu_allocator_t *alloc, const hu_stm_buffer_t *buf,
+                             hu_memory_t *memory, const hu_promotion_config_t *config);
 
 #endif
 ```
@@ -467,7 +467,7 @@ Periodically merge duplicate memories, decay old entries, and promote patterns.
 
 **Files:**
 
-- Create: `include/seaclaw/memory/consolidation.h`
+- Create: `include/human/memory/consolidation.h`
 - Create: `src/memory/consolidation.c`
 - Test: `tests/test_consolidation.c`
 - Modify: `tests/test_main.c`
@@ -476,34 +476,34 @@ Periodically merge duplicate memories, decay old entries, and promote patterns.
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_MEMORY_CONSOLIDATION_H
-#define SC_MEMORY_CONSOLIDATION_H
+#ifndef HU_MEMORY_CONSOLIDATION_H
+#define HU_MEMORY_CONSOLIDATION_H
 
-#include "seaclaw/memory.h"
+#include "human/memory.h"
 
-typedef struct sc_consolidation_config {
+typedef struct hu_consolidation_config {
     uint32_t decay_days;        /* memories older than this lose importance */
     double decay_factor;         /* multiplier per decay period (e.g. 0.9) */
     uint32_t dedup_threshold;    /* similarity score for merging (0–100) */
     uint32_t max_entries;        /* cap total entries, prune lowest importance */
-} sc_consolidation_config_t;
+} hu_consolidation_config_t;
 
-#define SC_CONSOLIDATION_DEFAULTS { .decay_days = 30, .decay_factor = 0.9, \
+#define HU_CONSOLIDATION_DEFAULTS { .decay_days = 30, .decay_factor = 0.9, \
                                      .dedup_threshold = 85, .max_entries = 10000 }
 
 /* Run consolidation pass over the memory backend */
-sc_error_t sc_memory_consolidate(sc_allocator_t *alloc, sc_memory_t *memory,
-                                  const sc_consolidation_config_t *config);
+hu_error_t hu_memory_consolidate(hu_allocator_t *alloc, hu_memory_t *memory,
+                                  const hu_consolidation_config_t *config);
 
 /* Compute string similarity score (0–100) using token overlap */
-uint32_t sc_similarity_score(const char *a, size_t a_len, const char *b, size_t b_len);
+uint32_t hu_similarity_score(const char *a, size_t a_len, const char *b, size_t b_len);
 
 #endif
 ```
 
 **Step 2:** Tests: `similarity_identical_strings_100`, `similarity_different_strings_low`, `consolidation_merges_duplicates`.
 
-**Step 3:** Implement. `sc_similarity_score` uses token overlap (split by space, count shared / total). `sc_memory_consolidate` lists all entries, groups by key prefix, merges entries above threshold, removes oldest beyond max_entries.
+**Step 3:** Implement. `hu_similarity_score` uses token overlap (split by space, count shared / total). `hu_memory_consolidate` lists all entries, groups by key prefix, merges entries above threshold, removes oldest beyond max_entries.
 
 **Step 4:** Tests pass. **Step 5:** Commit: `feat(memory): add memory consolidation with dedup and decay`
 
@@ -517,7 +517,7 @@ Detect promises, intentions, and reminders from text using pattern matching.
 
 **Files:**
 
-- Create: `include/seaclaw/agent/commitment.h`
+- Create: `include/human/agent/commitment.h`
 - Create: `src/agent/commitment.c`
 - Test: `tests/test_commitment.c`
 - Modify: `tests/test_main.c`
@@ -526,56 +526,56 @@ Detect promises, intentions, and reminders from text using pattern matching.
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_COMMITMENT_H
-#define SC_COMMITMENT_H
+#ifndef HU_COMMITMENT_H
+#define HU_COMMITMENT_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 
-typedef enum sc_commitment_type {
-    SC_COMMIT_PROMISE,     /* "I will", "I'll" */
-    SC_COMMIT_INTENTION,   /* "I'm going to", "I plan to" */
-    SC_COMMIT_REMINDER,    /* "remind me", "don't let me forget" */
-    SC_COMMIT_GOAL,        /* "I want to", "my goal is" */
-} sc_commitment_type_t;
+typedef enum hu_commitment_type {
+    HU_COMMIT_PROMISE,     /* "I will", "I'll" */
+    HU_COMMIT_INTENTION,   /* "I'm going to", "I plan to" */
+    HU_COMMIT_REMINDER,    /* "remind me", "don't let me forget" */
+    HU_COMMIT_GOAL,        /* "I want to", "my goal is" */
+} hu_commitment_type_t;
 
-typedef enum sc_commitment_status {
-    SC_COMMIT_STATUS_ACTIVE,
-    SC_COMMIT_STATUS_COMPLETED,
-    SC_COMMIT_STATUS_EXPIRED,
-    SC_COMMIT_STATUS_CANCELLED,
-} sc_commitment_status_t;
+typedef enum hu_commitment_status {
+    HU_COMMIT_STATUS_ACTIVE,
+    HU_COMMIT_STATUS_COMPLETED,
+    HU_COMMIT_STATUS_EXPIRED,
+    HU_COMMIT_STATUS_CANCELLED,
+} hu_commitment_status_t;
 
-typedef struct sc_commitment {
+typedef struct hu_commitment {
     char *id;               /* owned — UUID */
     char *statement;         /* owned — the original text */
     size_t statement_len;
     char *summary;           /* owned — extracted core commitment */
     size_t summary_len;
-    sc_commitment_type_t type;
-    sc_commitment_status_t status;
+    hu_commitment_type_t type;
+    hu_commitment_status_t status;
     char *target_date;       /* owned, NULL if no deadline — ISO 8601 */
     char *follow_up_after;   /* owned, NULL if no follow-up — ISO 8601 */
     char *created_at;        /* owned — ISO 8601 */
     double emotional_weight; /* 0.0–1.0 */
     char *owner;             /* "user" or "assistant" — owned */
-} sc_commitment_t;
+} hu_commitment_t;
 
-#define SC_COMMITMENT_MAX_DETECT 5
+#define HU_COMMITMENT_MAX_DETECT 5
 
-typedef struct sc_commitment_detect_result {
-    sc_commitment_t commitments[SC_COMMITMENT_MAX_DETECT];
+typedef struct hu_commitment_detect_result {
+    hu_commitment_t commitments[HU_COMMITMENT_MAX_DETECT];
     size_t count;
-} sc_commitment_detect_result_t;
+} hu_commitment_detect_result_t;
 
 /* Detect commitments in text */
-sc_error_t sc_commitment_detect(sc_allocator_t *alloc, const char *text, size_t text_len,
+hu_error_t hu_commitment_detect(hu_allocator_t *alloc, const char *text, size_t text_len,
                                  const char *role, size_t role_len,
-                                 sc_commitment_detect_result_t *out);
+                                 hu_commitment_detect_result_t *out);
 
 /* Free a commitment's owned fields */
-void sc_commitment_deinit(sc_commitment_t *c, sc_allocator_t *alloc);
-void sc_commitment_detect_result_deinit(sc_commitment_detect_result_t *r, sc_allocator_t *alloc);
+void hu_commitment_deinit(hu_commitment_t *c, hu_allocator_t *alloc);
+void hu_commitment_detect_result_deinit(hu_commitment_detect_result_t *r, hu_allocator_t *alloc);
 
 #endif
 ```
@@ -594,7 +594,7 @@ Store and query commitments in the SQLite memory backend.
 
 **Files:**
 
-- Create: `include/seaclaw/agent/commitment_store.h`
+- Create: `include/human/agent/commitment_store.h`
 - Create: `src/agent/commitment_store.c`
 - Test: `tests/test_commitment_store.c`
 - Modify: `tests/test_main.c`
@@ -603,28 +603,28 @@ Store and query commitments in the SQLite memory backend.
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_COMMITMENT_STORE_H
-#define SC_COMMITMENT_STORE_H
+#ifndef HU_COMMITMENT_STORE_H
+#define HU_COMMITMENT_STORE_H
 
-#include "seaclaw/agent/commitment.h"
-#include "seaclaw/memory.h"
+#include "human/agent/commitment.h"
+#include "human/memory.h"
 
-typedef struct sc_commitment_store sc_commitment_store_t;
+typedef struct hu_commitment_store hu_commitment_store_t;
 
-sc_error_t sc_commitment_store_create(sc_allocator_t *alloc, sc_memory_t *memory,
-                                       sc_commitment_store_t **out);
-sc_error_t sc_commitment_store_save(sc_commitment_store_t *store, const sc_commitment_t *c);
-sc_error_t sc_commitment_store_list_active(sc_commitment_store_t *store, sc_allocator_t *alloc,
-                                            sc_commitment_t **out, size_t *out_count);
-sc_error_t sc_commitment_store_list_due(sc_commitment_store_t *store, sc_allocator_t *alloc,
+hu_error_t hu_commitment_store_create(hu_allocator_t *alloc, hu_memory_t *memory,
+                                       hu_commitment_store_t **out);
+hu_error_t hu_commitment_store_save(hu_commitment_store_t *store, const hu_commitment_t *c);
+hu_error_t hu_commitment_store_list_active(hu_commitment_store_t *store, hu_allocator_t *alloc,
+                                            hu_commitment_t **out, size_t *out_count);
+hu_error_t hu_commitment_store_list_due(hu_commitment_store_t *store, hu_allocator_t *alloc,
                                          const char *before_date, size_t before_date_len,
-                                         sc_commitment_t **out, size_t *out_count);
-sc_error_t sc_commitment_store_update_status(sc_commitment_store_t *store,
+                                         hu_commitment_t **out, size_t *out_count);
+hu_error_t hu_commitment_store_update_status(hu_commitment_store_t *store,
                                               const char *id, size_t id_len,
-                                              sc_commitment_status_t status);
-sc_error_t sc_commitment_store_build_context(sc_commitment_store_t *store, sc_allocator_t *alloc,
+                                              hu_commitment_status_t status);
+hu_error_t hu_commitment_store_build_context(hu_commitment_store_t *store, hu_allocator_t *alloc,
                                               char **out, size_t *out_len);
-void sc_commitment_store_destroy(sc_commitment_store_t *store);
+void hu_commitment_store_destroy(hu_commitment_store_t *store);
 
 #endif
 ```
@@ -643,19 +643,19 @@ Wire commitment detection and context injection into the agent turn.
 
 **Files:**
 
-- Modify: `include/seaclaw/agent.h` — add `sc_commitment_store_t *commitments` to `sc_agent_t`
+- Modify: `include/human/agent.h` — add `hu_commitment_store_t *commitments` to `hu_agent_t`
 - Modify: `src/agent/agent.c` — init/deinit commitment store
 - Modify: `src/agent/agent_turn.c` — detect commitments after user message, inject context
-- Modify: `include/seaclaw/agent/prompt.h` — add `commitment_context` to prompt config
+- Modify: `include/human/agent/prompt.h` — add `commitment_context` to prompt config
 - Modify: `src/agent/prompt.c` — include commitment context
 
-**Step 1:** Add `sc_commitment_store_t *commitment_store;` to `sc_agent_t`.
+**Step 1:** Add `hu_commitment_store_t *commitment_store;` to `hu_agent_t`.
 
-**Step 2:** After fast-capture in agent_turn.c, run `sc_commitment_detect` on user message. If commitments found, store each via `sc_commitment_store_save`.
+**Step 2:** After fast-capture in agent_turn.c, run `hu_commitment_detect` on user message. If commitments found, store each via `hu_commitment_store_save`.
 
-**Step 3:** Before building system prompt, call `sc_commitment_store_build_context` and set `prompt_config.commitment_context`.
+**Step 3:** Before building system prompt, call `hu_commitment_store_build_context` and set `prompt_config.commitment_context`.
 
-**Step 4:** In `sc_prompt_build_system`, after STM context, append commitment context under `### Active Commitments`.
+**Step 4:** In `hu_prompt_build_system`, after STM context, append commitment context under `### Active Commitments`.
 
 **Step 5:** Tests: verify commitment detected and context injected.
 
@@ -671,7 +671,7 @@ Record and track recurring patterns across conversations — topics, emotions, b
 
 **Files:**
 
-- Create: `include/seaclaw/agent/pattern_radar.h`
+- Create: `include/human/agent/pattern_radar.h`
 - Create: `src/agent/pattern_radar.c`
 - Test: `tests/test_pattern_radar.c`
 - Modify: `tests/test_main.c`
@@ -680,25 +680,25 @@ Record and track recurring patterns across conversations — topics, emotions, b
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_PATTERN_RADAR_H
-#define SC_PATTERN_RADAR_H
+#ifndef HU_PATTERN_RADAR_H
+#define HU_PATTERN_RADAR_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
 
-#define SC_PATTERN_MAX_OBSERVATIONS 100
+#define HU_PATTERN_MAX_OBSERVATIONS 100
 
-typedef enum sc_pattern_type {
-    SC_PATTERN_TOPIC_RECURRENCE,    /* same topic appearing repeatedly */
-    SC_PATTERN_EMOTIONAL_TREND,     /* emotion trending up or down */
-    SC_PATTERN_BEHAVIORAL_CYCLE,    /* recurring at time-of-day or day-of-week */
-    SC_PATTERN_RELATIONSHIP_SHIFT,  /* mentions of a person changing in tone */
-    SC_PATTERN_GROWTH,              /* topic dropping off = improvement */
-} sc_pattern_type_t;
+typedef enum hu_pattern_type {
+    HU_PATTERN_TOPIC_RECURRENCE,    /* same topic appearing repeatedly */
+    HU_PATTERN_EMOTIONAL_TREND,     /* emotion trending up or down */
+    HU_PATTERN_BEHAVIORAL_CYCLE,    /* recurring at time-of-day or day-of-week */
+    HU_PATTERN_RELATIONSHIP_SHIFT,  /* mentions of a person changing in tone */
+    HU_PATTERN_GROWTH,              /* topic dropping off = improvement */
+} hu_pattern_type_t;
 
-typedef struct sc_pattern_observation {
-    sc_pattern_type_t type;
+typedef struct hu_pattern_observation {
+    hu_pattern_type_t type;
     char *subject;          /* owned — what the pattern is about */
     size_t subject_len;
     char *detail;           /* owned — description */
@@ -707,33 +707,33 @@ typedef struct sc_pattern_observation {
     double confidence;       /* 0.0–1.0 */
     char *first_seen;       /* ISO 8601 — owned */
     char *last_seen;        /* ISO 8601 — owned */
-} sc_pattern_observation_t;
+} hu_pattern_observation_t;
 
-typedef struct sc_pattern_radar {
-    sc_allocator_t alloc;
-    sc_memory_t *memory;
-    sc_pattern_observation_t observations[SC_PATTERN_MAX_OBSERVATIONS];
+typedef struct hu_pattern_radar {
+    hu_allocator_t alloc;
+    hu_memory_t *memory;
+    hu_pattern_observation_t observations[HU_PATTERN_MAX_OBSERVATIONS];
     size_t observation_count;
-} sc_pattern_radar_t;
+} hu_pattern_radar_t;
 
-sc_error_t sc_pattern_radar_init(sc_pattern_radar_t *radar, sc_allocator_t alloc,
-                                  sc_memory_t *memory);
+hu_error_t hu_pattern_radar_init(hu_pattern_radar_t *radar, hu_allocator_t alloc,
+                                  hu_memory_t *memory);
 
 /* Record a new observation from fast-capture results */
-sc_error_t sc_pattern_radar_observe(sc_pattern_radar_t *radar,
+hu_error_t hu_pattern_radar_observe(hu_pattern_radar_t *radar,
                                      const char *topic, size_t topic_len,
-                                     sc_pattern_type_t type, const char *detail, size_t detail_len,
+                                     hu_pattern_type_t type, const char *detail, size_t detail_len,
                                      const char *timestamp, size_t timestamp_len);
 
 /* Analyze accumulated observations and generate insights */
-sc_error_t sc_pattern_radar_analyze(sc_pattern_radar_t *radar, sc_allocator_t *alloc,
+hu_error_t hu_pattern_radar_analyze(hu_pattern_radar_t *radar, hu_allocator_t *alloc,
                                      char **insights, size_t *insights_len);
 
 /* Build context string for prompt injection */
-sc_error_t sc_pattern_radar_build_context(sc_pattern_radar_t *radar, sc_allocator_t *alloc,
+hu_error_t hu_pattern_radar_build_context(hu_pattern_radar_t *radar, hu_allocator_t *alloc,
                                            char **out, size_t *out_len);
 
-void sc_pattern_radar_deinit(sc_pattern_radar_t *radar);
+void hu_pattern_radar_deinit(hu_pattern_radar_t *radar);
 
 #endif
 ```
@@ -752,13 +752,13 @@ Wire pattern radar into the agent turn, fed by fast-capture results.
 
 **Files:**
 
-- Modify: `include/seaclaw/agent.h` — add `sc_pattern_radar_t radar` to `sc_agent_t`
+- Modify: `include/human/agent.h` — add `hu_pattern_radar_t radar` to `hu_agent_t`
 - Modify: `src/agent/agent.c` — init/deinit
 - Modify: `src/agent/agent_turn.c` — feed fast-capture results to radar, inject context
-- Modify: `include/seaclaw/agent/prompt.h` — add `pattern_context`
+- Modify: `include/human/agent/prompt.h` — add `pattern_context`
 - Modify: `src/agent/prompt.c` — include pattern context
 
-**Step 1–5:** Same integration pattern as STM and commitments. After fast-capture, call `sc_pattern_radar_observe` for each entity/topic/emotion. Before prompt build, call `sc_pattern_radar_build_context`. Inject into system prompt.
+**Step 1–5:** Same integration pattern as STM and commitments. After fast-capture, call `hu_pattern_radar_observe` for each entity/topic/emotion. Before prompt build, call `hu_pattern_radar_build_context`. Inject into system prompt.
 
 **Step 6:** Commit: `feat(agent): integrate pattern radar into agent turn loop`
 
@@ -772,7 +772,7 @@ Adjust persona behavior based on time of day — calmer at night, energetic in m
 
 **Files:**
 
-- Create: `include/seaclaw/persona/circadian.h`
+- Create: `include/human/persona/circadian.h`
 - Create: `src/persona/circadian.c`
 - Test: `tests/test_circadian.c`
 - Modify: `tests/test_main.c`
@@ -781,38 +781,38 @@ Adjust persona behavior based on time of day — calmer at night, energetic in m
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_CIRCADIAN_H
-#define SC_CIRCADIAN_H
+#ifndef HU_CIRCADIAN_H
+#define HU_CIRCADIAN_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 
-typedef enum sc_time_phase {
-    SC_PHASE_EARLY_MORNING,  /* 5:00–8:00 — gentle, warming up */
-    SC_PHASE_MORNING,        /* 8:00–12:00 — energetic, productive */
-    SC_PHASE_AFTERNOON,      /* 12:00–17:00 — steady, focused */
-    SC_PHASE_EVENING,        /* 17:00–21:00 — winding down, reflective */
-    SC_PHASE_NIGHT,          /* 21:00–0:00 — calm, intimate, deeper */
-    SC_PHASE_LATE_NIGHT,     /* 0:00–5:00 — quiet, present, unhurried */
-} sc_time_phase_t;
+typedef enum hu_time_phase {
+    HU_PHASE_EARLY_MORNING,  /* 5:00–8:00 — gentle, warming up */
+    HU_PHASE_MORNING,        /* 8:00–12:00 — energetic, productive */
+    HU_PHASE_AFTERNOON,      /* 12:00–17:00 — steady, focused */
+    HU_PHASE_EVENING,        /* 17:00–21:00 — winding down, reflective */
+    HU_PHASE_NIGHT,          /* 21:00–0:00 — calm, intimate, deeper */
+    HU_PHASE_LATE_NIGHT,     /* 0:00–5:00 — quiet, present, unhurried */
+} hu_time_phase_t;
 
-typedef struct sc_circadian_overlay {
-    sc_time_phase_t phase;
+typedef struct hu_circadian_overlay {
+    hu_time_phase_t phase;
     const char *tone_guidance;       /* injected into persona prompt */
     size_t tone_guidance_len;
     const char *pacing_guidance;     /* speech tempo/length guidance */
     size_t pacing_guidance_len;
     double energy_level;             /* 0.0–1.0 */
-} sc_circadian_overlay_t;
+} hu_circadian_overlay_t;
 
 /* Get current phase from hour (0–23) */
-sc_time_phase_t sc_circadian_phase(uint8_t hour);
+hu_time_phase_t hu_circadian_phase(uint8_t hour);
 
 /* Get overlay for current phase */
-const sc_circadian_overlay_t *sc_circadian_get_overlay(sc_time_phase_t phase);
+const hu_circadian_overlay_t *hu_circadian_get_overlay(hu_time_phase_t phase);
 
 /* Build persona prompt addition for current time */
-sc_error_t sc_circadian_build_prompt(sc_allocator_t *alloc, uint8_t hour,
+hu_error_t hu_circadian_build_prompt(hu_allocator_t *alloc, uint8_t hour,
                                       char **out, size_t *out_len);
 
 #endif
@@ -832,7 +832,7 @@ Track how the relationship with the user deepens over time, adjusting warmth and
 
 **Files:**
 
-- Create: `include/seaclaw/persona/relationship.h`
+- Create: `include/human/persona/relationship.h`
 - Create: `src/persona/relationship.c`
 - Test: `tests/test_relationship.c`
 - Modify: `tests/test_main.c`
@@ -841,22 +841,22 @@ Track how the relationship with the user deepens over time, adjusting warmth and
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_RELATIONSHIP_H
-#define SC_RELATIONSHIP_H
+#ifndef HU_RELATIONSHIP_H
+#define HU_RELATIONSHIP_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
 
-typedef enum sc_relationship_stage {
-    SC_REL_NEW,           /* 0–5 sessions: formal, helpful, establishing trust */
-    SC_REL_FAMILIAR,      /* 5–20 sessions: warmer, recalls preferences */
-    SC_REL_TRUSTED,       /* 20–50 sessions: candid, proactive, personal */
-    SC_REL_DEEP,          /* 50+ sessions: intimate, anticipatory, growth-oriented */
-} sc_relationship_stage_t;
+typedef enum hu_relationship_stage {
+    HU_REL_NEW,           /* 0–5 sessions: formal, helpful, establishing trust */
+    HU_REL_FAMILIAR,      /* 5–20 sessions: warmer, recalls preferences */
+    HU_REL_TRUSTED,       /* 20–50 sessions: candid, proactive, personal */
+    HU_REL_DEEP,          /* 50+ sessions: intimate, anticipatory, growth-oriented */
+} hu_relationship_stage_t;
 
-typedef struct sc_relationship_state {
-    sc_relationship_stage_t stage;
+typedef struct hu_relationship_state {
+    hu_relationship_stage_t stage;
     uint32_t session_count;
     uint32_t total_turns;
     uint32_t vulnerability_moments;  /* times user shared something personal */
@@ -864,19 +864,19 @@ typedef struct sc_relationship_state {
     double trust_score;              /* 0.0–1.0, composite */
     char *first_interaction;         /* ISO 8601 — owned */
     char *last_interaction;          /* ISO 8601 — owned */
-} sc_relationship_state_t;
+} hu_relationship_state_t;
 
-sc_error_t sc_relationship_load(sc_allocator_t *alloc, sc_memory_t *memory,
-                                 sc_relationship_state_t *out);
-sc_error_t sc_relationship_save(sc_allocator_t *alloc, sc_memory_t *memory,
-                                 const sc_relationship_state_t *state);
-sc_error_t sc_relationship_update(sc_relationship_state_t *state,
+hu_error_t hu_relationship_load(hu_allocator_t *alloc, hu_memory_t *memory,
+                                 hu_relationship_state_t *out);
+hu_error_t hu_relationship_save(hu_allocator_t *alloc, hu_memory_t *memory,
+                                 const hu_relationship_state_t *state);
+hu_error_t hu_relationship_update(hu_relationship_state_t *state,
                                    bool had_vulnerability, bool had_humor,
                                    uint32_t turn_count);
-sc_error_t sc_relationship_build_prompt(sc_allocator_t *alloc,
-                                         const sc_relationship_state_t *state,
+hu_error_t hu_relationship_build_prompt(hu_allocator_t *alloc,
+                                         const hu_relationship_state_t *state,
                                          char **out, size_t *out_len);
-void sc_relationship_state_deinit(sc_relationship_state_t *state, sc_allocator_t *alloc);
+void hu_relationship_state_deinit(hu_relationship_state_t *state, hu_allocator_t *alloc);
 
 #endif
 ```
@@ -896,12 +896,12 @@ Wire circadian overlay and relationship depth into the persona prompt builder.
 **Files:**
 
 - Modify: `src/agent/agent_turn.c` — compute circadian + relationship, inject into prompt
-- Modify: `include/seaclaw/agent.h` — add relationship state to agent
+- Modify: `include/human/agent.h` — add relationship state to agent
 - Modify: `src/agent/agent.c` — load/save relationship state on init/session-end
-- Modify: `include/seaclaw/agent/prompt.h` — add adaptive persona fields
+- Modify: `include/human/agent/prompt.h` — add adaptive persona fields
 - Modify: `src/agent/prompt.c` — include adaptive persona context
 
-**Steps:** Same integration pattern. Add `sc_relationship_state_t relationship;` to agent. Load on init. After each turn, call `sc_relationship_update`. Before prompt build, call `sc_circadian_build_prompt` and `sc_relationship_build_prompt`. Inject both into system prompt.
+**Steps:** Same integration pattern. Add `hu_relationship_state_t relationship;` to agent. Load on init. After each turn, call `hu_relationship_update`. Before prompt build, call `hu_circadian_build_prompt` and `hu_relationship_build_prompt`. Inject both into system prompt.
 
 **Commit:** `feat(agent): integrate adaptive persona (circadian + relationship depth)`
 
@@ -915,7 +915,7 @@ Define the task DAG (directed acyclic graph) with dependency tracking and cycle 
 
 **Files:**
 
-- Create: `include/seaclaw/agent/dag.h`
+- Create: `include/human/agent/dag.h`
 - Create: `src/agent/dag.c`
 - Test: `tests/test_dag.c`
 - Modify: `tests/test_main.c`
@@ -924,51 +924,51 @@ Define the task DAG (directed acyclic graph) with dependency tracking and cycle 
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_DAG_H
-#define SC_DAG_H
+#ifndef HU_DAG_H
+#define HU_DAG_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
 
-#define SC_DAG_MAX_NODES 32
-#define SC_DAG_MAX_DEPS   8
+#define HU_DAG_MAX_NODES 32
+#define HU_DAG_MAX_DEPS   8
 
-typedef enum sc_dag_node_status {
-    SC_DAG_PENDING,
-    SC_DAG_READY,     /* all deps resolved */
-    SC_DAG_RUNNING,
-    SC_DAG_DONE,
-    SC_DAG_FAILED,
-} sc_dag_node_status_t;
+typedef enum hu_dag_node_status {
+    HU_DAG_PENDING,
+    HU_DAG_READY,     /* all deps resolved */
+    HU_DAG_RUNNING,
+    HU_DAG_DONE,
+    HU_DAG_FAILED,
+} hu_dag_node_status_t;
 
-typedef struct sc_dag_node {
+typedef struct hu_dag_node {
     char *id;            /* owned — "t1", "t2", etc. */
     char *tool_name;     /* owned */
     char *args_json;     /* owned — may contain $t1 refs */
-    char *deps[SC_DAG_MAX_DEPS]; /* owned dep IDs */
+    char *deps[HU_DAG_MAX_DEPS]; /* owned dep IDs */
     size_t dep_count;
-    sc_dag_node_status_t status;
+    hu_dag_node_status_t status;
     char *result;        /* owned — output after execution */
     size_t result_len;
-} sc_dag_node_t;
+} hu_dag_node_t;
 
-typedef struct sc_dag {
-    sc_allocator_t alloc;
-    sc_dag_node_t nodes[SC_DAG_MAX_NODES];
+typedef struct hu_dag {
+    hu_allocator_t alloc;
+    hu_dag_node_t nodes[HU_DAG_MAX_NODES];
     size_t node_count;
-} sc_dag_t;
+} hu_dag_t;
 
-sc_error_t sc_dag_init(sc_dag_t *dag, sc_allocator_t alloc);
-sc_error_t sc_dag_add_node(sc_dag_t *dag, const char *id, const char *tool_name,
+hu_error_t hu_dag_init(hu_dag_t *dag, hu_allocator_t alloc);
+hu_error_t hu_dag_add_node(hu_dag_t *dag, const char *id, const char *tool_name,
                             const char *args_json, const char **deps, size_t dep_count);
-sc_error_t sc_dag_validate(const sc_dag_t *dag); /* checks: no cycles, no missing deps, no dup IDs */
-sc_error_t sc_dag_parse_json(sc_dag_t *dag, sc_allocator_t *alloc,
+hu_error_t hu_dag_validate(const hu_dag_t *dag); /* checks: no cycles, no missing deps, no dup IDs */
+hu_error_t hu_dag_parse_json(hu_dag_t *dag, hu_allocator_t *alloc,
                               const char *json, size_t json_len);
-void sc_dag_deinit(sc_dag_t *dag);
+void hu_dag_deinit(hu_dag_t *dag);
 
 /* Query */
-bool sc_dag_is_complete(const sc_dag_t *dag);
-sc_dag_node_t *sc_dag_find_node(sc_dag_t *dag, const char *id, size_t id_len);
+bool hu_dag_is_complete(const hu_dag_t *dag);
+hu_dag_node_t *hu_dag_find_node(hu_dag_t *dag, const char *id, size_t id_len);
 
 #endif
 ```
@@ -987,7 +987,7 @@ Group DAG nodes into execution batches — each batch contains nodes whose depen
 
 **Files:**
 
-- Create: `include/seaclaw/agent/dag_executor.h`
+- Create: `include/human/agent/dag_executor.h`
 - Create: `src/agent/dag_executor.c`
 - Test: `tests/test_dag_executor.c`
 - Modify: `tests/test_main.c`
@@ -996,30 +996,30 @@ Group DAG nodes into execution batches — each batch contains nodes whose depen
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_DAG_EXECUTOR_H
-#define SC_DAG_EXECUTOR_H
+#ifndef HU_DAG_EXECUTOR_H
+#define HU_DAG_EXECUTOR_H
 
-#include "seaclaw/agent/dag.h"
-#include "seaclaw/tool.h"
+#include "human/agent/dag.h"
+#include "human/tool.h"
 
-#define SC_DAG_MAX_BATCH_SIZE 8
+#define HU_DAG_MAX_BATCH_SIZE 8
 
-typedef struct sc_dag_batch {
-    sc_dag_node_t *nodes[SC_DAG_MAX_BATCH_SIZE];
+typedef struct hu_dag_batch {
+    hu_dag_node_t *nodes[HU_DAG_MAX_BATCH_SIZE];
     size_t count;
-} sc_dag_batch_t;
+} hu_dag_batch_t;
 
 /* Get next batch of ready-to-execute nodes */
-sc_error_t sc_dag_next_batch(sc_dag_t *dag, sc_dag_batch_t *batch);
+hu_error_t hu_dag_next_batch(hu_dag_t *dag, hu_dag_batch_t *batch);
 
 /* Resolve $tN variable references in args using completed node results */
-sc_error_t sc_dag_resolve_vars(sc_allocator_t *alloc, const sc_dag_t *dag,
+hu_error_t hu_dag_resolve_vars(hu_allocator_t *alloc, const hu_dag_t *dag,
                                 const char *args, size_t args_len,
                                 char **resolved, size_t *resolved_len);
 
 /* Execute a full DAG using tool dispatch */
-sc_error_t sc_dag_execute(sc_dag_t *dag, sc_allocator_t *alloc,
-                           sc_tool_t *tools, size_t tools_count,
+hu_error_t hu_dag_execute(hu_dag_t *dag, hu_allocator_t *alloc,
+                           hu_tool_t *tools, size_t tools_count,
                            uint32_t max_parallel);
 
 #endif
@@ -1039,7 +1039,7 @@ Generate a DAG plan from a user goal using the LLM.
 
 **Files:**
 
-- Create: `include/seaclaw/agent/llm_compiler.h`
+- Create: `include/human/agent/llm_compiler.h`
 - Create: `src/agent/llm_compiler.c`
 - Test: `tests/test_llm_compiler.c`
 - Modify: `tests/test_main.c`
@@ -1048,29 +1048,29 @@ Generate a DAG plan from a user goal using the LLM.
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_LLM_COMPILER_H
-#define SC_LLM_COMPILER_H
+#ifndef HU_LLM_COMPILER_H
+#define HU_LLM_COMPILER_H
 
-#include "seaclaw/agent/dag.h"
-#include "seaclaw/provider.h"
-#include "seaclaw/tool.h"
+#include "human/agent/dag.h"
+#include "human/provider.h"
+#include "human/tool.h"
 
 /* Build the planning prompt for LLM DAG generation */
-sc_error_t sc_llm_compiler_build_prompt(sc_allocator_t *alloc,
+hu_error_t hu_llm_compiler_build_prompt(hu_allocator_t *alloc,
                                          const char *goal, size_t goal_len,
-                                         sc_tool_t *tools, size_t tools_count,
+                                         hu_tool_t *tools, size_t tools_count,
                                          char **out, size_t *out_len);
 
 /* Parse LLM response into a DAG */
-sc_error_t sc_llm_compiler_parse_plan(sc_allocator_t *alloc,
+hu_error_t hu_llm_compiler_parse_plan(hu_allocator_t *alloc,
                                        const char *response, size_t response_len,
-                                       sc_dag_t *dag);
+                                       hu_dag_t *dag);
 
 /* Full pipeline: generate plan via LLM, validate, execute */
-sc_error_t sc_llm_compiler_run(sc_allocator_t *alloc,
-                                sc_provider_t *provider, const char *model,
+hu_error_t hu_llm_compiler_run(hu_allocator_t *alloc,
+                                hu_provider_t *provider, const char *model,
                                 const char *goal, size_t goal_len,
-                                sc_tool_t *tools, size_t tools_count,
+                                hu_tool_t *tools, size_t tools_count,
                                 uint32_t max_parallel,
                                 char **final_result, size_t *final_result_len);
 
@@ -1092,10 +1092,10 @@ When the planner detects a multi-step goal, use LLMCompiler instead of sequentia
 **Files:**
 
 - Modify: `src/agent/agent_turn.c` — detect multi-tool scenarios, route to LLMCompiler
-- Modify: `include/seaclaw/agent.h` — add config flag for LLMCompiler
-- Modify: `include/seaclaw/config.h` — add `llm_compiler_enabled` to agent config
+- Modify: `include/human/agent.h` — add config flag for LLMCompiler
+- Modify: `include/human/config.h` — add `llm_compiler_enabled` to agent config
 
-**Steps:** Add `bool llm_compiler_enabled;` to `sc_agent_config_t`. In the agent turn loop, when the provider returns 3+ tool calls, check if `llm_compiler_enabled`. If so, instead of dispatching sequentially, build a DAG from the tool calls (treating each as an independent node unless the LLM specified dependencies via `$tN` in args), and use `sc_dag_execute` with `max_parallel=4`.
+**Steps:** Add `bool llm_compiler_enabled;` to `hu_agent_config_t`. In the agent turn loop, when the provider returns 3+ tool calls, check if `llm_compiler_enabled`. If so, instead of dispatching sequentially, build a DAG from the tool calls (treating each as an independent node unless the LLM specified dependencies via `$tN` in args), and use `hu_dag_execute` with `max_parallel=4`.
 
 **Commit:** `feat(agent): integrate LLMCompiler parallel execution into agent turn`
 
@@ -1109,7 +1109,7 @@ A scheduler that fires actions based on time — check-ins, reminders, milestone
 
 **Files:**
 
-- Create: `include/seaclaw/agent/proactive.h`
+- Create: `include/human/agent/proactive.h`
 - Create: `src/agent/proactive.c`
 - Test: `tests/test_proactive.c`
 - Modify: `tests/test_main.c`
@@ -1118,56 +1118,56 @@ A scheduler that fires actions based on time — check-ins, reminders, milestone
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_PROACTIVE_H
-#define SC_PROACTIVE_H
+#ifndef HU_PROACTIVE_H
+#define HU_PROACTIVE_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/agent/commitment.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
+#include "human/agent/commitment.h"
 
-#define SC_PROACTIVE_MAX_ACTIONS 32
+#define HU_PROACTIVE_MAX_ACTIONS 32
 
-typedef enum sc_proactive_action_type {
-    SC_PROACTIVE_COMMITMENT_FOLLOW_UP,
-    SC_PROACTIVE_MILESTONE,
-    SC_PROACTIVE_CHECK_IN,
-    SC_PROACTIVE_MORNING_BRIEFING,
-    SC_PROACTIVE_PATTERN_INSIGHT,
-} sc_proactive_action_type_t;
+typedef enum hu_proactive_action_type {
+    HU_PROACTIVE_COMMITMENT_FOLLOW_UP,
+    HU_PROACTIVE_MILESTONE,
+    HU_PROACTIVE_CHECK_IN,
+    HU_PROACTIVE_MORNING_BRIEFING,
+    HU_PROACTIVE_PATTERN_INSIGHT,
+} hu_proactive_action_type_t;
 
-typedef struct sc_proactive_action {
-    sc_proactive_action_type_t type;
+typedef struct hu_proactive_action {
+    hu_proactive_action_type_t type;
     char *message;       /* owned — the proactive message/question to inject */
     size_t message_len;
     char *context;       /* owned — supporting context for the LLM */
     size_t context_len;
     double priority;     /* 0.0–1.0 */
-} sc_proactive_action_t;
+} hu_proactive_action_t;
 
-typedef struct sc_proactive_result {
-    sc_proactive_action_t actions[SC_PROACTIVE_MAX_ACTIONS];
+typedef struct hu_proactive_result {
+    hu_proactive_action_t actions[HU_PROACTIVE_MAX_ACTIONS];
     size_t count;
-} sc_proactive_result_t;
+} hu_proactive_result_t;
 
 /* Check for due actions given current time and memory state */
-sc_error_t sc_proactive_check(sc_allocator_t *alloc, sc_memory_t *memory,
+hu_error_t hu_proactive_check(hu_allocator_t *alloc, hu_memory_t *memory,
                                const char *current_time, size_t current_time_len,
-                               sc_proactive_result_t *out);
+                               hu_proactive_result_t *out);
 
 /* Build context string for prompt injection (top N by priority) */
-sc_error_t sc_proactive_build_context(const sc_proactive_result_t *result,
-                                       sc_allocator_t *alloc, size_t max_actions,
+hu_error_t hu_proactive_build_context(const hu_proactive_result_t *result,
+                                       hu_allocator_t *alloc, size_t max_actions,
                                        char **out, size_t *out_len);
 
-void sc_proactive_result_deinit(sc_proactive_result_t *result, sc_allocator_t *alloc);
+void hu_proactive_result_deinit(hu_proactive_result_t *result, hu_allocator_t *alloc);
 
 #endif
 ```
 
 **Step 2:** Tests: `proactive_detects_due_commitment`, `proactive_generates_milestone_at_anniversary`, `proactive_morning_briefing_includes_commitments`, `proactive_build_context_sorts_by_priority`.
 
-**Step 3:** Implement. `sc_proactive_check`: query commitment store for due follow-ups, check memory for milestones (first_interaction anniversary, session count milestones at 10/25/50/100), check time for morning briefing window (8-10am). Generate action for each.
+**Step 3:** Implement. `hu_proactive_check`: query commitment store for due follow-ups, check memory for milestones (first_interaction anniversary, session count milestones at 10/25/50/100), check time for morning briefing window (8-10am). Generate action for each.
 
 **Step 4:** Tests pass. **Step 5:** Commit: `feat(agent): add proactive scheduler for time-triggered actions`
 
@@ -1180,10 +1180,10 @@ Wire proactive actions into the agent turn.
 **Files:**
 
 - Modify: `src/agent/agent_turn.c` — run proactive check at turn start, inject context
-- Modify: `include/seaclaw/agent/prompt.h` — add `proactive_context`
+- Modify: `include/human/agent/prompt.h` — add `proactive_context`
 - Modify: `src/agent/prompt.c` — include proactive context
 
-**Steps:** At the start of the agent turn (before the main loop), call `sc_proactive_check` with current time. If actions exist, call `sc_proactive_build_context` and inject into system prompt under `### Proactive Awareness`. The LLM decides whether and how to surface these naturally.
+**Steps:** At the start of the agent turn (before the main loop), call `hu_proactive_check` with current time. If actions exist, call `hu_proactive_build_context` and inject into system prompt under `### Proactive Awareness`. The LLM decides whether and how to surface these naturally.
 
 **Commit:** `feat(agent): integrate proactive awareness into agent turn`
 
@@ -1197,7 +1197,7 @@ A registry for superhuman services that build specialized context from memory.
 
 **Files:**
 
-- Create: `include/seaclaw/agent/superhuman.h`
+- Create: `include/human/agent/superhuman.h`
 - Create: `src/agent/superhuman.c`
 - Test: `tests/test_superhuman.c`
 - Modify: `tests/test_main.c`
@@ -1206,47 +1206,47 @@ A registry for superhuman services that build specialized context from memory.
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_SUPERHUMAN_H
-#define SC_SUPERHUMAN_H
+#ifndef HU_SUPERHUMAN_H
+#define HU_SUPERHUMAN_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/stm.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/memory.h"
+#include "human/memory/stm.h"
 
-#define SC_SUPERHUMAN_MAX_SERVICES 16
+#define HU_SUPERHUMAN_MAX_SERVICES 16
 
-typedef struct sc_superhuman_service {
+typedef struct hu_superhuman_service {
     const char *name;
     /* Build context string for this service given memory + STM state */
-    sc_error_t (*build_context)(void *ctx, sc_allocator_t *alloc, sc_memory_t *memory,
-                                 const sc_stm_buffer_t *stm,
+    hu_error_t (*build_context)(void *ctx, hu_allocator_t *alloc, hu_memory_t *memory,
+                                 const hu_stm_buffer_t *stm,
                                  char **out, size_t *out_len);
     /* Record an observation from the current turn */
-    sc_error_t (*observe)(void *ctx, sc_allocator_t *alloc, sc_memory_t *memory,
+    hu_error_t (*observe)(void *ctx, hu_allocator_t *alloc, hu_memory_t *memory,
                            const char *text, size_t text_len,
                            const char *role, size_t role_len);
     void *ctx;
-} sc_superhuman_service_t;
+} hu_superhuman_service_t;
 
-typedef struct sc_superhuman_registry {
-    sc_superhuman_service_t services[SC_SUPERHUMAN_MAX_SERVICES];
+typedef struct hu_superhuman_registry {
+    hu_superhuman_service_t services[HU_SUPERHUMAN_MAX_SERVICES];
     size_t count;
-} sc_superhuman_registry_t;
+} hu_superhuman_registry_t;
 
-sc_error_t sc_superhuman_registry_init(sc_superhuman_registry_t *reg);
-sc_error_t sc_superhuman_register(sc_superhuman_registry_t *reg,
-                                   sc_superhuman_service_t service);
+hu_error_t hu_superhuman_registry_init(hu_superhuman_registry_t *reg);
+hu_error_t hu_superhuman_register(hu_superhuman_registry_t *reg,
+                                   hu_superhuman_service_t service);
 
 /* Build unified context from all registered services */
-sc_error_t sc_superhuman_build_context(sc_superhuman_registry_t *reg,
-                                        sc_allocator_t *alloc, sc_memory_t *memory,
-                                        const sc_stm_buffer_t *stm,
+hu_error_t hu_superhuman_build_context(hu_superhuman_registry_t *reg,
+                                        hu_allocator_t *alloc, hu_memory_t *memory,
+                                        const hu_stm_buffer_t *stm,
                                         char **out, size_t *out_len);
 
 /* Run all observe hooks for a turn */
-sc_error_t sc_superhuman_observe_all(sc_superhuman_registry_t *reg,
-                                      sc_allocator_t *alloc, sc_memory_t *memory,
+hu_error_t hu_superhuman_observe_all(hu_superhuman_registry_t *reg,
+                                      hu_allocator_t *alloc, hu_memory_t *memory,
                                       const char *text, size_t text_len,
                                       const char *role, size_t role_len);
 
@@ -1270,7 +1270,7 @@ First superhuman service — wraps the commitment store with richer context buil
 - Create: `src/agent/superhuman_commitment.c`
 - Modify: `tests/test_superhuman.c` — add tests
 
-**Step 1:** Implement `sc_superhuman_service_t` for commitment keeping. `build_context`: query active commitments, format as: "You made {count} active commitments. [list]. {follow_up_due} are due for follow-up." `observe`: run `sc_commitment_detect` on text, store results.
+**Step 1:** Implement `hu_superhuman_service_t` for commitment keeping. `build_context`: query active commitments, format as: "You made {count} active commitments. [list]. {follow_up_due} are due for follow-up." `observe`: run `hu_commitment_detect` on text, store results.
 
 **Step 2:** Tests: `commitment_service_builds_context_with_active`, `commitment_service_observes_new_commitments`.
 
@@ -1345,13 +1345,13 @@ Wire the superhuman registry into the agent, register all services, and inject u
 
 **Files:**
 
-- Modify: `include/seaclaw/agent.h` — add `sc_superhuman_registry_t superhuman` to agent
+- Modify: `include/human/agent.h` — add `hu_superhuman_registry_t superhuman` to agent
 - Modify: `src/agent/agent.c` — init registry, register services
 - Modify: `src/agent/agent_turn.c` — call observe + build_context
-- Modify: `include/seaclaw/agent/prompt.h` — add `superhuman_context`
+- Modify: `include/human/agent/prompt.h` — add `superhuman_context`
 - Modify: `src/agent/prompt.c` — include superhuman context
 
-**Steps:** Init registry in `sc_agent_init`. Register commitment keeper, predictive coaching, emotional first aid, silence interpreter. In agent_turn: after processing user message, call `sc_superhuman_observe_all`. Before prompt build, call `sc_superhuman_build_context`. Inject into system prompt under `### Superhuman Insights`.
+**Steps:** Init registry in `hu_agent_init`. Register commitment keeper, predictive coaching, emotional first aid, silence interpreter. In agent_turn: after processing user message, call `hu_superhuman_observe_all`. Before prompt build, call `hu_superhuman_build_context`. Inject into system prompt under `### Superhuman Insights`.
 
 **Commit:** `feat(agent): integrate superhuman service registry into agent turn`
 
@@ -1365,7 +1365,7 @@ Score tool relevance to the current conversation context, so only the most relev
 
 **Files:**
 
-- Create: `include/seaclaw/agent/tool_router.h`
+- Create: `include/human/agent/tool_router.h`
 - Create: `src/agent/tool_router.c`
 - Test: `tests/test_tool_router.c`
 - Modify: `tests/test_main.c`
@@ -1374,35 +1374,35 @@ Score tool relevance to the current conversation context, so only the most relev
 **Step 1: Write the header**
 
 ```c
-#ifndef SC_TOOL_ROUTER_H
-#define SC_TOOL_ROUTER_H
+#ifndef HU_TOOL_ROUTER_H
+#define HU_TOOL_ROUTER_H
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/tool.h"
 
-#define SC_TOOL_ROUTER_MAX_SELECTED 15
-#define SC_TOOL_ROUTER_ALWAYS_MAX    8
+#define HU_TOOL_ROUTER_MAX_SELECTED 15
+#define HU_TOOL_ROUTER_ALWAYS_MAX    8
 
-typedef struct sc_tool_router {
-    sc_allocator_t alloc;
+typedef struct hu_tool_router {
+    hu_allocator_t alloc;
     const char **always_tools;      /* tool names always included */
     size_t always_tools_count;
-} sc_tool_router_t;
+} hu_tool_router_t;
 
-typedef struct sc_tool_selection {
-    sc_tool_t *tools[SC_TOOL_ROUTER_MAX_SELECTED];
+typedef struct hu_tool_selection {
+    hu_tool_t *tools[HU_TOOL_ROUTER_MAX_SELECTED];
     size_t count;
-} sc_tool_selection_t;
+} hu_tool_selection_t;
 
-sc_error_t sc_tool_router_init(sc_tool_router_t *router, sc_allocator_t alloc);
+hu_error_t hu_tool_router_init(hu_tool_router_t *router, hu_allocator_t alloc);
 
 /* Select most relevant tools for the given message */
-sc_error_t sc_tool_router_select(sc_tool_router_t *router,
+hu_error_t hu_tool_router_select(hu_tool_router_t *router,
                                   const char *message, size_t message_len,
-                                  sc_tool_t *all_tools, size_t all_tools_count,
-                                  sc_tool_selection_t *out);
+                                  hu_tool_t *all_tools, size_t all_tools_count,
+                                  hu_tool_selection_t *out);
 
-void sc_tool_router_deinit(sc_tool_router_t *router);
+void hu_tool_router_deinit(hu_tool_router_t *router);
 
 #endif
 ```
@@ -1422,9 +1422,9 @@ Wire tool router into agent turn so only relevant tools are sent to the provider
 **Files:**
 
 - Modify: `src/agent/agent_turn.c` — use tool router before provider chat call
-- Modify: `include/seaclaw/agent.h` — add tool_router to agent
+- Modify: `include/human/agent.h` — add tool_router to agent
 
-**Steps:** Before the provider `chat()` call in the main loop, run `sc_tool_router_select` to get a filtered tool set. Pass the filtered tools to the provider instead of all tools. This reduces token usage and improves tool selection quality.
+**Steps:** Before the provider `chat()` call in the main loop, run `hu_tool_router_select` to get a filtered tool set. Pass the filtered tools to the provider instead of all tools. This reduces token usage and improves tool selection quality.
 
 **Commit:** `feat(agent): integrate semantic tool routing into agent turn`
 
@@ -1435,7 +1435,7 @@ Wire tool router into agent turn so only relevant tools are sent to the provider
 After each layer:
 
 ```bash
-cmake --build build -j$(sysctl -n hw.ncpu) && ./build/seaclaw_tests
+cmake --build build -j$(sysctl -n hw.ncpu) && ./build/human_tests
 ```
 
 All tests must pass with 0 ASan errors.
@@ -1446,7 +1446,7 @@ After all layers:
 cmake -B build-release -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON \
   -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON
 cmake --build build-release -j$(sysctl -n hw.ncpu)
-ls -la build-release/seaclaw  # verify binary size still reasonable
+ls -la build-release/human  # verify binary size still reasonable
 ```
 
 ---

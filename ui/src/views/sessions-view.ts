@@ -3,17 +3,17 @@ import { customElement, state } from "lit/decorators.js";
 import { formatRelative } from "../utils.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import "../components/sc-badge.js";
-import "../components/sc-button.js";
-import "../components/sc-card.js";
-import "../components/sc-dialog.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-search.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
+import "../components/hu-badge.js";
+import "../components/hu-button.js";
+import "../components/hu-card.js";
+import "../components/hu-dialog.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-search.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -40,7 +40,7 @@ interface Session {
   status?: "active" | "archived";
 }
 
-@customElement("sc-sessions-view")
+@customElement("hu-sessions-view")
 export class ScSessionsView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
 
@@ -48,25 +48,25 @@ export class ScSessionsView extends GatewayAwareLitElement {
     :host {
       view-transition-name: view-sessions;
       display: block;
-      color: var(--sc-text);
+      color: var(--hu-text);
       max-width: 75rem;
-      padding: var(--sc-space-lg) var(--sc-space-xl);
+      padding: var(--hu-space-lg) var(--hu-space-xl);
     }
 
     .staleness {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
     .search-row {
-      margin-bottom: var(--sc-space-lg);
+      margin-bottom: var(--hu-space-lg);
       max-width: 20rem;
     }
 
     .sessions-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
-      gap: var(--sc-space-lg);
+      gap: var(--hu-space-lg);
     }
 
     .session-card {
@@ -77,14 +77,14 @@ export class ScSessionsView extends GatewayAwareLitElement {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: var(--sc-space-sm);
-      margin-bottom: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
 
     .session-card-title {
-      font-size: var(--sc-text-base);
-      font-weight: var(--sc-weight-semibold);
-      color: var(--sc-text);
+      font-size: var(--hu-text-base);
+      font-weight: var(--hu-weight-semibold);
+      color: var(--hu-text);
       flex: 1;
       min-width: 0;
       overflow: hidden;
@@ -96,19 +96,19 @@ export class ScSessionsView extends GatewayAwareLitElement {
       flex-shrink: 0;
       display: flex;
       align-items: center;
-      gap: var(--sc-space-2xs);
+      gap: var(--hu-space-2xs);
     }
 
     .session-card-preview {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text-muted);
-      line-height: var(--sc-leading-relaxed);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text-muted);
+      line-height: var(--hu-leading-relaxed);
       overflow: hidden;
       text-overflow: ellipsis;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
 
     .session-card-meta {
@@ -116,12 +116,12 @@ export class ScSessionsView extends GatewayAwareLitElement {
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: var(--sc-space-xs);
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      gap: var(--hu-space-xs);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
     }
 
-    @media (max-width: 48rem) /* --sc-breakpoint-lg */ {
+    @media (max-width: 48rem) /* --hu-breakpoint-lg */ {
       .sessions-grid {
         grid-template-columns: 1fr;
       }
@@ -229,13 +229,13 @@ export class ScSessionsView extends GatewayAwareLitElement {
     return html`
       ${this._renderHero()} ${this._renderStats()} ${this._renderSearch()}
       ${this.error
-        ? html`<sc-empty-state
+        ? html`<hu-empty-state
             .icon=${icons.warning}
             heading="Error"
             description=${this.error}
-          ></sc-empty-state>`
+          ></hu-empty-state>`
         : this._renderContent()}
-      <sc-dialog
+      <hu-dialog
         ?open=${this._deleteTarget != null}
         title="Delete session"
         message=${this._deleteTarget
@@ -243,67 +243,67 @@ export class ScSessionsView extends GatewayAwareLitElement {
           : ""}
         confirmLabel="Delete"
         variant="danger"
-        @sc-confirm=${this._onDeleteConfirm}
-        @sc-cancel=${this._onDeleteCancel}
-      ></sc-dialog>
+        @hu-confirm=${this._onDeleteConfirm}
+        @hu-cancel=${this._onDeleteCancel}
+      ></hu-dialog>
     `;
   }
 
   private _renderHero() {
     return html`
-      <sc-page-hero role="region" aria-label="Sessions overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Sessions overview">
+        <hu-section-header
           heading="Sessions"
           description="Browse and manage your conversation sessions"
         >
           <span class="staleness">${this.stalenessLabel}</span>
-          <sc-button size="sm" @click=${() => this.load()} aria-label="Refresh sessions">
+          <hu-button size="sm" @click=${() => this.load()} aria-label="Refresh sessions">
             Refresh
-          </sc-button>
-          <sc-button
+          </hu-button>
+          <hu-button
             variant="primary"
             size="sm"
             @click=${() => this.dispatchNavigate("chat:default")}
             aria-label="Start new session"
           >
             New Session
-          </sc-button>
-        </sc-section-header>
-      </sc-page-hero>
+          </hu-button>
+        </hu-section-header>
+      </hu-page-hero>
     `;
   }
 
   private _renderStats() {
     return html`
-      <sc-stats-row>
-        <sc-stat-card
+      <hu-stats-row>
+        <hu-stat-card
           .value=${this.sessions.length}
           label="Sessions"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.activeCount}
           label="Active"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${this.totalMessages}
           label="Total Messages"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+      </hu-stats-row>
     `;
   }
 
   private _renderSearch() {
     return html`
       <div class="search-row" role="search">
-        <sc-search
+        <hu-search
           .value=${this.searchQuery}
           placeholder="Search sessions..."
           size="md"
-          @sc-search=${this._onSearch}
-        ></sc-search>
+          @hu-search=${this._onSearch}
+        ></hu-search>
       </div>
     `;
   }
@@ -312,20 +312,20 @@ export class ScSessionsView extends GatewayAwareLitElement {
     const filtered = this.filteredSessions;
     if (filtered.length === 0) {
       return html`
-        <sc-empty-state
+        <hu-empty-state
           .icon=${icons["chat-circle"]}
           heading=${this.searchQuery ? "No matching sessions" : "No sessions yet"}
           description=${this.searchQuery
             ? "Try a different search term."
             : "Start a conversation to create your first session."}
-        ></sc-empty-state>
+        ></hu-empty-state>
       `;
     }
     return html`
       <div class="sessions-grid" role="list">
         ${filtered.map(
           (s) => html`
-            <sc-card
+            <hu-card
               class="session-card"
               hoverable
               clickable
@@ -335,10 +335,10 @@ export class ScSessionsView extends GatewayAwareLitElement {
               <div class="session-card-header">
                 <span class="session-card-title">${this.sessionTitle(s)}</span>
                 <div class="session-card-actions">
-                  <sc-badge variant=${s.status === "archived" ? "neutral" : "success"}>
+                  <hu-badge variant=${s.status === "archived" ? "neutral" : "success"}>
                     ${s.status === "archived" ? "Archived" : "Active"}
-                  </sc-badge>
-                  <sc-button
+                  </hu-badge>
+                  <hu-button
                     variant="ghost"
                     size="sm"
                     .iconOnly=${true}
@@ -346,7 +346,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
                     @click=${(e: Event) => this._onDeleteClick(e, s)}
                   >
                     ${icons.trash}
-                  </sc-button>
+                  </hu-button>
                 </div>
               </div>
               ${s.last_message
@@ -356,7 +356,7 @@ export class ScSessionsView extends GatewayAwareLitElement {
                 <span>${this.sessionMessageCount(s)} messages</span>
                 <span>${formatRelative(this.sessionTimestamp(s))}</span>
               </div>
-            </sc-card>
+            </hu-card>
           `,
         )}
       </div>
@@ -365,24 +365,24 @@ export class ScSessionsView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-page-hero role="region" aria-label="Sessions overview">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Sessions overview">
+        <hu-section-header
           heading="Sessions"
           description="Browse and manage your conversation sessions"
-        ></sc-section-header>
-      </sc-page-hero>
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
+        ></hu-section-header>
+      </hu-page-hero>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
       <div class="search-row">
-        <sc-skeleton variant="line" height="var(--sc-input-min-height)" width="20rem"></sc-skeleton>
+        <hu-skeleton variant="line" height="var(--hu-input-min-height)" width="20rem"></hu-skeleton>
       </div>
       <div class="sessions-grid">
-        <sc-skeleton variant="session-card"></sc-skeleton>
-        <sc-skeleton variant="session-card"></sc-skeleton>
-        <sc-skeleton variant="session-card"></sc-skeleton>
+        <hu-skeleton variant="session-card"></hu-skeleton>
+        <hu-skeleton variant="session-card"></hu-skeleton>
+        <hu-skeleton variant="session-card"></hu-skeleton>
       </div>
     `;
   }
@@ -390,6 +390,6 @@ export class ScSessionsView extends GatewayAwareLitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "sc-sessions-view": ScSessionsView;
+    "hu-sessions-view": ScSessionsView;
   }
 }

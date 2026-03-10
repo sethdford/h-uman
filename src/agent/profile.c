@@ -1,4 +1,4 @@
-#include "seaclaw/agent/profile.h"
+#include "human/agent/profile.h"
 #include <string.h>
 
 static const char *coding_tools[] = {
@@ -23,9 +23,9 @@ static const char *minimal_tools[] = {
     "memory_recall",
 };
 
-static const sc_agent_profile_t profiles[] = {
+static const hu_agent_profile_t profiles[] = {
     {
-        .type = SC_PROFILE_CODING,
+        .type = HU_PROFILE_CODING,
         .name = "coding",
         .description = "Full-featured coding agent with file ops, git, shell, and patch tools",
         .system_prompt = "You are an expert software engineer. Write clean, tested code. "
@@ -39,7 +39,7 @@ static const sc_agent_profile_t profiles[] = {
         .autonomy_level = 2,
     },
     {
-        .type = SC_PROFILE_OPS,
+        .type = HU_PROFILE_OPS,
         .name = "ops",
         .description = "Operations agent for system administration, monitoring, and scheduling",
         .system_prompt = "You are a systems operations specialist. "
@@ -53,7 +53,7 @@ static const sc_agent_profile_t profiles[] = {
         .autonomy_level = 1,
     },
     {
-        .type = SC_PROFILE_MESSAGING,
+        .type = HU_PROFILE_MESSAGING,
         .name = "messaging",
         .description = "Conversational agent for chat channels with memory and search",
         .system_prompt = "You are a helpful assistant in a team chat. "
@@ -67,7 +67,7 @@ static const sc_agent_profile_t profiles[] = {
         .autonomy_level = 1,
     },
     {
-        .type = SC_PROFILE_MINIMAL,
+        .type = HU_PROFILE_MINIMAL,
         .name = "minimal",
         .description = "Lightweight agent with minimal tools and low resource usage",
         .system_prompt = "You are a helpful assistant. Be concise.",
@@ -83,14 +83,14 @@ static const sc_agent_profile_t profiles[] = {
 
 #define PROFILE_COUNT (sizeof(profiles) / sizeof(profiles[0]))
 
-const sc_agent_profile_t *sc_agent_profile_get(sc_agent_profile_type_t type) {
+const hu_agent_profile_t *hu_agent_profile_get(hu_agent_profile_type_t type) {
     for (size_t i = 0; i < PROFILE_COUNT; i++)
         if (profiles[i].type == type)
             return &profiles[i];
     return NULL;
 }
 
-const sc_agent_profile_t *sc_agent_profile_by_name(const char *name, size_t name_len) {
+const hu_agent_profile_t *hu_agent_profile_by_name(const char *name, size_t name_len) {
     if (!name || name_len == 0)
         return NULL;
     for (size_t i = 0; i < PROFILE_COUNT; i++) {
@@ -100,10 +100,10 @@ const sc_agent_profile_t *sc_agent_profile_by_name(const char *name, size_t name
     return NULL;
 }
 
-sc_error_t sc_agent_profile_list(const sc_agent_profile_t **out, size_t *count) {
+hu_error_t hu_agent_profile_list(const hu_agent_profile_t **out, size_t *count) {
     if (!out || !count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = profiles;
     *count = PROFILE_COUNT;
-    return SC_OK;
+    return HU_OK;
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "seaclaw-v1";
+const CACHE_NAME = "human-v1";
 const PRECACHE_URLS = ["/", "/index.html"];
 
 self.addEventListener("install", (event) => {

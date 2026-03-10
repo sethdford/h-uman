@@ -1,67 +1,67 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/persona/circadian.h"
+#include "human/core/allocator.h"
+#include "human/persona/circadian.h"
 #include "test_framework.h"
 #include <string.h>
 
 static void circadian_5am_is_early_morning(void) {
-    sc_time_phase_t p = sc_circadian_phase(5);
-    SC_ASSERT_EQ(p, SC_PHASE_EARLY_MORNING);
+    hu_time_phase_t p = hu_circadian_phase(5);
+    HU_ASSERT_EQ(p, HU_PHASE_EARLY_MORNING);
 }
 
 static void circadian_10am_is_morning(void) {
-    sc_time_phase_t p = sc_circadian_phase(10);
-    SC_ASSERT_EQ(p, SC_PHASE_MORNING);
+    hu_time_phase_t p = hu_circadian_phase(10);
+    HU_ASSERT_EQ(p, HU_PHASE_MORNING);
 }
 
 static void circadian_14pm_is_afternoon(void) {
-    sc_time_phase_t p = sc_circadian_phase(14);
-    SC_ASSERT_EQ(p, SC_PHASE_AFTERNOON);
+    hu_time_phase_t p = hu_circadian_phase(14);
+    HU_ASSERT_EQ(p, HU_PHASE_AFTERNOON);
 }
 
 static void circadian_19pm_is_evening(void) {
-    sc_time_phase_t p = sc_circadian_phase(19);
-    SC_ASSERT_EQ(p, SC_PHASE_EVENING);
+    hu_time_phase_t p = hu_circadian_phase(19);
+    HU_ASSERT_EQ(p, HU_PHASE_EVENING);
 }
 
 static void circadian_22pm_is_night(void) {
-    sc_time_phase_t p = sc_circadian_phase(22);
-    SC_ASSERT_EQ(p, SC_PHASE_NIGHT);
+    hu_time_phase_t p = hu_circadian_phase(22);
+    HU_ASSERT_EQ(p, HU_PHASE_NIGHT);
 }
 
 static void circadian_2am_is_late_night(void) {
-    sc_time_phase_t p = sc_circadian_phase(2);
-    SC_ASSERT_EQ(p, SC_PHASE_LATE_NIGHT);
+    hu_time_phase_t p = hu_circadian_phase(2);
+    HU_ASSERT_EQ(p, HU_PHASE_LATE_NIGHT);
 }
 
 static void circadian_build_prompt_contains_phase(void) {
-    sc_allocator_t alloc = sc_system_allocator();
+    hu_allocator_t alloc = hu_system_allocator();
     char *out = NULL;
     size_t out_len = 0;
-    sc_error_t err = sc_circadian_build_prompt(&alloc, 10, &out, &out_len);
-    SC_ASSERT_EQ(err, SC_OK);
-    SC_ASSERT_NOT_NULL(out);
-    SC_ASSERT_TRUE(strstr(out, "Time Awareness") != NULL);
-    SC_ASSERT_TRUE(strstr(out, "morning") != NULL);
+    hu_error_t err = hu_circadian_build_prompt(&alloc, 10, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(strstr(out, "Time Awareness") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "morning") != NULL);
     alloc.free(alloc.ctx, out, out_len + 1);
 }
 
 static void circadian_boundary_hours(void) {
-    SC_ASSERT_EQ(sc_circadian_phase(0), SC_PHASE_LATE_NIGHT);
-    SC_ASSERT_EQ(sc_circadian_phase(5), SC_PHASE_EARLY_MORNING);
-    SC_ASSERT_EQ(sc_circadian_phase(8), SC_PHASE_MORNING);
-    SC_ASSERT_EQ(sc_circadian_phase(12), SC_PHASE_AFTERNOON);
-    SC_ASSERT_EQ(sc_circadian_phase(17), SC_PHASE_EVENING);
-    SC_ASSERT_EQ(sc_circadian_phase(21), SC_PHASE_NIGHT);
+    HU_ASSERT_EQ(hu_circadian_phase(0), HU_PHASE_LATE_NIGHT);
+    HU_ASSERT_EQ(hu_circadian_phase(5), HU_PHASE_EARLY_MORNING);
+    HU_ASSERT_EQ(hu_circadian_phase(8), HU_PHASE_MORNING);
+    HU_ASSERT_EQ(hu_circadian_phase(12), HU_PHASE_AFTERNOON);
+    HU_ASSERT_EQ(hu_circadian_phase(17), HU_PHASE_EVENING);
+    HU_ASSERT_EQ(hu_circadian_phase(21), HU_PHASE_NIGHT);
 }
 
 void run_circadian_tests(void) {
-    SC_TEST_SUITE("circadian");
-    SC_RUN_TEST(circadian_5am_is_early_morning);
-    SC_RUN_TEST(circadian_10am_is_morning);
-    SC_RUN_TEST(circadian_14pm_is_afternoon);
-    SC_RUN_TEST(circadian_19pm_is_evening);
-    SC_RUN_TEST(circadian_22pm_is_night);
-    SC_RUN_TEST(circadian_2am_is_late_night);
-    SC_RUN_TEST(circadian_build_prompt_contains_phase);
-    SC_RUN_TEST(circadian_boundary_hours);
+    HU_TEST_SUITE("circadian");
+    HU_RUN_TEST(circadian_5am_is_early_morning);
+    HU_RUN_TEST(circadian_10am_is_morning);
+    HU_RUN_TEST(circadian_14pm_is_afternoon);
+    HU_RUN_TEST(circadian_19pm_is_evening);
+    HU_RUN_TEST(circadian_22pm_is_night);
+    HU_RUN_TEST(circadian_2am_is_late_night);
+    HU_RUN_TEST(circadian_build_prompt_contains_phase);
+    HU_RUN_TEST(circadian_boundary_hours);
 }

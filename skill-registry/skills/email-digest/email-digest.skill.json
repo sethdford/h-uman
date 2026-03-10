@@ -2,7 +2,7 @@
   "name": "email-digest",
   "version": "1.0.0",
   "description": "Summarize and prioritize unread emails into a daily digest",
-  "author": "seaclaw",
+  "author": "human",
   "tags": ["email", "productivity", "summary"],
   "parameters": {
     "max_emails": { "type": "integer", "default": 50 },

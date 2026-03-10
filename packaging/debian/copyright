@@ -1,10 +1,10 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: seaclaw
-Upstream-Contact: team@seaclaw.ai
-Source: https://github.com/sethdford/seaclaw
+Upstream-Name: human
+Upstream-Contact: team@h-uman.ai
+Source: https://github.com/sethdford/human
 
 Files: *
-Copyright: 2024-2026 SeaClaw Contributors
+Copyright: 2024-2026 Human Contributors
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a
  copy of this software and associated documentation files (the "Software"),

@@ -1,9 +1,9 @@
 /*
  * Superhuman emotional first aid service — detects crisis and distress keywords.
  */
-#include "seaclaw/agent/superhuman.h"
-#include "seaclaw/agent/superhuman_emotional.h"
-#include "seaclaw/core/string.h"
+#include "human/agent/superhuman.h"
+#include "human/agent/superhuman_emotional.h"
+#include "human/core/string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,29 +54,29 @@ static bool has_distress(const char *text, size_t text_len) {
     return false;
 }
 
-static sc_error_t emotional_build_context(void *ctx, sc_allocator_t *alloc, char **out,
+static hu_error_t emotional_build_context(void *ctx, hu_allocator_t *alloc, char **out,
                                            size_t *out_len) {
-    sc_superhuman_emotional_ctx_t *ectx = (sc_superhuman_emotional_ctx_t *)ctx;
+    hu_superhuman_emotional_ctx_t *ectx = (hu_superhuman_emotional_ctx_t *)ctx;
     if (!ectx || !alloc || !out || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_len = 0;
 
     const char *text = ectx->last_text;
     size_t text_len = ectx->last_text_len;
     if (text_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     if (has_crisis(text, text_len)) {
         static const char SAFETY[] =
             "SAFETY: The user may be in crisis. Prioritize empathy, validation, and crisis "
             "resources. Do not minimize. Suggest professional help (988, crisis line) if "
             "appropriate. Stay present and non-judgmental.";
-        *out = sc_strndup(alloc, SAFETY, sizeof(SAFETY) - 1);
+        *out = hu_strndup(alloc, SAFETY, sizeof(SAFETY) - 1);
         if (!*out)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         *out_len = sizeof(SAFETY) - 1;
-        return SC_OK;
+        return HU_OK;
     }
 
     if (has_distress(text, text_len)) {
@@ -84,25 +84,25 @@ static sc_error_t emotional_build_context(void *ctx, sc_allocator_t *alloc, char
             "The user may be experiencing distress. Offer containing presence: validate "
             "feelings, avoid rushing to solutions. Ask how they are and what might help. "
             "Be warm and steady.";
-        *out = sc_strndup(alloc, CONTAINING, sizeof(CONTAINING) - 1);
+        *out = hu_strndup(alloc, CONTAINING, sizeof(CONTAINING) - 1);
         if (!*out)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         *out_len = sizeof(CONTAINING) - 1;
-        return SC_OK;
+        return HU_OK;
     }
 
-    return SC_OK;
+    return HU_OK;
 }
 
-static sc_error_t emotional_observe(void *ctx, sc_allocator_t *alloc, const char *text,
+static hu_error_t emotional_observe(void *ctx, hu_allocator_t *alloc, const char *text,
                                      size_t text_len, const char *role, size_t role_len) {
-    sc_superhuman_emotional_ctx_t *ectx = (sc_superhuman_emotional_ctx_t *)ctx;
+    hu_superhuman_emotional_ctx_t *ectx = (hu_superhuman_emotional_ctx_t *)ctx;
     if (!ectx)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t copy_len = text_len;
-    if (copy_len >= SC_EMOTIONAL_LAST_TEXT_CAP)
-        copy_len = SC_EMOTIONAL_LAST_TEXT_CAP - 1;
+    if (copy_len >= HU_EMOTIONAL_LAST_TEXT_CAP)
+        copy_len = HU_EMOTIONAL_LAST_TEXT_CAP - 1;
     if (text && copy_len > 0)
         memcpy(ectx->last_text, text, copy_len);
     ectx->last_text[copy_len] = '\0';
@@ -117,16 +117,16 @@ static sc_error_t emotional_observe(void *ctx, sc_allocator_t *alloc, const char
     ectx->last_role_len = role_copy;
 
     (void)alloc;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_superhuman_emotional_service(sc_superhuman_emotional_ctx_t *ctx,
-                                           sc_superhuman_service_t *out) {
+hu_error_t hu_superhuman_emotional_service(hu_superhuman_emotional_ctx_t *ctx,
+                                           hu_superhuman_service_t *out) {
     if (!ctx || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     out->name = "Emotional First Aid";
     out->build_context = emotional_build_context;
     out->observe = emotional_observe;
     out->ctx = ctx;
-    return SC_OK;
+    return HU_OK;
 }

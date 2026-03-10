@@ -27,7 +27,7 @@ test.describe("Overview Capabilities", () => {
 
   test("stat cards display numeric values", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-overview-view"));
+      const text: string = await page.evaluate(deepText("hu-overview-view"));
       expect(text).toMatch(/\d+/);
       expect(text).toMatch(/Channels|Tools|Uptime/i);
     }).toPass({ timeout: POLL });
@@ -35,7 +35,7 @@ test.describe("Overview Capabilities", () => {
 
   test("overview cards are present", async ({ page }) => {
     await expect(async () => {
-      const count = await page.evaluate(shadowCount("sc-overview-view", "sc-card"));
+      const count = await page.evaluate(shadowCount("hu-overview-view", "hu-card"));
       expect(count).toBeGreaterThanOrEqual(1);
     }).toPass({ timeout: POLL });
   });
@@ -52,7 +52,7 @@ test.describe("Chat Capabilities", () => {
 
   test("demo messages render with correct roles", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-chat-view"));
+      const text: string = await page.evaluate(deepText("hu-chat-view"));
       expect(text).toContain("memory leak");
       expect(text).toContain("free()");
     }).toPass({ timeout: POLL });
@@ -61,9 +61,9 @@ test.describe("Chat Capabilities", () => {
   test("composer textarea accepts input", async ({ page }) => {
     await expect(async () => {
       const hasTextarea = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-chat-view");
-        const composer = view?.shadowRoot?.querySelector("sc-chat-composer");
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-chat-view");
+        const composer = view?.shadowRoot?.querySelector("hu-chat-composer");
         return !!composer?.shadowRoot?.querySelector("textarea");
       })()`);
       expect(hasTextarea).toBe(true);
@@ -71,14 +71,14 @@ test.describe("Chat Capabilities", () => {
   });
 
   test("sessions panel opens on toggle click", async ({ page }) => {
-    await page.evaluate(shadowClick("sc-chat-view", ".sessions-toggle"));
+    await page.evaluate(shadowClick("hu-chat-view", ".sessions-toggle"));
     await page.waitForTimeout(600);
 
     await expect(async () => {
       const panelOpen = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-chat-view");
-        const panel = view?.shadowRoot?.querySelector("sc-chat-sessions-panel");
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-chat-view");
+        const panel = view?.shadowRoot?.querySelector("hu-chat-sessions-panel");
         return panel?.hasAttribute("open");
       })()`);
       expect(panelOpen).toBe(true);
@@ -86,15 +86,15 @@ test.describe("Chat Capabilities", () => {
   });
 
   test("sessions panel closes on second toggle", async ({ page }) => {
-    await page.evaluate(shadowClick("sc-chat-view", ".sessions-toggle"));
+    await page.evaluate(shadowClick("hu-chat-view", ".sessions-toggle"));
     await page.waitForTimeout(600);
-    await page.evaluate(shadowClick("sc-chat-view", ".sessions-toggle"));
+    await page.evaluate(shadowClick("hu-chat-view", ".sessions-toggle"));
     await page.waitForTimeout(600);
 
     const panelOpen = await page.evaluate(`(() => {
-      const app = document.querySelector("sc-app");
-      const view = app?.shadowRoot?.querySelector("sc-chat-view");
-      const panel = view?.shadowRoot?.querySelector("sc-chat-sessions-panel");
+      const app = document.querySelector("hu-app");
+      const view = app?.shadowRoot?.querySelector("hu-chat-view");
+      const panel = view?.shadowRoot?.querySelector("hu-chat-sessions-panel");
       return panel?.hasAttribute("open");
     })()`);
     expect(panelOpen).toBe(false);
@@ -105,7 +105,7 @@ test.describe("Chat Capabilities", () => {
     await page.waitForTimeout(400);
 
     await expect(async () => {
-      const hasSearch = await page.evaluate(shadowExists("sc-chat-view", "sc-chat-search"));
+      const hasSearch = await page.evaluate(shadowExists("hu-chat-view", "hu-chat-search"));
       expect(hasSearch).toBe(true);
     }).toPass({ timeout: POLL });
   });
@@ -122,7 +122,7 @@ test.describe("Tools Capabilities", () => {
 
   test("tool list shows expected tools", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-tools-view"));
+      const text: string = await page.evaluate(deepText("hu-tools-view"));
       expect(text).toContain("shell");
       expect(text).toContain("file_read");
     }).toPass({ timeout: POLL });
@@ -131,9 +131,9 @@ test.describe("Tools Capabilities", () => {
   test("data table is searchable", async ({ page }) => {
     await expect(async () => {
       const isSearchable = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-tools-view");
-        const table = view?.shadowRoot?.querySelector("sc-data-table-v2");
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-tools-view");
+        const table = view?.shadowRoot?.querySelector("hu-data-table-v2");
         return table?.hasAttribute("searchable") ?? false;
       })()`);
       expect(isSearchable).toBe(true);
@@ -142,7 +142,7 @@ test.describe("Tools Capabilities", () => {
 
   test("data table renders rows", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-tools-view"));
+      const text: string = await page.evaluate(deepText("hu-tools-view"));
       expect(text).toContain("shell");
     }).toPass({ timeout: POLL });
   });
@@ -159,14 +159,14 @@ test.describe("Channels Capabilities", () => {
 
   test("shows channel status badges", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-channels-view"));
+      const text: string = await page.evaluate(deepText("hu-channels-view"));
       expect(text).toMatch(/Active|Unconfigured|Error/);
     }).toPass({ timeout: POLL });
   });
 
   test("filter tabs work (All/Configured/Unconfigured)", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-channels-view", "sc-segmented-control"))).toBe(
+      expect(await page.evaluate(shadowExists("hu-channels-view", "hu-segmented-control"))).toBe(
         true,
       );
     }).toPass({ timeout: POLL });
@@ -174,7 +174,7 @@ test.describe("Channels Capabilities", () => {
 
   test("shows health status for channels", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-channels-view"));
+      const text: string = await page.evaluate(deepText("hu-channels-view"));
       expect(text).toMatch(/Healthy|Unhealthy/);
     }).toPass({ timeout: POLL });
   });
@@ -191,14 +191,14 @@ test.describe("Nodes Capabilities", () => {
 
   test("shows node table with status", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-nodes-view"));
+      const text: string = await page.evaluate(deepText("hu-nodes-view"));
       expect(text).toMatch(/online|degraded|offline/i);
     }).toPass({ timeout: POLL });
   });
 
   test("shows multiple node entries", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-nodes-view"));
+      const text: string = await page.evaluate(deepText("hu-nodes-view"));
       expect(text).toContain("local");
       expect(text).toContain("remote-prod");
     }).toPass({ timeout: POLL });
@@ -216,17 +216,17 @@ test.describe("Logs Capabilities", () => {
 
   test("log area has content", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-logs-view", ".log-area"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-logs-view", ".log-area"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
   test("filter input is present", async ({ page }) => {
     await expect(async () => {
       const has = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-logs-view");
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-logs-view");
         return !!view?.shadowRoot?.querySelector(".filter-input") ||
-               !!view?.shadowRoot?.querySelector("sc-input");
+               !!view?.shadowRoot?.querySelector("hu-input");
       })()`);
       expect(has).toBe(true);
     }).toPass({ timeout: POLL });
@@ -234,7 +234,7 @@ test.describe("Logs Capabilities", () => {
 
   test("clear button is present", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(shadowText("sc-logs-view"));
+      const text: string = await page.evaluate(shadowText("hu-logs-view"));
       expect(text).toMatch(/Clear|clear/);
     }).toPass({ timeout: POLL });
   });
@@ -251,16 +251,16 @@ test.describe("Voice Capabilities", () => {
 
   test("mic button is present and interactive", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-voice-view", "sc-voice-orb"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-voice-view", "hu-voice-orb"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
   test("text input area is present", async ({ page }) => {
     await expect(async () => {
       const hasInput = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-voice-view");
-        return !!view?.shadowRoot?.querySelector("sc-textarea") ||
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-voice-view");
+        return !!view?.shadowRoot?.querySelector("hu-textarea") ||
                !!view?.shadowRoot?.querySelector("textarea");
       })()`);
       expect(hasInput).toBe(true);
@@ -269,7 +269,7 @@ test.describe("Voice Capabilities", () => {
 
   test("shows empty conversation state", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-voice-view"));
+      const text: string = await page.evaluate(deepText("hu-voice-view"));
       expect(text).toMatch(/No conversation|conversation yet/i);
     }).toPass({ timeout: POLL });
   });
@@ -286,20 +286,20 @@ test.describe("Models Capabilities", () => {
 
   test("shows provider cards", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-models-view"));
+      const text: string = await page.evaluate(deepText("hu-models-view"));
       expect(text).toMatch(/openai|anthropic|google|openrouter/i);
     }).toPass({ timeout: POLL });
   });
 
   test("search filters providers", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-models-view", "sc-search"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-models-view", "hu-search"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 
   test("shows default provider info", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-models-view"));
+      const text: string = await page.evaluate(deepText("hu-models-view"));
       expect(text).toMatch(/Default|default/);
     }).toPass({ timeout: POLL });
   });
@@ -316,21 +316,21 @@ test.describe("Usage Capabilities", () => {
 
   test("shows stat cards with metrics", async ({ page }) => {
     await expect(async () => {
-      const count = await page.evaluate(shadowCount("sc-usage-view", "sc-card"));
+      const count = await page.evaluate(shadowCount("hu-usage-view", "hu-card"));
       expect(count).toBeGreaterThanOrEqual(3);
     }).toPass({ timeout: POLL });
   });
 
   test("shows export button", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(shadowText("sc-usage-view"));
+      const text: string = await page.evaluate(shadowText("hu-usage-view"));
       expect(text).toMatch(/Export|export/);
     }).toPass({ timeout: POLL });
   });
 
   test("shows cost breakdown section", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-usage-view"));
+      const text: string = await page.evaluate(deepText("hu-usage-view"));
       expect(text).toMatch(/Cost|cost/);
     }).toPass({ timeout: POLL });
   });
@@ -347,14 +347,14 @@ test.describe("Agents Capabilities", () => {
 
   test("shows agent metrics", async ({ page }) => {
     await expect(async () => {
-      const text: string = await page.evaluate(deepText("sc-agents-view"));
+      const text: string = await page.evaluate(deepText("hu-agents-view"));
       expect(text).toMatch(/sessions|turns|tools|channels/i);
     }).toPass({ timeout: POLL });
   });
 
   test("shows sessions data table", async ({ page }) => {
     await expect(async () => {
-      expect(await page.evaluate(shadowExists("sc-agents-view", "sc-data-table-v2"))).toBe(true);
+      expect(await page.evaluate(shadowExists("hu-agents-view", "hu-data-table-v2"))).toBe(true);
     }).toPass({ timeout: POLL });
   });
 });
@@ -370,15 +370,15 @@ test.describe("Theme Toggle", () => {
     const getTheme = () =>
       page.evaluate(() => document.documentElement.getAttribute("data-theme") ?? "system");
 
-    await page.evaluate(shadowClick("sc-sidebar", ".theme-toggle"));
+    await page.evaluate(shadowClick("hu-sidebar", ".theme-toggle"));
     await page.waitForTimeout(200);
     const first = await getTheme();
 
-    await page.evaluate(shadowClick("sc-sidebar", ".theme-toggle"));
+    await page.evaluate(shadowClick("hu-sidebar", ".theme-toggle"));
     await page.waitForTimeout(200);
     const second = await getTheme();
 
-    await page.evaluate(shadowClick("sc-sidebar", ".theme-toggle"));
+    await page.evaluate(shadowClick("hu-sidebar", ".theme-toggle"));
     await page.waitForTimeout(200);
     const third = await getTheme();
 
@@ -400,8 +400,8 @@ test.describe("Command Palette Navigation", () => {
 
     await expect(async () => {
       const paletteExists = await page.evaluate(`(() => {
-        const app = document.querySelector("sc-app");
-        return !!app?.shadowRoot?.querySelector("sc-command-palette");
+        const app = document.querySelector("hu-app");
+        return !!app?.shadowRoot?.querySelector("hu-command-palette");
       })()`);
       expect(paletteExists).toBe(true);
     }).toPass({ timeout: POLL });

@@ -4,12 +4,12 @@ test.describe("Chat Streaming Choreography (demo mode)", () => {
   test("empty state shows time-aware hero greeting", async ({ page }) => {
     await page.goto("/?demo#chat");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("sc-app")).toBeAttached({ timeout: 10000 });
+    await expect(page.locator("hu-app")).toBeAttached({ timeout: 10000 });
 
     const heroText = await page.evaluate(() => {
-      const app = document.querySelector("sc-app");
-      const view = app?.shadowRoot?.querySelector("sc-chat-view");
-      const thread = view?.shadowRoot?.querySelector("sc-message-thread");
+      const app = document.querySelector("hu-app");
+      const view = app?.shadowRoot?.querySelector("hu-chat-view");
+      const thread = view?.shadowRoot?.querySelector("hu-message-thread");
       const hero = thread?.shadowRoot?.querySelector(".hero");
       return hero?.textContent ?? "";
     });
@@ -27,12 +27,12 @@ test.describe("Chat Streaming Choreography (demo mode)", () => {
   test("hero suggestion chips are interactive", async ({ page }) => {
     await page.goto("/?demo#chat");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("sc-app")).toBeAttached({ timeout: 10000 });
+    await expect(page.locator("hu-app")).toBeAttached({ timeout: 10000 });
 
     const chipCount = await page.evaluate(() => {
-      const app = document.querySelector("sc-app");
-      const view = app?.shadowRoot?.querySelector("sc-chat-view");
-      const thread = view?.shadowRoot?.querySelector("sc-message-thread");
+      const app = document.querySelector("hu-app");
+      const view = app?.shadowRoot?.querySelector("hu-chat-view");
+      const thread = view?.shadowRoot?.querySelector("hu-message-thread");
       return thread?.shadowRoot?.querySelectorAll(".hero-chip").length ?? 0;
     });
     expect(chipCount).toBe(4);
@@ -41,10 +41,10 @@ test.describe("Chat Streaming Choreography (demo mode)", () => {
   test("typing indicator uses accent glow animation", async ({ page }) => {
     await page.goto("/?demo#chat");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("sc-app")).toBeAttached({ timeout: 10000 });
+    await expect(page.locator("hu-app")).toBeAttached({ timeout: 10000 });
 
     await page.evaluate(async () => {
-      const app = document.querySelector("sc-app") as {
+      const app = document.querySelector("hu-app") as {
         gateway?: { request: (m: string, p: object) => Promise<unknown> };
       } | null;
       await app?.gateway?.request("chat.send", {
@@ -55,10 +55,10 @@ test.describe("Chat Streaming Choreography (demo mode)", () => {
 
     await expect(async () => {
       const hasIndicator = await page.evaluate(() => {
-        const app = document.querySelector("sc-app");
-        const view = app?.shadowRoot?.querySelector("sc-chat-view");
-        const thread = view?.shadowRoot?.querySelector("sc-message-thread");
-        return !!thread?.shadowRoot?.querySelector("sc-typing-indicator");
+        const app = document.querySelector("hu-app");
+        const view = app?.shadowRoot?.querySelector("hu-chat-view");
+        const thread = view?.shadowRoot?.querySelector("hu-message-thread");
+        return !!thread?.shadowRoot?.querySelector("hu-typing-indicator");
       });
       expect(hasIndicator).toBe(true);
     }).toPass({ timeout: 5000 });
@@ -79,10 +79,10 @@ test.describe("Chat via Gateway Direct", () => {
   test("send message via gw.request and capture response", async ({ page }) => {
     await page.goto("/#chat");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("sc-app >> sc-chat-view")).toBeAttached({ timeout: 10000 });
+    await expect(page.locator("hu-app >> hu-chat-view")).toBeAttached({ timeout: 10000 });
 
     const statusBefore = await page.evaluate(() => {
-      const app = document.querySelector("sc-app") as { gateway?: { status: string } } | null;
+      const app = document.querySelector("hu-app") as { gateway?: { status: string } } | null;
       return app?.gateway?.status ?? "no-gateway";
     });
     if (statusBefore !== "connected") {
@@ -92,7 +92,7 @@ test.describe("Chat via Gateway Direct", () => {
 
     // 3. Send message via gateway client
     const sendResult = await page.evaluate(async () => {
-      const app = document.querySelector("sc-app") as {
+      const app = document.querySelector("hu-app") as {
         gateway?: { status: string; request: (m: string, p: object) => Promise<unknown> };
       } | null;
       const gw = app?.gateway;
@@ -125,7 +125,7 @@ test.describe("Chat via Gateway Direct", () => {
       const pageText = await page.evaluate(() => document.body.innerText);
       const hasAssistant =
         pageText.includes("assistant") ||
-        pageText.includes("SeaClaw") ||
+        pageText.includes("Human") ||
         pageText.includes("Gemini");
       expect(hasAssistant).toBe(true);
     }).toPass({ timeout: 15000 });
@@ -139,7 +139,7 @@ test.describe("Chat via Gateway Direct", () => {
     // 6. Assert assistant content appeared (already verified in step 4)
 
     // 7. Try interacting with chat input (skip if no chat view, e.g. demo mode)
-    const chatView = page.locator("sc-app >> sc-chat-view");
+    const chatView = page.locator("hu-app >> hu-chat-view");
     const input = chatView.locator("textarea").first();
     const inputVisible = await input.isVisible().catch(() => false);
     if (inputVisible) {
@@ -153,8 +153,8 @@ test.describe("Chat via Gateway Direct", () => {
       }
       await expect(async () => {
         const hasResponse = await page.evaluate(() => {
-          const app = document.querySelector("sc-app");
-          const view = app?.shadowRoot?.querySelector("sc-chat-view");
+          const app = document.querySelector("hu-app");
+          const view = app?.shadowRoot?.querySelector("hu-chat-view");
           const text = view?.shadowRoot?.textContent ?? "";
           return text.includes("assistant") || text.includes("thinking") || text.length > 200;
         });

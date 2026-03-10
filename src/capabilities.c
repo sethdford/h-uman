@@ -1,11 +1,11 @@
-#include "seaclaw/capabilities.h"
-#include "seaclaw/channel_catalog.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/version.h"
+#include "human/capabilities.h"
+#include "human/channel_catalog.h"
+#include "human/core/string.h"
+#include "human/version.h"
 #include <stdio.h>
 #include <string.h>
 
-/* Memory backend names (SeaClaw minimal set) */
+/* Memory backend names (Human minimal set) */
 static const char *MEMORY_BACKENDS[] = {"none", "markdown", "memory_lru", "sqlite"};
 #define N_MEMORY_BACKENDS (sizeof(MEMORY_BACKENDS) / sizeof(MEMORY_BACKENDS[0]))
 
@@ -36,19 +36,19 @@ static size_t append_json_string_array(char *out, size_t cap, size_t *pos, const
     return *pos;
 }
 
-sc_error_t sc_capabilities_build_manifest_json(sc_allocator_t *alloc, const sc_config_t *cfg_opt,
-                                               const sc_tool_t *runtime_tools,
+hu_error_t hu_capabilities_build_manifest_json(hu_allocator_t *alloc, const hu_config_t *cfg_opt,
+                                               const hu_tool_t *runtime_tools,
                                                size_t runtime_tools_count, char **out_json) {
     if (!alloc || !out_json)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     size_t cap = 4096;
     char *buf = (char *)alloc->alloc(alloc->ctx, cap);
     if (!buf)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     size_t pos = 0;
-    const char *version = sc_version_string();
+    const char *version = hu_version_string();
     const char *backend = cfg_opt && cfg_opt->memory_backend ? cfg_opt->memory_backend : "";
 
     pos += (size_t)snprintf(
@@ -57,10 +57,10 @@ sc_error_t sc_capabilities_build_manifest_json(sc_allocator_t *alloc, const sc_c
         version, backend);
 
     size_t n_meta;
-    const sc_channel_meta_t *meta = sc_channel_catalog_all(&n_meta);
+    const hu_channel_meta_t *meta = hu_channel_catalog_all(&n_meta);
     for (size_t i = 0; i < n_meta && pos < cap - 80; i++) {
-        bool enabled = sc_channel_catalog_is_build_enabled(meta[i].id);
-        size_t cfg_count = cfg_opt ? sc_channel_catalog_configured_count(cfg_opt, meta[i].id) : 0;
+        bool enabled = hu_channel_catalog_is_build_enabled(meta[i].id);
+        size_t cfg_count = cfg_opt ? hu_channel_catalog_configured_count(cfg_opt, meta[i].id) : 0;
         bool configured = enabled && cfg_count > 0;
         pos +=
             (size_t)snprintf(buf + pos, cap - pos,
@@ -97,23 +97,23 @@ sc_error_t sc_capabilities_build_manifest_json(sc_allocator_t *alloc, const sc_c
     pos += (size_t)snprintf(buf + pos, cap - pos, "\n  }\n}\n");
 
     *out_json = buf;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_capabilities_build_summary_text(sc_allocator_t *alloc, const sc_config_t *cfg_opt,
-                                              const sc_tool_t *runtime_tools,
+hu_error_t hu_capabilities_build_summary_text(hu_allocator_t *alloc, const hu_config_t *cfg_opt,
+                                              const hu_tool_t *runtime_tools,
                                               size_t runtime_tools_count, char **out_text) {
     if (!alloc || !out_text)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     char en[256] = {0}, dis[256] = {0}, cfg[256] = {0};
     size_t en_len = 0, dis_len = 0, cfg_len = 0;
 
     size_t n_meta;
-    const sc_channel_meta_t *meta = sc_channel_catalog_all(&n_meta);
+    const hu_channel_meta_t *meta = hu_channel_catalog_all(&n_meta);
     for (size_t i = 0; i < n_meta; i++) {
-        bool built = sc_channel_catalog_is_build_enabled(meta[i].id);
-        bool has_cfg = cfg_opt && sc_channel_catalog_is_configured(cfg_opt, meta[i].id);
+        bool built = hu_channel_catalog_is_build_enabled(meta[i].id);
+        bool has_cfg = cfg_opt && hu_channel_catalog_is_configured(cfg_opt, meta[i].id);
         const char *sep = (en_len || dis_len || cfg_len) ? ", " : "";
         if (built) {
             if (en_len + strlen(meta[i].key) + 4 < sizeof(en)) {
@@ -162,7 +162,7 @@ sc_error_t sc_capabilities_build_summary_text(sc_allocator_t *alloc, const sc_co
     size_t total = 512;
     char *out = (char *)alloc->alloc(alloc->ctx, total);
     if (!out)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
 
     int n = snprintf(out, total,
                      "Capabilities\n\nAvailable in this runtime:\n"
@@ -179,15 +179,15 @@ sc_error_t sc_capabilities_build_summary_text(sc_allocator_t *alloc, const sc_co
 
     if (n < 0 || (size_t)n >= total) {
         alloc->free(alloc->ctx, out, total);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     *out_text = out;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_capabilities_build_prompt_section(sc_allocator_t *alloc, const sc_config_t *cfg_opt,
-                                                const sc_tool_t *runtime_tools,
+hu_error_t hu_capabilities_build_prompt_section(hu_allocator_t *alloc, const hu_config_t *cfg_opt,
+                                                const hu_tool_t *runtime_tools,
                                                 size_t runtime_tools_count, char **out_text) {
-    return sc_capabilities_build_summary_text(alloc, cfg_opt, runtime_tools, runtime_tools_count,
+    return hu_capabilities_build_summary_text(alloc, cfg_opt, runtime_tools, runtime_tools_count,
                                               out_text);
 }

@@ -1,14 +1,14 @@
 /*
  * Git operations tool — status, diff, log, branch, commit, add, checkout, stash.
  */
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/security.h"
-#include "seaclaw/security/sandbox.h"
-#include "seaclaw/tool.h"
-#include "seaclaw/tools/validation.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/security.h"
+#include "human/security/sandbox.h"
+#include "human/tool.h"
+#include "human/tools/validation.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,22 +20,22 @@
 #include <unistd.h>
 #endif
 
-#define SC_GIT_NAME "git_operations"
-#define SC_GIT_DESC \
+#define HU_GIT_NAME "git_operations"
+#define HU_GIT_DESC \
     "Perform Git operations (status, diff, log, branch, commit, add, checkout, stash)."
-#define SC_GIT_PARAMS                                                                           \
+#define HU_GIT_PARAMS                                                                           \
     "{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\",\"enum\":["        \
     "\"status\",\"diff\",\"log\",\"branch\",\"commit\",\"add\",\"checkout\",\"stash\"]},"       \
     "\"message\":{\"type\":\"string\"},\"paths\":{\"type\":\"string\"},\"branch\":{\"type\":"   \
     "\"string\"},\"files\":{\"type\":\"string\"},\"cached\":{\"type\":\"boolean\"},\"limit\":{" \
     "\"type\":\"integer\"},\"action\":{\"type\":\"string\"}},\"required\":[\"operation\"]}"
-#define SC_GIT_OUTPUT_MAX 1048576
+#define HU_GIT_OUTPUT_MAX 1048576
 
-typedef struct sc_git_ctx {
+typedef struct hu_git_ctx {
     const char *workspace_dir;
     size_t workspace_dir_len;
-    sc_security_policy_t *policy;
-} sc_git_ctx_t;
+    hu_security_policy_t *policy;
+} hu_git_ctx_t;
 
 static bool sanitize_git_args(const char *args) {
     if (!args)
@@ -47,20 +47,20 @@ static bool sanitize_git_args(const char *args) {
     return true;
 }
 
-#if !SC_IS_TEST
-static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, int argc,
-                     sc_security_policy_t *policy, sc_tool_result_t *out) {
+#if !HU_IS_TEST
+static char *run_git(hu_allocator_t *alloc, const char *cwd, const char **argv, int argc,
+                     hu_security_policy_t *policy, hu_tool_result_t *out) {
 #ifndef _WIN32
     int fds[2];
     if (pipe(fds) != 0) {
-        *out = sc_tool_result_fail("pipe failed", 11);
+        *out = hu_tool_result_fail("pipe failed", 11);
         return NULL;
     }
     pid_t pid = fork();
     if (pid < 0) {
         close(fds[0]);
         close(fds[1]);
-        *out = sc_tool_result_fail("fork failed", 11);
+        *out = hu_tool_result_fail("fork failed", 11);
         return NULL;
     }
     if (pid == 0) {
@@ -113,17 +113,17 @@ static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, 
 
         if (policy && policy->sandbox && policy->sandbox->vtable &&
             policy->sandbox->vtable->apply) {
-            sc_error_t serr = policy->sandbox->vtable->apply(policy->sandbox->ctx);
-            if (serr != SC_OK && serr != SC_ERR_NOT_SUPPORTED)
+            hu_error_t serr = policy->sandbox->vtable->apply(policy->sandbox->ctx);
+            if (serr != HU_OK && serr != HU_ERR_NOT_SUPPORTED)
                 _exit(125);
         }
 
         /* Wrap command with sandbox if available (firejail, seatbelt, etc.) */
-        if (policy && policy->sandbox && sc_sandbox_is_available(policy->sandbox)) {
+        if (policy && policy->sandbox && hu_sandbox_is_available(policy->sandbox)) {
             const char *wrapped[32];
             size_t wrapped_count = 0;
-            if (sc_sandbox_wrap_command(policy->sandbox, argv, (size_t)argc, wrapped, 31,
-                                        &wrapped_count) == SC_OK &&
+            if (hu_sandbox_wrap_command(policy->sandbox, argv, (size_t)argc, wrapped, 31,
+                                        &wrapped_count) == HU_OK &&
                 wrapped_count > 0) {
                 wrapped[wrapped_count] = NULL;
                 execvp(wrapped[0], (char *const *)wrapped);
@@ -148,21 +148,21 @@ static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, 
     if (!buf) {
         close(fds[0]);
         waitpid(pid, NULL, 0);
-        *out = sc_tool_result_fail("out of memory", 12);
+        *out = hu_tool_result_fail("out of memory", 12);
         return NULL;
     }
     size_t len = 0;
     for (;;) {
-        if (len >= cap - 1 || len >= SC_GIT_OUTPUT_MAX)
+        if (len >= cap - 1 || len >= HU_GIT_OUTPUT_MAX)
             break;
         ssize_t n = read(fds[0], buf + len, cap - len - 1);
         if (n <= 0)
             break;
         len += (size_t)n;
-        if (len >= cap - 1 && cap < SC_GIT_OUTPUT_MAX) {
+        if (len >= cap - 1 && cap < HU_GIT_OUTPUT_MAX) {
             size_t new_cap = cap * 2;
-            if (new_cap > SC_GIT_OUTPUT_MAX)
-                new_cap = SC_GIT_OUTPUT_MAX;
+            if (new_cap > HU_GIT_OUTPUT_MAX)
+                new_cap = HU_GIT_OUTPUT_MAX;
             char *nbuf = (char *)alloc->realloc(alloc->ctx, buf, cap, new_cap);
             if (!nbuf)
                 break;
@@ -177,10 +177,10 @@ static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, 
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         char err_buf[48];
         int n = snprintf(err_buf, sizeof(err_buf), "Git failed: exit %d", WEXITSTATUS(status));
-        char *err_msg = sc_strndup(alloc, err_buf, (size_t)n);
+        char *err_msg = hu_strndup(alloc, err_buf, (size_t)n);
         alloc->free(alloc->ctx, buf, cap);
-        *out = err_msg ? sc_tool_result_fail_owned(err_msg, (size_t)n)
-                       : sc_tool_result_fail("Git failed", 10);
+        *out = err_msg ? hu_tool_result_fail_owned(err_msg, (size_t)n)
+                       : hu_tool_result_fail("Git failed", 10);
         return NULL;
     }
     if (cap > len + 1) {
@@ -194,56 +194,56 @@ static char *run_git(sc_allocator_t *alloc, const char *cwd, const char **argv, 
     (void)cwd;
     (void)argv;
     (void)argc;
-    *out = sc_tool_result_fail("git not supported on this platform", 35);
+    *out = hu_tool_result_fail("git not supported on this platform", 35);
     return NULL;
 #endif
 }
 #endif
 
-static sc_error_t git_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                              sc_tool_result_t *out) {
-    sc_git_ctx_t *c = (sc_git_ctx_t *)ctx;
+static hu_error_t git_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                              hu_tool_result_t *out) {
+    hu_git_ctx_t *c = (hu_git_ctx_t *)ctx;
     if (!c || !args || !out) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *op = sc_json_get_string(args, "operation");
+    const char *op = hu_json_get_string(args, "operation");
     if (!op || strlen(op) == 0) {
-        *out = sc_tool_result_fail("Missing 'operation' parameter", 27);
-        return SC_OK;
+        *out = hu_tool_result_fail("Missing 'operation' parameter", 27);
+        return HU_OK;
     }
     const char *fields[] = {"message", "paths", "branch", "files", "action"};
     for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
-        const char *val = sc_json_get_string(args, fields[i]);
+        const char *val = hu_json_get_string(args, fields[i]);
         if (val && !sanitize_git_args(val)) {
-            *out = sc_tool_result_fail("Unsafe git arguments detected", 28);
-            return SC_OK;
+            *out = hu_tool_result_fail("Unsafe git arguments detected", 28);
+            return HU_OK;
         }
     }
     /* Add operation: validate paths before stub or real execution */
     if (strcmp(op, "add") == 0) {
-        const char *p = sc_json_get_string(args, "paths");
+        const char *p = hu_json_get_string(args, "paths");
         if (!p || !p[0]) {
-            *out = sc_tool_result_fail("Missing 'paths' for add", 22);
-            return SC_OK;
+            *out = hu_tool_result_fail("Missing 'paths' for add", 22);
+            return HU_OK;
         }
         if (strcmp(p, ".") != 0) {
-            sc_error_t perr = sc_tool_validate_path(p, c->workspace_dir,
+            hu_error_t perr = hu_tool_validate_path(p, c->workspace_dir,
                                                     c->workspace_dir ? c->workspace_dir_len : 0);
-            if (perr != SC_OK) {
-                *out = sc_tool_result_fail("path traversal or invalid path", 30);
-                return SC_OK;
+            if (perr != HU_OK) {
+                *out = hu_tool_result_fail("path traversal or invalid path", 30);
+                return HU_OK;
             }
         }
     }
-#if SC_IS_TEST
-    char *msg = sc_strndup(alloc, "(git stub in test)", 18);
+#if HU_IS_TEST
+    char *msg = hu_strndup(alloc, "(git stub in test)", 18);
     if (!msg) {
-        *out = sc_tool_result_fail("out of memory", 12);
-        return SC_ERR_OUT_OF_MEMORY;
+        *out = hu_tool_result_fail("out of memory", 12);
+        return HU_ERR_OUT_OF_MEMORY;
     }
-    *out = sc_tool_result_ok_owned(msg, 18);
-    return SC_OK;
+    *out = hu_tool_result_ok_owned(msg, 18);
+    return HU_OK;
 #else
 #ifndef _WIN32
     const char *cwd = c->workspace_dir && c->workspace_dir_len > 0 ? c->workspace_dir : ".";
@@ -258,24 +258,24 @@ static sc_error_t git_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
     } else if (strcmp(op, "diff") == 0) {
         argv[argc++] = "diff";
         argv[argc++] = "--unified=3";
-        if (sc_json_get_bool(args, "cached", false))
+        if (hu_json_get_bool(args, "cached", false))
             argv[argc++] = "--cached";
         {
-            const char *files = sc_json_get_string(args, "files");
+            const char *files = hu_json_get_string(args, "files");
             const char *files_arg = files && files[0] ? files : ".";
             if (strcmp(files_arg, ".") != 0) {
-                sc_error_t err = sc_tool_validate_path(files_arg, c->workspace_dir,
+                hu_error_t err = hu_tool_validate_path(files_arg, c->workspace_dir,
                                                        c->workspace_dir ? c->workspace_dir_len : 0);
-                if (err != SC_OK) {
-                    *out = sc_tool_result_fail("path traversal or invalid path", 30);
-                    return SC_OK;
+                if (err != HU_OK) {
+                    *out = hu_tool_result_fail("path traversal or invalid path", 30);
+                    return HU_OK;
                 }
             }
             argv[argc++] = "--";
             argv[argc++] = files_arg;
         }
     } else if (strcmp(op, "log") == 0) {
-        int lim = (int)sc_json_get_number(args, "limit", 10);
+        int lim = (int)hu_json_get_number(args, "limit", 10);
         if (lim < 1)
             lim = 1;
         if (lim > 1000)
@@ -289,37 +289,37 @@ static sc_error_t git_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
         argv[argc++] = "branch";
         argv[argc++] = "--format=%(refname:short)|%(HEAD)";
     } else if (strcmp(op, "commit") == 0) {
-        const char *m = sc_json_get_string(args, "message");
+        const char *m = hu_json_get_string(args, "message");
         if (!m || !m[0]) {
-            *out = sc_tool_result_fail("Missing 'message' for commit", 27);
-            return SC_OK;
+            *out = hu_tool_result_fail("Missing 'message' for commit", 27);
+            return HU_OK;
         }
         argv[argc++] = "commit";
         argv[argc++] = "-m";
         argv[argc++] = m;
     } else if (strcmp(op, "add") == 0) {
-        const char *p = sc_json_get_string(args, "paths");
+        const char *p = hu_json_get_string(args, "paths");
         argv[argc++] = "add";
         argv[argc++] = "--";
         argv[argc++] = p;
     } else if (strcmp(op, "checkout") == 0) {
-        const char *b = sc_json_get_string(args, "branch");
+        const char *b = hu_json_get_string(args, "branch");
         if (!b || !b[0]) {
-            *out = sc_tool_result_fail("Missing 'branch' for checkout", 30);
-            return SC_OK;
+            *out = hu_tool_result_fail("Missing 'branch' for checkout", 30);
+            return HU_OK;
         }
         if (strchr(b, ';') || strchr(b, '|') || strchr(b, '`') || strstr(b, "$(")) {
-            *out = sc_tool_result_fail("Branch name contains invalid characters", 36);
-            return SC_OK;
+            *out = hu_tool_result_fail("Branch name contains invalid characters", 36);
+            return HU_OK;
         }
         if (strstr(b, "..")) {
-            *out = sc_tool_result_fail("invalid branch name", 19);
-            return SC_OK;
+            *out = hu_tool_result_fail("invalid branch name", 19);
+            return HU_OK;
         }
         argv[argc++] = "checkout";
         argv[argc++] = b;
     } else if (strcmp(op, "stash") == 0) {
-        const char *a = sc_json_get_string(args, "action");
+        const char *a = hu_json_get_string(args, "action");
         if (!a)
             a = "push";
         if (strcmp(a, "push") == 0 || strcmp(a, "save") == 0) {
@@ -334,48 +334,48 @@ static sc_error_t git_execute(void *ctx, sc_allocator_t *alloc, const sc_json_va
             argv[argc++] = "stash";
             argv[argc++] = "list";
         } else {
-            *out = sc_tool_result_fail("Unknown stash action", 19);
-            return SC_OK;
+            *out = hu_tool_result_fail("Unknown stash action", 19);
+            return HU_OK;
         }
     } else {
-        *out = sc_tool_result_fail("Unknown operation", 17);
-        return SC_OK;
+        *out = hu_tool_result_fail("Unknown operation", 17);
+        return HU_OK;
     }
     char *result = run_git(alloc, cwd, argv, argc, c->policy, out);
     if (!result)
-        return SC_OK;
-    *out = sc_tool_result_ok_owned(result, strlen(result));
-    return SC_OK;
+        return HU_OK;
+    *out = hu_tool_result_ok_owned(result, strlen(result));
+    return HU_OK;
 #else
-    *out = sc_tool_result_fail("git not supported on this platform", 35);
-    return SC_OK;
+    *out = hu_tool_result_fail("git not supported on this platform", 35);
+    return HU_OK;
 #endif
 #endif
 }
 
 static const char *git_name(void *ctx) {
     (void)ctx;
-    return SC_GIT_NAME;
+    return HU_GIT_NAME;
 }
 static const char *git_description(void *ctx) {
     (void)ctx;
-    return SC_GIT_DESC;
+    return HU_GIT_DESC;
 }
 static const char *git_parameters_json(void *ctx) {
     (void)ctx;
-    return SC_GIT_PARAMS;
+    return HU_GIT_PARAMS;
 }
-static void git_deinit(void *ctx, sc_allocator_t *alloc) {
+static void git_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!ctx)
         return;
-    sc_git_ctx_t *c = (sc_git_ctx_t *)ctx;
+    hu_git_ctx_t *c = (hu_git_ctx_t *)ctx;
     if (c->workspace_dir && alloc)
         alloc->free(alloc->ctx, (void *)c->workspace_dir, c->workspace_dir_len + 1);
     if (alloc)
         alloc->free(alloc->ctx, c, sizeof(*c));
 }
 
-static const sc_tool_vtable_t git_vtable = {
+static const hu_tool_vtable_t git_vtable = {
     .execute = git_execute,
     .name = git_name,
     .description = git_description,
@@ -383,22 +383,22 @@ static const sc_tool_vtable_t git_vtable = {
     .deinit = git_deinit,
 };
 
-sc_error_t sc_git_create(sc_allocator_t *alloc, const char *workspace_dir, size_t workspace_dir_len,
-                         sc_security_policy_t *policy, sc_tool_t *out) {
-    sc_git_ctx_t *c = (sc_git_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
+hu_error_t hu_git_create(hu_allocator_t *alloc, const char *workspace_dir, size_t workspace_dir_len,
+                         hu_security_policy_t *policy, hu_tool_t *out) {
+    hu_git_ctx_t *c = (hu_git_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     if (workspace_dir && workspace_dir_len > 0) {
-        c->workspace_dir = sc_strndup(alloc, workspace_dir, workspace_dir_len);
+        c->workspace_dir = hu_strndup(alloc, workspace_dir, workspace_dir_len);
         if (!c->workspace_dir) {
             alloc->free(alloc->ctx, c, sizeof(*c));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         c->workspace_dir_len = workspace_dir_len;
     }
     c->policy = policy;
     out->ctx = c;
     out->vtable = &git_vtable;
-    return SC_OK;
+    return HU_OK;
 }

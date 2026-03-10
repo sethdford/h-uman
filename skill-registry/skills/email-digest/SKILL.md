@@ -4,7 +4,7 @@ Summarize and prioritize unread emails into a concise daily digest.
 
 ## Usage
 
-Invoke with `seaclaw skills run email-digest` or configure as a cron job.
+Invoke with `human skills run email-digest` or configure as a cron job.
 
 ## Parameters
 

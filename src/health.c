@@ -1,5 +1,5 @@
-#include "seaclaw/health.h"
-#include "seaclaw/core/allocator.h"
+#include "human/health.h"
+#include "human/core/allocator.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,22 +8,22 @@
 
 #ifdef _WIN32
 #include <process.h>
-#define sc_getpid() (uint32_t)getpid()
+#define hu_getpid() (uint32_t)getpid()
 #else
 #include <pthread.h>
 #include <unistd.h>
-#define sc_getpid() (uint32_t)getpid()
+#define hu_getpid() (uint32_t)getpid()
 #endif
 
-#define SC_MAX_COMPONENTS 64
-#define SC_MAX_NAME       64
+#define HU_MAX_COMPONENTS 64
+#define HU_MAX_NAME       64
 
 typedef struct health_entry {
-    char name[SC_MAX_NAME];
-    sc_component_health_t health;
+    char name[HU_MAX_NAME];
+    hu_component_health_t health;
 } health_entry_t;
 
-static health_entry_t s_components[SC_MAX_COMPONENTS];
+static health_entry_t s_components[HU_MAX_COMPONENTS];
 static size_t s_component_count = 0;
 static time_t s_start_time = 0;
 static bool s_started = false;
@@ -56,11 +56,11 @@ static health_entry_t *get_or_create(const char *component) {
     health_entry_t *e = find_component(component);
     if (e)
         return e;
-    if (s_component_count >= SC_MAX_COMPONENTS)
+    if (s_component_count >= HU_MAX_COMPONENTS)
         return NULL;
     e = &s_components[s_component_count++];
-    strncpy(e->name, component, SC_MAX_NAME - 1);
-    e->name[SC_MAX_NAME - 1] = '\0';
+    strncpy(e->name, component, HU_MAX_NAME - 1);
+    e->name[HU_MAX_NAME - 1] = '\0';
     memset(&e->health, 0, sizeof(e->health));
     snprintf(e->health.status, sizeof(e->health.status), "%s", "starting");
     return e;
@@ -75,7 +75,7 @@ static void timestamp_str(char *buf, size_t buf_size) {
         snprintf(buf, buf_size, "%ld", (long)t);
 }
 
-void sc_health_mark_ok(const char *component) {
+void hu_health_mark_ok(const char *component) {
     if (!component)
         return;
     HEALTH_LOCK();
@@ -92,7 +92,7 @@ void sc_health_mark_ok(const char *component) {
     HEALTH_UNLOCK();
 }
 
-void sc_health_mark_error(const char *component, const char *message) {
+void hu_health_mark_error(const char *component, const char *message) {
     if (!component)
         return;
     HEALTH_LOCK();
@@ -110,7 +110,7 @@ void sc_health_mark_error(const char *component, const char *message) {
     HEALTH_UNLOCK();
 }
 
-void sc_health_bump_restart(const char *component) {
+void hu_health_bump_restart(const char *component) {
     if (!component)
         return;
     HEALTH_LOCK();
@@ -124,42 +124,42 @@ void sc_health_bump_restart(const char *component) {
     HEALTH_UNLOCK();
 }
 
-void sc_health_snapshot(sc_health_snapshot_t *out) {
+void hu_health_snapshot(hu_health_snapshot_t *out) {
     if (!out)
         return;
     HEALTH_LOCK();
     ensure_started();
     memset(out, 0, sizeof(*out));
-    out->pid = sc_getpid();
+    out->pid = hu_getpid();
     time_t now = time(NULL);
     out->uptime_seconds = (uint64_t)(now > s_start_time ? now - s_start_time : 0);
     if (s_component_count > 0) {
         out->components =
-            (sc_component_health_t *)malloc(s_component_count * sizeof(sc_component_health_t));
+            (hu_component_health_t *)malloc(s_component_count * sizeof(hu_component_health_t));
         if (out->components) {
             out->component_count = s_component_count;
             for (size_t i = 0; i < s_component_count; i++)
-                memcpy(&out->components[i], &s_components[i].health, sizeof(sc_component_health_t));
+                memcpy(&out->components[i], &s_components[i].health, sizeof(hu_component_health_t));
         }
     }
     HEALTH_UNLOCK();
 }
 
-sc_readiness_result_t sc_health_check_readiness(sc_allocator_t *alloc) {
-    sc_readiness_result_t out = {SC_READINESS_NOT_READY, NULL, 0};
+hu_readiness_result_t hu_health_check_readiness(hu_allocator_t *alloc) {
+    hu_readiness_result_t out = {HU_READINESS_NOT_READY, NULL, 0};
     if (!alloc)
         return out;
     HEALTH_LOCK();
     ensure_started();
 
     if (s_component_count == 0) {
-        out.status = SC_READINESS_READY;
+        out.status = HU_READINESS_READY;
         HEALTH_UNLOCK();
         return out;
     }
 
-    sc_component_check_t *checks = (sc_component_check_t *)alloc->alloc(
-        alloc->ctx, s_component_count * sizeof(sc_component_check_t));
+    hu_component_check_t *checks = (hu_component_check_t *)alloc->alloc(
+        alloc->ctx, s_component_count * sizeof(hu_component_check_t));
     if (!checks) {
         HEALTH_UNLOCK();
         return out;
@@ -176,12 +176,12 @@ sc_readiness_result_t sc_health_check_readiness(sc_allocator_t *alloc) {
     }
     out.checks = checks;
     out.check_count = s_component_count;
-    out.status = all_ok ? SC_READINESS_READY : SC_READINESS_NOT_READY;
+    out.status = all_ok ? HU_READINESS_READY : HU_READINESS_NOT_READY;
     HEALTH_UNLOCK();
     return out;
 }
 
-void sc_health_reset(void) {
+void hu_health_reset(void) {
     HEALTH_LOCK();
     s_component_count = 0;
     s_started = false;

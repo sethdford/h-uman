@@ -6,7 +6,7 @@ const observer =
         (entries) => {
           for (const entry of entries) {
             if (entry.isIntersecting) {
-              entry.target.classList.add("sc-visible");
+              entry.target.classList.add("hu-visible");
               observer!.unobserve(entry.target);
             }
           }
@@ -18,17 +18,17 @@ const observer =
 export function observeEntrance(el: Element): void {
   if (!observer || OBSERVED.has(el)) return;
   OBSERVED.add(el);
-  el.classList.add("sc-entrance");
+  el.classList.add("hu-entrance");
   observer.observe(el);
 }
 
 export function observeAllCards(root: ShadowRoot | Document): void {
-  const cards = root.querySelectorAll("sc-card, .sc-observe");
+  const cards = root.querySelectorAll("hu-card, .hu-observe");
   cards.forEach(observeEntrance);
 }
 
 export function unobserveAllCards(root: ShadowRoot | Document): void {
   if (!observer) return;
-  const cards = root.querySelectorAll("sc-card, .sc-observe");
+  const cards = root.querySelectorAll("hu-card, .hu-observe");
   cards.forEach((el) => observer!.unobserve(el));
 }

@@ -1,7 +1,7 @@
-#include "seaclaw/tools/canvas.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tools/validation.h"
+#include "human/tools/canvas.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tools/validation.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,14 +16,14 @@
     "\"action\"]}"
 #define CANVAS_MAX         16
 #define CANVAS_MAX_CONTENT 16384
-#define CANVAS_DIR_SUFFIX  "/.seaclaw/canvas"
+#define CANVAS_DIR_SUFFIX  "/.human/canvas"
 typedef struct {
     char *id;
     char *title;
     char *content;
 } canvas_doc_t;
 typedef struct {
-    sc_allocator_t *alloc;
+    hu_allocator_t *alloc;
     canvas_doc_t docs[CANVAS_MAX];
     size_t count;
     uint32_t next_id;
@@ -83,7 +83,7 @@ static void canvas_save_index(canvas_ctx_t *c) {
             fprintf(f, "%s\t%s\n", c->docs[i].id, c->docs[i].title ? c->docs[i].title : "");
     fclose(f);
 }
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
 static void canvas_init_persist_dir(canvas_ctx_t *c) {
     if (!c->persist_dir[0])
         return;
@@ -148,20 +148,20 @@ static void canvas_load_from_disk(canvas_ctx_t *c) {
         if (buf[0] == '#' && buf[1] == ' ') {
             char *nl = strchr(buf + 2, '\n');
             if (nl) {
-                real_title = sc_strndup(c->alloc, buf + 2, (size_t)(nl - (buf + 2)));
+                real_title = hu_strndup(c->alloc, buf + 2, (size_t)(nl - (buf + 2)));
                 content = nl + 1;
                 while (*content == '\n')
                     content++;
             }
         }
         if (!real_title && title_str)
-            real_title = sc_strndup(c->alloc, title_str, strlen(title_str));
+            real_title = hu_strndup(c->alloc, title_str, strlen(title_str));
         unsigned id_num = 0;
         if (sscanf(id_str, "doc_%u", &id_num) == 1 && id_num >= c->next_id)
             c->next_id = id_num + 1;
-        c->docs[c->count].id = sc_strndup(c->alloc, id_str, strlen(id_str));
+        c->docs[c->count].id = hu_strndup(c->alloc, id_str, strlen(id_str));
         c->docs[c->count].title = real_title;
-        c->docs[c->count].content = sc_strndup(c->alloc, content, strlen(content));
+        c->docs[c->count].content = hu_strndup(c->alloc, content, strlen(content));
         c->alloc->free(c->alloc->ctx, buf, (size_t)flen + 1);
         c->count++;
     }
@@ -175,86 +175,86 @@ static canvas_doc_t *canvas_find(canvas_ctx_t *c, const char *id) {
     return NULL;
 }
 
-static sc_error_t canvas_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                 sc_tool_result_t *out) {
+static hu_error_t canvas_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                 hu_tool_result_t *out) {
     canvas_ctx_t *c = (canvas_ctx_t *)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
     if (strcmp(action, "create") == 0) {
         if (c->count >= CANVAS_MAX) {
-            *out = sc_tool_result_fail("canvas limit reached", 20);
-            return SC_OK;
+            *out = hu_tool_result_fail("canvas limit reached", 20);
+            return HU_OK;
         }
-        const char *title = sc_json_get_string(args, "title");
-        const char *content = sc_json_get_string(args, "content");
+        const char *title = hu_json_get_string(args, "title");
+        const char *content = hu_json_get_string(args, "content");
         char id_buf[16];
         int n = snprintf(id_buf, sizeof(id_buf), "doc_%u", c->next_id++);
         if (n < 0)
             n = 0;
-        c->docs[c->count].id = sc_strndup(c->alloc, id_buf, (size_t)n);
-        c->docs[c->count].title = title ? sc_strndup(c->alloc, title, strlen(title)) : NULL;
+        c->docs[c->count].id = hu_strndup(c->alloc, id_buf, (size_t)n);
+        c->docs[c->count].title = title ? hu_strndup(c->alloc, title, strlen(title)) : NULL;
         c->docs[c->count].content =
-            content ? sc_strndup(c->alloc, content, strlen(content)) : sc_strndup(c->alloc, "", 0);
+            content ? hu_strndup(c->alloc, content, strlen(content)) : hu_strndup(c->alloc, "", 0);
         c->count++;
         canvas_persist_doc(c, &c->docs[c->count - 1]);
         canvas_save_index(c);
-        char *msg = sc_sprintf(alloc, "{\"id\":\"%s\",\"created\":true}", id_buf);
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        char *msg = hu_sprintf(alloc, "{\"id\":\"%s\",\"created\":true}", id_buf);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else if (strcmp(action, "edit") == 0) {
-        const char *id = sc_json_get_string(args, "id");
+        const char *id = hu_json_get_string(args, "id");
         if (!id) {
-            *out = sc_tool_result_fail("missing id", 10);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing id", 10);
+            return HU_OK;
         }
         canvas_doc_t *doc = canvas_find(c, id);
         if (!doc) {
-            *out = sc_tool_result_fail("document not found", 18);
-            return SC_OK;
+            *out = hu_tool_result_fail("document not found", 18);
+            return HU_OK;
         }
-        const char *content = sc_json_get_string(args, "content");
+        const char *content = hu_json_get_string(args, "content");
         if (content) {
             if (doc->content)
                 c->alloc->free(c->alloc->ctx, doc->content, strlen(doc->content) + 1);
-            doc->content = sc_strndup(c->alloc, content, strlen(content));
+            doc->content = hu_strndup(c->alloc, content, strlen(content));
         }
-        const char *title = sc_json_get_string(args, "title");
+        const char *title = hu_json_get_string(args, "title");
         if (title) {
             if (doc->title)
                 c->alloc->free(c->alloc->ctx, doc->title, strlen(doc->title) + 1);
-            doc->title = sc_strndup(c->alloc, title, strlen(title));
+            doc->title = hu_strndup(c->alloc, title, strlen(title));
         }
         canvas_persist_doc(c, doc);
         canvas_save_index(c);
-        *out = sc_tool_result_ok("updated", 7);
+        *out = hu_tool_result_ok("updated", 7);
     } else if (strcmp(action, "view") == 0) {
-        const char *id = sc_json_get_string(args, "id");
+        const char *id = hu_json_get_string(args, "id");
         if (!id) {
-            *out = sc_tool_result_fail("missing id", 10);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing id", 10);
+            return HU_OK;
         }
         canvas_doc_t *doc = canvas_find(c, id);
         if (!doc) {
-            *out = sc_tool_result_fail("document not found", 18);
-            return SC_OK;
+            *out = hu_tool_result_fail("document not found", 18);
+            return HU_OK;
         }
-        char *msg = sc_sprintf(alloc, "{\"id\":\"%s\",\"title\":\"%s\",\"content\":\"%s\"}",
+        char *msg = hu_sprintf(alloc, "{\"id\":\"%s\",\"title\":\"%s\",\"content\":\"%s\"}",
                                doc->id ? doc->id : "", doc->title ? doc->title : "",
                                doc->content ? doc->content : "");
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else if (strcmp(action, "delete") == 0) {
-        const char *id = sc_json_get_string(args, "id");
+        const char *id = hu_json_get_string(args, "id");
         if (!id) {
-            *out = sc_tool_result_fail("missing id", 10);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing id", 10);
+            return HU_OK;
         }
         bool found = false;
         for (size_t i = 0; i < c->count; i++) {
@@ -276,11 +276,11 @@ static sc_error_t canvas_execute(void *ctx, sc_allocator_t *alloc, const sc_json
                 break;
             }
         }
-        *out = found ? sc_tool_result_ok("deleted", 7) : sc_tool_result_fail("not found", 9);
+        *out = found ? hu_tool_result_ok("deleted", 7) : hu_tool_result_fail("not found", 9);
     } else {
-        *out = sc_tool_result_fail("unknown action", 14);
+        *out = hu_tool_result_fail("unknown action", 14);
     }
-    return SC_OK;
+    return HU_OK;
 }
 static const char *canvas_name(void *ctx) {
     (void)ctx;
@@ -294,7 +294,7 @@ static const char *canvas_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void canvas_deinit(void *ctx, sc_allocator_t *alloc) {
+static void canvas_deinit(void *ctx, hu_allocator_t *alloc) {
     canvas_ctx_t *c = (canvas_ctx_t *)ctx;
     if (!c)
         return;
@@ -308,21 +308,21 @@ static void canvas_deinit(void *ctx, sc_allocator_t *alloc) {
     }
     alloc->free(alloc->ctx, c, sizeof(*c));
 }
-static const sc_tool_vtable_t canvas_vtable = {.execute = canvas_execute,
+static const hu_tool_vtable_t canvas_vtable = {.execute = canvas_execute,
                                                .name = canvas_name,
                                                .description = canvas_desc,
                                                .parameters_json = canvas_params,
                                                .deinit = canvas_deinit};
 
-sc_error_t sc_canvas_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_canvas_create(hu_allocator_t *alloc, hu_tool_t *out) {
     if (!alloc || !out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     canvas_ctx_t *c = (canvas_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*c));
     if (!c)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
-#if !defined(SC_IS_TEST) || SC_IS_TEST == 0
+#if !defined(HU_IS_TEST) || HU_IS_TEST == 0
     const char *home = getenv("HOME");
     if (home) {
         snprintf(c->persist_dir, sizeof(c->persist_dir), "%s%s", home, CANVAS_DIR_SUFFIX);
@@ -332,5 +332,5 @@ sc_error_t sc_canvas_create(sc_allocator_t *alloc, sc_tool_t *out) {
 #endif
     out->ctx = c;
     out->vtable = &canvas_vtable;
-    return SC_OK;
+    return HU_OK;
 }

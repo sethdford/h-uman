@@ -10,7 +10,7 @@ title: ADR-0001: C11 Vtable Architecture
 
 ## Context
 
-SeaClaw needed an extensible architecture that supports multiple providers, channels, tools, memory backends, and peripherals without dynamic linking or runtime reflection.
+Human needed an extensible architecture that supports multiple providers, channels, tools, memory backends, and peripherals without dynamic linking or runtime reflection.
 
 ## Decision
 

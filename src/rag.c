@@ -1,5 +1,5 @@
-#include "seaclaw/rag.h"
-#include "seaclaw/core/string.h"
+#include "human/rag.h"
+#include "human/core/string.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,17 +33,17 @@ static int board_matches(const char *chunk_board, const char *const *boards, siz
 }
 
 /* Tokenize query into terms (>2 chars, lowercase). Caller frees out_terms and each term. */
-static sc_error_t tokenize_query(sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t tokenize_query(hu_allocator_t *alloc, const char *query, size_t query_len,
                                  char ***out_terms, size_t *out_count) {
     *out_terms = NULL;
     *out_count = 0;
     if (!query || query_len == 0)
-        return SC_OK;
+        return HU_OK;
 
     size_t cap = 16;
     char **terms = (char **)alloc->alloc(alloc->ctx, cap * sizeof(char *));
     if (!terms)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     size_t count = 0;
 
     size_t i = 0;
@@ -66,7 +66,7 @@ static sc_error_t tokenize_query(sc_allocator_t *alloc, const char *query, size_
             for (size_t j = 0; j < count; j++)
                 alloc->free(alloc->ctx, terms[j], strlen(terms[j]) + 1);
             alloc->free(alloc->ctx, terms, cap * sizeof(char *));
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         }
         for (size_t k = 0; k < len; k++)
             term[k] = (char)tolower((unsigned char)query[start + k]);
@@ -80,7 +80,7 @@ static sc_error_t tokenize_query(sc_allocator_t *alloc, const char *query, size_
                 for (size_t j = 0; j < count; j++)
                     alloc->free(alloc->ctx, terms[j], strlen(terms[j]) + 1);
                 alloc->free(alloc->ctx, terms, cap * sizeof(char *));
-                return SC_ERR_OUT_OF_MEMORY;
+                return HU_ERR_OUT_OF_MEMORY;
             }
             terms = new_terms;
             cap = new_cap;
@@ -100,11 +100,11 @@ static sc_error_t tokenize_query(sc_allocator_t *alloc, const char *query, size_
     }
     *out_terms = terms;
     *out_count = count;
-    return SC_OK;
+    return HU_OK;
 }
 
 typedef struct {
-    const sc_datasheet_chunk_t *chunk;
+    const hu_datasheet_chunk_t *chunk;
     int score;
 } scored_chunk_t;
 
@@ -114,19 +114,19 @@ static int scored_cmp(const void *a, const void *b) {
     return (sa > sb) ? -1 : (sa < sb) ? 1 : 0;
 }
 
-sc_error_t sc_rag_init(sc_rag_t *rag, sc_allocator_t *alloc) {
+hu_error_t hu_rag_init(hu_rag_t *rag, hu_allocator_t *alloc) {
     if (!rag || !alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     memset(rag, 0, sizeof(*rag));
     rag->alloc = alloc;
-    return SC_OK;
+    return HU_OK;
 }
 
-void sc_rag_free(sc_rag_t *rag) {
+void hu_rag_free(hu_rag_t *rag) {
     if (!rag)
         return;
     for (size_t i = 0; i < rag->chunk_count; i++) {
-        sc_datasheet_chunk_t *c = &rag->chunks[i];
+        hu_datasheet_chunk_t *c = &rag->chunks[i];
         if (c->board)
             rag->alloc->free(rag->alloc->ctx, (void *)c->board, strlen(c->board) + 1);
         if (c->source)
@@ -136,33 +136,33 @@ void sc_rag_free(sc_rag_t *rag) {
     }
     if (rag->chunks)
         rag->alloc->free(rag->alloc->ctx, rag->chunks,
-                         rag->chunk_cap * sizeof(sc_datasheet_chunk_t));
+                         rag->chunk_cap * sizeof(hu_datasheet_chunk_t));
     rag->chunks = NULL;
     rag->chunk_count = 0;
     rag->chunk_cap = 0;
 }
 
-sc_error_t sc_rag_add_chunk(sc_rag_t *rag, const char *board, const char *source,
+hu_error_t hu_rag_add_chunk(hu_rag_t *rag, const char *board, const char *source,
                             const char *content) {
     if (!rag || !rag->alloc)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!source || !content)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (rag->chunk_count >= rag->chunk_cap) {
         size_t new_cap = rag->chunk_cap == 0 ? RAG_INITIAL_CAP : rag->chunk_cap * 2;
-        sc_datasheet_chunk_t *new_chunks = (sc_datasheet_chunk_t *)rag->alloc->realloc(
-            rag->alloc->ctx, rag->chunks, rag->chunk_cap * sizeof(sc_datasheet_chunk_t),
-            new_cap * sizeof(sc_datasheet_chunk_t));
+        hu_datasheet_chunk_t *new_chunks = (hu_datasheet_chunk_t *)rag->alloc->realloc(
+            rag->alloc->ctx, rag->chunks, rag->chunk_cap * sizeof(hu_datasheet_chunk_t),
+            new_cap * sizeof(hu_datasheet_chunk_t));
         if (!new_chunks)
-            return SC_ERR_OUT_OF_MEMORY;
+            return HU_ERR_OUT_OF_MEMORY;
         rag->chunks = new_chunks;
         rag->chunk_cap = new_cap;
     }
 
-    char *board_dup = board ? sc_strdup(rag->alloc, board) : NULL;
-    char *source_dup = sc_strdup(rag->alloc, source);
-    char *content_dup = sc_strdup(rag->alloc, content);
+    char *board_dup = board ? hu_strdup(rag->alloc, board) : NULL;
+    char *source_dup = hu_strdup(rag->alloc, source);
+    char *content_dup = hu_strdup(rag->alloc, content);
     if (!source_dup || !content_dup) {
         if (board_dup)
             rag->alloc->free(rag->alloc->ctx, board_dup, strlen(board_dup) + 1);
@@ -170,31 +170,31 @@ sc_error_t sc_rag_add_chunk(sc_rag_t *rag, const char *board, const char *source
             rag->alloc->free(rag->alloc->ctx, source_dup, strlen(source_dup) + 1);
         if (content_dup)
             rag->alloc->free(rag->alloc->ctx, content_dup, strlen(content_dup) + 1);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
 
-    sc_datasheet_chunk_t *c = &rag->chunks[rag->chunk_count++];
+    hu_datasheet_chunk_t *c = &rag->chunks[rag->chunk_count++];
     c->board = board_dup;
     c->source = source_dup;
     c->content = content_dup;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_rag_retrieve(sc_rag_t *rag, sc_allocator_t *alloc, const char *query,
+hu_error_t hu_rag_retrieve(hu_rag_t *rag, hu_allocator_t *alloc, const char *query,
                            size_t query_len, const char *const *boards, size_t board_count,
-                           size_t limit, const sc_datasheet_chunk_t ***out_results,
+                           size_t limit, const hu_datasheet_chunk_t ***out_results,
                            size_t *out_count) {
     *out_results = NULL;
     *out_count = 0;
     if (!rag || !alloc || !out_results || !out_count)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (rag->chunk_count == 0 || limit == 0)
-        return SC_OK;
+        return HU_OK;
 
     char **terms = NULL;
     size_t term_count = 0;
-    sc_error_t err = tokenize_query(alloc, query, query_len, &terms, &term_count);
-    if (err != SC_OK)
+    hu_error_t err = tokenize_query(alloc, query, query_len, &terms, &term_count);
+    if (err != HU_OK)
         return err;
 
     scored_chunk_t *scored =
@@ -204,12 +204,12 @@ sc_error_t sc_rag_retrieve(sc_rag_t *rag, sc_allocator_t *alloc, const char *que
             alloc->free(alloc->ctx, terms[i], strlen(terms[i]) + 1);
         if (terms)
             alloc->free(alloc->ctx, terms, term_count * sizeof(char *));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t scored_count = 0;
 
     for (size_t i = 0; i < rag->chunk_count; i++) {
-        const sc_datasheet_chunk_t *c = &rag->chunks[i];
+        const hu_datasheet_chunk_t *c = &rag->chunks[i];
         int score = 0;
         const char *cont = c->content;
         if (!cont)
@@ -236,17 +236,17 @@ sc_error_t sc_rag_retrieve(sc_rag_t *rag, sc_allocator_t *alloc, const char *que
 
     if (scored_count == 0) {
         alloc->free(alloc->ctx, scored, rag->chunk_count * sizeof(scored_chunk_t));
-        return SC_OK;
+        return HU_OK;
     }
 
     qsort(scored, scored_count, sizeof(scored_chunk_t), scored_cmp);
 
     size_t result_count = limit < scored_count ? limit : scored_count;
-    const sc_datasheet_chunk_t **results = (const sc_datasheet_chunk_t **)alloc->alloc(
-        alloc->ctx, result_count * sizeof(const sc_datasheet_chunk_t *));
+    const hu_datasheet_chunk_t **results = (const hu_datasheet_chunk_t **)alloc->alloc(
+        alloc->ctx, result_count * sizeof(const hu_datasheet_chunk_t *));
     if (!results) {
         alloc->free(alloc->ctx, scored, rag->chunk_count * sizeof(scored_chunk_t));
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     for (size_t i = 0; i < result_count; i++)
         results[i] = scored[i].chunk;
@@ -254,34 +254,34 @@ sc_error_t sc_rag_retrieve(sc_rag_t *rag, sc_allocator_t *alloc, const char *que
     alloc->free(alloc->ctx, scored, rag->chunk_count * sizeof(scored_chunk_t));
     *out_results = results;
     *out_count = result_count;
-    return SC_OK;
+    return HU_OK;
 }
 
-sc_error_t sc_rag_query(sc_allocator_t *alloc, const char *query, size_t query_len,
+hu_error_t hu_rag_query(hu_allocator_t *alloc, const char *query, size_t query_len,
                         char **out_response, size_t *out_len) {
     if (!alloc || !out_response || !out_len)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     *out_response = NULL;
     *out_len = 0;
 
-    sc_rag_t rag;
-    sc_error_t err = sc_rag_init(&rag, alloc);
-    if (err != SC_OK)
+    hu_rag_t rag;
+    hu_error_t err = hu_rag_init(&rag, alloc);
+    if (err != HU_OK)
         return err;
 
-    const sc_datasheet_chunk_t **results = NULL;
+    const hu_datasheet_chunk_t **results = NULL;
     size_t count = 0;
-    err = sc_rag_retrieve(&rag, alloc, query, query_len, NULL, 0, 3, &results, &count);
-    sc_rag_free(&rag);
-    if (err != SC_OK)
+    err = hu_rag_retrieve(&rag, alloc, query, query_len, NULL, 0, 3, &results, &count);
+    hu_rag_free(&rag);
+    if (err != HU_OK)
         return err;
     if (count == 0) {
-        char *empty = sc_strndup(alloc, "", 0);
+        char *empty = hu_strndup(alloc, "", 0);
         if (empty) {
             *out_response = empty;
             *out_len = 0;
         }
-        return SC_OK;
+        return HU_OK;
     }
 
     size_t total = 0;
@@ -293,8 +293,8 @@ sc_error_t sc_rag_query(sc_allocator_t *alloc, const char *query, size_t query_l
     }
     char *buf = (char *)alloc->alloc(alloc->ctx, total + 1);
     if (!buf) {
-        alloc->free(alloc->ctx, (void *)results, count * sizeof(const sc_datasheet_chunk_t *));
-        return SC_ERR_OUT_OF_MEMORY;
+        alloc->free(alloc->ctx, (void *)results, count * sizeof(const hu_datasheet_chunk_t *));
+        return HU_ERR_OUT_OF_MEMORY;
     }
     size_t pos = 0;
     for (size_t i = 0; i < count; i++) {
@@ -314,8 +314,8 @@ sc_error_t sc_rag_query(sc_allocator_t *alloc, const char *query, size_t query_l
     }
     buf[pos] = '\0';
 
-    alloc->free(alloc->ctx, (void *)results, count * sizeof(const sc_datasheet_chunk_t *));
+    alloc->free(alloc->ctx, (void *)results, count * sizeof(const hu_datasheet_chunk_t *));
     *out_response = buf;
     *out_len = pos;
-    return SC_OK;
+    return HU_OK;
 }

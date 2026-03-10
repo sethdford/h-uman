@@ -13,7 +13,7 @@ override_dh_auto_build:
 	cmake --build build -j$$(nproc)
 
 override_dh_auto_install:
-	DESTDIR=debian/seaclaw cmake --install build
+	DESTDIR=debian/human cmake --install build
 
 override_dh_auto_test:
-	cd build && ./seaclaw_tests
+	cd build && ./human_tests

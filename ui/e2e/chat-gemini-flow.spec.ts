@@ -9,14 +9,14 @@ test.describe("Chat Gemini Flow", () => {
   test("full chat flow - send message and get demo response", async ({ page }) => {
     await page.goto("/?demo#chat");
     await page.waitForLoadState("domcontentloaded");
-    const chatView = page.locator("sc-app >> sc-chat-view");
+    const chatView = page.locator("hu-app >> hu-chat-view");
     await expect(chatView).toBeAttached({ timeout: 10000 });
 
     // Type into the composer textarea via shadow DOM traversal
     const typed = await page.evaluate(() => {
-      const app = document.querySelector("sc-app");
-      const view = app?.shadowRoot?.querySelector("sc-chat-view");
-      const composer = view?.shadowRoot?.querySelector("sc-chat-composer");
+      const app = document.querySelector("hu-app");
+      const view = app?.shadowRoot?.querySelector("hu-chat-view");
+      const composer = view?.shadowRoot?.querySelector("hu-chat-composer");
       const textarea = composer?.shadowRoot?.querySelector(
         "textarea",
       ) as HTMLTextAreaElement | null;
@@ -33,7 +33,7 @@ test.describe("Chat Gemini Flow", () => {
 
     // Verify message thread is present (demo response ~600ms + render)
     const messagesArea = chatView.locator(
-      "[role='log'], .messages, .chat-messages, sc-message-thread",
+      "[role='log'], .messages, .chat-messages, hu-message-thread",
     );
     await expect(messagesArea.first()).toBeAttached({ timeout: 10000 });
   });

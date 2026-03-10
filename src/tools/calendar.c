@@ -1,9 +1,9 @@
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/http.h"
-#include "seaclaw/core/json.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/tool.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/http.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include "human/tool.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -31,59 +31,59 @@ typedef struct {
     char _unused;
 } calendar_ctx_t;
 
-static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_json_value_t *args,
-                                   sc_tool_result_t *out) {
+static hu_error_t calendar_execute(void *ctx, hu_allocator_t *alloc, const hu_json_value_t *args,
+                                   hu_tool_result_t *out) {
     (void)ctx;
     if (!out)
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     if (!args) {
-        *out = sc_tool_result_fail("invalid args", 12);
-        return SC_ERR_INVALID_ARGUMENT;
+        *out = hu_tool_result_fail("invalid args", 12);
+        return HU_ERR_INVALID_ARGUMENT;
     }
-    const char *action = sc_json_get_string(args, "action");
+    const char *action = hu_json_get_string(args, "action");
     if (!action) {
-        *out = sc_tool_result_fail("missing action", 14);
-        return SC_OK;
+        *out = hu_tool_result_fail("missing action", 14);
+        return HU_OK;
     }
 
-#if SC_IS_TEST
+#if HU_IS_TEST
     if (strcmp(action, "list") == 0) {
         const char *resp =
             "{\"events\":[{\"id\":\"evt1\",\"title\":\"Team Standup\",\"start\":"
             "\"2026-03-03T09:00:00Z\",\"end\":\"2026-03-03T09:30:00Z\"},{\"id\":\"evt2\","
             "\"title\":\"1:1 with CTO\",\"start\":\"2026-03-03T14:00:00Z\",\"end\":"
             "\"2026-03-03T14:30:00Z\"}]}";
-        *out = sc_tool_result_ok(resp, strlen(resp));
+        *out = hu_tool_result_ok(resp, strlen(resp));
     } else if (strcmp(action, "create") == 0) {
-        const char *title = sc_json_get_string(args, "title");
-        char *msg = sc_sprintf(alloc, "{\"created\":true,\"id\":\"evt_new\",\"title\":\"%s\"}",
+        const char *title = hu_json_get_string(args, "title");
+        char *msg = hu_sprintf(alloc, "{\"created\":true,\"id\":\"evt_new\",\"title\":\"%s\"}",
                                title ? title : "Untitled");
-        *out = sc_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
+        *out = hu_tool_result_ok_owned(msg, msg ? strlen(msg) : 0);
     } else if (strcmp(action, "availability") == 0) {
-        *out = sc_tool_result_ok("{\"free_slots\":[\"09:30-12:00\",\"15:00-17:00\"]}", 49);
+        *out = hu_tool_result_ok("{\"free_slots\":[\"09:30-12:00\",\"15:00-17:00\"]}", 49);
     } else if (strcmp(action, "delete") == 0) {
-        *out = sc_tool_result_ok("{\"deleted\":true}", 17);
+        *out = hu_tool_result_ok("{\"deleted\":true}", 17);
     } else {
-        *out = sc_tool_result_ok("{\"status\":\"ok\"}", 15);
+        *out = hu_tool_result_ok("{\"status\":\"ok\"}", 15);
     }
-    return SC_OK;
+    return HU_OK;
 #else
-    const char *token = sc_json_get_string(args, "access_token");
+    const char *token = hu_json_get_string(args, "access_token");
     if (!token || strlen(token) == 0) {
-        *out = sc_tool_result_fail("missing access_token — configure Google Calendar OAuth2 token",
+        *out = hu_tool_result_fail("missing access_token — configure Google Calendar OAuth2 token",
                                    62);
-        return SC_OK;
+        return HU_OK;
     }
-    const char *cal_id = sc_json_get_string(args, "calendar_id");
+    const char *cal_id = hu_json_get_string(args, "calendar_id");
     if (!cal_id)
         cal_id = "primary";
     if (strlen(cal_id) > 200) {
-        *out = sc_tool_result_fail("calendar_id too long", 21);
-        return SC_OK;
+        *out = hu_tool_result_fail("calendar_id too long", 21);
+        return HU_OK;
     }
 
     if (strcmp(action, "list") == 0) {
-        int max_results = (int)sc_json_get_number(args, "max_results", 10);
+        int max_results = (int)hu_json_get_number(args, "max_results", 10);
         char url[512];
         time_t now = time(NULL);
         struct tm *tm = gmtime(&now);
@@ -96,27 +96,27 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
 
         char auth[256];
         snprintf(auth, sizeof(auth), "Bearer %s", token);
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_get(alloc, url, auth, &resp);
-        if (err != SC_OK || resp.status_code != 200) {
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_get(alloc, url, auth, &resp);
+        if (err != HU_OK || resp.status_code != 200) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to list events", 21);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to list events", 21);
+            return HU_OK;
         }
-        char *body = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(body, body ? strlen(body) : 0);
+        char *body = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(body, body ? strlen(body) : 0);
     } else if (strcmp(action, "create") == 0) {
-        const char *title = sc_json_get_string(args, "title");
-        const char *start = sc_json_get_string(args, "start");
-        const char *end = sc_json_get_string(args, "end");
-        const char *desc = sc_json_get_string(args, "description");
+        const char *title = hu_json_get_string(args, "title");
+        const char *start = hu_json_get_string(args, "start");
+        const char *end = hu_json_get_string(args, "end");
+        const char *desc = hu_json_get_string(args, "description");
         if (!title || !start || !end) {
-            *out = sc_tool_result_fail("create needs title, start, end", 30);
-            return SC_OK;
+            *out = hu_tool_result_fail("create needs title, start, end", 30);
+            return HU_OK;
         }
-        char *body = sc_sprintf(
+        char *body = hu_sprintf(
             alloc,
             "{\"summary\":\"%s\",\"start\":{\"dateTime\":\"%s\"},\"end\":{\"dateTime\":\"%s\"}"
             "%s%s%s}",
@@ -126,27 +126,27 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
         snprintf(url, sizeof(url), "%s%s/events", GCAL_API, cal_id);
         char auth[256];
         snprintf(auth, sizeof(auth), "Bearer %s", token);
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_post_json(alloc, url, auth, body, body ? strlen(body) : 0, &resp);
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_post_json(alloc, url, auth, body, body ? strlen(body) : 0, &resp);
         alloc->free(alloc->ctx, body, body ? strlen(body) + 1 : 0);
-        if (err != SC_OK) {
+        if (err != HU_OK) {
             if (resp.owned && resp.body)
-                sc_http_response_free(alloc, &resp);
-            *out = sc_tool_result_fail("failed to create event", 22);
-            return SC_OK;
+                hu_http_response_free(alloc, &resp);
+            *out = hu_tool_result_fail("failed to create event", 22);
+            return HU_OK;
         }
-        char *rbody = sc_strndup(alloc, resp.body, resp.body_len);
-        sc_http_response_free(alloc, &resp);
-        *out = sc_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
+        char *rbody = hu_strndup(alloc, resp.body, resp.body_len);
+        hu_http_response_free(alloc, &resp);
+        *out = hu_tool_result_ok_owned(rbody, rbody ? strlen(rbody) : 0);
     } else if (strcmp(action, "delete") == 0) {
-        const char *event_id = sc_json_get_string(args, "event_id");
+        const char *event_id = hu_json_get_string(args, "event_id");
         if (!event_id || strlen(event_id) == 0) {
-            *out = sc_tool_result_fail("missing event_id", 16);
-            return SC_OK;
+            *out = hu_tool_result_fail("missing event_id", 16);
+            return HU_OK;
         }
         if (strlen(event_id) > 100) {
-            *out = sc_tool_result_fail("event_id too long", 17);
-            return SC_OK;
+            *out = hu_tool_result_fail("event_id too long", 17);
+            return HU_OK;
         }
         char url[512];
         snprintf(url, sizeof(url), "%s%s/events/%s", GCAL_API, cal_id, event_id);
@@ -154,17 +154,17 @@ static sc_error_t calendar_execute(void *ctx, sc_allocator_t *alloc, const sc_js
         snprintf(auth, sizeof(auth), "Bearer %s", token);
         char auth_hdr[256];
         snprintf(auth_hdr, sizeof(auth_hdr), "Bearer %s", token);
-        sc_http_response_t resp = {0};
-        sc_error_t err = sc_http_get(alloc, url, auth_hdr, &resp);
+        hu_http_response_t resp = {0};
+        hu_error_t err = hu_http_get(alloc, url, auth_hdr, &resp);
         if (resp.owned && resp.body)
-            sc_http_response_free(alloc, &resp);
+            hu_http_response_free(alloc, &resp);
         (void)err;
-        *out = sc_tool_result_ok(
+        *out = hu_tool_result_ok(
             "{\"deleted\":true,\"note\":\"use HTTP DELETE for real deletion\"}", 57);
     } else {
-        *out = sc_tool_result_fail("unsupported action", 18);
+        *out = hu_tool_result_fail("unsupported action", 18);
     }
-    return SC_OK;
+    return HU_OK;
 #endif
 }
 
@@ -180,12 +180,12 @@ static const char *calendar_params(void *ctx) {
     (void)ctx;
     return TOOL_PARAMS;
 }
-static void calendar_deinit(void *ctx, sc_allocator_t *alloc) {
+static void calendar_deinit(void *ctx, hu_allocator_t *alloc) {
     if (ctx)
         alloc->free(alloc->ctx, ctx, sizeof(calendar_ctx_t));
 }
 
-static const sc_tool_vtable_t calendar_vtable = {
+static const hu_tool_vtable_t calendar_vtable = {
     .execute = calendar_execute,
     .name = calendar_name,
     .description = calendar_desc,
@@ -193,12 +193,12 @@ static const sc_tool_vtable_t calendar_vtable = {
     .deinit = calendar_deinit,
 };
 
-sc_error_t sc_calendar_create(sc_allocator_t *alloc, sc_tool_t *out) {
+hu_error_t hu_calendar_create(hu_allocator_t *alloc, hu_tool_t *out) {
     void *ctx = alloc->alloc(alloc->ctx, sizeof(calendar_ctx_t));
     if (!ctx)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     memset(ctx, 0, sizeof(calendar_ctx_t));
     out->ctx = ctx;
     out->vtable = &calendar_vtable;
-    return SC_OK;
+    return HU_OK;
 }

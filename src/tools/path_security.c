@@ -1,14 +1,14 @@
-#include "seaclaw/tools/path_security.h"
-#include "seaclaw/core/allocator.h"
+#include "human/tools/path_security.h"
+#include "human/core/allocator.h"
 #include <ctype.h>
 #include <string.h>
 
 #ifdef _WIN32
-#define SC_PATH_SEP '\\'
-#define SC_ALT_SEP  '/'
+#define HU_PATH_SEP '\\'
+#define HU_ALT_SEP  '/'
 #else
-#define SC_PATH_SEP '/'
-#define SC_ALT_SEP  '/'
+#define HU_PATH_SEP '/'
+#define HU_ALT_SEP  '/'
 #endif
 
 static bool path_starts_with(const char *path, const char *prefix) {
@@ -17,12 +17,12 @@ static bool path_starts_with(const char *path, const char *prefix) {
         return false;
     if (path[plen] == '\0')
         return true;
-    if (path[plen] == SC_PATH_SEP || path[plen] == SC_ALT_SEP)
+    if (path[plen] == HU_PATH_SEP || path[plen] == HU_ALT_SEP)
         return true;
     return false;
 }
 
-bool sc_path_is_safe(const char *path) {
+bool hu_path_is_safe(const char *path) {
     if (!path)
         return false;
     if (path[0] == '/' || path[0] == '\\')
@@ -72,7 +72,7 @@ static const char *const SYSTEM_BLOCKED_WIN[] = {"C:\\Windows",
                                                  NULL};
 #endif
 
-bool sc_path_resolved_allowed(sc_allocator_t *alloc, const char *resolved, const char *ws_resolved,
+bool hu_path_resolved_allowed(hu_allocator_t *alloc, const char *resolved, const char *ws_resolved,
                               const char *const *allowed_paths, size_t allowed_count) {
     (void)alloc;
     if (!resolved)

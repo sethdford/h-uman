@@ -4,8 +4,8 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked, type Token, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 
-import "../components/sc-code-block.js";
-import "../components/sc-latex.js";
+import "../components/hu-code-block.js";
+import "../components/hu-latex.js";
 
 export interface RenderOptions {
   onCopyCode?: (code: string) => void;
@@ -39,7 +39,7 @@ function renderTextWithLatex(text: string): TemplateResult {
   return html`${segments.map((s) =>
     s.type === "text"
       ? html`${s.value}`
-      : html`<sc-latex .latex=${s.value} .display=${s.display}></sc-latex>`,
+      : html`<hu-latex .latex=${s.value} .display=${s.display}></hu-latex>`,
   )}`;
 }
 
@@ -104,7 +104,7 @@ export function renderInlineTokens(
           src="${img.href}"
           alt="${img.text}"
           loading="lazy"
-          style="max-width: 100%; border-radius: var(--sc-radius-md);"
+          style="max-width: 100%; border-radius: var(--hu-radius-md);"
           class="md-image-img"
           ${img.title ? html` title="${img.title}"` : nothing}
         />`;
@@ -179,11 +179,11 @@ function renderToken(token: Token, options?: RenderOptions): TemplateResult | ty
     }
     case "code": {
       const c = token as Tokens.Code;
-      return html`<sc-code-block
+      return html`<hu-code-block
         .code=${c.text}
         .language=${c.lang || ""}
         .onCopy=${options?.onCopyCode}
-      ></sc-code-block>`;
+      ></hu-code-block>`;
     }
     case "blockquote": {
       const bq = token as Tokens.Blockquote;

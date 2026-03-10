@@ -1,20 +1,20 @@
-/* Redis memory backend — TCP RESP when SC_ENABLE_REDIS_ENGINE.
- * In SC_IS_TEST: in-memory mock.
- * When SC_ENABLE_REDIS_ENGINE is not set, all operations return SC_ERR_NOT_SUPPORTED.
+/* Redis memory backend — TCP RESP when HU_ENABLE_REDIS_ENGINE.
+ * In HU_IS_TEST: in-memory mock.
+ * When HU_ENABLE_REDIS_ENGINE is not set, all operations return HU_ERR_NOT_SUPPORTED.
  * This is intentional, documented stub behavior. */
 
-#include "seaclaw/core/allocator.h"
-#include "seaclaw/core/error.h"
-#include "seaclaw/core/string.h"
-#include "seaclaw/memory.h"
-#include "seaclaw/memory/engines.h"
+#include "human/core/allocator.h"
+#include "human/core/error.h"
+#include "human/core/string.h"
+#include "human/memory.h"
+#include "human/memory/engines.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#if defined(SC_ENABLE_REDIS_ENGINE) && !(defined(SC_IS_TEST) && SC_IS_TEST)
+#if defined(HU_ENABLE_REDIS_ENGINE) && !(defined(HU_IS_TEST) && HU_IS_TEST)
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -33,34 +33,34 @@ typedef struct mock_entry {
     char *session_id;
 } mock_entry_t;
 
-typedef struct sc_redis_memory {
-    sc_allocator_t *alloc;
-#if defined(SC_ENABLE_REDIS_ENGINE) && !(defined(SC_IS_TEST) && SC_IS_TEST)
+typedef struct hu_redis_memory {
+    hu_allocator_t *alloc;
+#if defined(HU_ENABLE_REDIS_ENGINE) && !(defined(HU_IS_TEST) && HU_IS_TEST)
     int sock;
     char *host;
     unsigned short port;
     char *key_prefix;
 #endif
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     mock_entry_t entries[MOCK_MAX_ENTRIES];
     size_t entry_count;
 #endif
-} sc_redis_memory_t;
+} hu_redis_memory_t;
 
-#if (defined(SC_IS_TEST) && SC_IS_TEST) || defined(SC_ENABLE_REDIS_ENGINE)
-static const char *category_to_string(const sc_memory_category_t *cat) {
+#if (defined(HU_IS_TEST) && HU_IS_TEST) || defined(HU_ENABLE_REDIS_ENGINE)
+static const char *category_to_string(const hu_memory_category_t *cat) {
     if (!cat)
         return "core";
     switch (cat->tag) {
-    case SC_MEMORY_CATEGORY_CORE:
+    case HU_MEMORY_CATEGORY_CORE:
         return "core";
-    case SC_MEMORY_CATEGORY_DAILY:
+    case HU_MEMORY_CATEGORY_DAILY:
         return "daily";
-    case SC_MEMORY_CATEGORY_CONVERSATION:
+    case HU_MEMORY_CATEGORY_CONVERSATION:
         return "conversation";
-    case SC_MEMORY_CATEGORY_INSIGHT:
+    case HU_MEMORY_CATEGORY_INSIGHT:
         return "insight";
-    case SC_MEMORY_CATEGORY_CUSTOM:
+    case HU_MEMORY_CATEGORY_CUSTOM:
         if (cat->data.custom.name && cat->data.custom.name_len > 0)
             return cat->data.custom.name;
         return "custom";
@@ -70,8 +70,8 @@ static const char *category_to_string(const sc_memory_category_t *cat) {
 }
 #endif
 
-#if defined(SC_IS_TEST) && SC_IS_TEST
-static void mock_free_entry(sc_allocator_t *alloc, mock_entry_t *e) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+static void mock_free_entry(hu_allocator_t *alloc, mock_entry_t *e) {
     if (!alloc || !e)
         return;
     if (e->key)
@@ -85,7 +85,7 @@ static void mock_free_entry(sc_allocator_t *alloc, mock_entry_t *e) {
     e->key = e->content = e->category = e->session_id = NULL;
 }
 
-static mock_entry_t *mock_find_by_key(sc_redis_memory_t *self, const char *key, size_t key_len) {
+static mock_entry_t *mock_find_by_key(hu_redis_memory_t *self, const char *key, size_t key_len) {
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
         if (e->key && strlen(e->key) == key_len && memcmp(e->key, key, key_len) == 0)
@@ -106,10 +106,10 @@ static int mock_contains_substring(const char *haystack, size_t hlen, const char
     }
     return 0;
 }
-#endif /* SC_IS_TEST */
+#endif /* HU_IS_TEST */
 
-#if defined(SC_ENABLE_REDIS_ENGINE) && !(defined(SC_IS_TEST) && SC_IS_TEST)
-static int redis_connect(sc_redis_memory_t *self) {
+#if defined(HU_ENABLE_REDIS_ENGINE) && !(defined(HU_IS_TEST) && HU_IS_TEST)
+static int redis_connect(hu_redis_memory_t *self) {
     if (self->sock >= 0)
         return 0;
     struct addrinfo hints = {0}, *res = NULL;
@@ -174,18 +174,18 @@ static int redis_send_bulk(int sock, const char *str, size_t len) {
     return 0;
 }
 
-static sc_error_t redis_recv_reply(int sock, char *out_buf, size_t out_cap, size_t *out_len) {
+static hu_error_t redis_recv_reply(int sock, char *out_buf, size_t out_cap, size_t *out_len) {
     *out_len = 0;
     char buf[REDIS_RECV_BUF];
     ssize_t n = recv(sock, buf, sizeof(buf) - 1, 0);
     if (n <= 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     buf[n] = '\0';
     size_t copy = (size_t)n < out_cap ? (size_t)n : out_cap - 1;
     memcpy(out_buf, buf, copy);
     out_buf[copy] = '\0';
     *out_len = copy;
-    return SC_OK;
+    return HU_OK;
 }
 
 /* Parse HGETALL reply: *N\r\n $len\r\nfield\r\n $len\r\nvalue\r\n ... Return hash as key-value
@@ -201,26 +201,26 @@ typedef struct redis_hgetall_ctx {
     size_t key_len;
 } redis_hgetall_ctx_t;
 
-static sc_error_t redis_parse_hgetall(const char *reply, size_t reply_len,
+static hu_error_t redis_parse_hgetall(const char *reply, size_t reply_len,
                                       redis_hgetall_ctx_t *out) {
     memset(out, 0, sizeof(*out));
     const char *p = reply;
     const char *end = reply + reply_len;
     if (p >= end || *p != '*')
-        return SC_ERR_PARSE;
+        return HU_ERR_PARSE;
     p++;
     long n = strtol(p, (char **)&p, 10);
     if (n <= 0 || (n % 2) != 0)
-        return SC_ERR_PARSE;
+        return HU_ERR_PARSE;
     while (p < end && (*p == '\r' || *p == '\n'))
         p++;
     for (long i = 0; i < n && p < end; i += 2) {
         if (*p != '$')
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         p++;
         long flen = strtol(p, (char **)&p, 10);
         if (flen < 0 || flen > (long)(end - p))
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         while (p < end && (*p == '\r' || *p == '\n'))
             p++;
         const char *fstart = p;
@@ -228,11 +228,11 @@ static sc_error_t redis_parse_hgetall(const char *reply, size_t reply_len,
         while (p < end && (*p == '\r' || *p == '\n'))
             p++;
         if (*p != '$')
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         p++;
         long vlen = strtol(p, (char **)&p, 10);
         if (vlen < 0 || vlen > (long)(end - p))
-            return SC_ERR_PARSE;
+            return HU_ERR_PARSE;
         while (p < end && (*p == '\r' || *p == '\n'))
             p++;
         const char *vstart = p;
@@ -253,7 +253,7 @@ static sc_error_t redis_parse_hgetall(const char *reply, size_t reply_len,
             out->key_len = (size_t)vlen;
         }
     }
-    return SC_OK;
+    return HU_OK;
 }
 #endif
 
@@ -262,12 +262,12 @@ static const char *impl_name(void *ctx) {
     return "redis";
 }
 
-static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
-                             size_t content_len, const sc_memory_category_t *category,
+static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const char *content,
+                             size_t content_len, const hu_memory_category_t *category,
                              const char *session_id, size_t session_id_len) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
-    sc_allocator_t *alloc = self->alloc;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
+    hu_allocator_t *alloc = self->alloc;
     mock_entry_t *existing = mock_find_by_key(self, key, key_len);
     const char *cat_str = category_to_string(category);
 
@@ -278,33 +278,33 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
             alloc->free(alloc->ctx, existing->category, strlen(existing->category) + 1);
         if (existing->session_id)
             alloc->free(alloc->ctx, existing->session_id, strlen(existing->session_id) + 1);
-        existing->content = sc_strndup(alloc, content, content_len);
-        existing->category = sc_strndup(alloc, cat_str, strlen(cat_str));
+        existing->content = hu_strndup(alloc, content, content_len);
+        existing->category = hu_strndup(alloc, cat_str, strlen(cat_str));
         existing->session_id = (session_id && session_id_len > 0)
-                                   ? sc_strndup(alloc, session_id, session_id_len)
+                                   ? hu_strndup(alloc, session_id, session_id_len)
                                    : NULL;
-        return existing->content ? SC_OK : SC_ERR_OUT_OF_MEMORY;
+        return existing->content ? HU_OK : HU_ERR_OUT_OF_MEMORY;
     }
 
     if (self->entry_count >= MOCK_MAX_ENTRIES)
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     mock_entry_t *e = &self->entries[self->entry_count];
-    e->key = sc_strndup(alloc, key, key_len);
-    e->content = sc_strndup(alloc, content, content_len);
-    e->category = sc_strndup(alloc, cat_str, strlen(cat_str));
+    e->key = hu_strndup(alloc, key, key_len);
+    e->content = hu_strndup(alloc, content, content_len);
+    e->category = hu_strndup(alloc, cat_str, strlen(cat_str));
     e->session_id =
-        (session_id && session_id_len > 0) ? sc_strndup(alloc, session_id, session_id_len) : NULL;
+        (session_id && session_id_len > 0) ? hu_strndup(alloc, session_id, session_id_len) : NULL;
     if (!e->key || !e->content || !e->category) {
         mock_free_entry(alloc, e);
-        return SC_ERR_OUT_OF_MEMORY;
+        return HU_ERR_OUT_OF_MEMORY;
     }
     self->entry_count++;
-    return SC_OK;
+    return HU_OK;
 
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     if (redis_connect(self) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
 
     const char *cat_str = category_to_string(category);
     const char *sid = (session_id && session_id_len > 0) ? session_id : "";
@@ -313,88 +313,88 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     char ts_buf[32];
     int tsn = snprintf(ts_buf, sizeof(ts_buf), "%lu", (unsigned long)time(NULL));
     if (tsn < 0 || (size_t)tsn >= sizeof(ts_buf))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t ts_len = (size_t)tsn;
 
     char id_buf[64];
     int idn =
         snprintf(id_buf, sizeof(id_buf), "%lu-%u", (unsigned long)time(NULL), (unsigned)rand());
     if (idn < 0 || (size_t)idn >= sizeof(id_buf))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
     size_t id_len = (size_t)idn;
 
     char entry_key[512];
     int ek = snprintf(entry_key, sizeof(entry_key), "%s:entry:%.*s",
                       self->key_prefix ? self->key_prefix : "mem", (int)key_len, key);
     if (ek <= 0 || (size_t)ek >= sizeof(entry_key))
-        return SC_ERR_INVALID_ARGUMENT;
+        return HU_ERR_INVALID_ARGUMENT;
 
     if (redis_send_array_start(self->sock, 16) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "HSET", 4) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, entry_key, (size_t)ek) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "id", 2) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, id_buf, id_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "content", 7) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, content, content_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "category", 8) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, cat_str, strlen(cat_str)) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "session_id", 10) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, sid, sid_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "created_at", 10) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, ts_buf, ts_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "updated_at", 10) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, ts_buf, ts_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "key", 3) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, key, key_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
 
     char reply[128];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
-        return SC_ERR_MEMORY_STORE;
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
+        return HU_ERR_MEMORY_STORE;
 
     char keys_key[256];
     int kkn = snprintf(keys_key, sizeof(keys_key), "%s:keys",
                        self->key_prefix ? self->key_prefix : "mem");
     if (kkn < 0 || (size_t)kkn >= sizeof(keys_key))
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_array_start(self->sock, 2) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "SADD", 4) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, keys_key, (size_t)kkn) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     redis_recv_reply(self->sock, reply, sizeof(reply), &rlen);
 
     char cat_key[256];
     int ckn = snprintf(cat_key, sizeof(cat_key), "%s:cat:%s",
                        self->key_prefix ? self->key_prefix : "mem", cat_str);
     if (ckn < 0 || (size_t)ckn >= sizeof(cat_key))
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_array_start(self->sock, 3) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, "SADD", 4) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, cat_key, (size_t)ckn) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     if (redis_send_bulk(self->sock, key, key_len) != 0)
-        return SC_ERR_MEMORY_STORE;
+        return HU_ERR_MEMORY_STORE;
     redis_recv_reply(self->sock, reply, sizeof(reply), &rlen);
 
     if (session_id && session_id_len > 0) {
@@ -403,19 +403,19 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
             snprintf(sess_key, sizeof(sess_key), "%s:sessions:%.*s",
                      self->key_prefix ? self->key_prefix : "mem", (int)session_id_len, session_id);
         if (skn < 0 || (size_t)skn >= sizeof(sess_key))
-            return SC_ERR_MEMORY_STORE;
+            return HU_ERR_MEMORY_STORE;
         if (redis_send_array_start(self->sock, 3) != 0)
-            return SC_ERR_MEMORY_STORE;
+            return HU_ERR_MEMORY_STORE;
         if (redis_send_bulk(self->sock, "SADD", 4) != 0)
-            return SC_ERR_MEMORY_STORE;
+            return HU_ERR_MEMORY_STORE;
         if (redis_send_bulk(self->sock, sess_key, (size_t)skn) != 0)
-            return SC_ERR_MEMORY_STORE;
+            return HU_ERR_MEMORY_STORE;
         if (redis_send_bulk(self->sock, key, key_len) != 0)
-            return SC_ERR_MEMORY_STORE;
+            return HU_ERR_MEMORY_STORE;
         redis_recv_reply(self->sock, reply, sizeof(reply), &rlen);
     }
 
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)key;
@@ -425,21 +425,21 @@ static sc_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
     (void)category;
     (void)session_id;
     (void)session_id_len;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *query, size_t query_len,
+static hu_error_t impl_recall(void *ctx, hu_allocator_t *alloc, const char *query, size_t query_len,
                               size_t limit, const char *session_id, size_t session_id_len,
-                              sc_memory_entry_t **out, size_t *out_count) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+                              hu_memory_entry_t **out, size_t *out_count) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     if (query_len == 0)
-        return SC_OK; /* empty query returns no matches */
+        return HU_OK; /* empty query returns no matches */
     size_t cap = 0, n = 0;
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
 
     for (size_t i = 0; i < self->entry_count && n < limit; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -458,80 +458,80 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
 
         if (n >= cap) {
             size_t new_cap = cap ? cap * 2 : 4;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp) {
                 for (size_t j = 0; j < n; j++)
-                    sc_memory_entry_free_fields(alloc, &results[j]);
+                    hu_memory_entry_free_fields(alloc, &results[j]);
                 if (results)
-                    alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = tmp;
             cap = new_cap;
         }
 
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
         r->id_len = r->key_len;
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (e->session_id) {
-            r->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+            r->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
             r->session_id_len = strlen(e->session_id);
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        r->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
         if (!r->key || !r->content) {
             for (size_t j = 0; j <= n; j++)
-                sc_memory_entry_free_fields(alloc, &results[j]);
-            alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-            return SC_ERR_OUT_OF_MEMORY;
+                hu_memory_entry_free_fields(alloc, &results[j]);
+            alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+            return HU_ERR_OUT_OF_MEMORY;
         }
         n++;
     }
     *out = results;
     *out_count = n;
-    return SC_OK;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+    return HU_OK;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *out = NULL;
     *out_count = 0;
     if (redis_connect(self) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char keys_key[256];
     int kkn = snprintf(keys_key, sizeof(keys_key), "%s:keys",
                        self->key_prefix ? self->key_prefix : "mem");
     if (kkn < 0 || (size_t)kkn >= sizeof(keys_key))
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_array_start(self->sock, 2) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, "SMEMBERS", 8) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, keys_key, (size_t)kkn) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char reply[REDIS_RECV_BUF];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
-        return SC_ERR_MEMORY_RECALL;
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
+        return HU_ERR_MEMORY_RECALL;
     const char *p = reply;
     if (*p != '*' || rlen < 4) {
         *out = NULL;
         *out_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
     p++;
     long key_count = strtol(p, (char **)&p, 10);
     if (key_count <= 0) {
         *out = NULL;
         *out_count = 0;
-        return SC_OK;
+        return HU_OK;
     }
     struct {
         const char *ptr;
@@ -554,11 +554,11 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
         p += klen;
     }
     size_t cap = 4, n = 0;
-    sc_memory_entry_t *results =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *results =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_memory_entry_t));
     if (!results)
-        return SC_ERR_OUT_OF_MEMORY;
-    memset(results, 0, cap * sizeof(sc_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(results, 0, cap * sizeof(hu_memory_entry_t));
     for (long ki = 0; ki < nkeys && n < limit; ki++) {
         const char *kstart = keys[ki].ptr;
         size_t klen = keys[ki].len;
@@ -575,10 +575,10 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
             break;
         char hr[2048];
         size_t hrlen;
-        if (redis_recv_reply(self->sock, hr, sizeof(hr), &hrlen) != SC_OK)
+        if (redis_recv_reply(self->sock, hr, sizeof(hr), &hrlen) != HU_OK)
             break;
         redis_hgetall_ctx_t hc;
-        if (redis_parse_hgetall(hr, hrlen, &hc) != SC_OK)
+        if (redis_parse_hgetall(hr, hrlen, &hc) != HU_OK)
             continue;
         if (session_id && session_id_len > 0 &&
             (!hc.session_id || hc.session_id_len != session_id_len ||
@@ -594,36 +594,36 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
             continue;
         if (n >= cap) {
             size_t new_cap = cap * 2;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp)
                 break;
             results = tmp;
             cap = new_cap;
         }
-        sc_memory_entry_t *r = &results[n];
-        r->id = r->key = sc_strndup(alloc, hc.key ? hc.key : kstart, hc.key ? hc.key_len : klen);
+        hu_memory_entry_t *r = &results[n];
+        r->id = r->key = hu_strndup(alloc, hc.key ? hc.key : kstart, hc.key ? hc.key_len : klen);
         r->key_len = r->id_len = hc.key ? hc.key_len : klen;
         r->content =
-            sc_strndup(alloc, hc.content ? hc.content : "", hc.content ? hc.content_len : 0);
+            hu_strndup(alloc, hc.content ? hc.content : "", hc.content ? hc.content_len : 0);
         r->content_len = hc.content ? hc.content_len : 0;
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (hc.session_id) {
-            r->session_id = sc_strndup(alloc, hc.session_id, hc.session_id_len);
+            r->session_id = hu_strndup(alloc, hc.session_id, hc.session_id_len);
             r->session_id_len = hc.session_id_len;
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
         if (hc.category) {
-            r->category.data.custom.name = sc_strndup(alloc, hc.category, hc.category_len);
+            r->category.data.custom.name = hu_strndup(alloc, hc.category, hc.category_len);
             r->category.data.custom.name_len = hc.category_len;
         }
         n++;
     }
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)alloc;
@@ -634,78 +634,78 @@ static sc_error_t impl_recall(void *ctx, sc_allocator_t *alloc, const char *quer
     (void)session_id_len;
     *out = NULL;
     *out_count = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, size_t key_len,
-                           sc_memory_entry_t *out, bool *found) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+static hu_error_t impl_get(void *ctx, hu_allocator_t *alloc, const char *key, size_t key_len,
+                           hu_memory_entry_t *out, bool *found) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     mock_entry_t *e = mock_find_by_key(self, key, key_len);
     *found = false;
     memset(out, 0, sizeof(*out));
     if (!e)
-        return SC_OK;
+        return HU_OK;
     *found = true;
-    out->id = out->key = sc_strndup(alloc, e->key, strlen(e->key));
+    out->id = out->key = hu_strndup(alloc, e->key, strlen(e->key));
     out->key_len = strlen(e->key);
     out->id_len = out->key_len;
-    out->content = sc_strndup(alloc, e->content, strlen(e->content));
+    out->content = hu_strndup(alloc, e->content, strlen(e->content));
     out->content_len = strlen(e->content);
-    out->timestamp = sc_sprintf(alloc, "0");
+    out->timestamp = hu_sprintf(alloc, "0");
     out->timestamp_len = out->timestamp ? strlen(out->timestamp) : 0;
     if (e->session_id) {
-        out->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+        out->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
         out->session_id_len = strlen(e->session_id);
     }
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-    out->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+    out->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
     out->category.data.custom.name_len = strlen(e->category);
-    return SC_OK;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+    return HU_OK;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *found = false;
     memset(out, 0, sizeof(*out));
     if (redis_connect(self) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char entry_key[512];
     int ekn = snprintf(entry_key, sizeof(entry_key), "%s:entry:%.*s",
                        self->key_prefix ? self->key_prefix : "mem", (int)key_len, key);
     if (ekn < 0 || (size_t)ekn >= sizeof(entry_key))
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_array_start(self->sock, 2) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, "HGETALL", 7) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, entry_key, (size_t)ekn) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char reply[2048];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
-        return SC_ERR_MEMORY_RECALL;
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
+        return HU_ERR_MEMORY_RECALL;
     redis_hgetall_ctx_t hc;
-    if (redis_parse_hgetall(reply, rlen, &hc) != SC_OK)
-        return SC_OK;
+    if (redis_parse_hgetall(reply, rlen, &hc) != HU_OK)
+        return HU_OK;
     if (!hc.content && !hc.key)
-        return SC_OK;
+        return HU_OK;
     *found = true;
-    out->id = out->key = sc_strndup(alloc, hc.key ? hc.key : key, hc.key ? hc.key_len : key_len);
+    out->id = out->key = hu_strndup(alloc, hc.key ? hc.key : key, hc.key ? hc.key_len : key_len);
     out->key_len = out->id_len = hc.key ? hc.key_len : key_len;
-    out->content = sc_strndup(alloc, hc.content ? hc.content : "", hc.content ? hc.content_len : 0);
+    out->content = hu_strndup(alloc, hc.content ? hc.content : "", hc.content ? hc.content_len : 0);
     out->content_len = hc.content ? hc.content_len : 0;
-    out->timestamp = sc_sprintf(alloc, "0");
+    out->timestamp = hu_sprintf(alloc, "0");
     out->timestamp_len = out->timestamp ? strlen(out->timestamp) : 0;
     if (hc.session_id) {
-        out->session_id = sc_strndup(alloc, hc.session_id, hc.session_id_len);
+        out->session_id = hu_strndup(alloc, hc.session_id, hc.session_id_len);
         out->session_id_len = hc.session_id_len;
     }
-    out->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+    out->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
     if (hc.category) {
-        out->category.data.custom.name = sc_strndup(alloc, hc.category, hc.category_len);
+        out->category.data.custom.name = hu_strndup(alloc, hc.category, hc.category_len);
         out->category.data.custom.name_len = hc.category_len;
     }
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)alloc;
@@ -713,20 +713,20 @@ static sc_error_t impl_get(void *ctx, sc_allocator_t *alloc, const char *key, si
     (void)key_len;
     (void)out;
     *found = false;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_category_t *category,
-                            const char *session_id, size_t session_id_len, sc_memory_entry_t **out,
+static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_category_t *category,
+                            const char *session_id, size_t session_id_len, hu_memory_entry_t **out,
                             size_t *out_count) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     const char *cat_filter = category ? category_to_string(category) : NULL;
     *out = NULL;
     *out_count = 0;
     size_t cap = 0, n = 0;
-    sc_memory_entry_t *results = NULL;
+    hu_memory_entry_t *results = NULL;
 
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -744,70 +744,70 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
 
         if (n >= cap) {
             size_t new_cap = cap ? cap * 2 : 4;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp) {
                 for (size_t j = 0; j < n; j++)
-                    sc_memory_entry_free_fields(alloc, &results[j]);
+                    hu_memory_entry_free_fields(alloc, &results[j]);
                 if (results)
-                    alloc->free(alloc->ctx, results, cap * sizeof(sc_memory_entry_t));
-                return SC_ERR_OUT_OF_MEMORY;
+                    alloc->free(alloc->ctx, results, cap * sizeof(hu_memory_entry_t));
+                return HU_ERR_OUT_OF_MEMORY;
             }
             results = tmp;
             cap = new_cap;
         }
 
-        sc_memory_entry_t *r = &results[n];
+        hu_memory_entry_t *r = &results[n];
         memset(r, 0, sizeof(*r));
-        r->id = r->key = sc_strndup(alloc, e->key, strlen(e->key));
+        r->id = r->key = hu_strndup(alloc, e->key, strlen(e->key));
         r->key_len = strlen(e->key);
         r->id_len = r->key_len;
-        r->content = sc_strndup(alloc, e->content, strlen(e->content));
+        r->content = hu_strndup(alloc, e->content, strlen(e->content));
         r->content_len = strlen(e->content);
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (e->session_id) {
-            r->session_id = sc_strndup(alloc, e->session_id, strlen(e->session_id));
+            r->session_id = hu_strndup(alloc, e->session_id, strlen(e->session_id));
             r->session_id_len = strlen(e->session_id);
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
-        r->category.data.custom.name = sc_strndup(alloc, e->category, strlen(e->category));
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
+        r->category.data.custom.name = hu_strndup(alloc, e->category, strlen(e->category));
         r->category.data.custom.name_len = strlen(e->category);
         n++;
     }
     *out = results;
     *out_count = n;
-    return SC_OK;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+    return HU_OK;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     const char *cat_filter = category ? category_to_string(category) : NULL;
     *out = NULL;
     *out_count = 0;
     if (redis_connect(self) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char keys_key[256];
     int kkn = snprintf(keys_key, sizeof(keys_key), "%s:keys",
                        self->key_prefix ? self->key_prefix : "mem");
     if (kkn < 0 || (size_t)kkn >= sizeof(keys_key))
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_array_start(self->sock, 2) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, "SMEMBERS", 8) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, keys_key, (size_t)kkn) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char reply[REDIS_RECV_BUF];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
-        return SC_ERR_MEMORY_RECALL;
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
+        return HU_ERR_MEMORY_RECALL;
     const char *p = reply;
     if (*p != '*' || rlen < 4)
-        return SC_OK;
+        return HU_OK;
     p++;
     long key_count = strtol(p, (char **)&p, 10);
     if (key_count <= 0)
-        return SC_OK;
+        return HU_OK;
     struct {
         const char *ptr;
         size_t len;
@@ -829,11 +829,11 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
         p += klen;
     }
     size_t cap = 4, n = 0;
-    sc_memory_entry_t *results =
-        (sc_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(sc_memory_entry_t));
+    hu_memory_entry_t *results =
+        (hu_memory_entry_t *)alloc->alloc(alloc->ctx, cap * sizeof(hu_memory_entry_t));
     if (!results)
-        return SC_ERR_OUT_OF_MEMORY;
-    memset(results, 0, cap * sizeof(sc_memory_entry_t));
+        return HU_ERR_OUT_OF_MEMORY;
+    memset(results, 0, cap * sizeof(hu_memory_entry_t));
     for (long ki = 0; ki < nkeys; ki++) {
         const char *kstart = keys[ki].ptr;
         size_t klen = keys[ki].len;
@@ -850,10 +850,10 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
             break;
         char hr[2048];
         size_t hrlen;
-        if (redis_recv_reply(self->sock, hr, sizeof(hr), &hrlen) != SC_OK)
+        if (redis_recv_reply(self->sock, hr, sizeof(hr), &hrlen) != HU_OK)
             break;
         redis_hgetall_ctx_t hc;
-        if (redis_parse_hgetall(hr, hrlen, &hc) != SC_OK)
+        if (redis_parse_hgetall(hr, hrlen, &hc) != HU_OK)
             continue;
         if (cat_filter && (!hc.category || hc.category_len != strlen(cat_filter) ||
                            memcmp(hc.category, cat_filter, strlen(cat_filter)) != 0))
@@ -864,36 +864,36 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
             continue;
         if (n >= cap) {
             size_t new_cap = cap * 2;
-            sc_memory_entry_t *tmp = (sc_memory_entry_t *)alloc->realloc(
-                alloc->ctx, results, cap * sizeof(sc_memory_entry_t),
-                new_cap * sizeof(sc_memory_entry_t));
+            hu_memory_entry_t *tmp = (hu_memory_entry_t *)alloc->realloc(
+                alloc->ctx, results, cap * sizeof(hu_memory_entry_t),
+                new_cap * sizeof(hu_memory_entry_t));
             if (!tmp)
                 break;
             results = tmp;
             cap = new_cap;
         }
-        sc_memory_entry_t *r = &results[n];
-        r->id = r->key = sc_strndup(alloc, hc.key ? hc.key : kstart, hc.key ? hc.key_len : klen);
+        hu_memory_entry_t *r = &results[n];
+        r->id = r->key = hu_strndup(alloc, hc.key ? hc.key : kstart, hc.key ? hc.key_len : klen);
         r->key_len = r->id_len = hc.key ? hc.key_len : klen;
         r->content =
-            sc_strndup(alloc, hc.content ? hc.content : "", hc.content ? hc.content_len : 0);
+            hu_strndup(alloc, hc.content ? hc.content : "", hc.content ? hc.content_len : 0);
         r->content_len = hc.content ? hc.content_len : 0;
-        r->timestamp = sc_sprintf(alloc, "0");
+        r->timestamp = hu_sprintf(alloc, "0");
         r->timestamp_len = r->timestamp ? strlen(r->timestamp) : 0;
         if (hc.session_id) {
-            r->session_id = sc_strndup(alloc, hc.session_id, hc.session_id_len);
+            r->session_id = hu_strndup(alloc, hc.session_id, hc.session_id_len);
             r->session_id_len = hc.session_id_len;
         }
-        r->category.tag = SC_MEMORY_CATEGORY_CUSTOM;
+        r->category.tag = HU_MEMORY_CATEGORY_CUSTOM;
         if (hc.category) {
-            r->category.data.custom.name = sc_strndup(alloc, hc.category, hc.category_len);
+            r->category.data.custom.name = hu_strndup(alloc, hc.category, hc.category_len);
             r->category.data.custom.name_len = hc.category_len;
         }
         n++;
     }
     *out = results;
     *out_count = n;
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)alloc;
@@ -902,13 +902,13 @@ static sc_error_t impl_list(void *ctx, sc_allocator_t *alloc, const sc_memory_ca
     (void)session_id_len;
     *out = NULL;
     *out_count = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+static hu_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *deleted) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *deleted = false;
     for (size_t i = 0; i < self->entry_count; i++) {
         mock_entry_t *e = &self->entries[i];
@@ -919,94 +919,94 @@ static sc_error_t impl_forget(void *ctx, const char *key, size_t key_len, bool *
             memset(&self->entries[self->entry_count - 1], 0, sizeof(mock_entry_t));
             self->entry_count--;
             *deleted = true;
-            return SC_OK;
+            return HU_OK;
         }
     }
-    return SC_OK;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+    return HU_OK;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *deleted = false;
     if (redis_connect(self) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char entry_key[512];
     snprintf(entry_key, sizeof(entry_key), "%s:entry:%.*s",
              self->key_prefix ? self->key_prefix : "mem", (int)key_len, key);
     char keys_key[256];
     snprintf(keys_key, sizeof(keys_key), "%s:keys", self->key_prefix ? self->key_prefix : "mem");
     if (redis_send_array_start(self->sock, 2) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, "DEL", 3) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, entry_key, strlen(entry_key)) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char reply[128];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
-        return SC_ERR_MEMORY_STORE;
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
+        return HU_ERR_MEMORY_STORE;
     if (reply[0] == ':') {
         long v = strtol(reply + 1, NULL, 10);
         *deleted = (v > 0);
     }
     if (redis_send_array_start(self->sock, 3) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, "SREM", 4) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, keys_key, (size_t)kkn) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, key, key_len) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     redis_recv_reply(self->sock, reply, sizeof(reply), &rlen);
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     (void)key;
     (void)key_len;
     *deleted = false;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static sc_error_t impl_count(void *ctx, size_t *out) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+static hu_error_t impl_count(void *ctx, size_t *out) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *out = self->entry_count;
-    return SC_OK;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+    return HU_OK;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     *out = 0;
     if (redis_connect(self) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char keys_key[256];
     int kkn = snprintf(keys_key, sizeof(keys_key), "%s:keys",
                        self->key_prefix ? self->key_prefix : "mem");
     if (kkn < 0 || (size_t)kkn >= sizeof(keys_key))
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_array_start(self->sock, 2) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, "SCARD", 5) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     if (redis_send_bulk(self->sock, keys_key, (size_t)kkn) != 0)
-        return SC_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_BACKEND;
     char reply[128];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
-        return SC_ERR_MEMORY_BACKEND;
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
+        return HU_ERR_MEMORY_BACKEND;
     if (reply[0] == ':')
         *out = (size_t)strtoul(reply + 1, NULL, 10);
-    return SC_OK;
+    return HU_OK;
 #else
     (void)ctx;
     *out = 0;
-    return SC_ERR_NOT_SUPPORTED;
+    return HU_ERR_NOT_SUPPORTED;
 #endif
 }
 
 static bool impl_health_check(void *ctx) {
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     (void)ctx;
     return true;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+#elif defined(HU_ENABLE_REDIS_ENGINE)
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     if (redis_connect(self) != 0)
         return false;
     if (redis_send_array_start(self->sock, 1) != 0)
@@ -1015,7 +1015,7 @@ static bool impl_health_check(void *ctx) {
         return false;
     char reply[64];
     size_t rlen;
-    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != SC_OK)
+    if (redis_recv_reply(self->sock, reply, sizeof(reply), &rlen) != HU_OK)
         return false;
     return (rlen >= 5 && memcmp(reply, "+PONG", 5) == 0);
 #else
@@ -1025,14 +1025,14 @@ static bool impl_health_check(void *ctx) {
 }
 
 static void impl_deinit(void *ctx) {
-    sc_redis_memory_t *self = (sc_redis_memory_t *)ctx;
+    hu_redis_memory_t *self = (hu_redis_memory_t *)ctx;
     if (!self || !self->alloc)
         return;
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     for (size_t i = 0; i < self->entry_count; i++)
         mock_free_entry(self->alloc, &self->entries[i]);
     self->entry_count = 0;
-#elif defined(SC_ENABLE_REDIS_ENGINE)
+#elif defined(HU_ENABLE_REDIS_ENGINE)
     if (self->sock >= 0) {
         close(self->sock);
         self->sock = -1;
@@ -1046,10 +1046,10 @@ static void impl_deinit(void *ctx) {
         self->key_prefix = NULL;
     }
 #endif
-    self->alloc->free(self->alloc->ctx, self, sizeof(sc_redis_memory_t));
+    self->alloc->free(self->alloc->ctx, self, sizeof(hu_redis_memory_t));
 }
 
-static const sc_memory_vtable_t redis_vtable = {
+static const hu_memory_vtable_t redis_vtable = {
     .name = impl_name,
     .store = impl_store,
     .recall = impl_recall,
@@ -1061,41 +1061,41 @@ static const sc_memory_vtable_t redis_vtable = {
     .deinit = impl_deinit,
 };
 
-sc_memory_t sc_redis_memory_create(sc_allocator_t *alloc, const char *host, unsigned short port,
+hu_memory_t hu_redis_memory_create(hu_allocator_t *alloc, const char *host, unsigned short port,
                                    const char *key_prefix) {
     if (!alloc)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    sc_redis_memory_t *self =
-        (sc_redis_memory_t *)alloc->alloc(alloc->ctx, sizeof(sc_redis_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    hu_redis_memory_t *self =
+        (hu_redis_memory_t *)alloc->alloc(alloc->ctx, sizeof(hu_redis_memory_t));
     if (!self)
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
-    memset(self, 0, sizeof(sc_redis_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
+    memset(self, 0, sizeof(hu_redis_memory_t));
     self->alloc = alloc;
-#if defined(SC_IS_TEST) && SC_IS_TEST
+#if defined(HU_IS_TEST) && HU_IS_TEST
     (void)host;
     (void)port;
     (void)key_prefix;
-    return (sc_memory_t){.ctx = self, .vtable = &redis_vtable};
-#elif defined(SC_ENABLE_REDIS_ENGINE)
+    return (hu_memory_t){.ctx = self, .vtable = &redis_vtable};
+#elif defined(HU_ENABLE_REDIS_ENGINE)
     self->sock = -1;
-    self->host = host ? sc_strdup(alloc, host) : NULL;
+    self->host = host ? hu_strdup(alloc, host) : NULL;
     self->port = port ? port : 6379;
-    self->key_prefix = key_prefix ? sc_strdup(alloc, key_prefix) : sc_strdup(alloc, "mem");
+    self->key_prefix = key_prefix ? hu_strdup(alloc, key_prefix) : hu_strdup(alloc, "mem");
     if (!self->host)
-        self->host = sc_strdup(alloc, "localhost");
+        self->host = hu_strdup(alloc, "localhost");
     if (!self->host || !self->key_prefix) {
         if (self->host)
             alloc->free(alloc->ctx, self->host, strlen(self->host) + 1);
         if (self->key_prefix)
             alloc->free(alloc->ctx, self->key_prefix, strlen(self->key_prefix) + 1);
-        alloc->free(alloc->ctx, self, sizeof(sc_redis_memory_t));
-        return (sc_memory_t){.ctx = NULL, .vtable = NULL};
+        alloc->free(alloc->ctx, self, sizeof(hu_redis_memory_t));
+        return (hu_memory_t){.ctx = NULL, .vtable = NULL};
     }
-    return (sc_memory_t){.ctx = self, .vtable = &redis_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &redis_vtable};
 #else
     (void)host;
     (void)port;
     (void)key_prefix;
-    return (sc_memory_t){.ctx = self, .vtable = &redis_vtable};
+    return (hu_memory_t){.ctx = self, .vtable = &redis_vtable};
 #endif
 }

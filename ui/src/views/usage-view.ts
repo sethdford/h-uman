@@ -2,17 +2,17 @@ import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
 import { icons } from "../icons.js";
-import "../components/sc-page-hero.js";
-import "../components/sc-section-header.js";
-import "../components/sc-stat-card.js";
-import "../components/sc-stats-row.js";
-import "../components/sc-card.js";
-import "../components/sc-skeleton.js";
-import "../components/sc-empty-state.js";
-import "../components/sc-button.js";
-import "../components/sc-chart.js";
-import type { ChartData } from "../components/sc-chart.js";
-import "../components/sc-segmented-control.js";
+import "../components/hu-page-hero.js";
+import "../components/hu-section-header.js";
+import "../components/hu-stat-card.js";
+import "../components/hu-stats-row.js";
+import "../components/hu-card.js";
+import "../components/hu-skeleton.js";
+import "../components/hu-empty-state.js";
+import "../components/hu-button.js";
+import "../components/hu-chart.js";
+import type { ChartData } from "../components/hu-chart.js";
+import "../components/hu-segmented-control.js";
 
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
@@ -56,11 +56,11 @@ interface UsageSummary {
 }
 
 const CHART_COLORS = [
-  "var(--sc-chart-categorical-1)",
-  "var(--sc-chart-categorical-2)",
-  "var(--sc-chart-categorical-3)",
-  "var(--sc-chart-categorical-4)",
-  "var(--sc-chart-categorical-5)",
+  "var(--hu-chart-categorical-1)",
+  "var(--hu-chart-categorical-2)",
+  "var(--hu-chart-categorical-3)",
+  "var(--hu-chart-categorical-4)",
+  "var(--hu-chart-categorical-5)",
 ];
 
 const TIME_RANGE_OPTIONS = [
@@ -69,87 +69,87 @@ const TIME_RANGE_OPTIONS = [
   { value: "30d", label: "30d" },
 ];
 
-@customElement("sc-usage-view")
+@customElement("hu-usage-view")
 export class ScUsageView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
   static override styles = css`
     :host {
       view-transition-name: view-usage;
       display: block;
-      color: var(--sc-text);
+      color: var(--hu-text);
       max-width: 60rem;
     }
     .section {
-      margin-bottom: var(--sc-space-2xl);
+      margin-bottom: var(--hu-space-2xl);
     }
     .section-label {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      margin-bottom: var(--sc-space-sm);
+      margin-bottom: var(--hu-space-sm);
     }
     .chart-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sc-space-md);
-      margin-bottom: var(--sc-space-md);
+      gap: var(--hu-space-md);
+      margin-bottom: var(--hu-space-md);
       flex-wrap: wrap;
     }
     .chart-inner {
-      padding: var(--sc-space-sm) var(--sc-space-md) var(--sc-space-md);
+      padding: var(--hu-space-sm) var(--hu-space-md) var(--hu-space-md);
     }
     .provider-list {
       display: flex;
       flex-direction: column;
-      gap: var(--sc-space-md);
+      gap: var(--hu-space-md);
     }
     .provider-row {
       display: flex;
       align-items: center;
-      gap: var(--sc-space-sm);
+      gap: var(--hu-space-sm);
     }
     .provider-dot {
       width: 0.625rem;
       height: 0.625rem;
-      border-radius: var(--sc-radius-full);
+      border-radius: var(--hu-radius-full);
       flex-shrink: 0;
     }
     .provider-name {
       width: 6.5rem;
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text);
       flex-shrink: 0;
-      font-weight: var(--sc-weight-medium);
+      font-weight: var(--hu-weight-medium);
     }
     .provider-bar-track {
       flex: 1;
-      height: var(--sc-space-md);
-      background: var(--sc-bg-inset);
-      border-radius: var(--sc-radius-sm);
+      height: var(--hu-space-md);
+      background: var(--hu-bg-inset);
+      border-radius: var(--hu-radius-sm);
       overflow: hidden;
     }
     .provider-bar-fill {
       height: 100%;
-      border-radius: var(--sc-radius-sm);
-      transition: width var(--sc-duration-normal) var(--sc-ease-out);
+      border-radius: var(--hu-radius-sm);
+      transition: width var(--hu-duration-normal) var(--hu-ease-out);
     }
     .provider-cost {
-      font-size: var(--sc-text-sm);
-      color: var(--sc-text);
+      font-size: var(--hu-text-sm);
+      color: var(--hu-text);
       font-variant-numeric: tabular-nums;
-      font-weight: var(--sc-weight-medium);
+      font-weight: var(--hu-weight-medium);
       min-width: 4rem;
       text-align: right;
     }
     .provider-pct {
-      font-size: var(--sc-text-xs);
-      color: var(--sc-text-muted);
+      font-size: var(--hu-text-xs);
+      color: var(--hu-text-muted);
       min-width: 2.5rem;
       text-align: right;
     }
-    @media (max-width: 30rem) /* --sc-breakpoint-sm */ {
+    @media (max-width: 30rem) /* --hu-breakpoint-sm */ {
       .provider-name {
         width: 5rem;
       }
@@ -235,8 +235,8 @@ export class ScUsageView extends GatewayAwareLitElement {
       datasets: [
         {
           data,
-          color: "var(--sc-chart-brand)",
-          backgroundColor: "var(--sc-chart-brand)",
+          color: "var(--hu-chart-brand)",
+          backgroundColor: "var(--hu-chart-brand)",
         },
       ],
     };
@@ -275,13 +275,13 @@ export class ScUsageView extends GatewayAwareLitElement {
 
   private _renderSkeleton() {
     return html`
-      <sc-stats-row>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-        <sc-skeleton variant="card" height="90px"></sc-skeleton>
-      </sc-stats-row>
-      <sc-skeleton variant="card" height="200px"></sc-skeleton>
-      <sc-skeleton variant="card" height="200px"></sc-skeleton>
+      <hu-stats-row>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+        <hu-skeleton variant="card" height="90px"></hu-skeleton>
+      </hu-stats-row>
+      <hu-skeleton variant="card" height="200px"></hu-skeleton>
+      <hu-skeleton variant="card" height="200px"></hu-skeleton>
     `;
   }
 
@@ -294,19 +294,19 @@ export class ScUsageView extends GatewayAwareLitElement {
       <div class="section" role="region" aria-label="Token usage over time">
         <div class="chart-header">
           <div class="section-label">Token Usage</div>
-          <sc-segmented-control
+          <hu-segmented-control
             .options=${TIME_RANGE_OPTIONS}
             .value=${this._timeRange}
-            @sc-change=${(e: CustomEvent<{ value: string }>) => {
+            @hu-change=${(e: CustomEvent<{ value: string }>) => {
               this._timeRange = e.detail.value as "24h" | "7d" | "30d";
             }}
-          ></sc-segmented-control>
+          ></hu-segmented-control>
         </div>
-        <sc-card glass>
+        <hu-card glass>
           <div class="chart-inner">
-            <sc-chart type="area" .data=${chartData} height=${200}></sc-chart>
+            <hu-chart type="area" .data=${chartData} height=${200}></hu-chart>
           </div>
-        </sc-card>
+        </hu-card>
       </div>
     `;
   }
@@ -323,11 +323,11 @@ export class ScUsageView extends GatewayAwareLitElement {
     return html`
       <div class="section">
         <div class="section-label">Cost Breakdown</div>
-        <sc-card glass>
+        <hu-card glass>
           <div class="chart-inner">
-            <sc-chart type="bar" .data=${chartData} height=${140} horizontal></sc-chart>
+            <hu-chart type="bar" .data=${chartData} height=${140} horizontal></hu-chart>
           </div>
-        </sc-card>
+        </hu-card>
       </div>
     `;
   }
@@ -342,7 +342,7 @@ export class ScUsageView extends GatewayAwareLitElement {
     return html`
       <div class="section">
         <div class="section-label">Cost by Provider</div>
-        <sc-card glass>
+        <hu-card glass>
           <div class="provider-list">
             ${providers.map(
               (p, i) => html`
@@ -366,7 +366,7 @@ export class ScUsageView extends GatewayAwareLitElement {
               `,
             )}
           </div>
-        </sc-card>
+        </hu-card>
       </div>
     `;
   }
@@ -380,12 +380,12 @@ export class ScUsageView extends GatewayAwareLitElement {
     const isEmpty = dailyCost === 0 && totalTokens === 0 && requestCount === 0;
 
     return html`
-      <sc-page-hero role="region" aria-label="Usage">
-        <sc-section-header
+      <hu-page-hero role="region" aria-label="Usage">
+        <hu-section-header
           heading="Usage"
           description="Token consumption, cost tracking, and forecasting"
         >
-          <sc-button
+          <hu-button
             variant="ghost"
             size="sm"
             @click=${this._exportUsage}
@@ -393,48 +393,48 @@ export class ScUsageView extends GatewayAwareLitElement {
           >
             <span class="icon-inline" aria-hidden="true">${icons.export}</span>
             Export
-          </sc-button>
-        </sc-section-header>
-      </sc-page-hero>
+          </hu-button>
+        </hu-section-header>
+      </hu-page-hero>
 
-      <sc-stats-row>
-        <sc-stat-card
+      <hu-stats-row>
+        <hu-stat-card
           .value=${totalTokens}
           label="Tokens Today"
-          style="--sc-stagger-delay: 0ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 0ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${dailyCost}
           label="Cost Today"
           prefix="$"
-          style="--sc-stagger-delay: 50ms"
-        ></sc-stat-card>
-        <sc-stat-card
+          style="--hu-stagger-delay: 50ms"
+        ></hu-stat-card>
+        <hu-stat-card
           .value=${requestCount}
           label="Requests"
-          style="--sc-stagger-delay: 100ms"
-        ></sc-stat-card>
-      </sc-stats-row>
+          style="--hu-stagger-delay: 100ms"
+        ></hu-stat-card>
+      </hu-stats-row>
 
       ${this.error
-        ? html`<sc-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
-            <sc-button
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
+            <hu-button
               variant="primary"
               @click=${() => this.load()}
               aria-label="Retry loading usage"
-              >Retry</sc-button
+              >Retry</hu-button
             >
-          </sc-empty-state>`
+          </hu-empty-state>`
         : nothing}
       ${this.loading
         ? this._renderSkeleton()
         : isEmpty
           ? html`
-              <sc-empty-state
+              <hu-empty-state
                 .icon=${icons["bar-chart"]}
                 heading="No usage data"
                 description="Start a conversation or run a tool to generate usage metrics. Data will appear here once requests are made."
-              ></sc-empty-state>
+              ></hu-empty-state>
             `
           : html`
               ${this._renderTokenChart()} ${this._renderCostBreakdownChart()}

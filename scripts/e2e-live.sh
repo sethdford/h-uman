@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e-live.sh — Build seaclaw, start gateway, prove the full stack works via Playwright.
+# e2e-live.sh — Build human, start gateway, prove the full stack works via Playwright.
 #
 # Usage: GEMINI_API_KEY=... bash scripts/e2e-live.sh
 #
@@ -10,11 +10,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BINARY="$REPO_ROOT/build-release/seaclaw"
+BINARY="$REPO_ROOT/build-release/human"
 UI_DIR="$REPO_ROOT/ui"
 UI_DIST="$UI_DIR/dist"
 E2E_HOME=$(mktemp -d)
-E2E_CONFIG_DIR="$E2E_HOME/.seaclaw"
+E2E_CONFIG_DIR="$E2E_HOME/.human"
 GW_PID=""
 EXIT_CODE=0
 
@@ -97,7 +97,7 @@ echo "[e2e] Step 5: Run Playwright E2E tests"
 mkdir -p "$UI_DIR/e2e-results"
 (
     cd "$UI_DIR"
-    SEACLAW_LIVE_E2E=1 npx playwright test e2e/live-gateway.spec.ts \
+    HUMAN_LIVE_E2E=1 npx playwright test e2e/live-gateway.spec.ts \
         --config=playwright-live.config.ts 2>&1
 ) || EXIT_CODE=$?
 

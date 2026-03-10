@@ -8,23 +8,23 @@
 #include "test_framework.h"
 
 static void test_example_does_something(void) {
-    SC_ASSERT_EQ(1 + 1, 2);
-    SC_ASSERT_STR_EQ("hello", "hello");
-    SC_ASSERT_NOT_NULL(ptr);
+    HU_ASSERT_EQ(1 + 1, 2);
+    HU_ASSERT_STR_EQ("hello", "hello");
+    HU_ASSERT_NOT_NULL(ptr);
 }
 
 void run_example_tests(void) {
-    SC_TEST_SUITE("example");
-    SC_RUN_TEST(test_example_does_something);
+    HU_TEST_SUITE("example");
+    HU_RUN_TEST(test_example_does_something);
 }
 ```
 
 ## Rules
 
 - Test names: `subject_expected_behavior` (e.g. `test_config_validate_null_returns_error`)
-- Use `SC_IS_TEST` guards for side effects — no real network, no process spawning, no hardware I/O
+- Use `HU_IS_TEST` guards for side effects — no real network, no process spawning, no hardware I/O
 - Free all allocations — ASan catches leaks
-- Never assert tautologies like `SC_ASSERT_TRUE(1)` — use meaningful assertions
+- Never assert tautologies like `HU_ASSERT_TRUE(1)` — use meaningful assertions
 - Use neutral test data: `"test-key"`, `"example.com"`, `"user_a"` — no real credentials or PII
 
 ## Adding Tests

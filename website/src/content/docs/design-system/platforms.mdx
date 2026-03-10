@@ -1,9 +1,9 @@
 ---
 title: Platform Integration
-description: How SeaClaw's design tokens map to CSS, Swift, Kotlin, and C — cross-platform consistency from a single source of truth.
+description: How Human's design tokens map to CSS, Swift, Kotlin, and C — cross-platform consistency from a single source of truth.
 ---
 
-SeaClaw's design tokens compile from JSON source files to **five platform outputs**, ensuring visual consistency across web, iOS, Android, CLI, and documentation.
+Human's design tokens compile from JSON source files to **five platform outputs**, ensuring visual consistency across web, iOS, Android, CLI, and documentation.
 
 ## Build Pipeline
 
@@ -17,7 +17,7 @@ design-tokens/*.tokens.json
         ├── website/src/styles/_tokens.css     (Docs site)
         ├── .../DesignTokens.swift              (iOS/macOS)
         ├── .../DesignTokens.kt                 (Android)
-        ├── include/seaclaw/design_tokens.h     (CLI)
+        ├── include/human/design_tokens.h     (CLI)
         └── docs/design-tokens-reference.json   (Docs reference)
 ```
 
@@ -27,14 +27,14 @@ Tokens are emitted as CSS custom properties on `:root`:
 
 ```css
 :root {
-  --sc-accent: #7ab648;
-  --sc-bg: #060b12;
-  --sc-text: #d8e4f0;
-  --sc-space-md: 1rem;
-  --sc-radius-lg: 12px;
-  --sc-duration-normal: 250ms;
-  --sc-ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  --sc-glass-standard-blur: 16px;
+  --hu-accent: #7ab648;
+  --hu-bg: #060b12;
+  --hu-text: #d8e4f0;
+  --hu-space-md: 1rem;
+  --hu-radius-lg: 12px;
+  --hu-duration-normal: 250ms;
+  --hu-ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --hu-glass-standard-blur: 16px;
 }
 ```
 
@@ -42,10 +42,10 @@ Usage:
 
 ```css
 .my-component {
-  background: var(--sc-bg-surface);
-  padding: var(--sc-space-lg);
-  border-radius: var(--sc-radius-md);
-  transition: transform var(--sc-duration-fast) var(--sc-ease-spring);
+  background: var(--hu-bg-surface);
+  padding: var(--hu-space-lg);
+  border-radius: var(--hu-radius-md);
+  transition: transform var(--hu-duration-fast) var(--hu-ease-spring);
 }
 ```
 
@@ -128,7 +128,7 @@ Tokens are emitted as preprocessor macros with four variants per color:
 Runtime capability detection chooses the right variant:
 
 ```c
-#include <seaclaw/terminal.h>
+#include <human/terminal.h>
 
 void print_status(const char *msg) {
     sc_color_level_t level = sc_terminal_color_level();
@@ -155,10 +155,10 @@ if (theme == SC_THEME_LIGHT) {
 
 | JSON Source           | CSS                        | Swift                        | Kotlin                       | C                 |
 | --------------------- | -------------------------- | ---------------------------- | ---------------------------- | ----------------- |
-| `dark.accent`         | `--sc-accent`              | `SCTokens.accent`            | `SCTokens.accent`            | `SC_COLOR_ACCENT` |
-| `space.lg`            | `--sc-space-lg`            | `SCTokens.spaceLg`           | `SCTokens.spaceLg`           | N/A               |
-| `text.xl`             | `--sc-text-xl`             | `SCTokens.textXl`            | `SCTokens.textXl`            | N/A               |
-| `glass.standard.blur` | `--sc-glass-standard-blur` | `SCTokens.glassStandardBlur` | `SCTokens.glassStandardBlur` | N/A               |
+| `dark.accent`         | `--hu-accent`              | `SCTokens.accent`            | `SCTokens.accent`            | `SC_COLOR_ACCENT` |
+| `space.lg`            | `--hu-space-lg`            | `SCTokens.spaceLg`           | `SCTokens.spaceLg`           | N/A               |
+| `text.xl`             | `--hu-text-xl`             | `SCTokens.textXl`            | `SCTokens.textXl`            | N/A               |
+| `glass.standard.blur` | `--hu-glass-standard-blur` | `SCTokens.glassStandardBlur` | `SCTokens.glassStandardBlur` | N/A               |
 
 ## Adding New Tokens
 

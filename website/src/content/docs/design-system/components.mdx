@@ -1,9 +1,9 @@
 ---
 title: Components
-description: SeaClaw's web component library — Lit-based custom elements with full token integration.
+description: Human's web component library — Lit-based custom elements with full token integration.
 ---
 
-SeaClaw's UI is built with **Lit** web components. Each component uses design tokens exclusively — no hardcoded colors, sizes, or durations.
+Human's UI is built with **Lit** web components. Each component uses design tokens exclusively — no hardcoded colors, sizes, or durations.
 
 ## Component Library
 
@@ -11,45 +11,45 @@ SeaClaw's UI is built with **Lit** web components. Each component uses design to
 
 | Component       | Tag                    | Description                                |
 | --------------- | ---------------------- | ------------------------------------------ |
-| Button          | `<sc-button>`          | Primary, secondary, ghost, danger variants |
-| Badge           | `<sc-badge>`           | Status indicators with semantic colors     |
-| Tooltip         | `<sc-tooltip>`         | Contextual help on hover/focus             |
-| Toggle          | `<sc-toggle>`          | On/off switches with micro-physics         |
-| Command Palette | `<sc-command-palette>` | CMD+K global search                        |
+| Button          | `<hu-button>`          | Primary, secondary, ghost, danger variants |
+| Badge           | `<hu-badge>`           | Status indicators with semantic colors     |
+| Tooltip         | `<hu-tooltip>`         | Contextual help on hover/focus             |
+| Toggle          | `<hu-toggle>`          | On/off switches with micro-physics         |
+| Command Palette | `<hu-command-palette>` | CMD+K global search                        |
 
 ### Layout Components
 
 | Component | Tag            | Description                        |
 | --------- | -------------- | ---------------------------------- |
-| Card      | `<sc-card>`    | Elevated surface with glass option |
-| Sheet     | `<sc-sheet>`   | Slide-in panel from edge           |
-| Modal     | `<sc-modal>`   | Centered dialog with backdrop      |
-| Dialog    | `<sc-dialog>`  | Confirmation/action dialogs        |
-| Sidebar   | `<sc-sidebar>` | Navigation sidebar                 |
+| Card      | `<hu-card>`    | Elevated surface with glass option |
+| Sheet     | `<hu-sheet>`   | Slide-in panel from edge           |
+| Modal     | `<hu-modal>`   | Centered dialog with backdrop      |
+| Dialog    | `<hu-dialog>`  | Confirmation/action dialogs        |
+| Sidebar   | `<hu-sidebar>` | Navigation sidebar                 |
 
 ### Display Components
 
 | Component    | Tag                 | Description                         |
 | ------------ | ------------------- | ----------------------------------- |
-| Avatar       | `<sc-avatar>`       | User avatars with fallback initials |
-| Floating Mic | `<sc-floating-mic>` | Voice input indicator               |
+| Avatar       | `<hu-avatar>`       | User avatars with fallback initials |
+| Floating Mic | `<hu-floating-mic>` | Voice input indicator               |
 
 ## Token Integration
 
-Every component consumes tokens through CSS custom properties. Example from `sc-card`:
+Every component consumes tokens through CSS custom properties. Example from `hu-card`:
 
 ```css
 :host {
-  background: var(--sc-bg-surface);
-  border: 1px solid var(--sc-border-subtle);
-  border-radius: var(--sc-radius-lg);
-  box-shadow: var(--sc-shadow-card);
-  padding: var(--sc-space-lg);
+  background: var(--hu-bg-surface);
+  border: 1px solid var(--hu-border-subtle);
+  border-radius: var(--hu-radius-lg);
+  box-shadow: var(--hu-shadow-card);
+  padding: var(--hu-space-lg);
 }
 
 :host(:hover) {
-  box-shadow: var(--sc-shadow-lg);
-  transition: box-shadow var(--sc-duration-normal) var(--sc-ease-default);
+  box-shadow: var(--hu-shadow-lg);
+  transition: box-shadow var(--hu-duration-normal) var(--hu-ease-default);
 }
 ```
 
@@ -58,10 +58,10 @@ Every component consumes tokens through CSS custom properties. Example from `sc-
 ### Button Variants
 
 ```html
-<sc-button variant="primary">Save</sc-button>
-<sc-button variant="secondary">Cancel</sc-button>
-<sc-button variant="ghost">More info</sc-button>
-<sc-button variant="danger">Delete</sc-button>
+<hu-button variant="primary">Save</hu-button>
+<hu-button variant="secondary">Cancel</hu-button>
+<hu-button variant="ghost">More info</hu-button>
+<hu-button variant="danger">Delete</hu-button>
 ```
 
 - **Primary**: Accent background, on-accent text, gradient overlay, physics press
@@ -72,17 +72,17 @@ Every component consumes tokens through CSS custom properties. Example from `sc-
 ### Badge Variants
 
 ```html
-<sc-badge variant="success">Online</sc-badge>
-<sc-badge variant="warning">Pending</sc-badge>
-<sc-badge variant="error">Failed</sc-badge>
-<sc-badge variant="info">New</sc-badge>
+<hu-badge variant="success">Online</hu-badge>
+<hu-badge variant="warning">Pending</hu-badge>
+<hu-badge variant="error">Failed</hu-badge>
+<hu-badge variant="info">New</hu-badge>
 ```
 
 ## Accessibility Patterns
 
 All components implement:
 
-- **Focus management**: Visible focus rings using `--sc-focus-ring` token
+- **Focus management**: Visible focus rings using `--hu-focus-ring` token
 - **Keyboard navigation**: Full keyboard support (Enter, Space, Escape, Arrow keys)
 - **ARIA attributes**: Proper roles, states, and properties
 - **Screen reader text**: Hidden labels where visual indicators are insufficient
@@ -91,8 +91,8 @@ All components implement:
 
 ```css
 :host(:focus-visible) {
-  outline: var(--sc-focus-ring-width) solid var(--sc-focus-ring);
-  outline-offset: var(--sc-focus-ring-offset);
+  outline: var(--hu-focus-ring-width) solid var(--hu-focus-ring);
+  outline-offset: var(--hu-focus-ring-offset);
 }
 ```
 
@@ -102,19 +102,19 @@ Components apply micro-physics contextually:
 
 | Component            | Interaction | Physics Preset                    |
 | -------------------- | ----------- | --------------------------------- |
-| `sc-button`          | Click       | `button-press` / `button-release` |
-| `sc-card`            | Hover       | `card-hover`                      |
-| `sc-modal`           | Open        | `modal-anticipation`              |
-| `sc-toggle`          | Toggle      | `toggle-squash`                   |
-| `sc-command-palette` | Open        | `dropdown-anticipation`           |
+| `hu-button`          | Click       | `button-press` / `button-release` |
+| `hu-card`            | Hover       | `card-hover`                      |
+| `hu-modal`           | Open        | `modal-anticipation`              |
+| `hu-toggle`          | Toggle      | `toggle-squash`                   |
+| `hu-command-palette` | Open        | `dropdown-anticipation`           |
 
 ## Glass Integration
 
 Components can opt into glass tiers:
 
 ```html
-<sc-card class="glass">Standard glass card</sc-card>
-<sc-card class="glass-prominent">Prominent glass card</sc-card>
+<hu-card class="glass">Standard glass card</hu-card>
+<hu-card class="glass-prominent">Prominent glass card</hu-card>
 ```
 
 ## View Catalog
