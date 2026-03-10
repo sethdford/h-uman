@@ -27,6 +27,8 @@
 static bool str_contains_ci(const char *haystack, size_t hlen, const char *needle)
     __attribute__((unused));
 static bool str_contains_ci(const char *haystack, size_t hlen, const char *needle) {
+    if (!haystack || !needle)
+        return false;
     size_t nlen = strlen(needle);
     if (nlen > hlen)
         return false;

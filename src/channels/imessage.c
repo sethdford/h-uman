@@ -1153,6 +1153,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
                 memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
                 msgs[i].message_id = (int64_t)(i + 1);
+                msgs[i].is_group = false;
                 msgs[i].has_attachment = c->mock_msgs[i].has_attachment;
                 msgs[i].has_video = c->mock_msgs[i].has_video;
                 msgs[i].guid[0] = '\0';
