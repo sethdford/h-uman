@@ -1301,6 +1301,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     if (gr == HU_GROUP_SKIP) {
                         fprintf(stderr, "[human] group: skipping (not addressed): %.*s\n",
                                 (int)(combined_len > 40 ? 40 : combined_len), combined);
+                        if (early_history)
+                            alloc->free(alloc->ctx, early_history,
+                                        early_history_count * sizeof(hu_channel_history_entry_t));
                         continue;
                     }
                 }
