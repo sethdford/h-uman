@@ -435,6 +435,11 @@ size_t hu_conversation_calibrate_relationship(const char *relationship_stage,
 
 /* ── Behavior configuration ──────────────────────────────────────────── */
 
+/* Load conversation word lists from embedded JSON data files.
+ * Call once at startup. Falls back to hardcoded defaults on failure. */
+hu_error_t hu_conversation_data_init(hu_allocator_t *alloc);
+void hu_conversation_data_cleanup(void);
+
 /* Set configurable behavior thresholds.
  * Call this after loading config to apply user-defined values.
  * Pass 0 to keep default for any threshold. */

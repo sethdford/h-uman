@@ -16,7 +16,7 @@ static void test_episodic_summarize_null(void) {
 static void test_episodic_summarize_basic(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *msgs[] = {"How do I compile human?", "Run cmake --build build"};
-    size_t lens[] = {25, 24};
+    size_t lens[] = {23, 23};
 
     size_t out_len = 0;
     char *summary = hu_episodic_summarize_session(&alloc, msgs, lens, 2, &out_len);
@@ -110,7 +110,7 @@ static void test_episodic_summarize_llm_basic(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_provider_t prov = {0};
     const char *msgs[] = {"How do I compile human?", "Run cmake --build build"};
-    size_t lens[] = {25, 24};
+    size_t lens[] = {23, 23};
 
     size_t out_len = 0;
     char *summary = hu_episodic_summarize_session_llm(&alloc, &prov, msgs, lens, 2, &out_len);

@@ -705,6 +705,9 @@ static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv)
                                    app_ctx.cfg->behavior.min_response_chars);
     hu_daemon_set_missed_msg_threshold(app_ctx.cfg->behavior.missed_msg_threshold_sec);
 
+    /* Initialize conversation data (load word lists from embedded JSON) */
+    hu_conversation_data_init(alloc);
+
     err = hu_service_run(alloc, 1000, app_ctx.channel_count > 0 ? app_ctx.channels : NULL,
                          app_ctx.channel_count, app_ctx.agent, app_ctx.cfg);
 
@@ -1171,6 +1174,7 @@ static hu_error_t cmd_gateway(hu_allocator_t *alloc, int argc, char **argv) {
 #endif
     hu_app_teardown(&app);
     hu_plugin_unload_all();
+    hu_conversation_data_cleanup();
     return err;
 }
 

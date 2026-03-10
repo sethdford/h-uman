@@ -32,6 +32,7 @@
 #include "human/memory/deep_extract.h"
 #include "human/memory/fast_capture.h"
 #include "human/memory/stm.h"
+#include "human/memory/superhuman.h"
 #ifdef HU_HAS_PERSONA
 #include "human/persona.h"
 #endif
@@ -367,6 +368,35 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         agent->superhuman_commitment_ctx.session_id_len = agent->memory_session_id_len;
         (void)hu_superhuman_build_context(&agent->superhuman, agent->alloc, &superhuman_ctx,
                                           &superhuman_ctx_len);
+#ifdef HU_ENABLE_SQLITE
+        /* F26: If they're quiet and it's during their usual quiet hours, inject hint */
+        if (agent->memory && agent->memory_session_id && agent->memory_session_id_len > 0 &&
+            superhuman_ctx) {
+            int qday = 0, qstart = 0, qend = 1;
+            if (hu_superhuman_temporal_get_quiet_hours(agent->memory, agent->alloc,
+                    agent->memory_session_id, agent->memory_session_id_len,
+                    &qday, &qstart, &qend) == HU_OK) {
+                time_t now_t = time(NULL);
+                struct tm lt_buf;
+                struct tm *lt = localtime_r(&now_t, &lt_buf);
+                if (lt && lt->tm_wday == qday && lt->tm_hour >= qstart && lt->tm_hour < qend) {
+                    static const char hint[] =
+                        "\nThey're often quiet at this time. Don't worry if no reply.";
+                    size_t hint_len = sizeof(hint) - 1;
+                    size_t new_len = superhuman_ctx_len + hint_len + 1;
+                    char *merged = (char *)agent->alloc->alloc(agent->alloc->ctx, new_len);
+                    if (merged) {
+                        memcpy(merged, superhuman_ctx, superhuman_ctx_len);
+                        memcpy(merged + superhuman_ctx_len, hint, hint_len + 1);
+                        agent->alloc->free(agent->alloc->ctx, superhuman_ctx,
+                            superhuman_ctx_len + 1);
+                        superhuman_ctx = merged;
+                        superhuman_ctx_len = superhuman_ctx_len + hint_len;
+                    }
+                }
+            }
+        }
+#endif
     }
 
     /* Build adaptive persona context (circadian + relationship) */
