@@ -32,4 +32,7 @@ hu_error_t hu_fast_capture(hu_allocator_t *alloc, const char *text, size_t text_
                            hu_fc_result_t *out);
 void hu_fc_result_deinit(hu_fc_result_t *result, hu_allocator_t *alloc);
 
+hu_error_t hu_fast_capture_data_init(hu_allocator_t *alloc);
+void hu_fast_capture_data_cleanup(hu_allocator_t *alloc);
+
 #endif
