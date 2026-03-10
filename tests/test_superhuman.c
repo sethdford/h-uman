@@ -4,6 +4,10 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
+#ifdef HU_ENABLE_SQLITE
+#include "human/memory.h"
+#include <sqlite3.h>
+#endif
 
 static hu_error_t mock_build_a(void *ctx, hu_allocator_t *alloc, char **out, size_t *out_len) {
     (void)ctx;
@@ -139,6 +143,45 @@ static void superhuman_build_context_empty(void) {
     HU_ASSERT_EQ(ctx_len, 0u);
 }
 
+#ifdef HU_ENABLE_SQLITE
+static void superhuman_phase3_tables_exist(void) {
+    static const char *const expected[] = {
+        "inside_jokes", "commitments", "temporal_patterns", "delayed_followups",
+        "avoidance_patterns", "topic_baselines", "micro_moments", "growth_milestones",
+        "pattern_observations",
+    };
+    static const size_t expected_count = sizeof(expected) / sizeof(expected[0]);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE type='table'", -1,
+                                &stmt, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+
+    for (size_t i = 0; i < expected_count; i++) {
+        bool found = false;
+        sqlite3_reset(stmt);
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *name = (const char *)sqlite3_column_text(stmt, 0);
+            if (name && strcmp(name, expected[i]) == 0) {
+                found = true;
+                break;
+            }
+        }
+        HU_ASSERT_TRUE(found);
+    }
+
+    sqlite3_finalize(stmt);
+    mem.vtable->deinit(mem.ctx);
+}
+#endif
+
 void run_superhuman_tests(void) {
     HU_TEST_SUITE("superhuman");
     HU_RUN_TEST(superhuman_register_and_count);
@@ -146,4 +189,7 @@ void run_superhuman_tests(void) {
     HU_RUN_TEST(superhuman_register_at_max);
     HU_RUN_TEST(superhuman_observe_null_text_ok);
     HU_RUN_TEST(superhuman_build_context_empty);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(superhuman_phase3_tables_exist);
+#endif
 }

@@ -66,6 +66,78 @@ static const char *const schema_parts[] = {
     "engagement_score REAL,"
     "sample_count INTEGER DEFAULT 0,"
     "PRIMARY KEY (contact_id, emotion, response_type))",
+    "CREATE TABLE IF NOT EXISTS inside_jokes("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "context TEXT NOT NULL,"
+    "punchline TEXT,"
+    "created_at INTEGER NOT NULL,"
+    "last_referenced INTEGER,"
+    "reference_count INTEGER DEFAULT 0)",
+    "CREATE INDEX IF NOT EXISTS idx_inside_jokes_contact ON inside_jokes(contact_id)",
+    "CREATE TABLE IF NOT EXISTS commitments("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "description TEXT NOT NULL,"
+    "who TEXT NOT NULL,"
+    "deadline INTEGER,"
+    "status TEXT DEFAULT 'pending',"
+    "created_at INTEGER NOT NULL,"
+    "followed_up_at INTEGER)",
+    "CREATE INDEX IF NOT EXISTS idx_commitments_contact ON commitments(contact_id)",
+    "CREATE INDEX IF NOT EXISTS idx_commitments_deadline ON commitments(deadline) WHERE status='pending'",
+    "CREATE TABLE IF NOT EXISTS temporal_patterns("
+    "contact_id TEXT NOT NULL,"
+    "day_of_week INTEGER NOT NULL,"
+    "hour INTEGER NOT NULL,"
+    "message_count INTEGER DEFAULT 0,"
+    "avg_response_time_ms INTEGER,"
+    "PRIMARY KEY (contact_id, day_of_week, hour))",
+    "CREATE TABLE IF NOT EXISTS delayed_followups("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "topic TEXT NOT NULL,"
+    "scheduled_at INTEGER NOT NULL,"
+    "sent INTEGER DEFAULT 0)",
+    "CREATE INDEX IF NOT EXISTS idx_delayed_followups_contact ON delayed_followups(contact_id)",
+    "CREATE INDEX IF NOT EXISTS idx_delayed_followups_scheduled ON delayed_followups(scheduled_at) WHERE sent=0",
+    "CREATE TABLE IF NOT EXISTS avoidance_patterns("
+    "contact_id TEXT NOT NULL,"
+    "topic TEXT NOT NULL,"
+    "mention_count INTEGER DEFAULT 0,"
+    "change_count INTEGER DEFAULT 0,"
+    "last_mentioned INTEGER,"
+    "PRIMARY KEY (contact_id, topic))",
+    "CREATE TABLE IF NOT EXISTS topic_baselines("
+    "contact_id TEXT NOT NULL,"
+    "topic TEXT NOT NULL,"
+    "mention_count INTEGER DEFAULT 0,"
+    "last_mentioned INTEGER,"
+    "PRIMARY KEY (contact_id, topic))",
+    "CREATE TABLE IF NOT EXISTS micro_moments("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "fact TEXT NOT NULL,"
+    "significance TEXT,"
+    "created_at INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_micro_moments_contact ON micro_moments(contact_id)",
+    "CREATE TABLE IF NOT EXISTS growth_milestones("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "topic TEXT NOT NULL,"
+    "before_state TEXT,"
+    "after_state TEXT,"
+    "created_at INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_growth_milestones_contact ON growth_milestones(contact_id)",
+    "CREATE TABLE IF NOT EXISTS pattern_observations("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "topic TEXT NOT NULL,"
+    "tone TEXT NOT NULL,"
+    "day_of_week INTEGER,"
+    "hour INTEGER,"
+    "observed_at INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_pattern_observations_contact ON pattern_observations(contact_id)",
     NULL};
 
 static void get_timestamp(char *buf, size_t buf_size) {
