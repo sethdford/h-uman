@@ -4,6 +4,7 @@
 #include "test_framework.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory.h"
 #include "human/memory/superhuman.h"
@@ -299,6 +300,31 @@ static void superhuman_temporal_record_and_quiet_hours(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+/* F26: 10 messages Mon 9am, 2 at Sun 6am — quietest slot is Sunday 6am */
+static void superhuman_temporal_quiet_hours_returns_sunday(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    /* 10 messages at Mon 9am (day=1, hour=9) */
+    for (int i = 0; i < 10; i++)
+        HU_ASSERT_EQ(hu_superhuman_temporal_record(&mem, "contact_temporal", 15, 1, 9, 0),
+            HU_OK);
+    /* 2 messages at Sun 6am (day=0, hour=6) */
+    for (int i = 0; i < 2; i++)
+        HU_ASSERT_EQ(hu_superhuman_temporal_record(&mem, "contact_temporal", 15, 0, 6, 0),
+            HU_OK);
+
+    int out_day = -1, out_start = -1, out_end = -1;
+    HU_ASSERT_EQ(hu_superhuman_temporal_get_quiet_hours(&mem, &alloc, "contact_temporal", 15,
+        &out_day, &out_start, &out_end), HU_OK);
+    HU_ASSERT_EQ(out_day, 0);
+    HU_ASSERT_EQ(out_start, 6);
+    HU_ASSERT_EQ(out_end, 7);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void superhuman_delayed_followup_lifecycle(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
@@ -393,6 +419,74 @@ static void superhuman_topic_baseline_and_absence(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static void superhuman_topic_baseline_record_multiple_topics(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "contact_a", 8, "work", 4), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "contact_a", 8, "pets", 4), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "contact_a", 8, "gym", 3), HU_OK);
+
+    int64_t now_ts = 4000000000; /* far future so all topics are absent */
+    char *json = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_superhuman_topic_absence_list(&mem, &alloc, "contact_a", 8, now_ts, 14,
+        &json, &len), HU_OK);
+    HU_ASSERT_NOT_NULL(json);
+    HU_ASSERT_TRUE(strstr(json, "work") != NULL);
+    HU_ASSERT_TRUE(strstr(json, "pets") != NULL);
+    HU_ASSERT_TRUE(strstr(json, "gym") != NULL);
+
+    alloc.free(alloc.ctx, json, len);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void superhuman_topic_absence_list_empty_when_recently_mentioned(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "c", 1, "work", 4), HU_OK);
+
+    /* now_ts = current time, 14 days: cutoff is 2 weeks ago.
+     * last_mentioned was just set, so topic is NOT absent. */
+    int64_t now_ts = (int64_t)time(NULL);
+    char *json = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_superhuman_topic_absence_list(&mem, &alloc, "c", 1, now_ts, 14,
+        &json, &len), HU_OK);
+    HU_ASSERT_NOT_NULL(json);
+    HU_ASSERT_TRUE(strstr(json, "(none)") != NULL);
+
+    alloc.free(alloc.ctx, json, len);
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void superhuman_topic_baseline_upsert_increments_mention_count(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    /* Record same topic 3 times — upsert increments mention_count */
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "c", 1, "work", 4), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "c", 1, "work", 4), HU_OK);
+    HU_ASSERT_EQ(hu_superhuman_topic_baseline_record(&mem, "c", 1, "work", 4), HU_OK);
+
+    /* Future now_ts so topic is absent; verify it appears in list */
+    int64_t now_ts = 3500000000;
+    char *json = NULL;
+    size_t len = 0;
+    HU_ASSERT_EQ(hu_superhuman_topic_absence_list(&mem, &alloc, "c", 1, now_ts, 14,
+        &json, &len), HU_OK);
+    HU_ASSERT_NOT_NULL(json);
+    HU_ASSERT_TRUE(strstr(json, "work") != NULL);
+    HU_ASSERT_TRUE(strstr(json, "- ") != NULL);
+
+    alloc.free(alloc.ctx, json, len);
+    mem.vtable->deinit(mem.ctx);
+}
+
 static void superhuman_growth_store_and_list(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
@@ -447,10 +541,14 @@ void run_superhuman_tests(void) {
     HU_RUN_TEST(superhuman_commitment_store_and_list_due);
     HU_RUN_TEST(superhuman_commitment_mark_followed_up);
     HU_RUN_TEST(superhuman_temporal_record_and_quiet_hours);
+    HU_RUN_TEST(superhuman_temporal_quiet_hours_returns_sunday);
     HU_RUN_TEST(superhuman_delayed_followup_lifecycle);
     HU_RUN_TEST(superhuman_micro_moment_store_and_list);
     HU_RUN_TEST(superhuman_avoidance_record_and_list);
     HU_RUN_TEST(superhuman_topic_baseline_and_absence);
+    HU_RUN_TEST(superhuman_topic_baseline_record_multiple_topics);
+    HU_RUN_TEST(superhuman_topic_absence_list_empty_when_recently_mentioned);
+    HU_RUN_TEST(superhuman_topic_baseline_upsert_increments_mention_count);
     HU_RUN_TEST(superhuman_growth_store_and_list);
     HU_RUN_TEST(superhuman_pattern_record_and_list);
 #endif
