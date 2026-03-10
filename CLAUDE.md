@@ -1,6 +1,6 @@
 # seaclaw
 
-C11 autonomous AI assistant runtime. ~1644 KB binary, <6 MB RAM, <30 ms startup.
+C11 autonomous AI assistant runtime. ~1679 KB binary, <6 MB RAM, <30 ms startup.
 Zero dependencies beyond libc (optional SQLite and libcurl).
 
 Read `AGENTS.md` for the full engineering protocol. This file is the quick reference.
@@ -12,7 +12,7 @@ Read `AGENTS.md` for the full engineering protocol. This file is the quick refer
 cmake -B build -DSC_ENABLE_ALL_CHANNELS=ON -DSC_ENABLE_SQLITE=ON -DSC_ENABLE_PERSONA=ON -DSC_ENABLE_SKILLS=ON
 cmake --build build -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 
-# Run tests (3779+ tests, must be 0 failures, 0 ASan errors)
+# Run tests (3,788+ tests, must be 0 failures, 0 ASan errors)
 ./build/seaclaw_tests
 
 # Release build
@@ -93,7 +93,7 @@ Extend via: `src/persona/` (persona.c, creator.c, analyzer.c, sampler.c, example
 | `src/`                                | All C source (~715 files, ~137K lines)                      |
 | `include/seaclaw/`                    | Public headers                                              |
 | `docs/cross-platform-ci-readiness.md` | Platform support, build flags, known platform-specific code |
-| `tests/`                              | 128 test files, 3779+ tests                                 |
+| `tests/`                              | 128 test files, 3,788+ tests                                 |
 | `fuzz/`                               | libFuzzer harnesses                                         |
 | `ui/`                                 | LitElement web dashboard                                    |
 | `website/`                            | Astro marketing site                                        |

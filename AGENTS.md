@@ -7,7 +7,7 @@ Scope: entire repository.
 
 seaclaw is a C11 autonomous AI assistant runtime optimized for:
 
-- minimal binary size (~1644 KB release with LTO)
+- minimal binary size (~1679 KB release with LTO)
 - minimal memory footprint (5–6 MB peak RSS measured)
 - zero dependencies beyond libc, optional SQLite and libcurl
 - Zig reference implementation archived in `archive/zig-reference/`
@@ -26,13 +26,13 @@ Key extension points:
 - `src/peripherals/` (`sc_peripheral_t`) — hardware boards (Arduino, STM32, RPi)
 - `src/persona/` — persona system (profile loading, prompt builder, example selection)
 
-Current scale: **715 source + header files, ~137K lines of C, ~59K lines of tests, 3779 tests, 34 channels**.
+Current scale: **715 source + header files, ~137K lines of C, ~59K lines of tests, 3,788 tests, 34 channels**.
 
 Performance baseline (macOS aarch64, MinSizeRel+LTO):
 
 | Metric                   | Measured       |
 | ------------------------ | -------------- |
-| Binary size              | ~1644 KB       |
+| Binary size              | ~1679 KB       |
 | Text section             | 480 KB         |
 | Cold-start (`--version`) | 4–27 ms avg    |
 | Peak RSS (`--version`)   | ~5.7 MB        |
@@ -61,7 +61,7 @@ These codebase realities should drive every design decision:
 2. **Binary size and memory are hard product constraints**
    - `cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DSC_ENABLE_LTO=ON` is the release target. Every dependency and abstraction has a size cost.
    - Avoid adding unnecessary runtime allocations or large data tables without justification.
-   - Current release binary: ~1644 KB (all features with LTO).
+   - Current release binary: ~1679 KB (all features with LTO).
 
 3. **Security-critical surfaces are first-class**
    - `src/gateway/gateway.c`, `src/security/`, `src/tools/`, `src/runtime/` carry high blast radius.
@@ -74,7 +74,7 @@ These codebase realities should drive every design decision:
    - All code compiles with `-Wall -Wextra -Wpedantic -Werror`.
    - Use `SC_IS_TEST` guards to bypass side effects (spawning, opening URLs, real hardware I/O).
 
-5. **All 3779+ tests must pass at zero ASan errors**
+5. **All 3,788+ tests must pass at zero ASan errors**
    - The test suite uses AddressSanitizer for leak and overflow detection.
    - Every allocation must be freed (`free()` or cleanup function).
    - Use `SC_IS_TEST` mock paths in tests — no network, no process spawning.
@@ -156,7 +156,7 @@ src/
 
 include/seaclaw/       public C headers
 
-tests/                 128 test files, 3779+ tests
+tests/                 128 test files, 3,788+ tests
 
 asm/                   platform-specific assembly (aarch64, x86_64, generic C)
 
