@@ -40,6 +40,7 @@ typedef struct hu_imessage_ctx {
     struct {
         char session_key[128];
         char content[4096];
+        bool has_attachment;
     } mock_msgs[8];
     size_t mock_count;
     hu_reaction_type_t last_reaction;
@@ -1151,6 +1152,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
                 memcpy(msgs[i].session_key, c->mock_msgs[i].session_key, 128);
                 memcpy(msgs[i].content, c->mock_msgs[i].content, 4096);
                 msgs[i].message_id = (int64_t)(i + 1);
+                msgs[i].has_attachment = c->mock_msgs[i].has_attachment;
             }
             *out_count = n;
             c->mock_count = 0;
@@ -1204,18 +1206,34 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         return HU_OK;
     }
 
-    const char *sql = "SELECT m.ROWID, m.text, h.id, "
-                      "  COALESCE("
-                      "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
-                      "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
-                      "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count "
-                      "FROM message m "
-                      "JOIN handle h ON m.handle_id = h.ROWID "
-                      "WHERE m.is_from_me = 0 AND m.text IS NOT NULL "
-                      "AND LENGTH(m.text) > 0 "
-                      "AND m.associated_message_type = 0 "
-                      "AND m.ROWID > ? "
-                      "ORDER BY m.ROWID ASC LIMIT ?";
+    /* Include text messages and photo-only messages (text NULL but image attachment).
+     * Use COALESCE(m.text, '[Photo]') for content. has_image: subquery checks attachment
+     * table for image extensions. */
+    const char *sql =
+        "SELECT m.ROWID, COALESCE(m.text, '[Photo]') AS text, h.id, "
+        "  COALESCE("
+        "    (SELECT COUNT(DISTINCT chj2.handle_id) FROM chat_message_join cmj "
+        "     JOIN chat_handle_join chj2 ON chj2.chat_id = cmj.chat_id "
+        "     WHERE cmj.message_id = m.ROWID), 0) AS participant_count, "
+        "  (SELECT COUNT(*) FROM message_attachment_join maj "
+        "   JOIN attachment a ON maj.attachment_id = a.ROWID "
+        "   WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+        "   AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "
+        "     OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "
+        "     OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')) "
+        "   > 0 AS has_image "
+        "FROM message m "
+        "JOIN handle h ON m.handle_id = h.ROWID "
+        "WHERE m.is_from_me = 0 AND m.associated_message_type = 0 "
+        "AND m.ROWID > ? "
+        "AND ((m.text IS NOT NULL AND LENGTH(m.text) > 0) "
+        "     OR (EXISTS (SELECT 1 FROM message_attachment_join maj "
+        "         JOIN attachment a ON maj.attachment_id = a.ROWID "
+        "         WHERE maj.message_id = m.ROWID AND a.filename IS NOT NULL "
+        "         AND (LOWER(a.filename) LIKE '%.jpg' OR LOWER(a.filename) LIKE '%.jpeg' "
+        "           OR LOWER(a.filename) LIKE '%.png' OR LOWER(a.filename) LIKE '%.heic' "
+        "           OR LOWER(a.filename) LIKE '%.gif' OR LOWER(a.filename) LIKE '%.webp')))) "
+        "ORDER BY m.ROWID ASC LIMIT ?";
 
     sqlite3_stmt *stmt = NULL;
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
@@ -1234,6 +1252,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         const char *text = (const char *)sqlite3_column_text(stmt, 1);
         const char *handle = (const char *)sqlite3_column_text(stmt, 2);
         int participant_count = sqlite3_column_int(stmt, 3);
+        int has_image = sqlite3_column_int(stmt, 4);
 
         if (!text || !handle)
             continue;
@@ -1276,6 +1295,7 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         msgs[count].content[text_len] = '\0';
         msgs[count].message_id = rowid;
         msgs[count].is_group = (participant_count > 2);
+        msgs[count].has_attachment = (has_image != 0);
 
         c->last_rowid = rowid;
         count++;
@@ -1300,6 +1320,13 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
 hu_error_t hu_imessage_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                         size_t session_key_len, const char *content,
                                         size_t content_len) {
+    return hu_imessage_test_inject_mock_ex(ch, session_key, session_key_len, content, content_len,
+                                           false);
+}
+
+hu_error_t hu_imessage_test_inject_mock_ex(hu_channel_t *ch, const char *session_key,
+                                           size_t session_key_len, const char *content,
+                                           size_t content_len, bool has_attachment) {
     if (!ch || !ch->ctx)
         return HU_ERR_INVALID_ARGUMENT;
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
@@ -1314,6 +1341,7 @@ hu_error_t hu_imessage_test_inject_mock(hu_channel_t *ch, const char *session_ke
     if (content && ct > 0)
         memcpy(c->mock_msgs[i].content, content, ct);
     c->mock_msgs[i].content[ct] = '\0';
+    c->mock_msgs[i].has_attachment = has_attachment;
     return HU_OK;
 }
 

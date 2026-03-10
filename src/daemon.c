@@ -1159,7 +1159,60 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 size_t batch_end = m;
 
                 while (m < count && strcmp(msgs[m].session_key, batch_key) == 0) {
-                    size_t mlen = strlen(msgs[m].content);
+                    const char *content_to_add = msgs[m].content;
+                    size_t mlen = strlen(content_to_add);
+#ifndef HU_IS_TEST
+#if defined(HU_ENABLE_IMESSAGE)
+                    /* Per-message vision: when has_attachment and message_id, describe
+                     * image and inject "[They sent a photo: {description}]" into context. */
+                    if (msgs[m].has_attachment && msgs[m].message_id > 0 && agent &&
+                        agent->provider.vtable && agent->provider.vtable->supports_vision &&
+                        agent->provider.vtable->supports_vision(agent->provider.ctx)) {
+                        const char *ch_name = ch->channel->vtable->name
+                                                  ? ch->channel->vtable->name(ch->channel->ctx)
+                                                  : NULL;
+                        if (ch_name && strcmp(ch_name, "imessage") == 0) {
+                            char *path = hu_imessage_get_attachment_path(alloc, msgs[m].message_id);
+                            if (path) {
+                                char *desc = NULL;
+                                size_t desc_len = 0;
+                                const char *model =
+                                    agent->model_name ? agent->model_name : "gpt-4o";
+                                size_t model_len = agent->model_name_len > 0
+                                                       ? agent->model_name_len
+                                                       : (size_t)strlen(model);
+                                hu_error_t verr = hu_vision_describe_image(
+                                    alloc, &agent->provider, path, strlen(path), model, model_len,
+                                    &desc, &desc_len);
+                                alloc->free(alloc->ctx, path, strlen(path) + 1);
+                                if (verr == HU_OK && desc && desc_len > 0) {
+                                    static char vision_augmented[4096];
+                                    size_t desc_copy = desc_len > 3800 ? 3800 : desc_len;
+                                    int n;
+                                    if (mlen > 0 && strcmp(content_to_add, "[Photo]") != 0) {
+                                        n = snprintf(vision_augmented, sizeof(vision_augmented),
+                                                     "%.*s\n[They sent a photo: %.*s]", (int)mlen,
+                                                     content_to_add, (int)desc_copy, desc);
+                                    } else {
+                                        n = snprintf(vision_augmented, sizeof(vision_augmented),
+                                                     "[They sent a photo: %.*s]", (int)desc_copy,
+                                                     desc);
+                                    }
+                                    alloc->free(alloc->ctx, desc, desc_len + 1);
+                                    if (n > 0 && (size_t)n < sizeof(vision_augmented)) {
+                                        content_to_add = vision_augmented;
+                                        mlen = (size_t)n;
+                                        if (agent->bth_metrics)
+                                            agent->bth_metrics->vision_descriptions++;
+                                    }
+                                } else if (desc) {
+                                    alloc->free(alloc->ctx, desc, desc_len + 1);
+                                }
+                            }
+                        }
+                    }
+#endif
+#endif
                     if (mlen == 0) {
                         m++;
                         continue;
@@ -1168,7 +1221,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         break;
                     if (combined_len > 0)
                         combined[combined_len++] = '\n';
-                    memcpy(combined + combined_len, msgs[m].content, mlen);
+                    memcpy(combined + combined_len, content_to_add, mlen);
                     combined_len += mlen;
                     batch_end = m;
                     m++;

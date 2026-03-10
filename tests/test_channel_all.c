@@ -1153,6 +1153,28 @@ static void test_imessage_inject_multiple_poll_message_ids(void) {
     hu_imessage_destroy(&ch);
 }
 
+static void test_imessage_inject_poll_has_attachment_flag(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_error_t err = hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch);
+    HU_ASSERT_EQ(err, HU_OK);
+    err = hu_imessage_test_inject_mock(&ch, "alice", 5, "Text only", 9);
+    HU_ASSERT_EQ(err, HU_OK);
+    err = hu_imessage_test_inject_mock_ex(&ch, "bob", 3, "[Photo]", 7, true);
+    HU_ASSERT_EQ(err, HU_OK);
+    hu_channel_loop_msg_t msgs[4];
+    size_t count = 0;
+    err = hu_imessage_poll(ch.ctx, &alloc, msgs, 4, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 2);
+    HU_ASSERT_FALSE(msgs[0].has_attachment);
+    HU_ASSERT_STR_EQ(msgs[0].content, "Text only");
+    HU_ASSERT_TRUE(msgs[1].has_attachment);
+    HU_ASSERT_STR_EQ(msgs[1].content, "[Photo]");
+    HU_ASSERT_EQ(msgs[1].message_id, (int64_t)2);
+    hu_imessage_destroy(&ch);
+}
+
 static void test_imessage_send_captures_last_message(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;
@@ -2528,6 +2550,7 @@ void run_channel_all_tests(void) {
 #if HU_IS_TEST
     HU_RUN_TEST(test_imessage_inject_and_poll);
     HU_RUN_TEST(test_imessage_inject_multiple_poll_message_ids);
+    HU_RUN_TEST(test_imessage_inject_poll_has_attachment_flag);
     HU_RUN_TEST(test_imessage_send_captures_last_message);
 #endif
 #endif
