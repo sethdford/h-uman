@@ -99,6 +99,23 @@ typedef struct hu_emotional_state {
 hu_emotional_state_t hu_conversation_detect_emotion(const hu_channel_history_entry_t *entries,
                                                     size_t count);
 
+/* Energy level for matching emotional energy of incoming message.
+ * Used to inject [ENERGY: ...] directive into the prompt. */
+typedef enum hu_energy_level {
+    HU_ENERGY_NEUTRAL,
+    HU_ENERGY_EXCITED,
+    HU_ENERGY_SAD,
+    HU_ENERGY_PLAYFUL,
+    HU_ENERGY_ANXIOUS,
+    HU_ENERGY_CALM,
+} hu_energy_level_t;
+
+hu_energy_level_t hu_conversation_detect_energy(const char *msg, size_t msg_len,
+                                                const hu_channel_history_entry_t *entries,
+                                                size_t count);
+
+size_t hu_conversation_build_energy_directive(hu_energy_level_t energy, char *buf, size_t cap);
+
 /* ── Typo correction fragment (*meant) ─────────────────────────────────── */
 
 /* Check if a typo was introduced and generate a correction fragment.

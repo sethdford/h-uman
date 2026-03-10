@@ -507,6 +507,84 @@ static void emotion_neutral_for_normal_chat(void) {
     HU_ASSERT_TRUE(emo.intensity < 0.3f);
 }
 
+/* ── Energy detection tests (F13) ─────────────────────────────────────── */
+
+static void energy_omg_amazing_excited(void) {
+    const char *msg = "omg that's amazing!!";
+    hu_energy_level_t e = hu_conversation_detect_energy(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_EQ(e, HU_ENERGY_EXCITED);
+}
+
+static void energy_sad_today_sad(void) {
+    const char *msg = "i'm so sad today";
+    hu_energy_level_t e = hu_conversation_detect_energy(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_EQ(e, HU_ENERGY_SAD);
+}
+
+static void energy_lol_ridiculous_playful(void) {
+    const char *msg = "lol you're ridiculous";
+    hu_energy_level_t e = hu_conversation_detect_energy(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_EQ(e, HU_ENERGY_PLAYFUL);
+}
+
+static void energy_worried_anxious(void) {
+    const char *msg = "i'm really worried about this";
+    hu_energy_level_t e = hu_conversation_detect_energy(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_EQ(e, HU_ENERGY_ANXIOUS);
+}
+
+static void energy_ok_sounds_good_neutral(void) {
+    const char *msg = "ok sounds good";
+    hu_energy_level_t e = hu_conversation_detect_energy(msg, strlen(msg), NULL, 0);
+    HU_ASSERT_EQ(e, HU_ENERGY_NEUTRAL);
+}
+
+static void energy_directive_excited_nonempty(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_energy_directive(HU_ENERGY_EXCITED, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "ENERGY"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "excited"));
+}
+
+static void energy_directive_sad_nonempty(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_energy_directive(HU_ENERGY_SAD, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "ENERGY"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "down"));
+}
+
+static void energy_directive_playful_nonempty(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_energy_directive(HU_ENERGY_PLAYFUL, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "ENERGY"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "playful"));
+}
+
+static void energy_directive_anxious_nonempty(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_energy_directive(HU_ENERGY_ANXIOUS, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "ENERGY"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "anxious"));
+}
+
+static void energy_directive_calm_nonempty(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_energy_directive(HU_ENERGY_CALM, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "ENERGY"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "calm"));
+}
+
+static void energy_directive_neutral_returns_zero(void) {
+    char buf[256];
+    size_t len = hu_conversation_build_energy_directive(HU_ENERGY_NEUTRAL, buf, sizeof(buf));
+    HU_ASSERT_EQ(len, 0u);
+}
+
 /* ── Honesty guardrail tests ─────────────────────────────────────────── */
 
 static void honesty_detects_action_query(void) {
@@ -1690,6 +1768,19 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(emotion_detects_positive);
     HU_RUN_TEST(emotion_detects_negative);
     HU_RUN_TEST(emotion_neutral_for_normal_chat);
+
+    /* Energy detection (F13) */
+    HU_RUN_TEST(energy_omg_amazing_excited);
+    HU_RUN_TEST(energy_sad_today_sad);
+    HU_RUN_TEST(energy_lol_ridiculous_playful);
+    HU_RUN_TEST(energy_worried_anxious);
+    HU_RUN_TEST(energy_ok_sounds_good_neutral);
+    HU_RUN_TEST(energy_directive_excited_nonempty);
+    HU_RUN_TEST(energy_directive_sad_nonempty);
+    HU_RUN_TEST(energy_directive_playful_nonempty);
+    HU_RUN_TEST(energy_directive_anxious_nonempty);
+    HU_RUN_TEST(energy_directive_calm_nonempty);
+    HU_RUN_TEST(energy_directive_neutral_returns_zero);
 
     /* Honesty guardrail */
     HU_RUN_TEST(honesty_detects_action_query);

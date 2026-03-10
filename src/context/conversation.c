@@ -1082,6 +1082,100 @@ hu_emotional_state_t hu_conversation_detect_emotion(const hu_channel_history_ent
     return state;
 }
 
+/* ── Energy level detection (F13) ─────────────────────────────────────── */
+
+static size_t count_exclamations(const char *msg, size_t msg_len) {
+    size_t n = 0;
+    for (size_t i = 0; i < msg_len; i++)
+        if (msg[i] == '!')
+            n++;
+    return n;
+}
+
+hu_energy_level_t hu_conversation_detect_energy(const char *msg, size_t msg_len,
+                                                const hu_channel_history_entry_t *entries,
+                                                size_t count) {
+    (void)entries;
+    (void)count;
+    if (!msg || msg_len == 0)
+        return HU_ENERGY_NEUTRAL;
+
+    /* Common neutral acknowledgments — return NEUTRAL before other heuristics */
+    if (str_contains_ci(msg, msg_len, "ok sounds good") ||
+        str_contains_ci(msg, msg_len, "sounds good") ||
+        (msg_len <= 4 &&
+         (str_contains_ci(msg, msg_len, "ok") || str_contains_ci(msg, msg_len, "k"))))
+        return HU_ENERGY_NEUTRAL;
+
+    /* Excited: positive valence, exclamation marks (3+), "omg", "amazing", "love", "so happy" */
+    if (str_contains_ci(msg, msg_len, "omg") || str_contains_ci(msg, msg_len, "amazing") ||
+        str_contains_ci(msg, msg_len, "love") || str_contains_ci(msg, msg_len, "so happy") ||
+        count_exclamations(msg, msg_len) >= 3)
+        return HU_ENERGY_EXCITED;
+
+    /* Sad: "sad", "depressed", "hurt", "lonely", "crying", "miss you", "broken" */
+    if (str_contains_ci(msg, msg_len, "sad") || str_contains_ci(msg, msg_len, "depressed") ||
+        str_contains_ci(msg, msg_len, "hurt") || str_contains_ci(msg, msg_len, "lonely") ||
+        str_contains_ci(msg, msg_len, "crying") || str_contains_ci(msg, msg_len, "miss you") ||
+        str_contains_ci(msg, msg_len, "broken"))
+        return HU_ENERGY_SAD;
+
+    /* Playful: "lol", "haha", "lmao", teasing, "you're ridiculous", "dead 💀" */
+    if (str_contains_ci(msg, msg_len, "lol") || str_contains_ci(msg, msg_len, "haha") ||
+        str_contains_ci(msg, msg_len, "lmao") ||
+        str_contains_ci(msg, msg_len, "you're ridiculous") ||
+        str_contains_ci(msg, msg_len, "youre ridiculous") || str_contains_ci(msg, msg_len, "dead"))
+        return HU_ENERGY_PLAYFUL;
+
+    /* Anxious: "worried", "stressed", "anxious", "scared", "nervous", "freaking out" */
+    if (str_contains_ci(msg, msg_len, "worried") || str_contains_ci(msg, msg_len, "stressed") ||
+        str_contains_ci(msg, msg_len, "anxious") || str_contains_ci(msg, msg_len, "scared") ||
+        str_contains_ci(msg, msg_len, "nervous") || str_contains_ci(msg, msg_len, "freaking out"))
+        return HU_ENERGY_ANXIOUS;
+
+    /* Calm: low intensity, neutral, short messages with no strong keywords */
+    if (msg_len < 30 && !str_contains_ci(msg, msg_len, "!") &&
+        !str_contains_ci(msg, msg_len, "?") && !str_contains_ci(msg, msg_len, "omg") &&
+        !str_contains_ci(msg, msg_len, "love") && !str_contains_ci(msg, msg_len, "hate"))
+        return HU_ENERGY_CALM;
+
+    return HU_ENERGY_NEUTRAL;
+}
+
+size_t hu_conversation_build_energy_directive(hu_energy_level_t energy, char *buf, size_t cap) {
+    if (!buf || cap == 0)
+        return 0;
+    if (energy == HU_ENERGY_NEUTRAL)
+        return 0;
+
+    const char *directive = NULL;
+    switch (energy) {
+    case HU_ENERGY_EXCITED:
+        directive = "[ENERGY: They're excited. Match their energy. Be enthusiastic.]";
+        break;
+    case HU_ENERGY_SAD:
+        directive = "[ENERGY: They're down. Be gentle, shorter, empathetic. No jokes.]";
+        break;
+    case HU_ENERGY_PLAYFUL:
+        directive = "[ENERGY: They're playful. Match the playfulness.]";
+        break;
+    case HU_ENERGY_ANXIOUS:
+        directive = "[ENERGY: They're anxious. Be calm, reassuring, grounding.]";
+        break;
+    case HU_ENERGY_CALM:
+        directive = "[ENERGY: They're calm. Keep it low-key and measured.]";
+        break;
+    default:
+        return 0;
+    }
+    size_t len = strlen(directive);
+    if (len >= cap)
+        len = cap - 1;
+    memcpy(buf, directive, len);
+    buf[len] = '\0';
+    return len;
+}
+
 /* ── Typo correction fragment (*meant) ─────────────────────────────────── */
 
 size_t hu_conversation_generate_correction(const char *original, size_t original_len,

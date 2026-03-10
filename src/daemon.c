@@ -2213,6 +2213,44 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                 }
 
+                /* F13: Energy matching — detect emotional energy of incoming message,
+                 * inject [ENERGY: ...] directive when not neutral. */
+                if (combined_len > 0) {
+                    hu_energy_level_t energy = hu_conversation_detect_energy(
+                        combined, combined_len, history_entries, history_count);
+                    if (energy != HU_ENERGY_NEUTRAL) {
+                        char energy_buf[128];
+                        size_t energy_len = hu_conversation_build_energy_directive(
+                            energy, energy_buf, sizeof(energy_buf));
+                        if (energy_len > 0) {
+                            if (convo_ctx) {
+                                size_t total = convo_ctx_len + energy_len + 3;
+                                char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                if (merged) {
+                                    memcpy(merged, convo_ctx, convo_ctx_len);
+                                    merged[convo_ctx_len] = '\n';
+                                    memcpy(merged + convo_ctx_len + 1, energy_buf, energy_len);
+                                    merged[convo_ctx_len + 1 + energy_len] = '\n';
+                                    merged[total - 1] = '\0';
+                                    alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                    convo_ctx = merged;
+                                    convo_ctx_len = total - 1;
+                                }
+                            } else {
+                                convo_ctx = (char *)alloc->alloc(alloc->ctx, energy_len + 2);
+                                if (convo_ctx) {
+                                    memcpy(convo_ctx, energy_buf, energy_len);
+                                    convo_ctx[energy_len] = '\n';
+                                    convo_ctx[energy_len + 1] = '\0';
+                                    convo_ctx_len = energy_len + 1;
+                                }
+                            }
+                            if (agent && agent->bth_metrics)
+                                agent->bth_metrics->emotions_surfaced++;
+                        }
+                    }
+                }
+
                 /* GraphRAG: inject knowledge graph context (cross-contact synthesis via batch_key)
                  */
 #ifdef HU_ENABLE_SQLITE
