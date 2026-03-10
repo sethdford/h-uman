@@ -1270,6 +1270,20 @@ size_t hu_conversation_build_deescalation_directive(char *buf, size_t cap) {
     return len;
 }
 
+/* ── Comfort pattern directive (F27) ───────────────────────────────────── */
+
+size_t hu_conversation_build_comfort_directive(const char *response_type, size_t type_len,
+                                               const char *emotion, size_t emotion_len, char *buf,
+                                               size_t cap) {
+    if (!buf || cap == 0 || !response_type || type_len == 0 || !emotion || emotion_len == 0)
+        return 0;
+    int n = snprintf(buf, cap, "[COMFORT: This contact responds well to %.*s when %.*s.]",
+                     (int)type_len, response_type, (int)emotion_len, emotion);
+    if (n <= 0 || (size_t)n >= cap)
+        return 0;
+    return (size_t)n;
+}
+
 /* ── Context modifiers (F16) ─────────────────────────────────────────── */
 
 #ifdef HU_HAS_PERSONA
@@ -2657,6 +2671,87 @@ size_t hu_conversation_pick_backchannel(uint32_t seed, char *buf, size_t cap) {
     memcpy(buf, phrase, len);
     buf[len] = '\0';
     return len;
+}
+
+/* ── Burst messaging (F45) ────────────────────────────────────────────── */
+
+static bool has_urgency_keywords(const char *msg, size_t msg_len) {
+    return str_contains_ci(msg, msg_len, "omg") || str_contains_ci(msg, msg_len, "oh my god") ||
+           str_contains_ci(msg, msg_len, "just saw") ||
+           str_contains_ci(msg, msg_len, "did you see") ||
+           str_contains_ci(msg, msg_len, "holy shit") ||
+           str_contains_ci(msg, msg_len, "emergency") ||
+           str_contains_ci(msg, msg_len, "are you okay") || count_exclamations(msg, msg_len) >= 3;
+}
+
+bool hu_conversation_should_burst(const char *msg, size_t msg_len,
+                                  const hu_channel_history_entry_t *entries, size_t count,
+                                  uint32_t seed, float probability) {
+    if (!msg || msg_len == 0)
+        return false;
+    if (!has_urgency_keywords(msg, msg_len))
+        return false;
+    hu_energy_level_t energy = hu_conversation_detect_energy(msg, msg_len, entries, count);
+    if (energy != HU_ENERGY_EXCITED && energy != HU_ENERGY_ANXIOUS)
+        return false;
+    if (probability <= 0.0f)
+        return false;
+    if (probability >= 1.0f)
+        return true;
+    uint32_t roll = seed % 100u;
+    return roll < (uint32_t)(probability * 100.0f);
+}
+
+size_t hu_conversation_build_burst_prompt(char *buf, size_t cap) {
+    static const char BURST_DIRECTIVE[] =
+        "[BURST MODE: Generate 3-4 SHORT independent messages as separate thoughts. "
+        "Output ONLY a JSON array: [\"msg1\", \"msg2\", \"msg3\"]. "
+        "Each 2-10 words. Rapid-fire thoughts, not one split message.]";
+    size_t len = sizeof(BURST_DIRECTIVE) - 1;
+    if (!buf || cap == 0)
+        return len;
+    if (len >= cap)
+        len = cap - 1;
+    memcpy(buf, BURST_DIRECTIVE, len);
+    buf[len] = '\0';
+    return len;
+}
+
+int hu_conversation_parse_burst_response(const char *response, size_t resp_len,
+                                         char messages[][256], size_t max_messages) {
+    if (!response || max_messages == 0)
+        return 0;
+    const char *p = response;
+    const char *end = response + resp_len;
+    while (p < end && *p != '[')
+        p++;
+    if (p >= end)
+        return 0;
+    p++; /* skip '[' */
+    int count = 0;
+    while (p < end && count < (int)max_messages) {
+        while (p < end && (*p == ' ' || *p == ',' || *p == '\n' || *p == '\r'))
+            p++;
+        if (p >= end || *p != '"')
+            break;
+        p++; /* skip opening quote */
+        const char *start = p;
+        while (p < end && *p != '"') {
+            if (*p == '\\' && p + 1 < end)
+                p++;
+            p++;
+        }
+        if (p >= end)
+            break;
+        size_t len = (size_t)(p - start);
+        if (len >= 256)
+            len = 255;
+        memcpy(messages[count], start, len);
+        messages[count][len] = '\0';
+        count++;
+        p++; /* skip closing quote */
+    }
+    return count;
 }
 
 /* ── Natural conversation drop-off classifier (F11) ──────────────────── */

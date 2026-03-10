@@ -1930,6 +1930,44 @@ static void backchannel_pick_deterministic(void) {
     HU_ASSERT_STR_EQ(buf1, buf2);
 }
 
+/* ── Burst messaging (F45) tests ──────────────────────────────────────── */
+
+static void burst_omg_did_you_see_prob_one_returns_true(void) {
+    const char *msg = "omg did you see the news!!!";
+    hu_channel_history_entry_t entries[1] = {make_entry(false, "hey", "12:00")};
+    bool r = hu_conversation_should_burst(msg, strlen(msg), entries, 1, 42u, 1.0f);
+    HU_ASSERT_TRUE(r);
+}
+
+static void burst_whats_for_dinner_returns_false(void) {
+    bool r = hu_conversation_should_burst("what's for dinner", 16, NULL, 0, 42u, 1.0f);
+    HU_ASSERT_FALSE(r);
+}
+
+static void burst_prob_zero_returns_false(void) {
+    const char *msg = "omg did you see the news!!!";
+    hu_channel_history_entry_t entries[1] = {make_entry(false, "hey", "12:00")};
+    bool r = hu_conversation_should_burst(msg, strlen(msg), entries, 1, 42u, 0.0f);
+    HU_ASSERT_FALSE(r);
+}
+
+static void burst_prompt_builder_contains_burst_mode(void) {
+    char buf[512];
+    size_t len = hu_conversation_build_burst_prompt(buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_TRUE(strstr(buf, "BURST MODE") != NULL);
+}
+
+static void burst_parse_json_array_returns_three_messages(void) {
+    const char *resp = "[\"oh my god\", \"just saw\", \"are you ok\"]";
+    char messages[4][256];
+    int n = hu_conversation_parse_burst_response(resp, strlen(resp), messages, 4);
+    HU_ASSERT_EQ(n, 3);
+    HU_ASSERT_STR_EQ(messages[0], "oh my god");
+    HU_ASSERT_STR_EQ(messages[1], "just saw");
+    HU_ASSERT_STR_EQ(messages[2], "are you ok");
+}
+
 /* ── Leave-on-read classifier (F46) tests ────────────────────────────── */
 
 static void leave_on_read_agree_to_disagree_seed_under_2_returns_true(void) {
@@ -2268,6 +2306,13 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(backchannel_narrative_prob_zero_returns_false);
     HU_RUN_TEST(backchannel_pick_returns_nonempty);
     HU_RUN_TEST(backchannel_pick_deterministic);
+
+    /* Burst messaging (F45) */
+    HU_RUN_TEST(burst_omg_did_you_see_prob_one_returns_true);
+    HU_RUN_TEST(burst_whats_for_dinner_returns_false);
+    HU_RUN_TEST(burst_prob_zero_returns_false);
+    HU_RUN_TEST(burst_prompt_builder_contains_burst_mode);
+    HU_RUN_TEST(burst_parse_json_array_returns_three_messages);
 
     /* Leave-on-read classifier (F46) */
     HU_RUN_TEST(leave_on_read_agree_to_disagree_seed_under_2_returns_true);

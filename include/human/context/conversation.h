@@ -131,6 +131,14 @@ hu_escalation_state_t hu_conversation_detect_escalation(const hu_channel_history
 
 size_t hu_conversation_build_deescalation_directive(char *buf, size_t cap);
 
+/* ── Comfort pattern directive (F27) ─────────────────────────────────── */
+
+/* Build [COMFORT: This contact responds well to {response_type} when {emotion}.]
+ * Writes into buf (up to cap bytes). Returns bytes written (0 if invalid args). */
+size_t hu_conversation_build_comfort_directive(const char *response_type, size_t type_len,
+                                               const char *emotion, size_t emotion_len, char *buf,
+                                               size_t cap);
+
 /* ── Context modifiers (F16) ─────────────────────────────────────────────── */
 
 /* Build [CONTEXT: ...] directives based on heavy topics, personal sharing,
@@ -275,6 +283,23 @@ bool hu_conversation_should_backchannel(const char *msg, size_t msg_len,
 
 /* Pick a backchannel phrase at random using seed. Returns length written. */
 size_t hu_conversation_pick_backchannel(uint32_t seed, char *buf, size_t cap);
+
+/* ── Burst messaging (F45) ────────────────────────────────────────────── */
+
+/* Returns true when message suggests urgency/excitement AND energy is EXCITED or ANXIOUS
+ * AND probability roll passes. Triggers: "omg", "oh my god", "just saw", "did you see",
+ * "holy shit", "emergency", "are you okay", "!!!" (3+ exclamation marks). */
+bool hu_conversation_should_burst(const char *msg, size_t msg_len,
+                                  const hu_channel_history_entry_t *entries, size_t count,
+                                  uint32_t seed, float probability);
+
+/* Build burst-mode prompt directive. Writes into buf, returns bytes written. */
+size_t hu_conversation_build_burst_prompt(char *buf, size_t cap);
+
+/* Parse JSON array from LLM burst response. Extracts up to max_messages strings into
+ * messages[][256]. Returns count. Simple parsing: find [, then quoted strings. */
+int hu_conversation_parse_burst_response(const char *response, size_t resp_len,
+                                         char messages[][256], size_t max_messages);
 
 /* ── URL extraction and link-sharing detection ───────────────────────── */
 

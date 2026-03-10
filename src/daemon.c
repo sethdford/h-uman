@@ -24,6 +24,7 @@
 #include "human/core/error.h"
 #include "human/core/process_util.h"
 #include "human/core/string.h"
+#include "human/memory/comfort_patterns.h"
 #include "human/memory/consolidation.h"
 #include "human/memory/deep_extract.h"
 #include "human/memory/emotional_graph.h"
@@ -35,6 +36,7 @@
 #include "human/memory/retrieval.h"
 #include "human/observability/bth_metrics.h"
 #include "human/persona/voice_maturity.h"
+#include "human/platform.h"
 #include <stdlib.h>
 #ifdef HU_HAS_PERSONA
 #include "human/persona.h"
@@ -137,6 +139,74 @@ static char *build_callback_context(hu_allocator_t *alloc, hu_memory_t *memory,
     *out_len = pos;
     return result;
 }
+
+#ifndef HU_IS_TEST
+/* F27: Classify our response type for comfort pattern learning.
+ * Heuristic: haha/lol/joke -> distraction; sorry/i understand/that sucks -> empathy;
+ * very short (<20 chars) -> space; you should/try this/maybe -> advice; default empathy. */
+static void classify_comfort_response_type(const char *response, size_t response_len,
+                                           char *out_type, size_t out_cap) {
+    if (!response || !out_type || out_cap < 8)
+        return;
+    out_type[0] = '\0';
+    if (response_len < 20) {
+        snprintf(out_type, out_cap, "space");
+        return;
+    }
+    char lower[256];
+    size_t copy = response_len < sizeof(lower) - 1 ? response_len : sizeof(lower) - 1;
+    for (size_t i = 0; i < copy; i++) {
+        char c = response[i];
+        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    lower[copy] = '\0';
+    if (strstr(lower, "haha") || strstr(lower, "lol") || strstr(lower, "hah ") ||
+        strstr(lower, " joke") || strstr(lower, "funny")) {
+        snprintf(out_type, out_cap, "distraction");
+        return;
+    }
+    if (strstr(lower, "you should") || strstr(lower, "try this") || strstr(lower, "maybe ") ||
+        strstr(lower, "have you tried") || strstr(lower, "i'd suggest")) {
+        snprintf(out_type, out_cap, "advice");
+        return;
+    }
+    if (strstr(lower, "sorry") || strstr(lower, "i understand") || strstr(lower, "that sucks") ||
+        strstr(lower, "i hear you") || strstr(lower, "that must be")) {
+        snprintf(out_type, out_cap, "empathy");
+        return;
+    }
+    snprintf(out_type, out_cap, "empathy");
+}
+
+/* F27: Score engagement from their reply. reply_len>20 + positive words -> 0.8;
+ * brief thanks -> 0.4; very short -> 0.2. */
+static float score_comfort_engagement(const char *reply, size_t reply_len) {
+    if (!reply)
+        return 0.2f;
+    if (reply_len <= 5)
+        return 0.2f;
+    char lower[256];
+    size_t copy = reply_len < sizeof(lower) - 1 ? reply_len : sizeof(lower) - 1;
+    for (size_t i = 0; i < copy; i++) {
+        char c = reply[i];
+        lower[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    lower[copy] = '\0';
+    if (strstr(lower, "thanks") || strstr(lower, "thank you") || strstr(lower, "ty ") ||
+        strstr(lower, "thx")) {
+        if (reply_len > 20)
+            return 0.8f;
+        return 0.4f;
+    }
+    if (strstr(lower, "yes") || strstr(lower, "yeah") || strstr(lower, "that helped") ||
+        strstr(lower, "good point") || strstr(lower, "makes sense")) {
+        return 0.8f;
+    }
+    if (reply_len > 20)
+        return 0.6f;
+    return 0.3f;
+}
+#endif
 
 /* Store a conversation summary as long-term memory.
  * Concatenates the user message and agent response, runs deep-extract
@@ -665,8 +735,8 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                             break;
 
                         char msg_buf[384];
-                        int w = snprintf(msg_buf, sizeof(msg_buf),
-                                         "hey how are you doing with %s?", m->topic);
+                        int w = snprintf(msg_buf, sizeof(msg_buf), "hey how are you doing with %s?",
+                                         m->topic);
                         if (w > 0 && (size_t)w < sizeof(msg_buf)) {
                             hu_error_t send_err = channels[c].channel->vtable->send(
                                 channels[c].channel->ctx, target_part, target_len, msg_buf,
@@ -1105,6 +1175,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         char key[64];
         time_t until;
     } leave_on_read_entries[HU_LEAVE_ON_READ_MAX];
+
+#define HU_COMFORT_PENDING_MAX 32
+    static struct {
+        char key[64];
+        char emotion[64];
+        char response_type[32];
+    } comfort_pending[HU_COMFORT_PENDING_MAX];
 
     static hu_bth_metrics_t bth_metrics;
     hu_bth_metrics_init(&bth_metrics);
@@ -2176,6 +2253,29 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         &history_count);
                 }
 
+#ifndef HU_IS_TEST
+                /* F27: If we have pending comfort record for this contact, their current message
+                 * is their reply. Score engagement and record, then clear pending. */
+                if (agent->memory) {
+                    for (size_t cp_i = 0; cp_i < HU_COMFORT_PENDING_MAX; cp_i++) {
+                        if (comfort_pending[cp_i].key[0] == '\0')
+                            continue;
+                        if (key_len < sizeof(comfort_pending[0].key) &&
+                            memcmp(comfort_pending[cp_i].key, batch_key, key_len) == 0 &&
+                            comfort_pending[cp_i].key[key_len] == '\0') {
+                            float eng = score_comfort_engagement(combined, combined_len);
+                            (void)hu_comfort_pattern_record(
+                                agent->memory, batch_key, key_len, comfort_pending[cp_i].emotion,
+                                strlen(comfort_pending[cp_i].emotion),
+                                comfort_pending[cp_i].response_type,
+                                strlen(comfort_pending[cp_i].response_type), eng);
+                            comfort_pending[cp_i].key[0] = '\0';
+                            break;
+                        }
+                    }
+                }
+#endif
+
                 /* 2b. Cross-channel awareness: load history from OTHER channels
                  * for the same contact (e.g. Gmail history when texting via iMessage) */
                 hu_channel_history_entry_t *cross_entries = NULL;
@@ -2452,6 +2552,61 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             }
                             if (agent && agent->bth_metrics)
                                 agent->bth_metrics->emotions_surfaced++;
+                        }
+                    }
+                }
+
+                /* F27: Comfort pattern — when emotion is negative, inject learned preference. */
+                if (history_entries && history_count > 0 && agent->memory) {
+                    hu_emotional_state_t emo_f27 =
+                        hu_conversation_detect_emotion(history_entries, history_count);
+                    bool emo_negative =
+                        emo_f27.concerning || (emo_f27.dominant_emotion &&
+                                               (strcmp(emo_f27.dominant_emotion, "sad") == 0 ||
+                                                strcmp(emo_f27.dominant_emotion, "stressed") == 0 ||
+                                                strcmp(emo_f27.dominant_emotion, "anxious") == 0 ||
+                                                strcmp(emo_f27.dominant_emotion, "worried") == 0));
+                    if (emo_negative) {
+                        const char *emotion_str =
+                            emo_f27.dominant_emotion && emo_f27.dominant_emotion[0]
+                                ? emo_f27.dominant_emotion
+                                : "concerning";
+                        char pref_type[32];
+                        size_t pref_len = 0;
+                        if (hu_comfort_pattern_get_preferred(
+                                alloc, agent->memory, batch_key, key_len, emotion_str,
+                                strlen(emotion_str), pref_type, sizeof(pref_type),
+                                &pref_len) == HU_OK &&
+                            pref_len > 0) {
+                            char comfort_buf[256];
+                            size_t comfort_len = hu_conversation_build_comfort_directive(
+                                pref_type, pref_len, emotion_str, strlen(emotion_str), comfort_buf,
+                                sizeof(comfort_buf));
+                            if (comfort_len > 0) {
+                                if (convo_ctx) {
+                                    size_t total = convo_ctx_len + comfort_len + 3;
+                                    char *merged = (char *)alloc->alloc(alloc->ctx, total);
+                                    if (merged) {
+                                        memcpy(merged, convo_ctx, convo_ctx_len);
+                                        merged[convo_ctx_len] = '\n';
+                                        memcpy(merged + convo_ctx_len + 1, comfort_buf,
+                                               comfort_len);
+                                        merged[convo_ctx_len + 1 + comfort_len] = '\n';
+                                        merged[total - 1] = '\0';
+                                        alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                                        convo_ctx = merged;
+                                        convo_ctx_len = total - 1;
+                                    }
+                                } else {
+                                    convo_ctx = (char *)alloc->alloc(alloc->ctx, comfort_len + 2);
+                                    if (convo_ctx) {
+                                        memcpy(convo_ctx, comfort_buf, comfort_len);
+                                        convo_ctx[comfort_len] = '\n';
+                                        convo_ctx[comfort_len + 1] = '\0';
+                                        convo_ctx_len = comfort_len + 1;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3553,6 +3708,77 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
+                /* F45: Burst messaging — 3–4 rapid-fire thoughts for urgent/exciting context */
+#ifndef HU_IS_TEST
+#ifdef HU_HAS_PERSONA
+                {
+                    float burst_prob = 0.03f;
+                    if (agent && agent->persona)
+                        burst_prob = agent->persona->humanization.burst_message_probability;
+                    uint32_t burst_seed =
+                        (uint32_t)time(NULL) * 1103515245u + 12345u + (uint32_t)(uintptr_t)combined;
+                    if (hu_conversation_should_burst(combined, combined_len, history_entries,
+                                                     history_count, burst_seed, burst_prob)) {
+                        char *burst_convo = NULL;
+                        size_t burst_convo_len = 0;
+                        char burst_buf[512];
+                        size_t burst_len =
+                            hu_conversation_build_burst_prompt(burst_buf, sizeof(burst_buf));
+                        if (burst_len > 0) {
+                            burst_convo_len = burst_len + 1 + (convo_ctx ? convo_ctx_len : 0) + 1;
+                            burst_convo = (char *)alloc->alloc(alloc->ctx, burst_convo_len);
+                            if (burst_convo) {
+                                memcpy(burst_convo, burst_buf, burst_len);
+                                burst_convo[burst_len] = '\n';
+                                if (convo_ctx && convo_ctx_len > 0)
+                                    memcpy(burst_convo + burst_len + 1, convo_ctx, convo_ctx_len);
+                                burst_convo[burst_convo_len - 1] = '\0';
+                                agent->conversation_context = burst_convo;
+                                agent->conversation_context_len = burst_convo_len - 1;
+                            }
+                        }
+                        if (ch->channel->vtable->start_typing)
+                            ch->channel->vtable->start_typing(ch->channel->ctx, batch_key, key_len);
+                        char *burst_response = NULL;
+                        size_t burst_response_len = 0;
+                        hu_error_t burst_err = hu_agent_turn(agent, combined, combined_len,
+                                                             &burst_response, &burst_response_len);
+                        if (ch->channel->vtable->stop_typing)
+                            ch->channel->vtable->stop_typing(ch->channel->ctx, batch_key, key_len);
+                        if (burst_err == HU_OK && burst_response && burst_response_len > 0 &&
+                            ch->channel->vtable->send) {
+                            char burst_msgs[4][256];
+                            int n = hu_conversation_parse_burst_response(
+                                burst_response, burst_response_len, burst_msgs, 4);
+                            for (int bi = 0; bi < n; bi++) {
+                                if (burst_msgs[bi][0]) {
+                                    ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len,
+                                                              burst_msgs[bi],
+                                                              strlen(burst_msgs[bi]), NULL, 0);
+                                    if (bi < n - 1) {
+                                        unsigned int delay_ms =
+                                            1000u + (burst_seed + (uint32_t)bi) % 2000u;
+                                        hu_platform_sleep_ms(delay_ms);
+                                    }
+                                }
+                            }
+                            fprintf(stderr, "[human] burst: %d messages for %.*s\n", n,
+                                    (int)(key_len > 20 ? 20 : key_len), batch_key);
+                        }
+                        if (burst_response)
+                            agent->alloc->free(agent->alloc->ctx, burst_response,
+                                               burst_response_len + 1);
+                        if (burst_convo) {
+                            alloc->free(alloc->ctx, burst_convo, burst_convo_len);
+                            agent->conversation_context = convo_ctx;
+                            agent->conversation_context_len = convo_ctx_len;
+                        }
+                        goto skip_llm_this_batch;
+                    }
+                }
+#endif
+#endif
+
                 bool retried = false;
                 fprintf(stderr, "[human] calling agent turn for %.*s...\n",
                         (int)(key_len > 20 ? 20 : key_len), batch_key);
@@ -3886,6 +4112,46 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 
 #ifndef HU_IS_TEST
+                /* F27: If we responded to negative emotion, set pending to record engagement
+                 * when we get their next reply. */
+                if (err == HU_OK && response && response_len > 0 && agent->memory &&
+                    history_entries && history_count > 0) {
+                    hu_emotional_state_t emo_pend =
+                        hu_conversation_detect_emotion(history_entries, history_count);
+                    bool should_pend = emo_pend.concerning ||
+                                       (emo_pend.dominant_emotion &&
+                                        (strcmp(emo_pend.dominant_emotion, "sad") == 0 ||
+                                         strcmp(emo_pend.dominant_emotion, "stressed") == 0 ||
+                                         strcmp(emo_pend.dominant_emotion, "anxious") == 0 ||
+                                         strcmp(emo_pend.dominant_emotion, "worried") == 0));
+                    if (should_pend && key_len < sizeof(comfort_pending[0].key)) {
+                        char resp_type[32];
+                        classify_comfort_response_type(response, response_len, resp_type,
+                                                       sizeof(resp_type));
+                        const char *emotion_str =
+                            emo_pend.dominant_emotion && emo_pend.dominant_emotion[0]
+                                ? emo_pend.dominant_emotion
+                                : "concerning";
+                        size_t slot = HU_COMFORT_PENDING_MAX;
+                        for (size_t cp_i = 0; cp_i < HU_COMFORT_PENDING_MAX; cp_i++) {
+                            if (comfort_pending[cp_i].key[0] == '\0' ||
+                                (memcmp(comfort_pending[cp_i].key, batch_key, key_len) == 0 &&
+                                 comfort_pending[cp_i].key[key_len] == '\0')) {
+                                slot = cp_i;
+                                break;
+                            }
+                        }
+                        if (slot < HU_COMFORT_PENDING_MAX) {
+                            memcpy(comfort_pending[slot].key, batch_key, key_len);
+                            comfort_pending[slot].key[key_len] = '\0';
+                            snprintf(comfort_pending[slot].emotion,
+                                     sizeof(comfort_pending[slot].emotion), "%s", emotion_str);
+                            snprintf(comfort_pending[slot].response_type,
+                                     sizeof(comfort_pending[slot].response_type), "%s", resp_type);
+                        }
+                    }
+                }
+
                 /* Episodic: summarize this interaction */
                 if (err == HU_OK && response && response_len > 0 && agent->memory) {
                     const char *ep_msgs[2] = {combined, response};
