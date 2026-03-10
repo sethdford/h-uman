@@ -644,6 +644,82 @@ static void escalation_deescalation_directive_nonempty(void) {
     HU_ASSERT_NOT_NULL(strstr(buf, "empathetic"));
 }
 
+#ifdef HU_HAS_PERSONA
+/* ── Context modifiers tests (F16) ─────────────────────────────────────── */
+
+static void context_modifiers_heavy_topic_includes_directive(void) {
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "my dad passed last week", "12:00"),
+        make_entry(true, "i'm so sorry", "12:01"),
+    };
+    hu_emotional_state_t emo = hu_conversation_detect_emotion(entries, 2);
+    char buf[512];
+    size_t len = hu_conversation_build_context_modifiers(entries, 2, &emo, NULL, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "Heavy topic"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "Reduce humor"));
+}
+
+static void context_modifiers_personal_sharing_includes_directive(void) {
+    hu_channel_history_entry_t entries[2] = {
+        make_entry(false, "can i be honest, i've been struggling", "12:00"),
+        make_entry(true, "hey", "12:01"),
+    };
+    hu_emotional_state_t emo = hu_conversation_detect_emotion(entries, 2);
+    char buf[512];
+    size_t len = hu_conversation_build_context_modifiers(entries, 2, &emo, NULL, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "sharing something personal"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "Boost warmth"));
+}
+
+static void context_modifiers_high_emotion_includes_directive(void) {
+    hu_channel_history_entry_t entries[4] = {
+        make_entry(false, "i'm so sad and depressed", "12:00"),
+        make_entry(true, "oh no", "12:01"),
+        make_entry(false, "everything is terrible and i'm crying", "12:02"),
+        make_entry(true, "i'm here", "12:03"),
+    };
+    hu_emotional_state_t emo = hu_conversation_detect_emotion(entries, 4);
+    char buf[512];
+    size_t len = hu_conversation_build_context_modifiers(entries, 4, &emo, NULL, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "High emotion"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "shorter sentences"));
+}
+
+static void context_modifiers_early_turn_includes_directive(void) {
+    hu_channel_history_entry_t entries[4] = {
+        make_entry(false, "hey", "12:00"),
+        make_entry(true, "hi", "12:01"),
+        make_entry(false, "how are you", "12:02"),
+        make_entry(true, "good", "12:03"),
+    };
+    hu_emotional_state_t emo = hu_conversation_detect_emotion(entries, 4);
+    char buf[512];
+    size_t len = hu_conversation_build_context_modifiers(entries, 4, &emo, NULL, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "Early in conversation"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "warmer"));
+}
+
+static void context_modifiers_combined_includes_multiple_lines(void) {
+    hu_channel_history_entry_t entries[4] = {
+        make_entry(false, "can i be honest, my dad passed last week", "12:00"),
+        make_entry(true, "oh no", "12:01"),
+        make_entry(false, "i've been meaning to tell you", "12:02"),
+    };
+    hu_emotional_state_t emo = hu_conversation_detect_emotion(entries, 3);
+    emo.intensity = 1.0f; /* force high emotion for combined test */
+    char buf[512];
+    size_t len = hu_conversation_build_context_modifiers(entries, 3, &emo, NULL, buf, sizeof(buf));
+    HU_ASSERT_TRUE(len > 0);
+    HU_ASSERT_NOT_NULL(strstr(buf, "Heavy topic"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "sharing something personal"));
+    HU_ASSERT_NOT_NULL(strstr(buf, "Early in conversation"));
+}
+#endif /* HU_HAS_PERSONA */
+
 /* ── Honesty guardrail tests ─────────────────────────────────────────── */
 
 static void honesty_detects_action_query(void) {
@@ -1847,6 +1923,15 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(escalation_two_negative_not_escalating);
     HU_RUN_TEST(escalation_mixed_positive_negative_not_escalating);
     HU_RUN_TEST(escalation_deescalation_directive_nonempty);
+
+#ifdef HU_HAS_PERSONA
+    /* Context modifiers (F16) */
+    HU_RUN_TEST(context_modifiers_heavy_topic_includes_directive);
+    HU_RUN_TEST(context_modifiers_personal_sharing_includes_directive);
+    HU_RUN_TEST(context_modifiers_high_emotion_includes_directive);
+    HU_RUN_TEST(context_modifiers_early_turn_includes_directive);
+    HU_RUN_TEST(context_modifiers_combined_includes_multiple_lines);
+#endif
 
     /* Honesty guardrail */
     HU_RUN_TEST(honesty_detects_action_query);
