@@ -138,4 +138,8 @@ hu_error_t hu_superhuman_pattern_record(void *sqlite_ctx, const char *contact_id
 hu_error_t hu_superhuman_pattern_list(void *sqlite_ctx, hu_allocator_t *alloc,
     const char *contact_id, size_t contact_id_len, size_t limit, char **out_json, size_t *out_len);
 
+hu_error_t hu_superhuman_memory_build_context(void *sqlite_ctx, hu_allocator_t *alloc,
+    const char *contact_id, size_t contact_id_len, bool include_avoidance,
+    char **out, size_t *out_len);
+
 #endif /* HU_MEMORY_SUPERHUMAN_H */

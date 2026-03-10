@@ -1072,6 +1072,112 @@ hu_error_t hu_superhuman_pattern_list(void *sqlite_ctx, hu_allocator_t *alloc,
     return HU_OK;
 }
 
+hu_error_t hu_superhuman_memory_build_context(void *sqlite_ctx, hu_allocator_t *alloc,
+    const char *contact_id, size_t contact_id_len, bool include_avoidance,
+    char **out, size_t *out_len) {
+    if (!sqlite_ctx || !alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+
+    sqlite3 *db = get_db(sqlite_ctx);
+    if (!db)
+        return HU_ERR_NOT_SUPPORTED;
+
+    size_t buf_len = 0;
+    size_t buf_cap = 256;
+    char *buf = (char *)alloc->alloc(alloc->ctx, buf_cap);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    buf[0] = '\0';
+
+    hu_error_t err = append_formatted(&buf, &buf_len, &buf_cap, alloc, "### Superhuman Memory\n\n");
+    if (err != HU_OK) {
+        alloc->free(alloc->ctx, buf, buf_cap);
+        return err;
+    }
+
+    char *mm = NULL;
+    size_t mm_len = 0;
+    if (hu_superhuman_micro_moment_list(sqlite_ctx, alloc, contact_id, contact_id_len, 10,
+                                        &mm, &mm_len) == HU_OK && mm && mm_len > 0 &&
+        strstr(mm, "(none)") == NULL) {
+        err = append_formatted(&buf, &buf_len, &buf_cap, alloc, "%s\n", mm);
+        alloc->free(alloc->ctx, mm, mm_len);
+        if (err != HU_OK) {
+            alloc->free(alloc->ctx, buf, buf_cap);
+            return err;
+        }
+    } else if (mm) {
+        alloc->free(alloc->ctx, mm, mm_len);
+    }
+
+    hu_inside_joke_t *jokes = NULL;
+    size_t jokes_count = 0;
+    if (hu_superhuman_inside_joke_list(sqlite_ctx, alloc, contact_id, contact_id_len, 5,
+                                       &jokes, &jokes_count) == HU_OK && jokes && jokes_count > 0) {
+        err = append_formatted(&buf, &buf_len, &buf_cap, alloc, "Inside jokes:\n");
+        if (err != HU_OK) {
+            hu_superhuman_inside_joke_free(alloc, jokes, jokes_count);
+            alloc->free(alloc->ctx, buf, buf_cap);
+            return err;
+        }
+        for (size_t i = 0; i < jokes_count; i++) {
+            err = append_formatted(&buf, &buf_len, &buf_cap, alloc,
+                "- %s | %s\n", jokes[i].context, jokes[i].punchline);
+            if (err != HU_OK) {
+                hu_superhuman_inside_joke_free(alloc, jokes, jokes_count);
+                alloc->free(alloc->ctx, buf, buf_cap);
+                return err;
+            }
+        }
+        hu_superhuman_inside_joke_free(alloc, jokes, jokes_count);
+    }
+
+    char *growth = NULL;
+    size_t growth_len = 0;
+    if (hu_superhuman_growth_list_recent(sqlite_ctx, alloc, contact_id, contact_id_len, 5,
+                                         &growth, &growth_len) == HU_OK && growth &&
+        growth_len > 0 && strstr(growth, "(none)") == NULL) {
+        err = append_formatted(&buf, &buf_len, &buf_cap, alloc, "\n%s\n", growth);
+        alloc->free(alloc->ctx, growth, growth_len);
+        if (err != HU_OK) {
+            alloc->free(alloc->ctx, buf, buf_cap);
+            return err;
+        }
+    } else if (growth) {
+        alloc->free(alloc->ctx, growth, growth_len);
+    }
+
+    if (include_avoidance) {
+        char *avoid = NULL;
+        size_t avoid_len = 0;
+        if (hu_superhuman_avoidance_list(sqlite_ctx, alloc, contact_id, contact_id_len,
+                                         &avoid, &avoid_len) == HU_OK && avoid && avoid_len > 0 &&
+            strstr(avoid, "(none)") == NULL) {
+            err = append_formatted(&buf, &buf_len, &buf_cap, alloc, "\n%s\n", avoid);
+            alloc->free(alloc->ctx, avoid, avoid_len);
+            if (err != HU_OK) {
+                alloc->free(alloc->ctx, buf, buf_cap);
+                return err;
+            }
+        } else if (avoid) {
+            alloc->free(alloc->ctx, avoid, avoid_len);
+        }
+    }
+
+    if (buf_len <= sizeof("### Superhuman Memory\n\n") - 1) {
+        alloc->free(alloc->ctx, buf, buf_cap);
+        *out = NULL;
+        *out_len = 0;
+        return HU_OK;
+    }
+
+    *out = buf;
+    *out_len = buf_len;
+    return HU_OK;
+}
+
 #else /* !HU_ENABLE_SQLITE */
 
 #include "human/core/allocator.h"
