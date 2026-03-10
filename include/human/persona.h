@@ -210,6 +210,18 @@ typedef struct hu_context_modifiers {
     float early_turn_humanization_boost; /* default 1.4 */
 } hu_context_modifiers_t;
 
+/* Important date — birthday, holiday, anniversary (MM-DD format) */
+typedef struct hu_important_date {
+    char date[8];      /* "07-15" MM-DD format */
+    char type[32];     /* "birthday", "holiday", "anniversary" */
+    char message[256]; /* "happy birthday min!" */
+} hu_important_date_t;
+
+/* Context awareness — calendar and situational context */
+typedef struct hu_context_awareness {
+    bool calendar_enabled;
+} hu_context_awareness_t;
+
 /* Inner world — deep personality content surfaced by relationship stage */
 typedef struct hu_inner_world {
     char **contradictions;
@@ -288,6 +300,9 @@ typedef struct hu_persona {
     char *time_overlay_evening;
     hu_humanization_config_t humanization;
     hu_context_modifiers_t context_modifiers;
+    hu_important_date_t *important_dates;
+    size_t important_dates_count;
+    hu_context_awareness_t context_awareness;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).

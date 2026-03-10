@@ -321,6 +321,11 @@ void hu_persona_deinit(hu_allocator_t *alloc, hu_persona_t *persona) {
                     persona->example_banks_count * sizeof(hu_persona_example_bank_t));
     }
 
+    if (persona->important_dates) {
+        alloc->free(alloc->ctx, persona->important_dates,
+                    persona->important_dates_count * sizeof(hu_important_date_t));
+    }
+
     if (persona->contacts) {
         for (size_t i = 0; i < persona->contacts_count; i++)
             free_contact_profile(alloc, &persona->contacts[i]);
@@ -1269,6 +1274,47 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             (float)hu_json_get_number(ctx_mod, "high_emotion_breathing_boost", 1.5);
         out->context_modifiers.early_turn_humanization_boost =
             (float)hu_json_get_number(ctx_mod, "early_turn_humanization_boost", 1.4);
+    }
+
+    /* Important dates (default: empty array) */
+    out->important_dates = NULL;
+    out->important_dates_count = 0;
+    hu_json_value_t *id_arr = hu_json_object_get(root, "important_dates");
+    if (id_arr && id_arr->type == HU_JSON_ARRAY && id_arr->data.array.items) {
+        size_t n = id_arr->data.array.len;
+        if (n > 0) {
+            hu_important_date_t *dates =
+                (hu_important_date_t *)alloc->alloc(alloc->ctx, n * sizeof(hu_important_date_t));
+            if (dates) {
+                memset(dates, 0, n * sizeof(hu_important_date_t));
+                size_t count = 0;
+                for (size_t i = 0; i < n; i++) {
+                    const hu_json_value_t *item = id_arr->data.array.items[i];
+                    if (!item || item->type != HU_JSON_OBJECT)
+                        continue;
+                    const char *d = hu_json_get_string(item, "date");
+                    const char *t = hu_json_get_string(item, "type");
+                    const char *m = hu_json_get_string(item, "message");
+                    if (d)
+                        (void)snprintf(dates[count].date, sizeof(dates[count].date), "%s", d);
+                    if (t)
+                        (void)snprintf(dates[count].type, sizeof(dates[count].type), "%s", t);
+                    if (m)
+                        (void)snprintf(dates[count].message, sizeof(dates[count].message), "%s", m);
+                    count++;
+                }
+                out->important_dates = dates;
+                out->important_dates_count = count;
+            }
+        }
+    }
+
+    /* Context awareness (default: calendar_enabled=false) */
+    out->context_awareness.calendar_enabled = false;
+    hu_json_value_t *ctx_aw = hu_json_object_get(root, "context_awareness");
+    if (ctx_aw && ctx_aw->type == HU_JSON_OBJECT) {
+        out->context_awareness.calendar_enabled =
+            hu_json_get_bool(ctx_aw, "calendar_enabled", false);
     }
 
     /* Parse contacts */

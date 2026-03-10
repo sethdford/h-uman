@@ -1816,6 +1816,53 @@ static void test_persona_load_json_humanization_defaults_when_absent(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+static void test_persona_load_json_important_dates_parses(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"dates_test\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
+                       "\"important_dates\":["
+                       "{\"date\":\"07-15\",\"type\":\"birthday\",\"message\":\"happy birthday min!\"},"
+                       "{\"date\":\"12-25\",\"type\":\"holiday\",\"message\":\"merry christmas!\"}"
+                       "]}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.important_dates_count, 2);
+    HU_ASSERT_NOT_NULL(p.important_dates);
+    HU_ASSERT_STR_EQ(p.important_dates[0].date, "07-15");
+    HU_ASSERT_STR_EQ(p.important_dates[0].type, "birthday");
+    HU_ASSERT_STR_EQ(p.important_dates[0].message, "happy birthday min!");
+    HU_ASSERT_STR_EQ(p.important_dates[1].date, "12-25");
+    HU_ASSERT_STR_EQ(p.important_dates[1].type, "holiday");
+    HU_ASSERT_STR_EQ(p.important_dates[1].message, "merry christmas!");
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_load_json_context_awareness_calendar_enabled(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"ctx_aware\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
+                       "\"context_awareness\":{\"calendar_enabled\":true}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(p.context_awareness.calendar_enabled);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_load_json_important_dates_context_awareness_defaults(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json = "{\"version\":1,\"name\":\"no_dates_or_ctx\","
+                       "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(p.important_dates_count, 0);
+    HU_ASSERT_NULL(p.important_dates);
+    HU_ASSERT_FALSE(p.context_awareness.calendar_enabled);
+    hu_persona_deinit(&alloc, &p);
+}
+
 static void test_overlay_typing_quirks_in_prompt(void) {
     hu_allocator_t alloc = hu_system_allocator();
     char *quirks[] = {"lowercase", "no_periods"};
@@ -3309,6 +3356,11 @@ void run_persona_tests(void) {
     /* Humanization and context_modifiers */
     HU_RUN_TEST(test_persona_load_json_humanization_block_parses_values);
     HU_RUN_TEST(test_persona_load_json_humanization_defaults_when_absent);
+
+    /* Important dates and context_awareness */
+    HU_RUN_TEST(test_persona_load_json_important_dates_parses);
+    HU_RUN_TEST(test_persona_load_json_context_awareness_calendar_enabled);
+    HU_RUN_TEST(test_persona_load_json_important_dates_context_awareness_defaults);
 
     /* Rich persona elements (Tier 1–3) */
     HU_RUN_TEST(test_persona_load_json_rich_persona);
