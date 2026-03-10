@@ -3072,6 +3072,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     convo_ctx_len = 32768;
                 }
 
+                /* Prepend group-chat instruction when responding in a group */
+                if (msgs[batch_start].is_group) {
+                    const char *hint = HU_GROUP_CHAT_PROMPT_HINT;
+                    size_t hint_len = sizeof(HU_GROUP_CHAT_PROMPT_HINT) - 1;
+                    size_t new_len = hint_len + (convo_ctx ? convo_ctx_len : 0);
+                    char *new_ctx = (char *)alloc->alloc(alloc->ctx, new_len + 1);
+                    if (new_ctx) {
+                        memcpy(new_ctx, hint, hint_len);
+                        if (convo_ctx && convo_ctx_len > 0)
+                            memcpy(new_ctx + hint_len, convo_ctx, convo_ctx_len);
+                        new_ctx[new_len] = '\0';
+                        if (convo_ctx)
+                            alloc->free(alloc->ctx, convo_ctx, convo_ctx_len + 1);
+                        convo_ctx = new_ctx;
+                        convo_ctx_len = new_len;
+                    }
+                }
+
                 /* Set agent per-turn context fields (prompt builder reads these) */
                 agent->contact_context = contact_ctx;
                 agent->contact_context_len = contact_ctx_len;
