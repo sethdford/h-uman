@@ -1,3 +1,5 @@
+typedef int hu_opinions_unused_; /* ISO C requires non-empty translation unit */
+
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/core/allocator.h"

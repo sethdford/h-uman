@@ -1,3 +1,5 @@
+typedef int hu_test_opinions_unused_;
+
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/core/allocator.h"

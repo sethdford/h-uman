@@ -1,3 +1,5 @@
+typedef int hu_theory_of_mind_unused_;
+
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/context/theory_of_mind.h"

@@ -1,3 +1,5 @@
+typedef int hu_anticipatory_unused_;
+
 #ifdef HU_ENABLE_SQLITE
 
 #include "human/context/anticipatory.h"
