@@ -182,4 +182,12 @@ void run_consolidation_engine_tests(void) {
     HU_RUN_TEST(consolidation_engine_run_scheduled_respects_time_gating);
 }
 
+#else
+
+typedef int hu_consolidation_engine_test_unused_;
+
+void run_consolidation_engine_tests(void) {
+    (void)0;
+}
+
 #endif /* HU_ENABLE_SQLITE */

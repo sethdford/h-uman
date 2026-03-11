@@ -97,7 +97,7 @@ static void bth_conversation_intelligence_pipeline(void) {
 
     char rep_buf[256];
     size_t rep_len = hu_conversation_detect_repetition(entries, 12, rep_buf, sizeof(rep_buf));
-    HU_ASSERT_TRUE(rep_len >= 0);
+    HU_ASSERT_TRUE(rep_len <= sizeof(rep_buf));
 }
 
 static void bth_emotional_graph_pipeline(void) {

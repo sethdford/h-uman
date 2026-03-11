@@ -6,7 +6,8 @@
 #include <sqlite3.h>
 #endif
 
-/* --- Pure computation (no DB) --- */
+/* --- Pure computation (no DB, but implementation is in a SQLite-guarded file) --- */
+#ifdef HU_ENABLE_SQLITE
 static void forgetting_decayed_salience_30_days_rate_01_expected_025(void) {
     int64_t created = 0;
     int64_t now = 30 * 86400; /* 30 days later */
@@ -37,7 +38,6 @@ static void forgetting_decayed_salience_zero_initial_returns_zero(void) {
     HU_ASSERT_FLOAT_EQ(s, 0.0, 0.001);
 }
 
-#ifdef HU_ENABLE_SQLITE
 static void forgetting_batch_decay_scores_decrease(void) {
     sqlite3 *db = NULL;
     int rc = sqlite3_open(":memory:", &db);
@@ -128,11 +128,11 @@ static void forgetting_batch_decay_scores_decrease(void) {
 
 void run_forgetting_curve_tests(void) {
     HU_TEST_SUITE("forgetting_curve");
+#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(forgetting_decayed_salience_30_days_rate_01_expected_025);
     HU_RUN_TEST(forgetting_decayed_salience_emotional_anchor_slower_decay);
     HU_RUN_TEST(forgetting_decayed_salience_zero_days_unchanged);
     HU_RUN_TEST(forgetting_decayed_salience_zero_initial_returns_zero);
-#ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(forgetting_batch_decay_scores_decrease);
 #endif
 }

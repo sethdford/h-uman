@@ -18,6 +18,7 @@
 #include "human/agent/proactive.h"
 #include "human/agent/theory_of_mind.h"
 #include "human/agent/weather_awareness.h"
+#include "human/agent/weather_fetch.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/context/event_extract.h"
@@ -800,11 +801,8 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
     size_t weather_ctx_len = 0;
     if (agent && agent->persona && agent->persona->location[0]) {
         hu_weather_context_t wx = {0};
-        /* TODO: populate from actual weather API when available */
-#ifdef HU_IS_TEST
-        /* Stub for tests: empty context; should_mention returns false */
-        (void)wx;
-#endif
+        (void)hu_weather_fetch(alloc, agent->persona->location,
+                               strlen(agent->persona->location), NULL, &wx);
         time_t now_ts = time(NULL);
         struct tm tm_buf;
         uint8_t bth_hour = 12;
@@ -3424,10 +3422,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     /* 10. Weather awareness (F51) — inject notable weather when location available */
                     if (agent->persona->location[0]) {
                         hu_weather_context_t wx = {0};
-                        /* TODO: populate from actual weather API when available */
-#ifdef HU_IS_TEST
-                        (void)wx;
-#endif
+                        (void)hu_weather_fetch(alloc, agent->persona->location,
+                                               strlen(agent->persona->location), NULL, &wx);
                         time_t wx_now = time(NULL);
                         struct tm wx_tm;
                         uint8_t wx_hour = 12;

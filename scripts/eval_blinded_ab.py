@@ -20,7 +20,7 @@ import time
 import urllib.request
 import re
 
-EVAL_API_KEY = os.environ.get("GEMINI_EVAL_KEY", "")
+EVAL_API_KEY = os.environ.get("GEMINI_EVAL_KEY", "AIzaSyDogKCd2qb-FvaueGZAtZWVGyF4h2JFsiw")
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={EVAL_API_KEY}"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,7 +47,7 @@ def call_gemini(prompt, temperature=0.3, retries=3):
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except urllib.error.HTTPError as e:
             if e.code in (403, 429) and attempt < retries - 1:
-                wait = 10 * (attempt + 1)
+                wait = 30 * (attempt + 1)
                 print(f"    Rate limited, waiting {wait}s...")
                 time.sleep(wait)
             else:

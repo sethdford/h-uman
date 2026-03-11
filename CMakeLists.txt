@@ -410,6 +410,7 @@ set(HU_CORE_SOURCES
     src/agent/proactive.c
     src/agent/proactive_ext.c
     src/agent/weather_awareness.c
+    src/agent/weather_fetch.c
     src/agent/timing.c
     src/agent/governor.c
     src/agent/arbitrator.c
