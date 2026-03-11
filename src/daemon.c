@@ -76,6 +76,7 @@
 #include "human/memory/degradation.h"
 #include "human/context/protective.h"
 #include "human/context/authentic.h"
+#include "human/context/cognitive_load.h"
 #include "human/context/intelligence.h"
 #include "human/context/rel_dynamics.h"
 #include "human/context/behavioral.h"
@@ -970,6 +971,19 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
     }
 #endif
 
+#ifdef HU_ENABLE_SQLITE
+    /* Phase 9: F103 Life narration — check for unsent narration events (global) */
+    if (agent && agent->memory) {
+        sqlite3 *p9_db = hu_sqlite_memory_get_db(agent->memory);
+        if (p9_db) {
+            int64_t narr_ids[3];
+            int narr_count = hu_narration_events_unsent(p9_db, 0.7f, narr_ids, 3);
+            if (narr_count > 0)
+                fprintf(stderr, "[human] Phase 9: %d narration events available\n", narr_count);
+        }
+    }
+#endif
+
     for (size_t i = 0; i < agent->persona->contacts_count; i++) {
         const hu_contact_profile_t *cp = &agent->persona->contacts[i];
         if (!cp->proactive_checkin || !cp->proactive_channel || !cp->contact_id)
@@ -1001,6 +1015,24 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                                          strlen(cp->contact_id), (int64_t)now, &preds, &pred_count);
             if (preds)
                 hu_anticipatory_predictions_free(alloc, preds, pred_count);
+        }
+
+        /* Phase 9: F115 Bad-day recovery, F114 Thread follow-ups */
+        if (agent->memory && cp->contact_id) {
+            sqlite3 *p9_db = hu_sqlite_memory_get_db(agent->memory);
+            if (p9_db) {
+                int needs_recovery = hu_interaction_quality_needs_recovery(
+                    p9_db, cp->contact_id, 0.3f, 7200, 43200, (int64_t)now);
+                if (needs_recovery > 0) {
+                    fprintf(stderr, "[human] Phase 9: recovery needed for %s\n", cp->contact_id);
+                    hu_interaction_quality_mark_recovered(p9_db, cp->contact_id, (int64_t)now);
+                }
+                int thread_followups = hu_thread_needs_followup(
+                    p9_db, cp->contact_id, 14400, 259200, (int64_t)now);
+                if (thread_followups > 0)
+                    fprintf(stderr, "[human] Phase 9: %d thread follow-ups for %s\n",
+                            thread_followups, cp->contact_id);
+            }
         }
 #endif
 
@@ -3527,6 +3559,79 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
 #endif
 
+                    /* Phase 9 (F102-F115): Authentic existence context injection */
+                    {
+                        time_t t_p9 = time(NULL);
+                        /* F102: Cognitive load */
+                        hu_cognitive_load_config_t cog_cfg = {
+                            .peak_hour_start = 9, .peak_hour_end = 12,
+                            .low_hour_start = 22, .low_hour_end = 6,
+                            .fatigue_threshold = 12,
+                            .monday_penalty = 0.15f, .friday_bonus = 0.1f
+                        };
+                        hu_cognitive_load_state_t cog =
+                            hu_cognitive_load_calculate(&cog_cfg, 0, t_p9);
+                        const char *cog_hint = hu_cognitive_load_prompt_hint(&cog);
+
+                        /* F104: Physical state */
+                        hu_physical_config_t phys_cfg = {
+                            .exercises = true,
+                            .exercise_days = {1, 3, 5},
+                            .exercise_day_count = 3,
+                            .coffee_drinker = true,
+                            .mentions_frequency = 0.3f
+                        };
+                        hu_physical_state_t phys =
+                            hu_physical_state_from_schedule(&phys_cfg, t_p9);
+                        const char *phys_hint = hu_physical_state_prompt_hint(phys);
+
+                        if (cog_hint) {
+                            fprintf(stderr, "[human] Phase 9: cognitive hint: capacity=%.2f\n",
+                                    cog.capacity);
+                            size_t ch_len = strlen(cog_hint);
+                            char *ch_copy = (char *)alloc->alloc(alloc->ctx, ch_len + 1);
+                            if (ch_copy) {
+                                memcpy(ch_copy, cog_hint, ch_len + 1);
+                                PHASE6_APPEND(ch_copy, ch_len);
+                            }
+                        }
+                        if (phys_hint) {
+                            fprintf(stderr, "[human] Phase 9: physical state: %s\n",
+                                    hu_physical_state_name(phys));
+                            size_t ph_len = strlen(phys_hint);
+                            char *ph_copy = (char *)alloc->alloc(alloc->ctx, ph_len + 1);
+                            if (ph_copy) {
+                                memcpy(ph_copy, phys_hint, ph_len + 1);
+                                PHASE6_APPEND(ph_copy, ph_len);
+                            }
+                        }
+
+                        /* F105: Error injection (3% chance) */
+                        static uint32_t error_seed = 0;
+                        if (hu_should_inject_error(0.03f, error_seed++)) {
+                            const char *err_p = hu_error_injection_prompt();
+                            if (err_p) {
+                                size_t el = strlen(err_p);
+                                char *ec = (char *)alloc->alloc(alloc->ctx, el + 1);
+                                if (ec) { memcpy(ec, err_p, el + 1); PHASE6_APPEND(ec, el); }
+                            }
+                            fprintf(stderr, "[human] Phase 9: error injection active\n");
+                        }
+
+                        /* F106: Mundane complaint */
+                        struct tm tm_p9;
+                        struct tm *lt_p9 = hu_platform_localtime_r(&t_p9, &tm_p9);
+                        if (lt_p9) {
+                            const char *complaint = hu_mundane_complaint_prompt(
+                                lt_p9->tm_hour, lt_p9->tm_wday, phys, NULL);
+                            if (complaint) {
+                                size_t cl = strlen(complaint);
+                                char *cc = (char *)alloc->alloc(alloc->ctx, cl + 1);
+                                if (cc) { memcpy(cc, complaint, cl + 1); PHASE6_APPEND(cc, cl); }
+                            }
+                        }
+                    }
+
                     /* 9. Authentic existence (F103-F115) */
                     {
                         uint32_t auth_seed = (uint32_t)((uint64_t)time(NULL) ^ (uintptr_t)batch_key);
@@ -5759,6 +5864,24 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                                           NULL, 0, NULL, 0, 0.5,
                                                           "conversation", 12, &episode_id);
                         }
+                    }
+                }
+#endif
+
+                /* Phase 9 (F115): Record interaction quality */
+#ifdef HU_ENABLE_SQLITE
+                if (err == HU_OK && agent && agent->memory && response && response_len > 0 &&
+                    batch_key && key_len > 0) {
+                    sqlite3 *q_db = hu_sqlite_memory_get_db(agent->memory);
+                    if (q_db) {
+                        float quality = 1.0f;
+                        if (response_len < 20)
+                            quality = 0.5f;
+                        if (response_len < 5)
+                            quality = 0.2f;
+                        time_t t_q = time(NULL);
+                        hu_interaction_quality_record(q_db, batch_key, quality, 0.5f, NULL,
+                                                      (int64_t)t_q);
                     }
                 }
 #endif

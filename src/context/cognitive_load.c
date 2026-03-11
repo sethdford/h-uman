@@ -1,7 +1,7 @@
 #include "human/context/cognitive_load.h"
 #include "human/platform.h"
 
-static float base_capacity_from_hour(const hu_cognitive_config_t *config, int hour) {
+static float base_capacity_from_hour(const hu_cognitive_load_config_t *config, int hour) {
     const int ps = config->peak_hour_start;
     const int pe = config->peak_hour_end;
     const int ls = config->low_hour_start;
@@ -34,12 +34,12 @@ static float base_capacity_from_hour(const hu_cognitive_config_t *config, int ho
     return 0.65f;
 }
 
-hu_cognitive_state_t hu_cognitive_load_calculate(
-    const hu_cognitive_config_t *config,
+hu_cognitive_load_state_t hu_cognitive_load_calculate(
+    const hu_cognitive_load_config_t *config,
     int conversation_depth,
     time_t now) {
 
-    hu_cognitive_state_t state = {0};
+    hu_cognitive_load_state_t state = {0};
     state.capacity = 0.65f;
     state.conversation_depth = conversation_depth;
     state.hour_of_day = 0;
@@ -87,7 +87,7 @@ hu_cognitive_state_t hu_cognitive_load_calculate(
     return state;
 }
 
-const char *hu_cognitive_load_prompt_hint(const hu_cognitive_state_t *state) {
+const char *hu_cognitive_load_prompt_hint(const hu_cognitive_load_state_t *state) {
     if (!state)
         return NULL;
     float c = state->capacity;
@@ -100,7 +100,7 @@ const char *hu_cognitive_load_prompt_hint(const hu_cognitive_state_t *state) {
     return "[COGNITIVE STATE: Exhausted. Minimal engagement. One-line responses OK. Typos acceptable.]";
 }
 
-int hu_cognitive_load_max_response_length(const hu_cognitive_state_t *state) {
+int hu_cognitive_load_max_response_length(const hu_cognitive_load_state_t *state) {
     if (!state)
         return 120;
     float c = state->capacity;

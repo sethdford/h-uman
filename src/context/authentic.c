@@ -1,9 +1,13 @@
 /* Phase 9 — F103–F115 Authentic Existence */
 #include "human/context/authentic.h"
 #include "human/core/string.h"
+#include "human/platform.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+#endif
 
 #define HU_AUTH_LCG_A 1103515245u
 #define HU_AUTH_LCG_C 12345u
@@ -400,7 +404,7 @@ hu_physical_state_t hu_physical_state_from_schedule(
     const hu_physical_config_t *config, time_t now)
 {
     struct tm tm_buf;
-    struct tm *t = localtime_r(&now, &tm_buf);
+    struct tm *t = hu_platform_localtime_r(&now, &tm_buf);
     if (!t)
         return HU_PHYSICAL_NORMAL;
 
@@ -531,40 +535,450 @@ const char *hu_medium_awareness_prompt(bool was_typo, int burst_count,
     return NULL;
 }
 
-/* F110: Resistance/Disengagement — stub */
+/* F110: Resistance/Disengagement */
+static const char *const DISENGAGE_DEFER = "can we talk about this tomorrow? I'm fried";
+static const char *const DISENGAGE_DEFLECT = "honestly I don't have an opinion on that";
+static const char *const DISENGAGE_BRIEF = "haha yeah";
+
 hu_disengage_decision_t hu_should_disengage(
     float cognitive_capacity, float topic_interest,
     bool is_emotional_context, const char *relationship_level)
 {
-    (void)cognitive_capacity;
-    (void)topic_interest;
-    (void)is_emotional_context;
-    (void)relationship_level;
     hu_disengage_decision_t out = {0};
     out.disengage_probability = 0.0f;
     out.disengage_style = NULL;
+
+    if (is_emotional_context)
+        return out;
+    if (relationship_level && strcmp(relationship_level, "confidant") == 0)
+        return out;
+
+    float probability = 0.0f;
+    if (cognitive_capacity < 0.4f)
+        probability += 0.20f;
+    if (topic_interest < 0.3f)
+        probability += 0.15f;
+
+    if (cognitive_capacity < 0.2f)
+        out.disengage_style = DISENGAGE_DEFER;
+    else if (topic_interest < 0.2f)
+        out.disengage_style = DISENGAGE_DEFLECT;
+    else
+        out.disengage_style = DISENGAGE_BRIEF;
+
+    if (probability > 1.0f)
+        probability = 1.0f;
+    if (probability < 0.0f)
+        probability = 0.0f;
+    out.disengage_probability = probability;
     return out;
 }
 
-/* F111: Existential curiosity — stub */
+/* F111: Existential curiosity */
+static const char *const CURIOSITY_QUESTIONS[] = {
+    "are you happy? like actually happy?",
+    "what are you most afraid of right now?",
+    "what would you do if money wasn't a thing?",
+    "do you ever think about just... starting over somewhere?"
+};
+
 bool hu_existential_curiosity_check(
     const char *relationship_level, int hour_of_day,
     int days_since_last, hu_curiosity_candidate_t *out)
 {
-    (void)relationship_level;
-    (void)hour_of_day;
-    (void)days_since_last;
-    (void)out;
-    return false;
+    if (!out)
+        return false;
+    if (!relationship_level)
+        return false;
+    if (strcmp(relationship_level, "trusted") != 0 && strcmp(relationship_level, "confidant") != 0)
+        return false;
+    if (hour_of_day < 21 || hour_of_day > 23)
+        return false;
+    if (days_since_last < 14)
+        return false;
+
+    int idx = days_since_last % 4;
+    out->question = CURIOSITY_QUESTIONS[idx];
+    out->trigger = "evening_bond";
+    return true;
 }
 
-/* F112: Contradiction tolerance — stub */
+/* F112: Contradiction tolerance */
 const char *hu_contradiction_select_position(
     const hu_contradiction_t *contradiction,
     float mood_valence, float cognitive_capacity)
 {
-    (void)contradiction;
-    (void)mood_valence;
-    (void)cognitive_capacity;
-    return NULL;
+    if (!contradiction || !contradiction->position_a || !contradiction->position_b)
+        return NULL;
+    if (mood_valence > 0.5f)
+        return contradiction->position_a;
+    if (mood_valence < -0.5f)
+        return contradiction->position_b;
+    if (cognitive_capacity < 0.3f)
+        return contradiction->expressed_a_count >= contradiction->expressed_b_count
+            ? contradiction->position_a : contradiction->position_b;
+    return contradiction->position_a;
 }
+
+#ifdef HU_ENABLE_SQLITE
+
+hu_error_t hu_contradiction_record(sqlite3 *db, const char *topic,
+    const char *position_a, const char *position_b, int64_t now)
+{
+    if (!db || !topic || !position_a || !position_b)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "INSERT INTO held_contradictions (topic, position_a, position_b, created_at) "
+                      "VALUES (?, ?, ?, ?)";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_text(stmt, 1, topic, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, position_a, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, position_b, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 4, now);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+#define HU_CONTRADICTION_BUF 256
+
+/* Result valid until next call (static buffers, single-threaded only). */
+int hu_contradiction_get(sqlite3 *db, const char *topic,
+    hu_contradiction_t *out)
+{
+    if (!db || !topic || !out)
+        return 0;
+    static _Thread_local char topic_buf[HU_CONTRADICTION_BUF];
+    static _Thread_local char pos_a_buf[HU_CONTRADICTION_BUF];
+    static _Thread_local char pos_b_buf[HU_CONTRADICTION_BUF];
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT topic, position_a, position_b, expressed_a_count, expressed_b_count "
+                      "FROM held_contradictions WHERE topic=? LIMIT 1";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(stmt, 1, topic, -1, SQLITE_STATIC);
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return 0;
+    }
+    const char *t = (const char *)sqlite3_column_text(stmt, 0);
+    const char *a = (const char *)sqlite3_column_text(stmt, 1);
+    const char *b = (const char *)sqlite3_column_text(stmt, 2);
+    int ea = sqlite3_column_int(stmt, 3);
+    int eb = sqlite3_column_int(stmt, 4);
+    if (t) {
+        size_t len = (size_t)sqlite3_column_bytes(stmt, 0);
+        if (len >= HU_CONTRADICTION_BUF)
+            len = HU_CONTRADICTION_BUF - 1;
+        memcpy(topic_buf, t, len);
+        topic_buf[len] = '\0';
+    } else {
+        topic_buf[0] = '\0';
+    }
+    if (a) {
+        size_t len = (size_t)sqlite3_column_bytes(stmt, 1);
+        if (len >= HU_CONTRADICTION_BUF)
+            len = HU_CONTRADICTION_BUF - 1;
+        memcpy(pos_a_buf, a, len);
+        pos_a_buf[len] = '\0';
+    } else {
+        pos_a_buf[0] = '\0';
+    }
+    if (b) {
+        size_t len = (size_t)sqlite3_column_bytes(stmt, 2);
+        if (len >= HU_CONTRADICTION_BUF)
+            len = HU_CONTRADICTION_BUF - 1;
+        memcpy(pos_b_buf, b, len);
+        pos_b_buf[len] = '\0';
+    } else {
+        pos_b_buf[0] = '\0';
+    }
+    sqlite3_finalize(stmt);
+    out->topic = topic_buf;
+    out->position_a = pos_a_buf;
+    out->position_b = pos_b_buf;
+    out->expressed_a_count = ea;
+    out->expressed_b_count = eb;
+    return 1;
+}
+
+/* F103: Spontaneous Life Narration */
+hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type,
+    const char *description, float shareability_score, int64_t now)
+{
+    if (!db || !event_type || !description)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "INSERT INTO life_narration_events (event_type, description, "
+                      "shareability_score, generated_at) VALUES (?, ?, ?, ?)";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_text(stmt, 1, event_type, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, description, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 3, (double)shareability_score);
+    sqlite3_bind_int64(stmt, 4, now);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+int hu_narration_events_unsent(sqlite3 *db, float min_shareability,
+    int64_t *out_ids, int max_out)
+{
+    if (!db || !out_ids || max_out <= 0)
+        return 0;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT id FROM life_narration_events WHERE shared_at IS NULL "
+                      "AND shareability_score >= ? ORDER BY generated_at DESC LIMIT ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_double(stmt, 1, (double)min_shareability);
+    sqlite3_bind_int(stmt, 2, max_out);
+    int count = 0;
+    while (count < max_out && sqlite3_step(stmt) == SQLITE_ROW) {
+        out_ids[count++] = sqlite3_column_int64(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id,
+    const char *contact_id, int64_t now)
+{
+    if (!db || !contact_id)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "UPDATE life_narration_events SET shared_with=?, shared_at=? WHERE id=?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, now);
+    sqlite3_bind_int64(stmt, 3, event_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+/* F107: Gossip (stub) */
+int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out)
+{
+    (void)db;
+    (void)contact_id;
+    (void)max_out;
+    return 0;
+}
+
+/* F108: Random thoughts */
+bool hu_random_thought_generate(int hour, int day_of_week,
+    int thoughts_this_week, hu_random_thought_t *out)
+{
+    (void)day_of_week;
+    if (!out || thoughts_this_week >= 2)
+        return false;
+    if (hour >= 5 && hour < 9) {
+        out->trigger_type = "dream";
+        out->seed_content = "had the weirdest dream last night";
+        return true;
+    }
+    if (hour >= 13 && hour < 17) {
+        out->trigger_type = "song";
+        out->seed_content = "this song has been stuck in my head all day";
+        return true;
+    }
+    if (hour >= 19 && hour < 23) {
+        out->trigger_type = "question";
+        out->seed_content = "you ever think about how weird gravity is?";
+        return true;
+    }
+    out->trigger_type = "observation";
+    out->seed_content = "random thought but... what if dogs think in barks";
+    return true;
+}
+
+/* F113: Guilt check — count of stale threads (7+ days, status=open) */
+int hu_guilt_check(sqlite3 *db, const char *contact_id, int max_out)
+{
+    if (!db || !contact_id || max_out <= 0)
+        return 0;
+    int64_t now_sec = (int64_t)time(NULL);
+    int64_t cutoff = now_sec - (7 * 24 * 3600);
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT COUNT(*) FROM active_threads WHERE contact_id=? "
+                      "AND status='open' AND last_update_at < ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, cutoff);
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    return count > max_out ? max_out : count;
+}
+
+/* F114: Thread management */
+hu_error_t hu_thread_open(sqlite3 *db, const char *contact_id,
+    const char *topic, int64_t now)
+{
+    if (!db || !contact_id || !topic)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "INSERT INTO active_threads (contact_id, topic, last_update_at, created_at) "
+                      "VALUES (?, ?, ?, ?)";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, topic, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 3, now);
+    sqlite3_bind_int64(stmt, 4, now);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+hu_error_t hu_thread_resolve(sqlite3 *db, int64_t thread_id)
+{
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "UPDATE active_threads SET status='resolved' WHERE id=?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_int64(stmt, 1, thread_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+int hu_thread_list_open(sqlite3 *db, const char *contact_id,
+    char topics[][128], int max_out)
+{
+    if (!db || !contact_id || !topics || max_out <= 0)
+        return 0;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT topic FROM active_threads WHERE contact_id=? AND status='open' "
+                      "ORDER BY last_update_at DESC LIMIT ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, max_out);
+    int count = 0;
+    while (count < max_out && sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *t = (const char *)sqlite3_column_text(stmt, 0);
+        if (t) {
+            size_t len = (size_t)sqlite3_column_bytes(stmt, 0);
+            if (len >= 128)
+                len = 127;
+            memcpy(topics[count], t, len);
+            topics[count][len] = '\0';
+        } else {
+            topics[count][0] = '\0';
+        }
+        count++;
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+int hu_thread_needs_followup(sqlite3 *db, const char *contact_id,
+    int64_t min_age_sec, int64_t max_age_sec, int64_t now)
+{
+    if (!db || !contact_id)
+        return 0;
+    int64_t lo = now - max_age_sec;
+    int64_t hi = now - min_age_sec;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT COUNT(*) FROM active_threads WHERE contact_id=? AND status='open' "
+                      "AND last_update_at >= ? AND last_update_at <= ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, lo);
+    sqlite3_bind_int64(stmt, 3, hi);
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+/* F115: Interaction quality */
+hu_error_t hu_interaction_quality_record(sqlite3 *db, const char *contact_id,
+    float quality_score, float cognitive_load, const char *mood_state, int64_t now)
+{
+    if (!db || !contact_id)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "INSERT INTO interaction_quality (contact_id, quality_score, "
+                      "cognitive_load, mood_state, timestamp) VALUES (?, ?, ?, ?, ?)";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 2, (double)quality_score);
+    sqlite3_bind_double(stmt, 3, (double)cognitive_load);
+    if (mood_state)
+        sqlite3_bind_text(stmt, 4, mood_state, -1, SQLITE_STATIC);
+    else
+        sqlite3_bind_null(stmt, 4);
+    sqlite3_bind_int64(stmt, 5, now);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+int hu_interaction_quality_needs_recovery(sqlite3 *db, const char *contact_id,
+    float threshold, int64_t min_age_sec, int64_t max_age_sec, int64_t now)
+{
+    if (!db || !contact_id)
+        return 0;
+    int64_t lo = now - max_age_sec;
+    int64_t hi = now - min_age_sec;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT COUNT(*) FROM interaction_quality WHERE contact_id=? "
+                      "AND recovery_sent=0 AND quality_score < ? "
+                      "AND timestamp >= ? AND timestamp <= ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 2, (double)threshold);
+    sqlite3_bind_int64(stmt, 3, lo);
+    sqlite3_bind_int64(stmt, 4, hi);
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        count = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+hu_error_t hu_interaction_quality_mark_recovered(sqlite3 *db,
+    const char *contact_id, int64_t now)
+{
+    if (!db || !contact_id)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "UPDATE interaction_quality SET recovery_sent=1, recovery_at=? "
+                      "WHERE contact_id=? AND recovery_sent=0";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_INTERNAL;
+    sqlite3_bind_int64(stmt, 1, now);
+    sqlite3_bind_text(stmt, 2, contact_id, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
+}
+
+#endif /* HU_ENABLE_SQLITE */

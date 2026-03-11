@@ -146,4 +146,54 @@ const char *hu_contradiction_select_position(
     const hu_contradiction_t *contradiction,
     float mood_valence, float cognitive_capacity);
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+
+hu_error_t hu_contradiction_record(sqlite3 *db, const char *topic,
+    const char *position_a, const char *position_b, int64_t now);
+int hu_contradiction_get(sqlite3 *db, const char *topic,
+    hu_contradiction_t *out);
+
+hu_error_t hu_narration_event_record(sqlite3 *db, const char *event_type,
+    const char *description, float shareability_score, int64_t now);
+
+int hu_narration_events_unsent(sqlite3 *db, float min_shareability,
+    int64_t *out_ids, int max_out);
+
+hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id,
+    const char *contact_id, int64_t now);
+
+/* F107: Gossip (stub for now) */
+int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out);
+
+/* F108: Random thoughts */
+typedef struct {
+    const char *trigger_type;
+    const char *seed_content;
+} hu_random_thought_t;
+
+bool hu_random_thought_generate(int hour, int day_of_week,
+    int thoughts_this_week, hu_random_thought_t *out);
+
+/* F113: Guilt check (stub) */
+int hu_guilt_check(sqlite3 *db, const char *contact_id, int max_out);
+
+/* F114: Thread management */
+hu_error_t hu_thread_open(sqlite3 *db, const char *contact_id,
+    const char *topic, int64_t now);
+hu_error_t hu_thread_resolve(sqlite3 *db, int64_t thread_id);
+int hu_thread_list_open(sqlite3 *db, const char *contact_id,
+    char topics[][128], int max_out);
+int hu_thread_needs_followup(sqlite3 *db, const char *contact_id,
+    int64_t min_age_sec, int64_t max_age_sec, int64_t now);
+
+/* F115: Interaction quality */
+hu_error_t hu_interaction_quality_record(sqlite3 *db, const char *contact_id,
+    float quality_score, float cognitive_load, const char *mood_state, int64_t now);
+int hu_interaction_quality_needs_recovery(sqlite3 *db, const char *contact_id,
+    float threshold, int64_t min_age_sec, int64_t max_age_sec, int64_t now);
+hu_error_t hu_interaction_quality_mark_recovered(sqlite3 *db,
+    const char *contact_id, int64_t now);
+#endif
+
 #endif /* HU_CONTEXT_AUTHENTIC_H */

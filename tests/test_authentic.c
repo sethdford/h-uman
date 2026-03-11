@@ -4,6 +4,10 @@
 #include "test_framework.h"
 #include <string.h>
 #include <time.h>
+#ifdef HU_ENABLE_SQLITE
+#include "human/memory.h"
+#include <sqlite3.h>
+#endif
 
 static void select_zero_probabilities_returns_none(void) {
     hu_authentic_config_t config = {0};
@@ -387,6 +391,279 @@ static void test_medium_awareness_normal(void) {
     HU_ASSERT_NULL(p);
 }
 
+/* F110: Disengagement */
+static void test_disengage_low_cognitive(void) {
+    hu_disengage_decision_t d = hu_should_disengage(0.2f, 0.5f, false, "casual");
+    HU_ASSERT_TRUE(d.disengage_probability > 0.0f);
+    HU_ASSERT_NOT_NULL(d.disengage_style);
+}
+
+static void test_disengage_never_emotional(void) {
+    hu_disengage_decision_t d = hu_should_disengage(0.1f, 0.1f, true, "casual");
+    HU_ASSERT_EQ(d.disengage_probability, 0.0f);
+    HU_ASSERT_NULL(d.disengage_style);
+}
+
+static void test_disengage_never_confidant(void) {
+    hu_disengage_decision_t d = hu_should_disengage(0.1f, 0.1f, false, "confidant");
+    HU_ASSERT_EQ(d.disengage_probability, 0.0f);
+    HU_ASSERT_NULL(d.disengage_style);
+}
+
+/* F111: Existential curiosity */
+static void test_curiosity_requires_trusted(void) {
+    hu_curiosity_candidate_t out = {0};
+    bool ok = hu_existential_curiosity_check("casual", 22, 20, &out);
+    HU_ASSERT_FALSE(ok);
+}
+
+static void test_curiosity_requires_evening(void) {
+    hu_curiosity_candidate_t out = {0};
+    bool ok = hu_existential_curiosity_check("trusted", 14, 20, &out);
+    HU_ASSERT_FALSE(ok);
+}
+
+static void test_curiosity_respects_cooldown(void) {
+    hu_curiosity_candidate_t out = {0};
+    bool ok = hu_existential_curiosity_check("trusted", 22, 5, &out);
+    HU_ASSERT_FALSE(ok);
+}
+
+static void test_curiosity_returns_question(void) {
+    hu_curiosity_candidate_t out = {0};
+    bool ok = hu_existential_curiosity_check("trusted", 22, 20, &out);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_NOT_NULL(out.question);
+    HU_ASSERT_STR_EQ(out.trigger, "evening_bond");
+}
+
+/* F112: Contradiction */
+static void test_contradiction_positive_mood(void) {
+    hu_contradiction_t c = {
+        .topic = "politics",
+        .position_a = "optimistic",
+        .position_b = "pessimistic",
+        .expressed_a_count = 1,
+        .expressed_b_count = 2
+    };
+    const char *p = hu_contradiction_select_position(&c, 0.7f, 0.8f);
+    HU_ASSERT_NOT_NULL(p);
+    HU_ASSERT_STR_EQ(p, "optimistic");
+}
+
+static void test_contradiction_negative_mood(void) {
+    hu_contradiction_t c = {
+        .topic = "politics",
+        .position_a = "optimistic",
+        .position_b = "pessimistic",
+        .expressed_a_count = 2,
+        .expressed_b_count = 1
+    };
+    const char *p = hu_contradiction_select_position(&c, -0.6f, 0.8f);
+    HU_ASSERT_NOT_NULL(p);
+    HU_ASSERT_STR_EQ(p, "pessimistic");
+}
+
+static void test_contradiction_low_cognitive(void) {
+    hu_contradiction_t c = {
+        .topic = "politics",
+        .position_a = "optimistic",
+        .position_b = "pessimistic",
+        .expressed_a_count = 3,
+        .expressed_b_count = 1
+    };
+    const char *p = hu_contradiction_select_position(&c, 0.0f, 0.2f);
+    HU_ASSERT_NOT_NULL(p);
+    HU_ASSERT_STR_EQ(p, "optimistic");
+}
+
+static void test_contradiction_low_cognitive_prefers_b(void) {
+    hu_contradiction_t c = {
+        .topic = "politics",
+        .position_a = "optimistic",
+        .position_b = "pessimistic",
+        .expressed_a_count = 1,
+        .expressed_b_count = 3
+    };
+    const char *p = hu_contradiction_select_position(&c, 0.0f, 0.2f);
+    HU_ASSERT_NOT_NULL(p);
+    HU_ASSERT_STR_EQ(p, "pessimistic");
+}
+
+#ifdef HU_ENABLE_SQLITE
+
+static void test_narration_event_record_query(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    hu_error_t err = hu_narration_event_record(db, "gym", "just got back from the gym", 0.8f, now);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    int64_t ids[4];
+    int n = hu_narration_events_unsent(db, 0.5f, ids, 4);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_TRUE(ids[0] > 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_narration_event_mark_shared(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_narration_event_record(db, "coffee", "grabbed a latte", 0.7f, now), HU_OK);
+
+    int64_t ids[4];
+    int n = hu_narration_events_unsent(db, 0.0f, ids, 4);
+    HU_ASSERT_EQ(n, 1);
+    int64_t id = ids[0];
+
+    HU_ASSERT_EQ(hu_narration_event_mark_shared(db, id, "contact_a", now + 1), HU_OK);
+
+    n = hu_narration_events_unsent(db, 0.0f, ids, 4);
+    HU_ASSERT_EQ(n, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_random_thought_morning_dream(void) {
+    hu_random_thought_t out = {0};
+    bool ok = hu_random_thought_generate(7, 2, 0, &out);
+    HU_ASSERT_TRUE(ok);
+    HU_ASSERT_STR_EQ(out.trigger_type, "dream");
+    HU_ASSERT_TRUE(strstr(out.seed_content, "dream") != NULL);
+}
+
+static void test_random_thought_frequency_cap(void) {
+    hu_random_thought_t out = {0};
+    bool ok = hu_random_thought_generate(7, 2, 2, &out);
+    HU_ASSERT_FALSE(ok);
+}
+
+static void test_thread_open_list(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_thread_open(db, "contact_x", "project deadline", now), HU_OK);
+
+    char topics[4][128];
+    int n = hu_thread_list_open(db, "contact_x", topics, 4);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_STR_EQ(topics[0], "project deadline");
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_thread_resolve(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_thread_open(db, "contact_y", "vacation plans", now), HU_OK);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, "SELECT id FROM active_threads WHERE contact_id='contact_y' "
+                                    "AND topic='vacation plans' ORDER BY id DESC LIMIT 1", -1,
+                               &stmt, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    HU_ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+    int64_t thread_id = sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    HU_ASSERT_EQ(hu_thread_resolve(db, thread_id), HU_OK);
+
+    char topics[4][128];
+    int n = hu_thread_list_open(db, "contact_y", topics, 4);
+    HU_ASSERT_EQ(n, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_quality_record_needs_recovery(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_interaction_quality_record(db, "contact_z", 0.2f, 0.9f, "frustrated", now),
+                 HU_OK);
+
+    int n = hu_interaction_quality_needs_recovery(db, "contact_z", 0.5f, 0, 86400, now + 1);
+    HU_ASSERT_EQ(n, 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_quality_mark_recovered(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_interaction_quality_record(db, "contact_w", 0.3f, 0.8f, "tired", now), HU_OK);
+
+    int n = hu_interaction_quality_needs_recovery(db, "contact_w", 0.5f, 0, 86400, now + 1);
+    HU_ASSERT_EQ(n, 1);
+
+    HU_ASSERT_EQ(hu_interaction_quality_mark_recovered(db, "contact_w", now + 2), HU_OK);
+
+    n = hu_interaction_quality_needs_recovery(db, "contact_w", 0.5f, 0, 86400, now + 3);
+    HU_ASSERT_EQ(n, 0);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_contradiction_record_retrieve(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_contradiction_record(db, "politics", "pro X", "anti X", now), HU_OK);
+
+    hu_contradiction_t out = {0};
+    int found = hu_contradiction_get(db, "politics", &out);
+    HU_ASSERT_EQ(found, 1);
+    HU_ASSERT_STR_EQ(out.topic, "politics");
+    HU_ASSERT_STR_EQ(out.position_a, "pro X");
+    HU_ASSERT_STR_EQ(out.position_b, "anti X");
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_guilt_stale_threads(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = (int64_t)time(NULL);
+    int64_t old = now - (8 * 24 * 3600);
+    HU_ASSERT_EQ(hu_thread_open(db, "contact_g", "old topic", old), HU_OK);
+
+    int n = hu_guilt_check(db, "contact_g", 10);
+    HU_ASSERT_EQ(n, 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+#endif /* HU_ENABLE_SQLITE */
+
 void run_authentic_tests(void) {
     HU_TEST_SUITE("authentic");
     HU_RUN_TEST(select_zero_probabilities_returns_none);
@@ -428,4 +705,27 @@ void run_authentic_tests(void) {
     HU_RUN_TEST(test_medium_awareness_burst);
     HU_RUN_TEST(test_medium_awareness_wall_of_text);
     HU_RUN_TEST(test_medium_awareness_normal);
+    HU_RUN_TEST(test_disengage_low_cognitive);
+    HU_RUN_TEST(test_disengage_never_emotional);
+    HU_RUN_TEST(test_disengage_never_confidant);
+    HU_RUN_TEST(test_curiosity_requires_trusted);
+    HU_RUN_TEST(test_curiosity_requires_evening);
+    HU_RUN_TEST(test_curiosity_respects_cooldown);
+    HU_RUN_TEST(test_curiosity_returns_question);
+    HU_RUN_TEST(test_contradiction_positive_mood);
+    HU_RUN_TEST(test_contradiction_negative_mood);
+    HU_RUN_TEST(test_contradiction_low_cognitive);
+    HU_RUN_TEST(test_contradiction_low_cognitive_prefers_b);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_narration_event_record_query);
+    HU_RUN_TEST(test_narration_event_mark_shared);
+    HU_RUN_TEST(test_random_thought_morning_dream);
+    HU_RUN_TEST(test_random_thought_frequency_cap);
+    HU_RUN_TEST(test_thread_open_list);
+    HU_RUN_TEST(test_thread_resolve);
+    HU_RUN_TEST(test_quality_record_needs_recovery);
+    HU_RUN_TEST(test_quality_mark_recovered);
+    HU_RUN_TEST(test_contradiction_record_retrieve);
+    HU_RUN_TEST(test_guilt_stale_threads);
+#endif
 }

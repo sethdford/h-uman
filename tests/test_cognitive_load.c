@@ -5,7 +5,7 @@
 
 /* Tue 10 AM = peak hours → capacity near 1.0 */
 static void test_peak_hours_capacity_near_one(void) {
-    hu_cognitive_config_t config = {
+    hu_cognitive_load_config_t config = {
         .peak_hour_start = 9,
         .peak_hour_end = 17,
         .low_hour_start = 22,
@@ -26,7 +26,7 @@ static void test_peak_hours_capacity_near_one(void) {
     time_t t = mktime(&tm);
     HU_ASSERT_TRUE(t != (time_t)-1);
 
-    hu_cognitive_state_t state = hu_cognitive_load_calculate(&config, 0, t);
+    hu_cognitive_load_state_t state = hu_cognitive_load_calculate(&config, 0, t);
     HU_ASSERT_TRUE(state.capacity >= 0.95f);
     HU_ASSERT_TRUE(state.capacity <= 1.0f);
     HU_ASSERT_EQ(state.hour_of_day, 10);
@@ -35,7 +35,7 @@ static void test_peak_hours_capacity_near_one(void) {
 
 /* Wed 2 AM = low hours → capacity near 0.3 */
 static void test_low_hours_capacity_near_point_three(void) {
-    hu_cognitive_config_t config = {
+    hu_cognitive_load_config_t config = {
         .peak_hour_start = 9,
         .peak_hour_end = 17,
         .low_hour_start = 22,
@@ -56,14 +56,14 @@ static void test_low_hours_capacity_near_point_three(void) {
     time_t t = mktime(&tm);
     HU_ASSERT_TRUE(t != (time_t)-1);
 
-    hu_cognitive_state_t state = hu_cognitive_load_calculate(&config, 0, t);
+    hu_cognitive_load_state_t state = hu_cognitive_load_calculate(&config, 0, t);
     HU_ASSERT_TRUE(state.capacity >= 0.25f);
     HU_ASSERT_TRUE(state.capacity <= 0.35f);
 }
 
 /* Monday penalty → lower than Tuesday at same hour */
 static void test_monday_penalty_lower_than_tuesday(void) {
-    hu_cognitive_config_t config = {
+    hu_cognitive_load_config_t config = {
         .peak_hour_start = 9,
         .peak_hour_end = 17,
         .low_hour_start = 22,
@@ -96,14 +96,14 @@ static void test_monday_penalty_lower_than_tuesday(void) {
     time_t t_tue = mktime(&tm_tue);
     HU_ASSERT_TRUE(t_tue != (time_t)-1);
 
-    hu_cognitive_state_t state_mon = hu_cognitive_load_calculate(&config, 0, t_mon);
-    hu_cognitive_state_t state_tue = hu_cognitive_load_calculate(&config, 0, t_tue);
+    hu_cognitive_load_state_t state_mon = hu_cognitive_load_calculate(&config, 0, t_mon);
+    hu_cognitive_load_state_t state_tue = hu_cognitive_load_calculate(&config, 0, t_tue);
     HU_ASSERT_TRUE(state_mon.capacity < state_tue.capacity);
 }
 
 /* Friday bonus → higher than Thursday at same hour */
 static void test_friday_bonus_higher_than_thursday(void) {
-    hu_cognitive_config_t config = {
+    hu_cognitive_load_config_t config = {
         .peak_hour_start = 9,
         .peak_hour_end = 17,
         .low_hour_start = 22,
@@ -136,14 +136,14 @@ static void test_friday_bonus_higher_than_thursday(void) {
     time_t t_fri = mktime(&tm_fri);
     HU_ASSERT_TRUE(t_fri != (time_t)-1);
 
-    hu_cognitive_state_t state_thu = hu_cognitive_load_calculate(&config, 0, t_thu);
-    hu_cognitive_state_t state_fri = hu_cognitive_load_calculate(&config, 0, t_fri);
+    hu_cognitive_load_state_t state_thu = hu_cognitive_load_calculate(&config, 0, t_thu);
+    hu_cognitive_load_state_t state_fri = hu_cognitive_load_calculate(&config, 0, t_fri);
     HU_ASSERT_TRUE(state_fri.capacity > state_thu.capacity);
 }
 
 /* Conversation fatigue → depth 0 vs depth 20 decreasing */
 static void test_conversation_fatigue_decreases_capacity(void) {
-    hu_cognitive_config_t config = {
+    hu_cognitive_load_config_t config = {
         .peak_hour_start = 9,
         .peak_hour_end = 17,
         .low_hour_start = 22,
@@ -164,8 +164,8 @@ static void test_conversation_fatigue_decreases_capacity(void) {
     time_t t = mktime(&tm);
     HU_ASSERT_TRUE(t != (time_t)-1);
 
-    hu_cognitive_state_t state_0 = hu_cognitive_load_calculate(&config, 0, t);
-    hu_cognitive_state_t state_20 = hu_cognitive_load_calculate(&config, 20, t);
+    hu_cognitive_load_state_t state_0 = hu_cognitive_load_calculate(&config, 0, t);
+    hu_cognitive_load_state_t state_20 = hu_cognitive_load_calculate(&config, 20, t);
     HU_ASSERT_TRUE(state_20.capacity < state_0.capacity);
     /* 15 exchanges beyond threshold * 0.05 = 0.75 reduction */
     HU_ASSERT_TRUE(state_20.capacity < 0.5f);
@@ -173,14 +173,14 @@ static void test_conversation_fatigue_decreases_capacity(void) {
 
 /* Prompt hint peak → NULL */
 static void test_prompt_hint_peak_returns_null(void) {
-    hu_cognitive_state_t state = {.capacity = 0.95f};
+    hu_cognitive_load_state_t state = {.capacity = 0.95f};
     const char *hint = hu_cognitive_load_prompt_hint(&state);
     HU_ASSERT_NULL(hint);
 }
 
 /* Prompt hint tired → non-NULL */
 static void test_prompt_hint_tired_returns_non_null(void) {
-    hu_cognitive_state_t state = {.capacity = 0.6f};
+    hu_cognitive_load_state_t state = {.capacity = 0.6f};
     const char *hint = hu_cognitive_load_prompt_hint(&state);
     HU_ASSERT_NOT_NULL(hint);
     HU_ASSERT_TRUE(strstr(hint, "Slightly tired") != NULL);
@@ -188,8 +188,8 @@ static void test_prompt_hint_tired_returns_non_null(void) {
 
 /* Max response length → scales with capacity */
 static void test_max_response_length_scales_with_capacity(void) {
-    hu_cognitive_state_t state_high = {.capacity = 1.0f};
-    hu_cognitive_state_t state_low = {.capacity = 0.2f};
+    hu_cognitive_load_state_t state_high = {.capacity = 1.0f};
+    hu_cognitive_load_state_t state_low = {.capacity = 0.2f};
     int len_high = hu_cognitive_load_max_response_length(&state_high);
     int len_low = hu_cognitive_load_max_response_length(&state_low);
     HU_ASSERT_TRUE(len_high > len_low);
