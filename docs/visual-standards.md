@@ -159,7 +159,7 @@ Rules:
 
 Classic interior design proportion applied to UI:
 
-| Proportion | Role       | Human Token                                  |
+| Proportion | Role       | Human Token                                    |
 | ---------- | ---------- | ---------------------------------------------- |
 | 60%        | Background | `--hu-bg`, `--hu-bg-surface`                   |
 | 30%        | Secondary  | `--hu-text`, `--hu-border`, `--hu-bg-elevated` |

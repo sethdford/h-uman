@@ -63,4 +63,39 @@ hu_error_t hu_feeds_build_prompt(hu_allocator_t *alloc,
                                  char **out, size_t *out_len);
 void hu_feed_item_deinit(hu_allocator_t *alloc, hu_feed_item_t *item);
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+
+typedef struct hu_feed_processor {
+    hu_allocator_t *alloc;
+    sqlite3 *db;
+} hu_feed_processor_t;
+
+typedef struct hu_feed_item_stored {
+    char source[32];
+    char contact_id[128];
+    char content_type[32];
+    char content[2048];
+    size_t content_len;
+    char url[512];
+    int64_t ingested_at;
+} hu_feed_item_stored_t;
+
+hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
+                                        const hu_feed_item_stored_t *item);
+hu_error_t hu_feed_processor_get_recent(hu_allocator_t *alloc, sqlite3 *db,
+                                        const char *source, size_t src_len,
+                                        size_t limit,
+                                        hu_feed_item_stored_t **out,
+                                        size_t *out_count);
+hu_error_t hu_feed_processor_get_for_contact(hu_allocator_t *alloc, sqlite3 *db,
+                                             const char *contact_id,
+                                             size_t cid_len, size_t limit,
+                                             hu_feed_item_stored_t **out,
+                                             size_t *out_count);
+void hu_feed_items_free(hu_allocator_t *alloc, hu_feed_item_stored_t *items,
+                        size_t count);
+
+#endif /* HU_ENABLE_SQLITE */
+
 #endif
