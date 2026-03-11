@@ -95,10 +95,17 @@ static hu_error_t load_string_array(const hu_json_value_t *obj, const char *fiel
 
     for (size_t i = 0; i < arr_len; i++) {
         hu_json_value_t *item = field->data.array.items[i];
-        if (item && item->type == HU_JSON_STRING) {
-            result[i] = item->data.string.ptr;
+        if (item && item->type == HU_JSON_STRING && item->data.string.ptr) {
+            size_t slen = strlen(item->data.string.ptr);
+            char *copy = (char *)s_conv_alloc->alloc(s_conv_alloc->ctx, slen + 1);
+            if (copy) {
+                memcpy(copy, item->data.string.ptr, slen + 1);
+                result[i] = copy;
+            } else {
+                result[i] = NULL;
+            }
         } else {
-            result[i] = "";
+            result[i] = NULL;
         }
     }
 
@@ -329,18 +336,28 @@ hu_error_t hu_conversation_data_init(hu_allocator_t *alloc) {
     return HU_OK;
 }
 
+static void free_string_array(const char **arr, size_t count) {
+    if (!arr || !s_conv_alloc)
+        return;
+    for (size_t i = 0; i < count; i++) {
+        if (arr[i])
+            s_conv_alloc->free(s_conv_alloc->ctx, (void *)arr[i], strlen(arr[i]) + 1);
+    }
+    s_conv_alloc->free(s_conv_alloc->ctx, (void *)arr, count * sizeof(const char *));
+}
+
 void hu_conversation_data_cleanup(void) {
     if (!s_conv_alloc)
         return;
 
     if (s_ai_disclosure_patterns) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_ai_disclosure_patterns, s_ai_disclosure_patterns_len * sizeof(const char *));
+        free_string_array(s_ai_disclosure_patterns, s_ai_disclosure_patterns_len);
         s_ai_disclosure_patterns = NULL;
         s_ai_disclosure_patterns_len = 0;
     }
 
     if (s_filler_words) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_filler_words, s_filler_words_len * sizeof(const char *));
+        free_string_array(s_filler_words, s_filler_words_len);
         s_filler_words = NULL;
         s_filler_words_len = 0;
     }
@@ -352,55 +369,55 @@ void hu_conversation_data_cleanup(void) {
     }
 
     if (s_conversation_intros) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_conversation_intros, s_conversation_intros_len * sizeof(const char *));
+        free_string_array(s_conversation_intros, s_conversation_intros_len);
         s_conversation_intros = NULL;
         s_conversation_intros_len = 0;
     }
 
     if (s_starters) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_starters, s_starters_len * sizeof(const char *));
+        free_string_array(s_starters, s_starters_len);
         s_starters = NULL;
         s_starters_len = 0;
     }
 
     if (s_backchannel_phrases) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_backchannel_phrases, s_backchannel_phrases_len * sizeof(const char *));
+        free_string_array(s_backchannel_phrases, s_backchannel_phrases_len);
         s_backchannel_phrases = NULL;
         s_backchannel_phrases_len = 0;
     }
 
     if (s_emotional_words) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_emotional_words, s_emotional_words_len * sizeof(const char *));
+        free_string_array(s_emotional_words, s_emotional_words_len);
         s_emotional_words = NULL;
         s_emotional_words_len = 0;
     }
 
     if (s_positive_words) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_positive_words, s_positive_words_len * sizeof(const char *));
+        free_string_array(s_positive_words, s_positive_words_len);
         s_positive_words = NULL;
         s_positive_words_len = 0;
     }
 
     if (s_negative_words) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_negative_words, s_negative_words_len * sizeof(const char *));
+        free_string_array(s_negative_words, s_negative_words_len);
         s_negative_words = NULL;
         s_negative_words_len = 0;
     }
 
     if (s_crisis_keywords) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_crisis_keywords, s_crisis_keywords_len * sizeof(const char *));
+        free_string_array(s_crisis_keywords, s_crisis_keywords_len);
         s_crisis_keywords = NULL;
         s_crisis_keywords_len = 0;
     }
 
     if (s_personal_sharing_phrases) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_personal_sharing_phrases, s_personal_sharing_phrases_len * sizeof(const char *));
+        free_string_array(s_personal_sharing_phrases, s_personal_sharing_phrases_len);
         s_personal_sharing_phrases = NULL;
         s_personal_sharing_phrases_len = 0;
     }
 
     if (s_engage_words) {
-        s_conv_alloc->free(s_conv_alloc->ctx, s_engage_words, s_engage_words_len * sizeof(const char *));
+        free_string_array(s_engage_words, s_engage_words_len);
         s_engage_words = NULL;
         s_engage_words_len = 0;
     }
@@ -2080,6 +2097,11 @@ const char *hu_conversation_classify_emotional_tone(const char *msg, size_t msg_
 
 size_t hu_conversation_extract_topic(const char *msg, size_t msg_len, char *out, size_t cap) {
     return extract_significant_topic(msg, msg_len, out, cap);
+}
+
+size_t hu_conversation_extract_followup_topic(const char *msg, size_t msg_len,
+                                             char *topic_out, size_t cap) {
+    return extract_significant_topic(msg, msg_len, topic_out, cap);
 }
 
 /* ── Growth celebration detection (F24) ─────────────────────────────────── */
@@ -4621,6 +4643,51 @@ hu_group_response_t hu_conversation_classify_group(const char *msg, size_t msg_l
         return HU_GROUP_SKIP;
 
     return HU_GROUP_BRIEF;
+}
+
+/* ── Group chat @ mentions (F56) ───────────────────────────────────────── */
+
+size_t hu_conversation_build_group_member_directive(const char *const *members, size_t member_count,
+                                                    char *buf, size_t cap) {
+    if (!buf || cap == 0 || !members || member_count == 0)
+        return 0;
+
+    size_t pos = 0;
+    int n = snprintf(buf, cap, "[GROUP: Members present: ");
+    if (n <= 0 || (size_t)n >= cap)
+        return 0;
+    pos += (size_t)n;
+
+    bool added_any = false;
+    for (size_t i = 0; i < member_count && pos < cap; i++) {
+        const char *name = members[i];
+        if (!name || name[0] == '\0')
+            continue;
+        size_t name_len = strlen(name);
+        if (name_len > 64)
+            name_len = 64;
+        if (added_any) {
+            if (pos + 2 >= cap)
+                break;
+            memcpy(buf + pos, ", ", 2);
+            pos += 2;
+        }
+        if (pos + name_len >= cap)
+            break;
+        memcpy(buf + pos, name, name_len);
+        pos += name_len;
+        added_any = true;
+    }
+
+    if (!added_any)
+        return 0;
+
+    const char *suffix = ". You can address them by name.]";
+    size_t suffix_len = strlen(suffix);
+    if (pos + suffix_len >= cap)
+        return 0;
+    memcpy(buf + pos, suffix, suffix_len + 1);
+    return pos + suffix_len;
 }
 
 /* ── Inline reply classifier (iMessage quoted text fallback) ────────────── */

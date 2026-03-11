@@ -525,6 +525,16 @@ hu_error_t hu_fast_capture(hu_allocator_t *alloc, const char *text, size_t text_
     if (!text || text_len == 0)
         return HU_OK;
 
+    /* Lazy init: use defaults if data_init was not called */
+    if (!s_topic_patterns) {
+        s_topic_patterns = (struct topic_pattern *)TOPIC_PATTERNS;
+        s_topic_patterns_count = sizeof(TOPIC_PATTERNS) / sizeof(TOPIC_PATTERNS[0]) - 1;
+    }
+    if (!s_commitment_prefixes) {
+        s_commitment_prefixes = (const char **)COMMITMENT_PREFIXES;
+        s_commitment_prefixes_count = sizeof(COMMITMENT_PREFIXES) / sizeof(COMMITMENT_PREFIXES[0]) - 1;
+    }
+
     scan_relationships(text, text_len, out, alloc);
     scan_emotions(text, text_len, out);
     scan_topics(text, text_len, out, alloc);

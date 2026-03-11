@@ -453,7 +453,7 @@ static void integration_filler_words_data_valid(void) {
     err = hu_json_parse(&alloc, data, data_len, &root);
     HU_ASSERT_EQ(err, HU_OK);
 
-    hu_json_value_t *words = hu_json_object_get(root, "words");
+    hu_json_value_t *words = hu_json_object_get(root, "fillers");
     HU_ASSERT_NOT_NULL(words);
     HU_ASSERT_EQ(words->type, HU_JSON_ARRAY);
     HU_ASSERT_TRUE(words->data.array.len > 0);
