@@ -23,6 +23,8 @@ static const char *MOOD_NAMES[] = {
     "contemplative", "excited", "sad",
 };
 
+#ifdef HU_ENABLE_SQLITE
+
 static float mood_decay_rate(hu_mood_enum_t mood) {
     switch (mood) {
     case HU_MOOD_STRESSED:
@@ -39,8 +41,6 @@ static float mood_decay_rate(hu_mood_enum_t mood) {
         return 0.2f;
     }
 }
-
-#ifdef HU_ENABLE_SQLITE
 
 /* In-memory cache */
 static hu_mood_state_t s_cached = {0};
