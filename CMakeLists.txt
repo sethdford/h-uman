@@ -28,6 +28,7 @@ option(HU_ENABLE_PUSH "Build push notification support (FCM/APNS)" OFF)
 option(HU_ENABLE_UPDATE "Build update check/apply support" OFF)
 option(HU_ENABLE_SKILLS "Build skillforge support" OFF)
 option(HU_ENABLE_PERSONA "Enable persona system" ON)
+option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 
 # WASM build: cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON ..
 
@@ -399,6 +400,10 @@ set(HU_CORE_SOURCES
     src/agent/commitment_store.c
     src/agent/pattern_radar.c
     src/agent/proactive.c
+    src/agent/timing.c
+    src/agent/governor.c
+    src/agent/arbitrator.c
+    src/agent/planning.c
     src/agent/superhuman.c
     src/agent/superhuman_commitment.c
     src/agent/superhuman_predictive.c
@@ -463,6 +468,7 @@ set(HU_CORE_SOURCES
     src/memory/retrieval/llm_reranker.c
     src/memory/retrieval/engine.c
     src/memory/connections.c
+    src/memory/knowledge.c
     src/memory/ingest.c
     src/memory/inbox.c
     src/memory/vector/circuit_breaker.c
@@ -627,6 +633,7 @@ if(HU_ENABLE_PERSONA)
         src/persona/auto_profile.c
         src/persona/auto_tune.c
         src/persona/voice_maturity.c
+        src/persona/style_clone.c
         src/tools/persona.c
     )
 endif()
@@ -658,6 +665,22 @@ if(HU_ENABLE_CURL)
         src/paperclip/heartbeat.c
         src/tools/paperclip.c
     )
+endif()
+
+# Cartesia TTS (requires libcurl for API calls)
+if(HU_ENABLE_CARTESIA)
+    if(NOT HU_ENABLE_CURL)
+        message(FATAL_ERROR "HU_ENABLE_CARTESIA requires HU_ENABLE_CURL=ON")
+    endif()
+    list(APPEND HU_CORE_SOURCES
+        src/tts/cartesia.c
+        src/tts/audio_pipeline.c
+        src/context/voice_decision.c
+        src/tts/emotion_map.c
+    )
+    message(STATUS "Cartesia TTS: enabled")
+else()
+    message(STATUS "Cartesia TTS: disabled")
 endif()
 
 # OpenTelemetry observability exporter
@@ -800,6 +823,9 @@ if(HU_ENABLE_SKILLS)
 endif()
 if(HU_ENABLE_PERSONA)
     target_compile_definitions(human_core PUBLIC HU_HAS_PERSONA=1)
+endif()
+if(HU_ENABLE_CARTESIA)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_CARTESIA=1)
 endif()
 
 # --- Compile definitions for enabled channels (for conditional compilation in source) ---
@@ -1246,12 +1272,20 @@ if(NOT HU_ENABLE_PERSONA)
         src/persona/persona.c src/persona/examples.c src/persona/sampler.c
         src/persona/analyzer.c src/persona/creator.c         src/persona/cli.c src/persona/feedback.c
         src/persona/replay.c src/persona/circadian.c src/persona/relationship.c
-        src/persona/auto_profile.c src/persona/auto_tune.c src/persona/voice_maturity.c src/tools/persona.c)
+        src/persona/auto_profile.c src/persona/auto_tune.c src/persona/voice_maturity.c src/persona/style_clone.c src/tools/persona.c)
+endif()
+if(NOT HU_ENABLE_CARTESIA)
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/tts/cartesia.c src/tts/audio_pipeline.c
+        src/context/voice_decision.c src/tts/emotion_map.c)
 endif()
 add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} ${HU_TEST_EXTRA_MODULES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)
+if(HU_ENABLE_CARTESIA)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_CARTESIA=1)
+endif()
 # Tests always have all module groups available
 target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1)
 if(Threads_FOUND)
@@ -1523,6 +1557,11 @@ set(HU_TEST_SOURCES
     tests/test_commitment.c
     tests/test_pattern_radar.c
     tests/test_proactive.c
+    tests/test_timing.c
+    tests/test_governor.c
+    tests/test_arbitrator.c
+    tests/test_planning.c
+    tests/test_knowledge.c
     tests/test_superhuman.c
     tests/test_tool_router.c
     tests/test_dag.c
@@ -1531,8 +1570,9 @@ set(HU_TEST_SOURCES
     tests/test_style_tracker.c
 )
 if(HU_ENABLE_PERSONA)
-    list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c)
+    list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c)
 endif()
+list(APPEND HU_TEST_SOURCES tests/test_cartesia.c tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
 
 # Paperclip tests (requires libcurl)
 if(HU_ENABLE_CURL)
@@ -1548,6 +1588,9 @@ target_include_directories(human_tests PRIVATE ${HU_ROOT}/tests)
 target_compile_definitions(human_tests PRIVATE HU_IS_TEST=1 HU_GATEWAY_TEST_MODE=1 HU_HAS_NONE_ENGINE=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1)
 if(HU_ENABLE_PERSONA)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_PERSONA=1)
+endif()
+if(HU_ENABLE_CARTESIA)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_CARTESIA=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)

@@ -620,4 +620,9 @@ const char *hu_conversation_classify_effect(const char *msg, size_t msg_len);
 bool hu_conversation_is_media_message(const char *msg, size_t msg_len,
                                       const hu_channel_history_entry_t *entries, size_t count);
 
+/* ── Nonverbal sound injection (F39) ───────────────────────────────── */
+
+size_t hu_conversation_inject_nonverbals(char *buf, size_t len, size_t cap,
+                                         uint32_t seed, bool enabled);
+
 #endif /* HU_CONTEXT_CONVERSATION_H */

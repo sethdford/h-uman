@@ -1932,6 +1932,81 @@ static void test_persona_load_json_phase4_defaults_when_absent(void) {
     hu_persona_deinit(&alloc, &p);
 }
 
+static void test_persona_load_json_voice_block_parses(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json =
+        "{\"version\":1,\"name\":\"voice_user\","
+        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
+        "\"voice\":{"
+        "\"provider\":\"cartesia\","
+        "\"voice_id\":\"cloned-voice-uuid\","
+        "\"model\":\"sonic-3-2026-01-12\","
+        "\"default_emotion\":\"content\","
+        "\"default_speed\":0.95,"
+        "\"nonverbals\":true"
+        "}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(p.voice.provider, "cartesia");
+    HU_ASSERT_STR_EQ(p.voice.voice_id, "cloned-voice-uuid");
+    HU_ASSERT_STR_EQ(p.voice.model, "sonic-3-2026-01-12");
+    HU_ASSERT_STR_EQ(p.voice.default_emotion, "content");
+    HU_ASSERT_FLOAT_EQ(p.voice.default_speed, 0.95f, 0.001f);
+    HU_ASSERT_TRUE(p.voice.nonverbals);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_load_json_voice_defaults_when_absent(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json =
+        "{\"version\":1,\"name\":\"no_voice\","
+        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_STR_EQ(p.voice.provider, "cartesia");
+    HU_ASSERT_EQ(p.voice.voice_id[0], '\0');
+    HU_ASSERT_STR_EQ(p.voice.model, "sonic-3-2026-01-12");
+    HU_ASSERT_STR_EQ(p.voice.default_emotion, "content");
+    HU_ASSERT_FLOAT_EQ(p.voice.default_speed, 0.95f, 0.001f);
+    HU_ASSERT_TRUE(p.voice.nonverbals);
+    HU_ASSERT_FALSE(p.voice_messages.enabled);
+    HU_ASSERT_STR_EQ(p.voice_messages.frequency, "rare");
+    HU_ASSERT_EQ(p.voice_messages.max_duration_sec, 30u);
+    HU_ASSERT_EQ(p.voice_messages.prefer_for_count, 0u);
+    HU_ASSERT_EQ(p.voice_messages.never_for_count, 0u);
+    hu_persona_deinit(&alloc, &p);
+}
+
+static void test_persona_load_json_voice_messages_parses(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *json =
+        "{\"version\":1,\"name\":\"voice_msg_user\","
+        "\"core\":{\"identity\":\"Test\",\"traits\":[\"direct\"]},"
+        "\"voice_messages\":{"
+        "\"enabled\":true,"
+        "\"frequency\":\"occasional\","
+        "\"prefer_for\":[\"emotional\",\"late_night\",\"long_response\"],"
+        "\"never_for\":[\"questions\",\"logistics\"],"
+        "\"max_duration_sec\":60"
+        "}}";
+    hu_persona_t p = {0};
+    hu_error_t err = hu_persona_load_json(&alloc, json, strlen(json), &p);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(p.voice_messages.enabled);
+    HU_ASSERT_STR_EQ(p.voice_messages.frequency, "occasional");
+    HU_ASSERT_EQ(p.voice_messages.max_duration_sec, 60u);
+    HU_ASSERT_EQ(p.voice_messages.prefer_for_count, 3u);
+    HU_ASSERT_STR_EQ(p.voice_messages.prefer_for[0], "emotional");
+    HU_ASSERT_STR_EQ(p.voice_messages.prefer_for[1], "late_night");
+    HU_ASSERT_STR_EQ(p.voice_messages.prefer_for[2], "long_response");
+    HU_ASSERT_EQ(p.voice_messages.never_for_count, 2u);
+    HU_ASSERT_STR_EQ(p.voice_messages.never_for[0], "questions");
+    HU_ASSERT_STR_EQ(p.voice_messages.never_for[1], "logistics");
+    hu_persona_deinit(&alloc, &p);
+}
+
 static void test_persona_load_json_bookend_phrases_morning_array(void) {
     hu_allocator_t alloc = hu_system_allocator();
     const char *json =
@@ -3454,6 +3529,9 @@ void run_persona_tests(void) {
     /* Phase 4 — follow-ups, bookends, timezone, weather, groups */
     HU_RUN_TEST(test_persona_load_json_phase4_all_fields);
     HU_RUN_TEST(test_persona_load_json_phase4_defaults_when_absent);
+    HU_RUN_TEST(test_persona_load_json_voice_block_parses);
+    HU_RUN_TEST(test_persona_load_json_voice_defaults_when_absent);
+    HU_RUN_TEST(test_persona_load_json_voice_messages_parses);
     HU_RUN_TEST(test_persona_load_json_bookend_phrases_morning_array);
 
     /* Rich persona elements (Tier 1–3) */

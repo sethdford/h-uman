@@ -1399,6 +1399,74 @@ static void disfluency_small_buffer_unchanged(void) {
     HU_ASSERT_TRUE(out <= cap - 1);
 }
 
+/* ── Nonverbal sound injection (F39) tests ────────────────────────────── */
+
+static void nonverbals_enabled_false_no_change(void) {
+    char buf[128];
+    const char *input = "That's funny.";
+    size_t len = strlen(input);
+    memcpy(buf, input, len + 1);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 0, false);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, input);
+}
+
+static void nonverbals_seed_zero_laughter_after_period(void) {
+    /* seed 0: 0%100 < 15 pass, 0/100%3=0 → type 0, insert after first . ! ? */
+    char buf[128];
+    const char *input = "That's funny.";
+    size_t len = strlen(input);
+    memcpy(buf, input, len + 1);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 0, true);
+    HU_ASSERT_TRUE(out > len);
+    HU_ASSERT_NOT_NULL(strstr(buf, "[laughter]"));
+}
+
+static void nonverbals_seed_100_prepend_hmm(void) {
+    /* seed 100: 0<15 pass, 100/100%3=1 → type 1, prepend Hmm... */
+    char buf[128];
+    const char *input = "I think so.";
+    size_t len = strlen(input);
+    memcpy(buf, input, len + 1);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 100, true);
+    HU_ASSERT_TRUE(out > len);
+    HU_ASSERT_TRUE(strncmp(buf, "Hmm... ", 7) == 0);
+}
+
+static void nonverbals_seed_200_pause_after_comma(void) {
+    /* seed 200: 0<15 pass, 200/100%3=2 → type 2, insert ... after first comma/period */
+    char buf[128];
+    const char *input = "Well, maybe.";
+    size_t len = strlen(input);
+    memcpy(buf, input, len + 1);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 200, true);
+    HU_ASSERT_TRUE(out > len);
+    HU_ASSERT_NOT_NULL(strstr(buf, "... "));
+}
+
+static void nonverbals_seed_50_no_roll_no_change(void) {
+    /* seed 50: 50%100=50 >= 15, no insertion */
+    char buf[128];
+    const char *input = "That's funny.";
+    size_t len = strlen(input);
+    memcpy(buf, input, len + 1);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 50, true);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, input);
+}
+
+static void nonverbals_buffer_too_small_no_change(void) {
+    /* Would insert but not enough room */
+    char buf[16];
+    const char *input = "Hi there.";
+    size_t len = strlen(input);
+    memcpy(buf, input, len + 1);
+    size_t cap = len + 2;
+    size_t out = hu_conversation_inject_nonverbals(buf, len, cap, 0, true);
+    HU_ASSERT_EQ(out, len);
+    HU_ASSERT_STR_EQ(buf, input);
+}
+
 /* ── Anti-repetition detection tests ──────────────────────────────────── */
 
 static void repetition_detects_repeated_opener(void) {
@@ -2837,6 +2905,14 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(disfluency_formal_contact_unchanged);
     HU_RUN_TEST(disfluency_formality_formal_unchanged);
     HU_RUN_TEST(disfluency_small_buffer_unchanged);
+
+    /* Nonverbal sound injection (F39) */
+    HU_RUN_TEST(nonverbals_enabled_false_no_change);
+    HU_RUN_TEST(nonverbals_seed_zero_laughter_after_period);
+    HU_RUN_TEST(nonverbals_seed_100_prepend_hmm);
+    HU_RUN_TEST(nonverbals_seed_200_pause_after_comma);
+    HU_RUN_TEST(nonverbals_seed_50_no_roll_no_change);
+    HU_RUN_TEST(nonverbals_buffer_too_small_no_change);
 
     /* Typing quirk post-processing */
     HU_RUN_TEST(quirks_lowercase_applies);

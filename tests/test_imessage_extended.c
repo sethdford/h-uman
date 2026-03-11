@@ -83,6 +83,21 @@ static void test_imessage_send_test_mode(void) {
     hu_imessage_destroy(&ch);
 }
 
+static void test_imessage_send_media_only_no_crash(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
+    const char *media[] = {"/tmp/voice.m4a"};
+    hu_error_t err = ch.vtable->send(ch.ctx, "+15551234567", 11, "", 0, media, 1);
+    HU_ASSERT_EQ(err, HU_OK);
+    size_t len = 0;
+    const char *msg = hu_imessage_test_get_last_message(&ch, &len);
+    HU_ASSERT(msg != NULL);
+    HU_ASSERT_EQ(len, 0u);
+    HU_ASSERT_STR_EQ(msg, "");
+    hu_imessage_destroy(&ch);
+}
+
 static void test_imessage_poll_test_mode(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;

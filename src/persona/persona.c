@@ -695,6 +695,27 @@ static hu_error_t parse_string_array(hu_allocator_t *a, const hu_json_value_t *a
     return HU_OK;
 }
 
+/* Parse string array into fixed-size buffer (max max_count items, each max 31 chars + null). */
+static void parse_string_array_32(const hu_json_value_t *arr, char (*dest)[32], size_t max_count,
+                                  size_t *out_count) {
+    *out_count = 0;
+    if (!arr || arr->type != HU_JSON_ARRAY || !arr->data.array.items)
+        return;
+    size_t n = arr->data.array.len;
+    if (n > max_count)
+        n = max_count;
+    for (size_t i = 0; i < n; i++) {
+        const hu_json_value_t *item = arr->data.array.items[i];
+        if (!item || item->type != HU_JSON_STRING || !item->data.string.ptr)
+            continue;
+        size_t len = item->data.string.len;
+        if (len >= 32)
+            len = 31;
+        (void)snprintf(dest[*out_count], 32, "%.*s", (int)len, item->data.string.ptr);
+        (*out_count)++;
+    }
+}
+
 /* Parse string array into fixed-size buffer (max max_count items, each max 63 chars + null). */
 static void parse_string_array_fixed(const hu_json_value_t *arr, char (*dest)[64], size_t max_count,
                                      size_t *out_count) {
@@ -1422,6 +1443,59 @@ hu_error_t hu_persona_load_json(hu_allocator_t *alloc, const char *json, size_t 
             (void)snprintf(out->location, sizeof(out->location), "%.127s", loc);
     }
     out->group_response_rate = (float)hu_json_get_number(root, "group_response_rate", 0.1);
+
+    /* Phase 5: voice config (defaults applied when block absent) */
+    (void)snprintf(out->voice.provider, sizeof(out->voice.provider), "%.31s", "cartesia");
+    (void)snprintf(out->voice.model, sizeof(out->voice.model), "%.63s", "sonic-3-2026-01-12");
+    (void)snprintf(out->voice.default_emotion, sizeof(out->voice.default_emotion), "%.31s",
+                   "content");
+    out->voice.default_speed = 0.95f;
+    out->voice.nonverbals = true;
+    hu_json_value_t *voice_obj = hu_json_object_get(root, "voice");
+    if (voice_obj && voice_obj->type == HU_JSON_OBJECT) {
+        const char *s = hu_json_get_string(voice_obj, "provider");
+        if (s && s[0])
+            (void)snprintf(out->voice.provider, sizeof(out->voice.provider), "%.31s", s);
+        s = hu_json_get_string(voice_obj, "voice_id");
+        if (s && s[0])
+            (void)snprintf(out->voice.voice_id, sizeof(out->voice.voice_id), "%.63s", s);
+        s = hu_json_get_string(voice_obj, "model");
+        if (s && s[0])
+            (void)snprintf(out->voice.model, sizeof(out->voice.model), "%.63s", s);
+        s = hu_json_get_string(voice_obj, "default_emotion");
+        if (s && s[0])
+            (void)snprintf(out->voice.default_emotion, sizeof(out->voice.default_emotion), "%.31s",
+                          s);
+        out->voice.default_speed =
+            (float)hu_json_get_number(voice_obj, "default_speed", 0.95);
+        out->voice.nonverbals = hu_json_get_bool(voice_obj, "nonverbals", true);
+    }
+
+    /* Phase 5: voice_messages (defaults: enabled=false, frequency="rare", max_duration_sec=30) */
+    out->voice_messages.enabled = false;
+    (void)snprintf(out->voice_messages.frequency, sizeof(out->voice_messages.frequency), "%.15s",
+                   "rare");
+    out->voice_messages.prefer_for_count = 0;
+    out->voice_messages.never_for_count = 0;
+    out->voice_messages.max_duration_sec = 30;
+    hu_json_value_t *vm = hu_json_object_get(root, "voice_messages");
+    if (vm && vm->type == HU_JSON_OBJECT) {
+        out->voice_messages.enabled = hu_json_get_bool(vm, "enabled", false);
+        const char *freq = hu_json_get_string(vm, "frequency");
+        if (freq && freq[0])
+            (void)snprintf(out->voice_messages.frequency,
+                           sizeof(out->voice_messages.frequency), "%.15s", freq);
+        out->voice_messages.max_duration_sec =
+            (uint32_t)hu_json_get_number(vm, "max_duration_sec", 30);
+        hu_json_value_t *pf = hu_json_object_get(vm, "prefer_for");
+        if (pf)
+            parse_string_array_32(pf, out->voice_messages.prefer_for, 8,
+                                 &out->voice_messages.prefer_for_count);
+        hu_json_value_t *nf = hu_json_object_get(vm, "never_for");
+        if (nf)
+            parse_string_array_32(nf, out->voice_messages.never_for, 8,
+                                 &out->voice_messages.never_for_count);
+    }
 
     /* Parse contacts */
     hu_json_value_t *contacts_obj = hu_json_object_get(root, "contacts");

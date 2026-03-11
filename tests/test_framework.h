@@ -40,6 +40,13 @@ extern jmp_buf hu__jmp;
             HU_FAIL("expected %lld != %lld (%s != %s)", _a, _b, #a, #b); \
     } while (0)
 
+#define HU_ASSERT_GT(a, b)                                               \
+    do {                                                                 \
+        long long _a = (long long)(a), _b = (long long)(b);              \
+        if (_a <= _b)                                                    \
+            HU_FAIL("expected %lld > %lld (%s > %s)", _a, _b, #a, #b);   \
+    } while (0)
+
 #define HU_ASSERT_STR_EQ(a, b)                                                            \
     do {                                                                                  \
         const char *_a = (a), *_b = (b);                                                  \

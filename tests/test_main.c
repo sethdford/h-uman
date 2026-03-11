@@ -53,6 +53,7 @@ void run_persona_tests(void);
 void run_circadian_tests(void);
 void run_relationship_tests(void);
 void run_replay_tests(void);
+void run_style_clone_tests(void);
 #endif
 void run_lifecycle_tests(void);
 void run_observer_tests(void);
@@ -128,6 +129,11 @@ void run_deep_extract_tests(void);
 void run_commitment_tests(void);
 void run_pattern_radar_tests(void);
 void run_proactive_tests(void);
+void run_timing_tests(void);
+void run_governor_tests(void);
+void run_arbitrator_tests(void);
+void run_planning_tests(void);
+void run_knowledge_tests(void);
 void run_superhuman_tests(void);
 void run_tool_router_tests(void);
 void run_dag_tests(void);
@@ -138,6 +144,12 @@ void run_bth_metrics_tests(void);
 void run_memory_features_tests(void);
 #ifdef HU_ENABLE_CURL
 void run_paperclip_tests(void);
+#endif
+#ifdef HU_ENABLE_CARTESIA
+void run_cartesia_tests(void);
+void run_audio_pipeline_tests(void);
+void run_voice_decision_tests(void);
+void run_emotion_map_tests(void);
 #endif
 
 int main(void) {
@@ -193,6 +205,7 @@ int main(void) {
     run_circadian_tests();
     run_relationship_tests();
     run_replay_tests();
+    run_style_clone_tests();
 #endif
     run_lifecycle_tests();
     run_observer_tests();
@@ -268,6 +281,11 @@ int main(void) {
     run_commitment_tests();
     run_pattern_radar_tests();
     run_proactive_tests();
+    run_timing_tests();
+    run_governor_tests();
+    run_arbitrator_tests();
+    run_planning_tests();
+    run_knowledge_tests();
     run_superhuman_tests();
     run_tool_router_tests();
     run_dag_tests();
@@ -278,6 +296,12 @@ int main(void) {
     run_memory_features_tests();
 #ifdef HU_ENABLE_CURL
     run_paperclip_tests();
+#endif
+#ifdef HU_ENABLE_CARTESIA
+    run_cartesia_tests();
+    run_audio_pipeline_tests();
+    run_voice_decision_tests();
+    run_emotion_map_tests();
 #endif
 
     HU_TEST_REPORT();

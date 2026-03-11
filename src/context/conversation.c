@@ -5264,6 +5264,87 @@ size_t hu_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t
     return len;
 }
 
+/* ── Nonverbal sound injection (F39) ─────────────────────────────────── */
+
+size_t hu_conversation_inject_nonverbals(char *buf, size_t len, size_t cap,
+                                         uint32_t seed, bool enabled) {
+    if (!buf || cap <= len)
+        return len;
+    if (!enabled)
+        return len;
+    /* 15% probability */
+    if ((seed % 100u) >= 15u)
+        return len;
+
+    uint32_t type = (seed / 100u) % 3u;
+    const char *insert = NULL;
+    size_t insert_len = 0;
+    size_t pos = 0;
+    bool insert_after = true;
+
+    if (type == 0) {
+        /* [laughter] after first sentence-ending or before lol/haha */
+        insert = "[laughter] ";
+        insert_len = 11;
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] == '.' || buf[i] == '!' || buf[i] == '?') {
+                pos = i + 1;
+                insert_after = true;
+                break;
+            }
+            if (i + 3 <= len && strncasecmp(buf + i, "lol", 3) == 0) {
+                pos = i;
+                insert_after = false;
+                break;
+            }
+            if (i + 4 <= len && strncasecmp(buf + i, "haha", 4) == 0) {
+                pos = i;
+                insert_after = false;
+                break;
+            }
+        }
+        if (pos == 0 && len > 0) {
+            pos = len;
+            insert_after = true;
+        }
+    } else if (type == 1) {
+        /* Prepend "Hmm... " at start */
+        insert = "Hmm... ";
+        insert_len = 7;
+        pos = 0;
+        insert_after = false;
+    } else {
+        /* type == 2: insert "... " after first comma or period */
+        insert = "... ";
+        insert_len = 4;
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] == ',' || buf[i] == '.') {
+                pos = i + 1;
+                insert_after = true;
+                break;
+            }
+        }
+        if (pos == 0) {
+            pos = len;
+            insert_after = true;
+        }
+    }
+
+    if (len + insert_len >= cap)
+        return len;
+
+    if (insert_after) {
+        memmove(buf + pos + insert_len, buf + pos, len - pos);
+        memcpy(buf + pos, insert, insert_len);
+    } else {
+        memmove(buf + insert_len, buf, len);
+        memcpy(buf, insert, insert_len);
+    }
+    len += insert_len;
+    buf[len] = '\0';
+    return len;
+}
+
 /* ── Stylometric variance ─────────────────────────────────────────────── */
 
 size_t hu_conversation_vary_complexity(char *buf, size_t len, uint32_t seed) {

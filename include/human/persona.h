@@ -237,6 +237,27 @@ typedef struct hu_important_date {
     char message[256]; /* "happy birthday min!" */
 } hu_important_date_t;
 
+/* Voice messages config — when to send voice vs text (per-contact) */
+typedef struct hu_voice_messages_config {
+    bool enabled;
+    char frequency[16];           /* "rare", "occasional", "frequent" */
+    char prefer_for[8][32];        /* "emotional", "late_night", "long_response", "comfort" */
+    size_t prefer_for_count;
+    char never_for[8][32];         /* "questions", "logistics", "quick_ack" */
+    size_t never_for_count;
+    uint32_t max_duration_sec;     /* default 30 */
+} hu_voice_messages_config_t;
+
+/* Voice config — Cartesia TTS, cloned voice UUID, model, emotion */
+typedef struct hu_persona_voice_config {
+    char provider[32];        /* "cartesia" */
+    char voice_id[64];        /* UUID */
+    char model[64];           /* "sonic-3-2026-01-12" */
+    char default_emotion[32];  /* "content" */
+    float default_speed;      /* 0.95 */
+    bool nonverbals;          /* true */
+} hu_persona_voice_config_t;
+
 /* Context awareness — calendar, weather, sports, news */
 typedef struct hu_context_awareness {
     bool calendar_enabled;
@@ -334,6 +355,9 @@ typedef struct hu_persona {
     char timezone[64];
     char location[128];
     float group_response_rate; /* default 0.1 */
+    /* Phase 5 — voice config (Cartesia TTS, cloned voice) */
+    hu_persona_voice_config_t voice;
+    hu_voice_messages_config_t voice_messages;
 } hu_persona_t;
 
 /* Returns persona base directory path in buf (either HU_PERSONA_DIR or ~/.human/personas).

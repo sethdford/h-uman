@@ -330,18 +330,28 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         tgt = c->default_target;
         tgt_len = c->default_target_len;
     }
-    if (!c || !c->alloc || !tgt || tgt_len == 0 || !message)
+    if (!c || !c->alloc || !tgt || tgt_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (message_len == 0 && media_count == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (message_len > 0 && !message)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /*
-     * Post-processing: strip markdown and sanitize AI-sounding phrases
-     * before sending via iMessage. Works in-place on a mutable copy.
-     */
-    size_t clean_cap = message_len + 1;
-    char *clean = (char *)c->alloc->alloc(c->alloc->ctx, clean_cap);
-    if (!clean)
-        return HU_ERR_OUT_OF_MEMORY;
-    {
+    hu_error_t send_err = HU_OK;
+    char *clean = NULL;
+    size_t clean_cap = 0;
+
+    /* Skip empty text send when we have media (voice-only) */
+    if (message_len > 0) {
+        /*
+         * Post-processing: strip markdown and sanitize AI-sounding phrases
+         * before sending via iMessage. Works in-place on a mutable copy.
+         */
+        clean_cap = message_len + 1;
+        clean = (char *)c->alloc->alloc(c->alloc->ctx, clean_cap);
+        if (!clean)
+            return HU_ERR_OUT_OF_MEMORY;
+        {
         size_t out_i = 0;
         size_t i = 0;
         while (i < message_len) {
@@ -372,100 +382,99 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
         clean[out_i] = '\0';
         message = clean;
         message_len = out_i;
-    }
-
-    message_len = imessage_sanitize_output(clean, message_len);
-
-    /* Hard length cap for iMessage: truncate at sentence boundary near 300 chars */
-    if (message_len > 300) {
-        size_t cut = 300;
-        while (cut > 100 && message[cut] != '.' && message[cut] != '!' && message[cut] != '?')
-            cut--;
-        if (cut > 100) {
-            message_len = cut + 1;
-            clean[message_len] = '\0';
-        } else {
-            size_t space_cut = 300;
-            while (space_cut > 100 && message[space_cut] != ' ')
-                space_cut--;
-            if (space_cut > 100)
-                message_len = space_cut;
-            else
-                message_len = 300;
-            clean[message_len] = '\0';
         }
-    }
 
-    hu_error_t send_err = HU_OK;
+        message_len = imessage_sanitize_output(clean, message_len);
 
-    /* Escaped strings: worst case 2x length */
-    size_t msg_esc_cap = message_len * 2 + 1;
-    size_t tgt_esc_cap = tgt_len * 2 + 1;
-    if (msg_esc_cap > 65536 || tgt_esc_cap > 4096) {
-        send_err = HU_ERR_INVALID_ARGUMENT;
-        goto imsg_cleanup;
-    }
+        /* Hard length cap for iMessage: truncate at sentence boundary near 300 chars */
+        if (message_len > 300) {
+            size_t cut = 300;
+            while (cut > 100 && message[cut] != '.' && message[cut] != '!' && message[cut] != '?')
+                cut--;
+            if (cut > 100) {
+                message_len = cut + 1;
+                clean[message_len] = '\0';
+            } else {
+                size_t space_cut = 300;
+                while (space_cut > 100 && message[space_cut] != ' ')
+                    space_cut--;
+                if (space_cut > 100)
+                    message_len = space_cut;
+                else
+                    message_len = 300;
+                clean[message_len] = '\0';
+            }
+        }
 
-    char *msg_esc = (char *)c->alloc->alloc(c->alloc->ctx, msg_esc_cap);
-    char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
-    if (!msg_esc || !tgt_esc) {
-        if (msg_esc)
+        /* Escaped strings: worst case 2x length */
+        size_t msg_esc_cap = message_len * 2 + 1;
+        size_t tgt_esc_cap = tgt_len * 2 + 1;
+        if (msg_esc_cap > 65536 || tgt_esc_cap > 4096) {
+            send_err = HU_ERR_INVALID_ARGUMENT;
+            goto imsg_cleanup;
+        }
+
+        char *msg_esc = (char *)c->alloc->alloc(c->alloc->ctx, msg_esc_cap);
+        char *tgt_esc = (char *)c->alloc->alloc(c->alloc->ctx, tgt_esc_cap);
+        if (!msg_esc || !tgt_esc) {
+            if (msg_esc)
+                c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
+            if (tgt_esc)
+                c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
+            send_err = HU_ERR_OUT_OF_MEMORY;
+            goto imsg_cleanup;
+        }
+        escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
+        escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
+
+        /* Target the iMessage service explicitly for reliability on modern macOS */
+        size_t script_cap = 256 + strlen(msg_esc) + strlen(tgt_esc);
+        char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
+        if (!script) {
             c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
-        if (tgt_esc)
             c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        send_err = HU_ERR_OUT_OF_MEMORY;
-        goto imsg_cleanup;
-    }
-    escape_for_applescript(msg_esc, msg_esc_cap, message, message_len);
-    escape_for_applescript(tgt_esc, tgt_esc_cap, tgt, tgt_len);
-
-    /* Target the iMessage service explicitly for reliability on modern macOS */
-    size_t script_cap = 256 + strlen(msg_esc) + strlen(tgt_esc);
-    char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
-    if (!script) {
+            send_err = HU_ERR_OUT_OF_MEMORY;
+            goto imsg_cleanup;
+        }
+        int n = snprintf(script, script_cap,
+                         "tell application \"Messages\"\n"
+                         "  set targetService to 1st service whose service type = iMessage\n"
+                         "  set targetBuddy to buddy \"%s\" of targetService\n"
+                         "  send \"%s\" to targetBuddy\n"
+                         "end tell",
+                         tgt_esc, msg_esc);
         c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
         c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-        send_err = HU_ERR_OUT_OF_MEMORY;
-        goto imsg_cleanup;
-    }
-    int n = snprintf(script, script_cap,
-                     "tell application \"Messages\"\n"
-                     "  set targetService to 1st service whose service type = iMessage\n"
-                     "  set targetBuddy to buddy \"%s\" of targetService\n"
-                     "  send \"%s\" to targetBuddy\n"
-                     "end tell",
-                     tgt_esc, msg_esc);
-    c->alloc->free(c->alloc->ctx, msg_esc, msg_esc_cap);
-    c->alloc->free(c->alloc->ctx, tgt_esc, tgt_esc_cap);
-    if (n < 0 || (size_t)n >= script_cap) {
-        c->alloc->free(c->alloc->ctx, script, script_cap);
-        send_err = HU_ERR_INTERNAL;
-        goto imsg_cleanup;
-    }
+        if (n < 0 || (size_t)n >= script_cap) {
+            c->alloc->free(c->alloc->ctx, script, script_cap);
+            send_err = HU_ERR_INTERNAL;
+            goto imsg_cleanup;
+        }
 
-    /* Human-like typing delay before sending */
-    {
-        unsigned int delay_ms = (unsigned int)(message_len * 25);
-        if (delay_ms < 800)
-            delay_ms = 800;
-        if (delay_ms > 4000)
-            delay_ms = 4000;
-        usleep(delay_ms * 1000);
-    }
+        /* Human-like typing delay before sending */
+        {
+            unsigned int delay_ms = (unsigned int)(message_len * 25);
+            if (delay_ms < 800)
+                delay_ms = 800;
+            if (delay_ms > 4000)
+                delay_ms = 4000;
+            usleep(delay_ms * 1000);
+        }
 
-    {
-        const char *argv[] = {"osascript", "-e", script, NULL};
-        hu_run_result_t result = {0};
-        hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
-        c->alloc->free(c->alloc->ctx, script, script_cap);
-        bool ok = (err == HU_OK && result.success && result.exit_code == 0);
-        hu_run_result_free(c->alloc, &result);
-        if (err || !ok)
-            send_err = HU_ERR_CHANNEL_SEND;
-    }
+        {
+            const char *argv[] = {"osascript", "-e", script, NULL};
+            hu_run_result_t result = {0};
+            hu_error_t err = hu_process_run(c->alloc, argv, NULL, 65536, &result);
+            c->alloc->free(c->alloc->ctx, script, script_cap);
+            bool ok = (err == HU_OK && result.success && result.exit_code == 0);
+            hu_run_result_free(c->alloc, &result);
+            if (err || !ok)
+                send_err = HU_ERR_CHANNEL_SEND;
+        }
 
-    if (send_err == HU_OK)
-        imessage_record_sent(c, message, message_len);
+        if (send_err == HU_OK)
+            imessage_record_sent(c, message, message_len);
+    }
 
 #if !HU_IS_TEST
     /* Send media attachments (local file paths only) after text succeeds */
@@ -520,7 +529,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
 #endif
 
 imsg_cleanup:
-    c->alloc->free(c->alloc->ctx, clean, clean_cap);
+    if (clean)
+        c->alloc->free(c->alloc->ctx, clean, clean_cap);
     return send_err;
 #endif
 }
