@@ -34,6 +34,6 @@ hu_error_t hu_plan_conversation(hu_allocator_t *alloc, const char *user_message,
 hu_error_t hu_plan_build_prompt(const hu_conversation_plan_t *plan, hu_allocator_t *alloc,
                                 char **out, size_t *out_len);
 
-void hu_plan_deinit(hu_conversation_plan_t *plan, hu_allocator_t *alloc);
+void hu_conversation_plan_deinit(hu_conversation_plan_t *plan, hu_allocator_t *alloc);
 
 #endif

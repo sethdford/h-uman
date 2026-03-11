@@ -1422,24 +1422,24 @@ static void nonverbals_seed_zero_laughter_after_period(void) {
     HU_ASSERT_NOT_NULL(strstr(buf, "[laughter]"));
 }
 
-static void nonverbals_seed_100_prepend_hmm(void) {
-    /* seed 100: 0<15 pass, 100/100%3=1 → type 1, prepend Hmm... */
+static void nonverbals_seed_500_prepend_hmm(void) {
+    /* seed 500: 0<15 pass, (500/100)%10=5, 5<8 → type 1, prepend Hmm... */
     char buf[128];
     const char *input = "I think so.";
     size_t len = strlen(input);
     memcpy(buf, input, len + 1);
-    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 100, true);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 500, true);
     HU_ASSERT_TRUE(out > len);
     HU_ASSERT_TRUE(strncmp(buf, "Hmm... ", 7) == 0);
 }
 
-static void nonverbals_seed_200_pause_after_comma(void) {
-    /* seed 200: 0<15 pass, 200/100%3=2 → type 2, insert ... after first comma/period */
+static void nonverbals_seed_800_pause_after_comma(void) {
+    /* seed 800: 0<15 pass, (800/100)%10=8 → type 2, insert ... after first comma/period */
     char buf[128];
     const char *input = "Well, maybe.";
     size_t len = strlen(input);
     memcpy(buf, input, len + 1);
-    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 200, true);
+    size_t out = hu_conversation_inject_nonverbals(buf, len, sizeof(buf), 800, true);
     HU_ASSERT_TRUE(out > len);
     HU_ASSERT_NOT_NULL(strstr(buf, "... "));
 }
@@ -2909,8 +2909,8 @@ void run_conversation_tests(void) {
     /* Nonverbal sound injection (F39) */
     HU_RUN_TEST(nonverbals_enabled_false_no_change);
     HU_RUN_TEST(nonverbals_seed_zero_laughter_after_period);
-    HU_RUN_TEST(nonverbals_seed_100_prepend_hmm);
-    HU_RUN_TEST(nonverbals_seed_200_pause_after_comma);
+    HU_RUN_TEST(nonverbals_seed_500_prepend_hmm);
+    HU_RUN_TEST(nonverbals_seed_800_pause_after_comma);
     HU_RUN_TEST(nonverbals_seed_50_no_roll_no_change);
     HU_RUN_TEST(nonverbals_buffer_too_small_no_change);
 

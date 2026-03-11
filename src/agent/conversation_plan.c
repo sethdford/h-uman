@@ -141,7 +141,7 @@ hu_error_t hu_plan_build_prompt(const hu_conversation_plan_t *plan, hu_allocator
     return HU_OK;
 }
 
-void hu_plan_deinit(hu_conversation_plan_t *plan, hu_allocator_t *alloc) {
+void hu_conversation_plan_deinit(hu_conversation_plan_t *plan, hu_allocator_t *alloc) {
     if (!plan || !alloc)
         return;
     if (plan->reasoning) {

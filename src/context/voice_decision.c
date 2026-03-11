@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#if HU_ENABLE_CARTESIA
+#if defined(HU_ENABLE_CARTESIA)
 
 static bool contains_substring_ci(const char *haystack, size_t hay_len, const char *needle) {
     size_t nlen = strlen(needle);
@@ -40,15 +40,6 @@ static bool is_logistics(const char *msg, size_t len) {
     return false;
 }
 
-static bool has_emotional_words(const char *msg, size_t len) {
-    static const char *patterns[] = {"crying", "upset", "scared"};
-    for (size_t i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
-        if (contains_substring_ci(msg, len, patterns[i]))
-            return true;
-    }
-    return false;
-}
-
 static bool ends_with_question(const char *msg, size_t len) {
     if (len == 0)
         return false;
@@ -58,14 +49,67 @@ static bool ends_with_question(const char *msg, size_t len) {
     return i > 0 && msg[i - 1] == '?';
 }
 
+static bool has_prefer_for_boost(const char *response_text, size_t response_len,
+                                 const char *incoming_msg, size_t incoming_len,
+                                 const hu_voice_messages_config_t *cfg, int hour_local) {
+    (void)incoming_msg;
+    (void)incoming_len;
+    if (!cfg)
+        return false;
+    for (size_t i = 0; i < cfg->prefer_for_count; i++) {
+        const char *p = cfg->prefer_for[i];
+        if (!p || !p[0])
+            continue;
+        if (strcmp(p, "late_night") == 0) {
+            if (hour_local >= 22 || hour_local <= 6)
+                return true;
+        } else if (strcmp(p, "long_response") == 0) {
+            if (response_len > 150)
+                return true;
+        } else if (strcmp(p, "emotional") == 0) {
+            static const char *emotional[] = {"love", "miss", "proud", "sorry", "worried"};
+            for (size_t j = 0; j < sizeof(emotional) / sizeof(emotional[0]); j++) {
+                if (contains_substring_ci(response_text, response_len, emotional[j]))
+                    return true;
+            }
+        } else if (strcmp(p, "comfort") == 0) {
+            /* Incoming must have sad keywords AND response must be comforting */
+            static const char *sad[] = {"sad", "upset", "crying", "devastated", "heartbroken",
+                                       "depressed", "miserable", "lonely"};
+            static const char *comfort[] = {"it'll be ok", "I'm here", "you've got this"};
+            bool incoming_sad = false;
+            if (incoming_msg && incoming_len > 0) {
+                for (size_t j = 0; j < sizeof(sad) / sizeof(sad[0]); j++) {
+                    if (contains_substring_ci(incoming_msg, incoming_len, sad[j])) {
+                        incoming_sad = true;
+                        break;
+                    }
+                }
+            }
+            if (incoming_sad) {
+                for (size_t j = 0; j < sizeof(comfort) / sizeof(comfort[0]); j++) {
+                    if (contains_substring_ci(response_text, response_len, comfort[j]))
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 hu_voice_decision_t hu_voice_decision_classify(
     const char *response_text, size_t response_len,
     const char *incoming_msg, size_t incoming_len,
-    bool voice_enabled, const char *frequency,
-    uint8_t hour_local, uint32_t seed) {
+    const hu_voice_messages_config_t *voice_msg_config,
+    bool has_voice_id,
+    int hour_local,
+    uint32_t seed) {
 
-    (void)response_text;
-    if (!voice_enabled)
+    (void)seed;
+
+    if (!has_voice_id)
+        return HU_VOICE_SEND_TEXT;
+    if (!voice_msg_config || !voice_msg_config->enabled)
         return HU_VOICE_SEND_TEXT;
 
     /* Never: incoming is question ('?') */
@@ -80,38 +124,51 @@ hu_voice_decision_t hu_voice_decision_classify(
     if (incoming_msg && incoming_len > 0 && is_logistics(incoming_msg, incoming_len))
         return HU_VOICE_SEND_TEXT;
 
-    /* Base probability from frequency: rare=5%, occasional=15%, frequent=30% */
+    /* Never: response would exceed max_duration_sec (~5 chars/sec speaking rate) */
+    if (voice_msg_config->max_duration_sec > 0) {
+        uint32_t est_sec = (uint32_t)(response_len / 5);
+        if (est_sec > voice_msg_config->max_duration_sec)
+            return HU_VOICE_SEND_TEXT;
+    }
+
+    /* Prefer for: need at least one boost to consider voice. Otherwise TEXT. */
+    if (!has_prefer_for_boost(response_text, response_len, incoming_msg, incoming_len,
+                              voice_msg_config, hour_local))
+        return HU_VOICE_SEND_TEXT;
+
+    /* Frequency roll: rare=5%, occasional=15%, frequent=30% */
     float base_prob = 0.05f;
-    if (frequency) {
-        if (strcmp(frequency, "occasional") == 0)
+    if (voice_msg_config->frequency[0]) {
+        if (strcmp(voice_msg_config->frequency, "occasional") == 0)
             base_prob = 0.15f;
-        else if (strcmp(frequency, "frequent") == 0)
+        else if (strcmp(voice_msg_config->frequency, "frequent") == 0)
             base_prob = 0.30f;
     }
 
-    float boost = 1.0f;
-
-    /* Prefer: hour 22-6 (late_night) and response_len > 50 */
-    if ((hour_local >= 22 || hour_local <= 6) && response_len > 50)
-        boost *= 1.5f;
-
-    /* Prefer: response_len > 150 (long_response) */
-    if (response_len > 150)
-        boost *= 1.4f;
-
-    /* Prefer: incoming contains emotional words (comfort) */
-    if (incoming_msg && incoming_len > 0 && has_emotional_words(incoming_msg, incoming_len))
-        boost *= 1.6f;
-
-    float probability = base_prob * boost;
-    if (probability > 1.0f)
-        probability = 1.0f;
-
-    /* Roll: (seed % 100) / 100.0 < probability → VOICE */
     uint32_t roll = seed % 100;
-    if ((float)roll / 100.0f < probability)
+    if ((float)roll / 100.0f < base_prob)
         return HU_VOICE_SEND_VOICE;
 
+    return HU_VOICE_SEND_TEXT;
+}
+
+#else
+
+hu_voice_decision_t hu_voice_decision_classify(
+    const char *response_text, size_t response_len,
+    const char *incoming_msg, size_t incoming_len,
+    const hu_voice_messages_config_t *voice_msg_config,
+    bool has_voice_id,
+    int hour_local,
+    uint32_t seed) {
+    (void)response_text;
+    (void)response_len;
+    (void)incoming_msg;
+    (void)incoming_len;
+    (void)voice_msg_config;
+    (void)has_voice_id;
+    (void)hour_local;
+    (void)seed;
     return HU_VOICE_SEND_TEXT;
 }
 

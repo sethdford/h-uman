@@ -5268,15 +5268,17 @@ size_t hu_conversation_apply_fillers(char *buf, size_t len, size_t cap, uint32_t
 
 size_t hu_conversation_inject_nonverbals(char *buf, size_t len, size_t cap,
                                          uint32_t seed, bool enabled) {
-    if (!buf || cap <= len)
+    if (!buf || len == 0 || !enabled)
         return len;
-    if (!enabled)
+    if (cap <= len)
         return len;
     /* 15% probability */
     if ((seed % 100u) >= 15u)
         return len;
 
-    uint32_t type = (seed / 100u) % 3u;
+    /* 50% [laughter], 30% Hmm..., 20% ... */
+    uint32_t t = (seed / 100u) % 10u;
+    uint32_t type = (t < 5u) ? 0u : (t < 8u) ? 1u : 2u;
     const char *insert = NULL;
     size_t insert_len = 0;
     size_t pos = 0;
@@ -5298,6 +5300,11 @@ size_t hu_conversation_inject_nonverbals(char *buf, size_t len, size_t cap,
                 break;
             }
             if (i + 4 <= len && strncasecmp(buf + i, "haha", 4) == 0) {
+                pos = i;
+                insert_after = false;
+                break;
+            }
+            if (i + 4 <= len && strncasecmp(buf + i, "lmao", 4) == 0) {
                 pos = i;
                 insert_after = false;
                 break;

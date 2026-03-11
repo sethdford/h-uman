@@ -63,7 +63,7 @@ static bool topic_matches(const char *entry_topic, size_t entry_len, const char 
     normalize_topic(query_topic, query_len, qbuf, sizeof(qbuf), &qlen);
     if (elen == 0 || qlen == 0)
         return false;
-    return strstr(ebuf, qbuf) != NULL || strstr(qbuf, ebuf) != NULL;
+    return elen == qlen && memcmp(ebuf, qbuf, elen) == 0;
 }
 
 static bool contact_id_eq(const char *a, size_t a_len, const char *b, size_t b_len) {

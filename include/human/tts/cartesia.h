@@ -3,8 +3,15 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/* Map conversation context to Cartesia emotion (declared in emotion_map.h, implemented in emotion_map.c) */
+const char *hu_cartesia_emotion_from_context(
+    const char *incoming_msg, size_t msg_len,
+    const char *response, size_t resp_len,
+    uint8_t hour_local);
 
 typedef struct hu_cartesia_tts_config {
     const char *model_id; /* "sonic-3-2026-01-12" */
@@ -22,10 +29,5 @@ hu_error_t hu_cartesia_tts_synthesize(hu_allocator_t *alloc,
     unsigned char **out_bytes, size_t *out_len);
 
 void hu_cartesia_tts_free_bytes(hu_allocator_t *alloc, unsigned char *bytes, size_t len);
-
-/* Map conversation emotion/energy to Cartesia emotion strings. */
-const char *hu_cartesia_emotion_from_context(
-    const char *detected_emotion, /* from hu_conversation_classify_emotional_tone */
-    int energy_level);            /* 0=LOW, 1=NEUTRAL, 2=HIGH */
 
 #endif

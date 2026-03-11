@@ -54,6 +54,12 @@
 #if defined(HU_ENABLE_IMESSAGE) && !defined(HU_IS_TEST)
 #include "human/channels/imessage.h"
 #endif
+#if defined(HU_ENABLE_CARTESIA)
+#include "human/context/voice_decision.h"
+#include "human/tts/cartesia.h"
+#include "human/tts/audio_pipeline.h"
+#include "human/tts/emotion_map.h"
+#endif
 #include <ctype.h>
 #include <limits.h>
 #include <stdint.h>
@@ -4080,7 +4086,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             if (plan_ctx)
                                 alloc->free(alloc->ctx, plan_ctx, plan_ctx_len + 1);
                         }
-                        hu_plan_deinit(&plan, alloc);
+                        hu_conversation_plan_deinit(&plan, alloc);
                     }
                 }
 
@@ -5264,6 +5270,72 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
 #endif
+                    /* ── Voice decision: TTS for iMessage when enabled ───── */
+                    bool sent_voice = false;
+#if defined(HU_ENABLE_CARTESIA)
+                    if (agent->persona && agent->persona->voice.voice_id[0] &&
+                        agent->persona->voice_messages.enabled) {
+                        hu_voice_decision_t vdec = hu_voice_decision_classify(
+                            response, response_len, combined, combined_len,
+                            &agent->persona->voice_messages, true, bth_hour,
+                            (uint32_t)(time(NULL) ^ (uintptr_t)combined));
+                        if (vdec == HU_VOICE_SEND_VOICE) {
+                            const char *cartesia_key = getenv("CARTESIA_API_KEY");
+                            if (cartesia_key) {
+                                char voice_transcript[4096];
+                                size_t vt_len = response_len < sizeof(voice_transcript) - 64
+                                                    ? response_len
+                                                    : sizeof(voice_transcript) - 64;
+                                memcpy(voice_transcript, response, vt_len);
+                                voice_transcript[vt_len] = '\0';
+                                vt_len = hu_conversation_inject_nonverbals(
+                                    voice_transcript, vt_len, sizeof(voice_transcript),
+                                    (uint32_t)time(NULL), agent->persona->voice.nonverbals);
+
+                                const char *emo_str =
+                                    hu_cartesia_emotion_from_context(
+                                        combined, combined_len, response, response_len,
+                                        (uint8_t)bth_hour);
+
+                                hu_cartesia_tts_config_t tts_cfg = {
+                                    .model_id = agent->persona->voice.model[0]
+                                                    ? agent->persona->voice.model
+                                                    : "sonic-3-2026-01-12",
+                                    .voice_id = agent->persona->voice.voice_id,
+                                    .emotion = emo_str,
+                                    .speed = agent->persona->voice.default_speed > 0.f
+                                                 ? agent->persona->voice.default_speed
+                                                 : 0.95f,
+                                    .volume = 1.0f,
+                                    .nonverbals = agent->persona->voice.nonverbals,
+                                };
+
+                                unsigned char *mp3 = NULL;
+                                size_t mp3_len = 0;
+                                hu_error_t tts_err = hu_cartesia_tts_synthesize(
+                                    alloc, cartesia_key, strlen(cartesia_key), voice_transcript,
+                                    vt_len, &tts_cfg, &mp3, &mp3_len);
+                                if (tts_err == HU_OK && mp3 && mp3_len > 0) {
+                                    char audio_path[512];
+                                    hu_error_t pipe_err =
+                                        hu_audio_mp3_to_caf(alloc, mp3, mp3_len, audio_path,
+                                                            sizeof(audio_path));
+                                    hu_cartesia_tts_free_bytes(alloc, mp3, mp3_len);
+                                    if (pipe_err == HU_OK) {
+                                        const char *media_paths[] = {audio_path};
+                                        ch->channel->vtable->send(ch->channel->ctx, batch_key,
+                                                                  key_len, "", 0, media_paths, 1);
+                                        hu_audio_cleanup_temp(audio_path);
+                                        sent_voice = true;
+                                    }
+                                } else if (mp3) {
+                                    hu_cartesia_tts_free_bytes(alloc, mp3, mp3_len);
+                                }
+                            }
+                        }
+                    }
+#endif
+                    if (!sent_voice) {
                     /* F10: Missed-message acknowledgment — prepend if delay > 30 min */
                     const char *send_ptr = response;
                     size_t send_len = response_len;
@@ -5385,6 +5457,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                     if (send_buf_ack)
                         alloc->free(alloc->ctx, send_buf_ack, send_len + 1);
+                    }
+
                 }
 
                 /* F32: Update style fingerprint with our sent response */

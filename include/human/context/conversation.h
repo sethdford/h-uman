@@ -622,6 +622,8 @@ bool hu_conversation_is_media_message(const char *msg, size_t msg_len,
 
 /* ── Nonverbal sound injection (F39) ───────────────────────────────── */
 
+/* Inject nonverbal sounds into transcript for TTS. Max 1 injection per message.
+ * Modifies buf in-place. Returns new length. */
 size_t hu_conversation_inject_nonverbals(char *buf, size_t len, size_t cap,
                                          uint32_t seed, bool enabled);
 

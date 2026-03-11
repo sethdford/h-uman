@@ -71,6 +71,7 @@ static void test_knowledge_query_sql_with_contact(void) {
 static void test_knowledge_contact_knows_true_when_told(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "job_interview", 13);
     entries[0].topic_len = 13;
@@ -82,7 +83,7 @@ static void test_knowledge_contact_knows_true_when_told(void) {
     entries[0].source = HU_KNOWLEDGE_DIRECT;
     entries[0].confidence = 1.0;
 
-    bool knows = hu_knowledge_contact_knows(entries, 1, "alice", 5, "job_interview", 12, 0.7);
+    bool knows = hu_knowledge_contact_knows(entries, 1, "alice", 5, "job_interview", 13, 0.7);
     HU_ASSERT_TRUE(knows);
 
     hu_knowledge_entry_deinit(&alloc, &entries[0]);
@@ -91,6 +92,7 @@ static void test_knowledge_contact_knows_true_when_told(void) {
 static void test_knowledge_contact_knows_false_when_not_told(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "job_interview", 13);
     entries[0].topic_len = 13;
@@ -102,7 +104,7 @@ static void test_knowledge_contact_knows_false_when_not_told(void) {
     entries[0].source = HU_KNOWLEDGE_DIRECT;
     entries[0].confidence = 1.0;
 
-    bool knows = hu_knowledge_contact_knows(entries, 1, "bob", 3, "job_interview", 12, 0.7);
+    bool knows = hu_knowledge_contact_knows(entries, 1, "bob", 3, "job_interview", 13, 0.7);
     HU_ASSERT_FALSE(knows);
 
     hu_knowledge_entry_deinit(&alloc, &entries[0]);
@@ -111,6 +113,7 @@ static void test_knowledge_contact_knows_false_when_not_told(void) {
 static void test_knowledge_contact_knows_respects_min_confidence(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "job_interview", 13);
     entries[0].topic_len = 13;
@@ -122,7 +125,7 @@ static void test_knowledge_contact_knows_respects_min_confidence(void) {
     entries[0].source = HU_KNOWLEDGE_INFERRED;
     entries[0].confidence = 0.5;
 
-    bool knows = hu_knowledge_contact_knows(entries, 1, "alice", 5, "job_interview", 12, 0.7);
+    bool knows = hu_knowledge_contact_knows(entries, 1, "alice", 5, "job_interview", 13, 0.7);
     HU_ASSERT_FALSE(knows);
 
     hu_knowledge_entry_deinit(&alloc, &entries[0]);
@@ -131,9 +134,10 @@ static void test_knowledge_contact_knows_respects_min_confidence(void) {
 static void test_knowledge_would_leak_detects_private_info(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "health_issue", 12);
-    entries[0].topic_len = 13;
+    entries[0].topic_len = 12;
     entries[0].detail = NULL;
     entries[0].detail_len = 0;
     entries[0].contact_id = hu_strndup(&alloc, "alice", 5);
@@ -151,6 +155,7 @@ static void test_knowledge_would_leak_detects_private_info(void) {
 static void test_knowledge_would_leak_false_for_public_info(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "new_job", 7);
     entries[0].topic_len = 7;
@@ -171,6 +176,7 @@ static void test_knowledge_would_leak_false_for_public_info(void) {
 static void test_knowledge_would_leak_false_when_both_know(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[2];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "new_apartment", 13);
     entries[0].topic_len = 13;
@@ -203,6 +209,7 @@ static void test_knowledge_would_leak_false_when_both_know(void) {
 static void test_knowledge_build_summary_categorizes_correctly(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[3];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "known_topic", 11);
     entries[0].topic_len = 11;
@@ -241,7 +248,7 @@ static void test_knowledge_build_summary_categorizes_correctly(void) {
     hu_error_t err = hu_knowledge_build_summary(&alloc, entries, 3, "alice", 5, all_topics, 3,
                                                  &summary);
     HU_ASSERT_EQ(err, HU_OK);
-    HU_ASSERT_EQ(summary.known_count, 2);
+    HU_ASSERT_EQ(summary.known_count, 1);
     HU_ASSERT_EQ(summary.uncertain_count, 1);
     HU_ASSERT_EQ(summary.unknown_count, 1);
 
@@ -305,6 +312,7 @@ static void test_knowledge_entry_deinit_frees_all(void) {
 static void test_knowledge_summary_deinit_frees_all(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "t", 1);
     entries[0].topic_len = 1;
@@ -329,6 +337,7 @@ static void test_knowledge_summary_deinit_frees_all(void) {
 static void test_knowledge_contact_knows_case_insensitive(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_knowledge_entry_t entries[1];
+    memset(entries, 0, sizeof(entries));
     entries[0].id = 1;
     entries[0].topic = hu_strndup(&alloc, "job_interview", 13);
     entries[0].topic_len = 13;
@@ -340,7 +349,7 @@ static void test_knowledge_contact_knows_case_insensitive(void) {
     entries[0].source = HU_KNOWLEDGE_DIRECT;
     entries[0].confidence = 1.0;
 
-    bool knows = hu_knowledge_contact_knows(entries, 1, "alice", 5, "Job Interview", 12, 0.7);
+    bool knows = hu_knowledge_contact_knows(entries, 1, "alice", 5, "Job Interview", 13, 0.7);
     HU_ASSERT_TRUE(knows);
 
     hu_knowledge_entry_deinit(&alloc, &entries[0]);

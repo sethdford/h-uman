@@ -84,6 +84,7 @@ static void test_imessage_send_test_mode(void) {
 }
 
 static void test_imessage_send_media_only_no_crash(void) {
+    /* Voice-only: empty message + media → no text sent, media sent */
     hu_allocator_t alloc = hu_system_allocator();
     hu_channel_t ch;
     hu_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
@@ -95,6 +96,22 @@ static void test_imessage_send_media_only_no_crash(void) {
     HU_ASSERT(msg != NULL);
     HU_ASSERT_EQ(len, 0u);
     HU_ASSERT_STR_EQ(msg, "");
+    hu_imessage_destroy(&ch);
+}
+
+static void test_imessage_send_text_and_media_both_sent(void) {
+    /* Normal send: message + media → both sent (mock records text) */
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_imessage_create(&alloc, "+15551234567", 11, NULL, 0, &ch);
+    const char *media[] = {"/tmp/photo.jpg"};
+    hu_error_t err = ch.vtable->send(ch.ctx, "+15551234567", 11, "Check this out", 14, media, 1);
+    HU_ASSERT_EQ(err, HU_OK);
+    size_t len = 0;
+    const char *msg = hu_imessage_test_get_last_message(&ch, &len);
+    HU_ASSERT(msg != NULL);
+    HU_ASSERT_EQ(len, 14u);
+    HU_ASSERT_STR_EQ(msg, "Check this out");
     hu_imessage_destroy(&ch);
 }
 
@@ -166,6 +183,8 @@ void run_imessage_extended_tests(void) {
     HU_RUN_TEST(test_imessage_health_check);
 #if defined(__APPLE__) && defined(__MACH__)
     HU_RUN_TEST(test_imessage_send_test_mode);
+    HU_RUN_TEST(test_imessage_send_media_only_no_crash);
+    HU_RUN_TEST(test_imessage_send_text_and_media_both_sent);
     HU_RUN_TEST(test_imessage_poll_test_mode);
 #endif
 #if HU_IS_TEST

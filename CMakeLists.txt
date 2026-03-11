@@ -1572,7 +1572,9 @@ set(HU_TEST_SOURCES
 if(HU_ENABLE_PERSONA)
     list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c)
 endif()
-list(APPEND HU_TEST_SOURCES tests/test_cartesia.c tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
+if(HU_ENABLE_CARTESIA)
+    list(APPEND HU_TEST_SOURCES tests/test_cartesia.c tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
+endif()
 
 # Paperclip tests (requires libcurl)
 if(HU_ENABLE_CURL)
