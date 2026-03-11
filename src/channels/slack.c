@@ -594,6 +594,19 @@ static bool slack_health_check(void *ctx) {
 #endif
 }
 
+static void slack_stream_clear(hu_slack_ctx_t *c) {
+    if (c->stream_ts) {
+        c->alloc->free(c->alloc->ctx, c->stream_ts, strlen(c->stream_ts) + 1);
+        c->stream_ts = NULL;
+    }
+    if (c->stream_text) {
+        c->alloc->free(c->alloc->ctx, c->stream_text, c->stream_text_cap + 1);
+        c->stream_text = NULL;
+    }
+    c->stream_text_len = 0;
+    c->stream_text_cap = 0;
+}
+
 #if !HU_IS_TEST
 static hu_error_t slack_stream_append(hu_slack_ctx_t *c, const char *delta, size_t delta_len) {
     size_t need = c->stream_text_len + delta_len + 1;
@@ -613,19 +626,6 @@ static hu_error_t slack_stream_append(hu_slack_ctx_t *c, const char *delta, size
     c->stream_text_len += delta_len;
     c->stream_text[c->stream_text_len] = '\0';
     return HU_OK;
-}
-
-static void slack_stream_clear(hu_slack_ctx_t *c) {
-    if (c->stream_ts) {
-        c->alloc->free(c->alloc->ctx, c->stream_ts, strlen(c->stream_ts) + 1);
-        c->stream_ts = NULL;
-    }
-    if (c->stream_text) {
-        c->alloc->free(c->alloc->ctx, c->stream_text, c->stream_text_cap + 1);
-        c->stream_text = NULL;
-    }
-    c->stream_text_len = 0;
-    c->stream_text_cap = 0;
 }
 #endif
 
@@ -1134,6 +1134,7 @@ void hu_slack_destroy(hu_channel_t *ch) {
     if (ch && ch->ctx) {
         hu_slack_ctx_t *c = (hu_slack_ctx_t *)ch->ctx;
         hu_allocator_t *a = c->alloc;
+        slack_stream_clear(c);
         if (c->token)
             a->free(a->ctx, c->token, c->token_len + 1);
         if (c->bot_user_id && a)

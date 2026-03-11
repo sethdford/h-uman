@@ -182,13 +182,19 @@ void hu_rate_tracker_destroy(hu_rate_tracker_t *t) {
     t->alloc->free(t->alloc->ctx, t, sizeof(hu_rate_tracker_t));
 }
 
+#define HU_RATE_TRACKER_CAP_MAX 4096
+
 bool hu_rate_tracker_record_action(hu_rate_tracker_t *t) {
     if (!t)
         return true;
     prune_timestamps(t);
     time_t now = time(NULL);
     if (t->count >= t->cap) {
+        if (t->cap >= HU_RATE_TRACKER_CAP_MAX)
+            return false;
         size_t new_cap = t->cap * 2;
+        if (new_cap > HU_RATE_TRACKER_CAP_MAX)
+            new_cap = HU_RATE_TRACKER_CAP_MAX;
         time_t *n = (time_t *)t->alloc->realloc(t->alloc->ctx, t->timestamps,
                                                 t->cap * sizeof(time_t), new_cap * sizeof(time_t));
         if (!n)

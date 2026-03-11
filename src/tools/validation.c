@@ -28,6 +28,23 @@ hu_error_t hu_tool_validate_path(const char *path, const char *workspace_dir,
             if (sep_before && sep_after)
                 return HU_ERR_TOOL_VALIDATION;
         }
+        /* Reject URL-encoded path traversal: %2e%2e, %2f, %5c (case-insensitive) */
+        if (p[0] == '%' && p[1] && p[2]) {
+            char c1 = (char)tolower((unsigned char)p[1]);
+            char c2 = (char)tolower((unsigned char)p[2]);
+            if (c1 == '2' && c2 == 'e') {
+                if (p[3] == '%' && p[4] && p[5]) {
+                    char c3 = (char)tolower((unsigned char)p[4]);
+                    char c4 = (char)tolower((unsigned char)p[5]);
+                    if (c3 == '2' && c4 == 'e')
+                        return HU_ERR_TOOL_VALIDATION;
+                }
+            }
+            if (c1 == '2' && c2 == 'f')
+                return HU_ERR_TOOL_VALIDATION;
+            if (c1 == '5' && c2 == 'c')
+                return HU_ERR_TOOL_VALIDATION;
+        }
         p++;
     }
 

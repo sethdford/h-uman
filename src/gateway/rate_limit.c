@@ -8,8 +8,9 @@
 #include <pthread.h>
 #endif
 
-#define HU_RATE_IP_MAX      64
-#define HU_RATE_ENTRIES_MAX 512
+#define HU_RATE_IP_MAX        64
+#define HU_RATE_ENTRIES_MAX   512
+#define HU_RATE_TIMESTAMPS_MAX 4096
 
 typedef struct rate_entry {
     char ip[HU_RATE_IP_MAX];
@@ -110,6 +111,12 @@ bool hu_rate_limiter_allow(hu_rate_limiter_t *lim, const char *ip) {
 
     time_t now = time(NULL);
     if (e->count >= e->cap) {
+        if (e->cap >= HU_RATE_TIMESTAMPS_MAX) {
+#ifdef HU_GATEWAY_POSIX
+            pthread_mutex_unlock(&lim->mutex);
+#endif
+            return false;
+        }
         if (e->cap > SIZE_MAX / 2) {
 #ifdef HU_GATEWAY_POSIX
             pthread_mutex_unlock(&lim->mutex);
@@ -117,6 +124,8 @@ bool hu_rate_limiter_allow(hu_rate_limiter_t *lim, const char *ip) {
             return false;
         }
         size_t new_cap = e->cap * 2;
+        if (new_cap > HU_RATE_TIMESTAMPS_MAX)
+            new_cap = HU_RATE_TIMESTAMPS_MAX;
         time_t *n = (time_t *)lim->alloc->realloc(
             lim->alloc->ctx, e->timestamps, e->cap * sizeof(time_t), new_cap * sizeof(time_t));
         if (!n) {

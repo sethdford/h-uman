@@ -313,7 +313,7 @@ hu_error_t hu_whatsapp_create(hu_allocator_t *alloc, const char *phone_number_id
     memset(c, 0, sizeof(*c));
     c->alloc = alloc;
     if (phone_number_id && phone_number_id_len > 0) {
-        c->phone_number_id = (char *)malloc(phone_number_id_len + 1);
+        c->phone_number_id = (char *)alloc->alloc(alloc->ctx, phone_number_id_len + 1);
         if (!c->phone_number_id) {
             alloc->free(alloc->ctx, c, sizeof(*c));
             return HU_ERR_OUT_OF_MEMORY;
@@ -323,10 +323,10 @@ hu_error_t hu_whatsapp_create(hu_allocator_t *alloc, const char *phone_number_id
         c->phone_number_id_len = phone_number_id_len;
     }
     if (token && token_len > 0) {
-        c->token = (char *)malloc(token_len + 1);
+        c->token = (char *)alloc->alloc(alloc->ctx, token_len + 1);
         if (!c->token) {
             if (c->phone_number_id)
-                free(c->phone_number_id);
+                alloc->free(alloc->ctx, c->phone_number_id, c->phone_number_id_len + 1);
             alloc->free(alloc->ctx, c, sizeof(*c));
             return HU_ERR_OUT_OF_MEMORY;
         }

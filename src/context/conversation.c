@@ -1039,7 +1039,10 @@ static const char *day_name(int wday) {
 
 char *hu_conversation_build_awareness(hu_allocator_t *alloc,
                                       const hu_channel_history_entry_t *entries, size_t count,
-                                      const hu_persona_t *persona, size_t *out_len) {
+                                      const struct hu_persona *persona, size_t *out_len) {
+#ifndef HU_HAS_PERSONA
+    (void)persona;
+#endif
     if (!alloc || !out_len)
         return NULL;
     *out_len = 0;
@@ -3069,7 +3072,10 @@ size_t hu_conversation_calibrate_length(const char *last_msg, size_t last_msg_le
 
 char *hu_conversation_analyze_style(hu_allocator_t *alloc,
                                     const hu_channel_history_entry_t *entries, size_t count,
-                                    const hu_persona_t *persona, size_t *out_len) {
+                                    const struct hu_persona *persona, size_t *out_len) {
+#ifndef HU_HAS_PERSONA
+    (void)persona;
+#endif
     if (!alloc || !entries || count == 0 || !out_len)
         return NULL;
     *out_len = 0;
@@ -5065,6 +5071,7 @@ hu_reaction_type_t hu_conversation_classify_photo_reaction(const char *vision_de
 
 /* ── Text disfluency (F33) ──────────────────────────────────────────── */
 
+#ifdef HU_HAS_PERSONA
 static bool str_eq_ci(const char *a, size_t a_len, const char *b) {
     size_t b_len = strlen(b);
     if (a_len != b_len)
@@ -5081,6 +5088,7 @@ static bool str_eq_ci(const char *a, size_t a_len, const char *b) {
     }
     return true;
 }
+#endif
 
 size_t hu_conversation_apply_disfluency(char *buf, size_t len, size_t cap, uint32_t seed,
                                         float frequency, const struct hu_contact_profile *contact,

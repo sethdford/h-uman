@@ -17,6 +17,7 @@
 #include "human/agent/outcomes.h"
 #include "human/agent/proactive.h"
 #include "human/agent/theory_of_mind.h"
+#include "human/agent/weather_awareness.h"
 #include "human/config.h"
 #include "human/context/conversation.h"
 #include "human/context/event_extract.h"
@@ -45,7 +46,6 @@
 #include "human/observability/bth_metrics.h"
 #include "human/agent/governor.h"
 #include "human/agent/timing.h"
-#include "human/context/context_ext.h"
 #include "human/memory/rag_pipeline.h"
 #include "human/memory/knowledge.h"
 #include "human/memory/compression.h"
@@ -786,17 +786,28 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
     /* F51: Weather awareness — inject notable weather for proactive context */
     char *weather_ctx = NULL;
     size_t weather_ctx_len = 0;
-    if (agent && agent->persona && agent->persona->context_awareness.weather_enabled) {
-        hu_weather_state_t ws = {0};
-        if (ws.condition && ws.is_notable) {
-            char *wdir = NULL;
-            size_t wdir_len = 0;
-            if (hu_weather_build_directive(alloc, &ws, &wdir, &wdir_len) == HU_OK &&
-                wdir && wdir_len > 0) {
-                weather_ctx = wdir;
-                weather_ctx_len = wdir_len;
-            } else if (wdir)
-                alloc->free(alloc->ctx, wdir, wdir_len + 1);
+    if (agent && agent->persona && agent->persona->location[0]) {
+        hu_weather_context_t wx = {0};
+        /* TODO: populate from actual weather API when available */
+#ifdef HU_IS_TEST
+        /* Stub for tests: empty context; should_mention returns false */
+        (void)wx;
+#endif
+        time_t now_ts = time(NULL);
+        struct tm tm_buf;
+        uint8_t bth_hour = 12;
+        if (hu_platform_localtime_r(&now_ts, &tm_buf))
+            bth_hour = (uint8_t)tm_buf.tm_hour;
+        if (hu_weather_awareness_should_mention(&wx, bth_hour)) {
+            char *wx_dir = NULL;
+            size_t wx_len = 0;
+            if (hu_weather_awareness_build_directive(alloc, &wx, bth_hour,
+                                                    &wx_dir, &wx_len) == HU_OK &&
+                wx_dir && wx_len > 0) {
+                weather_ctx = wx_dir;
+                weather_ctx_len = wx_len;
+            } else if (wx_dir)
+                alloc->free(alloc->ctx, wx_dir, wx_len + 1);
         }
     }
 
@@ -2987,27 +2998,35 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             profile_buf[0] = '\0';
 
                             if (auto_ov.formality) {
-                                pb_n +=
-                                    snprintf(profile_buf + pb_n, sizeof(profile_buf) - (size_t)pb_n,
-                                             "Contact formality: %s. ", auto_ov.formality);
+                                int w = snprintf(profile_buf + pb_n,
+                                                 sizeof(profile_buf) - (size_t)pb_n,
+                                                 "Contact formality: %s. ", auto_ov.formality);
+                                if (w > 0 && (size_t)pb_n + (size_t)w < sizeof(profile_buf))
+                                    pb_n += w;
                             }
                             if (auto_ov.avg_length) {
-                                pb_n +=
-                                    snprintf(profile_buf + pb_n, sizeof(profile_buf) - (size_t)pb_n,
-                                             "Avg message length: %s. ", auto_ov.avg_length);
+                                int w = snprintf(profile_buf + pb_n,
+                                                 sizeof(profile_buf) - (size_t)pb_n,
+                                                 "Avg message length: %s. ", auto_ov.avg_length);
+                                if (w > 0 && (size_t)pb_n + (size_t)w < sizeof(profile_buf))
+                                    pb_n += w;
                             }
                             if (auto_ov.emoji_usage) {
-                                pb_n +=
-                                    snprintf(profile_buf + pb_n, sizeof(profile_buf) - (size_t)pb_n,
-                                             "Emoji usage: %s. ", auto_ov.emoji_usage);
+                                int w = snprintf(profile_buf + pb_n,
+                                                 sizeof(profile_buf) - (size_t)pb_n,
+                                                 "Emoji usage: %s. ", auto_ov.emoji_usage);
+                                if (w > 0 && (size_t)pb_n + (size_t)w < sizeof(profile_buf))
+                                    pb_n += w;
                             }
                             if (auto_ov.style_notes) {
                                 for (size_t sn = 0;
                                      sn < auto_ov.style_notes_count && (size_t)pb_n < 900; sn++) {
                                     if (auto_ov.style_notes[sn]) {
-                                        pb_n += snprintf(profile_buf + pb_n,
+                                        int w = snprintf(profile_buf + pb_n,
                                                          sizeof(profile_buf) - (size_t)pb_n, "%s ",
                                                          auto_ov.style_notes[sn]);
+                                        if (w > 0 && (size_t)pb_n + (size_t)w < sizeof(profile_buf))
+                                            pb_n += w;
                                     }
                                 }
                             }
@@ -3386,6 +3405,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 PHASE6_APPEND(hum_dir, hum_len);
                             else if (hum_dir)
                                 alloc->free(alloc->ctx, hum_dir, hum_len + 1);
+                        }
+                    }
+
+                    /* 10. Weather awareness (F51) — inject notable weather when location available */
+                    if (agent->persona->location[0]) {
+                        hu_weather_context_t wx = {0};
+                        /* TODO: populate from actual weather API when available */
+#ifdef HU_IS_TEST
+                        (void)wx;
+#endif
+                        time_t wx_now = time(NULL);
+                        struct tm wx_tm;
+                        uint8_t wx_hour = 12;
+                        if (hu_platform_localtime_r(&wx_now, &wx_tm))
+                            wx_hour = (uint8_t)wx_tm.tm_hour;
+                        if (hu_weather_awareness_should_mention(&wx, wx_hour)) {
+                            char *wx_dir = NULL;
+                            size_t wx_len = 0;
+                            if (hu_weather_awareness_build_directive(alloc, &wx, wx_hour,
+                                                                     &wx_dir, &wx_len) == HU_OK &&
+                                wx_dir && wx_len > 0)
+                                PHASE6_APPEND(wx_dir, wx_len);
+                            else if (wx_dir)
+                                alloc->free(alloc->ctx, wx_dir, wx_len + 1);
                         }
                     }
 
@@ -5990,6 +6033,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
                 /* ── BTH post-turn: Graph recall tracking + reconsolidate (t1f) */
+#ifdef HU_ENABLE_SQLITE
                 if (err == HU_OK && response && response_len > 0 && graph) {
                     hu_deep_extract_result_t de_light;
                     memset(&de_light, 0, sizeof(de_light));
@@ -6017,6 +6061,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_deep_extract_result_deinit(&de_light, alloc);
                     }
                 }
+#endif
 
                 /* ── BTH post-turn: LLM deep extraction (t1g) ─────────────── */
                 if (err == HU_OK && response && response_len > 0 && agent->memory && graph) {

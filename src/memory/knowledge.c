@@ -392,15 +392,16 @@ hu_error_t hu_knowledge_summary_to_prompt(hu_allocator_t *alloc,
             buf[pos++] = ' ';
         }
         n = snprintf(buf + pos, cap - pos, "%s (mentioned in group chat)", summary->uncertain_topics[i]);
-        if (n > 0)
+        if (n > 0 && (size_t)n < cap - pos)
             pos += (size_t)n;
     }
     if (summary->uncertain_count == 0) {
         n = snprintf(buf + pos, cap - pos, "(none)");
-        if (n > 0)
+        if (n > 0 && (size_t)n < cap - pos)
             pos += (size_t)n;
     }
-    buf[pos++] = '\n';
+    if (pos < cap - 1)
+        buf[pos++] = '\n';
     buf[pos] = '\0';
 
     n = snprintf(buf + pos, cap - pos,

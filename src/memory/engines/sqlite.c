@@ -772,6 +772,13 @@ static hu_error_t impl_list(void *ctx, hu_allocator_t *alloc, const hu_memory_ca
         count++;
     }
     sqlite3_finalize(stmt);
+    if (count < cap && count > 0) {
+        hu_memory_entry_t *shrunk = (hu_memory_entry_t *)alloc->realloc(
+            alloc->ctx, entries, cap * sizeof(hu_memory_entry_t),
+            count * sizeof(hu_memory_entry_t));
+        if (shrunk)
+            entries = shrunk;
+    }
     *out = entries;
     *out_count = count;
     return HU_OK;
@@ -899,6 +906,13 @@ static hu_error_t impl_session_load_messages(void *ctx, hu_allocator_t *alloc,
         count++;
     }
     sqlite3_finalize(stmt);
+    if (count < cap && count > 0) {
+        hu_message_entry_t *shrunk = (hu_message_entry_t *)alloc->realloc(
+            alloc->ctx, entries, cap * sizeof(hu_message_entry_t),
+            count * sizeof(hu_message_entry_t));
+        if (shrunk)
+            entries = shrunk;
+    }
     *out = entries;
     *out_count = count;
     return HU_OK;

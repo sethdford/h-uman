@@ -960,7 +960,7 @@ hu_error_t hu_imessage_create(hu_allocator_t *alloc, const char *default_target,
     c->allow_from = allow_from;
     c->allow_from_count = allow_from_count;
     if (default_target && default_target_len > 0) {
-        c->default_target = (char *)malloc(default_target_len + 1);
+        c->default_target = (char *)alloc->alloc(alloc->ctx, default_target_len + 1);
         if (!c->default_target) {
             alloc->free(alloc->ctx, c, sizeof(*c));
             return HU_ERR_OUT_OF_MEMORY;
@@ -1018,7 +1018,7 @@ void hu_imessage_destroy(hu_channel_t *ch) {
         hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
         hu_allocator_t *a = c->alloc;
         if (c->default_target)
-            free(c->default_target);
+            a->free(a->ctx, c->default_target, c->default_target_len + 1);
         a->free(a->ctx, c, sizeof(*c));
         ch->ctx = NULL;
         ch->vtable = NULL;

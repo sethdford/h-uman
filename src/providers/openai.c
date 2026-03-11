@@ -917,15 +917,15 @@ static const hu_provider_vtable_t openai_vtable = {
 
 hu_error_t hu_openai_create(hu_allocator_t *alloc, const char *api_key, size_t api_key_len,
                             const char *base_url, size_t base_url_len, hu_provider_t *out) {
-    (void)alloc;
-    hu_openai_ctx_t *oc = (hu_openai_ctx_t *)calloc(1, sizeof(*oc));
+    hu_openai_ctx_t *oc = (hu_openai_ctx_t *)alloc->alloc(alloc->ctx, sizeof(*oc));
     if (!oc)
         return HU_ERR_OUT_OF_MEMORY;
+    memset(oc, 0, sizeof(*oc));
 
     if (api_key && api_key_len > 0) {
-        oc->api_key = (char *)malloc(api_key_len + 1);
+        oc->api_key = (char *)alloc->alloc(alloc->ctx, api_key_len + 1);
         if (!oc->api_key) {
-            free(oc);
+            alloc->free(alloc->ctx, oc, sizeof(*oc));
             return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(oc->api_key, api_key, api_key_len);
@@ -933,11 +933,11 @@ hu_error_t hu_openai_create(hu_allocator_t *alloc, const char *api_key, size_t a
         oc->api_key_len = api_key_len;
     }
     if (base_url && base_url_len > 0) {
-        oc->base_url = (char *)malloc(base_url_len + 1);
+        oc->base_url = (char *)alloc->alloc(alloc->ctx, base_url_len + 1);
         if (!oc->base_url) {
             if (oc->api_key)
-                free(oc->api_key);
-            free(oc);
+                alloc->free(alloc->ctx, oc->api_key, oc->api_key_len + 1);
+            alloc->free(alloc->ctx, oc, sizeof(*oc));
             return HU_ERR_OUT_OF_MEMORY;
         }
         memcpy(oc->base_url, base_url, base_url_len);

@@ -180,15 +180,18 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
 
     lru_entry_t *existing = find_entry(self, key, key_len);
     if (existing) {
+        char *new_content = hu_strndup(alloc, content, content_len);
+        if (!new_content)
+            return HU_ERR_OUT_OF_MEMORY;
+        char *new_updated = now_timestamp(self);
+        if (!new_updated) {
+            alloc->free(alloc->ctx, new_content, content_len + 1);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
         alloc->free(alloc->ctx, (void *)existing->content, strlen(existing->content) + 1);
-        existing->content = hu_strndup(alloc, content, content_len);
-        if (!existing->content)
-            return HU_ERR_OUT_OF_MEMORY;
-
+        existing->content = new_content;
         alloc->free(alloc->ctx, (void *)existing->updated_at, strlen(existing->updated_at) + 1);
-        existing->updated_at = now_timestamp(self);
-        if (!existing->updated_at)
-            return HU_ERR_OUT_OF_MEMORY;
+        existing->updated_at = new_updated;
 
         if (existing->category.tag == HU_MEMORY_CATEGORY_CUSTOM &&
             existing->category.data.custom.name)

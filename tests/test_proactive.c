@@ -3,6 +3,8 @@
 #include "human/agent/governor.h"
 #include "human/agent/proactive.h"
 #include "human/agent/timing.h"
+#include "human/agent/weather_awareness.h"
+#include "human/visual/content.h"
 #include "human/context/authentic.h"
 #include "human/context/behavioral.h"
 #include "human/context/event_extract.h"
@@ -994,6 +996,53 @@ static void daemon_knowledge_summary_to_prompt_empty(void) {
         hu_str_free(&alloc, out);
 }
 
+static void daemon_weather_awareness_build_directive_and_should_mention(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_weather_context_t wx = {0};
+    memcpy(wx.condition, "rainy", 5);
+    wx.temp_celsius = 3;
+    wx.feels_like_celsius = -1;
+    wx.humidity_pct = 92;
+    wx.has_alert = false;
+
+    HU_ASSERT(hu_weather_awareness_should_mention(&wx, 7) == true);
+    HU_ASSERT(hu_weather_awareness_should_mention(&wx, 14) == false);
+
+    char *dir = NULL;
+    size_t dir_len = 0;
+    hu_error_t err = hu_weather_awareness_build_directive(&alloc, &wx, 7, &dir, &dir_len);
+    HU_ASSERT(err == HU_OK);
+    HU_ASSERT(dir != NULL);
+    HU_ASSERT(dir_len > 0);
+    alloc.free(alloc.ctx, dir, dir_len + 1);
+
+    hu_weather_context_t calm = {0};
+    memcpy(calm.condition, "sunny", 5);
+    calm.temp_celsius = 22;
+    HU_ASSERT(hu_weather_awareness_should_mention(&calm, 10) == false);
+}
+
+static void daemon_visual_should_share_decision(void) {
+    hu_visual_entry_t entry = {0};
+    entry.rowid = 1;
+    memcpy(entry.path, "/photos/sunset.jpg", 18);
+    memcpy(entry.description, "beautiful sunset at the beach", 29);
+    memcpy(entry.tags, "sunset,beach,vacation", 21);
+    entry.timestamp_ms = 1000000;
+    entry.relevance = 0.0;
+
+    bool should = false;
+    double conf = 0.0;
+    hu_visual_should_share(&entry, "sunset at the beach on vacation", 31, &should, &conf);
+    HU_ASSERT(should == true);
+    HU_ASSERT(conf > 0.4);
+
+    bool should2 = false;
+    double conf2 = 0.0;
+    hu_visual_should_share(&entry, "database migration plan", 23, &should2, &conf2);
+    HU_ASSERT(should2 == false);
+}
+
 void run_proactive_tests(void) {
     HU_TEST_SUITE("proactive");
     HU_RUN_TEST(daemon_governor_init_has_budget_and_record_sent);
@@ -1045,4 +1094,6 @@ void run_proactive_tests(void) {
     HU_RUN_TEST(proactive_callbacks_returns_delayed_followup);
     HU_RUN_TEST(proactive_callbacks_returns_false_without_due_items);
 #endif
+    HU_RUN_TEST(daemon_weather_awareness_build_directive_and_should_mention);
+    HU_RUN_TEST(daemon_visual_should_share_decision);
 }

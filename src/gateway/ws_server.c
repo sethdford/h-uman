@@ -508,6 +508,10 @@ hu_error_t hu_ws_server_process(hu_ws_server_t *srv, hu_ws_conn_t *conn) {
             break;
 
         size_t total = hdr.header_bytes + (size_t)hdr.payload_len;
+        if (total > HU_WS_SERVER_RECV_MAX) {
+            hu_ws_server_close_conn(srv, conn);
+            return HU_ERR_IO;
+        }
         if (total > conn->recv_len)
             break;
 
