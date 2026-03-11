@@ -179,6 +179,8 @@ void run_music_feeds_tests(void);
 #endif
 /* feed_processor tests excluded — types not yet in processor.h */
 void run_intelligence_reflection_tests(void);
+void run_intelligence_skills_tests(void);
+void run_reflection_advanced_tests(void);
 #ifdef HU_ENABLE_SQLITE
 void run_feedback_tests(void);
 #endif
@@ -376,6 +378,8 @@ int main(void) {
 #endif
     /* feed_processor tests excluded — types not yet in processor.h */
     run_intelligence_reflection_tests();
+    run_intelligence_skills_tests();
+    run_reflection_advanced_tests();
 #ifdef HU_ENABLE_SQLITE
     run_feedback_tests();
 #endif

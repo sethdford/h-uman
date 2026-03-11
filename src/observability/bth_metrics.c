@@ -57,6 +57,16 @@ void hu_bth_metrics_log(const hu_bth_metrics_t *m) {
         fprintf(stderr, "[bth] egraph_contexts=%u\n", m->egraph_contexts);
     if (m->vision_descriptions)
         fprintf(stderr, "[bth] vision_descriptions=%u\n", m->vision_descriptions);
+    if (m->skills_applied)
+        fprintf(stderr, "[bth] skills_applied=%u\n", m->skills_applied);
+    if (m->skills_evolved)
+        fprintf(stderr, "[bth] skills_evolved=%u\n", m->skills_evolved);
+    if (m->skills_retired)
+        fprintf(stderr, "[bth] skills_retired=%u\n", m->skills_retired);
+    if (m->reflections_daily)
+        fprintf(stderr, "[bth] reflections_daily=%u\n", m->reflections_daily);
+    if (m->reflections_weekly)
+        fprintf(stderr, "[bth] reflections_weekly=%u\n", m->reflections_weekly);
     if (m->total_turns)
         fprintf(stderr, "[bth] total_turns=%u\n", m->total_turns);
 }
@@ -97,6 +107,11 @@ char *hu_bth_metrics_summary(hu_allocator_t *alloc, const hu_bth_metrics_t *m, s
     HU_BTH_SUMMARY_LINE(replay_analyses, "replay_analyses");
     HU_BTH_SUMMARY_LINE(egraph_contexts, "egraph_contexts");
     HU_BTH_SUMMARY_LINE(vision_descriptions, "vision_descriptions");
+    HU_BTH_SUMMARY_LINE(skills_applied, "skills_applied");
+    HU_BTH_SUMMARY_LINE(skills_evolved, "skills_evolved");
+    HU_BTH_SUMMARY_LINE(skills_retired, "skills_retired");
+    HU_BTH_SUMMARY_LINE(reflections_daily, "reflections_daily");
+    HU_BTH_SUMMARY_LINE(reflections_weekly, "reflections_weekly");
     HU_BTH_SUMMARY_LINE(total_turns, "total_turns");
 
     *out_len = cap; /* must match allocation size for free() */

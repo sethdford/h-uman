@@ -29,6 +29,11 @@ typedef struct hu_bth_metrics {
     uint32_t replay_analyses;          /* Phase 7b: replay analyses run */
     uint32_t egraph_contexts;          /* Phase 7c: emotional graph contexts */
     uint32_t vision_descriptions;       /* vision: image descriptions generated */
+    uint32_t skills_applied;           /* Phase 8: skills matched and applied */
+    uint32_t skills_evolved;           /* Phase 8: skills refined */
+    uint32_t skills_retired;           /* Phase 8: skills retired */
+    uint32_t reflections_daily;        /* Phase 8: daily reflections run */
+    uint32_t reflections_weekly;       /* Phase 8: weekly reflections run */
     uint32_t total_turns;              /* total agent turns */
 } hu_bth_metrics_t;
 

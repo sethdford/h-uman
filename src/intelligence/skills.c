@@ -391,6 +391,8 @@ static int trigger_conditions_match(const char *tc, size_t tc_len,
         if (!eq || eq >= p)
             return 0;
         size_t key_len = (size_t)(eq - start);
+        if (key_len > 0 && *(eq - 1) == '>')
+            key_len--;
         const char *val = eq + 1;
         if (*val == '=')
             val++;
@@ -707,15 +709,23 @@ static hu_error_t resolve_chain_recursive(hu_allocator_t *alloc, sqlite3 *db,
 
     while (p < end && written < out_cap - 1) {
         const char *next = (const char *)memchr(p, 's', (size_t)(end - p));
-        if (!next || (size_t)(end - next) < SKILL_PREFIX_LEN ||
-            memcmp(next, SKILL_PREFIX, SKILL_PREFIX_LEN) != 0) {
+        if (!next) {
             size_t copy = (size_t)(end - p);
             if (copy > out_cap - 1 - written)
                 copy = out_cap - 1 - written;
             memcpy(out + written, p, copy);
             written += copy;
-            p = end;
             break;
+        }
+        if ((size_t)(end - next) < SKILL_PREFIX_LEN ||
+            memcmp(next, SKILL_PREFIX, SKILL_PREFIX_LEN) != 0) {
+            size_t copy = (size_t)(next - p + 1);
+            if (copy > out_cap - 1 - written)
+                copy = out_cap - 1 - written;
+            memcpy(out + written, p, copy);
+            written += copy;
+            p = next + 1;
+            continue;
         }
 
         if (next > p) {

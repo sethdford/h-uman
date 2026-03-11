@@ -43,6 +43,12 @@
 #include "human/memory/retrieval.h"
 #include "human/memory/superhuman.h"
 #include "human/observability/bth_metrics.h"
+#ifdef HU_ENABLE_SQLITE
+#include "human/intelligence/reflection.h"
+#include "human/intelligence/skills.h"
+#include "human/intelligence/feedback.h"
+#include "human/intelligence/meta_learning.h"
+#endif
 #include "human/persona/voice_maturity.h"
 #include "human/platform.h"
 #include "human/platform/calendar.h"
@@ -1785,6 +1791,66 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         }
                     }
                 }
+#ifdef HU_ENABLE_SQLITE
+                /* Phase 8 (F77-F82): Scheduled reflection engine */
+                {
+                    static bool reflection_done_today = false;
+                    static bool reflection_done_week = false;
+                    static bool reflection_done_month = false;
+                    struct tm tm_refl;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                    struct tm *lt_refl = (localtime_s(&tm_refl, &t) == 0) ? &tm_refl : NULL;
+#else
+                    struct tm *lt_refl = localtime_r(&t, &tm_refl);
+#endif
+                    if (lt_refl) {
+                        /* Daily: 2-4 AM */
+                        if (lt_refl->tm_hour >= 2 && lt_refl->tm_hour < 4 && lt_refl->tm_min == 0 &&
+                            !reflection_done_today && agent && agent->memory) {
+                            sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
+                            if (refl_db) {
+                                hu_reflection_engine_t refl_engine = {.alloc = alloc, .db = refl_db};
+                                hu_reflection_daily(&refl_engine, (int64_t)t);
+                                reflection_done_today = true;
+                                if (agent->bth_metrics)
+                                    agent->bth_metrics->reflections_daily++;
+                            }
+                        }
+                        if (lt_refl->tm_hour == 5)
+                            reflection_done_today = false;
+
+                        /* Weekly: Sunday 3 AM */
+                        if (lt_refl->tm_wday == 0 && lt_refl->tm_hour == 3 && lt_refl->tm_min == 0 &&
+                            !reflection_done_week && agent && agent->memory) {
+                            sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
+                            if (refl_db) {
+                                hu_reflection_engine_t refl_engine = {.alloc = alloc, .db = refl_db};
+                                hu_reflection_weekly(&refl_engine, (int64_t)t);
+                                reflection_done_week = true;
+                                if (agent->bth_metrics)
+                                    agent->bth_metrics->reflections_weekly++;
+                            }
+                        }
+                        if (lt_refl->tm_wday == 1 && lt_refl->tm_hour == 0)
+                            reflection_done_week = false;
+
+                        /* Monthly: 1st 3 AM */
+                        if (lt_refl->tm_mday == 1 && lt_refl->tm_hour == 3 && lt_refl->tm_min == 0 &&
+                            !reflection_done_month && agent && agent->memory) {
+                            sqlite3 *refl_db = hu_sqlite_memory_get_db(agent->memory);
+                            if (refl_db) {
+                                hu_reflection_engine_t refl_engine = {.alloc = alloc, .db = refl_db};
+                                hu_reflection_extract_general_lessons(&refl_engine, (int64_t)t);
+                                hu_meta_params_t meta_params = {0};
+                                hu_meta_learning_optimize(refl_db, &meta_params);
+                                reflection_done_month = true;
+                            }
+                        }
+                        if (lt_refl->tm_mday == 2)
+                            reflection_done_month = false;
+                    }
+                }
+#endif
 #ifdef HU_HAS_PERSONA
                 {
                     static bool tuned_today = false;
@@ -3269,6 +3335,53 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     }
                                     hu_episode_free(alloc, episodes, ep_count);
                                 }
+                            }
+                        }
+                    }
+#endif
+
+                    /* Phase 8 (F96): Skill trigger matching */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory && batch_key && key_len > 0) {
+                        sqlite3 *skill_db = hu_sqlite_memory_get_db(agent->memory);
+                        if (skill_db) {
+                            hu_skill_t *matched = NULL;
+                            size_t matched_count = 0;
+                            hu_error_t skill_err = hu_skill_match_triggers(alloc, skill_db,
+                                batch_key, key_len, NULL, 0, NULL, 0, 0.5,
+                                &matched, &matched_count);
+                            if (skill_err == HU_OK && matched && matched_count > 0) {
+                                size_t max_skills = matched_count > 3 ? 3 : matched_count;
+                                for (size_t si = 0; si < max_skills; si++) {
+                                    /* Inject skill strategy as directive */
+                                    size_t strat_len = matched[si].strategy_len > 0
+                                        ? matched[si].strategy_len
+                                        : strlen(matched[si].strategy);
+                                    if (strat_len > 0 && strat_len < 500) {
+                                        fprintf(stderr, "[human] Phase 8: applying skill '%s'\n",
+                                                matched[si].name);
+                                        char skill_buf[512];
+                                        int sb = snprintf(skill_buf, sizeof(skill_buf),
+                                            "[SKILL %s]: %.*s", matched[si].name,
+                                            (int)strat_len, matched[si].strategy);
+                                        if (sb > 0 && (size_t)sb < sizeof(skill_buf)) {
+                                            char *skill_str =
+                                                (char *)alloc->alloc(alloc->ctx, (size_t)sb + 1);
+                                            if (skill_str) {
+                                                memcpy(skill_str, skill_buf, (size_t)sb + 1);
+                                                PHASE6_APPEND(skill_str, (size_t)sb);
+                                            }
+                                        }
+                                    }
+                                    /* Record attempt */
+                                    int64_t attempt_id = 0;
+                                    hu_skill_record_attempt(skill_db, matched[si].id,
+                                        batch_key, key_len, (int64_t)time(NULL),
+                                        NULL, 0, NULL, 0, NULL, 0, &attempt_id);
+                                    if (agent->bth_metrics)
+                                        agent->bth_metrics->skills_applied++;
+                                }
+                                hu_skill_free(alloc, matched, matched_count);
                             }
                         }
                     }

@@ -29,6 +29,11 @@ static void bth_metrics_init_zeros(void) {
     HU_ASSERT_EQ(m.replay_analyses, 0u);
     HU_ASSERT_EQ(m.egraph_contexts, 0u);
     HU_ASSERT_EQ(m.vision_descriptions, 0u);
+    HU_ASSERT_EQ(m.skills_applied, 0u);
+    HU_ASSERT_EQ(m.skills_evolved, 0u);
+    HU_ASSERT_EQ(m.skills_retired, 0u);
+    HU_ASSERT_EQ(m.reflections_daily, 0u);
+    HU_ASSERT_EQ(m.reflections_weekly, 0u);
     HU_ASSERT_EQ(m.total_turns, 0u);
 }
 

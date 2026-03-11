@@ -2641,7 +2641,7 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
                     goto fail;
             }
             if (h->self_deprecation_count > 0) {
-                err = append_prompt(alloc, &buf, &len, &cap, "Self-deprecation topics: ", 24);
+                err = append_prompt(alloc, &buf, &len, &cap, "Self-deprecation topics: ", 25);
                 if (err != HU_OK)
                     goto fail;
                 for (size_t i = 0; i < h->self_deprecation_count; i++) {
@@ -3390,7 +3390,7 @@ hu_error_t hu_persona_build_prompt(hu_allocator_t *alloc, const hu_persona_t *pe
             if (ch_n > 0 && (size_t)ch_n < sizeof(ch_header)) {
                 err = append_prompt(alloc, &buf, &len, &cap, ch_header, (size_t)ch_n);
             } else {
-                err = append_prompt(alloc, &buf, &len, &cap, "Channel style:\n", 16);
+                err = append_prompt(alloc, &buf, &len, &cap, "Channel style:\n", 15);
             }
             if (err != HU_OK)
                 goto fail;
