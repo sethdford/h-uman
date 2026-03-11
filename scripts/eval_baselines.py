@@ -95,6 +95,7 @@ def get_hu_response(message):
         raw = result.stdout.decode("utf-8", errors="replace")
         output = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', raw)
         output = re.sub(r'\x1b\[\?25[hl]', '', output)
+        output = re.sub(r'[\ufffc\ufffd]', '', output)
         lines = [l.strip() for l in output.strip().split("\n") if l.strip() and l.strip() != "Goodbye."]
         return " ".join(lines) if lines else "(empty)"
     except subprocess.TimeoutExpired:
