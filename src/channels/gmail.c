@@ -268,7 +268,7 @@ static void gmail_stop(void *ctx) {
 }
 
 #if HU_IS_TEST
-static hu_error_t gmail_send(void *ctx, const char *target, size_t target_len, const char *message,
+static __attribute__((unused)) hu_error_t gmail_send(void *ctx, const char *target, size_t target_len, const char *message,
                              size_t message_len, const char *const *media, size_t media_count) {
     (void)target;
     (void)target_len;

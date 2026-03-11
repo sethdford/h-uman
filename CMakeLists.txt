@@ -1563,6 +1563,7 @@ set(HU_TEST_SOURCES
     tests/test_peripheral.c
     tests/test_vtables.c
     tests/test_e2e.c
+    tests/test_e2e_conversation.c
     tests/test_subsystems.c
     tests/test_config_parse.c
     tests/test_config_migrate.c
@@ -1719,7 +1720,7 @@ if(HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_SOURCES tests/test_cartesia.c tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
 endif()
 if(HU_ENABLE_AUTHENTIC)
-    list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c)
+    list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c tests/test_phase9_integration.c)
 endif()
 
 # Paperclip tests (requires libcurl)

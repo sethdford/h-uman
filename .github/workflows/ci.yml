@@ -77,6 +77,32 @@ jobs:
       - name: Run tests
         run: ./build-minimal/human_tests
 
+  feature-flags:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: no-sqlite
+            flags: "-DHU_ENABLE_SQLITE=OFF -DHU_ENABLE_ALL_CHANNELS=ON"
+          - name: no-persona
+            flags: "-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_PERSONA=OFF"
+          - name: no-skills
+            flags: "-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_SKILLS=OFF"
+          - name: kitchen-sink
+            flags: "-DHU_ENABLE_SQLITE=ON -DHU_ENABLE_ALL_CHANNELS=ON -DHU_ENABLE_PERSONA=ON -DHU_ENABLE_SKILLS=ON"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake libsqlite3-dev libcurl4-openssl-dev
+      - name: Configure (${{ matrix.name }})
+        run: cmake -B build ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build build -j$(nproc)
+      - name: Test (${{ matrix.name }})
+        run: ./build/human_tests
+        continue-on-error: false
+
   release-size:
     runs-on: macos-latest
     steps:

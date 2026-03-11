@@ -72,6 +72,8 @@ static void qq_queue_push(hu_qq_ctx_t *c, const char *from, size_t from_len, con
 
 static hu_error_t qq_send(void *ctx, const char *target, size_t target_len, const char *message,
                           size_t message_len, const char *const *media, size_t media_count) {
+    (void)target;
+    (void)target_len;
     (void)media;
     (void)media_count;
     hu_qq_ctx_t *c = (hu_qq_ctx_t *)ctx;

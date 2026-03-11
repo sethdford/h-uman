@@ -93,7 +93,43 @@ Use `#if HU_IS_TEST` to bypass side effects in tests (network, process spawn, br
 - Constants: `HU_SCREAMING_SNAKE_CASE`
 - Factory registration keys: lowercase, user-facing (e.g. `"weather"`, `"my_channel"`)
 
+## Vtable Interfaces
+
+Each extension point is a struct of function pointers. Your plugin allocates context (`void *ctx`) and provides a static vtable:
+
+| Extension  | Vtable Type              | Header                            | Key Methods                                           |
+| ---------- | ------------------------ | --------------------------------- | ----------------------------------------------------- |
+| Provider   | `hu_provider_vtable_t`   | `include/human/provider.h`        | `chat`, `supports_native_tools`, `get_name`, `deinit` |
+| Channel    | `hu_channel_vtable_t`    | `include/human/channel.h`         | `send`, `listen`, `name`, `is_configured`, `react`    |
+| Tool       | `hu_tool_vtable_t`       | `include/human/tool.h`            | `execute`, `name`, `description`, `parameters_json`   |
+| Memory     | `hu_memory_vtable_t`     | `include/human/memory/memory.h`   | `store`, `recall`, `forget`, `health`, `search`       |
+| Runtime    | `hu_runtime_vtable_t`    | `include/human/runtime/runtime.h` | `has_filesystem`, `has_network`, `spawn`, `name`      |
+| Peripheral | `hu_peripheral_vtable_t` | `include/human/peripheral.h`      | `read`, `write`, `probe`, `name`                      |
+
+## Build Flags
+
+| Flag                     | Default | Effect                                    |
+| ------------------------ | ------- | ----------------------------------------- |
+| `HU_ENABLE_SQLITE`       | ON      | SQLite memory engine, knowledge graph     |
+| `HU_ENABLE_CURL`         | OFF     | HTTP client (libcurl)                     |
+| `HU_ENABLE_ALL_CHANNELS` | OFF     | All 35 channel implementations            |
+| `HU_ENABLE_PERSONA`      | OFF     | Persona system (profiles, prompt builder) |
+| `HU_ENABLE_SKILLS`       | OFF     | Skill system (matching, chains, feedback) |
+| `HU_ENABLE_LTO`          | OFF     | Link-time optimization (release builds)   |
+| `HU_ENABLE_TLS`          | OFF     | TLS support for WebSocket (OpenSSL)       |
+
+## Performance Baseline
+
+| Metric            | Value (MinSizeRel+LTO, all flags) |
+| ----------------- | --------------------------------- |
+| Binary size       | ~918 KB                           |
+| Cold start        | ~24 ms                            |
+| Peak RSS          | ~5.7 MB                           |
+| Test suite (4643) | ~4.2 s (~1400 tests/sec)          |
+
 ## See Also
 
 - [API Reference](../docs/api/README.md) for full type and function documentation
 - [AGENTS.md](../AGENTS.md) for engineering protocol and change playbooks
+- [Skill Format](../human-skills/SKILL_FORMAT.md) for building agent skills
+- [Skill Registry](../human-skills/REGISTRY.md) for publishing skills

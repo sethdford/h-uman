@@ -54,6 +54,8 @@ static void twitter_stop(void *ctx) {
 static hu_error_t twitter_send(void *ctx, const char *target, size_t target_len,
                                const char *message, size_t message_len, const char *const *media,
                                size_t media_count) {
+    (void)target;
+    (void)target_len;
     (void)media;
     (void)media_count;
     hu_twitter_ctx_t *c = (hu_twitter_ctx_t *)ctx;

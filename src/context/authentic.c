@@ -765,13 +765,45 @@ hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id,
     return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_INTERNAL;
 }
 
-/* F107: Gossip (stub) */
+/* F107: Gossip — query feed_items for recent items about contacts other than current */
 int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out)
 {
-    (void)db;
-    (void)contact_id;
-    (void)max_out;
-    return 0;
+    if (!db || max_out <= 0)
+        return 0;
+    int64_t now_sec = (int64_t)time(NULL);
+    int64_t cutoff = now_sec - (24 * 3600);
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT id FROM feed_items WHERE ingested_at >= ? "
+                      "AND (contact_id IS NULL OR contact_id != ?) "
+                      "ORDER BY ingested_at DESC LIMIT ?";
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return 0;
+    sqlite3_bind_int64(stmt, 1, cutoff);
+    sqlite3_bind_text(stmt, 2, contact_id ? contact_id : "", -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 3, max_out);
+    int count = 0;
+    while (count < max_out && sqlite3_step(stmt) == SQLITE_ROW)
+        count++;
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+#define HU_GOSSIP_PROMPT_BUF 512
+
+const char *hu_gossip_prompt(const char *shared_contact, const char *observation)
+{
+    static _Thread_local char buf[HU_GOSSIP_PROMPT_BUF];
+    const char *sc = shared_contact ? shared_contact : "someone";
+    const char *obs = observation ? observation : "";
+    int n = snprintf(buf, sizeof(buf),
+                    "[GOSSIP: You noticed something about %s: %s. Share a brief, dry "
+                    "observation. STRICT: Never reveal private information from other "
+                    "conversations.]",
+                    sc, obs);
+    if (n < 0 || (size_t)n >= sizeof(buf))
+        buf[0] = '\0';
+    return buf;
 }
 
 /* F108: Random thoughts */

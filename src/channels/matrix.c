@@ -149,6 +149,7 @@ static const hu_channel_vtable_t matrix_vtable = {
 
 hu_error_t hu_matrix_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                           size_t max_msgs, size_t *out_count) {
+    (void)alloc;
     hu_matrix_ctx_t *ctx = (hu_matrix_ctx_t *)channel_ctx;
     if (!ctx || !msgs || !out_count)
         return HU_ERR_INVALID_ARGUMENT;

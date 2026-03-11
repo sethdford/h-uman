@@ -103,3 +103,5 @@ apps/flutter/build/
 build2/
 audit.log
 firebase-debug.log
+human_test_output.txt
+human_test_stderr.txt

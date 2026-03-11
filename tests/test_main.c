@@ -26,6 +26,7 @@ void run_tool_tests(void);
 void test_vtables_run(void);
 void run_peripheral_tests(void);
 void run_e2e_tests(void);
+void run_e2e_conversation_tests(void);
 void run_subsystems_tests(void);
 void run_config_parse_tests(void);
 void run_config_migrate_tests(void);
@@ -153,6 +154,7 @@ void run_knowledge_tests(void);
 void run_cognitive_tests(void);
 #ifdef HU_ENABLE_AUTHENTIC
 void run_cognitive_load_tests(void);
+void run_phase9_integration_tests(void);
 #endif
 void run_deep_memory_tests(void);
 void run_compression_tests(void);
@@ -357,6 +359,7 @@ int main(void) {
     run_cognitive_tests();
 #ifdef HU_ENABLE_AUTHENTIC
     run_cognitive_load_tests();
+    run_phase9_integration_tests();
 #endif
     run_deep_memory_tests();
     run_compression_tests();
@@ -392,6 +395,7 @@ int main(void) {
     run_privacy_audit_tests();
     run_collab_planning_tests();
     run_bth_e2e_tests();
+    run_e2e_conversation_tests();
     run_bth_metrics_tests();
     run_memory_features_tests();
 #ifdef HU_ENABLE_CURL

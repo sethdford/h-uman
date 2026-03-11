@@ -660,6 +660,8 @@ static void telegram_stop(void *ctx) {
 static hu_error_t telegram_send(void *ctx, const char *target, size_t target_len,
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
+    (void)media;
+    (void)media_count;
     hu_telegram_ctx_t *c = (hu_telegram_ctx_t *)ctx;
     if (!c || !c->alloc)
         return HU_ERR_INVALID_ARGUMENT;

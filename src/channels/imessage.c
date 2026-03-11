@@ -301,6 +301,8 @@ static hu_error_t imessage_send(void *ctx, const char *target, size_t target_len
                                 const char *message, size_t message_len, const char *const *media,
                                 size_t media_count) {
 #if HU_IS_TEST
+    (void)target;
+    (void)target_len;
     (void)media;
     (void)media_count;
     {
@@ -682,6 +684,7 @@ static hu_error_t imessage_get_response_constraints(void *ctx,
 
 static hu_error_t imessage_react(void *ctx, const char *target, size_t target_len,
                                  int64_t message_id, hu_reaction_type_t reaction) {
+    (void)target;
     (void)target_len;
     (void)message_id;
 #if HU_IS_TEST
@@ -716,9 +719,12 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     if (!target || target_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
 
-    /* Fetch message content from chat.db for row matching (message_id > 0). */
+    /* Fetch message content + row offset from chat.db for robust AX matching. */
     char content_buf[256];
     size_t content_len = 0;
+    int row_offset = -1; /* messages after target in same chat; -1 = unknown */
+    char guid_buf[96];
+    guid_buf[0] = '\0';
 #if defined(HU_ENABLE_SQLITE)
     if (message_id > 0) {
         const char *home_env = getenv("HOME");
@@ -729,7 +735,8 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
                 sqlite3 *db = NULL;
                 if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
                     sqlite3_stmt *stmt = NULL;
-                    if (sqlite3_prepare_v2(db, "SELECT text FROM message WHERE ROWID = ?", -1,
+                    if (sqlite3_prepare_v2(db,
+                                           "SELECT text, guid FROM message WHERE ROWID = ?", -1,
                                            &stmt, NULL) == SQLITE_OK) {
                         sqlite3_bind_int64(stmt, 1, message_id);
                         if (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -742,8 +749,32 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
                                 content_buf[len] = '\0';
                                 content_len = len;
                             }
+                            const char *guid = (const char *)sqlite3_column_text(stmt, 1);
+                            if (guid) {
+                                size_t glen = strlen(guid);
+                                if (glen >= sizeof(guid_buf))
+                                    glen = sizeof(guid_buf) - 1;
+                                memcpy(guid_buf, guid, glen);
+                                guid_buf[glen] = '\0';
+                            }
                         }
                         sqlite3_finalize(stmt);
+                    }
+                    /* Row offset: count non-tapback messages after this one in the same chat.
+                     * Gives us a reliable index from the bottom of the transcript view. */
+                    sqlite3_stmt *off_stmt = NULL;
+                    const char *off_sql =
+                        "SELECT COUNT(*) FROM message m "
+                        "JOIN chat_message_join cmj ON m.ROWID = cmj.message_id "
+                        "WHERE cmj.chat_id = ("
+                        "  SELECT cmj2.chat_id FROM chat_message_join cmj2 "
+                        "  WHERE cmj2.message_id = ?1 LIMIT 1"
+                        ") AND m.ROWID > ?1 AND m.associated_message_type = 0";
+                    if (sqlite3_prepare_v2(db, off_sql, -1, &off_stmt, NULL) == SQLITE_OK) {
+                        sqlite3_bind_int64(off_stmt, 1, message_id);
+                        if (sqlite3_step(off_stmt) == SQLITE_ROW)
+                            row_offset = sqlite3_column_int(off_stmt, 0);
+                        sqlite3_finalize(off_stmt);
                     }
                     sqlite3_close(db);
                 }
@@ -752,6 +783,7 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     }
 #endif
     (void)message_id;
+    (void)guid_buf;
 
     /* Escape content_prefix and tapback_ax for JavaScript string literals. */
     size_t esc_cap = (content_len + strlen(tapback_ax)) * 2 + 64;
@@ -793,14 +825,15 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
     tapback_esc[j] = '\0';
 
     /*
-     * JXA script: activate Messages, find row by content, AXShowMenu, select tapback.
+     * JXA script: activate Messages, find row by offset or content, AXShowMenu, select tapback.
+     * - rowOffset: messages after target in the transcript (-1 = unknown, use content match)
      * - contentPrefix: substring to match in table row (empty = use last row)
      * - tapbackAx: AX menu label (Love, Like, Ha Ha, etc.)
-     * Fragile: requires accessibility permissions; UI hierarchy varies by macOS.
+     * Requires accessibility permissions; UI hierarchy varies by macOS version.
      */
     static const char *script_tpl =
         "ObjC.import(\"stdlib\");"
-        "var contentPrefix=\"%s\";var tapbackAx=\"%s\";"
+        "var rowOff=%d;var contentPrefix=\"%s\";var tapbackAx=\"%s\";"
         "try{"
         "var M=Application(\"Messages\");M.activate();delay(0.5);"
         "var SE=Application(\"System Events\");var p=SE.processes[\"Messages\"];"
@@ -810,8 +843,18 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
         "if(!t||t.length===0){$.exit(1);}"
         "var rows=t[t.length-1].rows();"
         "if(!rows||rows.length===0){$.exit(1);}"
-        "var r=rows[rows.length-1];"
-        "if(contentPrefix&&contentPrefix.length>0){"
+        "var r=null;"
+        /* Try row-offset first (most reliable when available). */
+        "if(rowOff>=0&&rowOff<rows.length){"
+        "var idx=rows.length-1-rowOff;"
+        "var cand=rows[idx];var cv=\"\";"
+        "try{if(cand.attributes&&cand.attributes.AXValue!==undefined)"
+        "{cv=String(cand.attributes.AXValue);}}catch(e){}"
+        "if(!contentPrefix||contentPrefix.length===0||"
+        "(cv&&cv.indexOf(contentPrefix)!==-1)){r=cand;}"
+        "}"
+        /* Fall back to content-prefix scan from bottom. */
+        "if(!r&&contentPrefix&&contentPrefix.length>0){"
         "for(var i=rows.length-1;i>=0;i--){"
         "var row=rows[i];var val=\"\";"
         "try{if(row.attributes&&row.attributes.AXValue!==undefined){val=String(row.attributes."
@@ -821,6 +864,8 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
         "attributes.AXValue);}}}catch(e){}"
         "if(val&&val.indexOf(contentPrefix)!==-1){r=row;break;}"
         "}}"
+        /* Last resort: use the most recent row. */
+        "if(!r){r=rows[rows.length-1];}"
         "if(r.actions&&r.actions.AXShowMenu){r.actions.AXShowMenu.perform();}"
         "delay(0.5);"
         "var ctxMenus=r.menus?r.menus():[];"
@@ -840,14 +885,14 @@ static hu_error_t imessage_react(void *ctx, const char *target, size_t target_le
         "$.exit(0);"
         "}catch(e){$.exit(1);}";
 
-    size_t script_cap = 1024 + content_esc_len + strlen(tapback_esc);
+    size_t script_cap = 1280 + content_esc_len + strlen(tapback_esc);
     char *script = (char *)c->alloc->alloc(c->alloc->ctx, script_cap);
     if (!script) {
         c->alloc->free(c->alloc->ctx, tapback_esc, tapback_esc_cap);
         c->alloc->free(c->alloc->ctx, content_esc, esc_cap);
         return HU_ERR_OUT_OF_MEMORY;
     }
-    int n = snprintf(script, script_cap, script_tpl, content_esc, tapback_esc);
+    int n = snprintf(script, script_cap, script_tpl, row_offset, content_esc, tapback_esc);
     c->alloc->free(c->alloc->ctx, tapback_esc, tapback_esc_cap);
     c->alloc->free(c->alloc->ctx, content_esc, esc_cap);
     if (n < 0 || (size_t)n >= script_cap) {

@@ -194,7 +194,10 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
             existing->category.data.custom.name)
             alloc->free(alloc->ctx, (void *)existing->category.data.custom.name,
                         existing->category.data.custom.name_len + 1);
-        dup_category(alloc, category, &existing->category);
+        if (category)
+            dup_category(alloc, category, &existing->category);
+        else
+            existing->category.tag = HU_MEMORY_CATEGORY_CORE;
 
         if (existing->session_id)
             alloc->free(alloc->ctx, (void *)existing->session_id, strlen(existing->session_id) + 1);
@@ -229,7 +232,10 @@ static hu_error_t impl_store(void *ctx, const char *key, size_t key_len, const c
         alloc->free(alloc->ctx, e, sizeof(lru_entry_t));
         return HU_ERR_OUT_OF_MEMORY;
     }
-    dup_category(alloc, category, &e->category);
+    if (category)
+        dup_category(alloc, category, &e->category);
+    else
+        e->category.tag = HU_MEMORY_CATEGORY_CORE;
     e->last_access = next_access(self);
 
     uint32_t b = hash_key(key, key_len);

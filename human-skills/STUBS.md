@@ -1,34 +1,35 @@
-# Human (Swift/HumanKit) — Project Status
+# Human — Project Status
 
-This file documents the **Swift/HumanKit** module — a Swift wrapper around the C core. Metrics below are for the Swift codebase; the main C codebase has different scale (~715 source files, ~136K lines of C, 3758 tests, ~unknown KB binary).
-
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 
 ## Summary
 
-| Metric                         | Value                |
-| ------------------------------ | -------------------- |
-| Source files (src/ + include/) | **~715**             |
-| Lines of C/H code              | **~137,162**         |
-| Test files                     | 128                  |
-| Tests passing                  | **3795/3795 (100%)** |
-| Binary size (MinSizeRel+LTO)   | **~772 KB (full)**   |
-| Core binary (no curl/channels) | **463 KB**           |
-| human module parity          | **100%**             |
+| Metric                         | Value                  |
+| ------------------------------ | ---------------------- |
+| Source files (src/ + include/) | **~715**               |
+| Lines of C/H code              | **~139K**              |
+| Test files                     | 129                    |
+| Tests passing                  | **4643/4643 (100%)**   |
+| Binary size (MinSizeRel+LTO)   | **918 KB (all flags)** |
+| Text section                   | **848 KB**             |
+| Cold start (--version)         | **~24 ms avg**         |
+| Peak RSS (--version)           | **~5.7 MB**            |
+| Peak RSS (test suite)          | **~8.5 MB**            |
+| Test throughput                | **~1400 tests/sec**    |
 
 ## Module Parity
 
 | Subsystem        | Baseline | Human | Status                      |
-| ---------------- | -------- | ------- | --------------------------- |
-| Providers        | 20       | 20      | **Full parity**             |
-| Channels         | 35       | 35      | **Full parity**             |
-| Tools            | 68       | 68      | **Full parity**             |
-| Security         | 11       | 13      | **Full parity** (+2 extras) |
-| Agent            | 8        | 11      | **Full parity** (+3 extras) |
-| Memory Engines   | 10       | 10      | **Full parity**             |
-| Memory Lifecycle | 8        | 8       | **Full parity**             |
-| Memory Retrieval | 8        | 10      | **Full parity** (+2 extras) |
-| Memory Vector    | 12       | 15      | **Full parity** (+3 extras) |
+| ---------------- | -------- | ----- | --------------------------- |
+| Providers        | 20       | 20    | **Full parity**             |
+| Channels         | 35       | 35    | **Full parity**             |
+| Tools            | 68       | 68    | **Full parity**             |
+| Security         | 11       | 13    | **Full parity** (+2 extras) |
+| Agent            | 8        | 11    | **Full parity** (+3 extras) |
+| Memory Engines   | 10       | 10    | **Full parity**             |
+| Memory Lifecycle | 8        | 8     | **Full parity**             |
+| Memory Retrieval | 8        | 10    | **Full parity** (+2 extras) |
+| Memory Vector    | 12       | 15    | **Full parity** (+3 extras) |
 
 **All baseline modules have been ported to Human. Zero gaps remain.**
 

@@ -90,6 +90,8 @@ static void irc_stop(void *ctx) {
 
 static hu_error_t irc_send(void *ctx, const char *target, size_t target_len, const char *message,
                            size_t message_len, const char *const *media, size_t media_count) {
+    (void)target;
+    (void)target_len;
     (void)media;
     (void)media_count;
 #if HU_IS_TEST
@@ -156,6 +158,7 @@ static const hu_channel_vtable_t irc_vtable = {
 
 hu_error_t hu_irc_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                        size_t max_msgs, size_t *out_count) {
+    (void)alloc;
     hu_irc_ctx_t *ctx = (hu_irc_ctx_t *)channel_ctx;
     if (!ctx || !msgs || !out_count)
         return HU_ERR_INVALID_ARGUMENT;

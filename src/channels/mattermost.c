@@ -146,6 +146,7 @@ static const hu_channel_vtable_t mattermost_vtable = {
 
 hu_error_t hu_mattermost_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel_loop_msg_t *msgs,
                               size_t max_msgs, size_t *out_count) {
+    (void)alloc;
     hu_mattermost_ctx_t *ctx = (hu_mattermost_ctx_t *)channel_ctx;
     if (!ctx || !msgs || !out_count)
         return HU_ERR_INVALID_ARGUMENT;

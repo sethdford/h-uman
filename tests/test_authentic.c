@@ -662,6 +662,32 @@ static void test_guilt_stale_threads(void) {
     mem.vtable->deinit(mem.ctx);
 }
 
+static void test_gossip_check_returns_count(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int n_empty = hu_gossip_check(db, "contact_a", 5);
+    HU_ASSERT_EQ(n_empty, 0);
+
+    int64_t now = (int64_t)time(NULL);
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "INSERT INTO feed_items (source, contact_id, content_type, content, ingested_at) "
+        "VALUES ('test', 'contact_b', 'post', 'saw Alex at cafe', ?)", -1, &stmt, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    sqlite3_bind_int64(stmt, 1, now);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    HU_ASSERT_EQ(rc, SQLITE_DONE);
+
+    int n = hu_gossip_check(db, "contact_a", 5);
+    HU_ASSERT_EQ(n, 1);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_authentic_tests(void) {
@@ -727,5 +753,6 @@ void run_authentic_tests(void) {
     HU_RUN_TEST(test_quality_mark_recovered);
     HU_RUN_TEST(test_contradiction_record_retrieve);
     HU_RUN_TEST(test_guilt_stale_threads);
+    HU_RUN_TEST(test_gossip_check_returns_count);
 #endif
 }

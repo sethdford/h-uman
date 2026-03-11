@@ -58,6 +58,8 @@ static hu_error_t google_chat_send(void *ctx, const char *target, size_t target_
                                    const char *const *media, size_t media_count) {
     (void)target;
     (void)target_len;
+    (void)media;
+    (void)media_count;
     hu_google_chat_ctx_t *c = (hu_google_chat_ctx_t *)ctx;
 
 #if HU_IS_TEST

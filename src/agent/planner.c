@@ -265,6 +265,7 @@ hu_error_t hu_planner_replan(hu_allocator_t *alloc, hu_provider_t *provider, con
                              const char *progress_summary, size_t progress_summary_len,
                              const char *failure_detail, size_t failure_detail_len,
                              const char *const *tool_names, size_t tool_count, hu_plan_t **out) {
+    (void)original_goal_len;
     if (!alloc || !provider || !provider->vtable || !original_goal || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;

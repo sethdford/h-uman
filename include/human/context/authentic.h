@@ -163,8 +163,9 @@ int hu_narration_events_unsent(sqlite3 *db, float min_shareability,
 hu_error_t hu_narration_event_mark_shared(sqlite3 *db, int64_t event_id,
     const char *contact_id, int64_t now);
 
-/* F107: Gossip (stub for now) */
+/* F107: Gossip */
 int hu_gossip_check(sqlite3 *db, const char *contact_id, int max_out);
+const char *hu_gossip_prompt(const char *shared_contact, const char *observation);
 
 /* F108: Random thoughts */
 typedef struct {

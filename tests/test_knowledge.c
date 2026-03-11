@@ -17,6 +17,7 @@ static void test_knowledge_create_table_sql_valid(void) {
 
 static void test_knowledge_insert_sql_escapes_quotes(void) {
     hu_allocator_t alloc = hu_system_allocator();
+    (void)alloc;
     hu_knowledge_entry_t entry = {
         .id = 1,
         .topic = "O'Brien's party",
