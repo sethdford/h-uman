@@ -766,14 +766,14 @@ git commit -m "feat(ui): upgrade skills view with json-viewer and tag filtering"
 
 Checklist:
 
-- [ ] Every view: stagger animation on load (`hu-stagger` class)
-- [ ] Every view: skeleton shapes matching content layout
-- [ ] Every view: empty state with actionable CTA
-- [ ] Every view: responsive at sm/md/lg breakpoints
-- [ ] Every stat card: trend indicator (up/down/flat)
-- [ ] Every list/table: "no results" state
-- [ ] Every view: `view-transition-name` CSS for route animations
-- [ ] No raw hex colors, pixel spacing, or pixel radii anywhere
+- [x] Every view: stagger animation on load (`hu-stagger` class)
+- [x] Every view: skeleton shapes matching content layout
+- [x] Every view: empty state with actionable CTA
+- [x] Every view: responsive at sm/md/lg breakpoints
+- [x] Every stat card: trend indicator (up/down/flat)
+- [x] Every list/table: "no results" state
+- [x] Every view: `view-transition-name` CSS for route animations
+- [x] No raw hex colors, pixel spacing, or pixel radii anywhere
 
 ```bash
 git commit -m "feat(ui): cross-view consistency pass — stagger, skeletons, empty states, transitions"

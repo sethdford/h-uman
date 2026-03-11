@@ -1,6 +1,11 @@
+#include "human/agent/collab_planning.h"
 #include "human/agent/commitment.h"
 #include "human/agent/proactive.h"
+#include "human/context/authentic.h"
+#include "human/context/behavioral.h"
 #include "human/context/event_extract.h"
+#include "human/context/intelligence.h"
+#include "human/context/rel_dynamics.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/core/string.h"
@@ -806,8 +811,136 @@ static void proactive_build_context_handles_new_action_types(void) {
     hu_proactive_result_deinit(&result, &alloc);
 }
 
+/* --- Daemon integration tests (Phase 6 + post-awareness) --- */
+
+static void daemon_authentic_select_and_build_directive_produces_valid_string(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_authentic_config_t auth_cfg = {
+        .narration_probability = 1.0,
+        .embodiment_probability = 0.0,
+        .imperfection_probability = 0.0,
+        .complaining_probability = 0.0,
+        .gossip_probability = 0.0,
+        .random_thought_probability = 0.0,
+        .medium_awareness_probability = 0.0,
+        .resistance_probability = 0.0,
+        .existential_probability = 0.0,
+        .contradiction_probability = 0.0,
+        .guilt_probability = 0.0,
+        .life_thread_probability = 0.0,
+        .bad_day_active = false,
+        .bad_day_duration_hours = 8,
+    };
+    hu_authentic_behavior_t behavior =
+        hu_authentic_select(&auth_cfg, 0.5, false, 42u);
+    HU_ASSERT_NEQ(behavior, HU_AUTH_NONE);
+
+    char *auth_dir = NULL;
+    size_t auth_len = 0;
+    hu_error_t err =
+        hu_authentic_build_directive(&alloc, behavior, NULL, 0, &auth_dir, &auth_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(auth_dir);
+    HU_ASSERT_TRUE(auth_len > 0);
+    HU_ASSERT_TRUE(strstr(auth_dir, "AUTHENTIC") != NULL);
+    hu_str_free(&alloc, auth_dir);
+}
+
+static void daemon_cognitive_compute_load_and_build_directive_work_together(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    double load = hu_cognitive_compute_load(5, 20, false);
+    HU_ASSERT_TRUE(load >= 0.0 && load <= 1.0);
+    if (load > 0.5) {
+        hu_cognitive_state_t cog_state = {
+            .active_conversations = 5,
+            .messages_this_hour = 20,
+            .complex_topic_active = false,
+            .load_score = load,
+        };
+        char *cog_dir = NULL;
+        size_t cog_len = 0;
+        hu_error_t err = hu_cognitive_build_directive(&alloc, &cog_state, &cog_dir, &cog_len);
+        HU_ASSERT_EQ(err, HU_OK);
+        HU_ASSERT_NOT_NULL(cog_dir);
+        HU_ASSERT_TRUE(cog_len > 0);
+        HU_ASSERT_TRUE(strstr(cog_dir, "cognitive") != NULL || strstr(cog_dir, "load") != NULL ||
+                       strstr(cog_dir, "COGNITIVE") != NULL);
+        hu_str_free(&alloc, cog_dir);
+    }
+}
+
+static void daemon_rel_velocity_compute_and_build_prompt_produce_context(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_rel_velocity_t rel_vel = {0};
+    rel_vel.contact_id = "test_contact";
+    rel_vel.contact_id_len = 11;
+    rel_vel.messages_sent_30d = 10;
+    rel_vel.messages_received_30d = 15;
+    rel_vel.initiations_sent_30d = 5;
+    rel_vel.initiations_received_30d = 8;
+    hu_rel_velocity_compute(&rel_vel);
+
+    hu_drift_signal_t drift = {0};
+    drift.contact_id = "test_contact";
+    drift.contact_id_len = 11;
+    drift.current_velocity = rel_vel.velocity;
+    hu_repair_state_t repair = {0};
+
+    char *rel_dir = NULL;
+    size_t rel_len = 0;
+    hu_error_t err =
+        hu_rel_dynamics_build_prompt(&alloc, &rel_vel, &drift, &repair, &rel_dir, &rel_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(rel_dir);
+    HU_ASSERT_TRUE(rel_len > 0);
+    HU_ASSERT_TRUE(strstr(rel_dir, "RELATIONSHIP") != NULL);
+
+    hu_str_free(&alloc, rel_dir);
+}
+
+static void daemon_collab_plan_build_prompt_works_with_empty_triggers_and_plans(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_collab_plan_build_prompt(&alloc, NULL, 0, NULL, 0, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_TRUE(strstr(out, "No triggers") != NULL || strstr(out, "triggers") != NULL ||
+                   strstr(out, "plans") != NULL);
+    hu_str_free(&alloc, out);
+}
+
+static void daemon_timezone_compute_and_build_directive_work(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* 6am UTC + offset -5 = 1am local (sleeping hours) */
+    uint64_t utc_now_ms = 6 * 3600 * 1000ULL;
+    hu_timezone_info_t tz = hu_timezone_compute(-5, utc_now_ms);
+    HU_ASSERT_EQ(tz.offset_hours, -5);
+    HU_ASSERT_TRUE(tz.is_sleeping_hours);
+
+    static const char CONTACT[] = "alice";
+    char *out = NULL;
+    size_t out_len = 0;
+    hu_error_t err =
+        hu_timezone_build_directive(&alloc, &tz, CONTACT, sizeof(CONTACT) - 1, &out, &out_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(out);
+    HU_ASSERT_TRUE(out_len > 0);
+    HU_ASSERT_TRUE(strstr(out, "alice") != NULL);
+    HU_ASSERT_TRUE(strstr(out, "sleeping") != NULL);
+
+    hu_str_free(&alloc, out);
+}
+
 void run_proactive_tests(void) {
     HU_TEST_SUITE("proactive");
+    HU_RUN_TEST(daemon_authentic_select_and_build_directive_produces_valid_string);
+    HU_RUN_TEST(daemon_cognitive_compute_load_and_build_directive_work_together);
+    HU_RUN_TEST(daemon_rel_velocity_compute_and_build_prompt_produce_context);
+    HU_RUN_TEST(daemon_collab_plan_build_prompt_works_with_empty_triggers_and_plans);
+    HU_RUN_TEST(daemon_timezone_compute_and_build_directive_work);
     HU_RUN_TEST(proactive_build_context_handles_new_action_types);
     HU_RUN_TEST(proactive_milestone_at_10_sessions);
     HU_RUN_TEST(proactive_milestone_50_reflects_deep_familiarity);

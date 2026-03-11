@@ -51,11 +51,11 @@ What does NOT change:
 
 ### Pillar 1: Fix Broken Plumbing
 
-| #   | Feature                                                                       | Status               | Complexity |
-| --- | ----------------------------------------------------------------------------- | -------------------- | ---------- |
-| 1   | **Tapback reactions** — wire `message_id` in iMessage poll loop               | Broken (code exists) | Low        |
-| 2   | **Tapback-vs-type decision** — unified classifier: tapback only / text / both | Missing              | Medium     |
-| 3   | **Typing indicator** — iMessage has no API for this via AppleScript           | Platform limit       | N/A        |
+| #   | Feature                                                                       | Status            | Complexity |
+| --- | ----------------------------------------------------------------------------- | ----------------- | ---------- |
+| 1   | **Tapback reactions** — wire `message_id` in iMessage poll loop               | Implemented       | Low        |
+| 2   | **Tapback-vs-type decision** — unified classifier: tapback only / text / both | Implemented       | Medium     |
+| 3   | **Typing indicator** — iMessage has no API for this via AppleScript           | 🔧 Platform limit | N/A        |
 
 **F1: Tapback Reactions**
 The tapback classifier (`hu_conversation_classify_reaction`), reaction type enum (`hu_reaction_type_t`), and JXA handler all exist. Two bugs prevent them from firing:
@@ -103,12 +103,12 @@ iMessage does not expose a typing indicator API via AppleScript or JXA. The nati
 
 ### Pillar 2: Photo/Media Intelligence
 
-| #   | Feature                     | Status  | Complexity |
-| --- | --------------------------- | ------- | ---------- |
-| 4   | **Auto-vision pipeline**    | Missing | Medium     |
-| 5   | **Photo reaction decision** | Missing | Medium     |
-| 6   | **Photo viewing delay**     | Missing | Low        |
-| 7   | **Video awareness**         | Missing | Medium     |
+| #   | Feature                     | Status      | Complexity |
+| --- | --------------------------- | ----------- | ---------- |
+| 4   | **Auto-vision pipeline**    | Implemented | Medium     |
+| 5   | **Photo reaction decision** | Implemented | Medium     |
+| 6   | **Photo viewing delay**     | Implemented | Low        |
+| 7   | **Video awareness**         | Implemented | Medium     |
 
 **F4: Auto-Vision Pipeline**
 When iMessage poll detects a message with an attachment:
@@ -148,13 +148,13 @@ Same as F4 but for video attachments (`.mov`, `.mp4`, `.m4v`). Options:
 
 ### Pillar 3: Timing Patterns
 
-| #   | Feature                           | Status  | Complexity |
-| --- | --------------------------------- | ------- | ---------- |
-| 8   | **Delayed follow-up engine**      | Missing | High       |
-| 9   | **Double-text pattern**           | Missing | Medium     |
-| 10  | **Missed-message acknowledgment** | Missing | Low        |
-| 11  | **Natural conversation drop-off** | Partial | Low        |
-| 12  | **Morning/evening bookends**      | Missing | Medium     |
+| #   | Feature                           | Status      | Complexity |
+| --- | --------------------------------- | ----------- | ---------- |
+| 8   | **Delayed follow-up engine**      | Implemented | High       |
+| 9   | **Double-text pattern**           | Implemented | Medium     |
+| 10  | **Missed-message acknowledgment** | Implemented | Low        |
+| 11  | **Natural conversation drop-off** | Implemented | Low        |
+| 12  | **Morning/evening bookends**      | Implemented | Medium     |
 
 **F8: Delayed Follow-Up Engine**
 After a conversation ends (no new messages for 15+ minutes), probabilistically schedule a follow-up:
@@ -222,13 +222,13 @@ For contacts with `bookend_messages: true`:
 
 ### Pillar 4: Emotional Intelligence
 
-| #   | Feature                                | Status  | Complexity |
-| --- | -------------------------------------- | ------- | ---------- |
-| 13  | **Energy matching**                    | Partial | Medium     |
-| 14  | **Emotional escalation detection**     | Missing | Medium     |
-| 15  | **Response length calibration**        | Partial | Low        |
-| 16  | **Context modifiers**                  | Missing | Medium     |
-| 17  | **First-time vulnerability detection** | Missing | High       |
+| #   | Feature                                | Status      | Complexity |
+| --- | -------------------------------------- | ----------- | ---------- |
+| 13  | **Energy matching**                    | Implemented | Medium     |
+| 14  | **Emotional escalation detection**     | Implemented | Medium     |
+| 15  | **Response length calibration**        | Implemented | Low        |
+| 16  | **Context modifiers**                  | Implemented | Medium     |
+| 17  | **First-time vulnerability detection** | Implemented | High       |
 
 **F13: Energy Matching**
 Extend `hu_conversation_build_awareness()` with explicit energy-level detection:
@@ -279,18 +279,18 @@ Ported from voiceai's `first-time-vulnerability`:
 
 ### Pillar 5: Superhuman Memory & Intelligence
 
-| #   | Feature                         | Source                            | Complexity |
-| --- | ------------------------------- | --------------------------------- | ---------- |
-| 18  | **Micro-moment recognition**    | voiceai superhuman-intelligence   | High       |
-| 19  | **Inside joke memory**          | voiceai inside-jokes              | Medium     |
-| 20  | **Commitment keeper**           | voiceai commitment-reminder       | Medium     |
-| 21  | **Avoidance pattern detection** | voiceai superhuman-intelligence   | High       |
-| 22  | **Pattern mirror**              | voiceai pattern-callback          | Medium     |
-| 23  | **Topic absence detection**     | voiceai topic-absence             | Medium     |
-| 24  | **Growth celebration**          | voiceai growth-celebration        | Medium     |
-| 25  | **Emotional check-ins**         | voiceai EmotionalCheckIn          | Medium     |
-| 26  | **Temporal pattern learning**   | voiceai temporal-pattern-detector | High       |
-| 27  | **Comfort pattern learning**    | voiceai comfort-patterns          | Medium     |
+| #   | Feature                         | Source                            | Complexity | Status         |
+| --- | ------------------------------- | --------------------------------- | ---------- | -------------- |
+| 18  | **Micro-moment recognition**    | voiceai superhuman-intelligence   | High       | ✅ Implemented |
+| 19  | **Inside joke memory**          | voiceai inside-jokes              | Medium     | ✅ Implemented |
+| 20  | **Commitment keeper**           | voiceai commitment-reminder       | Medium     | ✅ Implemented |
+| 21  | **Avoidance pattern detection** | voiceai superhuman-intelligence   | High       | ✅ Implemented |
+| 22  | **Pattern mirror**              | voiceai pattern-callback          | Medium     | ✅ Implemented |
+| 23  | **Topic absence detection**     | voiceai topic-absence             | Medium     | ✅ Implemented |
+| 24  | **Growth celebration**          | voiceai growth-celebration        | Medium     | ✅ Implemented |
+| 25  | **Emotional check-ins**         | voiceai EmotionalCheckIn          | Medium     | ✅ Implemented |
+| 26  | **Temporal pattern learning**   | voiceai temporal-pattern-detector | High       | ✅ Implemented |
+| 27  | **Comfort pattern learning**    | voiceai comfort-patterns          | Medium     | ✅ Implemented |
 
 **F18: Micro-Moment Recognition**
 Catch small but significant details that most people would miss:
@@ -379,14 +379,14 @@ Learn what helps when someone is down:
 
 ### Pillar 6: Behavioral Consistency & Humanization
 
-| #   | Feature                           | Source                        | Complexity |
-| --- | --------------------------------- | ----------------------------- | ---------- |
-| 28  | **Linguistic mirroring**          | voiceai vocabulary_mirroring  | Medium     |
-| 29  | **Active listening cues**         | voiceai backchannel           | Low        |
-| 30  | **Spontaneous curiosity**         | voiceai spontaneous_curiosity | Medium     |
-| 31  | **Callback opportunities**        | voiceai callback_probability  | Medium     |
-| 32  | **Style consistency enforcement** | voiceai communication-style   | Medium     |
-| 33  | **Text disfluency**               | voiceai disfluency            | Low        |
+| #   | Feature                           | Source                        | Complexity | Status         |
+| --- | --------------------------------- | ----------------------------- | ---------- | -------------- |
+| 28  | **Linguistic mirroring**          | voiceai vocabulary_mirroring  | Medium     | ✅ Implemented |
+| 29  | **Active listening cues**         | voiceai backchannel           | Low        | ✅ Implemented |
+| 30  | **Spontaneous curiosity**         | voiceai spontaneous_curiosity | Medium     | ✅ Implemented |
+| 31  | **Callback opportunities**        | voiceai callback_probability  | Medium     | ✅ Implemented |
+| 32  | **Style consistency enforcement** | voiceai communication-style   | Medium     | ✅ Implemented |
+| 33  | **Text disfluency**               | voiceai disfluency            | Low        | ✅ Implemented |
 
 **F28: Linguistic Mirroring**
 Mirror contact's specific phrases and words back to them:
@@ -445,14 +445,14 @@ Natural text imperfections beyond typos:
 
 ### Pillar 7: Voice Messages via Cartesia
 
-| #   | Feature                               | Complexity                   |
-| --- | ------------------------------------- | ---------------------------- |
-| 34  | **Cartesia TTS integration**          | High                         |
-| 35  | **Seth voice clone**                  | External (Cartesia platform) |
-| 36  | **Audio format pipeline** (MP3 → CAF) | Medium                       |
-| 37  | **Voice message decision engine**     | Medium                       |
-| 38  | **Emotion-modulated voice**           | Medium                       |
-| 39  | **Nonverbal sounds**                  | Low                          |
+| #   | Feature                               | Complexity                   | Status         |
+| --- | ------------------------------------- | ---------------------------- | -------------- |
+| 34  | **Cartesia TTS integration**          | High                         | ✅ Implemented |
+| 35  | **Seth voice clone**                  | External (Cartesia platform) | ✅ Implemented |
+| 36  | **Audio format pipeline** (MP3 → CAF) | Medium                       | ✅ Implemented |
+| 37  | **Voice message decision engine**     | Medium                       | ✅ Implemented |
+| 38  | **Emotion-modulated voice**           | Medium                       | ✅ Implemented |
+| 39  | **Nonverbal sounds**                  | Low                          | ✅ Implemented |
 
 **F34: Cartesia TTS Integration**
 New module: `src/tts/cartesia.c` + `include/human/tts/cartesia.h`
@@ -525,13 +525,13 @@ Inject nonverbal cues into transcript before TTS:
 
 ### Pillar 8: iMessage Platform Features
 
-| #   | Feature                      | Complexity |
-| --- | ---------------------------- | ---------- |
-| 40  | **Inline replies**           | High       |
-| 41  | **Message editing**          | Medium     |
-| 42  | **Screen & bubble effects**  | Low        |
-| 43  | **Abandoned typing pattern** | Medium     |
-| 44  | **Unsend**                   | Low        |
+| #   | Feature                      | Complexity | Status            |
+| --- | ---------------------------- | ---------- | ----------------- |
+| 40  | **Inline replies**           | High       | ✅ Implemented    |
+| 41  | **Message editing**          | Medium     | ✅ Implemented    |
+| 42  | **Screen & bubble effects**  | Low        | ✅ Implemented    |
+| 43  | **Abandoned typing pattern** | Medium     | 🔧 Platform limit |
+| 44  | **Unsend**                   | Low        | 🔧 Platform limit |
 
 **F40: Inline Replies**
 Reply to a specific earlier message in the thread:
@@ -593,13 +593,13 @@ Unsend a recently sent message:
 
 ### Pillar 9: Advanced Behavioral Patterns
 
-| #   | Feature                        | Complexity |
-| --- | ------------------------------ | ---------- |
-| 45  | **Burst messaging**            | Medium     |
-| 46  | **Leave on read** (deliberate) | Low        |
-| 47  | **Content forwarding**         | Medium     |
-| 48  | **Meme/image sharing**         | High       |
-| 49  | **"Call me" escalation**       | Low        |
+| #   | Feature                        | Complexity | Status            |
+| --- | ------------------------------ | ---------- | ----------------- |
+| 45  | **Burst messaging**            | Medium     | ✅ Implemented    |
+| 46  | **Leave on read** (deliberate) | Low        | ✅ Implemented    |
+| 47  | **Content forwarding**         | Medium     | ✅ Implemented    |
+| 48  | **Meme/image sharing**         | High       | 🔧 Platform limit |
+| 49  | **"Call me" escalation**       | Low        | ✅ Implemented    |
 
 **F45: Burst Messaging**
 Send 3-4 independent thoughts in rapid succession (stream of consciousness):
@@ -650,13 +650,13 @@ Know when text isn't enough:
 
 ### Pillar 10: Context Awareness
 
-| #   | Feature                         | Complexity |
-| --- | ------------------------------- | ---------- |
-| 50  | **Calendar/schedule awareness** | High       |
-| 51  | **Weather/location context**    | Medium     |
-| 52  | **Sports/current events**       | Medium     |
-| 53  | **Birthday/holiday awareness**  | Medium     |
-| 54  | **Time zone awareness**         | Low        |
+| #   | Feature                         | Complexity | Status         |
+| --- | ------------------------------- | ---------- | -------------- |
+| 50  | **Calendar/schedule awareness** | High       | ✅ Implemented |
+| 51  | **Weather/location context**    | Medium     | ✅ Implemented |
+| 52  | **Sports/current events**       | Medium     | ✅ Implemented |
+| 53  | **Birthday/holiday awareness**  | Medium     | ✅ Implemented |
+| 54  | **Time zone awareness**         | Low        | ✅ Implemented |
 
 **F50: Calendar/Schedule Awareness**
 Access macOS Calendar for context:
@@ -711,11 +711,11 @@ Adjust behavior for contacts in different time zones:
 
 ### Pillar 11: Group Chat Intelligence
 
-| #   | Feature                            | Complexity |
-| --- | ---------------------------------- | ---------- |
-| 55  | **Group chat lurking**             | Medium     |
-| 56  | **Group chat @ mentions**          | Low        |
-| 57  | **Multi-thread energy management** | Medium     |
+| #   | Feature                            | Complexity | Status         |
+| --- | ---------------------------------- | ---------- | -------------- |
+| 55  | **Group chat lurking**             | Medium     | ✅ Implemented |
+| 56  | **Group chat @ mentions**          | Low        | ✅ Implemented |
+| 57  | **Multi-thread energy management** | Medium     | ✅ Implemented |
 
 **F55: Group Chat Lurking**
 Read everything, rarely contribute:
@@ -900,20 +900,20 @@ CREATE TABLE IF NOT EXISTS delayed_followups (
 
 The first 57 features make human pass the Turing test. These 12 features make it pass the **close friend test** — where someone who's known you for 30 years can't tell the difference. This is the layer that separates "really good chatbot" from "this person understands me better than anyone I know."
 
-| #   | Feature                             | Complexity |
-| --- | ----------------------------------- | ---------- |
-| 58  | **Theory of Mind**                  | Very High  |
-| 59  | **Parallel Life Simulation**        | High       |
-| 60  | **Mood Persistence**                | Medium     |
-| 61  | **Memory Degradation**              | Medium     |
-| 62  | **Self-Awareness / Meta-Cognition** | High       |
-| 63  | **Social Reciprocity Tracking**     | Medium     |
-| 64  | **Anticipatory Emotional Modeling** | High       |
-| 65  | **Opinion Evolution**               | High       |
-| 66  | **Narrative Self / Life Chapters**  | Medium     |
-| 67  | **Social Network Mental Model**     | Medium     |
-| 68  | **Protective Intelligence**         | Medium     |
-| 69  | **Humor Generation Principles**     | Medium     |
+| #   | Feature                             | Complexity | Status         |
+| --- | ----------------------------------- | ---------- | -------------- |
+| 58  | **Theory of Mind**                  | Very High  | ✅ Implemented |
+| 59  | **Parallel Life Simulation**        | High       | ✅ Implemented |
+| 60  | **Mood Persistence**                | Medium     | ✅ Implemented |
+| 61  | **Memory Degradation**              | Medium     | ✅ Implemented |
+| 62  | **Self-Awareness / Meta-Cognition** | High       | ✅ Implemented |
+| 63  | **Social Reciprocity Tracking**     | Medium     | ✅ Implemented |
+| 64  | **Anticipatory Emotional Modeling** | High       | ✅ Implemented |
+| 65  | **Opinion Evolution**               | High       | ✅ Implemented |
+| 66  | **Narrative Self / Life Chapters**  | Medium     | ✅ Implemented |
+| 67  | **Social Network Mental Model**     | Medium     | ✅ Implemented |
+| 68  | **Protective Intelligence**         | Medium     | ✅ Implemented |
+| 69  | **Humor Generation Principles**     | Medium     | ✅ Implemented |
 
 **F58: Theory of Mind**
 Infer unstated emotional states from behavioral signals — not just what they said, but what they're NOT saying:
@@ -1111,22 +1111,22 @@ Explicit comedy principles injected into the prompt for original wit:
 
 Everything before this makes human BEHAVE like a human. This pillar makes it BE like a human — messy, embodied, imperfect, genuinely present in the world. These features are what would eventually give away even the most sophisticated system without them.
 
-| #   | Feature                        | Complexity |
-| --- | ------------------------------ | ---------- |
-| 102 | **Cognitive load simulation**  | Medium     |
-| 103 | **Spontaneous life narration** | Medium     |
-| 104 | **Physical embodiment**        | Medium     |
-| 105 | **Being wrong**                | Medium     |
-| 106 | **Mundane complaining**        | Low        |
-| 107 | **Gossip & social commentary** | Medium     |
-| 108 | **Random trains of thought**   | Medium     |
-| 109 | **Medium awareness**           | Low        |
-| 110 | **Resistance & disengagement** | Medium     |
-| 111 | **Deep existential curiosity** | Medium     |
-| 112 | **Contradiction tolerance**    | Medium     |
-| 113 | **Guilt & social obligation**  | Low        |
-| 114 | **Running life thread**        | Medium     |
-| 115 | **Bad-day recovery**           | Low        |
+| #   | Feature                        | Complexity | Status         |
+| --- | ------------------------------ | ---------- | -------------- |
+| 102 | **Cognitive load simulation**  | Medium     | ✅ Implemented |
+| 103 | **Spontaneous life narration** | Medium     | ✅ Implemented |
+| 104 | **Physical embodiment**        | Medium     | ✅ Implemented |
+| 105 | **Being wrong**                | Medium     | ✅ Implemented |
+| 106 | **Mundane complaining**        | Low        | ✅ Implemented |
+| 107 | **Gossip & social commentary** | Medium     | ✅ Implemented |
+| 108 | **Random trains of thought**   | Medium     | ✅ Implemented |
+| 109 | **Medium awareness**           | Low        | ✅ Implemented |
+| 110 | **Resistance & disengagement** | Medium     | ✅ Implemented |
+| 111 | **Deep existential curiosity** | Medium     | ✅ Implemented |
+| 112 | **Contradiction tolerance**    | Medium     | ✅ Implemented |
+| 113 | **Guilt & social obligation**  | Low        | ✅ Implemented |
+| 114 | **Running life thread**        | Medium     | ✅ Implemented |
+| 115 | **Bad-day recovery**           | Low        | ✅ Implemented |
 
 **F102: Cognitive Load Simulation**
 Response quality degrades with fatigue — not just slower, but WORSE:

@@ -73,21 +73,21 @@ Each brand scored 1-10. Updated quarterly.
 ### 3.1 Performance — Redefine the Ceiling
 
 | Metric                    | Industry Best         | Human Target | Strategy                                                           |
-| ------------------------- | --------------------- | -------------- | ------------------------------------------------------------------ |
-| Lighthouse Performance    | 95-97 (Vercel)        | **99+**        | Astro static + aggressive prefetch + edge CDN                      |
-| LCP                       | 0.8s (Linear)         | **< 0.5s**     | Inline critical CSS, prerendered content, zero JS in critical path |
-| CLS                       | ~0.02 (Stripe)        | **0.00**       | No layout shift — explicit dimensions on all elements              |
-| INP                       | ~80ms (Superhuman)    | **< 50ms**     | Event handler audit, web worker offloading, requestIdleCallback    |
-| TTFB                      | 45-80ms (Vercel edge) | **< 40ms**     | Edge-first deployment, aggressive caching headers                  |
-| Lighthouse Accessibility  | 98 (Vercel)           | **100**        | Automated + manual audit, screen reader testing in CI              |
-| Lighthouse Best Practices | 95 (Stripe)           | **100**        | Zero warnings, zero mixed content, zero deprecated APIs            |
-| Lighthouse SEO            | 95 (Linear)           | **100**        | Complete structured data, perfect meta tags, sitemap               |
-| UI entry bundle           | 200-500KB (SaaS avg)  | **< 100KB**    | Lit (no framework bloat) + aggressive code splitting               |
-| Time to Interactive       | 2-4s (typical SaaS)   | **< 1s**       | C runtime + minimal JS + streaming SSR                             |
+| ------------------------- | --------------------- | ------------ | ------------------------------------------------------------------ |
+| Lighthouse Performance    | 95-97 (Vercel)        | **99+**      | Astro static + aggressive prefetch + edge CDN                      |
+| LCP                       | 0.8s (Linear)         | **< 0.5s**   | Inline critical CSS, prerendered content, zero JS in critical path |
+| CLS                       | ~0.02 (Stripe)        | **0.00**     | No layout shift — explicit dimensions on all elements              |
+| INP                       | ~80ms (Superhuman)    | **< 50ms**   | Event handler audit, web worker offloading, requestIdleCallback    |
+| TTFB                      | 45-80ms (Vercel edge) | **< 40ms**   | Edge-first deployment, aggressive caching headers                  |
+| Lighthouse Accessibility  | 98 (Vercel)           | **100**      | Automated + manual audit, screen reader testing in CI              |
+| Lighthouse Best Practices | 95 (Stripe)           | **100**      | Zero warnings, zero mixed content, zero deprecated APIs            |
+| Lighthouse SEO            | 95 (Linear)           | **100**      | Complete structured data, perfect meta tags, sitemap               |
+| UI entry bundle           | 200-500KB (SaaS avg)  | **< 100KB**  | Lit (no framework bloat) + aggressive code splitting               |
+| Time to Interactive       | 2-4s (typical SaaS)   | **< 1s**     | C runtime + minimal JS + streaming SSR                             |
 
 ### 3.2 Interaction Latency — Instant by Default
 
-| Interaction                  | Industry Best      | Human Target                  | How                                    |
+| Interaction                  | Industry Best      | Human Target                    | How                                    |
 | ---------------------------- | ------------------ | ------------------------------- | -------------------------------------- |
 | Key press to visual feedback | ~80ms (Superhuman) | **< 16ms** (single frame)       | Optimistic UI, CSS-only state changes  |
 | Button tap to state change   | ~100ms (Linear)    | **< 50ms**                      | No async in critical path              |
@@ -97,7 +97,7 @@ Each brand scored 1-10. Updated quarterly.
 
 ### 3.3 C Runtime — Unmatched (Competitors Can't Touch This)
 
-| Metric          | Competitors                | Human                   |
+| Metric          | Competitors                | Human                     |
 | --------------- | -------------------------- | ------------------------- |
 | Binary size     | N/A (web-only or Electron) | **< 1.5MB** full-featured |
 | Cold startup    | N/A (Electron: 2-5s)       | **< 30ms**                |
@@ -285,13 +285,13 @@ New `docs/quality-scorecard.md`:
 
 ## 8. Success Criteria
 
-- [ ] All 15 benchmark brands scored on all 7 dimensions
-- [ ] Competitive PageSpeed script runs successfully against all competitors
-- [ ] Lighthouse CI thresholds raised and passing
-- [ ] All four design docs upgraded with category-defining principles
-- [ ] Quality scorecard established for all 5 UI surfaces
-- [ ] Weekly competitive benchmark CI job running
-- [ ] AGENTS.md updated with new quality bars and doc references
+- [x] All 15 benchmark brands scored on all 7 dimensions
+- [x] Competitive PageSpeed script runs successfully against all competitors
+- [x] Lighthouse CI thresholds raised and passing
+- [x] All four design docs upgraded with category-defining principles
+- [x] Quality scorecard established for all 5 UI surfaces
+- [x] Weekly competitive benchmark CI job running
+- [x] AGENTS.md updated with new quality bars and doc references
 
 ## 9. Risks
 

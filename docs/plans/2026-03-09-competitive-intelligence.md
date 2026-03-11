@@ -250,9 +250,9 @@ Replace the existing quality checklist with an enhanced version that adds a "Com
 
 After each existing checklist item, the new format includes the competitive reference. Add these new items to the checklist:
 
-- `[ ] **Perceptual speed**: Does the transition from loading to loaded feel instantaneous?`
-- `[ ] **Monochrome test**: Does the screen pass the grayscale squint test?`
-- `[ ] **Competitive ceiling**: Would this screen hold up next to Linear, Stripe, or Vercel?`
+- `[x] **Perceptual speed**: Does the transition from loading to loaded feel instantaneous?`
+- `[x] **Monochrome test**: Does the screen pass the grayscale squint test?`
+- `[x] **Competitive ceiling**: Would this screen hold up next to Linear, Stripe, or Vercel?`
 
 **Step 4: Commit**
 
@@ -479,16 +479,16 @@ At the end of the document (before any existing cross-reference section), add:
 Human doesn't benchmark against industry averages — it sets the ceiling others measure against.
 
 | Metric                 | Category Status Quo    | Human Target | Competitive Edge                                |
-| ---------------------- | ---------------------- | -------------- | ----------------------------------------------- |
-| Lighthouse Performance | 90-95                  | **99+**        | Astro static + zero JS in critical path         |
-| LCP                    | 0.8-2.0s               | **< 0.5s**     | Inline critical CSS + prerendered content       |
-| CLS                    | 0.01-0.1               | **0.00**       | Explicit dimensions on every element            |
-| INP                    | 80-200ms               | **< 50ms**     | Event handler audit + web workers               |
-| UI entry bundle        | 200-500KB              | **< 100KB**    | Lit (no framework bloat) + aggressive splitting |
-| TTI (dashboard)        | 2-4s                   | **< 1s**       | Minimal JS + streaming render                   |
-| C runtime binary       | N/A (Electron: 100MB+) | **< 1.5MB**    | C11 + LTO (competitors can't match)             |
-| C runtime startup      | N/A (Electron: 2-5s)   | **< 30ms**     | No VM, no GC, pure native (100x faster)         |
-| C runtime RSS          | N/A (Electron: 100MB+) | **< 6MB**      | Zero-allocation hot paths                       |
+| ---------------------- | ---------------------- | ------------ | ----------------------------------------------- |
+| Lighthouse Performance | 90-95                  | **99+**      | Astro static + zero JS in critical path         |
+| LCP                    | 0.8-2.0s               | **< 0.5s**   | Inline critical CSS + prerendered content       |
+| CLS                    | 0.01-0.1               | **0.00**     | Explicit dimensions on every element            |
+| INP                    | 80-200ms               | **< 50ms**   | Event handler audit + web workers               |
+| UI entry bundle        | 200-500KB              | **< 100KB**  | Lit (no framework bloat) + aggressive splitting |
+| TTI (dashboard)        | 2-4s                   | **< 1s**     | Minimal JS + streaming render                   |
+| C runtime binary       | N/A (Electron: 100MB+) | **< 1.5MB**  | C11 + LTO (competitors can't match)             |
+| C runtime startup      | N/A (Electron: 2-5s)   | **< 30ms**   | No VM, no GC, pure native (100x faster)         |
+| C runtime RSS          | N/A (Electron: 100MB+) | **< 6MB**    | Zero-allocation hot paths                       |
 
 ### Competitive Advantages Nobody Can Match
 
@@ -694,7 +694,7 @@ Read `AGENTS.md` and find section 12 (UI & Design System Contract).
 
 In AGENTS.md section 12, add to the SOTA Design References table (§12.0):
 
-| Source                     | What We Take                                   | Human Doc                      |
+| Source                     | What We Take                                   | Human Doc                        |
 | -------------------------- | ---------------------------------------------- | -------------------------------- |
 | **Competitive Benchmarks** | Named brand targets, quantified quality deltas | `docs/competitive-benchmarks.md` |
 | **Quality Scorecard**      | Per-surface scoring, quarterly tracking        | `docs/quality-scorecard.md`      |
