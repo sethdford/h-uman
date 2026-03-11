@@ -26,7 +26,7 @@ option(HU_ENABLE_OTEL "Build OpenTelemetry observability exporter" OFF)
 option(HU_ENABLE_CRON "Build cron scheduler support" OFF)
 option(HU_ENABLE_PUSH "Build push notification support (FCM/APNS)" OFF)
 option(HU_ENABLE_UPDATE "Build update check/apply support" OFF)
-option(HU_ENABLE_SKILLS "Build skillforge support" OFF)
+option(HU_ENABLE_SKILLS "Build skill acquisition and continuous learning" OFF)
 option(HU_ENABLE_PERSONA "Enable persona system" ON)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 
@@ -395,7 +395,6 @@ set(HU_CORE_SOURCES
     src/context/event_extract.c
     src/context/vision.c
     src/context/intelligence.c
-    src/intelligence/reflection.c
     src/intelligence/skill_system.c
     src/feeds/processor.c
     src/context/behavioral.c
@@ -733,6 +732,7 @@ if(HU_ENABLE_SQLITE)
         src/memory/prospective.c
         src/memory/emotional_residue.c
         src/feeds/oauth.c
+        src/intelligence/skills.c
     )
 endif()
 
@@ -745,9 +745,16 @@ if(HU_ENABLE_FEEDS)
         src/feeds/news.c src/feeds/email.c)
 endif()
 
-# Skillforge
+# Skillforge + Phase 8 intelligence (skills, reflection, feedback, meta-learning)
 if(HU_ENABLE_SKILLS)
-    list(APPEND HU_CORE_SOURCES src/skillforge.c src/skills.c)
+    list(APPEND HU_CORE_SOURCES
+        src/skillforge.c
+        src/skills.c
+        src/intelligence/skills.c
+        src/intelligence/reflection.c
+        src/intelligence/feedback.c
+        src/intelligence/meta_learning.c
+    )
 endif()
 
 # Cron scheduler (cron.c and crontab.c are in HU_CORE_SOURCES unconditionally)
@@ -1314,7 +1321,14 @@ if(NOT HU_ENABLE_OTEL)
     list(APPEND HU_TEST_EXTRA_MODULES src/observability/otel.c)
 endif()
 if(NOT HU_ENABLE_SKILLS)
-    list(APPEND HU_TEST_EXTRA_MODULES src/skillforge.c src/skills.c)
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/skillforge.c
+        src/skills.c
+        src/intelligence/skills.c
+        src/intelligence/reflection.c
+        src/intelligence/feedback.c
+        src/intelligence/meta_learning.c
+    )
 endif()
 if(NOT HU_ENABLE_SOCIAL)
     list(APPEND HU_TEST_EXTRA_MODULES src/feeds/social.c)
@@ -1649,6 +1663,9 @@ set(HU_TEST_SOURCES
     tests/test_arbitrator.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
+    tests/test_prospective.c
+    tests/test_emotional_residue.c
+    tests/test_consolidation_engine.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_cognitive.c
@@ -1674,6 +1691,8 @@ set(HU_TEST_SOURCES
     tests/test_feeds.c
     tests/test_news_health_email.c
     tests/test_intelligence_reflection.c
+    tests/test_feedback.c
+    tests/test_intelligence_skills.c
     tests/test_privacy_audit.c
     tests/test_collab_planning.c
 )

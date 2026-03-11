@@ -145,7 +145,9 @@ void run_governor_tests(void);
 void run_arbitrator_tests(void);
 void run_planning_tests(void);
 void run_rel_dynamics_tests(void);
-/* prospective/emotional_residue/consolidation_engine tests disabled — SQLite impl not ready */
+void run_prospective_tests(void);
+void run_emotional_residue_tests(void);
+void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
 void run_knowledge_tests(void);
 void run_cognitive_tests(void);
@@ -177,6 +179,9 @@ void run_music_feeds_tests(void);
 #endif
 /* feed_processor tests excluded — types not yet in processor.h */
 void run_intelligence_reflection_tests(void);
+#ifdef HU_ENABLE_SQLITE
+void run_feedback_tests(void);
+#endif
 void run_privacy_audit_tests(void);
 void run_collab_planning_tests(void);
 void run_bth_e2e_tests(void);
@@ -338,7 +343,9 @@ int main(void) {
     run_planning_tests();
     run_rel_dynamics_tests();
 #ifdef HU_ENABLE_SQLITE
-    /* prospective/emotional_residue/consolidation_engine disabled — SQLite impl not ready */
+    run_prospective_tests();
+    run_emotional_residue_tests();
+    run_consolidation_engine_tests();
 #endif
     run_conv_goals_tests();
     run_knowledge_tests();
@@ -369,6 +376,9 @@ int main(void) {
 #endif
     /* feed_processor tests excluded — types not yet in processor.h */
     run_intelligence_reflection_tests();
+#ifdef HU_ENABLE_SQLITE
+    run_feedback_tests();
+#endif
     run_privacy_audit_tests();
     run_collab_planning_tests();
     run_bth_e2e_tests();

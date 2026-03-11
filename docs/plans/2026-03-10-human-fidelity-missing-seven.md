@@ -77,13 +77,13 @@ All seven systems follow the existing BTH Enhancement approach:
 
 ### Features
 
-| #    | Feature                                                                                  | Complexity | Phase |
-| ---- | ---------------------------------------------------------------------------------------- | ---------- | ----- |
-| F116 | **Photo sharing engine** — query Apple Photos for relevant content to share              | High       | 4     |
-| F117 | **Link sharing** — share URLs with natural context framing                               | Medium     | 4     |
-| F118 | **Screenshot capture** — programmatic screenshot of web content to share                 | Medium     | 4     |
-| F119 | **Visual decision engine** — when to send visual vs text, what format                    | High       | 4     |
-| F120 | **Visual context matching** — match visual content to contact interests and conversation | High       | 4     |
+| #    | Feature                                                                                  | Complexity | Phase | Status         |
+| ---- | ---------------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
+| F116 | **Photo sharing engine** — query Apple Photos for relevant content to share              | High       | 4     | ✅ Implemented |
+| F117 | **Link sharing** — share URLs with natural context framing                               | Medium     | 4     | ✅ Implemented |
+| F118 | **Screenshot capture** — programmatic screenshot of web content to share                 | Medium     | 4     | ✅ Implemented |
+| F119 | **Visual decision engine** — when to send visual vs text, what format                    | High       | 4     | ✅ Implemented |
+| F120 | **Visual context matching** — match visual content to contact interests and conversation | High       | 4     | ✅ Implemented |
 
 ### F116: Photo Sharing Engine
 
@@ -312,12 +312,12 @@ CREATE TABLE IF NOT EXISTS visual_content (
 
 ### Features
 
-| #    | Feature                                                                          | Complexity | Phase |
-| ---- | -------------------------------------------------------------------------------- | ---------- | ----- |
-| F121 | **Global proactive budget** — unified daily/weekly cap per contact               | High       | 2     |
-| F122 | **Priority queue arbitration** — rank all proactive candidates, pick top N       | Medium     | 2     |
-| F123 | **Reciprocity-aware throttling** — reduce outreach when contact isn't responding | Medium     | 3     |
-| F124 | **Busyness simulation** — sometimes too busy to text proactively                 | Low        | 4     |
+| #    | Feature                                                                          | Complexity | Phase | Status         |
+| ---- | -------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
+| F121 | **Global proactive budget** — unified daily/weekly cap per contact               | High       | 2     | ✅ Implemented |
+| F122 | **Priority queue arbitration** — rank all proactive candidates, pick top N       | Medium     | 2     | ✅ Implemented |
+| F123 | **Reciprocity-aware throttling** — reduce outreach when contact isn't responding | Medium     | 3     | ✅ Implemented |
+| F124 | **Busyness simulation** — sometimes too busy to text proactively                 | Low        | 4     | ✅ Implemented |
 
 ### F121: Global Proactive Budget
 
@@ -454,13 +454,13 @@ CREATE TABLE IF NOT EXISTS proactive_budget_log (
 
 ### Features
 
-| #    | Feature                                                                           | Complexity | Phase |
-| ---- | --------------------------------------------------------------------------------- | ---------- | ----- |
-| F125 | **Knowledge graph per contact** — track what each contact knows about your life   | High       | 3     |
-| F126 | **Disclosure tracking** — record what was shared, when, and to whom               | Medium     | 3     |
-| F127 | **Redundancy detection** — prevent telling the same story twice                   | Medium     | 3     |
-| F128 | **Cross-contact isolation** — enforce information boundaries between contacts     | High       | 3     |
-| F129 | **"Did I tell you?" pattern** — naturalistic uncertainty about what's been shared | Low        | 6     |
+| #    | Feature                                                                           | Complexity | Phase | Status         |
+| ---- | --------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
+| F125 | **Knowledge graph per contact** — track what each contact knows about your life   | High       | 3     | ✅ Implemented |
+| F126 | **Disclosure tracking** — record what was shared, when, and to whom               | Medium     | 3     | ✅ Implemented |
+| F127 | **Redundancy detection** — prevent telling the same story twice                   | Medium     | 3     | ✅ Implemented |
+| F128 | **Cross-contact isolation** — enforce information boundaries between contacts     | High       | 3     | ✅ Implemented |
+| F129 | **"Did I tell you?" pattern** — naturalistic uncertainty about what's been shared | Low        | 6     | ✅ Implemented |
 
 ### F125: Knowledge Graph Per Contact
 
@@ -586,12 +586,12 @@ CREATE TABLE IF NOT EXISTS contact_knowledge (
 
 ### Features
 
-| #    | Feature                                                                               | Complexity | Phase |
-| ---- | ------------------------------------------------------------------------------------- | ---------- | ----- |
-| F130 | **Plan initiation** — proactively suggest activities based on shared interests        | High       | 4     |
-| F131 | **Logistics coordination** — follow through on plan details (time, place, who)        | Medium     | 4     |
-| F132 | **Opportunistic triggers** — share events/deals/openings that match contact interests | Medium     | 4     |
-| F133 | **Plan memory** — track proposed/accepted/rejected/completed plans                    | Medium     | 3     |
+| #    | Feature                                                                               | Complexity | Phase | Status         |
+| ---- | ------------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
+| F130 | **Plan initiation** — proactively suggest activities based on shared interests        | High       | 4     | ✅ Implemented |
+| F131 | **Logistics coordination** — follow through on plan details (time, place, who)        | Medium     | 4     | ✅ Implemented |
+| F132 | **Opportunistic triggers** — share events/deals/openings that match contact interests | Medium     | 4     | ✅ Implemented |
+| F133 | **Plan memory** — track proposed/accepted/rejected/completed plans                    | Medium     | 3     | ✅ Implemented |
 
 ### F130: Plan Initiation
 
@@ -712,12 +712,12 @@ CREATE TABLE IF NOT EXISTS plans (
 
 ### Features
 
-| #    | Feature                                                                                | Complexity | Phase |
-| ---- | -------------------------------------------------------------------------------------- | ---------- | ----- |
-| F134 | **Directive priority ranking** — score and rank all candidate prompt injections        | High       | 2     |
-| F135 | **Token budget management** — fit maximum signal into fixed context window             | Medium     | 2     |
-| F136 | **Conflict resolution** — detect and resolve contradictory directives                  | High       | 2     |
-| F137 | **Dynamic directive selection** — select top-K directives per message based on context | Medium     | 2     |
+| #    | Feature                                                                                | Complexity | Phase | Status         |
+| ---- | -------------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
+| F134 | **Directive priority ranking** — score and rank all candidate prompt injections        | High       | 2     | ✅ Implemented |
+| F135 | **Token budget management** — fit maximum signal into fixed context window             | Medium     | 2     | ✅ Implemented |
+| F136 | **Conflict resolution** — detect and resolve contradictory directives                  | High       | 2     | ✅ Implemented |
+| F137 | **Dynamic directive selection** — select top-K directives per message based on context | Medium     | 2     | ✅ Implemented |
 
 ### F134: Directive Priority Ranking
 
@@ -842,11 +842,11 @@ The number of directives scales with conversation complexity:
 
 ### Features
 
-| #    | Feature                                                                  | Complexity | Phase |
-| ---- | ------------------------------------------------------------------------ | ---------- | ----- |
-| F138 | **Relationship velocity tracking** — measure rate of change in closeness | High       | 6     |
-| F139 | **Drift detection** — identify when a relationship is cooling            | Medium     | 6     |
-| F140 | **Repair mode** — adjust behavior when relationship is strained          | Medium     | 6     |
+| #    | Feature                                                                  | Complexity | Phase | Status         |
+| ---- | ------------------------------------------------------------------------ | ---------- | ----- | -------------- |
+| F138 | **Relationship velocity tracking** — measure rate of change in closeness | High       | 6     | ✅ Implemented |
+| F139 | **Drift detection** — identify when a relationship is cooling            | Medium     | 6     | ✅ Implemented |
+| F140 | **Repair mode** — adjust behavior when relationship is strained          | Medium     | 6     | ✅ Implemented |
 
 ### F138: Relationship Velocity Tracking
 
@@ -982,11 +982,11 @@ CREATE INDEX IF NOT EXISTS idx_relstate_contact ON relationship_state(contact_id
 
 ### Features
 
-| #    | Feature                                                                                   | Complexity | Phase |
-| ---- | ----------------------------------------------------------------------------------------- | ---------- | ----- |
-| F141 | **Shared reference tracking** — detect and catalog compressed references between contacts | High       | 6     |
-| F142 | **Compression generation** — create new compressed references from shared experiences     | Medium     | 8     |
-| F143 | **Reference deployment** — use compressed references naturally in conversation            | Medium     | 6     |
+| #    | Feature                                                                                   | Complexity | Phase | Status         |
+| ---- | ----------------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
+| F141 | **Shared reference tracking** — detect and catalog compressed references between contacts | High       | 6     | ✅ Implemented |
+| F142 | **Compression generation** — create new compressed references from shared experiences     | Medium     | 8     | ✅ Implemented |
+| F143 | **Reference deployment** — use compressed references naturally in conversation            | Medium     | 6     | ✅ Implemented |
 
 ### F141: Shared Reference Tracking
 

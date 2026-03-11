@@ -4,6 +4,11 @@
 #include "test_framework.h"
 #include <string.h>
 
+#ifdef HU_ENABLE_SQLITE
+#include "human/memory.h"
+#include <sqlite3.h>
+#endif
+
 static void test_reflection_create_tables_sql_valid(void) {
     char buf[2048];
     size_t len = 0;
@@ -97,22 +102,22 @@ static void test_reflection_query_latest_sql_valid(void) {
 
 static void test_feedback_classify_left_on_read_negative(void) {
     hu_feedback_signal_type_t t =
-        hu_feedback_classify(60, 100, true, true);
+        hu_reflection_feedback_classify(60, 100, true, true);
     HU_ASSERT_EQ(t, HU_FEEDBACK_NEGATIVE);
 }
 
 static void test_feedback_classify_short_response_negative(void) {
-    hu_feedback_signal_type_t t = hu_feedback_classify(10, 3, false, false);
+    hu_feedback_signal_type_t t = hu_reflection_feedback_classify(10, 3, false, false);
     HU_ASSERT_EQ(t, HU_FEEDBACK_NEGATIVE);
 }
 
 static void test_feedback_classify_contains_question_positive(void) {
-    hu_feedback_signal_type_t t = hu_feedback_classify(30, 50, true, false);
+    hu_feedback_signal_type_t t = hu_reflection_feedback_classify(30, 50, true, false);
     HU_ASSERT_EQ(t, HU_FEEDBACK_POSITIVE);
 }
 
 static void test_feedback_classify_otherwise_neutral(void) {
-    hu_feedback_signal_type_t t = hu_feedback_classify(20, 20, false, false);
+    hu_feedback_signal_type_t t = hu_reflection_feedback_classify(20, 20, false, false);
     HU_ASSERT_EQ(t, HU_FEEDBACK_NEUTRAL);
 }
 
@@ -232,6 +237,123 @@ static void test_reflection_create_tables_sql_null_buf_returns_error(void) {
     HU_ASSERT_NEQ(err, HU_OK);
 }
 
+#ifdef HU_ENABLE_SQLITE
+static void insert_behavioral_feedback(sqlite3 *db, const char *bt, const char *cid,
+                                       const char *sig, const char *ctx, int64_t ts) {
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "INSERT INTO behavioral_feedback (behavior_type, contact_id, "
+                                "signal, context, timestamp) VALUES (?1, ?2, ?3, ?4, ?5)",
+                                -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return;
+    sqlite3_bind_text(stmt, 1, bt, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, cid, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, sig, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, ctx, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 5, ts);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+static void test_daily_reflection_three_positive_creates_skill(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    const char *bt = "response_style";
+    const char *cid = "contact_a";
+    const char *sig = "positive";
+    const char *ctx = "warm reply";
+    int64_t now = 1700100000;
+    int64_t run_ts = now + 86400;
+
+    insert_behavioral_feedback(db, bt, cid, sig, ctx, now + 1);
+    insert_behavioral_feedback(db, bt, cid, sig, ctx, now + 2);
+    insert_behavioral_feedback(db, bt, cid, sig, ctx, now + 3);
+
+    sqlite3_stmt *chk = NULL;
+    int chk_rc = sqlite3_prepare_v2(db,
+        "SELECT COUNT(*) FROM behavioral_feedback WHERE signal='positive' AND timestamp > ?1",
+        -1, &chk, NULL);
+    HU_ASSERT_EQ(chk_rc, SQLITE_OK);
+    sqlite3_bind_int64(chk, 1, now);
+    chk_rc = sqlite3_step(chk);
+    HU_ASSERT_EQ(chk_rc, SQLITE_ROW);
+    int fb_count = sqlite3_column_int(chk, 0);
+    sqlite3_finalize(chk);
+    HU_ASSERT_EQ(fb_count, 3);
+
+    hu_reflection_engine_t engine = {.alloc = &alloc, .db = db};
+    hu_error_t err = hu_reflection_daily(&engine, run_ts);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    sqlite3_stmt *sel = NULL;
+    int rc = sqlite3_prepare_v2(db,
+                                "SELECT id, name, origin FROM skills WHERE origin='reflection'",
+                                -1, &sel, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    rc = sqlite3_step(sel);
+    HU_ASSERT_EQ(rc, SQLITE_ROW);
+    HU_ASSERT_TRUE(sqlite3_column_int64(sel, 0) > 0);
+    HU_ASSERT_TRUE(strstr((const char *)sqlite3_column_text(sel, 1), "response_style") != NULL);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(sel, 2), "reflection");
+    sqlite3_finalize(sel);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_daily_reflection_no_feedback_no_skills(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = 1700100000;
+    hu_reflection_engine_t engine = {.alloc = &alloc, .db = db};
+    hu_error_t err = hu_reflection_daily(&engine, now);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    sqlite3_stmt *sel = NULL;
+    int rc = sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM skills WHERE origin='reflection'",
+                                -1, &sel, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    rc = sqlite3_step(sel);
+    HU_ASSERT_EQ(rc, SQLITE_ROW);
+    HU_ASSERT_EQ(sqlite3_column_int(sel, 0), 0);
+    sqlite3_finalize(sel);
+
+    mem.vtable->deinit(mem.ctx);
+}
+
+static void test_daily_reflection_summary_stored_in_kv(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.vtable);
+    sqlite3 *db = hu_sqlite_memory_get_db(&mem);
+    HU_ASSERT_NOT_NULL(db);
+
+    int64_t now = 1700200000;
+    hu_reflection_engine_t engine = {.alloc = &alloc, .db = db};
+    hu_error_t err = hu_reflection_daily(&engine, now);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    sqlite3_stmt *sel = NULL;
+    int rc = sqlite3_prepare_v2(db, "SELECT value FROM kv WHERE key='reflection_daily_last'",
+                                -1, &sel, NULL);
+    HU_ASSERT_EQ(rc, SQLITE_OK);
+    rc = sqlite3_step(sel);
+    HU_ASSERT_EQ(rc, SQLITE_ROW);
+    HU_ASSERT_STR_EQ((const char *)sqlite3_column_text(sel, 0), "1700200000");
+    sqlite3_finalize(sel);
+
+    mem.vtable->deinit(mem.ctx);
+}
+#endif /* HU_ENABLE_SQLITE */
+
 void run_intelligence_reflection_tests(void) {
     HU_TEST_SUITE("intelligence_reflection");
     HU_RUN_TEST(test_reflection_create_tables_sql_valid);
@@ -253,4 +375,9 @@ void run_intelligence_reflection_tests(void) {
     HU_RUN_TEST(test_reflection_entry_deinit_frees_all);
     HU_RUN_TEST(test_skill_observation_deinit_frees_all);
     HU_RUN_TEST(test_reflection_create_tables_sql_null_buf_returns_error);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_daily_reflection_three_positive_creates_skill);
+    HU_RUN_TEST(test_daily_reflection_no_feedback_no_skills);
+    HU_RUN_TEST(test_daily_reflection_summary_stored_in_kv);
+#endif
 }

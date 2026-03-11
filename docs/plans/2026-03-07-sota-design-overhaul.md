@@ -229,32 +229,38 @@ The most-used view. Complete redesign.
 
 ### Phase 1: Composite Components (Tasks 1-7)
 
-1. `hu-stat-card`
-2. `hu-section-header`
-3. `hu-metric-row`
-4. `hu-timeline`
-5. `hu-sparkline-enhanced`
-6. `hu-page-hero`
-7. Wire motion choreography globally (stagger, hover, press in `theme.css`)
+| #   | Task                                                                     | Status         |
+| --- | ------------------------------------------------------------------------ | -------------- |
+| 1   | `hu-stat-card`                                                           | ✅ Implemented |
+| 2   | `hu-section-header`                                                      | ✅ Implemented |
+| 3   | `hu-metric-row`                                                          | ✅ Implemented |
+| 4   | `hu-timeline`                                                            | ✅ Implemented |
+| 5   | `hu-sparkline-enhanced`                                                  | ✅ Implemented |
+| 6   | `hu-page-hero`                                                           | ✅ Implemented |
+| 7   | Wire motion choreography globally (stagger, hover, press in `theme.css`) | ✅ Implemented |
 
 ### Phase 2: View Sweep (Tasks 8-22)
 
-8. **Chat view** (highest priority — complete redesign)
-9. Overview view
-10. Automations view (polish pass)
-11. Agents view
-12. Models view
-13. Sessions view
-14. Config view
-15. Tools view
-16. Channels view
-17. Skills view
-18. Voice view (light touch)
-19. Usage view
-20. Security view
-21. Nodes view
-22. Logs view
+| #   | Task                                                 | Status         |
+| --- | ---------------------------------------------------- | -------------- |
+| 8   | **Chat view** (highest priority — complete redesign) | ✅ Implemented |
+| 9   | Overview view                                        | ✅ Implemented |
+| 10  | Automations view (polish pass)                       | ✅ Implemented |
+| 11  | Agents view                                          | ✅ Implemented |
+| 12  | Models view                                          | ✅ Implemented |
+| 13  | Sessions view                                        | ✅ Implemented |
+| 14  | Config view                                          | ✅ Implemented |
+| 15  | Tools view                                           | ✅ Implemented |
+| 16  | Channels view                                        | ✅ Implemented |
+| 17  | Skills view                                          | ✅ Implemented |
+| 18  | Voice view (light touch)                             | ✅ Implemented |
+| 19  | Usage view                                           | ✅ Implemented |
+| 20  | Security view                                        | ✅ Implemented |
+| 21  | Nodes view                                           | ✅ Implemented |
+| 22  | Logs view                                            | ✅ Implemented |
 
 ### Phase 3: Verification (Task 23)
 
-23. Build verification, lint check, visual review
+| #   | Task                                          | Status         |
+| --- | --------------------------------------------- | -------------- |
+| 23  | Build verification, lint check, visual review | ✅ Implemented |

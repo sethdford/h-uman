@@ -46,6 +46,24 @@ typedef struct hu_skill_observation {
     uint64_t last_practiced;
 } hu_skill_observation_t;
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+typedef struct hu_reflection_engine {
+    hu_allocator_t *alloc;
+    sqlite3 *db;
+} hu_reflection_engine_t;
+
+hu_error_t hu_reflection_engine_create(hu_allocator_t *alloc, sqlite3 *db,
+                                      hu_reflection_engine_t *out);
+void hu_reflection_engine_deinit(hu_reflection_engine_t *engine);
+
+/* F79/F80: Weekly reflection — query behavioral_feedback, compute metrics, insert self_evaluations. */
+hu_error_t hu_reflection_weekly(hu_reflection_engine_t *engine, int64_t now_ts);
+
+/* F81: Extract general lessons from self_evaluations (recommendations appearing in 2+ contacts). */
+hu_error_t hu_reflection_extract_general_lessons(hu_reflection_engine_t *engine, int64_t now_ts);
+#endif
+
 hu_error_t hu_reflection_create_tables_sql(char *buf, size_t cap, size_t *out_len);
 hu_error_t hu_feedback_insert_sql(const hu_feedback_signal_t *fb, char *buf, size_t cap,
                                  size_t *out_len);
@@ -56,10 +74,11 @@ hu_error_t hu_reflection_insert_sql(const hu_reflection_entry_t *entry, char *bu
 hu_error_t hu_reflection_query_latest_sql(const char *period, size_t period_len, char *buf,
                                           size_t cap, size_t *out_len);
 
-/* F78: Detect feedback signals from response patterns */
-hu_feedback_signal_type_t hu_feedback_classify(uint32_t response_time_seconds,
-                                               size_t response_length, bool contains_question,
-                                               bool left_on_read);
+/* Legacy: simple feedback classification (F78 detailed version in feedback.h) */
+hu_feedback_signal_type_t hu_reflection_feedback_classify(uint32_t response_time_seconds,
+                                                          size_t response_length,
+                                                          bool contains_question,
+                                                          bool left_on_read);
 
 /* F80: Score relationship skill proficiency */
 double hu_skill_proficiency_score(uint32_t positive_count, uint32_t total_count,
@@ -77,5 +96,10 @@ const char *hu_feedback_type_str(hu_feedback_signal_type_t type);
 void hu_feedback_signal_deinit(hu_allocator_t *alloc, hu_feedback_signal_t *fb);
 void hu_reflection_entry_deinit(hu_allocator_t *alloc, hu_reflection_entry_t *entry);
 void hu_skill_observation_deinit(hu_allocator_t *alloc, hu_skill_observation_t *obs);
+
+#ifdef HU_ENABLE_SQLITE
+/* F77: Daily Reflection Engine — nightly offline processing. */
+hu_error_t hu_reflection_daily(hu_reflection_engine_t *engine, int64_t now_ts);
+#endif /* HU_ENABLE_SQLITE */
 
 #endif /* HU_INTELLIGENCE_REFLECTION_H */

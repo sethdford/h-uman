@@ -4,6 +4,15 @@
 
 **Goal:** Bring every dashboard view to Linear/Raycast/Vercel tier by building 7 new components and rewriting/upgrading all 14 views.
 
+## Status Summary
+
+| Wave                   | Tasks                                                                                 | Status         |
+| ---------------------- | ------------------------------------------------------------------------------------- | -------------- |
+| 1 (Data Visualization) | hu-chart, hu-json-viewer, usage-view, logs-view, overview-view                        | ✅ Implemented |
+| 2 (Interactive Tables) | hu-pagination, hu-data-table-v2, tools-view, channels-view, nodes-view, agents-view   | ✅ Implemented |
+| 3 (Forms)              | hu-checkbox, hu-combobox, hu-form-group, config-view, security-view, automations-view | ✅ Implemented |
+| 4 (Polish)             | models-view, voice-view, skills-view, cross-view consistency pass                     | ✅ Implemented |
+
 **Architecture:** 4 waves, each builds primitives then applies them to views. TDD throughout. Each task produces one commit. Components are LitElement web components using `--hu-*` design tokens exclusively.
 
 **Tech Stack:** LitElement, TypeScript, Chart.js (CDN dynamic import), CSS custom properties, vitest.

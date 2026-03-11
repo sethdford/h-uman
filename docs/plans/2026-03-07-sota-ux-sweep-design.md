@@ -245,11 +245,11 @@ Methods:
 
 ## Deliverables Summary
 
-| Wave | New Components                          | Views Rewritten        | Views Upgraded              |
-| ---- | --------------------------------------- | ---------------------- | --------------------------- |
-| 1    | hu-chart, hu-json-viewer                | Usage, Logs            | Overview                    |
-| 2    | hu-data-table-v2, hu-pagination         | Tools, Channels, Nodes | Agents                      |
-| 3    | hu-combobox, hu-checkbox, hu-form-group | Config, Security       | Automations                 |
-| 4    | —                                       | Models                 | Voice, Skills + consistency |
+| Wave | New Components                          | Views Rewritten        | Views Upgraded              | Status         |
+| ---- | --------------------------------------- | ---------------------- | --------------------------- | -------------- |
+| 1    | hu-chart, hu-json-viewer                | Usage, Logs            | Overview                    | ✅ Implemented |
+| 2    | hu-data-table-v2, hu-pagination         | Tools, Channels, Nodes | Agents                      | ✅ Implemented |
+| 3    | hu-combobox, hu-checkbox, hu-form-group | Config, Security       | Automations                 | ✅ Implemented |
+| 4    | —                                       | Models                 | Voice, Skills + consistency | ✅ Implemented |
 
 **Total: 7 new components, 8 view rewrites, 6 view upgrades, 1 cross-view consistency pass.**

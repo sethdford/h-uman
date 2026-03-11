@@ -271,6 +271,65 @@ static const char *const schema_parts[] = {
     "refresh_token TEXT,"
     "expires_at INTEGER,"
     "scope TEXT)",
+    "CREATE TABLE IF NOT EXISTS skills("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "name TEXT NOT NULL,"
+    "type TEXT NOT NULL,"
+    "contact_id TEXT,"
+    "trigger_conditions TEXT,"
+    "strategy TEXT NOT NULL,"
+    "success_rate REAL DEFAULT 0.5,"
+    "attempts INTEGER DEFAULT 0,"
+    "successes INTEGER DEFAULT 0,"
+    "version INTEGER DEFAULT 1,"
+    "origin TEXT NOT NULL,"
+    "parent_skill_id INTEGER,"
+    "created_at INTEGER NOT NULL,"
+    "updated_at INTEGER,"
+    "retired INTEGER DEFAULT 0)",
+    "CREATE INDEX IF NOT EXISTS idx_skills_contact ON skills(contact_id)",
+    "CREATE TABLE IF NOT EXISTS skill_attempts("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "skill_id INTEGER NOT NULL,"
+    "contact_id TEXT NOT NULL,"
+    "applied_at INTEGER NOT NULL,"
+    "outcome_signal TEXT,"
+    "outcome_evidence TEXT,"
+    "context TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_skill_attempts_skill ON skill_attempts(skill_id)",
+    "CREATE TABLE IF NOT EXISTS skill_evolution("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "skill_id INTEGER NOT NULL,"
+    "version INTEGER NOT NULL,"
+    "strategy TEXT NOT NULL,"
+    "success_rate REAL,"
+    "evolved_at INTEGER NOT NULL,"
+    "reason TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_skill_evolution_skill ON skill_evolution(skill_id)",
+    "CREATE TABLE IF NOT EXISTS behavioral_feedback("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "behavior_type TEXT NOT NULL,"
+    "contact_id TEXT NOT NULL,"
+    "signal TEXT NOT NULL,"
+    "context TEXT,"
+    "timestamp INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_behavioral_feedback_contact ON behavioral_feedback(contact_id)",
+    "CREATE INDEX IF NOT EXISTS idx_behavioral_feedback_timestamp ON behavioral_feedback(timestamp)",
+    "CREATE TABLE IF NOT EXISTS self_evaluations("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "contact_id TEXT NOT NULL,"
+    "week INTEGER NOT NULL,"
+    "metrics TEXT NOT NULL,"
+    "recommendations TEXT,"
+    "created_at INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_self_evaluations_contact ON self_evaluations(contact_id)",
+    "CREATE TABLE IF NOT EXISTS general_lessons("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "lesson TEXT NOT NULL,"
+    "confidence REAL DEFAULT 0.5,"
+    "source_count INTEGER DEFAULT 1,"
+    "first_learned INTEGER NOT NULL,"
+    "last_confirmed INTEGER)",
     NULL};
 
 static void get_timestamp(char *buf, size_t buf_size) {

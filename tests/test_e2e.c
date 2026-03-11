@@ -5,6 +5,7 @@
 #include "human/core/json.h"
 #include "human/core/string.h"
 #include "human/health.h"
+#include "human/memory.h"
 #include "human/observability/log_observer.h"
 #include "human/provider.h"
 #include "human/tool.h"
@@ -12,6 +13,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#ifdef HU_HAS_PERSONA
+#include "human/agent/collab_planning.h"
+#include "human/context/authentic.h"
+#include "human/context/behavioral.h"
+#include "human/context/intelligence.h"
+#include "human/context/rel_dynamics.h"
+#endif
 
 /* ─────────────────────────────────────────────────────────────────────────
  * Mock provider — returns fixed "mock response" from chat()
@@ -890,6 +899,136 @@ static void test_outcome_detect_repeated_failure(void) {
     HU_ASSERT_TRUE(hu_outcome_detect_repeated_failure(&tracker, "shell", 3));
 }
 
+/* ── Multi-turn with SQLite memory (daemon module integrations) ───────────── */
+
+#ifdef HU_ENABLE_SQLITE
+static void test_agent_multi_turn_with_sqlite_memory(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    mock_provider_t mock_ctx;
+    hu_provider_t prov = mock_provider_create(&alloc, &mock_ctx);
+
+    hu_memory_t mem = hu_sqlite_memory_create(&alloc, ":memory:");
+    HU_ASSERT_NOT_NULL(mem.ctx);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, &mem, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Turn 1: greeting */
+    char *resp1 = NULL;
+    size_t resp1_len = 0;
+    err = hu_agent_turn(&agent, "hey, how are you?", 17, &resp1, &resp1_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(resp1);
+    alloc.free(alloc.ctx, resp1, resp1_len + 1);
+
+    /* Turn 2: follow-up */
+    char *resp2 = NULL;
+    size_t resp2_len = 0;
+    err = hu_agent_turn(&agent, "what should we do this weekend?", 31, &resp2, &resp2_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(resp2);
+    alloc.free(alloc.ctx, resp2, resp2_len + 1);
+
+    /* Turn 3: emotional topic */
+    char *resp3 = NULL;
+    size_t resp3_len = 0;
+    err = hu_agent_turn(&agent, "I've been feeling stressed about work lately", 44, &resp3,
+                        &resp3_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(resp3);
+    alloc.free(alloc.ctx, resp3, resp3_len + 1);
+
+    hu_agent_deinit(&agent);
+    if (mem.vtable->deinit)
+        mem.vtable->deinit(mem.ctx);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+#endif
+
+#ifdef HU_HAS_PERSONA
+static void test_daemon_module_pipeline_no_crash(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    /* Phase 6: Authentic existence */
+    hu_authentic_config_t auth_cfg = {
+        .narration_probability = 0.10,
+        .embodiment_probability = 0.08,
+        .complaining_probability = 0.07,
+    };
+    hu_authentic_behavior_t behavior = hu_authentic_select(&auth_cfg, 0.5, false, 42);
+    if (behavior != HU_AUTH_NONE) {
+        char *dir = NULL;
+        size_t dir_len = 0;
+        hu_authentic_build_directive(&alloc, behavior, NULL, 0, &dir, &dir_len);
+        if (dir)
+            hu_str_free(&alloc, dir);
+    }
+
+    /* Phase 6: Cognitive load */
+    double load = hu_cognitive_compute_load(3, 15, false);
+    HU_ASSERT_TRUE(load >= 0.0 && load <= 1.0);
+    if (load > 0.5) {
+        hu_cognitive_state_t state = {
+            .active_conversations = 3,
+            .messages_this_hour = 15,
+            .load_score = load,
+        };
+        char *dir = NULL;
+        size_t dir_len = 0;
+        hu_cognitive_build_directive(&alloc, &state, &dir, &dir_len);
+        if (dir)
+            hu_str_free(&alloc, dir);
+    }
+
+    /* Phase 6: Relationship dynamics */
+    hu_rel_velocity_t vel = {
+        .contact_id = "test_user",
+        .contact_id_len = 9,
+        .messages_sent_30d = 50,
+        .messages_received_30d = 45,
+        .initiations_sent_30d = 10,
+        .initiations_received_30d = 8,
+        .interaction_quality = 0.7f,
+    };
+    hu_rel_velocity_compute(&vel);
+    hu_drift_signal_t drift = {
+        .contact_id = "test_user",
+        .contact_id_len = 9,
+        .current_velocity = vel.velocity,
+    };
+    hu_repair_state_t repair = {0};
+    char *rel_dir = NULL;
+    size_t rel_len = 0;
+    hu_rel_dynamics_build_prompt(&alloc, &vel, &drift, &repair, &rel_dir, &rel_len);
+    if (rel_dir)
+        hu_str_free(&alloc, rel_dir);
+
+    /* Post-awareness: Collab planning */
+    char *plan_ctx = NULL;
+    size_t plan_len = 0;
+    hu_collab_plan_build_prompt(&alloc, NULL, 0, NULL, 0, &plan_ctx, &plan_len);
+    if (plan_ctx)
+        hu_str_free(&alloc, plan_ctx);
+
+    /* Post-awareness: Timezone */
+    hu_timezone_info_t tz = hu_timezone_compute(-5, (uint64_t)time(NULL) * 1000);
+    char *tz_dir = NULL;
+    size_t tz_len = 0;
+    hu_timezone_build_directive(&alloc, &tz, "test_user", 9, &tz_dir, &tz_len);
+    if (tz_dir)
+        hu_str_free(&alloc, tz_dir);
+
+    /* Proactive: Plan proposal gating */
+    bool should = hu_collab_plan_should_propose("test", 4, 0, 3, 0.5);
+    (void)should;
+}
+#endif
+
 void run_e2e_tests(void) {
     HU_TEST_SUITE("E2E");
     HU_RUN_TEST(test_agent_from_config_basic);
@@ -931,4 +1070,11 @@ void run_e2e_tests(void) {
     HU_RUN_TEST(test_outcome_get_recent);
     HU_RUN_TEST(test_outcome_build_summary);
     HU_RUN_TEST(test_outcome_detect_repeated_failure);
+
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_agent_multi_turn_with_sqlite_memory);
+#endif
+#ifdef HU_HAS_PERSONA
+    HU_RUN_TEST(test_daemon_module_pipeline_no_crash);
+#endif
 }
