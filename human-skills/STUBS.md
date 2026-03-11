@@ -1,6 +1,6 @@
 # Human — Project Status
 
-Last updated: 2026-03-10
+Last updated: 2026-03-11
 
 ## Summary
 
@@ -8,8 +8,8 @@ Last updated: 2026-03-10
 | ------------------------------ | ---------------------- |
 | Source files (src/ + include/) | **~715**               |
 | Lines of C/H code              | **~139K**              |
-| Test files                     | 129                    |
-| Tests passing                  | **4643/4643 (100%)**   |
+| Test files                     | 131                    |
+| Tests passing                  | **4640/4640 (100%)**   |
 | Binary size (MinSizeRel+LTO)   | **918 KB (all flags)** |
 | Text section                   | **848 KB**             |
 | Cold start (--version)         | **~24 ms avg**         |
