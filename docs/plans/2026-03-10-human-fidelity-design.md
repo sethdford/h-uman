@@ -151,10 +151,10 @@ Same as F4 but for video attachments (`.mov`, `.mp4`, `.m4v`). Options:
 | #   | Feature                           | Status      | Complexity |
 | --- | --------------------------------- | ----------- | ---------- |
 | 8   | **Delayed follow-up engine**      | Implemented | High       |
-| 9   | **Double-text pattern**           | ⚠️ Partial   | Medium     |
+| 9   | **Double-text pattern**           | ⚠️ Partial  | Medium     |
 | 10  | **Missed-message acknowledgment** | Implemented | Low        |
 | 11  | **Natural conversation drop-off** | Implemented | Low        |
-| 12  | **Morning/evening bookends**      | Implemented | Medium     |
+| 12  | **Morning/evening bookends**      | ⚠️ Partial  | Medium     |
 
 **F8: Delayed Follow-Up Engine**
 After a conversation ends (no new messages for 15+ minutes), probabilistically schedule a follow-up:
@@ -527,9 +527,9 @@ Inject nonverbal cues into transcript before TTS:
 
 | #   | Feature                      | Complexity | Status            |
 | --- | ---------------------------- | ---------- | ----------------- |
-| 40  | **Inline replies**           | High       | ✅ Implemented    |
-| 41  | **Message editing**          | Medium     | ✅ Implemented    |
-| 42  | **Screen & bubble effects**  | Low        | ✅ Implemented    |
+| 40  | **Inline replies**           | High       | ⚠️ Partial        |
+| 41  | **Message editing**          | Medium     | 🚫 Not feasible  |
+| 42  | **Screen & bubble effects**  | Low        | ⚠️ Partial        |
 | 43  | **Abandoned typing pattern** | Medium     | 🔧 Platform limit |
 | 44  | **Unsend**                   | Low        | 🔧 Platform limit |
 
