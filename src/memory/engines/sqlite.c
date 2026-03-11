@@ -330,6 +330,48 @@ static const char *const schema_parts[] = {
     "source_count INTEGER DEFAULT 1,"
     "first_learned INTEGER NOT NULL,"
     "last_confirmed INTEGER)",
+    "CREATE TABLE IF NOT EXISTS cognitive_load_log("
+    "id INTEGER PRIMARY KEY,"
+    "capacity REAL NOT NULL,"
+    "conversation_depth INTEGER DEFAULT 0,"
+    "hour_of_day INTEGER NOT NULL,"
+    "day_of_week INTEGER NOT NULL,"
+    "physical_state TEXT,"
+    "recorded_at INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS active_threads("
+    "id INTEGER PRIMARY KEY,"
+    "contact_id TEXT NOT NULL,"
+    "topic TEXT NOT NULL,"
+    "status TEXT DEFAULT 'open',"
+    "last_update_at INTEGER NOT NULL,"
+    "created_at INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_active_threads_contact_status ON active_threads(contact_id, status)",
+    "CREATE TABLE IF NOT EXISTS interaction_quality("
+    "id INTEGER PRIMARY KEY,"
+    "contact_id TEXT NOT NULL,"
+    "quality_score REAL NOT NULL,"
+    "cognitive_load REAL,"
+    "mood_state TEXT,"
+    "recovery_sent INTEGER DEFAULT 0,"
+    "recovery_at INTEGER,"
+    "timestamp INTEGER NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_interaction_quality_contact_recovery ON interaction_quality(contact_id, recovery_sent)",
+    "CREATE TABLE IF NOT EXISTS life_narration_events("
+    "id INTEGER PRIMARY KEY,"
+    "event_type TEXT NOT NULL,"
+    "description TEXT NOT NULL,"
+    "shareability_score REAL NOT NULL,"
+    "shared_with TEXT,"
+    "generated_at INTEGER NOT NULL,"
+    "shared_at INTEGER)",
+    "CREATE TABLE IF NOT EXISTS held_contradictions("
+    "id INTEGER PRIMARY KEY,"
+    "topic TEXT NOT NULL,"
+    "position_a TEXT NOT NULL,"
+    "position_b TEXT NOT NULL,"
+    "expressed_a_count INTEGER DEFAULT 0,"
+    "expressed_b_count INTEGER DEFAULT 0,"
+    "created_at INTEGER NOT NULL)",
     NULL};
 
 static void get_timestamp(char *buf, size_t buf_size) {

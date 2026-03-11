@@ -3,6 +3,7 @@
 #include "human/core/string.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #define HU_AUTH_LCG_A 1103515245u
 #define HU_AUTH_LCG_C 12345u
@@ -381,4 +382,189 @@ void hu_authentic_state_deinit(hu_allocator_t *alloc, hu_authentic_state_t *s)
     }
     s->active = HU_AUTH_NONE;
     s->intensity = 0.0;
+}
+
+/* F104: Physical Embodiment — schedule-based physical state */
+static bool is_exercise_day(const hu_physical_config_t *config, int day_of_week)
+{
+    if (!config || !config->exercises || config->exercise_day_count <= 0)
+        return false;
+    for (int i = 0; i < config->exercise_day_count && i < 7; i++) {
+        if (config->exercise_days[i] == day_of_week)
+            return true;
+    }
+    return false;
+}
+
+hu_physical_state_t hu_physical_state_from_schedule(
+    const hu_physical_config_t *config, time_t now)
+{
+    struct tm tm_buf;
+    struct tm *t = localtime_r(&now, &tm_buf);
+    if (!t)
+        return HU_PHYSICAL_NORMAL;
+
+    int hour = t->tm_hour;
+    int day_of_week = t->tm_wday; /* 0=Sunday, 6=Saturday */
+
+    /* 5-7 AM: TIRED. If coffee_drinker and hour >= 7: transition to CAFFEINATED */
+    if (hour >= 5 && hour < 7)
+        return HU_PHYSICAL_TIRED;
+    if (hour == 7 && config && config->coffee_drinker)
+        return HU_PHYSICAL_CAFFEINATED;
+
+    /* 7-10 AM: CAFFEINATED if coffee_drinker, else NORMAL */
+    if (hour >= 7 && hour < 10) {
+        if (config && config->coffee_drinker)
+            return HU_PHYSICAL_CAFFEINATED;
+        return HU_PHYSICAL_NORMAL;
+    }
+
+    /* 12-13: EATING */
+    if (hour >= 12 && hour < 13)
+        return HU_PHYSICAL_EATING;
+
+    /* 17-18 on exercise day: SORE */
+    if (hour >= 17 && hour < 18 && config && is_exercise_day(config, day_of_week))
+        return HU_PHYSICAL_SORE;
+
+    /* 18-19: EATING */
+    if (hour >= 18 && hour < 19)
+        return HU_PHYSICAL_EATING;
+
+    /* 22+: TIRED */
+    if (hour >= 22)
+        return HU_PHYSICAL_TIRED;
+
+    return HU_PHYSICAL_NORMAL;
+}
+
+const char *hu_physical_state_name(hu_physical_state_t state)
+{
+    switch (state) {
+    case HU_PHYSICAL_NORMAL:     return "normal";
+    case HU_PHYSICAL_TIRED:      return "tired";
+    case HU_PHYSICAL_CAFFEINATED: return "caffeinated";
+    case HU_PHYSICAL_SORE:       return "sore";
+    case HU_PHYSICAL_HUNGRY:     return "hungry";
+    case HU_PHYSICAL_EATING:     return "eating";
+    case HU_PHYSICAL_SICK:      return "sick";
+    case HU_PHYSICAL_ENERGIZED:  return "energized";
+    case HU_PHYSICAL_COLD:      return "cold";
+    case HU_PHYSICAL_HOT:       return "hot";
+    }
+    return "normal";
+}
+
+const char *hu_physical_state_prompt_hint(hu_physical_state_t state)
+{
+    switch (state) {
+    case HU_PHYSICAL_TIRED:
+        return "[PHYSICAL: Tired. You might mention being sleepy or yawning.]";
+    case HU_PHYSICAL_CAFFEINATED:
+        return "[PHYSICAL: Just had coffee. Slightly more energetic and talkative.]";
+    case HU_PHYSICAL_SORE:
+        return "[PHYSICAL: Sore from workout. Might mention it if relevant.]";
+    case HU_PHYSICAL_EATING:
+        return "[PHYSICAL: Currently eating. Responses may be brief — one hand typing.]";
+    case HU_PHYSICAL_ENERGIZED:
+        return "[PHYSICAL: Feeling energized after a workout. Slightly hyped.]";
+    case HU_PHYSICAL_HUNGRY:
+        return "[PHYSICAL: Hungry. Might mention it or be slightly distracted.]";
+    case HU_PHYSICAL_SICK:
+        return "[PHYSICAL: Not feeling well. May be brief or mention it.]";
+    case HU_PHYSICAL_COLD:
+        return "[PHYSICAL: Cold. Might mention it.]";
+    case HU_PHYSICAL_HOT:
+        return "[PHYSICAL: Hot. Might mention it.]";
+    case HU_PHYSICAL_NORMAL:
+    default:
+        return NULL;
+    }
+}
+
+/* F105: Imperfection — being wrong about minor things */
+bool hu_should_inject_error(float probability, uint32_t seed)
+{
+    return (int)(seed % 1000u) < (int)(probability * 1000.0f);
+}
+
+const char *hu_error_injection_prompt(void)
+{
+    return "[IMPERFECTION: Casually misremember one minor factual detail — a street "
+           "name, a date, a restaurant name. Sound confident, not uncertain. NEVER be "
+           "wrong about: emotional content, relationship facts, important commitments, "
+           "safety information.]";
+}
+
+/* F106: Mundane complaining */
+const char *hu_mundane_complaint_prompt(int hour, int day_of_week,
+    hu_physical_state_t physical_state, const char *weather)
+{
+    if (physical_state == HU_PHYSICAL_SORE)
+        return "[AUTHENTIC: Your body is sore from working out. You might grumble about it.]";
+    if (weather && strcmp(weather, "hot") == 0)
+        return "[AUTHENTIC: It's really hot and you're not happy about it.]";
+    if (weather && strcmp(weather, "cold") == 0)
+        return "[AUTHENTIC: It's freezing and you're complaining about it.]";
+    if (day_of_week >= 1 && day_of_week <= 5 && hour >= 7 && hour <= 9)
+        return "[AUTHENTIC: You're slightly annoyed about morning traffic/commute. Vent briefly if natural, don't force it.]";
+    if (hour >= 12 && hour < 13)
+        return "[AUTHENTIC: You're not thrilled with your lunch options. Brief food complaint if it fits.]";
+    if (day_of_week >= 1 && day_of_week <= 5 && hour >= 14 && hour < 17)
+        return "[AUTHENTIC: You just got out of a meeting. Brief work annoyance if natural.]";
+    if (hour >= 19 && hour <= 21)
+        return "[AUTHENTIC: Something minor at home is bugging you — neighbors, a chore, etc. Mention briefly if natural.]";
+    return NULL;
+}
+
+/* F109: Medium awareness */
+const char *hu_medium_awareness_prompt(bool was_typo, int burst_count,
+    int message_length, int wall_of_text_threshold)
+{
+    if (was_typo)
+        return "[META: You just noticed a typo. Say 'sorry autocorrect' or 'lol autocorrect' naturally.]";
+    if (burst_count >= 4)
+        return "[META: You realize you've sent a lot of messages in a row. Briefly acknowledge it — 'sorry for the spam' or similar.]";
+    if (message_length > wall_of_text_threshold)
+        return "[META: You're aware that was a wall of text. Add 'sorry for the novel' or 'tl;dr' naturally.]";
+    return NULL;
+}
+
+/* F110: Resistance/Disengagement — stub */
+hu_disengage_decision_t hu_should_disengage(
+    float cognitive_capacity, float topic_interest,
+    bool is_emotional_context, const char *relationship_level)
+{
+    (void)cognitive_capacity;
+    (void)topic_interest;
+    (void)is_emotional_context;
+    (void)relationship_level;
+    hu_disengage_decision_t out = {0};
+    out.disengage_probability = 0.0f;
+    out.disengage_style = NULL;
+    return out;
+}
+
+/* F111: Existential curiosity — stub */
+bool hu_existential_curiosity_check(
+    const char *relationship_level, int hour_of_day,
+    int days_since_last, hu_curiosity_candidate_t *out)
+{
+    (void)relationship_level;
+    (void)hour_of_day;
+    (void)days_since_last;
+    (void)out;
+    return false;
+}
+
+/* F112: Contradiction tolerance — stub */
+const char *hu_contradiction_select_position(
+    const hu_contradiction_t *contradiction,
+    float mood_valence, float cognitive_capacity)
+{
+    (void)contradiction;
+    (void)mood_valence;
+    (void)cognitive_capacity;
+    return NULL;
 }

@@ -312,12 +312,14 @@ CREATE TABLE IF NOT EXISTS visual_content (
 
 ### Features
 
-| #    | Feature                                                                          | Complexity | Phase | Status         |
-| ---- | -------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
-| F121 | **Global proactive budget** — unified daily/weekly cap per contact               | High       | 2     | ✅ Implemented |
-| F122 | **Priority queue arbitration** — rank all proactive candidates, pick top N       | Medium     | 2     | ✅ Implemented |
-| F123 | **Reciprocity-aware throttling** — reduce outreach when contact isn't responding | Medium     | 3     | ✅ Implemented |
-| F124 | **Busyness simulation** — sometimes too busy to text proactively                 | Low        | 4     | ✅ Implemented |
+| #    | Feature                                                                          | Complexity | Phase | Status         | Daemon          |
+| ---- | -------------------------------------------------------------------------------- | ---------- | ----- | -------------- | --------------- |
+| F121 | **Global proactive budget** — unified daily/weekly cap per contact               | High       | 2     | ✅ Implemented | ✅ Daemon Wired |
+| F122 | **Priority queue arbitration** — rank all proactive candidates, pick top N       | Medium     | 2     | ✅ Implemented | ✅ Daemon Wired |
+| F123 | **Reciprocity-aware throttling** — reduce outreach when contact isn't responding | Medium     | 3     | ✅ Implemented | ✅ Daemon Wired |
+| F124 | **Busyness simulation** — sometimes too busy to text proactively                 | Low        | 4     | ✅ Implemented | ✅ Daemon Wired |
+
+**Daemon integration:** Budget check before proactive messages; `hu_governor_has_budget()` gates proactive cycle; `hu_governor_record_sent()` after send.
 
 ### F121: Global Proactive Budget
 
@@ -454,13 +456,15 @@ CREATE TABLE IF NOT EXISTS proactive_budget_log (
 
 ### Features
 
-| #    | Feature                                                                           | Complexity | Phase | Status         |
-| ---- | --------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
-| F125 | **Knowledge graph per contact** — track what each contact knows about your life   | High       | 3     | ✅ Implemented |
-| F126 | **Disclosure tracking** — record what was shared, when, and to whom               | Medium     | 3     | ✅ Implemented |
-| F127 | **Redundancy detection** — prevent telling the same story twice                   | Medium     | 3     | ✅ Implemented |
-| F128 | **Cross-contact isolation** — enforce information boundaries between contacts     | High       | 3     | ✅ Implemented |
-| F129 | **"Did I tell you?" pattern** — naturalistic uncertainty about what's been shared | Low        | 6     | ✅ Implemented |
+| #    | Feature                                                                           | Complexity | Phase | Status         | Daemon          |
+| ---- | --------------------------------------------------------------------------------- | ---------- | ----- | -------------- | --------------- |
+| F125 | **Knowledge graph per contact** — track what each contact knows about your life   | High       | 3     | ✅ Implemented | ✅ Daemon Wired |
+| F126 | **Disclosure tracking** — record what was shared, when, and to whom               | Medium     | 3     | ✅ Implemented | ✅ Daemon Wired |
+| F127 | **Redundancy detection** — prevent telling the same story twice                   | Medium     | 3     | ✅ Implemented | ✅ Daemon Wired |
+| F128 | **Cross-contact isolation** — enforce information boundaries between contacts     | High       | 3     | ✅ Implemented | ✅ Daemon Wired |
+| F129 | **"Did I tell you?" pattern** — naturalistic uncertainty about what's been shared | Low        | 6     | ✅ Implemented | ✅ Daemon Wired |
+
+**Daemon integration:** Knowledge query and summary prompt in Phase 6 context; `hu_knowledge_query_sql()` + `hu_knowledge_build_summary()` + `hu_knowledge_summary_to_prompt()`.
 
 ### F125: Knowledge Graph Per Contact
 
@@ -982,11 +986,13 @@ CREATE INDEX IF NOT EXISTS idx_relstate_contact ON relationship_state(contact_id
 
 ### Features
 
-| #    | Feature                                                                                   | Complexity | Phase | Status         |
-| ---- | ----------------------------------------------------------------------------------------- | ---------- | ----- | -------------- |
-| F141 | **Shared reference tracking** — detect and catalog compressed references between contacts | High       | 6     | ✅ Implemented |
-| F142 | **Compression generation** — create new compressed references from shared experiences     | Medium     | 8     | ✅ Implemented |
-| F143 | **Reference deployment** — use compressed references naturally in conversation            | Medium     | 6     | ✅ Implemented |
+| #    | Feature                                                                                   | Complexity | Phase | Status         | Daemon          |
+| ---- | ----------------------------------------------------------------------------------------- | ---------- | ----- | -------------- | --------------- |
+| F141 | **Shared reference tracking** — detect and catalog compressed references between contacts | High       | 6     | ✅ Implemented | ✅ Daemon Wired |
+| F142 | **Compression generation** — create new compressed references from shared experiences     | Medium     | 8     | ✅ Implemented | ✅ Daemon Wired |
+| F143 | **Reference deployment** — use compressed references naturally in conversation            | Medium     | 6     | ✅ Implemented | ✅ Daemon Wired |
+
+**Daemon integration:** Compression query and prompt in Phase 6 context; `hu_compression_query_sql()` + `hu_compression_build_prompt()`.
 
 ### F141: Shared Reference Tracking
 
@@ -1155,6 +1161,17 @@ identity section → channel overlay → contact context →
     **arbitrator: score, resolve conflicts, select top-K** →
     example selection → final prompt assembly
 ```
+
+### Extended Pillars — Daemon Wiring (25, 29, 31, 32)
+
+Additional modules wired into `daemon.c` beyond Pillars 18–24:
+
+| Pillar | Module                     | Daemon Integration                                 | Status          |
+| ------ | -------------------------- | -------------------------------------------------- | --------------- |
+| 25     | Persona Fine-Tuning / LoRA | Training sample collection in post-turn processing | ✅ Daemon Wired |
+| 29     | On-Device Classification   | Message classification in Phase 6 context          | ✅ Daemon Wired |
+| 31     | Statistical Timing Model   | Timing model overlay on reading delay              | ✅ Daemon Wired |
+| 32     | Behavioral Cloning         | Feedback recording in post-turn processing         | ✅ Daemon Wired |
 
 ---
 

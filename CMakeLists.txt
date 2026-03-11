@@ -28,6 +28,7 @@ option(HU_ENABLE_PUSH "Build push notification support (FCM/APNS)" OFF)
 option(HU_ENABLE_UPDATE "Build update check/apply support" OFF)
 option(HU_ENABLE_SKILLS "Build skill acquisition and continuous learning" OFF)
 option(HU_ENABLE_PERSONA "Enable persona system" ON)
+option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 
 # WASM build: cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/wasm32-wasi.cmake -DSC_BUILD_WASM=ON ..
@@ -662,11 +663,22 @@ if(HU_ENABLE_PERSONA)
         src/context/protective.c
         src/context/humor.c
         src/context/social_graph.c
-        src/context/authentic.c
         src/memory/degradation.c
         src/memory/opinions.c
         src/memory/life_chapters.c
     )
+endif()
+
+# Authentic existence (Phase 9: cognitive load, authentic)
+if(HU_ENABLE_AUTHENTIC)
+    list(APPEND HU_CORE_SOURCES
+        src/context/cognitive_load.c
+        src/context/authentic.c
+    )
+endif()
+# authentic.c also needed when PERSONA is ON (add if not already from AUTHENTIC)
+if(HU_ENABLE_PERSONA AND NOT HU_ENABLE_AUTHENTIC)
+    list(APPEND HU_CORE_SOURCES src/context/authentic.c)
 endif()
 
 # Browser automation tools
@@ -1706,6 +1718,9 @@ endif()
 if(HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_SOURCES tests/test_cartesia.c tests/test_audio_pipeline.c tests/test_voice_decision.c tests/test_emotion_map.c)
 endif()
+if(HU_ENABLE_AUTHENTIC)
+    list(APPEND HU_TEST_SOURCES tests/test_cognitive_load.c)
+endif()
 
 # Paperclip tests (requires libcurl)
 if(HU_ENABLE_CURL)
@@ -1727,6 +1742,9 @@ if(HU_ENABLE_CARTESIA)
 endif()
 if(HU_ENABLE_FEEDS)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_FEEDS=1)
+endif()
+if(HU_ENABLE_AUTHENTIC)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_AUTHENTIC=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)

@@ -1629,7 +1629,7 @@ Each phase has its own detailed implementation plan:
 - `2026-03-10-human-fidelity-phase7-deep-memory.md`
 - `2026-03-10-human-fidelity-phase8-skill-acquisition.md`
 - `2026-03-10-human-fidelity-phase9-authentic-existence.md`
-- `2026-03-10-human-fidelity-missing-seven.md` — 28 cross-cutting features (F116–F143) across 7 new pillars: Visual Content Pipeline, Proactive Governor, Contact Knowledge State, Collaborative Planning, Context Arbitration, Relationship Dynamics, Shared Experience Compression
+- `2026-03-10-human-fidelity-missing-seven.md` — 28 cross-cutting features (F116–F143) across 7 new pillars: Visual Content Pipeline, Proactive Governor, Contact Knowledge State, Collaborative Planning, Context Arbitration, Relationship Dynamics, Shared Experience Compression. **Daemon wired:** Pillars 19 (Governor), 20 (Knowledge State), 24 (Shared Compression). Extended pillars 25 (Persona Fine-Tuning), 29 (On-Device Classification), 31 (Statistical Timing), 32 (Behavioral Cloning) also wired in `daemon.c`.
 
 ## Success Criteria
 

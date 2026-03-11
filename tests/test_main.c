@@ -151,6 +151,9 @@ void run_consolidation_engine_tests(void);
 void run_conv_goals_tests(void);
 void run_knowledge_tests(void);
 void run_cognitive_tests(void);
+#ifdef HU_ENABLE_AUTHENTIC
+void run_cognitive_load_tests(void);
+#endif
 void run_deep_memory_tests(void);
 void run_compression_tests(void);
 void run_proactive_ext_tests(void);
@@ -352,6 +355,9 @@ int main(void) {
     run_conv_goals_tests();
     run_knowledge_tests();
     run_cognitive_tests();
+#ifdef HU_ENABLE_AUTHENTIC
+    run_cognitive_load_tests();
+#endif
     run_deep_memory_tests();
     run_compression_tests();
     run_proactive_ext_tests();

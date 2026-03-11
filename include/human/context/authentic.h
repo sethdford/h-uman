@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 typedef enum hu_authentic_behavior {
     HU_AUTH_NONE = 0,
@@ -72,5 +73,77 @@ hu_error_t hu_bad_day_build_directive(hu_allocator_t *alloc, char **out, size_t 
 
 const char *hu_authentic_behavior_str(hu_authentic_behavior_t b);
 void hu_authentic_state_deinit(hu_allocator_t *alloc, hu_authentic_state_t *s);
+
+/* F104: Physical Embodiment — schedule-based physical state */
+typedef enum {
+    HU_PHYSICAL_NORMAL = 0,
+    HU_PHYSICAL_TIRED,
+    HU_PHYSICAL_CAFFEINATED,
+    HU_PHYSICAL_SORE,
+    HU_PHYSICAL_HUNGRY,
+    HU_PHYSICAL_EATING,
+    HU_PHYSICAL_SICK,
+    HU_PHYSICAL_ENERGIZED,
+    HU_PHYSICAL_COLD,
+    HU_PHYSICAL_HOT
+} hu_physical_state_t;
+
+typedef struct {
+    bool exercises;
+    int exercise_days[7];
+    int exercise_day_count;
+    bool coffee_drinker;
+    float mentions_frequency;
+} hu_physical_config_t;
+
+hu_physical_state_t hu_physical_state_from_schedule(
+    const hu_physical_config_t *config, time_t now);
+const char *hu_physical_state_name(hu_physical_state_t state);
+const char *hu_physical_state_prompt_hint(hu_physical_state_t state);
+
+/* F105: Imperfection — being wrong about minor things */
+bool hu_should_inject_error(float probability, uint32_t seed);
+const char *hu_error_injection_prompt(void);
+
+/* F106: Mundane complaining */
+const char *hu_mundane_complaint_prompt(int hour, int day_of_week,
+    hu_physical_state_t physical_state, const char *weather);
+
+/* F109: Medium awareness */
+const char *hu_medium_awareness_prompt(bool was_typo, int burst_count,
+    int message_length, int wall_of_text_threshold);
+
+/* F110: Resistance/Disengagement */
+typedef struct {
+    float disengage_probability;
+    const char *disengage_style;
+} hu_disengage_decision_t;
+
+hu_disengage_decision_t hu_should_disengage(
+    float cognitive_capacity, float topic_interest,
+    bool is_emotional_context, const char *relationship_level);
+
+/* F111: Existential curiosity */
+typedef struct {
+    const char *question;
+    const char *trigger;
+} hu_curiosity_candidate_t;
+
+bool hu_existential_curiosity_check(
+    const char *relationship_level, int hour_of_day,
+    int days_since_last, hu_curiosity_candidate_t *out);
+
+/* F112: Contradiction tolerance */
+typedef struct {
+    const char *topic;
+    const char *position_a;
+    const char *position_b;
+    int expressed_a_count;
+    int expressed_b_count;
+} hu_contradiction_t;
+
+const char *hu_contradiction_select_position(
+    const hu_contradiction_t *contradiction,
+    float mood_valence, float cognitive_capacity);
 
 #endif /* HU_CONTEXT_AUTHENTIC_H */
