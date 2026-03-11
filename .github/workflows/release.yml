@@ -42,10 +42,6 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-
       - uses: actions/checkout@v6
         with:
           sparse-checkout: |
@@ -53,6 +49,10 @@ jobs:
             docs/man
             install.sh
             LICENSE
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
 
       - name: Rename binaries
         run: |
