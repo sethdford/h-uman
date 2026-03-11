@@ -9,6 +9,8 @@
 #include <string.h>
 #include <time.h>
 
+#define SL(s) (s), (sizeof(s) - 1)
+
 static void ensure_skills_table(sqlite3 *db) {
     const char *sql =
         "CREATE TABLE IF NOT EXISTS skills ("
@@ -67,12 +69,12 @@ static void test_skill_insert_load_active_by_contact_found(void) {
     int64_t now = (int64_t)time(NULL);
     int64_t out_id = 0;
     hu_error_t err = hu_skill_insert(&alloc, db,
-                                     "comfort_mindy", 12,
+                                     "comfort_mindy", 13,
                                      "interpersonal", 13,
                                      "contact_a", 9,
-                                     "emotion==sad", 11,
+                                     "emotion==sad", 12,
                                      "Acknowledge first. Short messages.", 34,
-                                     "reflection", 9,
+                                     "reflection", 10,
                                      0, now, &out_id);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out_id > 0);
@@ -103,7 +105,7 @@ static void test_skill_load_null_contact_returns_universal_only(void) {
     int64_t now = (int64_t)time(NULL);
     int64_t out_id = 0;
     hu_error_t err = hu_skill_insert(&alloc, db,
-                                     "universal_skill", 14,
+                                     "universal_skill", 15,
                                      "generic", 7,
                                      NULL, 0,
                                      NULL, 0,
@@ -181,7 +183,7 @@ static void test_match_triggers_emotion_contact_found(void) {
                                      "user_a", 6,
                                      "emotion==sad,contact==user_a", 28,
                                      "Acknowledge first.", 18,
-                                     "reflection", 9,
+                                     "reflection", 10,
                                      0, now, &out_id);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out_id > 0);
@@ -217,7 +219,7 @@ static void test_match_triggers_confidence_below_threshold_not_found(void) {
                                      "high_conf_skill", 15,
                                      "test", 4,
                                      NULL, 0,
-                                     "emotion==sad,confidence>=0.8", 29,
+                                     "emotion==sad,confidence>=0.8", 28,
                                      "Strategy.", 9,
                                      "manual", 6,
                                      0, now, &out_id);
@@ -267,7 +269,7 @@ static void test_record_attempt_update_success_rate_verified(void) {
                                   now,
                                   "success", 7,
                                   "User responded positively.", 26,
-                                  "test context", 11,
+                                  "test context", 12,
                                   &attempt_id);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(attempt_id > 0);
@@ -297,24 +299,24 @@ static void test_evolve_skill_version_incremented_evolution_row_inserted(void) {
     int64_t now = (int64_t)time(NULL);
     int64_t skill_id = 0;
     hu_error_t err = hu_skill_insert(&alloc, db,
-                                     "evolve_skill", 11,
+                                     "evolve_skill", 12,
                                      "test", 4,
                                      NULL, 0,
                                      NULL, 0,
-                                     "Old strategy.", 14,
+                                     "Old strategy.", 13,
                                      "manual", 6,
                                      0, now, &skill_id);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(skill_id > 0);
 
     err = hu_skill_evolve(&alloc, db, skill_id,
-                          "New improved strategy.", 23,
-                          "Low success rate", 17,
+                          "New improved strategy.", 22,
+                          "Low success rate", 16,
                           now + 1);
     HU_ASSERT_EQ(err, HU_OK);
 
     hu_skill_t out = {0};
-    err = hu_skill_get_by_name(&alloc, db, "evolve_skill", 11, &out);
+    err = hu_skill_get_by_name(&alloc, db, "evolve_skill", 12, &out);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_EQ(out.version, 2);
     HU_ASSERT_STR_EQ(out.strategy, "New improved strategy.");
@@ -396,15 +398,15 @@ static void test_transfer_skill_creates_universal_with_parent_skill_id(void) {
                                      "contact_specific", 16,
                                      "interpersonal", 13,
                                      "user_a", 6,
-                                     "emotion==sad", 11,
-                                     "Be gentle with this person.", 28,
-                                     "reflection", 9,
+                                     "emotion==sad", 12,
+                                     SL("Be gentle with this person."),
+                                     "reflection", 10,
                                      0, now, &orig_id);
     HU_ASSERT_EQ(err, HU_OK);
 
     int64_t new_id = 0;
     err = hu_skill_transfer(&alloc, db, orig_id,
-                            "emotion==sad", 11,
+                            "emotion==sad", 12,
                             0.1, now + 1, &new_id);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(new_id > 0);
@@ -445,7 +447,7 @@ static void test_resolve_chain_skill_basics_expanded_includes_basics_strategy(vo
                                      "base", 4,
                                      NULL, 0,
                                      NULL, 0,
-                                     "Listen and acknowledge.", 24,
+                                     SL("Listen and acknowledge."),
                                      "manual", 6,
                                      0, now, &basics_id);
     HU_ASSERT_EQ(err, HU_OK);
@@ -456,15 +458,15 @@ static void test_resolve_chain_skill_basics_expanded_includes_basics_strategy(vo
                           "derived", 7,
                           NULL, 0,
                           NULL, 0,
-                          "First apply skill:basics then add nuance.", 40,
-                          "manual", 6,
+                          SL("First apply skill:basics then add nuance."),
+                          SL("manual"),
                           0, now, &advanced_id);
     HU_ASSERT_EQ(err, HU_OK);
 
     char out[2048];
     size_t out_len = 0;
     err = hu_skill_resolve_chain(&alloc, db,
-                                 "First apply skill:basics then add nuance.", 40,
+                                 SL("First apply skill:basics then add nuance."),
                                  out, sizeof(out), &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(strstr(out, "Listen and acknowledge.") != NULL);
@@ -511,7 +513,7 @@ static void test_resolve_chain_depth_gt_3_stops_recursion(void) {
     char out[2048];
     size_t out_len = 0;
     err = hu_skill_resolve_chain(&alloc, db,
-                                 "Start skill:e end.", 19,
+                                 SL("Start skill:e end."),
                                  out, sizeof(out), &out_len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(out_len > 0);
@@ -537,7 +539,7 @@ static void test_skill_get_by_name_found(void) {
                                      "c1", 2,
                                      "cond", 4,
                                      "Do something.", 13,
-                                     "reflection", 9,
+                                     "reflection", 10,
                                      0, now, &out_id);
     HU_ASSERT_EQ(err, HU_OK);
 
