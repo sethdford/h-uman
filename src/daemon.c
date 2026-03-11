@@ -799,6 +799,7 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
     /* F51: Weather awareness — inject notable weather for proactive context */
     char *weather_ctx = NULL;
     size_t weather_ctx_len = 0;
+#ifdef HU_HAS_PERSONA
     if (agent && agent->persona && agent->persona->location[0]) {
         hu_weather_context_t wx = {0};
         (void)hu_weather_fetch(alloc, agent->persona->location,
@@ -820,6 +821,7 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
                 alloc->free(alloc->ctx, wx_dir, wx_len + 1);
         }
     }
+#endif /* HU_HAS_PERSONA weather */
 
     static const char HU_DEFAULT_PROACTIVE_RULES[] =
         "\nRules: "
@@ -830,12 +832,17 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
         "4. If you have nothing specific, share something you saw/did "
         "that made you think of them. "
         "5. Reply SKIP if you genuinely have nothing natural to say.";
+#ifdef HU_HAS_PERSONA
     const char *rules = (agent && agent->persona && agent->persona->proactive_rules)
                             ? agent->persona->proactive_rules
                             : HU_DEFAULT_PROACTIVE_RULES;
     size_t rules_len = (agent && agent->persona && agent->persona->proactive_rules)
                            ? strlen(rules)
                            : sizeof(HU_DEFAULT_PROACTIVE_RULES) - 1;
+#else
+    const char *rules = HU_DEFAULT_PROACTIVE_RULES;
+    size_t rules_len = sizeof(HU_DEFAULT_PROACTIVE_RULES) - 1;
+#endif
 
     char base_buf[256];
     int w = snprintf(base_buf, sizeof(base_buf), "You're initiating a casual check-in text to %s. ",
@@ -3404,7 +3411,9 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 PHASE6_APPEND(lc_dir, lc_len);
                             else if (lc_dir)
                                 alloc->free(alloc->ctx, lc_dir, lc_len + 1);
-                        } else if (agent->persona->current_chapter.theme[0]) {
+                        }
+#ifdef HU_HAS_PERSONA
+                        else if (agent->persona && agent->persona->current_chapter.theme[0]) {
                             size_t lc_len = 0;
                             char *lc_dir = hu_life_chapter_build_directive(
                                 alloc, &agent->persona->current_chapter, &lc_len);
@@ -3413,6 +3422,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                             else if (lc_dir)
                                 alloc->free(alloc->ctx, lc_dir, lc_len + 1);
                         }
+#endif
                     }
 #endif
 
@@ -3439,6 +3449,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
                     /* 8. Timezone awareness (F54) — inject local-time context */
+#ifdef HU_HAS_PERSONA
                     if (cp_p6 && agent->persona && agent->persona->timezone[0]) {
                         const char *tzs = agent->persona->timezone;
                         int tz_offset = 0;
@@ -3461,6 +3472,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, tz_dir, tz_len + 1);
                         }
                     }
+#endif /* HU_HAS_PERSONA timezone */
 
                     /* 9. Humor (F69) — only when playful and not concerning */
                     if (agent->persona->humor.type) {

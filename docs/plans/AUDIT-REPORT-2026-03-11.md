@@ -45,7 +45,7 @@ The Human Fidelity project spans **115 features** across 9 phases in the master 
 | Feature                      | Claimed Status | Verification                                                                                                           |
 | ---------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | F8 Delayed follow-up         | Implemented    | ✅ **Verified** — `hu_superhuman_delayed_followup_schedule`, `hu_superhuman_delayed_followup_list_due` in superhuman.h |
-| F9 Double-text               | Implemented    | ⚠️ **Unverified** — no `hu_conversation_should_double_text` grep hit                                                   |
+| F9 Double-text               | Implemented    | ✅ **Verified** — `hu_conversation_should_double_text` in conversation.c, wired in daemon post-send                    |
 | F10 Missed-message ack       | Implemented    | ⚠️ **Unverified** — no explicit function found                                                                         |
 | F11 Natural drop-off         | Implemented    | ✅ **Verified** — `hu_conversation_classify_response` returns `HU_RESPONSE_SKIP`                                       |
 | F12 Morning/evening bookends | Implemented    | ⚠️ **Unverified** — no `hu_proactive_check_bookends` found                                                             |
@@ -91,23 +91,23 @@ The Human Fidelity project spans **115 features** across 9 phases in the master 
 
 ### Pillar 9: Advanced Behavioral (F45–F49)
 
-| Feature                  | Claimed Status    | Verification                                                           |
-| ------------------------ | ----------------- | ---------------------------------------------------------------------- |
-| F45 Burst messaging      | ✅ Implemented    | ✅ **Verified** — burst logic in conversation/daemon                   |
-| F46 Leave on read        | ✅ Implemented    | ✅ **Verified** — `HU_RESPONSE_LEAVE_ON_READ` in conversation          |
-| F47 Content forwarding   | ✅ Implemented    | ⚠️ **Unverified** — no `hu_content_forward` found                      |
-| F48 Meme sharing         | 🔧 Platform limit | Correct — stretch goal                                                 |
-| F49 "Call me" escalation | ✅ Implemented    | ⚠️ **Unverified** — no `hu_conversation_should_escalate_to_call` found |
+| Feature                  | Claimed Status    | Verification                                                                 |
+| ------------------------ | ----------------- | ---------------------------------------------------------------------------- |
+| F45 Burst messaging      | ✅ Implemented    | ✅ **Verified** — burst logic in conversation/daemon                         |
+| F46 Leave on read        | ✅ Implemented    | ✅ **Verified** — `HU_RESPONSE_LEAVE_ON_READ` in conversation                |
+| F47 Content forwarding   | ✅ Implemented    | ✅ **Verified** — `save_for_later` tool in factory, stores via memory vtable |
+| F48 Meme sharing         | 🔧 Platform limit | Correct — stretch goal                                                       |
+| F49 "Call me" escalation | ✅ Implemented    | ⚠️ **Unverified** — no `hu_conversation_should_escalate_to_call` found       |
 
 ### Pillar 10: Context Awareness (F50–F54)
 
-| Feature              | Claimed Status | Verification                                                                       |
-| -------------------- | -------------- | ---------------------------------------------------------------------------------- |
-| F50 Calendar         | Implemented    | ✅ **Verified** — calendar logic in proactive/superhuman                           |
-| F51 Weather          | Implemented    | ⚠️ **Unverified** — no `hu_weather_fetch` found                                    |
-| F52 Sports/events    | Implemented    | ⚠️ **Unverified** — no `hu_current_events_fetch` found                             |
-| F53 Birthday/holiday | Implemented    | ✅ **Verified** — `hu_proactive_check_important_dates`, important_dates in persona |
-| F54 Time zone        | Implemented    | ⚠️ **Unverified** — no `hu_timezone_` found                                        |
+| Feature              | Claimed Status | Verification                                                                               |
+| -------------------- | -------------- | ------------------------------------------------------------------------------------------ |
+| F50 Calendar         | Implemented    | ✅ **Verified** — calendar logic in proactive/superhuman                                   |
+| F51 Weather          | Implemented    | ✅ **Verified** — `hu_weather_fetch` in weather_fetch.c with 30-min cache + OpenWeatherMap |
+| F52 Sports/events    | Implemented    | ✅ **Verified** — `hu_current_events_fetch` in context_ext.c with RSS parsing              |
+| F53 Birthday/holiday | Implemented    | ✅ **Verified** — `hu_proactive_check_important_dates`, important_dates in persona         |
+| F54 Time zone        | Implemented    | ⚠️ **Unverified** — no `hu_timezone_` found                                                |
 
 ### Pillar 11: Group Chat (F55–F57)
 
@@ -269,8 +269,8 @@ The Human Fidelity project spans **115 features** across 9 phases in the master 
 | F77–F82 Reflection, feedback, general lessons                                            | 8     | No reflection.c, feedback.c                                  |
 | F83–F93 External feeds (Facebook, Instagram, Apple, Google, Spotify, RSS, email, Health) | 7     | No src/feeds/                                                |
 | F94–F101 Skill lifecycle                                                                 | 8     | No src/intelligence/                                         |
-| F51 Weather                                                                              | 4     | No hu_weather_fetch                                          |
-| F52 Sports/events                                                                        | 4     | No hu_current_events_fetch                                   |
+| F51 Weather                                                                              | 4     | ✅ Implemented — hu_weather_fetch with cache + API           |
+| F52 Sports/events                                                                        | 4     | ✅ Implemented — hu_current_events_fetch with RSS            |
 | F54 Time zone                                                                            | 4     | No hu*timezone*                                              |
 | F40 Inline replies (platform)                                                            | 1     | Fallback to quoted text may exist; platform reply unverified |
 | F41 Message editing                                                                      | 1     | Investigation only per Phase 1                               |

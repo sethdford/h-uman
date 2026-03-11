@@ -1612,7 +1612,16 @@ CREATE TABLE IF NOT EXISTS held_contradictions (
 | 9         | Authentic Existence                     | F102-F115                                       | ~1200                 |
 | **Total** |                                         | **115 features**                                | **~11000 lines**      |
 
-### Phase 7 & 8 Feature Status (Audit)
+### Phase 4 Feature Status (Closed)
+
+| Feature                | Status                                                                 |
+| ---------------------- | ---------------------------------------------------------------------- |
+| F9 Double-text         | ✅ Implemented — `hu_conversation_should_double_text` + daemon wiring  |
+| F47 Content forwarding | ✅ Implemented — `save_for_later` tool registered in factory           |
+| F51 Weather awareness  | ✅ Implemented — `hu_weather_fetch` with OpenWeatherMap + 30-min cache |
+| F52 Current events     | ✅ Implemented — `hu_current_events_fetch` with RSS parsing            |
+
+### Phase 7 & 8 Feature Status (Closed)
 
 | Feature range               | Status                               |
 | --------------------------- | ------------------------------------ |
@@ -1620,6 +1629,13 @@ CREATE TABLE IF NOT EXISTS held_contradictions (
 | F77-F82 (Skill Acquisition) | ✅ Implemented (all modules + tests) |
 | F83-F93 (External Feeds)    | ✅ Implemented (daemon wired)        |
 | F94-F101 (Skill Lifecycle)  | ✅ Implemented (F101 gateway added)  |
+| Consolidation engine        | ✅ Wired — nightly after reflection  |
+| Forgetting curve decay      | ✅ Wired — nightly batch decay       |
+| Episode reinforcement       | ✅ Wired — on episodic context use   |
+| Feed processor poll         | ✅ Wired — 6-hour periodic task      |
+| Feedback classification     | ✅ Wired — replaces generic signal   |
+| Skill pre-loading           | ✅ Wired — startup + post-reflection |
+| Skill success rate update   | ✅ Wired — after attempt recording   |
 
 ## Implementation Plans
 
