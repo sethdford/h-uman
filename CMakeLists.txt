@@ -720,6 +720,28 @@ if(HU_ENABLE_OTEL)
     )
 endif()
 
+# Phase 7 core memory (episodic, consolidation engine, forgetting, prospective, emotional residue)
+# Phase 7 feeds: OAuth token storage (oauth_tokens table)
+if(HU_ENABLE_SQLITE)
+    list(APPEND HU_CORE_SOURCES
+        src/memory/episodic.c
+        src/memory/consolidation_engine.c
+        src/memory/forgetting.c
+        src/memory/forgetting_curve.c
+        src/memory/prospective.c
+        src/memory/emotional_residue.c
+        src/feeds/oauth.c
+    )
+endif()
+
+# Phase 7 feed ingestion (social F83/F84, Apple F85/F87/F88)
+if(HU_ENABLE_SOCIAL)
+    list(APPEND HU_CORE_SOURCES src/feeds/social.c)
+endif()
+if(HU_ENABLE_FEEDS)
+    list(APPEND HU_CORE_SOURCES src/feeds/apple.c)
+endif()
+
 # Skillforge
 if(HU_ENABLE_SKILLS)
     list(APPEND HU_CORE_SOURCES src/skillforge.c src/skills.c)
@@ -850,6 +872,12 @@ if(HU_ENABLE_UPDATE)
 endif()
 if(HU_ENABLE_SKILLS)
     target_compile_definitions(human_core PRIVATE HU_HAS_SKILLS=1)
+endif()
+if(HU_ENABLE_SOCIAL)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_SOCIAL=1)
+endif()
+if(HU_ENABLE_FEEDS)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_FEEDS=1)
 endif()
 if(HU_ENABLE_PERSONA)
     target_compile_definitions(human_core PUBLIC HU_HAS_PERSONA=1)
@@ -1285,6 +1313,12 @@ endif()
 if(NOT HU_ENABLE_SKILLS)
     list(APPEND HU_TEST_EXTRA_MODULES src/skillforge.c src/skills.c)
 endif()
+if(NOT HU_ENABLE_SOCIAL)
+    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/social.c)
+endif()
+if(NOT HU_ENABLE_FEEDS)
+    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c)
+endif()
 if(NOT HU_ENABLE_PUSH)
     list(APPEND HU_TEST_EXTRA_MODULES src/gateway/push.c)
 endif()
@@ -1608,6 +1642,9 @@ set(HU_TEST_SOURCES
     tests/test_arbitrator.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
+    tests/test_prospective.c
+    tests/test_emotional_residue.c
+    tests/test_consolidation_engine.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_cognitive.c
@@ -1631,6 +1668,7 @@ set(HU_TEST_SOURCES
     tests/test_social_graph.c
     tests/test_skill_system.c
     tests/test_feeds.c
+    tests/test_feed_processor.c
     tests/test_intelligence_reflection.c
     tests/test_privacy_audit.c
 )

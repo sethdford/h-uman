@@ -145,6 +145,11 @@ void run_governor_tests(void);
 void run_arbitrator_tests(void);
 void run_planning_tests(void);
 void run_rel_dynamics_tests(void);
+#ifdef HU_ENABLE_SQLITE
+void run_prospective_tests(void);
+void run_emotional_residue_tests(void);
+void run_consolidation_engine_tests(void);
+#endif
 void run_conv_goals_tests(void);
 void run_knowledge_tests(void);
 void run_cognitive_tests(void);
@@ -167,6 +172,7 @@ void run_life_chapters_tests(void);
 void run_social_graph_tests(void);
 void run_skill_system_tests(void);
 void run_feeds_tests(void);
+void run_feed_processor_tests(void);
 void run_intelligence_reflection_tests(void);
 void run_privacy_audit_tests(void);
 void run_bth_e2e_tests(void);
@@ -327,6 +333,11 @@ int main(void) {
     run_arbitrator_tests();
     run_planning_tests();
     run_rel_dynamics_tests();
+#ifdef HU_ENABLE_SQLITE
+    run_prospective_tests();
+    run_emotional_residue_tests();
+    run_consolidation_engine_tests();
+#endif
     run_conv_goals_tests();
     run_knowledge_tests();
     run_cognitive_tests();
@@ -349,6 +360,7 @@ int main(void) {
     run_social_graph_tests();
     run_skill_system_tests();
     run_feeds_tests();
+    run_feed_processor_tests();
     run_intelligence_reflection_tests();
     run_privacy_audit_tests();
     run_bth_e2e_tests();
