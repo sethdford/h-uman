@@ -2744,6 +2744,55 @@ static void thread_energy_null_safety(void) {
     HU_ASSERT_EQ(hu_thread_energy_build_isolation_hint(NULL, "x", 1, buf, sizeof(buf)), 0u);
 }
 
+/* ── Double-text decision (F9) ───────────────────────────────────────── */
+
+static void double_text_null_response_returns_false(void) {
+    HU_ASSERT_FALSE(hu_conversation_should_double_text(NULL, 0, NULL, 0, 12, 42, 0.08f));
+}
+
+static void double_text_late_night_returns_false(void) {
+    const char *resp = "haha that's great";
+    HU_ASSERT_FALSE(hu_conversation_should_double_text(resp, strlen(resp), NULL, 0, 23, 42, 1.0f));
+    HU_ASSERT_FALSE(hu_conversation_should_double_text(resp, strlen(resp), NULL, 0, 3, 42, 1.0f));
+}
+
+static void double_text_farewell_returns_false(void) {
+    const char *resp = "alright goodnight!";
+    HU_ASSERT_FALSE(hu_conversation_should_double_text(resp, strlen(resp), NULL, 0, 14, 42, 1.0f));
+}
+
+static void double_text_high_probability_returns_true(void) {
+    const char *resp = "yeah totally makes sense";
+    bool result = hu_conversation_should_double_text(resp, strlen(resp), NULL, 0, 14, 12345, 1.0f);
+    HU_ASSERT_TRUE(result);
+}
+
+static void double_text_zero_probability_returns_false(void) {
+    const char *resp = "yeah totally";
+    HU_ASSERT_FALSE(hu_conversation_should_double_text(resp, strlen(resp), NULL, 0, 14, 42, 0.0f));
+}
+
+static void double_text_energy_boost_increases_chance(void) {
+    const char *resp = "omg that's amazing lol!!";
+    int hits = 0;
+    for (uint32_t seed = 0; seed < 1000; seed++) {
+        if (hu_conversation_should_double_text(resp, strlen(resp), NULL, 0, 14, seed, 0.10f))
+            hits++;
+    }
+    HU_ASSERT_TRUE(hits > 100);
+}
+
+static void double_text_suppresses_when_too_many_from_me(void) {
+    hu_channel_history_entry_t entries[4];
+    memset(entries, 0, sizeof(entries));
+    entries[0].from_me = true; snprintf(entries[0].text, sizeof(entries[0].text), "first");
+    entries[1].from_me = true; snprintf(entries[1].text, sizeof(entries[1].text), "second");
+    entries[2].from_me = true; snprintf(entries[2].text, sizeof(entries[2].text), "third");
+    entries[3].from_me = true; snprintf(entries[3].text, sizeof(entries[3].text), "fourth");
+    const char *resp = "hey what's up";
+    HU_ASSERT_FALSE(hu_conversation_should_double_text(resp, strlen(resp), entries, 4, 14, 42, 1.0f));
+}
+
 /* ── Test suite registration ─────────────────────────────────────────── */
 
 void run_conversation_tests(void) {
@@ -3135,4 +3184,13 @@ void run_conversation_tests(void) {
     HU_RUN_TEST(call_escalation_long_emotional_returns_true);
     HU_RUN_TEST(call_escalation_null_input_returns_false_score_zero);
     HU_RUN_TEST(call_escalation_build_directive_writes_nonempty);
+
+    /* Double-text decision (F9) */
+    HU_RUN_TEST(double_text_null_response_returns_false);
+    HU_RUN_TEST(double_text_late_night_returns_false);
+    HU_RUN_TEST(double_text_farewell_returns_false);
+    HU_RUN_TEST(double_text_high_probability_returns_true);
+    HU_RUN_TEST(double_text_zero_probability_returns_false);
+    HU_RUN_TEST(double_text_energy_boost_increases_chance);
+    HU_RUN_TEST(double_text_suppresses_when_too_many_from_me);
 }

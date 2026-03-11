@@ -20,6 +20,7 @@ static void bth_metrics_init_zeros(void) {
     HU_ASSERT_EQ(m.typos_applied, 0u);
     HU_ASSERT_EQ(m.corrections_sent, 0u);
     HU_ASSERT_EQ(m.thinking_responses, 0u);
+    HU_ASSERT_EQ(m.double_texts, 0u);
     HU_ASSERT_EQ(m.callbacks_triggered, 0u);
     HU_ASSERT_EQ(m.reactions_sent, 0u);
     HU_ASSERT_EQ(m.link_contexts, 0u);

@@ -39,6 +39,8 @@ void hu_bth_metrics_log(const hu_bth_metrics_t *m) {
         fprintf(stderr, "[bth] corrections_sent=%u\n", m->corrections_sent);
     if (m->thinking_responses)
         fprintf(stderr, "[bth] thinking_responses=%u\n", m->thinking_responses);
+    if (m->double_texts)
+        fprintf(stderr, "[bth] double_texts=%u\n", m->double_texts);
     if (m->callbacks_triggered)
         fprintf(stderr, "[bth] callbacks_triggered=%u\n", m->callbacks_triggered);
     if (m->reactions_sent)
@@ -98,6 +100,7 @@ char *hu_bth_metrics_summary(hu_allocator_t *alloc, const hu_bth_metrics_t *m, s
     HU_BTH_SUMMARY_LINE(typos_applied, "typos_applied");
     HU_BTH_SUMMARY_LINE(corrections_sent, "corrections_sent");
     HU_BTH_SUMMARY_LINE(thinking_responses, "thinking_responses");
+    HU_BTH_SUMMARY_LINE(double_texts, "double_texts");
     HU_BTH_SUMMARY_LINE(callbacks_triggered, "callbacks_triggered");
     HU_BTH_SUMMARY_LINE(reactions_sent, "reactions_sent");
     HU_BTH_SUMMARY_LINE(link_contexts, "link_contexts");

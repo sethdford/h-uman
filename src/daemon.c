@@ -6977,6 +6977,31 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     (void)hu_style_fingerprint_update(agent->memory, alloc, batch_key, key_len,
                                                       response, response_len);
 
+#ifndef HU_IS_TEST
+                /* F9: Double-text — natural afterthought follow-up */
+                if (response && response_len > 0 && agent->persona && ch->channel->vtable->send) {
+                    float dt_prob = agent->persona->humanization.double_text_probability;
+                    uint32_t dt_seed = (uint32_t)time(NULL) * 1103515245u + 12345u +
+                                       (uint32_t)(uintptr_t)response;
+                    if (hu_conversation_should_double_text(
+                            response, response_len, history_entries, history_count,
+                            bth_hour, dt_seed, dt_prob)) {
+                        char *dt_prompt = NULL;
+                        size_t dt_prompt_len = 0;
+                        if (hu_double_text_build_prompt(alloc, &dt_prompt, &dt_prompt_len) == HU_OK &&
+                            dt_prompt) {
+                            unsigned int dt_delay = 10000u + (dt_seed % 35000u);
+                            usleep((useconds_t)(dt_delay * 1000u));
+                            ch->channel->vtable->send(ch->channel->ctx, batch_key, key_len,
+                                                      dt_prompt, dt_prompt_len, NULL, 0);
+                            if (agent->bth_metrics)
+                                agent->bth_metrics->double_texts++;
+                            alloc->free(alloc->ctx, dt_prompt, dt_prompt_len + 1);
+                        }
+                    }
+                }
+#endif
+
 #if defined(HU_ENABLE_IMESSAGE) && !defined(HU_IS_TEST)
             skip_send:
 #endif

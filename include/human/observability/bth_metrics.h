@@ -20,6 +20,7 @@ typedef struct hu_bth_metrics {
     uint32_t typos_applied;            /* Phase 4a: typos introduced */
     uint32_t corrections_sent;         /* Phase 4b: self-corrections sent */
     uint32_t thinking_responses;       /* Phase 4c: thinking fillers sent */
+    uint32_t double_texts;             /* Phase 4e: double-text follow-ups sent */
     uint32_t callbacks_triggered;       /* Phase 4d: thread callbacks injected */
     uint32_t reactions_sent;           /* Phase 5: tapback reactions sent */
     uint32_t link_contexts;             /* Phase 6: link sharing contexts */
