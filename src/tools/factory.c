@@ -60,6 +60,7 @@
 #include "human/tools/memory_list.h"
 #include "human/tools/memory_recall.h"
 #include "human/tools/memory_store.h"
+#include "human/tools/save_for_later.h"
 #include "human/tools/message.h"
 #include "human/tools/pdf.h"
 #include "human/tools/pushover.h"
@@ -100,8 +101,8 @@
 #define HU_TOOLS_PERSONA_COUNT 0
 #endif
 #define HU_TOOLS_COUNT_BASE         \
-    (43 + HU_TOOLS_CRON_COUNT - 1 + \
-     HU_TOOLS_PERSONA_COUNT) /* 42 base + homeassistant + persona(0|1) + cron */
+    (44 + HU_TOOLS_CRON_COUNT - 1 + \
+     HU_TOOLS_PERSONA_COUNT) /* 43 base + save_for_later + homeassistant + persona(0|1) + cron */
 #ifdef HU_HAS_TOOLS_BROWSER
 #define HU_TOOLS_BROWSER_COUNT 3
 #else
@@ -220,6 +221,11 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
     idx++;
 
     err = hu_memory_store_create(alloc, memory, &tools[idx]);
+    if (err != HU_OK)
+        goto fail;
+    idx++;
+
+    err = hu_save_for_later_create(alloc, memory, &tools[idx]);
     if (err != HU_OK)
         goto fail;
     idx++;

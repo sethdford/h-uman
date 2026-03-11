@@ -512,6 +512,7 @@ set(HU_CORE_SOURCES
     src/tools/web_fetch.c
     src/tools/http_request.c
     src/tools/memory_store.c
+    src/tools/save_for_later.c
     src/tools/memory_recall.c
     src/tools/memory_list.c
     src/tools/memory_forget.c
