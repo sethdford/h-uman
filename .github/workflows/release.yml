@@ -43,6 +43,8 @@ jobs:
 
     steps:
       - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
 
       - uses: actions/checkout@v6
         with:
@@ -54,8 +56,9 @@ jobs:
 
       - name: Rename binaries
         run: |
-          mv human-linux-x86_64/human human-linux-x86_64.bin
-          mv human-macos-aarch64/human human-macos-aarch64.bin
+          ls -R artifacts/
+          mv artifacts/human-linux-x86_64/human human-linux-x86_64.bin
+          mv artifacts/human-macos-aarch64/human human-macos-aarch64.bin
           chmod +x human-linux-x86_64.bin human-macos-aarch64.bin
 
       - name: Package completions and man pages
