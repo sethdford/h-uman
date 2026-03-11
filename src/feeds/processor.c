@@ -322,13 +322,13 @@ hu_error_t hu_feeds_build_prompt(hu_allocator_t *alloc,
         return HU_ERR_INVALID_ARGUMENT;
 
     if (count == 0 || !items) {
-        char *empty =
-            (char *)alloc->alloc(alloc->ctx, sizeof("[EXTERNAL AWARENESS]: (none)\n"));
+        static const char msg[] = "[EXTERNAL AWARENESS]: (none)\n";
+        char *empty = (char *)alloc->alloc(alloc->ctx, sizeof(msg));
         if (!empty)
             return HU_ERR_OUT_OF_MEMORY;
-        memcpy(empty, "[EXTERNAL AWARENESS]: (none)\n", 31);
+        memcpy(empty, msg, sizeof(msg));
         *out = empty;
-        *out_len = 30;
+        *out_len = sizeof(msg) - 1;
         return HU_OK;
     }
 
