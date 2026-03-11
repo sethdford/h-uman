@@ -3475,7 +3475,8 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif /* HU_HAS_PERSONA timezone */
 
                     /* 9. Humor (F69) — only when playful and not concerning */
-                    if (agent->persona->humor.type) {
+#ifdef HU_HAS_PERSONA
+                    if (agent->persona && agent->persona->humor.type) {
                         hu_emotional_state_t emo_humor =
                             history_entries && history_count > 0
                                 ? hu_conversation_detect_emotion(history_entries, history_count)
@@ -3497,9 +3498,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, hum_dir, hum_len + 1);
                         }
                     }
+#endif /* HU_HAS_PERSONA humor */
 
                     /* 10. Weather awareness (F51) — inject notable weather when location available */
-                    if (agent->persona->location[0]) {
+#ifdef HU_HAS_PERSONA
+                    if (agent->persona && agent->persona->location[0]) {
                         hu_weather_context_t wx = {0};
                         (void)hu_weather_fetch(alloc, agent->persona->location,
                                                strlen(agent->persona->location), NULL, &wx);
@@ -3519,6 +3522,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, wx_dir, wx_len + 1);
                         }
                     }
+#endif /* HU_HAS_PERSONA weather per-contact */
 
                     /* Phase 7 (F72–F76): Prospective memory, emotional residue, episodic context */
 #ifdef HU_ENABLE_SQLITE
@@ -4108,7 +4112,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
 
                     /* F52: Sports/current events — inject relevant events matching persona interests */
-#ifdef HU_ENABLE_SQLITE
+#if defined(HU_ENABLE_SQLITE) && defined(HU_HAS_PERSONA)
                     if (agent->memory && agent->persona) {
                         sqlite3 *ev_db = hu_sqlite_memory_get_db(agent->memory);
                         if (ev_db && agent->persona->context_awareness.news_topics_count > 0) {
@@ -6870,7 +6874,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                     /* ── Voice decision: TTS for iMessage when enabled ───── */
                     bool sent_voice = false;
-#if defined(HU_ENABLE_CARTESIA)
+#if defined(HU_ENABLE_CARTESIA) && defined(HU_HAS_PERSONA)
                     {
                         const char *chn_voice =
                             ch->channel->vtable->name
@@ -7073,7 +7077,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     (void)hu_style_fingerprint_update(agent->memory, alloc, batch_key, key_len,
                                                       response, response_len);
 
-#ifndef HU_IS_TEST
+#if !defined(HU_IS_TEST) && defined(HU_HAS_PERSONA)
                 /* F9: Double-text — natural afterthought follow-up */
                 if (response && response_len > 0 && agent->persona && ch->channel->vtable->send) {
                     float dt_prob = agent->persona->humanization.double_text_probability;

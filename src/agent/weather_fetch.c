@@ -5,8 +5,6 @@
 #include <string.h>
 #include <time.h>
 
-static hu_weather_cache_t g_cache = {0};
-
 #ifdef HU_IS_TEST
 
 hu_error_t hu_weather_fetch(hu_allocator_t *alloc, const char *location, size_t location_len,
@@ -27,6 +25,8 @@ hu_error_t hu_weather_fetch(hu_allocator_t *alloc, const char *location, size_t 
 #elif defined(HU_ENABLE_CURL)
 
 #include "human/core/http.h"
+
+static hu_weather_cache_t g_cache = {0};
 
 hu_error_t hu_weather_fetch(hu_allocator_t *alloc, const char *location, size_t location_len,
                             const char *api_key, hu_weather_context_t *out) {

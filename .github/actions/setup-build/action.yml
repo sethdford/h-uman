@@ -58,6 +58,7 @@ runs:
       shell: bash
       run: |
         mkdir -p ${{ inputs.build-dir }} && cd ${{ inputs.build-dir }}
+        rm -f CMakeCache.txt
         CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ inputs.build-type }}"
         if [ "${{ inputs.enable-asan }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DHU_ENABLE_ASAN=ON"; fi
         if [ "${{ inputs.enable-curl }}" = "true" ]; then CMAKE_FLAGS="$CMAKE_FLAGS -DHU_ENABLE_CURL=ON"; fi
