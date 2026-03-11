@@ -297,6 +297,8 @@ const char *hu_plan_status_str(hu_plan_status_t status)
         return "cancelled";
     case HU_PLAN_DECLINED:
         return "declined";
+    case HU_PLAN_EXPIRED:
+        return "expired";
     default:
         return "proposed";
     }
@@ -328,6 +330,10 @@ bool hu_plan_status_from_str(const char *str, hu_plan_status_t *out)
     }
     if (strcmp(str, "declined") == 0) {
         *out = HU_PLAN_DECLINED;
+        return true;
+    }
+    if (strcmp(str, "expired") == 0) {
+        *out = HU_PLAN_EXPIRED;
         return true;
     }
     return false;

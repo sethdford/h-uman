@@ -388,6 +388,186 @@ hu_error_t hu_feeds_build_prompt(hu_allocator_t *alloc,
     return HU_OK;
 }
 
+#ifdef HU_ENABLE_SQLITE
+#include <sqlite3.h>
+
+hu_error_t hu_feed_processor_store_item(hu_feed_processor_t *proc,
+                                        const hu_feed_item_stored_t *item) {
+    if (!proc || !proc->db || !item)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *sql =
+        "INSERT INTO feed_items (source, contact_id, content_type, content, "
+        "url, ingested_at) VALUES (?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(proc->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_text(stmt, 1, item->source, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, item->contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, item->content_type, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, item->content, (int)item->content_len,
+                      SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 5, item->url, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 6, item->ingested_at);
+
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_IO;
+}
+
+hu_error_t hu_feed_processor_get_recent(hu_allocator_t *alloc, sqlite3 *db,
+                                        const char *source, size_t src_len,
+                                        size_t limit,
+                                        hu_feed_item_stored_t **out,
+                                        size_t *out_count) {
+    (void)src_len;
+    if (!alloc || !db || !source || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    *out = NULL;
+    *out_count = 0;
+
+    const char *sql =
+        "SELECT source, contact_id, content_type, content, url, ingested_at "
+        "FROM feed_items WHERE source = ? ORDER BY ingested_at DESC LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_text(stmt, 1, source, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, (int)limit);
+
+    hu_feed_item_stored_t *items = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (count >= cap) {
+            size_t new_cap = cap == 0 ? 4 : cap * 2;
+            hu_feed_item_stored_t *tmp = (hu_feed_item_stored_t *)alloc->alloc(
+                alloc->ctx, new_cap * sizeof(hu_feed_item_stored_t));
+            if (!tmp) {
+                if (items) alloc->free(alloc->ctx, items,
+                                       cap * sizeof(hu_feed_item_stored_t));
+                sqlite3_finalize(stmt);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            if (items) {
+                memcpy(tmp, items, count * sizeof(hu_feed_item_stored_t));
+                alloc->free(alloc->ctx, items,
+                            cap * sizeof(hu_feed_item_stored_t));
+            }
+            items = tmp;
+            cap = new_cap;
+        }
+        hu_feed_item_stored_t *it = &items[count];
+        memset(it, 0, sizeof(*it));
+
+        const char *s = (const char *)sqlite3_column_text(stmt, 0);
+        if (s) snprintf(it->source, sizeof(it->source), "%s", s);
+        s = (const char *)sqlite3_column_text(stmt, 1);
+        if (s) snprintf(it->contact_id, sizeof(it->contact_id), "%s", s);
+        s = (const char *)sqlite3_column_text(stmt, 2);
+        if (s) snprintf(it->content_type, sizeof(it->content_type), "%s", s);
+        s = (const char *)sqlite3_column_text(stmt, 3);
+        if (s) {
+            snprintf(it->content, sizeof(it->content), "%s", s);
+            it->content_len = strlen(it->content);
+        }
+        s = (const char *)sqlite3_column_text(stmt, 4);
+        if (s) snprintf(it->url, sizeof(it->url), "%s", s);
+        it->ingested_at = sqlite3_column_int64(stmt, 5);
+        count++;
+    }
+    sqlite3_finalize(stmt);
+
+    *out = items;
+    *out_count = count;
+    return HU_OK;
+}
+
+hu_error_t hu_feed_processor_get_for_contact(hu_allocator_t *alloc, sqlite3 *db,
+                                             const char *contact_id,
+                                             size_t cid_len, size_t limit,
+                                             hu_feed_item_stored_t **out,
+                                             size_t *out_count) {
+    (void)cid_len;
+    if (!alloc || !db || !contact_id || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    *out = NULL;
+    *out_count = 0;
+
+    const char *sql =
+        "SELECT source, contact_id, content_type, content, url, ingested_at "
+        "FROM feed_items WHERE contact_id = ? ORDER BY ingested_at DESC "
+        "LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    sqlite3_bind_text(stmt, 1, contact_id, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, (int)limit);
+
+    hu_feed_item_stored_t *items = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (count >= cap) {
+            size_t new_cap = cap == 0 ? 4 : cap * 2;
+            hu_feed_item_stored_t *tmp = (hu_feed_item_stored_t *)alloc->alloc(
+                alloc->ctx, new_cap * sizeof(hu_feed_item_stored_t));
+            if (!tmp) {
+                if (items) alloc->free(alloc->ctx, items,
+                                       cap * sizeof(hu_feed_item_stored_t));
+                sqlite3_finalize(stmt);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            if (items) {
+                memcpy(tmp, items, count * sizeof(hu_feed_item_stored_t));
+                alloc->free(alloc->ctx, items,
+                            cap * sizeof(hu_feed_item_stored_t));
+            }
+            items = tmp;
+            cap = new_cap;
+        }
+        hu_feed_item_stored_t *it = &items[count];
+        memset(it, 0, sizeof(*it));
+
+        const char *s = (const char *)sqlite3_column_text(stmt, 0);
+        if (s) snprintf(it->source, sizeof(it->source), "%s", s);
+        s = (const char *)sqlite3_column_text(stmt, 1);
+        if (s) snprintf(it->contact_id, sizeof(it->contact_id), "%s", s);
+        s = (const char *)sqlite3_column_text(stmt, 2);
+        if (s) snprintf(it->content_type, sizeof(it->content_type), "%s", s);
+        s = (const char *)sqlite3_column_text(stmt, 3);
+        if (s) {
+            snprintf(it->content, sizeof(it->content), "%s", s);
+            it->content_len = strlen(it->content);
+        }
+        s = (const char *)sqlite3_column_text(stmt, 4);
+        if (s) snprintf(it->url, sizeof(it->url), "%s", s);
+        it->ingested_at = sqlite3_column_int64(stmt, 5);
+        count++;
+    }
+    sqlite3_finalize(stmt);
+
+    *out = items;
+    *out_count = count;
+    return HU_OK;
+}
+
+void hu_feed_items_free(hu_allocator_t *alloc, hu_feed_item_stored_t *items,
+                        size_t count) {
+    (void)count;
+    if (alloc && items)
+        alloc->free(alloc->ctx, items, count * sizeof(hu_feed_item_stored_t));
+}
+
+#endif /* HU_ENABLE_SQLITE */
+
 void hu_feed_item_deinit(hu_allocator_t *alloc, hu_feed_item_t *item) {
     if (!alloc || !item)
         return;

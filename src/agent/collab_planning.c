@@ -172,7 +172,7 @@ hu_error_t hu_collab_plan_query_sql(const char *contact_id, size_t contact_id_le
     escape_sql_string(contact_id, contact_id_len, contact_esc, sizeof(contact_esc), &ce_len);
 
     int n;
-    if (status_filter != NULL && *status_filter < HU_PLAN_STATUS_COUNT) {
+    if (status_filter != NULL && (int)*status_filter <= HU_PLAN_DECLINED) {
         const char *status_str = hu_plan_status_str(*status_filter);
         n = snprintf(buf, cap,
                      "SELECT id, contact_id, description, location, proposed_time, status, "
@@ -196,7 +196,7 @@ hu_error_t hu_collab_plan_update_status_sql(int64_t plan_id, hu_plan_status_t ne
                                             char *buf, size_t cap, size_t *out_len) {
     if (!buf || !out_len || cap < 128)
         return HU_ERR_INVALID_ARGUMENT;
-    if (new_status >= HU_PLAN_STATUS_COUNT)
+    if ((int)new_status > HU_PLAN_DECLINED)
         return HU_ERR_INVALID_ARGUMENT;
 
     const char *status_str = hu_plan_status_str(new_status);
@@ -376,21 +376,4 @@ void hu_plan_trigger_deinit(hu_allocator_t *alloc, hu_plan_trigger_t *trigger) {
     }
 }
 
-const char *hu_plan_status_str(hu_plan_status_t status) {
-    switch (status) {
-        case HU_PLAN_PROPOSED:
-            return "proposed";
-        case HU_PLAN_ACCEPTED:
-            return "accepted";
-        case HU_PLAN_DECLINED:
-            return "declined";
-        case HU_PLAN_COMPLETED:
-            return "completed";
-        case HU_PLAN_CANCELLED:
-            return "cancelled";
-        case HU_PLAN_EXPIRED:
-            return "expired";
-        default:
-            return "proposed";
-    }
-}
+/* hu_plan_status_str is defined in planning.c — reuse via planning.h */

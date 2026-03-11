@@ -10,6 +10,7 @@
 #include "human/daemon.h"
 #include "human/agent.h"
 #include "human/agent/anticipatory.h"
+#include "human/agent/collab_planning.h"
 #include "human/agent/conversation_plan.h"
 #include "human/agent/episodic.h"
 #include "human/agent/info_asymmetry.h"
@@ -27,7 +28,12 @@
 #include "human/core/string.h"
 #include "human/memory/comfort_patterns.h"
 #include "human/memory/consolidation.h"
+#include "human/memory/consolidation_engine.h"
 #include "human/memory/deep_extract.h"
+#include "human/memory/episodic.h"
+#include "human/memory/emotional_residue.h"
+#include "human/memory/forgetting_curve.h"
+#include "human/memory/prospective.h"
 #include "human/memory/emotional_graph.h"
 #include "human/memory/emotional_moments.h"
 #include "human/memory/fast_capture.h"
@@ -1320,6 +1326,28 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                     }
                 }
             }
+            /* F130: Collaborative plan proposal check */
+#ifdef HU_HAS_PERSONA
+            if (agent->memory && prompt) {
+                bool should_propose = hu_collab_plan_should_propose(
+                    cp->contact_id, strlen(cp->contact_id), 0, 3, 0.5);
+                if (should_propose) {
+                    static const char PLAN_HINT[] =
+                        "\nConsider naturally suggesting a plan or activity to do together.";
+                    size_t hint_len = sizeof(PLAN_HINT) - 1;
+                    size_t merged_len = prompt_len + hint_len + 1;
+                    char *merged = (char *)alloc->alloc(alloc->ctx, merged_len);
+                    if (merged) {
+                        memcpy(merged, prompt, prompt_len);
+                        memcpy(merged + prompt_len, PLAN_HINT, hint_len);
+                        merged[merged_len - 1] = '\0';
+                        alloc->free(alloc->ctx, prompt, prompt_len + 1);
+                        prompt = merged;
+                        prompt_len = merged_len - 1;
+                    }
+                }
+            }
+#endif /* HU_HAS_PERSONA — collab plan */
 #endif
             if (prompt && event_ctx && event_ctx_len > 0) {
                 size_t merged_len = prompt_len + 1 + event_ctx_len + 1;
@@ -2921,6 +2949,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 if (agent && agent->persona) {
                     const hu_contact_profile_t *cp_p6 =
                         hu_persona_find_contact(agent->persona, batch_key, key_len);
+                    (void)cp_p6;
 #define PHASE6_APPEND(str, len)                                                  \
     do {                                                                         \
         if ((str) && (len) > 0) {                                                \
@@ -3125,6 +3154,119 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 alloc->free(alloc->ctx, hum_dir, hum_len + 1);
                         }
                     }
+
+                    /* Phase 7 (F72–F76): Prospective memory, emotional residue, episodic context */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory && batch_key && key_len > 0) {
+                        sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+                        if (db) {
+                            int64_t now_ts = (int64_t)time(NULL);
+
+                            /* 9. Prospective memory — check triggers from current message */
+                            if (combined_len > 0) {
+                                hu_prospective_entry_t *prosp_entries = NULL;
+                                size_t prosp_count = 0;
+                                if (hu_prospective_check_triggers(alloc, db, "keyword", combined,
+                                                                 combined_len, batch_key, key_len,
+                                                                 now_ts, &prosp_entries,
+                                                                 &prosp_count) == HU_OK &&
+                                    prosp_entries && prosp_count > 0) {
+                                    char prosp_buf[1024];
+                                    size_t prosp_pos = 0;
+                                    int n = snprintf(prosp_buf, sizeof(prosp_buf),
+                                                    "[PROSPECTIVE MEMORY: Remember to: ");
+                                    if (n > 0)
+                                        prosp_pos = (size_t)n;
+                                    for (size_t pi = 0; pi < prosp_count && pi < 3 && prosp_pos < sizeof(prosp_buf) - 64; pi++) {
+                                        if (pi > 0) {
+                                            prosp_buf[prosp_pos++] = ' ';
+                                            prosp_buf[prosp_pos++] = '|';
+                                            prosp_buf[prosp_pos++] = ' ';
+                                        }
+                                        int w = snprintf(prosp_buf + prosp_pos,
+                                                        sizeof(prosp_buf) - prosp_pos,
+                                                        "%s (triggered by: %s)",
+                                                        prosp_entries[pi].action,
+                                                        prosp_entries[pi].trigger_value);
+                                        if (w > 0 && prosp_pos + (size_t)w < sizeof(prosp_buf))
+                                            prosp_pos += (size_t)w;
+                                    }
+                                    if (prosp_pos + 2 < sizeof(prosp_buf)) {
+                                        prosp_buf[prosp_pos++] = ']';
+                                        prosp_buf[prosp_pos] = '\0';
+                                        char *prosp_str = (char *)alloc->alloc(alloc->ctx, prosp_pos + 1);
+                                        if (prosp_str) {
+                                            memcpy(prosp_str, prosp_buf, prosp_pos + 1);
+                                            PHASE6_APPEND(prosp_str, prosp_pos);
+                                        }
+                                    }
+                                    alloc->free(alloc->ctx, prosp_entries,
+                                                prosp_count * sizeof(hu_prospective_entry_t));
+                                }
+                            }
+
+                            /* 10. Emotional residue — active valence/intensity for this contact */
+                            {
+                                hu_emotional_residue_t *residues = NULL;
+                                size_t res_count = 0;
+                                if (hu_emotional_residue_get_active(alloc, db, batch_key, key_len,
+                                                                   now_ts, &residues,
+                                                                   &res_count) == HU_OK &&
+                                    residues && res_count > 0) {
+                                    size_t dir_len = 0;
+                                    char *dir = hu_emotional_residue_build_directive(
+                                        alloc, residues, res_count, &dir_len);
+                                    if (dir && dir_len > 0)
+                                        PHASE6_APPEND(dir, dir_len);
+                                    else if (dir)
+                                        alloc->free(alloc->ctx, dir, dir_len + 1);
+                                    alloc->free(alloc->ctx, residues,
+                                                res_count * sizeof(hu_emotional_residue_t));
+                                }
+                            }
+
+                            /* 11. Episodic context — last 3 episodes for this contact */
+                            {
+                                hu_episode_sqlite_t *episodes = NULL;
+                                size_t ep_count = 0;
+                                if (hu_episode_get_by_contact(alloc, db, batch_key, key_len, 3, 0,
+                                                              &episodes, &ep_count) == HU_OK &&
+                                    episodes && ep_count > 0) {
+                                    char ep_buf[2048];
+                                    size_t ep_pos = 0;
+                                    int n = snprintf(ep_buf, sizeof(ep_buf),
+                                                    "[EPISODIC MEMORY: Recent episodes: ");
+                                    if (n > 0)
+                                        ep_pos = (size_t)n;
+                                    for (size_t ei = 0; ei < ep_count && ep_pos < sizeof(ep_buf) - 64; ei++) {
+                                        if (ei > 0) {
+                                            ep_buf[ep_pos++] = ' ';
+                                            ep_buf[ep_pos++] = ';';
+                                            ep_buf[ep_pos++] = ' ';
+                                        }
+                                        size_t add = episodes[ei].summary_len;
+                                        if (add > 120)
+                                            add = 120;
+                                        if (ep_pos + add + 2 < sizeof(ep_buf)) {
+                                            memcpy(ep_buf + ep_pos, episodes[ei].summary, add);
+                                            ep_pos += add;
+                                        }
+                                    }
+                                    if (ep_pos + 2 < sizeof(ep_buf)) {
+                                        ep_buf[ep_pos++] = ']';
+                                        ep_buf[ep_pos] = '\0';
+                                        char *ep_str = (char *)alloc->alloc(alloc->ctx, ep_pos + 1);
+                                        if (ep_str) {
+                                            memcpy(ep_str, ep_buf, ep_pos + 1);
+                                            PHASE6_APPEND(ep_str, ep_pos);
+                                        }
+                                    }
+                                    hu_episode_free(alloc, episodes, ep_count);
+                                }
+                            }
+                        }
+                    }
+#endif
 
 #undef PHASE6_APPEND
                 }
@@ -5224,6 +5366,30 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 #endif
+#endif
+
+                /* Phase 7: Post-conversation episode creation (>= 5 messages) */
+#ifdef HU_ENABLE_SQLITE
+                if (err == HU_OK && response && response_len > 0 && agent->memory &&
+                    history_count >= 3 && batch_key && key_len > 0) {
+                    sqlite3 *db = hu_sqlite_memory_get_db(agent->memory);
+                    if (db) {
+                        char summary_buf[1024];
+                        size_t sum_len = 0;
+                        int n = snprintf(summary_buf, sizeof(summary_buf), "User: %.*s. Assistant: %.*s",
+                                         (int)(combined_len > 200 ? 200 : combined_len), combined,
+                                         (int)(response_len > 200 ? 200 : response_len), response);
+                        if (n > 0 && (size_t)n < sizeof(summary_buf))
+                            sum_len = (size_t)n;
+                        if (sum_len > 0) {
+                            int64_t episode_id = 0;
+                            (void)hu_episode_store_insert(alloc, db, batch_key, key_len,
+                                                          summary_buf, sum_len,
+                                                          NULL, 0, NULL, 0, 0.5,
+                                                          "conversation", 12, &episode_id);
+                        }
+                    }
+                }
 #endif
 
                 /* ── BTH post-turn: Graph recall tracking + reconsolidate (t1f) */

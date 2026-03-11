@@ -413,7 +413,9 @@ set(HU_CORE_SOURCES
     src/agent/governor.c
     src/agent/arbitrator.c
     src/agent/planning.c
+    src/agent/collab_planning.c
     src/agent/rel_dynamics.c
+    src/context/rel_dynamics.c
     src/agent/conv_goals.c
     src/agent/superhuman.c
     src/agent/superhuman_commitment.c
@@ -739,7 +741,8 @@ if(HU_ENABLE_SOCIAL)
     list(APPEND HU_CORE_SOURCES src/feeds/social.c)
 endif()
 if(HU_ENABLE_FEEDS)
-    list(APPEND HU_CORE_SOURCES src/feeds/apple.c)
+    list(APPEND HU_CORE_SOURCES src/feeds/apple.c src/feeds/google.c src/feeds/music.c
+        src/feeds/news.c src/feeds/email.c)
 endif()
 
 # Skillforge
@@ -1317,7 +1320,8 @@ if(NOT HU_ENABLE_SOCIAL)
     list(APPEND HU_TEST_EXTRA_MODULES src/feeds/social.c)
 endif()
 if(NOT HU_ENABLE_FEEDS)
-    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c)
+    list(APPEND HU_TEST_EXTRA_MODULES src/feeds/apple.c src/feeds/google.c src/feeds/music.c
+        src/feeds/news.c src/feeds/email.c)
 endif()
 if(NOT HU_ENABLE_PUSH)
     list(APPEND HU_TEST_EXTRA_MODULES src/gateway/push.c)
@@ -1353,6 +1357,9 @@ add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} 
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
 target_include_directories(human_core_test PRIVATE ${HU_ROOT}/asm/generic)
 target_compile_definitions(human_core_test PRIVATE HU_IS_TEST=1)
+if(HU_ENABLE_FEEDS)
+    target_compile_definitions(human_core_test PRIVATE HU_ENABLE_FEEDS=1)
+endif()
 if(HU_ENABLE_CARTESIA)
     target_compile_definitions(human_core_test PRIVATE HU_ENABLE_CARTESIA=1)
 endif()
@@ -1642,9 +1649,6 @@ set(HU_TEST_SOURCES
     tests/test_arbitrator.c
     tests/test_planning.c
     tests/test_rel_dynamics.c
-    tests/test_prospective.c
-    tests/test_emotional_residue.c
-    tests/test_consolidation_engine.c
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_cognitive.c
@@ -1668,10 +1672,14 @@ set(HU_TEST_SOURCES
     tests/test_social_graph.c
     tests/test_skill_system.c
     tests/test_feeds.c
-    tests/test_feed_processor.c
+    tests/test_news_health_email.c
     tests/test_intelligence_reflection.c
     tests/test_privacy_audit.c
+    tests/test_collab_planning.c
 )
+if(HU_ENABLE_FEEDS)
+    list(APPEND HU_TEST_SOURCES tests/test_google_feeds.c tests/test_music_feeds.c)
+endif()
 if(HU_ENABLE_PERSONA)
     list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c)
 endif()
@@ -1696,6 +1704,9 @@ if(HU_ENABLE_PERSONA)
 endif()
 if(HU_ENABLE_CARTESIA)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_CARTESIA=1)
+endif()
+if(HU_ENABLE_FEEDS)
+    target_compile_definitions(human_tests PRIVATE HU_ENABLE_FEEDS=1)
 endif()
 if(UNIX AND NOT WIN32)
     target_compile_definitions(human_tests PRIVATE HU_GATEWAY_POSIX=1)

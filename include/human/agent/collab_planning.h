@@ -1,23 +1,15 @@
 #ifndef HU_AGENT_COLLAB_PLANNING_H
 #define HU_AGENT_COLLAB_PLANNING_H
 
+#include "human/agent/planning.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* F130-F133 — Collaborative Planning */
-
-typedef enum hu_plan_status {
-    HU_PLAN_PROPOSED = 0,
-    HU_PLAN_ACCEPTED,
-    HU_PLAN_DECLINED,
-    HU_PLAN_COMPLETED,
-    HU_PLAN_CANCELLED,
-    HU_PLAN_EXPIRED,
-    HU_PLAN_STATUS_COUNT
-} hu_plan_status_t;
+/* F130-F133 — Collaborative Planning
+   hu_plan_status_t enum is defined in planning.h */
 
 typedef enum hu_plan_trigger_type {
     HU_PLAN_TRIGGER_INTEREST_MATCH = 0,
@@ -85,6 +77,6 @@ hu_error_t hu_collab_plan_build_prompt(hu_allocator_t *alloc,
 void hu_collab_plan_deinit(hu_allocator_t *alloc, hu_collab_plan_t *plan);
 void hu_plan_trigger_deinit(hu_allocator_t *alloc, hu_plan_trigger_t *trigger);
 
-const char *hu_plan_status_str(hu_plan_status_t status);
+/* hu_plan_status_str / hu_plan_status_from_str are declared in planning.h */
 
 #endif /* HU_AGENT_COLLAB_PLANNING_H */

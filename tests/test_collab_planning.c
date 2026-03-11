@@ -32,7 +32,7 @@ static void test_insert_sql_valid(void) {
         .location = NULL,
         .location_len = 0,
         .proposed_time_ms = 1000000ULL,
-        .status = HU_COLLAB_PLAN_PROPOSED,
+        .status = HU_PLAN_PROPOSED,
         .trigger_type = HU_PLAN_TRIGGER_INTEREST_MATCH,
     };
     char buf[512];
@@ -57,7 +57,7 @@ static void test_insert_sql_with_location(void) {
         .location = hu_strndup(&alloc, "Mount Trail", 11),
         .location_len = 11,
         .proposed_time_ms = 2000000ULL,
-        .status = HU_COLLAB_PLAN_ACCEPTED,
+        .status = HU_PLAN_ACCEPTED,
         .trigger_type = HU_PLAN_TRIGGER_SEASONAL,
     };
     char buf[512];
@@ -80,7 +80,7 @@ static void test_insert_sql_without_location(void) {
         .location = NULL,
         .location_len = 0,
         .proposed_time_ms = 3000000ULL,
-        .status = HU_COLLAB_PLAN_PROPOSED,
+        .status = HU_PLAN_PROPOSED,
         .trigger_type = HU_PLAN_TRIGGER_SPONTANEOUS,
     };
     char buf[512];
@@ -102,7 +102,7 @@ static void test_insert_sql_escapes_quotes(void) {
         .location = NULL,
         .location_len = 0,
         .proposed_time_ms = 4000000ULL,
-        .status = HU_COLLAB_PLAN_PROPOSED,
+        .status = HU_PLAN_PROPOSED,
         .trigger_type = HU_PLAN_TRIGGER_INTEREST_MATCH,
     };
     char buf[512];
@@ -128,7 +128,7 @@ static void test_query_sql_with_status_filter(void) {
     char buf[512];
     size_t len = 0;
     const char *contact = "user_a";
-    hu_collab_plan_status_t status = HU_COLLAB_PLAN_ACCEPTED;
+    hu_plan_status_t status = HU_PLAN_ACCEPTED;
     hu_error_t err =
         hu_collab_plan_query_sql(contact, 6, &status, buf, sizeof(buf), &len);
     HU_ASSERT_EQ(err, HU_OK);
@@ -151,7 +151,7 @@ static void test_update_status_sql_valid(void) {
     char buf[256];
     size_t len = 0;
     hu_error_t err =
-        hu_collab_plan_update_status_sql(42, HU_COLLAB_PLAN_COMPLETED, buf, sizeof(buf), &len);
+        hu_collab_plan_update_status_sql(42, HU_PLAN_COMPLETED, buf, sizeof(buf), &len);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_TRUE(strstr(buf, "UPDATE plans") != NULL);
     HU_ASSERT_TRUE(strstr(buf, "status") != NULL);
@@ -173,7 +173,7 @@ static void test_score_trigger_with_matching_interests(void) {
     };
     const char *interests[] = {"concert"};
     double score = hu_collab_plan_score_trigger(&trigger, interests, 1);
-    HU_ASSERT_GT(score, 0.0);
+    HU_ASSERT_TRUE(score > 0.0);
     hu_plan_trigger_deinit(&alloc, &trigger);
 }
 
@@ -273,12 +273,12 @@ static void test_trigger_deinit_handles_null(void) {
 }
 
 static void test_plan_status_str_returns_labels(void) {
-    HU_ASSERT_STR_EQ(hu_collab_plan_status_str(HU_COLLAB_PLAN_PROPOSED), "proposed");
-    HU_ASSERT_STR_EQ(hu_collab_plan_status_str(HU_COLLAB_PLAN_ACCEPTED), "accepted");
-    HU_ASSERT_STR_EQ(hu_collab_plan_status_str(HU_COLLAB_PLAN_DECLINED), "declined");
-    HU_ASSERT_STR_EQ(hu_collab_plan_status_str(HU_COLLAB_PLAN_COMPLETED), "completed");
-    HU_ASSERT_STR_EQ(hu_collab_plan_status_str(HU_COLLAB_PLAN_CANCELLED), "cancelled");
-    HU_ASSERT_STR_EQ(hu_collab_plan_status_str(HU_COLLAB_PLAN_EXPIRED), "expired");
+    HU_ASSERT_STR_EQ(hu_plan_status_str(HU_PLAN_PROPOSED), "proposed");
+    HU_ASSERT_STR_EQ(hu_plan_status_str(HU_PLAN_ACCEPTED), "accepted");
+    HU_ASSERT_STR_EQ(hu_plan_status_str(HU_PLAN_CONFIRMED), "confirmed");
+    HU_ASSERT_STR_EQ(hu_plan_status_str(HU_PLAN_COMPLETED), "completed");
+    HU_ASSERT_STR_EQ(hu_plan_status_str(HU_PLAN_CANCELLED), "cancelled");
+    HU_ASSERT_STR_EQ(hu_plan_status_str(HU_PLAN_DECLINED), "declined");
 }
 
 void run_collab_planning_tests(void) {

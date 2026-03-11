@@ -13,7 +13,9 @@ typedef enum hu_plan_status {
     HU_PLAN_CONFIRMED,
     HU_PLAN_COMPLETED,
     HU_PLAN_CANCELLED,
-    HU_PLAN_DECLINED
+    HU_PLAN_DECLINED,
+    HU_PLAN_EXPIRED,
+    HU_PLAN_STATUS_COUNT
 } hu_plan_status_t;
 
 typedef struct hu_plan {
