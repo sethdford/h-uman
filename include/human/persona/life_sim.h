@@ -5,22 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Routine block — time, activity, availability, mood modifier.
- * Defined here; may be moved to persona.h by another agent. */
-typedef struct hu_routine_block {
-    char *time;           /* "05:30" */
-    char *activity;      /* "wake_up", "gym", "work_meetings" */
-    char *availability;  /* "brief", "unavailable", "slow", "available" */
-    char *mood_modifier; /* "groggy", "energetic_after", "focused" */
-} hu_routine_block_t;
-
-typedef struct hu_daily_routine {
-    hu_routine_block_t *weekday;
-    size_t weekday_count;
-    hu_routine_block_t *weekend;
-    size_t weekend_count;
-    float routine_variance; /* 0.15 = ±15% time jitter */
-} hu_daily_routine_t;
+/* hu_routine_block_t and hu_daily_routine_t are defined in persona.h.
+ * Include persona.h so we can use them. */
+#include "human/persona.h"
 
 typedef struct hu_life_sim_state {
     const char *activity;

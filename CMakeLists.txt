@@ -395,6 +395,9 @@ set(HU_CORE_SOURCES
     src/context/event_extract.c
     src/context/vision.c
     src/context/intelligence.c
+    src/intelligence/reflection.c
+    src/intelligence/skill_system.c
+    src/feeds/processor.c
     src/context/behavioral.c
     src/context/context_ext.c
     src/agent/episodic.c
@@ -478,6 +481,8 @@ set(HU_CORE_SOURCES
     src/memory/connections.c
     src/memory/knowledge.c
     src/memory/cognitive.c
+    src/memory/deep_memory.c
+    src/memory/rag_pipeline.c
     src/memory/compression.c
     src/visual/content.c
     src/memory/ingest.c
@@ -541,6 +546,7 @@ set(HU_CORE_SOURCES
     src/tools/factory.c
     src/mcp_server.c
     src/channels/thread_binding.c
+    src/channels/voice_integration.c
     src/security/policy_engine.c
     src/security/replay.c
     src/plugins/registry.c
@@ -645,6 +651,7 @@ if(HU_ENABLE_PERSONA)
         src/persona/auto_tune.c
         src/persona/voice_maturity.c
         src/persona/style_clone.c
+        src/persona/training.c
         src/persona/life_sim.c
         src/persona/mood.c
         src/tools/persona.c
@@ -653,6 +660,8 @@ if(HU_ENABLE_PERSONA)
         src/context/anticipatory.c
         src/context/protective.c
         src/context/humor.c
+        src/context/social_graph.c
+        src/context/authentic.c
         src/memory/degradation.c
         src/memory/opinions.c
         src/memory/life_chapters.c
@@ -1296,8 +1305,10 @@ if(NOT HU_ENABLE_PERSONA)
         src/persona/auto_profile.c src/persona/auto_tune.c src/persona/voice_maturity.c
         src/persona/style_clone.c src/persona/life_sim.c src/persona/mood.c src/tools/persona.c
         src/context/theory_of_mind.c src/context/self_awareness.c src/context/anticipatory.c
-        src/context/protective.c src/context/humor.c
-        src/memory/degradation.c src/memory/opinions.c src/memory/life_chapters.c)
+        src/context/protective.c src/context/humor.c src/context/social_graph.c
+        src/context/authentic.c
+        src/memory/degradation.c src/memory/opinions.c src/memory/life_chapters.c
+        src/memory/rag_pipeline.c src/persona/training.c src/channels/voice_integration.c)
 endif()
 if(NOT HU_ENABLE_CARTESIA)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -1564,6 +1575,13 @@ set(HU_TEST_SOURCES
     tests/test_tavily.c
     tests/test_awareness.c
     tests/test_intelligence.c
+    tests/test_intelligence_reflection.c
+    tests/test_protective.c
+    tests/test_humor.c
+    tests/test_authentic.c
+    tests/test_rag_pipeline.c
+    tests/test_persona_training.c
+    tests/test_voice_integration.c
     tests/test_behavioral.c
     tests/test_context_ext.c
     tests/test_episodic.c
@@ -1593,6 +1611,7 @@ set(HU_TEST_SOURCES
     tests/test_conv_goals.c
     tests/test_knowledge.c
     tests/test_cognitive.c
+    tests/test_deep_memory.c
     tests/test_compression.c
     tests/test_proactive_ext.c
     tests/test_degradation.c
@@ -1608,6 +1627,12 @@ set(HU_TEST_SOURCES
     tests/test_anticipatory.c
     tests/test_visual_content.c
     tests/test_opinions.c
+    tests/test_life_chapters.c
+    tests/test_social_graph.c
+    tests/test_skill_system.c
+    tests/test_feeds.c
+    tests/test_intelligence_reflection.c
+    tests/test_privacy_audit.c
 )
 if(HU_ENABLE_PERSONA)
     list(APPEND HU_TEST_SOURCES tests/test_persona.c tests/test_circadian.c tests/test_relationship.c tests/test_replay.c tests/test_style_clone.c tests/test_life_sim.c tests/test_persona_mood.c)

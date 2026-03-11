@@ -101,9 +101,9 @@ hu_life_sim_state_t hu_life_sim_get_current(const hu_daily_routine_t *routine, i
         int end = block_start_minutes(blocks, count, i + 1);
         if (effective_minutes >= start && effective_minutes < end) {
             const hu_routine_block_t *b = &blocks[i];
-            out.activity = b->activity ? b->activity : DEFAULT_ACTIVITY;
-            out.availability = b->availability ? b->availability : DEFAULT_AVAILABILITY;
-            out.mood_modifier = b->mood_modifier ? b->mood_modifier : DEFAULT_MOOD;
+            out.activity = (b->activity[0] != '\0') ? b->activity : DEFAULT_ACTIVITY;
+            out.availability = (b->availability[0] != '\0') ? b->availability : DEFAULT_AVAILABILITY;
+            out.mood_modifier = (b->mood_modifier[0] != '\0') ? b->mood_modifier : DEFAULT_MOOD;
             out.availability_factor = availability_to_factor(b->availability);
             return out;
         }

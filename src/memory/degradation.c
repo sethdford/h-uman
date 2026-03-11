@@ -79,6 +79,7 @@ bool hu_degradation_is_protected(const char *content, size_t content_len) {
         "July", "August", "September", "October", "November", "December",
         "The", "This", "That", "These", "Those", "There", "Then", "But",
         "And", "For", "Not", "Yet", "So", "Or", "We", "He", "She", "It",
+        "A", "I", "In", "On", "At", "To", "My", "Our", "If", "No",
     };
     static const size_t skip_caps_count = sizeof(skip_caps) / sizeof(skip_caps[0]);
 
@@ -93,7 +94,7 @@ bool hu_degradation_is_protected(const char *content, size_t content_len) {
                 bool is_common = false;
                 for (size_t s = 0; s < skip_caps_count; s++) {
                     if (strlen(skip_caps[s]) == word_len &&
-                        strncmp(content + word_start, skip_caps[s], word_len) == 0) {
+                        strncasecmp(content + word_start, skip_caps[s], word_len) == 0) {
                         is_common = true;
                         break;
                     }

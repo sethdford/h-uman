@@ -2,33 +2,24 @@
 #include "human/persona/life_sim.h"
 #include "test_framework.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 static void life_sim_09_30_weekday_work_meetings_slow(void) {
     /* Routine: 09:00 work_meetings (slow), 12:00 lunch (available).
      * At 09:30 weekday -> activity "work_meetings", availability "slow". */
-    hu_routine_block_t blocks[2] = {
-        {
-            .time = "09:00",
-            .activity = "work_meetings",
-            .availability = "slow",
-            .mood_modifier = "focused",
-        },
-        {
-            .time = "12:00",
-            .activity = "lunch",
-            .availability = "available",
-            .mood_modifier = "relaxed",
-        },
-    };
-    hu_daily_routine_t routine = {
-        .weekday = blocks,
-        .weekday_count = 2,
-        .weekend = NULL,
-        .weekend_count = 0,
-        .routine_variance = 0.15f,
-    };
+    hu_daily_routine_t routine = {0};
+    routine.routine_variance = 0.15f;
+    routine.weekday_count = 2;
+    snprintf(routine.weekday[0].time, sizeof(routine.weekday[0].time), "09:00");
+    snprintf(routine.weekday[0].activity, sizeof(routine.weekday[0].activity), "work_meetings");
+    snprintf(routine.weekday[0].availability, sizeof(routine.weekday[0].availability), "slow");
+    snprintf(routine.weekday[0].mood_modifier, sizeof(routine.weekday[0].mood_modifier), "focused");
+    snprintf(routine.weekday[1].time, sizeof(routine.weekday[1].time), "12:00");
+    snprintf(routine.weekday[1].activity, sizeof(routine.weekday[1].activity), "lunch");
+    snprintf(routine.weekday[1].availability, sizeof(routine.weekday[1].availability), "available");
+    snprintf(routine.weekday[1].mood_modifier, sizeof(routine.weekday[1].mood_modifier), "relaxed");
 
     /* Build timestamp for Wednesday 09:30 local. Use a fixed date. */
     struct tm tm = {0};
@@ -49,17 +40,17 @@ static void life_sim_09_30_weekday_work_meetings_slow(void) {
 }
 
 static void life_sim_12_30_weekday_lunch_available(void) {
-    hu_routine_block_t blocks[2] = {
-        {.time = "09:00", .activity = "work_meetings", .availability = "slow", .mood_modifier = "focused"},
-        {.time = "12:00", .activity = "lunch", .availability = "available", .mood_modifier = "relaxed"},
-    };
-    hu_daily_routine_t routine = {
-        .weekday = blocks,
-        .weekday_count = 2,
-        .weekend = NULL,
-        .weekend_count = 0,
-        .routine_variance = 0.15f,
-    };
+    hu_daily_routine_t routine = {0};
+    routine.routine_variance = 0.15f;
+    routine.weekday_count = 2;
+    snprintf(routine.weekday[0].time, sizeof(routine.weekday[0].time), "09:00");
+    snprintf(routine.weekday[0].activity, sizeof(routine.weekday[0].activity), "work_meetings");
+    snprintf(routine.weekday[0].availability, sizeof(routine.weekday[0].availability), "slow");
+    snprintf(routine.weekday[0].mood_modifier, sizeof(routine.weekday[0].mood_modifier), "focused");
+    snprintf(routine.weekday[1].time, sizeof(routine.weekday[1].time), "12:00");
+    snprintf(routine.weekday[1].activity, sizeof(routine.weekday[1].activity), "lunch");
+    snprintf(routine.weekday[1].availability, sizeof(routine.weekday[1].availability), "available");
+    snprintf(routine.weekday[1].mood_modifier, sizeof(routine.weekday[1].mood_modifier), "relaxed");
 
     struct tm tm = {0};
     tm.tm_year = 124;
@@ -86,13 +77,10 @@ static void life_sim_no_routine_defaults(void) {
 }
 
 static void life_sim_empty_weekday_uses_defaults(void) {
-    hu_daily_routine_t routine = {
-        .weekday = NULL,
-        .weekday_count = 0,
-        .weekend = NULL,
-        .weekend_count = 0,
-        .routine_variance = 0.15f,
-    };
+    hu_daily_routine_t routine = {0};
+    routine.routine_variance = 0.15f;
+    routine.weekday_count = 0;
+    routine.weekend_count = 0;
     hu_life_sim_state_t state = hu_life_sim_get_current(&routine, (int64_t)time(NULL), 3, 0);
     HU_ASSERT_STR_EQ(state.activity, "idle");
     HU_ASSERT_STR_EQ(state.availability, "available");
@@ -117,19 +105,18 @@ static void life_sim_build_context_format(void) {
 }
 
 static void life_sim_weekend_uses_weekend_blocks(void) {
-    hu_routine_block_t weekday[1] = {
-        {.time = "09:00", .activity = "work", .availability = "slow", .mood_modifier = "focused"},
-    };
-    hu_routine_block_t weekend[1] = {
-        {.time = "09:00", .activity = "sleep_in", .availability = "available", .mood_modifier = "relaxed"},
-    };
-    hu_daily_routine_t routine = {
-        .weekday = weekday,
-        .weekday_count = 1,
-        .weekend = weekend,
-        .weekend_count = 1,
-        .routine_variance = 0.15f,
-    };
+    hu_daily_routine_t routine = {0};
+    routine.routine_variance = 0.15f;
+    routine.weekday_count = 1;
+    snprintf(routine.weekday[0].time, sizeof(routine.weekday[0].time), "09:00");
+    snprintf(routine.weekday[0].activity, sizeof(routine.weekday[0].activity), "work");
+    snprintf(routine.weekday[0].availability, sizeof(routine.weekday[0].availability), "slow");
+    snprintf(routine.weekday[0].mood_modifier, sizeof(routine.weekday[0].mood_modifier), "focused");
+    routine.weekend_count = 1;
+    snprintf(routine.weekend[0].time, sizeof(routine.weekend[0].time), "09:00");
+    snprintf(routine.weekend[0].activity, sizeof(routine.weekend[0].activity), "sleep_in");
+    snprintf(routine.weekend[0].availability, sizeof(routine.weekend[0].availability), "available");
+    snprintf(routine.weekend[0].mood_modifier, sizeof(routine.weekend[0].mood_modifier), "relaxed");
 
     struct tm tm = {0};
     tm.tm_year = 124;

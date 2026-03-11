@@ -212,6 +212,13 @@ static const char *const schema_parts[] = {
     "set_at INTEGER,"
     "source TEXT)",
     "CREATE INDEX IF NOT EXISTS idx_boundaries_contact ON boundaries(contact_id)",
+    "CREATE TABLE IF NOT EXISTS contact_relationships("
+    "contact_id TEXT NOT NULL,"
+    "person_name TEXT NOT NULL,"
+    "role TEXT NOT NULL,"
+    "last_mentioned INTEGER,"
+    "notes TEXT,"
+    "PRIMARY KEY (contact_id, person_name))",
     NULL};
 
 static void get_timestamp(char *buf, size_t buf_size) {

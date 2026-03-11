@@ -45,9 +45,10 @@ hu_error_t hu_opinions_upsert(hu_allocator_t *alloc, hu_memory_t *memory,
         int64_t old_id = sqlite3_column_int64(sel, 0);
         const char *old_pos = (const char *)sqlite3_column_text(sel, 1);
         size_t old_pos_len = old_pos ? (size_t)sqlite3_column_bytes(sel, 1) : 0;
+        bool same_position = position_matches(position, position_len, old_pos, old_pos_len);
         sqlite3_finalize(sel);
 
-        if (position_matches(position, position_len, old_pos, old_pos_len)) {
+        if (same_position) {
             /* Same position: update last_expressed, confidence */
             sqlite3_stmt *upd = NULL;
             rc = sqlite3_prepare_v2(db,

@@ -46,6 +46,16 @@
 #include "human/persona/auto_profile.h"
 #include "human/persona/auto_tune.h"
 #include "human/persona/replay.h"
+#include "human/persona/life_sim.h"
+#include "human/persona/mood.h"
+#include "human/context/theory_of_mind.h"
+#include "human/context/anticipatory.h"
+#include "human/context/self_awareness.h"
+#include "human/memory/life_chapters.h"
+#include "human/context/social_graph.h"
+#include "human/context/humor.h"
+#include "human/memory/degradation.h"
+#include "human/context/protective.h"
 #endif
 #ifdef HU_HAS_CRON
 #include "human/cron.h"
@@ -92,10 +102,12 @@
 #ifndef HU_IS_TEST
 /* Build conversation callback context from memory.
  * Queries memory for past topics relevant to the current message.
+ * F61: Memory content passed through hu_memory_degradation_apply before injection.
+ * F68: Memory filtered via hu_protective_memory_ok before injection.
  * Returns an allocated string (caller frees) or NULL. */
 static char *build_callback_context(hu_allocator_t *alloc, hu_memory_t *memory,
                                     const char *session_id, size_t session_id_len, const char *msg,
-                                    size_t msg_len, size_t *out_len) {
+                                    size_t msg_len, size_t *out_len, hu_agent_t *agent) {
     *out_len = 0;
     if (!memory || !memory->vtable || !memory->vtable->recall || !msg || msg_len == 0)
         return NULL;
@@ -107,6 +119,16 @@ static char *build_callback_context(hu_allocator_t *alloc, hu_memory_t *memory,
     if (err != HU_OK || !entries || count == 0)
         return NULL;
 
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    struct tm *lt = hu_platform_localtime_r(&now, &tm_buf);
+    int hour_local = lt ? lt->tm_hour : 12;
+    float deg_rate = 0.10f;
+#ifdef HU_HAS_PERSONA
+    if (agent && agent->persona && agent->persona->memory_degradation_rate > 0.f)
+        deg_rate = agent->persona->memory_degradation_rate;
+#endif
+
     char buf[2048];
     size_t pos = 0;
     int w = snprintf(buf, sizeof(buf), "\nCONTEXT FROM YOUR SHARED HISTORY:\n");
@@ -117,10 +139,31 @@ static char *build_callback_context(hu_allocator_t *alloc, hu_memory_t *memory,
     for (size_t i = 0; i < count && i < 3; i++) {
         if (!entries[i].content || entries[i].content_len == 0)
             continue;
-        size_t show = entries[i].content_len;
+#ifdef HU_HAS_PERSONA
+        if (agent && !hu_protective_memory_ok(alloc, memory, session_id, session_id_len,
+                                             entries[i].content, entries[i].content_len,
+                                             0.0f, hour_local))
+            continue;
+#endif
+        const char *content = entries[i].content;
+        size_t content_len = entries[i].content_len;
+        char *degraded = NULL;
+        size_t degraded_len = 0;
+#ifdef HU_HAS_PERSONA
+        uint32_t seed = (uint32_t)now * 1103515245u + 12345u + (uint32_t)i;
+        degraded = hu_memory_degradation_apply(alloc, content, content_len, seed, deg_rate,
+                                              &degraded_len);
+        if (degraded && degraded_len > 0) {
+            content = degraded;
+            content_len = degraded_len;
+        }
+#endif
+        size_t show = content_len;
         if (show > 200)
             show = 200;
-        w = snprintf(buf + pos, sizeof(buf) - pos, "%.*s\n", (int)show, entries[i].content);
+        w = snprintf(buf + pos, sizeof(buf) - pos, "%.*s\n", (int)show, content);
+        if (degraded)
+            alloc->free(alloc->ctx, degraded, degraded_len + 1);
         if (w > 0 && pos + (size_t)w < sizeof(buf)) {
             pos += (size_t)w;
             usable++;
@@ -678,7 +721,7 @@ static char *proactive_prompt_for_contact(hu_allocator_t *alloc, hu_agent_t *age
     size_t mem_ctx_len = 0;
     if (memory && cp->contact_id) {
         mem_ctx = build_callback_context(alloc, memory, cp->contact_id, strlen(cp->contact_id),
-                                         "recent conversation topics", 24, &mem_ctx_len);
+                                         "recent conversation topics", 24, &mem_ctx_len, agent);
     }
 
     /* Calendar awareness: inject today's events when calendar_enabled */
@@ -907,6 +950,18 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
                 target_len = strlen(target_part);
             }
         }
+
+#ifdef HU_ENABLE_SQLITE
+        /* F64: Anticipatory predictions — run for each contact in proactive cycle */
+        if (agent->memory) {
+            hu_emotional_prediction_t *preds = NULL;
+            size_t pred_count = 0;
+            (void)hu_anticipatory_predict(alloc, agent->memory, cp->contact_id,
+                                         strlen(cp->contact_id), (int64_t)now, &preds, &pred_count);
+            if (preds)
+                hu_anticipatory_predictions_free(alloc, preds, pred_count);
+        }
+#endif
 
         /* Check last interaction time via conversation history */
         for (size_t c = 0; c < channel_count; c++) {
@@ -1337,6 +1392,13 @@ void hu_service_run_proactive_checkins(hu_allocator_t *alloc, hu_agent_t *agent,
 
                 if (err == HU_OK && response && response_len > 0) {
                     bool skip = (response_len == 4 && memcmp(response, "SKIP", 4) == 0);
+#ifdef HU_HAS_PERSONA
+                    /* F68: Protective boundary — skip proactive if topic is boundary */
+                    if (!skip && agent->memory &&
+                        hu_protective_is_boundary(agent->memory, cp->contact_id,
+                                                 strlen(cp->contact_id), "proactive", 9))
+                        skip = true;
+#endif
                     if (!skip && channels[c].channel->vtable->send) {
                         channels[c].channel->vtable->send(channels[c].channel->ctx, target_part,
                                                           target_len, response, response_len, NULL,
@@ -2329,6 +2391,23 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
 #endif
                                                               ));
 
+                    /* F59: Multiply delay by life sim availability factor */
+#ifdef HU_HAS_PERSONA
+                    if (agent && agent->persona &&
+                        (agent->persona->daily_routine.weekday_count > 0 ||
+                         agent->persona->daily_routine.weekend_count > 0)) {
+                        time_t now_ts = time(NULL);
+                        struct tm tm_buf;
+                        struct tm *lt = hu_platform_localtime_r(&now_ts, &tm_buf);
+                        int dow = lt ? lt->tm_wday : 0;
+                        uint32_t seed = (uint32_t)now_ts * 1103515245u + 12345u;
+                        hu_life_sim_state_t ls_state = hu_life_sim_get_current(
+                            &agent->persona->daily_routine, (int64_t)now_ts, dow, seed);
+                        adjusted = (int32_t)((float)adjusted * ls_state.availability_factor);
+                        if (adjusted < 1000)
+                            adjusted = 1000;
+                    }
+#endif
                     fprintf(stderr, "[human] reading delay: %dms (hour=%d)\n", (int)adjusted,
                             bth_hour);
                     usleep((useconds_t)((unsigned int)adjusted * 1000));
@@ -2808,11 +2887,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 
-                /* 3. Build awareness context from history via shared analyzer.
-                 * Merge primary + cross-channel history into one array. */
+                /* Merge primary + cross-channel history for Phase 6 ToM and awareness. */
+                hu_channel_history_entry_t *merged_history = NULL;
+                const hu_channel_history_entry_t *ctx_entries = NULL;
+                size_t ctx_count = 0;
                 if (history_count > 0 || cross_count > 0) {
                     size_t total = history_count + cross_count;
-                    hu_channel_history_entry_t *merged_history = NULL;
                     if (cross_count > 0 && history_count > 0) {
                         merged_history = (hu_channel_history_entry_t *)alloc->alloc(
                             alloc->ctx, total * sizeof(hu_channel_history_entry_t));
@@ -2824,37 +2904,293 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                    history_count * sizeof(hu_channel_history_entry_t));
                         }
                     }
-                    const hu_channel_history_entry_t *ctx_entries = merged_history ? merged_history
-                                                                    : history_entries
-                                                                        ? history_entries
-                                                                        : cross_entries;
-                    size_t ctx_count = merged_history    ? total
-                                       : history_entries ? history_count
-                                                         : cross_count;
-                    if (ctx_entries && ctx_count > 0) {
-                        convo_ctx = hu_conversation_build_awareness(
-                            alloc, ctx_entries, ctx_count,
-                            (agent && agent->persona) ? agent->persona : NULL, &convo_ctx_len);
+                    ctx_entries = merged_history ? merged_history
+                                    : history_entries ? history_entries
+                                    : cross_entries;
+                    ctx_count = merged_history ? total
+                                 : history_entries ? history_count
+                                 : cross_count;
+                }
 
-                        /* F21: Avoidance pattern detection — topic change within same session */
-                        if (agent->memory && ctx_count >= 2) {
-                            char topic_before[64], topic_after[64];
-                            if (hu_conversation_detect_topic_change(ctx_entries, ctx_count,
-                                                                   topic_before,
-                                                                   sizeof(topic_before),
-                                                                   topic_after,
-                                                                   sizeof(topic_after))) {
-                                size_t tb_len = strlen(topic_before);
-                                if (tb_len > 0)
-                                    (void)hu_superhuman_avoidance_record(agent->memory, batch_key,
-                                                                         key_len, topic_before,
-                                                                         tb_len, true);
+                /* Phase 6 (F59–F69): Build prefix context before awareness.
+                 * Order: life sim, mood, ToM, anticipatory, self-awareness, life chapter,
+                 * social graph, humor. These are prepended to hu_conversation_build_awareness. */
+#ifdef HU_HAS_PERSONA
+                char *phase6_prefix = NULL;
+                size_t phase6_len = 0;
+                if (agent && agent->persona) {
+                    const hu_contact_profile_t *cp_p6 =
+                        hu_persona_find_contact(agent->persona, batch_key, key_len);
+#define PHASE6_APPEND(str, len)                                                  \
+    do {                                                                         \
+        if ((str) && (len) > 0) {                                                \
+            size_t new_len = phase6_len + (len) + (phase6_len ? 2 : 1);         \
+            char *p6m = (char *)alloc->realloc(alloc->ctx, phase6_prefix,      \
+                                             phase6_len ? phase6_len + 1 : 0, new_len); \
+            if (p6m) {                                                          \
+                phase6_prefix = p6m;                                              \
+                if (phase6_len) {                                               \
+                    phase6_prefix[phase6_len] = '\n';                            \
+                    phase6_prefix[phase6_len + 1] = '\n';                        \
+                    memcpy(phase6_prefix + phase6_len + 2, (str), (len));      \
+                } else                                                           \
+                    memcpy(phase6_prefix, (str), (len));                         \
+                phase6_prefix[new_len - 1] = '\0';                               \
+                phase6_len = new_len - 1;                                       \
+                alloc->free(alloc->ctx, (str), (len) + 1);                       \
+            } else if ((str))                                                    \
+                alloc->free(alloc->ctx, (str), (len) + 1);                       \
+        }                                                                       \
+    } while (0)
+
+                    /* 1. Life sim context (F59) */
+                    if (agent->persona->daily_routine.weekday_count > 0 ||
+                        agent->persona->daily_routine.weekend_count > 0) {
+                        time_t now_ts = time(NULL);
+                        struct tm tm_buf;
+                        struct tm *lt = hu_platform_localtime_r(&now_ts, &tm_buf);
+                        int dow = lt ? lt->tm_wday : 0;
+                        uint32_t seed = (uint32_t)now_ts * 1103515245u + 12345u;
+                        hu_life_sim_state_t ls_state = hu_life_sim_get_current(
+                            &agent->persona->daily_routine, (int64_t)now_ts, dow, seed);
+                        size_t ls_len = 0;
+                        char *ls_ctx = hu_life_sim_build_context(alloc, &ls_state, &ls_len);
+                        if (ls_ctx && ls_len > 0) {
+                            phase6_prefix = ls_ctx;
+                            phase6_len = ls_len;
+                        } else if (ls_ctx) {
+                            alloc->free(alloc->ctx, ls_ctx, ls_len + 1);
+                        }
+                    }
+
+                    /* 2. Current mood (F60) — persona mood directive */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory) {
+                        hu_mood_state_t mood_state;
+                        memset(&mood_state, 0, sizeof(mood_state));
+                        if (hu_mood_get_current(alloc, agent->memory, &mood_state) == HU_OK) {
+                            size_t mood_len = 0;
+                            char *mood_dir = hu_mood_build_directive(alloc, &mood_state, &mood_len);
+                            if (mood_dir && mood_len > 0)
+                                PHASE6_APPEND(mood_dir, mood_len);
+                            else if (mood_dir)
+                                alloc->free(alloc->ctx, mood_dir, mood_len + 1);
+                        }
+                    }
+#endif
+
+                    /* 3. Theory of Mind inference (F58) */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory && ctx_entries && ctx_count > 0) {
+                        hu_contact_baseline_t tom_baseline;
+                        memset(&tom_baseline, 0, sizeof(tom_baseline));
+                        if (hu_theory_of_mind_get_baseline(agent->memory, alloc, batch_key,
+                                                           key_len, &tom_baseline) == HU_OK &&
+                            tom_baseline.messages_sampled >= 5) {
+                            hu_theory_of_mind_deviation_t dev = hu_theory_of_mind_detect_deviation(
+                                &tom_baseline, ctx_entries, ctx_count);
+                            if (dev.severity >= 0.3f) {
+                                const char *contact_name = NULL;
+                                size_t name_len = 0;
+                                if (cp_p6 && cp_p6->name) {
+                                    contact_name = cp_p6->name;
+                                    name_len = strlen(cp_p6->name);
+                                } else {
+                                    contact_name = batch_key;
+                                    name_len = key_len;
+                                }
+                                size_t tom_len = 0;
+                                char *tom_inf = hu_theory_of_mind_build_inference(
+                                    alloc, contact_name, name_len, NULL, 0, &dev, &tom_len);
+                                if (tom_inf && tom_len > 0)
+                                    PHASE6_APPEND(tom_inf, tom_len);
+                                else if (tom_inf)
+                                    alloc->free(alloc->ctx, tom_inf, tom_len + 1);
                             }
+                        }
+                    }
+#endif
+
+                    /* 4. Anticipatory predictions (F64) */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory) {
+                        hu_emotional_prediction_t *preds = NULL;
+                        size_t pred_count = 0;
+                        if (hu_anticipatory_predict(alloc, agent->memory, batch_key, key_len,
+                                                    (int64_t)time(NULL), &preds, &pred_count) ==
+                                HU_OK &&
+                            preds && pred_count > 0) {
+                            const char *cname = (cp_p6 && cp_p6->name) ? cp_p6->name : batch_key;
+                            size_t cname_len = (cp_p6 && cp_p6->name) ? strlen(cp_p6->name) : key_len;
+                            size_t ant_len = 0;
+                            char *ant_dir = hu_anticipatory_build_directive(
+                                alloc, preds, pred_count, cname, cname_len, &ant_len);
+                            hu_anticipatory_predictions_free(alloc, preds, pred_count);
+                            if (ant_dir && ant_len > 0)
+                                PHASE6_APPEND(ant_dir, ant_len);
+                            else if (ant_dir)
+                                alloc->free(alloc->ctx, ant_dir, ant_len + 1);
+                        }
+                    }
+#endif
+
+                    /* 5. Self-awareness / reciprocity (F62, F63) */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory) {
+                        char *sa_dir = NULL;
+                        size_t sa_len = 0;
+                        if (hu_self_awareness_build_directive_from_memory(
+                                alloc, agent->memory, batch_key, key_len,
+                                (int64_t)time(NULL), &sa_dir, &sa_len) == HU_OK &&
+                            sa_dir && sa_len > 0) {
+                            PHASE6_APPEND(sa_dir, sa_len);
+                        }
+                        char *rec_dir = NULL;
+                        size_t rec_len = 0;
+                        if (hu_self_awareness_build_reciprocity_directive(
+                                alloc, agent->memory, batch_key, key_len, &rec_dir, &rec_len) ==
+                                HU_OK &&
+                            rec_dir && rec_len > 0) {
+                            PHASE6_APPEND(rec_dir, rec_len);
+                        }
+                    }
+#endif
+
+                    /* 6. Life chapter (F66) */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory) {
+                        hu_life_chapter_t lc = {0};
+                        if (hu_life_chapter_get_active(alloc, agent->memory, &lc) == HU_OK &&
+                            lc.theme[0]) {
+                            size_t lc_len = 0;
+                            char *lc_dir = hu_life_chapter_build_directive(alloc, &lc, &lc_len);
+                            if (lc_dir && lc_len > 0)
+                                PHASE6_APPEND(lc_dir, lc_len);
+                            else if (lc_dir)
+                                alloc->free(alloc->ctx, lc_dir, lc_len + 1);
+                        } else if (agent->persona->current_chapter.theme[0]) {
+                            size_t lc_len = 0;
+                            char *lc_dir = hu_life_chapter_build_directive(
+                                alloc, &agent->persona->current_chapter, &lc_len);
+                            if (lc_dir && lc_len > 0)
+                                PHASE6_APPEND(lc_dir, lc_len);
+                            else if (lc_dir)
+                                alloc->free(alloc->ctx, lc_dir, lc_len + 1);
+                        }
+                    }
+#endif
+
+                    /* 7. Social network (F67) */
+#ifdef HU_ENABLE_SQLITE
+                    if (agent->memory) {
+                        hu_relationship_t *rels = NULL;
+                        size_t rel_count = 0;
+                        if (hu_social_graph_get(alloc, agent->memory, batch_key, key_len,
+                                                &rels, &rel_count) == HU_OK &&
+                            rels && rel_count > 0) {
+                            const char *cname = (cp_p6 && cp_p6->name) ? cp_p6->name : batch_key;
+                            size_t cname_len = (cp_p6 && cp_p6->name) ? strlen(cp_p6->name) : key_len;
+                            size_t sg_len = 0;
+                            char *sg_dir = hu_social_graph_build_directive(
+                                alloc, cname, cname_len, rels, rel_count, &sg_len);
+                            hu_social_graph_free(alloc, rels, rel_count);
+                            if (sg_dir && sg_len > 0)
+                                PHASE6_APPEND(sg_dir, sg_len);
+                            else if (sg_dir)
+                                alloc->free(alloc->ctx, sg_dir, sg_len + 1);
+                        }
+                    }
+#endif
+
+                    /* 8. Humor (F69) — only when playful and not concerning */
+                    if (agent->persona->humor.type) {
+                        hu_emotional_state_t emo_humor =
+                            history_entries && history_count > 0
+                                ? hu_conversation_detect_emotion(history_entries, history_count)
+                                : (hu_emotional_state_t){0};
+                        bool playful = (combined_len > 0) && (
+                            strstr(combined, "lol") || strstr(combined, "haha") ||
+                            strstr(combined, "😂") || strstr(combined, "😄"));
+                        if (playful && !emo_humor.concerning) {
+                            const char *dom = emo_humor.dominant_emotion
+                                                  ? emo_humor.dominant_emotion
+                                                  : "neutral";
+                            size_t hum_len = 0;
+                            char *hum_dir = hu_humor_build_persona_directive(
+                                alloc, &agent->persona->humor, dom, strlen(dom),
+                                true, &hum_len);
+                            if (hum_dir && hum_len > 0)
+                                PHASE6_APPEND(hum_dir, hum_len);
+                            else if (hum_dir)
+                                alloc->free(alloc->ctx, hum_dir, hum_len + 1);
+                        }
+                    }
+
+#undef PHASE6_APPEND
+                }
+#endif /* HU_HAS_PERSONA */
+
+                /* 3. Build awareness context from history via shared analyzer. */
+                if (ctx_entries && ctx_count > 0) {
+                    char *awareness_ctx = hu_conversation_build_awareness(
+                        alloc, ctx_entries, ctx_count,
+                        (agent && agent->persona) ? agent->persona : NULL, &convo_ctx_len);
+
+#ifdef HU_HAS_PERSONA
+                    /* Prepend Phase 6 prefix (1–8) before awareness (9) */
+                    if (phase6_prefix && phase6_len > 0) {
+                        if (awareness_ctx && convo_ctx_len > 0) {
+                            size_t total = phase6_len + convo_ctx_len + 2;
+                            char *merged = (char *)alloc->alloc(alloc->ctx, total + 1);
+                            if (merged) {
+                                memcpy(merged, phase6_prefix, phase6_len);
+                                merged[phase6_len] = '\n';
+                                merged[phase6_len + 1] = '\n';
+                                memcpy(merged + phase6_len + 2, awareness_ctx, convo_ctx_len);
+                                merged[total] = '\0';
+                                alloc->free(alloc->ctx, awareness_ctx, convo_ctx_len + 1);
+                                convo_ctx = merged;
+                                convo_ctx_len = total;
+                            } else {
+                                convo_ctx = awareness_ctx;
+                            }
+                        } else {
+                            convo_ctx = phase6_prefix;
+                            convo_ctx_len = phase6_len;
+                            awareness_ctx = NULL;
+                            phase6_prefix = NULL; /* ownership transferred to convo_ctx */
+                        }
+                        if (phase6_prefix) {
+                            alloc->free(alloc->ctx, phase6_prefix, phase6_len + 1);
+                            phase6_prefix = NULL;
+                        }
+                    } else {
+                        convo_ctx = awareness_ctx;
+                    }
+                    if (phase6_prefix)
+                        alloc->free(alloc->ctx, phase6_prefix, phase6_len + 1);
+#else
+                    convo_ctx = awareness_ctx;
+#endif
+
+                    /* F21: Avoidance pattern detection — topic change within same session */
+                    if (agent->memory && ctx_count >= 2) {
+                        char topic_before[64], topic_after[64];
+                        if (hu_conversation_detect_topic_change(ctx_entries, ctx_count,
+                                                               topic_before,
+                                                               sizeof(topic_before),
+                                                               topic_after,
+                                                               sizeof(topic_after))) {
+                            size_t tb_len = strlen(topic_before);
+                            if (tb_len > 0)
+                                (void)hu_superhuman_avoidance_record(agent->memory, batch_key,
+                                                                     key_len, topic_before,
+                                                                     tb_len, true);
                         }
                     }
                     if (merged_history)
                         alloc->free(alloc->ctx, merged_history,
-                                    total * sizeof(hu_channel_history_entry_t));
+                                    ctx_count * sizeof(hu_channel_history_entry_t));
                 }
 
                 /* 2c. Length calibration fallback for channels without history.
@@ -3419,7 +3755,7 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     }
                     if (agent->memory && agent->memory->vtable && agent->memory->vtable->recall) {
                         mem_cb = build_callback_context(alloc, agent->memory, batch_key, key_len,
-                                                        combined, combined_len, &mem_cb_len);
+                                                        combined, combined_len, &mem_cb_len, agent);
                     }
                     char *cb_ctx = NULL;
                     size_t cb_len = 0;
@@ -4830,6 +5166,65 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         hu_fc_result_deinit(&fc_vm, alloc);
                     }
                 }
+
+                /* ── Phase 6 post-turn: ToM baseline, self-awareness, reciprocity (F58, F62, F63) ── */
+#ifdef HU_HAS_PERSONA
+#ifndef HU_IS_TEST
+#ifdef HU_ENABLE_SQLITE
+                if (err == HU_OK && response && response_len > 0 && agent->memory) {
+                    if (history_entries && history_count > 0) {
+                        (void)hu_theory_of_mind_update_baseline(agent->memory, alloc, batch_key,
+                                                                key_len, history_entries,
+                                                                history_count);
+                    }
+                    bool we_initiated = (history_count > 0 && history_entries &&
+                                         history_entries[history_count - 1].from_me);
+                    char topic_buf[128] = {0};
+                    size_t topic_len = 0;
+                    if (combined_len > 0 && combined_len < sizeof(topic_buf)) {
+                        size_t copy = combined_len;
+                        if (copy > 80)
+                            copy = 80;
+                        memcpy(topic_buf, combined, copy);
+                        topic_buf[copy] = '\0';
+                        topic_len = strlen(topic_buf);
+                    }
+                    (void)hu_self_awareness_record_send(alloc, agent->memory, batch_key, key_len,
+                                                       we_initiated,
+                                                       topic_len > 0 ? topic_buf : NULL, topic_len);
+                    bool we_asked = (response && (memchr(response, '?', response_len) != NULL));
+                    bool we_shared = (response_len > 40);
+                    (void)hu_self_awareness_update_reciprocity(alloc, agent->memory, batch_key,
+                                                              key_len, we_initiated, we_asked,
+                                                              we_shared);
+                    /* Optional: set mood from life_sim state when notable */
+                    if (agent->persona &&
+                        (agent->persona->daily_routine.weekday_count > 0 ||
+                         agent->persona->daily_routine.weekend_count > 0)) {
+                        time_t now_ts = time(NULL);
+                        struct tm tm_buf;
+                        struct tm *lt = hu_platform_localtime_r(&now_ts, &tm_buf);
+                        int dow = lt ? lt->tm_wday : 0;
+                        uint32_t seed = (uint32_t)now_ts * 1103515245u + 12345u;
+                        hu_life_sim_state_t ls = hu_life_sim_get_current(
+                            &agent->persona->daily_routine, (int64_t)now_ts, dow, seed);
+                        if (ls.mood_modifier && strcmp(ls.mood_modifier, "neutral") != 0) {
+                            if (strcmp(ls.mood_modifier, "tired") == 0)
+                                (void)hu_mood_set(alloc, agent->memory, HU_MOOD_TIRED, 0.4f,
+                                                 "life_sim", 8);
+                            else if (strcmp(ls.mood_modifier, "stressed") == 0)
+                                (void)hu_mood_set(alloc, agent->memory, HU_MOOD_STRESSED, 0.4f,
+                                                 "life_sim", 8);
+                            else if (strcmp(ls.mood_modifier, "energetic") == 0 ||
+                                     strcmp(ls.mood_modifier, "energetic_after") == 0)
+                                (void)hu_mood_set(alloc, agent->memory, HU_MOOD_ENERGIZED, 0.4f,
+                                                 "life_sim", 8);
+                        }
+                    }
+                }
+#endif
+#endif
+#endif
 
                 /* ── BTH post-turn: Graph recall tracking + reconsolidate (t1f) */
                 if (err == HU_OK && response && response_len > 0 && graph) {
