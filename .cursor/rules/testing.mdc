@@ -6,6 +6,8 @@ globs:
   - "ui/e2e/**"
 ---
 
+Read `docs/standards/engineering/testing.md` for full testing standards.
+
 - C tests: every new function needs at least one test; test names follow `subject_expected_behavior`
 - C tests: use `HU_IS_TEST` guards for side effects; no real network, no process spawning
 - UI component tests: every `hu-*` component must have tests in `components.test.ts` or `extra-components.test.ts`

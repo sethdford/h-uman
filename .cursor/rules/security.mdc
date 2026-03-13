@@ -8,7 +8,7 @@ globs:
 
 # Security Module (High Risk)
 
-This is a high-blast-radius area. Read AGENTS.md sections 3.5 and 7.5 before any change.
+This is a high-blast-radius area. Read `docs/standards/security/` (threat-model, sandbox, ai-safety, data-privacy) and AGENTS.md sections 3.5 and 7.5 before any change.
 
 ## Principles
 
