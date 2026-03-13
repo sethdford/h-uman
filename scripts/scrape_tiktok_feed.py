@@ -29,11 +29,11 @@ INGEST_DIR = Path.home() / ".human" / "feeds" / "ingest"
 TIKTOK_URL = "https://www.tiktok.com/foryou"
 
 
-def scrape_tiktok(max_videos: int = 30) -> list[dict]:
+def scrape_tiktok(max_videos: int = 30, headless: bool = True) -> list[dict]:
     videos = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=headless)
         state_path = Path.home() / ".human" / "browser_state" / "tiktok.json"
         context = browser.new_context(
             storage_state=str(state_path) if state_path.exists() else None

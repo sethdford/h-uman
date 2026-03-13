@@ -29,6 +29,14 @@ FILTER="${1:-all}"
 
 log "=== Daily Feed Scrape started ==="
 
+# Refresh cookies from Chrome/PWA before scraping
+log "Extracting fresh cookies from Chrome..."
+if "$VENV_PYTHON" "$SCRIPT_DIR/extract_chrome_cookies.py" >> "$LOG_FILE" 2>&1; then
+    log "Cookie extraction complete"
+else
+    log "WARNING: Cookie extraction failed — scrapers will use cached state"
+fi
+
 run_scraper() {
     local name="$1" script="$2"; shift 2
     if [ "$FILTER" != "all" ] && [ "$FILTER" != "$name" ]; then return 0; fi
