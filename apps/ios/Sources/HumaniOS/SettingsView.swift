@@ -22,6 +22,7 @@ struct SettingsView: View {
 #endif
                 } header: {
                     Text("Connection")
+                        .font(.custom("Avenir-Medium", size: HUTokens.textSm, relativeTo: .subheadline))
                 } footer: {
                     Text("WebSocket URL, e.g. wss://localhost:3000/ws")
                 }
@@ -38,23 +39,29 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .accessibilityLabel("Connection status: \(connectionManager.isConnected ? "Connected" : "Disconnected")")
+                        .animation(HUTokens.springExpressive, value: connectionManager.isConnected)
                     }
 
                     Button(connectionManager.isConnected ? "Disconnect" : "Connect") {
-                        if connectionManager.isConnected {
-                            connectionManager.disconnect()
-                        } else {
-                            connectionManager.connect()
+                        withAnimation(HUTokens.springExpressive) {
+                            if connectionManager.isConnected {
+                                connectionManager.disconnect()
+                            } else {
+                                connectionManager.connect()
+                            }
                         }
                     }
 
                     if connectionManager.isConnected {
                         Button("Reconnect") {
-                            connectionManager.reconnect()
+                            withAnimation(HUTokens.springExpressive) {
+                                connectionManager.reconnect()
+                            }
                         }
                     }
                 } header: {
                     Text("Connection Status")
+                        .font(.custom("Avenir-Medium", size: HUTokens.textSm, relativeTo: .subheadline))
                 }
             }
             .navigationTitle("Settings")

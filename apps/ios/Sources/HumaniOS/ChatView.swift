@@ -65,7 +65,7 @@ struct ChatView: View {
                             .transition(messageTransition)
                     }
                 }
-                .animation(.spring(response: 0.35, dampingFraction: 0.7), value: messages.count + toolCalls.count)
+                .animation(HUTokens.springExpressive, value: messages.count + toolCalls.count)
                 .padding()
             }
             .onChange(of: messages.count) { _, _ in
@@ -131,7 +131,7 @@ struct ChatView: View {
         inputText = ""
         sendTrigger += 1
 
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+        withAnimation(HUTokens.springExpressive) {
             messages.append(ChatMessage(id: UUID(), text: trimmed, role: .user))
         }
 
@@ -143,7 +143,7 @@ struct ChatView: View {
                 )
             } catch {
                 await MainActor.run {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                    withAnimation(HUTokens.springExpressive) {
                         messages.append(ChatMessage(
                             id: UUID(),
                             text: "Failed to send: \(error.localizedDescription)",
@@ -167,7 +167,7 @@ struct ChatView: View {
                 let state = payload?["state"]?.value as? String
                 let content = payload?["message"]?.value as? String
                 if let content = content, !content.isEmpty {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                    withAnimation(HUTokens.springExpressive) {
                         switch state {
                         case "received":
                             messages.append(ChatMessage(id: UUID(), text: content, role: .user))
@@ -191,7 +191,7 @@ struct ChatView: View {
                 let args = (payload?["arguments"]?.value as? [String: Any])
                     .flatMap { try? JSONSerialization.data(withJSONObject: $0) }
                     .flatMap { String(data: $0, encoding: .utf8) }
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                withAnimation(HUTokens.springExpressive) {
                     if let ok = payload?["success"]?.value as? Bool, !toolCalls.isEmpty {
                         let idx = toolCalls.count - 1
                         let result = (payload?["detail"]?.value ?? payload?["message"]?.value).map { "\($0)" }
