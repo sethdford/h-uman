@@ -837,6 +837,104 @@ static hu_error_t cmd_skills(hu_allocator_t *alloc, int argc, char **argv) {
 }
 #endif
 
+/* ─── agents subcommand ──────────────────────────────────────────────────── */
+
+static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv) {
+    const char *sub = (argc >= 3 && argv[2]) ? argv[2] : "list";
+
+    char agents_dir[512];
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) {
+        fprintf(stderr, "HOME not set\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+    snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
+
+    hu_agent_registry_t reg;
+    hu_error_t err = hu_agent_registry_create(alloc, &reg);
+    if (err != HU_OK)
+        return err;
+
+    err = hu_agent_registry_discover(&reg, agents_dir);
+    if (err != HU_OK) {
+        hu_agent_registry_destroy(&reg);
+        return err;
+    }
+
+    if (strcmp(sub, "list") == 0) {
+        printf("Registered agents: %zu\n", reg.count);
+        for (size_t i = 0; i < reg.count; i++) {
+            const hu_named_agent_config_t *a = &reg.agents[i];
+            printf("  - %s", a->name ? a->name : "(unnamed)");
+            if (a->provider)
+                printf(" [%s", a->provider);
+            if (a->model)
+                printf("/%s", a->model);
+            if (a->provider)
+                printf("]");
+            if (a->role)
+                printf(" role=%s", a->role);
+            if (a->is_default)
+                printf(" (default)");
+            printf("\n");
+            if (a->description)
+                printf("    %s\n", a->description);
+        }
+        hu_agent_registry_destroy(&reg);
+        return HU_OK;
+    }
+
+    if (strcmp(sub, "show") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "Usage: human agents show <name>\n");
+            hu_agent_registry_destroy(&reg);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        const hu_named_agent_config_t *a = hu_agent_registry_get(&reg, argv[3]);
+        if (!a) {
+            fprintf(stderr, "Agent '%s' not found\n", argv[3]);
+            hu_agent_registry_destroy(&reg);
+            return HU_ERR_NOT_FOUND;
+        }
+        printf("Name:         %s\n", a->name ? a->name : "(none)");
+        printf("Provider:     %s\n", a->provider ? a->provider : "(default)");
+        printf("Model:        %s\n", a->model ? a->model : "(default)");
+        printf("Persona:      %s\n", a->persona ? a->persona : "(none)");
+        printf("Role:         %s\n", a->role ? a->role : "(none)");
+        printf("Description:  %s\n", a->description ? a->description : "(none)");
+        printf("Capabilities: %s\n", a->capabilities ? a->capabilities : "(none)");
+        printf("Autonomy:     %u\n", a->autonomy_level);
+        printf("Temperature:  %.2f\n", a->temperature);
+        printf("Budget:       $%.2f\n", a->budget_usd);
+        printf("Max iter:     %u\n", a->max_iterations);
+        printf("Default:      %s\n", a->is_default ? "yes" : "no");
+        if (a->enabled_tools_count > 0) {
+            printf("Tools:        ");
+            for (size_t i = 0; i < a->enabled_tools_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", a->enabled_tools[i] ? a->enabled_tools[i] : "?");
+            }
+            printf("\n");
+        }
+        if (a->enabled_skills_count > 0) {
+            printf("Skills:       ");
+            for (size_t i = 0; i < a->enabled_skills_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", a->enabled_skills[i] ? a->enabled_skills[i] : "?");
+            }
+            printf("\n");
+        }
+        hu_agent_registry_destroy(&reg);
+        return HU_OK;
+    }
+
+    hu_agent_registry_destroy(&reg);
+    fprintf(stderr, "Usage: human agents [list|show <name>]\n");
+    return HU_ERR_INVALID_ARGUMENT;
+}
+
 #ifdef HU_HAS_PERSONA
 static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv) {
     hu_persona_cli_args_t args;
