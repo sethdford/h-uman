@@ -1377,6 +1377,7 @@ if(NOT HU_ENABLE_SKILLS)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/skillforge.c
         src/skills.c
+        src/tools/skill_run.c
         src/intelligence/skills.c
         src/intelligence/reflection.c
         src/intelligence/feedback.c

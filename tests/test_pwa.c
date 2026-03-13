@@ -366,58 +366,52 @@ static void test_pwa_tool_send_missing_app(void) {
 /* ── Suite Runner ──────────────────────────────────────────────────── */
 
 void run_pwa_tests(void) {
-    HU_TEST_SUITE("pwa — driver lookup") {
-        HU_RUN_TEST(test_driver_find_slack);
-        HU_RUN_TEST(test_driver_find_discord);
-        HU_RUN_TEST(test_driver_find_whatsapp);
-        HU_RUN_TEST(test_driver_find_gmail);
-        HU_RUN_TEST(test_driver_find_calendar);
-        HU_RUN_TEST(test_driver_find_notion);
-        HU_RUN_TEST(test_driver_find_twitter);
-        HU_RUN_TEST(test_driver_find_telegram);
-        HU_RUN_TEST(test_driver_find_linkedin);
-        HU_RUN_TEST(test_driver_find_unknown_returns_null);
-        HU_RUN_TEST(test_driver_find_null_returns_null);
-        HU_RUN_TEST(test_driver_find_by_url_slack);
-        HU_RUN_TEST(test_driver_find_by_url_gmail);
-        HU_RUN_TEST(test_driver_find_by_url_unknown);
-        HU_RUN_TEST(test_drivers_all_returns_count);
-    }
+    HU_TEST_SUITE("pwa_drivers");
+    HU_RUN_TEST(test_driver_find_slack);
+    HU_RUN_TEST(test_driver_find_discord);
+    HU_RUN_TEST(test_driver_find_whatsapp);
+    HU_RUN_TEST(test_driver_find_gmail);
+    HU_RUN_TEST(test_driver_find_calendar);
+    HU_RUN_TEST(test_driver_find_notion);
+    HU_RUN_TEST(test_driver_find_twitter);
+    HU_RUN_TEST(test_driver_find_telegram);
+    HU_RUN_TEST(test_driver_find_linkedin);
+    HU_RUN_TEST(test_driver_find_unknown_returns_null);
+    HU_RUN_TEST(test_driver_find_null_returns_null);
+    HU_RUN_TEST(test_driver_find_by_url_slack);
+    HU_RUN_TEST(test_driver_find_by_url_gmail);
+    HU_RUN_TEST(test_driver_find_by_url_unknown);
+    HU_RUN_TEST(test_drivers_all_returns_count);
 
-    HU_TEST_SUITE("pwa — escaping") {
-        HU_RUN_TEST(test_escape_js_basic);
-        HU_RUN_TEST(test_escape_js_quotes);
-        HU_RUN_TEST(test_escape_js_newlines);
-        HU_RUN_TEST(test_escape_js_backslash);
-        HU_RUN_TEST(test_escape_js_null_args);
-        HU_RUN_TEST(test_escape_applescript_quotes);
-    }
+    HU_TEST_SUITE("pwa_escaping");
+    HU_RUN_TEST(test_escape_js_basic);
+    HU_RUN_TEST(test_escape_js_quotes);
+    HU_RUN_TEST(test_escape_js_newlines);
+    HU_RUN_TEST(test_escape_js_backslash);
+    HU_RUN_TEST(test_escape_js_null_args);
+    HU_RUN_TEST(test_escape_applescript_quotes);
 
-    HU_TEST_SUITE("pwa — browser") {
-        HU_RUN_TEST(test_detect_browser_test_mode);
-        HU_RUN_TEST(test_browser_name_valid);
-        HU_RUN_TEST(test_browser_name_invalid);
-    }
+    HU_TEST_SUITE("pwa_browser");
+    HU_RUN_TEST(test_detect_browser_test_mode);
+    HU_RUN_TEST(test_browser_name_valid);
+    HU_RUN_TEST(test_browser_name_invalid);
 
-    HU_TEST_SUITE("pwa — tabs") {
-        HU_RUN_TEST(test_find_tab_test_mode);
-        HU_RUN_TEST(test_find_tab_null_args);
-        HU_RUN_TEST(test_list_tabs_test_mode);
-        HU_RUN_TEST(test_exec_js_test_mode);
-    }
+    HU_TEST_SUITE("pwa_tabs");
+    HU_RUN_TEST(test_find_tab_test_mode);
+    HU_RUN_TEST(test_find_tab_null_args);
+    HU_RUN_TEST(test_list_tabs_test_mode);
+    HU_RUN_TEST(test_exec_js_test_mode);
 
-    HU_TEST_SUITE("pwa — actions") {
-        HU_RUN_TEST(test_send_message_test_mode);
-        HU_RUN_TEST(test_read_messages_test_mode);
-        HU_RUN_TEST(test_send_message_unknown_app);
-        HU_RUN_TEST(test_read_messages_null_args);
-    }
+    HU_TEST_SUITE("pwa_actions");
+    HU_RUN_TEST(test_send_message_test_mode);
+    HU_RUN_TEST(test_read_messages_test_mode);
+    HU_RUN_TEST(test_send_message_unknown_app);
+    HU_RUN_TEST(test_read_messages_null_args);
 
-    HU_TEST_SUITE("pwa — tool") {
-        HU_RUN_TEST(test_pwa_tool_create_destroy);
-        HU_RUN_TEST(test_pwa_tool_list_apps);
-        HU_RUN_TEST(test_pwa_tool_read_slack);
-        HU_RUN_TEST(test_pwa_tool_unknown_action);
-        HU_RUN_TEST(test_pwa_tool_send_missing_app);
-    }
+    HU_TEST_SUITE("pwa_tool");
+    HU_RUN_TEST(test_pwa_tool_create_destroy);
+    HU_RUN_TEST(test_pwa_tool_list_apps);
+    HU_RUN_TEST(test_pwa_tool_read_slack);
+    HU_RUN_TEST(test_pwa_tool_unknown_action);
+    HU_RUN_TEST(test_pwa_tool_send_missing_app);
 }
