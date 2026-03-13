@@ -159,6 +159,12 @@ export class ScVoiceView extends GatewayAwareLitElement {
         min-height: 2.5rem;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0s !important;
+        transition-duration: 0s !important;
+      }
+    }
   `;
 
   @state() private transcript = "";

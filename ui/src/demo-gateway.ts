@@ -1492,6 +1492,12 @@ export class DemoGatewayClient extends EventTarget {
       case "metrics.snapshot":
         return {
           health: { uptime_seconds: 14523, pid: 12345 },
+          intelligence: {
+            tree_of_thought: true,
+            constitutional_ai: true,
+            llm_compiler: true,
+            speculative_cache: true,
+          },
           metrics: {
             total_requests: 847,
             total_tokens: 1247832,

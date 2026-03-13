@@ -143,6 +143,12 @@ export class ScAutomationsView extends GatewayAwareLitElement {
       font-weight: var(--hu-weight-semibold);
       color: var(--hu-text);
     }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0s !important;
+        transition-duration: 0s !important;
+      }
+    }
   `;
 
   @state() private jobs: CronJob[] = [];

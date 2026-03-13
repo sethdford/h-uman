@@ -131,6 +131,12 @@ export class ScChatView extends GatewayAwareLitElement {
       width: 1.125rem;
       height: 1.125rem;
     }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0s !important;
+        transition-duration: 0s !important;
+      }
+    }
   `;
 
   @property() sessionKey = "default";

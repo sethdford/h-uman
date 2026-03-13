@@ -209,6 +209,12 @@ export class ScMemoryView extends GatewayAwareLitElement {
         grid-template-columns: 1fr;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0s !important;
+        transition-duration: 0s !important;
+      }
+    }
   `;
 
   @state() private status: MemoryStatus | null = null;

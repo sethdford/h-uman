@@ -13,6 +13,12 @@ import { icons } from "../icons.js";
 
 interface MetricsSnapshot {
   health?: { uptime_seconds?: number; pid?: number };
+  intelligence?: {
+    tree_of_thought?: boolean;
+    constitutional_ai?: boolean;
+    llm_compiler?: boolean;
+    speculative_cache?: boolean;
+  };
   metrics?: {
     total_requests?: number;
     total_tokens?: number;
@@ -128,6 +134,41 @@ export class ScMetricsView extends GatewayAwareLitElement {
     .card-inner {
       padding: var(--hu-space-md);
     }
+    .intel-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--hu-space-sm);
+      align-items: center;
+    }
+    .intel-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--hu-space-2xs);
+      padding: var(--hu-space-2xs) var(--hu-space-sm);
+      border-radius: var(--hu-radius);
+      font-size: var(--hu-text-sm);
+      font-weight: var(--hu-weight-medium);
+    }
+    .intel-badge.enabled {
+      background: color-mix(in srgb, var(--hu-accent) 15%, transparent);
+      color: var(--hu-accent);
+    }
+    .intel-badge.enabled svg {
+      color: var(--hu-accent);
+    }
+    .intel-badge.disabled {
+      background: var(--hu-surface-dim);
+      color: var(--hu-text-muted);
+    }
+    .intel-badge.disabled svg {
+      color: var(--hu-text-muted);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0s !important;
+        transition-duration: 0s !important;
+      }
+    }
   `;
 
   @state() private snapshot: MetricsSnapshot = {};
@@ -203,6 +244,43 @@ export class ScMetricsView extends GatewayAwareLitElement {
                         : "—"}</span
                     >
                   </div>
+                `,
+              )}
+            </div>
+          </div>
+        </hu-card>
+      </div>
+    `;
+  }
+
+  private _renderIntelligenceStats() {
+    const intel = this.snapshot.intelligence;
+    if (!intel) return nothing;
+
+    const modules: { key: keyof typeof intel; label: string }[] = [
+      { key: "tree_of_thought", label: "Tree of Thought" },
+      { key: "constitutional_ai", label: "Constitutional AI" },
+      { key: "llm_compiler", label: "LLM Compiler" },
+      { key: "speculative_cache", label: "Speculative Cache" },
+    ];
+
+    return html`
+      <div class="section" role="region" aria-label="SOTA intelligence modules">
+        <hu-section-header
+          heading="Intelligence Modules"
+          description="State-of-the-art reasoning features"
+        ></hu-section-header>
+        <hu-card glass>
+          <div class="card-inner">
+            <div class="intel-badges">
+              ${modules.map(
+                (m) => html`
+                  <span
+                    class="intel-badge ${intel[m.key] ? "enabled" : "disabled"}"
+                    title="${intel[m.key] ? "Enabled" : "Disabled"}"
+                  >
+                    ${intel[m.key] ? icons.check : icons.xCircle} ${m.label}
+                  </span>
                 `,
               )}
             </div>
@@ -313,7 +391,10 @@ export class ScMetricsView extends GatewayAwareLitElement {
         : nothing}
       ${this.loading
         ? this._renderSkeleton()
-        : html` ${this._renderSystemHealth()} ${this._renderIntelligencePipeline()} `}
+        : html`
+            ${this._renderIntelligenceStats()} ${this._renderSystemHealth()}
+            ${this._renderIntelligencePipeline()}
+          `}
     `;
   }
 }
