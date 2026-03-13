@@ -689,7 +689,7 @@ static void test_integ_factory_pool(void) {
     hu_tool_t *tools = NULL;
     size_t count = 0;
     hu_error_t err =
-        hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, pool, NULL, NULL, &tools, &count);
+        hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, pool, NULL, NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT(count > 0);
     hu_tools_destroy_default(&a, tools, count);
@@ -701,7 +701,7 @@ static void test_integ_factory_null_pool(void) {
     hu_tool_t *tools = NULL;
     size_t count = 0;
     hu_error_t err =
-        hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+        hu_tools_create_default(&a, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     hu_tools_destroy_default(&a, tools, count);
 }

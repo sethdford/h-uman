@@ -372,7 +372,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     size_t tools_count = 0;
     err = hu_tools_create_default(alloc, ws, strlen(ws), &policy, &cfg,
                                   memory.vtable ? &memory : NULL, cron, cli_agent_pool, cli_mailbox,
-                                  NULL, &tools, &tools_count);
+                                  NULL, NULL, &tools, &tools_count);
     if (err != HU_OK) {
         fprintf(stderr, "[%s] Tools init failed: %s\n", HU_CODENAME, hu_error_string(err));
         if (cron)

@@ -26,6 +26,7 @@
 #include "human/persona/relationship.h"
 #endif
 #include "human/agent/reflection.h"
+#include "human/skillforge.h"
 #include "human/context.h"
 #include "human/context/conversation.h"
 #include "human/context_tokens.h"
@@ -655,12 +656,47 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     }
 #endif
 
+    /* Build skills context from skillforge if available */
+    char *skills_ctx = NULL;
+    size_t skills_ctx_len = 0;
+    if (agent->skillforge) {
+        hu_skillforge_t *sf = (hu_skillforge_t *)agent->skillforge;
+        hu_skill_t *all_skills = NULL;
+        size_t all_count = 0;
+        if (hu_skillforge_list_skills(sf, &all_skills, &all_count) == HU_OK && all_count > 0) {
+            size_t total = 0;
+            for (size_t i = 0; i < all_count; i++) {
+                if (!all_skills[i].enabled)
+                    continue;
+                total += 4 + (all_skills[i].name ? strlen(all_skills[i].name) : 0) + 3 +
+                         (all_skills[i].description ? strlen(all_skills[i].description) : 0) + 1;
+            }
+            if (total > 0) {
+                skills_ctx = (char *)agent->alloc->alloc(agent->alloc->ctx, total + 1);
+                if (skills_ctx) {
+                    size_t pos = 0;
+                    for (size_t i = 0; i < all_count; i++) {
+                        if (!all_skills[i].enabled)
+                            continue;
+                        int n = snprintf(skills_ctx + pos, total + 1 - pos, "- %s: %s\n",
+                                         all_skills[i].name ? all_skills[i].name : "",
+                                         all_skills[i].description ? all_skills[i].description : "");
+                        if (n > 0)
+                            pos += (size_t)n;
+                    }
+                    skills_ctx[pos] = '\0';
+                    skills_ctx_len = pos;
+                }
+            }
+        }
+    }
+
     /* Build system prompt using cached static portion when available */
     char *system_prompt = NULL;
     size_t system_prompt_len = 0;
     if (agent->cached_static_prompt && !pref_ctx && !tone_hint && !persona_prompt &&
         !awareness_ctx && !stm_ctx && !commitment_ctx && !pattern_ctx && !adaptive_ctx &&
-        !proactive_ctx && !superhuman_ctx) {
+        !proactive_ctx && !superhuman_ctx && !skills_ctx) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
                                          memory_ctx_len, &system_prompt, &system_prompt_len);
@@ -743,6 +779,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .max_response_chars = agent->max_response_chars,
             .intelligence_context = intelligence_ctx,
             .intelligence_context_len = intelligence_ctx_len,
+            .skills_context = skills_ctx,
+            .skills_context_len = skills_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (persona_prompt)
@@ -760,6 +798,9 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             agent->alloc->free(agent->alloc->ctx, outcome_ctx, outcome_ctx_len + 1);
         if (intelligence_ctx)
             agent->alloc->free(agent->alloc->ctx, intelligence_ctx, intelligence_ctx_len + 1);
+        if (skills_ctx)
+            agent->alloc->free(agent->alloc->ctx, skills_ctx, skills_ctx_len + 1);
+        skills_ctx = NULL;
         if (err != HU_OK) {
             if (pref_ctx)
                 agent->alloc->free(agent->alloc->ctx, pref_ctx, pref_ctx_len + 1);

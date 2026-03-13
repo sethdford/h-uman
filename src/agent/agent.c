@@ -511,6 +511,8 @@ void hu_agent_deinit(hu_agent_t *agent) {
     }
     if (agent->provider.vtable && agent->provider.vtable->deinit) {
         agent->provider.vtable->deinit(agent->provider.ctx, agent->alloc);
+        agent->provider.vtable = NULL;
+        agent->provider.ctx = NULL;
     }
     if (agent->turn_arena) {
         hu_arena_destroy(agent->turn_arena);

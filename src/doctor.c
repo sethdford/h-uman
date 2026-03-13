@@ -1,5 +1,6 @@
 #include "human/doctor.h"
 #include "human/channel_catalog.h"
+#include "human/config.h"
 #include "human/core/string.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -75,7 +76,7 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
     *items = NULL;
     *count = 0;
 
-    size_t cap = 16;
+    size_t cap = 24;
     hu_diag_item_t *buf = (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * cap);
     if (!buf)
         return HU_ERR_OUT_OF_MEMORY;
@@ -134,6 +135,39 @@ hu_error_t hu_doctor_check_config_semantics(hu_allocator_t *alloc, const hu_conf
             HU_DIAG_WARN, hu_strdup(alloc, "config"),
             hu_strdup(alloc, "no channels configured -- run onboard to set one up")};
         buf[n++] = it;
+    }
+
+    const struct {
+        const char *name;
+        bool enabled;
+    } modules[] = {
+        {"tree_of_thought", cfg->agent.tree_of_thought},
+        {"constitutional_ai", cfg->agent.constitutional_ai},
+        {"speculative_cache", cfg->agent.speculative_cache},
+        {"llm_compiler", cfg->agent.llm_compiler_enabled},
+        {"tool_routing", cfg->agent.tool_routing_enabled},
+    };
+    size_t active = 0;
+    for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]); i++) {
+        if (modules[i].enabled)
+            active++;
+    }
+    if (n + 1 < cap) {
+        char *msg = hu_sprintf(alloc, "intelligence: %zu/%zu modules active",
+                               active, sizeof(modules) / sizeof(modules[0]));
+        if (msg) {
+            it = (hu_diag_item_t){active > 0 ? HU_DIAG_OK : HU_DIAG_WARN,
+                                  hu_strdup(alloc, "agent"), msg};
+            buf[n++] = it;
+        }
+    }
+    for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]) && n < cap; i++) {
+        char *msg = hu_sprintf(alloc, "%s: %s", modules[i].name,
+                               modules[i].enabled ? "enabled" : "disabled");
+        if (msg) {
+            it = (hu_diag_item_t){HU_DIAG_OK, hu_strdup(alloc, "intelligence"), msg};
+            buf[n++] = it;
+        }
     }
 
     *items = buf;

@@ -37,9 +37,11 @@ typedef struct hu_app_ctx {
     void *vector_store;  /* hu_vector_store_t * */
     void *retrieval;     /* hu_retrieval_engine_t * */
     void *session_store; /* hu_session_store_t * */
-    void *agent_pool;    /* hu_agent_pool_t * */
-    void *mailbox;       /* hu_mailbox_t * */
-    void *cron;          /* hu_cron_scheduler_t * */
+    void *agent_pool;      /* hu_agent_pool_t * */
+    void *mailbox;         /* hu_mailbox_t * */
+    void *cron;            /* hu_cron_scheduler_t * */
+    void *agent_registry;  /* hu_agent_registry_t * */
+    void *skillforge;      /* hu_skillforge_t * */
 
     /* When with_channels: service channels for polling */
     hu_service_channel_t *channels;

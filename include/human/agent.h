@@ -156,6 +156,8 @@ struct hu_agent {
     hu_agent_pool_t *agent_pool;
     hu_mailbox_t *mailbox;
     uint64_t agent_id; /* used for mailbox registration; 0 = use (uintptr_t)agent */
+    struct hu_skillforge *skillforge;       /* optional; loaded skills for prompt injection */
+    struct hu_agent_registry *agent_registry; /* optional; named agent definitions */
     hu_worktree_manager_t *worktree_mgr;
     hu_team_t *team;
     hu_task_list_t *task_list;

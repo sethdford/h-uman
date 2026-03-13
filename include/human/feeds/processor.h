@@ -18,6 +18,11 @@ typedef enum hu_feed_type {
     HU_FEED_NEWS_RSS,              /* F90 */
     HU_FEED_APPLE_HEALTH,          /* F91 */
     HU_FEED_EMAIL,                 /* F92 */
+    HU_FEED_GMAIL,                 /* F94 — Gmail API via OAuth */
+    HU_FEED_IMESSAGE,              /* F95 — iMessage via chat.db */
+    HU_FEED_TWITTER,               /* F96 — Twitter/X timeline API */
+    HU_FEED_TIKTOK,                /* F97 — TikTok via file ingest */
+    HU_FEED_FILE_INGEST,           /* F98 — generic JSONL file ingest */
     HU_FEED_COUNT
 } hu_feed_type_t;
 

@@ -116,7 +116,7 @@ static void test_tools_factory_create_default(void) {
     hu_tool_t *tools = NULL;
     size_t count = 0;
     hu_error_t err =
-        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
+        hu_tools_create_default(&alloc, ".", 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &tools, &count);
     HU_ASSERT_EQ(err, HU_OK);
     HU_ASSERT_NOT_NULL(tools);
     HU_ASSERT(count >= 1);

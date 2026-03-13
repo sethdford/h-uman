@@ -145,6 +145,7 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
                                    const hu_config_t *config, hu_memory_t *memory,
                                    hu_cron_scheduler_t *cron, hu_agent_pool_t *agent_pool,
                                    hu_mailbox_t *mailbox, hu_skillforge_t *skillforge,
+                                   hu_agent_registry_t *agent_registry,
                                    hu_tool_t **out_tools, size_t *out_count) {
     if (!alloc || !out_tools || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
@@ -252,7 +253,7 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
         goto fail;
     idx++;
 
-    err = hu_delegate_create(alloc, policy, &tools[idx]);
+    err = hu_delegate_create(alloc, policy, agent_pool, agent_registry, &tools[idx]);
     if (err != HU_OK)
         goto fail;
     idx++;

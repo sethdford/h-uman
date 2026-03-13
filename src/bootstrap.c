@@ -108,6 +108,11 @@
 #include "human/cron.h"
 #include "human/crontab.h"
 #endif
+#include "human/agent/registry.h"
+#ifdef HU_HAS_SKILLS
+#include "human/skill_registry.h"
+#include "human/skillforge.h"
+#endif
 
 #define HU_BOOTSTRAP_CHANNELS_MAX 20
 
@@ -325,6 +330,13 @@ typedef struct hu_bootstrap_internal {
     hu_observer_t observer;
     FILE *log_fp;
 
+#ifdef HU_HAS_SKILLS
+    hu_skillforge_t skillforge;
+    bool skillforge_ok;
+#endif
+    hu_agent_registry_t agent_registry;
+    bool agent_registry_ok;
+
     bool provider_ok;
     bool agent_ok;
 } hu_bootstrap_internal_t;
@@ -480,9 +492,31 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
     ctx->agent_pool = bi->agent_pool;
     ctx->mailbox = bi->mailbox;
 
+#ifdef HU_HAS_SKILLS
+    {
+        err = hu_skillforge_create(alloc, &bi->skillforge);
+        if (err == HU_OK) {
+            bi->skillforge_ok = true;
+            char skills_dir[512];
+            size_t sd_len = hu_skill_registry_get_installed_dir(skills_dir, sizeof(skills_dir));
+            if (sd_len > 0)
+                hu_skillforge_discover(&bi->skillforge, skills_dir);
+        }
+    }
+#endif
+
+    hu_skillforge_t *sf_ptr = NULL;
+#ifdef HU_HAS_SKILLS
+    if (bi->skillforge_ok) {
+        sf_ptr = &bi->skillforge;
+        ctx->skillforge = sf_ptr;
+    }
+#endif
+
+    hu_agent_registry_t *reg_ptr = bi->agent_registry_ok ? &bi->agent_registry : NULL;
     err = hu_tools_create_default(alloc, ws, strlen(ws), &bi->policy, &bi->cfg,
                                   (with_agent && bi->memory.vtable) ? &bi->memory : NULL, bi->cron,
-                                  bi->agent_pool, bi->mailbox, NULL, &bi->tools,
+                                  bi->agent_pool, bi->mailbox, sf_ptr, reg_ptr, &bi->tools,
                                   &bi->tools_count);
     if (err != HU_OK)
         goto fail;
@@ -508,6 +542,21 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         }
         ctx->tools = bi->tools;
         ctx->tools_count = bi->tools_count;
+    }
+
+    {
+        hu_error_t reg_err = hu_agent_registry_create(alloc, &bi->agent_registry);
+        if (reg_err == HU_OK) {
+            bi->agent_registry_ok = true;
+            const char *home = getenv("HOME");
+            if (home && home[0]) {
+                char agents_dir[512];
+                int n = snprintf(agents_dir, sizeof(agents_dir), "%s/.human/agents", home);
+                if (n > 0 && (size_t)n < sizeof(agents_dir))
+                    hu_agent_registry_discover(&bi->agent_registry, agents_dir);
+            }
+            ctx->agent_registry = &bi->agent_registry;
+        }
     }
 
     if (with_agent) {
@@ -583,6 +632,12 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         bi->agent.agent_pool = bi->agent_pool;
         bi->agent.scheduler = (struct hu_cron_scheduler *)bi->cron;
         hu_agent_set_mailbox(&bi->agent, bi->mailbox);
+#ifdef HU_HAS_SKILLS
+        if (bi->skillforge_ok)
+            bi->agent.skillforge = (struct hu_skillforge *)&bi->skillforge;
+#endif
+        if (bi->agent_registry_ok)
+            bi->agent.agent_registry = (struct hu_agent_registry *)&bi->agent_registry;
         bi->agent.policy_engine = NULL;
         if (bi->cfg.policy.enabled)
             bi->agent.policy_engine = hu_policy_engine_create(alloc);
@@ -1190,6 +1245,8 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         if (bi->agent.policy_engine)
             hu_policy_engine_destroy(bi->agent.policy_engine);
         hu_agent_deinit(&bi->agent);
+        bi->provider.vtable = NULL;
+        bi->provider.ctx = NULL;
     }
     hu_tools_destroy_default(alloc, bi->tools, bi->tools_count);
     if (bi->cron)
@@ -1214,6 +1271,12 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         hu_sandbox_storage_destroy(bi->sb_storage, &bi->sb_alloc);
     if (bi->plugin_reg)
         hu_plugin_registry_destroy(bi->plugin_reg);
+    if (bi->agent_registry_ok)
+        hu_agent_registry_destroy(&bi->agent_registry);
+#ifdef HU_HAS_SKILLS
+    if (bi->skillforge_ok)
+        hu_skillforge_destroy(&bi->skillforge);
+#endif
     if (bi->agent_pool)
         hu_agent_pool_destroy(bi->agent_pool);
     if (bi->mailbox)

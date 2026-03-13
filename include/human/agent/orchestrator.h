@@ -101,4 +101,12 @@ hu_error_t hu_orchestrator_next_task(hu_orchestrator_t *orch,
 
 const char *hu_task_status_str(hu_task_status_t status);
 
+/* Forward declaration */
+typedef struct hu_agent_registry hu_agent_registry_t;
+
+/* Populate orchestrator agents from the registry. Iterates all registered
+ * agent configs and calls hu_orchestrator_register_agent for each. */
+hu_error_t hu_orchestrator_load_from_registry(hu_orchestrator_t *orch,
+                                               const hu_agent_registry_t *registry);
+
 #endif /* HU_AGENT_ORCHESTRATOR_H */
