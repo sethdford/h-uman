@@ -178,10 +178,8 @@ jobs:
         run: bash ../scripts/lint-raw-colors.sh --all
       - name: Component quality checklist
         run: npm run check:components
-        continue-on-error: true
       - name: Unused token audit
         run: bash scripts/check-unused-tokens.sh
-        continue-on-error: true
       - run: npm run build
       - name: Enforce bundle size budget (350KB)
         run: bash scripts/check-bundle-size.sh

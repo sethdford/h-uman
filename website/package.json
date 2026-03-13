@@ -6,7 +6,7 @@
     "check": "astro check",
     "dev": "astro dev",
     "start": "astro dev",
-    "prebuild": "node scripts/generate-assets.mjs",
+    "prebuild": "cd ../design-tokens && npm run build || true && cd ../website && node scripts/generate-assets.mjs",
     "build": "astro build",
     "generate-assets": "node scripts/generate-assets.mjs",
     "preview": "astro preview",
