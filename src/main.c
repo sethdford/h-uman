@@ -49,6 +49,7 @@
 #include "human/security/sandbox.h"
 #include "human/security/sandbox_internal.h"
 #include "human/session.h"
+#include "human/agent/registry.h"
 #include "human/skill_registry.h"
 #ifdef HU_HAS_SKILLS
 #include "human/skillforge.h"
@@ -159,6 +160,7 @@ static hu_error_t cmd_onboard(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_service(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_skills(hu_allocator_t *alloc, int argc, char **argv);
+static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_migrate(hu_allocator_t *alloc, int argc, char **argv);
 #ifdef HU_HAS_PERSONA
 static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv);
@@ -207,6 +209,7 @@ static const hu_command_t commands[] = {
 #endif
     {"channel", "Channel management", cmd_channel},
     {"skills", "Skill discovery and integration", cmd_skills},
+    {"agents", "Manage named agent definitions", cmd_agents},
     {"hardware", "Hardware peripheral management", cmd_hardware},
     {"sandbox", "Show sandbox status and backends", cmd_sandbox},
     {"migrate", "Migrate memory backends", cmd_migrate},

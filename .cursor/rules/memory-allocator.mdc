@@ -1,0 +1,48 @@
+---
+description: Memory management and allocator standards for allocation, ownership, and cleanup
+globs:
+  - "src/core/arena.c"
+  - "src/core/allocator.c"
+  - "src/memory/**"
+  - "include/human/core/arena.h"
+  - "include/human/core/allocator.h"
+  - "include/human/memory*.h"
+---
+
+# Memory Management Standards
+
+Read `docs/standards/engineering/memory-management.md` before modifying allocator or memory code.
+
+## Allocator Types
+
+- `hu_system_allocator()` -- long-lived objects (config, vtables, process-lifetime data)
+- `hu_arena_t` -- per-turn ephemeral data (prompt assembly, JSON building, context). Bulk-freed via `hu_arena_destroy()`
+- `hu_tracking_allocator_t` -- tests only. Assert `hu_tracking_allocator_leaks(ta) == 0`
+
+## Ownership Rules
+
+- Creator owns -- whoever allocates is responsible for freeing
+- `_owned` flags on results -- `output_owned = true` means caller frees; `false` means borrowed/static
+- Every vtable type has a `_destroy` or `_deinit` cleanup -- always call it
+- Never return pointers to stack locals or temporaries
+
+## Cleanup Pattern
+
+Use goto-cleanup for functions with multiple allocations:
+
+```c
+hu_error_t err = HU_OK;
+char *buf = alloc->alloc(alloc->ctx, 256);
+if (!buf) { err = HU_ERR_OOM; goto cleanup; }
+// ...work...
+cleanup:
+    if (buf) alloc->free(alloc->ctx, buf, 256);
+    return err;
+```
+
+## Critical Rules
+
+- Free in reverse allocation order
+- Never individually free arena-allocated pointers -- let `hu_arena_destroy()` handle it
+- Use `SQLITE_STATIC` (null), never `SQLITE_TRANSIENT`
+- Zero ASan errors required -- leaks, overflows, use-after-free are build failures
