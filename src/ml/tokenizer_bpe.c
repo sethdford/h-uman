@@ -35,10 +35,11 @@ static hu_error_t ensure_vocab_capacity(struct hu_bpe_tokenizer *tok, size_t nee
     size_t cap = tok->vocab_capacity ? tok->vocab_capacity * 2 : BPE_INITIAL_VOCAB_CAP;
     while (cap < need)
         cap *= 2;
+    size_t old_cap = tok->vocab_capacity;
 
     uint8_t **new_bytes = (uint8_t **)tok->alloc->realloc(
         tok->alloc->ctx, tok->vocab_bytes,
-        tok->vocab_capacity * sizeof(uint8_t *),
+        old_cap * sizeof(uint8_t *),
         cap * sizeof(uint8_t *));
     if (!new_bytes)
         return HU_ERR_OUT_OF_MEMORY;
@@ -46,10 +47,13 @@ static hu_error_t ensure_vocab_capacity(struct hu_bpe_tokenizer *tok, size_t nee
 
     size_t *new_lens = (size_t *)tok->alloc->realloc(
         tok->alloc->ctx, tok->vocab_lens,
-        tok->vocab_capacity * sizeof(size_t),
+        old_cap * sizeof(size_t),
         cap * sizeof(size_t));
-    if (!new_lens)
+    if (!new_lens) {
+        /* vocab_bytes already grew — update capacity to match so deinit frees correctly */
+        tok->vocab_capacity = cap;
         return HU_ERR_OUT_OF_MEMORY;
+    }
     tok->vocab_lens = new_lens;
     tok->vocab_capacity = cap;
     return HU_OK;
@@ -62,10 +66,11 @@ static hu_error_t ensure_merge_capacity(struct hu_bpe_tokenizer *tok, size_t nee
     size_t cap = tok->merge_capacity ? tok->merge_capacity * 2 : BPE_INITIAL_MERGE_CAP;
     while (cap < need)
         cap *= 2;
+    size_t old_cap = tok->merge_capacity;
 
     int32_t *new_a = (int32_t *)tok->alloc->realloc(
         tok->alloc->ctx, tok->merge_a,
-        tok->merge_capacity * sizeof(int32_t),
+        old_cap * sizeof(int32_t),
         cap * sizeof(int32_t));
     if (!new_a)
         return HU_ERR_OUT_OF_MEMORY;
@@ -73,10 +78,12 @@ static hu_error_t ensure_merge_capacity(struct hu_bpe_tokenizer *tok, size_t nee
 
     int32_t *new_b = (int32_t *)tok->alloc->realloc(
         tok->alloc->ctx, tok->merge_b,
-        tok->merge_capacity * sizeof(int32_t),
+        old_cap * sizeof(int32_t),
         cap * sizeof(int32_t));
-    if (!new_b)
+    if (!new_b) {
+        tok->merge_capacity = cap;
         return HU_ERR_OUT_OF_MEMORY;
+    }
     tok->merge_b = new_b;
     tok->merge_capacity = cap;
     return HU_OK;

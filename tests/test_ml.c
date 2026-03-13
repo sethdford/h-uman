@@ -14,12 +14,12 @@
 #include "human/ml/train.h"
 #include "test_framework.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 
@@ -664,6 +664,434 @@ static void test_gpt_backward_not_supported(void) {
     model.vtable->deinit(model.ctx, &alloc);
 }
 
+/* ─── GPT: forward produces finite logits ──────────────────────────────── */
+
+static void test_gpt_forward_logits_finite(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 16;
+    cfg.vocab_size = 128;
+    cfg.n_layer = 2;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 64;
+    cfg.head_dim = 32;
+    cfg.activation = HU_ML_ACT_RELU_SQ;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
+
+    int32_t ids[2 * 8];
+    for (size_t i = 0; i < 16; i++)
+        ids[i] = (int32_t)(i % 128);
+
+    hu_ml_tensor_t input = {.data = ids, .shape = {2, 8, 0, 0}, .ndim = 2, .dtype = HU_ML_DTYPE_I32};
+    hu_ml_tensor_t output = {0};
+    HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &output), HU_OK);
+
+    float *logits = (float *)output.data;
+    size_t total = output.shape[0] * output.shape[1] * output.shape[2];
+    for (size_t i = 0; i < total; i++) {
+        HU_ASSERT(isfinite(logits[i]));
+    }
+
+    alloc.free(alloc.ctx, output.data, output.size_bytes);
+    model.vtable->deinit(model.ctx, &alloc);
+}
+
+/* ─── GPT: get_params returns NOT_SUPPORTED ────────────────────────────── */
+
+static void test_gpt_get_params_stub(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 8;
+    cfg.vocab_size = 64;
+    cfg.n_layer = 1;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 64;
+    cfg.head_dim = 32;
+
+    hu_model_t model = {0};
+    hu_gpt_create(&alloc, &cfg, &model);
+
+    hu_ml_tensor_t *params = NULL;
+    size_t count = 0;
+    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &count), HU_ERR_NOT_SUPPORTED);
+
+    model.vtable->deinit(model.ctx, &alloc);
+}
+
+/* ─── MuonAdamW: optimizer step moves params in gradient direction ─────── */
+
+static void test_muon_adamw_step_direction(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_optimizer_config_t cfg = hu_experiment_config_default().optimizer;
+    cfg.embedding_lr = 0.1f;
+    cfg.scalar_lr = 0.1f;
+    cfg.weight_decay = 0.0f;
+
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &cfg, &opt), HU_OK);
+
+    float param[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    float grad[4]  = {1.0f, 1.0f, 1.0f, 1.0f};
+    float before[4];
+    memcpy(before, param, sizeof(param));
+
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(&opt, param, grad, 1, 4, HU_PARAM_SCALAR), HU_OK);
+    opt.vtable->step(opt.ctx, NULL, NULL, 0);
+
+    for (int i = 0; i < 4; i++) {
+        HU_ASSERT(param[i] < before[i]);
+    }
+
+    opt.vtable->deinit(opt.ctx, &alloc);
+}
+
+/* ─── MuonAdamW: zero_grad zeroes gradients ────────────────────────────── */
+
+static void test_muon_adamw_zero_grad(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_optimizer_config_t cfg = hu_experiment_config_default().optimizer;
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &cfg, &opt), HU_OK);
+
+    float param[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    float grad[4]  = {0.5f, -0.3f, 0.2f, -0.1f};
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(&opt, param, grad, 1, 4, HU_PARAM_SCALAR), HU_OK);
+
+    opt.vtable->zero_grad(opt.ctx);
+    for (int i = 0; i < 4; i++) {
+        HU_ASSERT_FLOAT_EQ(grad[i], 0.0f, 1e-10f);
+    }
+
+    opt.vtable->deinit(opt.ctx, &alloc);
+}
+
+/* ─── MuonAdamW: set_lr_multiplier affects param updates ───────────────── */
+
+static void test_muon_adamw_lr_multiplier(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_optimizer_config_t cfg = hu_experiment_config_default().optimizer;
+    cfg.scalar_lr = 0.1f;
+    cfg.weight_decay = 0.0f;
+
+    /* Step with multiplier=1 */
+    float param_a[2] = {1.0f, 1.0f};
+    float grad_a[2]  = {1.0f, 1.0f};
+    hu_ml_optimizer_t opt_a = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &cfg, &opt_a), HU_OK);
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(&opt_a, param_a, grad_a, 1, 2, HU_PARAM_SCALAR), HU_OK);
+    opt_a.vtable->step(opt_a.ctx, NULL, NULL, 0);
+
+    /* Step with multiplier=0 (effectively no update) */
+    float param_b[2] = {1.0f, 1.0f};
+    float grad_b[2]  = {1.0f, 1.0f};
+    hu_ml_optimizer_t opt_b = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &cfg, &opt_b), HU_OK);
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(&opt_b, param_b, grad_b, 1, 2, HU_PARAM_SCALAR), HU_OK);
+    opt_b.vtable->set_lr_multiplier(opt_b.ctx, 0.0f);
+    opt_b.vtable->step(opt_b.ctx, NULL, NULL, 0);
+
+    HU_ASSERT(fabsf(param_a[0] - 1.0f) > fabsf(param_b[0] - 1.0f));
+
+    opt_a.vtable->deinit(opt_a.ctx, &alloc);
+    opt_b.vtable->deinit(opt_b.ctx, &alloc);
+}
+
+/* ─── MuonAdamW: null args ─────────────────────────────────────────────── */
+
+static void test_muon_adamw_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_optimizer_config_t cfg = hu_experiment_config_default().optimizer;
+    hu_ml_optimizer_t opt = {0};
+
+    HU_ASSERT_EQ(hu_muon_adamw_create(NULL, &cfg, &opt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, NULL, &opt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &cfg, NULL), HU_ERR_INVALID_ARGUMENT);
+
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(NULL, NULL, NULL, 1, 1, HU_PARAM_SCALAR), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── MuonAdamW: add_param with zero size ──────────────────────────────── */
+
+static void test_muon_adamw_add_param_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_optimizer_config_t cfg = hu_experiment_config_default().optimizer;
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &cfg, &opt), HU_OK);
+
+    float param = 1.0f, grad = 0.5f;
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(&opt, &param, &grad, 0, 1, HU_PARAM_SCALAR), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_muon_adamw_add_param(&opt, &param, &grad, 1, 0, HU_PARAM_SCALAR), HU_ERR_INVALID_ARGUMENT);
+
+    opt.vtable->deinit(opt.ctx, &alloc);
+}
+
+/* ─── Dataloader: reset resets position ────────────────────────────────── */
+
+static void test_dataloader_reset(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *dir = "/tmp/test_ml_dl_reset";
+    mkdir_p(dir);
+
+    int32_t tokens[200];
+    for (int i = 0; i < 200; i++)
+        tokens[i] = i % 100;
+    char path1[256], path2[256];
+    snprintf(path1, sizeof(path1), "%s/shard_00000.bin", dir);
+    snprintf(path2, sizeof(path2), "%s/shard_00001.bin", dir);
+    write_bin_file(path1, tokens, 200);
+    write_bin_file(path2, tokens, 200);
+
+    hu_ml_dataloader_t *dl = NULL;
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, dir, 2, 16, "train", &dl), HU_OK);
+
+    hu_ml_batch_t b1 = {0};
+    HU_ASSERT_EQ(hu_ml_dataloader_next(dl, &b1), HU_OK);
+    int32_t first_id = b1.input_ids[0];
+    hu_ml_batch_free(&alloc, &b1);
+
+    HU_ASSERT_EQ(hu_ml_dataloader_next(dl, &b1), HU_OK);
+    hu_ml_batch_free(&alloc, &b1);
+
+    hu_ml_dataloader_reset(dl);
+
+    hu_ml_batch_t b2 = {0};
+    HU_ASSERT_EQ(hu_ml_dataloader_next(dl, &b2), HU_OK);
+    HU_ASSERT_EQ(b2.input_ids[0], first_id);
+    hu_ml_batch_free(&alloc, &b2);
+
+    hu_ml_dataloader_deinit(dl);
+    remove(path1);
+    remove(path2);
+    rmdir(dir);
+}
+
+/* ─── Dataloader: null args ────────────────────────────────────────────── */
+
+static void test_dataloader_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_ml_dataloader_t *dl = NULL;
+    HU_ASSERT_EQ(hu_ml_dataloader_create(NULL, "/tmp", 1, 1, "train", &dl), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, NULL, 1, 1, "train", &dl), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, "/tmp", 1, 1, "train", NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── BPE tokenizer: token_byte_length ─────────────────────────────────── */
+
+static void test_bpe_token_byte_length(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_bpe_tokenizer_t *tok = NULL;
+    hu_bpe_tokenizer_create(&alloc, &tok);
+
+    HU_ASSERT_EQ(hu_bpe_tokenizer_token_byte_length(tok, 'A'), 1);
+    HU_ASSERT_EQ(hu_bpe_tokenizer_token_byte_length(tok, 0), 1);
+    HU_ASSERT_EQ(hu_bpe_tokenizer_token_byte_length(tok, 255), 1);
+    HU_ASSERT_EQ(hu_bpe_tokenizer_token_byte_length(tok, 9999), 0);
+
+    hu_bpe_tokenizer_deinit(tok);
+}
+
+/* ─── BPE tokenizer: trained merge token byte length > 1 ──────────────── */
+
+static void test_bpe_trained_token_byte_length(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_bpe_tokenizer_t *tok = NULL;
+    hu_bpe_tokenizer_create(&alloc, &tok);
+
+    const char *texts[] = {"ab ab ab ab ab ab ab ab ab ab ab"};
+    hu_bpe_tokenizer_train(tok, texts, 1, 260, NULL);
+    HU_ASSERT_GT(hu_bpe_tokenizer_vocab_size(tok), 256);
+
+    size_t byte_len = hu_bpe_tokenizer_token_byte_length(tok, 256);
+    HU_ASSERT_GT(byte_len, 1);
+
+    hu_bpe_tokenizer_deinit(tok);
+}
+
+/* ─── Evaluator: happy path with real model ────────────────────────────── */
+
+static void test_evaluator_happy_path(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    const char *dir = "/tmp/test_ml_eval_happy";
+    mkdir_p(dir);
+    int32_t tokens[200];
+    for (int i = 0; i < 200; i++)
+        tokens[i] = i % 64;
+    char path1[256], path2[256];
+    snprintf(path1, sizeof(path1), "%s/shard_00000.bin", dir);
+    snprintf(path2, sizeof(path2), "%s/shard_00001.bin", dir);
+    write_bin_file(path1, tokens, 200);
+    write_bin_file(path2, tokens, 200);
+
+    hu_gpt_config_t gpt_cfg = {0};
+    gpt_cfg.sequence_len = 16;
+    gpt_cfg.vocab_size = 64;
+    gpt_cfg.n_layer = 1;
+    gpt_cfg.n_head = 2;
+    gpt_cfg.n_kv_head = 2;
+    gpt_cfg.n_embd = 64;
+    gpt_cfg.head_dim = 32;
+    gpt_cfg.activation = HU_ML_ACT_RELU_SQ;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &gpt_cfg, &model), HU_OK);
+
+    hu_ml_dataloader_t *val_dl = NULL;
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, dir, 2, 8, "val", &val_dl), HU_OK);
+
+    int32_t token_bytes[64];
+    for (int i = 0; i < 64; i++)
+        token_bytes[i] = 1;
+
+    hu_ml_eval_result_t result = {0};
+    hu_error_t err = hu_ml_evaluate_bpb(&alloc, &model, val_dl, token_bytes, 64, 16, &result);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_GT(result.val_bpb, 0.0);
+    HU_ASSERT(isfinite(result.val_bpb));
+    HU_ASSERT_GT(result.total_bytes, 0);
+    HU_ASSERT_GT(result.total_nats, 0.0);
+
+    hu_ml_dataloader_deinit(val_dl);
+    model.vtable->deinit(model.ctx, &alloc);
+    remove(path1);
+    remove(path2);
+    rmdir(dir);
+}
+
+/* ─── TSV: overflow returns error ──────────────────────────────────────── */
+
+static void test_experiment_result_to_tsv_overflow(void) {
+    hu_experiment_result_t result = {0};
+    result.val_bpb = 1.0;
+    result.status = HU_EXPERIMENT_KEEP;
+    snprintf(result.description, sizeof(result.description), "test");
+
+    char tiny_buf[5];
+    hu_error_t err = hu_experiment_result_to_tsv(&result, tiny_buf, sizeof(tiny_buf));
+    HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── TSV: null args ───────────────────────────────────────────────────── */
+
+static void test_experiment_result_to_tsv_null(void) {
+    char buf[256];
+    HU_ASSERT_EQ(hu_experiment_result_to_tsv(NULL, buf, sizeof(buf)), HU_ERR_INVALID_ARGUMENT);
+    hu_experiment_result_t result = {0};
+    HU_ASSERT_EQ(hu_experiment_result_to_tsv(&result, NULL, sizeof(buf)), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_experiment_result_to_tsv(&result, buf, 0), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── Experiment loop: KEEP/DISCARD decision logic ─────────────────────── */
+
+static int keep_count;
+static int discard_count;
+static int crash_count;
+
+static void track_status_callback(const hu_experiment_result_t *result,
+                                   void *user_data)
+{
+    (void)user_data;
+    switch (result->status) {
+    case HU_EXPERIMENT_KEEP: keep_count++; break;
+    case HU_EXPERIMENT_DISCARD: discard_count++; break;
+    case HU_EXPERIMENT_CRASH: crash_count++; break;
+    }
+}
+
+static void test_experiment_loop_keep_discard(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    const char *dir = "/tmp/test_ml_keepdisc";
+    mkdir_p(dir);
+    int32_t tokens[400];
+    for (int i = 0; i < 400; i++)
+        tokens[i] = i % 50;
+    char path1[256], path2[256];
+    snprintf(path1, sizeof(path1), "%s/shard_00000.bin", dir);
+    snprintf(path2, sizeof(path2), "%s/shard_00001.bin", dir);
+    write_bin_file(path1, tokens, 400);
+    write_bin_file(path2, tokens, 400);
+
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 3;
+    loop_cfg.base_config = hu_experiment_config_default();
+    loop_cfg.base_config.gpt.n_layer = 1;
+    loop_cfg.base_config.gpt.n_embd = 64;
+    loop_cfg.base_config.gpt.head_dim = 32;
+    loop_cfg.base_config.gpt.n_head = 2;
+    loop_cfg.base_config.gpt.n_kv_head = 2;
+    loop_cfg.base_config.gpt.vocab_size = 50;
+    loop_cfg.base_config.gpt.sequence_len = 16;
+    loop_cfg.base_config.training.device_batch_size = 2;
+    loop_cfg.base_config.training.time_budget_secs = 1;
+    loop_cfg.base_config.training.total_batch_size = 32;
+    loop_cfg.data_dir = dir;
+    loop_cfg.convergence_threshold = 0.0;
+
+    keep_count = discard_count = crash_count = 0;
+    hu_error_t err = hu_experiment_loop(&alloc, &loop_cfg, track_status_callback, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    int total = keep_count + discard_count + crash_count;
+    HU_ASSERT_EQ(total, 3);
+    HU_ASSERT_GT(keep_count, 0);
+
+    remove(path1);
+    remove(path2);
+    rmdir(dir);
+}
+
+/* ─── Experiment loop: zero iterations ─────────────────────────────────── */
+
+static void test_experiment_loop_zero_iterations(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 0;
+    loop_cfg.data_dir = "/tmp";
+    HU_ASSERT_EQ(hu_experiment_loop(&alloc, &loop_cfg, NULL, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── Experiment loop: null data_dir ───────────────────────────────────── */
+
+static void test_experiment_loop_null_data_dir(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 1;
+    loop_cfg.data_dir = NULL;
+    HU_ASSERT_EQ(hu_experiment_loop(&alloc, &loop_cfg, NULL, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── Batch free: null args are safe ───────────────────────────────────── */
+
+static void test_batch_free_null(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_ml_batch_free(NULL, NULL);
+    hu_ml_batch_free(&alloc, NULL);
+    hu_ml_batch_t batch = {0};
+    hu_ml_batch_free(&alloc, &batch);
+}
+
+/* ─── Prepare: null args ───────────────────────────────────────────────── */
+
+static void test_prepare_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_bpe_tokenizer_t *tok = NULL;
+    hu_bpe_tokenizer_create(&alloc, &tok);
+
+    int32_t *tb = NULL;
+    size_t cnt = 0;
+    HU_ASSERT_EQ(hu_ml_prepare_token_bytes(NULL, tok, &tb, &cnt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_prepare_token_bytes(&alloc, NULL, &tb, &cnt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_prepare_token_bytes(&alloc, tok, NULL, &cnt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_prepare_token_bytes(&alloc, tok, &tb, NULL), HU_ERR_INVALID_ARGUMENT);
+
+    hu_bpe_tokenizer_deinit(tok);
+}
+
 /* ─── suite runner ────────────────────────────────────────────────────────── */
 
 /* ─── experiment loop: runs with test data ─────────────────────────────── */
@@ -782,6 +1210,7 @@ static void test_experiment_loop_convergence(void) {
 
 void run_ml_tests(void) {
     HU_TEST_SUITE("ml");
+    /* BPE tokenizer */
     HU_RUN_TEST(test_bpe_create_destroy);
     HU_RUN_TEST(test_bpe_encode_bytes);
     HU_RUN_TEST(test_bpe_decode_roundtrip);
@@ -790,25 +1219,53 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_bpe_encode_empty);
     HU_RUN_TEST(test_bpe_null_args);
     HU_RUN_TEST(test_bpe_utf8_roundtrip);
+    HU_RUN_TEST(test_bpe_token_byte_length);
+    HU_RUN_TEST(test_bpe_trained_token_byte_length);
+    /* Config / TSV */
     HU_RUN_TEST(test_experiment_config_default);
     HU_RUN_TEST(test_experiment_result_to_tsv);
-    HU_RUN_TEST(test_experiment_loop_null_config);
+    HU_RUN_TEST(test_experiment_result_to_tsv_overflow);
+    HU_RUN_TEST(test_experiment_result_to_tsv_null);
+    /* Dataloader */
     HU_RUN_TEST(test_dataloader_missing_dir);
     HU_RUN_TEST(test_dataloader_basic);
+    HU_RUN_TEST(test_dataloader_reset);
+    HU_RUN_TEST(test_dataloader_null_args);
+    HU_RUN_TEST(test_batch_free_null);
+    /* Evaluator */
     HU_RUN_TEST(test_evaluator_null_model);
+    HU_RUN_TEST(test_evaluator_happy_path);
+    /* Prepare */
     HU_RUN_TEST(test_prepare_token_bytes);
     HU_RUN_TEST(test_prepare_tokenize_file);
+    HU_RUN_TEST(test_prepare_null_args);
+    /* GPT model */
     HU_RUN_TEST(test_gpt_create_destroy);
     HU_RUN_TEST(test_gpt_create_null_args);
     HU_RUN_TEST(test_gpt_create_invalid_config);
     HU_RUN_TEST(test_gpt_forward);
+    HU_RUN_TEST(test_gpt_forward_logits_finite);
+    HU_RUN_TEST(test_gpt_get_params_stub);
     HU_RUN_TEST(test_gpt_backward_not_supported);
+    /* Optimizer */
     HU_RUN_TEST(test_muon_adamw_create_destroy);
     HU_RUN_TEST(test_muon_adamw_step);
+    HU_RUN_TEST(test_muon_adamw_step_direction);
+    HU_RUN_TEST(test_muon_adamw_zero_grad);
+    HU_RUN_TEST(test_muon_adamw_lr_multiplier);
+    HU_RUN_TEST(test_muon_adamw_null_args);
+    HU_RUN_TEST(test_muon_adamw_add_param_zero);
     HU_RUN_TEST(test_lr_schedule);
+    /* Training pipeline */
     HU_RUN_TEST(test_train_pipeline);
+    /* Experiment loop */
+    HU_RUN_TEST(test_experiment_loop_null_config);
+    HU_RUN_TEST(test_experiment_loop_zero_iterations);
+    HU_RUN_TEST(test_experiment_loop_null_data_dir);
     HU_RUN_TEST(test_experiment_loop_runs);
+    HU_RUN_TEST(test_experiment_loop_keep_discard);
     HU_RUN_TEST(test_experiment_loop_convergence);
+    /* CLI */
     HU_RUN_TEST(test_ml_cli_train_help);
     HU_RUN_TEST(test_ml_cli_experiment_help);
     HU_RUN_TEST(test_ml_cli_prepare_help);

@@ -328,6 +328,7 @@ hu_error_t hu_ml_dataloader_next(hu_ml_dataloader_t *dl_ptr, hu_ml_batch_t *batc
     batch->input_ids = input_ids;
     batch->target_ids = target_ids;
     batch->batch_size = rows_filled;
+    batch->alloc_rows = dl->batch_size;
     batch->seq_len = dl->seq_len;
     batch->epoch = batch_epoch;
 
@@ -383,16 +384,18 @@ void hu_ml_batch_free(hu_allocator_t *alloc, hu_ml_batch_t *batch)
     if (!alloc || !batch)
         return;
 
+    size_t rows = batch->alloc_rows ? batch->alloc_rows : batch->batch_size;
     if (batch->input_ids) {
         alloc->free(alloc->ctx, batch->input_ids,
-                    batch->batch_size * batch->seq_len * sizeof(int32_t));
+                    rows * batch->seq_len * sizeof(int32_t));
         batch->input_ids = NULL;
     }
     if (batch->target_ids) {
         alloc->free(alloc->ctx, batch->target_ids,
-                    batch->batch_size * batch->seq_len * sizeof(int32_t));
+                    rows * batch->seq_len * sizeof(int32_t));
         batch->target_ids = NULL;
     }
     batch->batch_size = 0;
+    batch->alloc_rows = 0;
     batch->seq_len = 0;
 }

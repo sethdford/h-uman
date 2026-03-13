@@ -15,6 +15,7 @@ typedef struct hu_ml_batch {
     int32_t *target_ids;
     size_t batch_size;
     size_t seq_len;
+    size_t alloc_rows; /* allocation capacity — may differ from batch_size on partial batches */
     int epoch;
 } hu_ml_batch_t;
 

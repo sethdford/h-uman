@@ -58,18 +58,31 @@ static double now_seconds(void)
 #endif
 }
 
-/* Apply a mutation to the config for the next experiment. */
+/* Simple xorshift32 PRNG for config exploration */
+static uint32_t xorshift32(uint32_t *state)
+{
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
+/* Apply a mutation to the config for the next experiment.
+ * Uses iteration + config hash to avoid deterministic cycling. */
 static void mutate_config(hu_experiment_config_t *cfg, int iteration)
 {
-    uint32_t seed = (uint32_t)iteration * 2654435761u;
+    uint32_t seed = hash_experiment_config(cfg) ^ ((uint32_t)iteration * 2654435761u);
+    if (seed == 0) seed = 1;
 
-    switch (seed % 8) {
+    switch (xorshift32(&seed) % 8) {
     case 0:
         if (cfg->gpt.n_layer > 2)
-            cfg->gpt.n_layer += (seed >> 8) % 2 ? 2 : -2;
+            cfg->gpt.n_layer += (xorshift32(&seed) % 2) ? 2 : -2;
         break;
     case 1: {
-        float delta = ((seed >> 12) % 2) ? 1.2f : 0.8f;
+        float delta = (xorshift32(&seed) % 2) ? 1.2f : 0.8f;
         cfg->optimizer.matrix_lr *= delta;
         if (cfg->optimizer.matrix_lr < 0.001f)
             cfg->optimizer.matrix_lr = 0.001f;
@@ -78,7 +91,7 @@ static void mutate_config(hu_experiment_config_t *cfg, int iteration)
         break;
     }
     case 2: {
-        float delta = ((seed >> 16) % 2) ? 1.3f : 0.7f;
+        float delta = (xorshift32(&seed) % 2) ? 1.3f : 0.7f;
         cfg->optimizer.embedding_lr *= delta;
         if (cfg->optimizer.embedding_lr < 0.01f)
             cfg->optimizer.embedding_lr = 0.01f;
@@ -87,13 +100,13 @@ static void mutate_config(hu_experiment_config_t *cfg, int iteration)
         break;
     }
     case 3:
-        cfg->optimizer.weight_decay = ((seed >> 20) % 2) ? 0.1f : 0.3f;
+        cfg->optimizer.weight_decay = (xorshift32(&seed) % 2) ? 0.1f : 0.3f;
         break;
     case 4:
-        cfg->optimizer.warmdown_ratio = ((seed >> 24) % 3) * 0.25f;
+        cfg->optimizer.warmdown_ratio = (xorshift32(&seed) % 3) * 0.25f;
         break;
     case 5: {
-        size_t new_dim = cfg->gpt.n_embd + (((seed >> 8) % 2) ? 128 : -128);
+        size_t new_dim = cfg->gpt.n_embd + ((xorshift32(&seed) % 2) ? 128 : -128);
         if (new_dim >= 128 && new_dim <= 2048) {
             cfg->gpt.n_embd = new_dim;
             cfg->gpt.n_head = new_dim / cfg->gpt.head_dim;
@@ -102,10 +115,10 @@ static void mutate_config(hu_experiment_config_t *cfg, int iteration)
         break;
     }
     case 6:
-        cfg->gpt.activation = (hu_ml_activation_t)((seed >> 12) % 3);
+        cfg->gpt.activation = (hu_ml_activation_t)((xorshift32(&seed)) % 3);
         break;
     case 7:
-        cfg->optimizer.adam_beta1 = ((seed >> 16) % 2) ? 0.8f : 0.9f;
+        cfg->optimizer.adam_beta1 = (xorshift32(&seed) % 2) ? 0.8f : 0.9f;
         break;
     }
 }
@@ -175,7 +188,6 @@ static hu_error_t run_single_experiment(hu_allocator_t *alloc,
 
     result->val_bpb = train_result.val_bpb;
     result->peak_memory_mb = train_result.peak_memory_mb;
-    result->training_seconds = train_result.training_seconds;
 
     if (err != HU_OK || !train_result.converged) {
         result->status = HU_EXPERIMENT_CRASH;
@@ -189,8 +201,7 @@ static hu_error_t run_single_experiment(hu_allocator_t *alloc,
     optimizer.vtable->deinit(optimizer.ctx, alloc);
     model.vtable->deinit(model.ctx, alloc);
 
-    double t_end = now_seconds();
-    result->training_seconds = t_end - t_start;
+    result->training_seconds = now_seconds() - t_start;
 
     return HU_OK;
 }

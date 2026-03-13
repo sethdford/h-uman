@@ -91,8 +91,8 @@ static void step_adamw(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
 
 /* ─── Muon step (2D matrices) ──────────────────────────────────────────────── */
 
-static void step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
-                      float lr, float wd, hu_allocator_t *alloc)
+static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
+                            float lr, float wd, hu_allocator_t *alloc)
 {
     const float beta = MUON_NESTEROV_BETA;
     const size_t rows = g->rows;
@@ -101,7 +101,6 @@ static void step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
 
     (void)cfg;
 
-    /* Nesterov: momentum = beta * momentum + (1-beta) * grad; g = grad + beta * momentum */
     for (size_t i = 0; i < n; i++) {
         float grad_val = g->grad[i];
         g->momentum_buf[i] = beta * g->momentum_buf[i] + (1.0f - beta) * grad_val;
@@ -109,7 +108,7 @@ static void step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
 
     float *g_buf = (float *)alloc->alloc(alloc->ctx, n * sizeof(float));
     if (!g_buf)
-        return;
+        return HU_ERR_OUT_OF_MEMORY;
     for (size_t i = 0; i < n; i++)
         g_buf[i] = g->grad[i] + beta * g->momentum_buf[i];
 
@@ -137,6 +136,7 @@ static void step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
     }
 
     alloc->free(alloc->ctx, g_buf, n * sizeof(float));
+    return HU_OK;
 }
 
 /* ─── Vtable implementations ─────────────────────────────────────────────── */
@@ -168,7 +168,10 @@ static hu_error_t muon_adamw_step(void *ctx, hu_ml_tensor_t *params,
             break;
         case HU_PARAM_MATRIX:
             lr = cfg->matrix_lr * mult;
-            step_muon(g, cfg, lr, wd, m->alloc);
+            {
+                hu_error_t err = step_muon(g, cfg, lr, wd, m->alloc);
+                if (err != HU_OK) return err;
+            }
             break;
         case HU_PARAM_SCALAR:
             lr = cfg->scalar_lr * mult;
