@@ -471,6 +471,23 @@
     z-index: 1;
   }
 
+  /* ── Glass entrance choreography ── */
+  .glass-enter {
+    backdrop-filter: blur(0) saturate(100%);
+    -webkit-backdrop-filter: blur(0) saturate(100%);
+    transition:
+      backdrop-filter var(--hu-glass-choreography-enter-duration, 350ms)
+        var(--hu-glass-choreography-enter-easing, cubic-bezier(0.2, 0, 0, 1)),
+      -webkit-backdrop-filter var(--hu-glass-choreography-enter-duration, 350ms)
+        var(--hu-glass-choreography-enter-easing, cubic-bezier(0.2, 0, 0, 1));
+  }
+  .glass-enter.revealed {
+    backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+      saturate(var(--hu-glass-standard-saturate, 180%));
+    -webkit-backdrop-filter: blur(var(--hu-glass-standard-blur, 24px))
+      saturate(var(--hu-glass-standard-saturate, 180%));
+  }
+
   .glass-nav {
     background: var(--hu-web-surface-elevated);
     backdrop-filter: blur(24px) saturate(1.8);
@@ -589,6 +606,27 @@
       }
     }
   }
+  @supports (animation-timeline: scroll()) {
+    .hero-gradient {
+      animation: hu-parallax-drift linear both;
+      animation-timeline: scroll();
+      animation-range: 0% 50%;
+    }
+    @keyframes hu-parallax-drift {
+      from { transform: translateY(0) scale(1); }
+      to   { transform: translateY(-15%) scale(1.05); }
+    }
+  }
+
+  /* ── Card depth on scroll entry ── */
+  .spectrum-card {
+    transition:
+      transform var(--hu-duration-slow) var(--hu-ease-out),
+      box-shadow var(--hu-duration-slow) var(--hu-ease-out);
+  }
+  .spectrum-card.revealed {
+    box-shadow: var(--hu-shadow-lg);
+  }
   @media (prefers-reduced-motion: reduce) {
     .hu-scroll-reveal,
     .hu-scroll-scale {
@@ -694,10 +732,9 @@
   }
 
   .btn-primary:active {
-    transform: translateY(0) scale(0.98);
+    animation: squash-press var(--hu-duration-fast) var(--hu-ease-out) forwards;
     box-shadow: 0 1px 2px
       color-mix(in srgb, var(--hu-web-text) 10%, transparent);
-    transition-duration: var(--hu-duration-instant);
   }
 
   .btn-outline {
@@ -716,6 +753,11 @@
   .btn-outline:hover {
     border-color: var(--hu-web-text-secondary);
     color: var(--hu-web-text);
+    transform: translateY(-1px);
+  }
+
+  .btn-outline:active {
+    animation: squash-press var(--hu-duration-fast) var(--hu-ease-out) forwards;
   }
 
   /* ── Terminal cursor blink ── */
@@ -831,6 +873,33 @@
     transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
   }
 
+  /* ── Hero headline text shadow for depth ── */
+  .hero-headline {
+    text-shadow: 0 2px 30px color-mix(in srgb, var(--hu-accent) 12%, transparent);
+  }
+
+  /* ── Section gradient dividers ── */
+  .section-divider {
+    height: 1px;
+    border: none;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--hu-accent) 20%, transparent) 30%,
+      color-mix(in srgb, var(--hu-accent) 25%, transparent) 50%,
+      color-mix(in srgb, var(--hu-accent) 20%, transparent) 70%,
+      transparent 100%
+    );
+    margin: 0 auto;
+    max-width: 50%;
+  }
+
+  /* ── Footer polish ── */
+  .site-footer {
+    border-top: 1px solid var(--hu-web-border);
+    background: color-mix(in srgb, var(--hu-accent) 2%, var(--hu-web-bg));
+  }
+
   /* ── Architecture node pulse ── */
   @keyframes node-pulse {
     0%,
@@ -861,6 +930,11 @@
 /* ── Provider pill transition (token-based) ── */
 .provider-pill.transition-all {
   transition-duration: var(--hu-duration-normal);
+}
+
+.provider-pill:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--hu-accent) 15%, transparent);
 }
 
 /* ── GPU compositing hints — promote animated layers ── */
