@@ -1,6 +1,7 @@
 import { html, css, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import { friendlyError } from "../utils/friendly-error.js";
 import { icons } from "../icons.js";
 import { observeAllCards, unobserveAllCards } from "../utils/scroll-entrance.js";
 import type { ActivityEvent } from "../components/hu-activity-feed.js";
@@ -400,7 +401,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       }
       this._updateWelcome();
     } catch (e) {
-      this.error = e instanceof Error ? e.message : "Failed to load overview";
+      this.error = friendlyError(e);
       this.health = {};
       this.capabilities = {};
       this.channels = [];

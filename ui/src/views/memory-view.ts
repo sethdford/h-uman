@@ -13,6 +13,7 @@ import "../components/hu-skeleton.js";
 import "../components/hu-stat-card.js";
 import "../components/hu-stats-row.js";
 import "../components/hu-segmented-control.js";
+import { friendlyError } from "../utils/friendly-error.js";
 
 interface MemoryEntry {
   key: string;
@@ -94,18 +95,6 @@ function sourceLabel(source?: string): string {
   if (source === "connection_discovery") return "Auto-insight";
   if (source.startsWith("api-ingest:")) return source.slice(11);
   return source;
-}
-
-function friendlyError(raw: string): string {
-  const msg = raw.toLowerCase();
-  if (msg.includes("timeout")) return "Request timed out. Please try again.";
-  if (msg.includes("websocket")) return "Connection lost. Reconnecting...";
-  if (msg.includes("404")) return "Resource not found.";
-  if (msg.includes("401") || msg.includes("unauthorized"))
-    return "Authentication failed. Please check your credentials.";
-  if (msg.includes("403") || msg.includes("forbidden")) return "Access denied.";
-  if (msg.includes("network")) return "Network error. Please check your connection.";
-  return raw;
 }
 
 @customElement("hu-memory-view")
@@ -263,7 +252,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
         this._runGraphSimulation();
       }
     } catch (e) {
-      this.error = friendlyError(e instanceof Error ? e.message : "Failed to load memory data");
+      this.error = friendlyError(e);
       this.status = null;
       this.entries = [];
       this.graphEntities = [];
@@ -301,7 +290,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
       await gw.request("memory.consolidate");
       await this.load();
     } catch (e) {
-      this.actionError = friendlyError(e instanceof Error ? e.message : "Consolidation failed");
+      this.actionError = friendlyError(e);
     } finally {
       this.consolidating = false;
     }
@@ -315,7 +304,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
       await gw.request("memory.forget", { key });
       this.entries = this.entries.filter((e) => e.key !== key);
     } catch (e) {
-      this.actionError = friendlyError(e instanceof Error ? e.message : "Failed to forget");
+      this.actionError = friendlyError(e);
     }
   }
 

@@ -2,6 +2,9 @@ import { LitElement } from "lit";
 import type { GatewayClient } from "./gateway.js";
 import { getGateway, GATEWAY_CHANGED, type GatewayChangedDetail } from "./gateway-provider.js";
 import { observeAllCards, unobserveAllCards } from "./utils/scroll-entrance.js";
+import { isAuthError } from "./utils/friendly-error.js";
+
+export const AUTH_FAILED = "hu-auth-failed";
 
 /**
  * Base class for views that depend on gateway connectivity.
@@ -93,6 +96,10 @@ export class GatewayAwareLitElement extends LitElement {
       });
     } catch (e) {
       console.warn(`[${this.tagName.toLowerCase()}] load failed:`, e);
+      if (isAuthError(e)) {
+        this._stopAutoRefresh();
+        document.dispatchEvent(new CustomEvent(AUTH_FAILED));
+      }
     }
   }
 

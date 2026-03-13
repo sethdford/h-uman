@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Chat Streaming Choreography (demo mode)", () => {
-  test.fixme(true, "Deep shadow DOM traversal unreliable in CI");
+  test.fixme(true, "4-level shadow DOM traversal (app > chat > thread > .hero) unreliable");
 
   test("empty state shows time-aware hero greeting", async ({ page }) => {
     await page.goto("/?demo#chat");

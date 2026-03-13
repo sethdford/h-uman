@@ -1,6 +1,7 @@
 import { html, css, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { GatewayAwareLitElement } from "../gateway-aware.js";
+import { friendlyError } from "../utils/friendly-error.js";
 import { ScToast } from "../components/hu-toast.js";
 import { icons } from "../icons.js";
 import "../components/hu-page-hero.js";
@@ -256,8 +257,8 @@ export class ScConfigView extends GatewayAwareLitElement {
       this.saveStatus = "idle";
     } catch (e) {
       this.saveStatus = "error";
-      this.errorMessage = e instanceof Error ? e.message : "Load failed";
-      this.loadError = e instanceof Error ? e.message : "Load failed";
+      this.errorMessage = friendlyError(e);
+      this.loadError = friendlyError(e);
     }
   }
 
@@ -401,7 +402,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       }
     } catch (e) {
       this.saveStatus = "error";
-      this.errorMessage = e instanceof Error ? e.message : "Save failed";
+      this.errorMessage = friendlyError(e);
       ScToast.show({ message: this.errorMessage, variant: "error" });
     } finally {
       this.saving = false;

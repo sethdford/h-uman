@@ -48,8 +48,6 @@ function clickStatusBarButton(label: string): string {
 }
 
 test.describe("Voice Interactions", () => {
-  test.fixme(true, "Deep shadow DOM traversal unreliable in CI");
-
   test.beforeEach(async ({ page }) => {
     await page.goto("/?demo#voice");
     await waitForViewReady(page, VIEW);
@@ -117,7 +115,7 @@ test.describe("Voice Interactions", () => {
     }).toPass({ timeout: 15000 });
   });
 
-  test("New Session clears conversation", async ({ page }) => {
+  test.fixme("New Session clears conversation", async ({ page }) => {
     const result = await page.evaluate(sendVoiceMessage("Session clear test"));
     expect(result).toMatch(/^sent/);
 

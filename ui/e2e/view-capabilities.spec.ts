@@ -19,7 +19,6 @@ import {
 // ─────────────────────────────────────────────────────────────
 // Overview
 test.describe.configure({ mode: "serial" });
-test.fixme(true, "Deep shadow DOM traversal unreliable in CI");
 
 // ─────────────────────────────────────────────────────────────
 test.describe("Overview Capabilities", () => {
@@ -53,7 +52,7 @@ test.describe("Chat Capabilities", () => {
     await page.waitForTimeout(WAIT);
   });
 
-  test("demo messages render with correct roles", async ({ page }) => {
+  test.fixme("demo messages render with correct roles", async ({ page }) => {
     await expect(async () => {
       const text: string = await page.evaluate(deepText("hu-chat-view"));
       expect(text).toContain("memory leak");

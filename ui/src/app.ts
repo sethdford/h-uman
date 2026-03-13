@@ -5,6 +5,7 @@ import type { GatewayClient, GatewayStatus } from "./gateway.js";
 import { GatewayClient as GatewayClientClass } from "./gateway.js";
 import { DemoGatewayClient } from "./demo-gateway.js";
 import { setGateway } from "./gateway-provider.js";
+import { AUTH_FAILED } from "./gateway-aware.js";
 import { dynamicLight } from "./lib/dynamic-light.js";
 import { icons } from "./icons.js";
 import "./components/floating-mic.js";
@@ -411,6 +412,9 @@ export class ScApp extends LitElement {
     this.connectionStatus = e.detail;
   }) as EventListener;
   private _fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private _authFailedHandler = (() => {
+    if (!this._isDemo) this._switchToDemo();
+  }) as EventListener;
 
   private get _isDemo(): boolean {
     return new URLSearchParams(window.location.search).has("demo");
@@ -426,6 +430,7 @@ export class ScApp extends LitElement {
 
     this.sidebarCollapsed = localStorage.getItem(SIDEBAR_KEY) === "true";
     document.addEventListener("keydown", this._keyHandler);
+    document.addEventListener(AUTH_FAILED, this._authFailedHandler);
     window.addEventListener("hashchange", this._hashHandler);
     this._onHashChange();
     dynamicLight.start();
@@ -515,6 +520,7 @@ export class ScApp extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener("keydown", this._moreSheetKeyHandler);
     document.removeEventListener("keydown", this._keyHandler);
+    document.removeEventListener(AUTH_FAILED, this._authFailedHandler);
     window.removeEventListener("hashchange", this._hashHandler);
     dynamicLight.stop();
     if (this._fallbackTimer) {
