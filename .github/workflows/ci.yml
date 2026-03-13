@@ -37,7 +37,7 @@ jobs:
           COUNT=$(./build/human_tests 2>&1 | grep -oE '[0-9]+/[0-9]+ passed' | head -1 | cut -d/ -f1)
           echo "Test count: $COUNT"
           # macOS has 2 more platform-specific tests than Linux (3199 vs 3197)
-          BASELINE=3197
+          BASELINE=4700
           if [ "$COUNT" -lt "$BASELINE" ]; then
             echo "Test count regression: $COUNT < $BASELINE baseline"
             exit 1

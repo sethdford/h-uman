@@ -187,6 +187,12 @@ Pattern for every extension:
 2. Register in the module's `factory.c`
 3. Callers OWN the implementing struct — never return a vtable pointing to a temporary
 
+## ML Subsystem
+
+Location: `src/ml/`, `include/human/ml/`. Gated behind `HU_ENABLE_ML`.
+
+Components: BPE tokenizer, GPT model, MuonAdamW optimizer, data loader, training loop, experiment loop. Config-driven: `hu_experiment_config_t` parameterizes model architecture and optimizer. Same vtable-driven approach as the rest of the project (`hu_model_t`, `hu_ml_optimizer_t`).
+
 ## Key Directories
 
 ```
@@ -196,6 +202,7 @@ src/
   providers/   50+ AI provider implementations
   tools/       67+ tool implementations
   memory/      Memory engines, retrieval, vector, lifecycle
+  ml/          ML training (BPE, GPT, MuonAdamW, experiment loop) — HU_ENABLE_ML
   security/    Policy, pairing, secrets, 11 sandbox backends
   gateway/     HTTP/WebSocket server, JSON-RPC control protocol
   persona/     Persona profiles, prompt builder, examples, adaptation

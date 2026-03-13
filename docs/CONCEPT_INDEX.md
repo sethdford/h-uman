@@ -149,3 +149,25 @@ Use this to find the right files for a given task without searching the full cod
 | **Tunnel**                       | `src/tunnel/ngrok.c`, `cloudflare.c`, `tailscale.c`                       | `test_tunnel.c`                                               |
 | **Voice / TTS**                  | `src/voice.c`, `src/tts/audio_pipeline.c`, `emotion_map.c`                | `test_voice.c`, `test_audio_pipeline.c`, `test_emotion_map.c` |
 | **Paperclip**                    | `src/paperclip/client.c`, `heartbeat.c`                                   | `test_paperclip.c`                                            |
+
+## AGI Frontiers / Intelligence
+
+| Concept                     | Primary Source Files                             | Test Files               |
+| --------------------------- | ------------------------------------------------ | ------------------------ |
+| **Constitutional AI**       | `src/agent/constitutional.c`                     | `test_agent_modules.c`   |
+| **Goal autonomy**           | `src/agent/goals.c`                              | `test_goal_engine.c`     |
+| **Agent orchestrator**      | `src/agent/orchestrator.c`, `orchestrator_llm.c` | `test_agi_frontiers.c`   |
+| **Agent registry**          | `src/agent/registry.c`                           | `test_agent_registry.c`  |
+| **Speculative execution**   | `src/agent/speculative.c`                        | `test_agi_frontiers.c`   |
+| **Tree-of-thought**         | `src/agent/tree_of_thought.c`                    | `test_agent_modules.c`   |
+| **Uncertainty estimation**  | `src/agent/uncertainty.c`                        | `test_agi_frontiers.c`   |
+| **Online learning**         | `src/intelligence/online_learning.c`             | `test_agi_frontiers.c`   |
+| **Self-improvement**        | `src/intelligence/self_improve.c`                | `test_agi_frontiers.c`   |
+| **Value learning**          | `src/intelligence/value_learning.c`              | `test_value_learning.c`  |
+| **World model**             | `src/intelligence/world_model.c`                 | `test_agi_frontiers.c`   |
+| **Strategy learner**        | `src/memory/retrieval/strategy_learner.c`        | `test_agi_frontiers.c`   |
+| **Peripheral control tool** | `src/tools/peripheral_ctrl.c`                    | `test_peripheral_ctrl.c` |
+| **Skill runner tool**       | `src/tools/skill_run.c`                          | `test_agent_registry.c`  |
+| **PWA bridge**              | `src/pwa/bridge.c`, `drivers.c`                  | `test_pwa.c`             |
+| **ML subsystem**            | `src/ml/gpt.c`, `train.c`, `prepare.c`           | `test_ml.c`              |
+| **Research feeds**          | `src/feeds/research.c`, `file_ingest.c`          | `test_research_feeds.c`  |

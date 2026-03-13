@@ -208,6 +208,7 @@ void run_peripheral_ctrl_tests(void);
 void run_value_learning_tests(void);
 void run_goal_engine_tests(void);
 void run_agent_registry_tests(void);
+void run_pwa_tests(void);
 #ifdef HU_ENABLE_CURL
 void run_paperclip_tests(void);
 #endif
@@ -451,6 +452,7 @@ int main(int argc, char **argv) {
     run_memory_features_tests();
     run_agi_frontiers_tests();
     run_agent_registry_tests();
+    run_pwa_tests();
 #ifdef HU_ENABLE_CURL
     run_paperclip_tests();
 #endif

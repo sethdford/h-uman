@@ -82,6 +82,7 @@
 #include "human/tools/schema.h"
 #include "human/tools/send_message.h"
 #include "human/tools/shell.h"
+#include "human/tools/pwa.h"
 #include "human/tools/skill_run.h"
 #include "human/tools/skill_write.h"
 #include "human/tools/spawn.h"
@@ -103,8 +104,8 @@
 #define HU_TOOLS_PERSONA_COUNT 0
 #endif
 #define HU_TOOLS_COUNT_BASE         \
-    (45 + HU_TOOLS_CRON_COUNT - 1 + \
-     HU_TOOLS_PERSONA_COUNT) /* 44 base + skill_run + save_for_later + homeassistant + persona(0|1) + cron */
+    (46 + HU_TOOLS_CRON_COUNT - 1 + \
+     HU_TOOLS_PERSONA_COUNT) /* 44 base + skill_run + pwa + save_for_later + homeassistant + persona(0|1) + cron */
 #ifdef HU_HAS_TOOLS_BROWSER
 #define HU_TOOLS_BROWSER_COUNT 3
 #else
@@ -448,6 +449,11 @@ hu_error_t hu_tools_create_default(hu_allocator_t *alloc, const char *workspace_
     idx++;
 
     err = hu_skill_run_create(alloc, &tools[idx], skillforge);
+    if (err != HU_OK)
+        goto fail;
+    idx++;
+
+    err = hu_pwa_tool_create(alloc, &tools[idx]);
     if (err != HU_OK)
         goto fail;
     idx++;

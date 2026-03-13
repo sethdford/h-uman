@@ -543,7 +543,9 @@ set(HU_CORE_SOURCES
     src/tools/send_message.c
     src/tools/calendar.c
     src/tools/skill_write.c
-    src/tools/skill_run.c
+    src/tools/pwa.c
+    src/pwa/bridge.c
+    src/pwa/drivers.c
     src/tools/jira.c
     src/tools/social.c
     src/tools/facebook.c
@@ -782,6 +784,7 @@ if(HU_ENABLE_SKILLS)
     list(APPEND HU_CORE_SOURCES
         src/skillforge.c
         src/skills.c
+        src/tools/skill_run.c
         src/intelligence/skills.c
         src/intelligence/reflection.c
         src/intelligence/feedback.c
@@ -818,6 +821,7 @@ if(HU_ENABLE_ML)
         src/ml/gpt.c
         src/ml/muon_adamw.c
         src/ml/train.c
+        src/ml/cli.c
     )
 endif()
 
@@ -1421,7 +1425,7 @@ if(NOT HU_ENABLE_ML)
     list(APPEND HU_TEST_EXTRA_MODULES
         src/ml/tokenizer_bpe.c src/ml/dataloader.c src/ml/prepare.c
         src/ml/evaluator.c src/ml/experiment.c src/ml/gpt.c
-        src/ml/muon_adamw.c src/ml/train.c)
+        src/ml/muon_adamw.c src/ml/train.c src/ml/cli.c)
 endif()
 add_library(human_core_test STATIC ${HU_CORE_SOURCES} ${HU_TEST_EXTRA_CHANNELS} ${HU_TEST_EXTRA_MODULES} ${HU_CRYPTO_SOURCES} ${HU_ASM_SOURCES})
 target_include_directories(human_core_test PUBLIC ${HU_ROOT}/include)
@@ -1785,6 +1789,7 @@ endif()
 list(APPEND HU_TEST_SOURCES tests/test_memory_features.c)
 list(APPEND HU_TEST_SOURCES tests/test_agi_frontiers.c)
 list(APPEND HU_TEST_SOURCES tests/test_agent_registry.c)
+list(APPEND HU_TEST_SOURCES tests/test_pwa.c)
 
 add_executable(human_tests ${HU_TEST_SOURCES} wasm/wasm_alloc.c)
 target_link_libraries(human_tests human_core_test)

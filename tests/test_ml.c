@@ -9,6 +9,7 @@
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/prepare.h"
+#include "human/ml/cli.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
 #include "test_framework.h"
@@ -665,6 +666,120 @@ static void test_gpt_backward_not_supported(void) {
 
 /* ─── suite runner ────────────────────────────────────────────────────────── */
 
+/* ─── experiment loop: runs with test data ─────────────────────────────── */
+
+static int experiment_callback_count;
+static hu_experiment_result_t last_callback_result;
+
+static void test_experiment_callback(const hu_experiment_result_t *result,
+                                      void *user_data)
+{
+    (void)user_data;
+    experiment_callback_count++;
+    last_callback_result = *result;
+}
+
+static void test_experiment_loop_runs(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    const char *dir = "/tmp/test_ml_experiment";
+    mkdir_p(dir);
+
+    int32_t tokens[400];
+    for (int i = 0; i < 400; i++)
+        tokens[i] = i % 50;
+    char path1[256], path2[256];
+    snprintf(path1, sizeof(path1), "%s/shard_00000.bin", dir);
+    snprintf(path2, sizeof(path2), "%s/shard_00001.bin", dir);
+    write_bin_file(path1, tokens, 400);
+    write_bin_file(path2, tokens, 400);
+
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 2;
+    loop_cfg.base_config = hu_experiment_config_default();
+    loop_cfg.base_config.gpt.n_layer = 1;
+    loop_cfg.base_config.gpt.n_embd = 64;
+    loop_cfg.base_config.gpt.head_dim = 32;
+    loop_cfg.base_config.gpt.n_head = 2;
+    loop_cfg.base_config.gpt.n_kv_head = 2;
+    loop_cfg.base_config.gpt.vocab_size = 50;
+    loop_cfg.base_config.gpt.sequence_len = 16;
+    loop_cfg.base_config.training.device_batch_size = 2;
+    loop_cfg.base_config.training.time_budget_secs = 1;
+    loop_cfg.base_config.training.total_batch_size = 32;
+    loop_cfg.data_dir = dir;
+    loop_cfg.convergence_threshold = 0.0;
+
+    experiment_callback_count = 0;
+    hu_error_t err = hu_experiment_loop(&alloc, &loop_cfg,
+                                         test_experiment_callback, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(experiment_callback_count, 2);
+    HU_ASSERT(last_callback_result.status == HU_EXPERIMENT_KEEP ||
+              last_callback_result.status == HU_EXPERIMENT_DISCARD ||
+              last_callback_result.status == HU_EXPERIMENT_CRASH);
+
+    remove(path1);
+    remove(path2);
+    rmdir(dir);
+}
+
+/* ─── ML CLI: train --help ─────────────────────────────────────────────── */
+
+static void test_ml_cli_train_help(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"human", "ml", "train", "--help"};
+    hu_error_t err = hu_ml_cli_train(&alloc, 4, argv);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
+/* ─── ML CLI: experiment --help ─────────────────────────────────────────── */
+
+static void test_ml_cli_experiment_help(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"human", "experiment", "--help"};
+    hu_error_t err = hu_ml_cli_experiment(&alloc, 3, argv);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
+/* ─── ML CLI: prepare --help ────────────────────────────────────────────── */
+
+static void test_ml_cli_prepare_help(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"human", "ml", "prepare", "--help"};
+    hu_error_t err = hu_ml_cli_prepare(&alloc, 4, argv);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
+/* ─── ML CLI: status ───────────────────────────────────────────────────── */
+
+static void test_ml_cli_status(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *argv[] = {"human", "ml", "status"};
+    hu_error_t err = hu_ml_cli_status(&alloc, 3, argv);
+    HU_ASSERT_EQ(err, HU_OK);
+}
+
+/* ─── experiment loop: convergence threshold stops early ───────────────── */
+
+static void test_experiment_loop_convergence(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    hu_experiment_loop_config_t loop_cfg = {0};
+    loop_cfg.max_iterations = 100;
+    loop_cfg.base_config = hu_experiment_config_default();
+    loop_cfg.data_dir = "/tmp/nonexistent_experiment_data";
+    loop_cfg.convergence_threshold = 999.0;
+
+    experiment_callback_count = 0;
+    hu_error_t err = hu_experiment_loop(&alloc, &loop_cfg,
+                                         test_experiment_callback, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    /* Should run but crash experiments due to missing data dir */
+    HU_ASSERT(experiment_callback_count > 0);
+    HU_ASSERT_EQ(last_callback_result.status, HU_EXPERIMENT_CRASH);
+}
+
 void run_ml_tests(void) {
     HU_TEST_SUITE("ml");
     HU_RUN_TEST(test_bpe_create_destroy);
@@ -692,4 +807,10 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_muon_adamw_step);
     HU_RUN_TEST(test_lr_schedule);
     HU_RUN_TEST(test_train_pipeline);
+    HU_RUN_TEST(test_experiment_loop_runs);
+    HU_RUN_TEST(test_experiment_loop_convergence);
+    HU_RUN_TEST(test_ml_cli_train_help);
+    HU_RUN_TEST(test_ml_cli_experiment_help);
+    HU_RUN_TEST(test_ml_cli_prepare_help);
+    HU_RUN_TEST(test_ml_cli_status);
 }

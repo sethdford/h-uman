@@ -659,6 +659,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
     /* Build skills context from skillforge if available */
     char *skills_ctx = NULL;
     size_t skills_ctx_len = 0;
+#ifdef HU_HAS_SKILLS
     if (agent->skillforge) {
         hu_skillforge_t *sf = (hu_skillforge_t *)agent->skillforge;
         hu_skill_t *all_skills = NULL;
@@ -690,6 +691,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
     }
+#endif /* HU_HAS_SKILLS */
 
     /* Build system prompt using cached static portion when available */
     char *system_prompt = NULL;

@@ -312,7 +312,7 @@ hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser,
         "end tell",
         app, url_pattern);
     if (n <= 0 || (size_t)n >= sizeof(script))
-        return HU_ERR_BUFFER_TOO_SMALL;
+        return HU_ERR_PARSE;
 
     char *result = NULL;
     size_t result_len = 0;
@@ -383,7 +383,7 @@ hu_error_t hu_pwa_list_tabs(hu_allocator_t *alloc, hu_pwa_browser_t browser,
         "return output",
         app, filter, filter);
     if (n <= 0 || (size_t)n >= sizeof(script))
-        return HU_ERR_BUFFER_TOO_SMALL;
+        return HU_ERR_PARSE;
 
     char *result = NULL;
     size_t result_len = 0;
@@ -480,7 +480,7 @@ hu_error_t hu_pwa_exec_js(hu_allocator_t *alloc, const hu_pwa_tab_t *tab,
 
     if (n <= 0 || (size_t)n >= script_size) {
         alloc->free(alloc->ctx, script, script_size);
-        return HU_ERR_BUFFER_TOO_SMALL;
+        return HU_ERR_PARSE;
     }
 
     err = run_applescript(alloc, script, out_result, out_len);
@@ -501,7 +501,7 @@ hu_error_t hu_pwa_activate_tab(hu_allocator_t *alloc, const hu_pwa_tab_t *tab) {
         "end tell",
         app, tab->window_idx, tab->tab_idx);
     if (n <= 0 || (size_t)n >= sizeof(script))
-        return HU_ERR_BUFFER_TOO_SMALL;
+        return HU_ERR_PARSE;
 
     char *out = NULL;
     size_t out_len = 0;
