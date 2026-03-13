@@ -22,6 +22,7 @@ To get an access token:
 
 import json
 import os
+import random
 import sys
 import time
 import urllib.error
@@ -222,10 +223,6 @@ def build_training_pairs(posts, comments_by_post, user_id, user_name):
                         }
                     })
 
-            if is_seth_post and not seth_replied and comment_author_id != user_id:
-                if len(comment_msg) > 5:
-                    pass
-
     for p in post_only:
         text = p["text"]
         if len(text) > 200:
@@ -238,7 +235,6 @@ def build_training_pairs(posts, comments_by_post, user_id, user_name):
             "tell me about your day",
             "what are you thinking about?",
         ]
-        import random
         prompt = random.choice(prompt_templates)
 
         pairs.append({

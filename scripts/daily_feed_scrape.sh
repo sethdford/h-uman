@@ -1,46 +1,51 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Daily feed scrape — runs all browser automation scrapers.
 # Outputs JSONL to ~/.human/feeds/ingest/ for the file_ingest feed to pick up.
 #
 # Usage:
-#   ./scripts/daily_feed_scrape.sh
-#   # Or schedule via cron: 0 5 * * * /path/to/scripts/daily_feed_scrape.sh
+#   ./scripts/daily_feed_scrape.sh           # run all scrapers
+#   ./scripts/daily_feed_scrape.sh twitter   # run only twitter
 #
-# Prerequisites:
-#   pip install playwright
-#   playwright install chromium
+# Automated via: ~/Library/LaunchAgents/com.human.daily-scrape.plist
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_PYTHON="$HOME/.human/scraper-venv/bin/python3"
 INGEST_DIR="$HOME/.human/feeds/ingest"
-mkdir -p "$INGEST_DIR"
+LOG_DIR="$HOME/.human/logs"
+LOG_FILE="$LOG_DIR/daily-scrape-$(date +%Y%m%d).log"
 
-echo "=== Daily Feed Scrape $(date) ==="
+mkdir -p "$INGEST_DIR" "$LOG_DIR"
 
-# Twitter/X PWA
-echo "--- Twitter/X ---"
-if python3 "$SCRIPT_DIR/scrape_twitter_feed.py" --max-tweets 50 2>&1; then
-    echo "Twitter scrape complete"
-else
-    echo "Twitter scrape failed (may need login)"
+log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+
+if [ ! -x "$VENV_PYTHON" ]; then
+    log "ERROR: venv not found at $VENV_PYTHON — run scripts/setup_automation.sh first"
+    exit 1
 fi
 
-# Facebook
-echo "--- Facebook ---"
-if python3 "$SCRIPT_DIR/scrape_facebook_feed.py" --max-posts 30 2>&1; then
-    echo "Facebook scrape complete"
-else
-    echo "Facebook scrape failed (may need login)"
-fi
+FILTER="${1:-all}"
 
-# TikTok
-echo "--- TikTok ---"
-if python3 "$SCRIPT_DIR/scrape_tiktok_feed.py" --max-videos 30 2>&1; then
-    echo "TikTok scrape complete"
-else
-    echo "TikTok scrape failed (may need login)"
-fi
+log "=== Daily Feed Scrape started ==="
 
-echo "=== Done. Files in $INGEST_DIR ==="
-ls -la "$INGEST_DIR"/*.jsonl 2>/dev/null || echo "(no JSONL files)"
+run_scraper() {
+    local name="$1" script="$2"; shift 2
+    if [ "$FILTER" != "all" ] && [ "$FILTER" != "$name" ]; then return 0; fi
+    log "--- $name ---"
+    if "$VENV_PYTHON" "$SCRIPT_DIR/$script" "$@" >> "$LOG_FILE" 2>&1; then
+        log "$name scrape complete"
+    else
+        log "WARNING: $name scrape failed (exit $?) — may need re-login"
+    fi
+}
+
+run_scraper twitter  scrape_twitter_feed.py  --max-tweets 50
+run_scraper facebook scrape_facebook_feed.py --max-posts 30
+run_scraper tiktok   scrape_tiktok_feed.py   --max-videos 30
+
+log "=== Done. Files in $INGEST_DIR ==="
+ls -la "$INGEST_DIR"/*.jsonl 2>/dev/null | tee -a "$LOG_FILE" || log "(no JSONL files)"
+
+# Prune logs older than 30 days
+find "$LOG_DIR" -name "daily-scrape-*.log" -mtime +30 -delete 2>/dev/null || true
