@@ -521,7 +521,7 @@ export class ScMemoryView extends GatewayAwareLitElement {
             heading="No memories found"
             description=${this.searchQuery || this.categoryFilter !== "all"
               ? "Try adjusting your search or filter."
-              : "Memories will appear here as human learns from conversations and ingested files."}
+              : "Memories will appear here as h-uman learns from conversations and ingested files."}
             .icon=${icons.brain}
           ></hu-empty-state>`
         : html`

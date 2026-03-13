@@ -38,8 +38,8 @@ test.describe("Chat View", () => {
     await expect(input).toBeVisible({ timeout: 5000 });
     const disabled = await input.getAttribute("disabled");
     if (disabled === null) {
-      await input.fill("Hello Human");
-      await expect(input).toHaveValue("Hello Human");
+      await input.fill("Hello h-uman");
+      await expect(input).toHaveValue("Hello h-uman");
     }
   });
 

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Human Component Catalog</title>
+    <title>h-uman Component Catalog</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       :root { --catalog-sidebar-width: 220px; }
@@ -128,7 +128,7 @@
     </nav>
     <main class="catalog-main">
       <header class="catalog-header">
-        <h1>Human Component Catalog</h1>
+        <h1>h-uman Component Catalog</h1>
         <div class="theme-toggle" role="group" aria-label="Theme">
           <button type="button" id="theme-dark" aria-pressed="true">Dark</button>
           <button type="button" id="theme-light" aria-pressed="false">Light</button>
@@ -1348,8 +1348,8 @@
         <div class="variants"><h3>All Variants</h3><div class="row" style="display: flex; gap: var(--hu-space-md); flex-wrap: wrap;">
           <hu-skill-card variant="installed" .skill=${'{ name: "Code Review", description: "Automated PR review and suggestions.", enabled: true }'}></hu-skill-card>
           <hu-skill-card variant="installed" .skill=${'{ name: "Disabled Skill", description: "A skill that is turned off.", enabled: false }'}></hu-skill-card>
-          <hu-skill-card variant="registry" .skill=${'{ name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" }'} .installed=${false}></hu-skill-card>
-          <hu-skill-card variant="registry" .skill=${'{ name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "Human", tags: "demo" }'} .installed=${true}></hu-skill-card>
+          <hu-skill-card variant="registry" .skill=${'{ name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "h-uman", tags: "slack,notifications" }'} .installed=${false}></hu-skill-card>
+          <hu-skill-card variant="registry" .skill=${'{ name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "h-uman", tags: "demo" }'} .installed=${true}></hu-skill-card>
         </div></div>
       </section>
 
@@ -2115,8 +2115,8 @@
       if (catalogMessageThread) {
         const now = Date.now();
         catalogMessageThread.items = [
-          { type: "message", role: "user", content: "What is Human?", ts: now - 60000 },
-          { type: "message", role: "assistant", content: "Human is a C11 autonomous AI assistant runtime with minimal binary size and zero dependencies beyond libc.", ts: now - 55000 },
+          { type: "message", role: "user", content: "What is h-uman?", ts: now - 60000 },
+          { type: "message", role: "assistant", content: "h-uman is a C11 autonomous AI assistant runtime with minimal binary size and zero dependencies beyond libc.", ts: now - 55000 },
           { type: "message", role: "user", content: "How do I build it?", ts: now - 30000 },
           { type: "message", role: "assistant", content: "Run `cmake -B build && cmake --build build` from the project root.", ts: now - 25000 },
         ];
@@ -2147,7 +2147,7 @@
       // JSON viewer
       const jsonViewerPreview = document.getElementById("json-viewer-preview");
       if (jsonViewerPreview) {
-        jsonViewerPreview.data = { name: "Human", version: "1.0", features: ["AI", "Channels", "Tools"] };
+        jsonViewerPreview.data = { name: "h-uman", version: "1.0", features: ["AI", "Channels", "Tools"] };
       }
 
       // hu-skill-card
@@ -2157,7 +2157,7 @@
         skillCardInstalled.skill = { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true };
       }
       if (skillCardRegistry) {
-        skillCardRegistry.skill = { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" };
+        skillCardRegistry.skill = { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "h-uman", tags: "slack,notifications" };
         skillCardRegistry.installed = false;
       }
       ["skill-card-v1", "skill-card-v2", "skill-card-v3", "skill-card-v4"].forEach((id, i) => {
@@ -2167,8 +2167,8 @@
         const skills = [
           { name: "Code Review", description: "Automated PR review and suggestions.", enabled: true },
           { name: "Disabled Skill", description: "A skill that is turned off.", enabled: false },
-          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" },
-          { name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "Human", tags: "demo" },
+          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "h-uman", tags: "slack,notifications" },
+          { name: "Already Installed", description: "This skill is already installed.", version: "2.0", author: "h-uman", tags: "demo" },
         ];
         el.skill = skills[i];
         if (variant === "registry") el.installed = i === 3;
@@ -2189,7 +2189,7 @@
       }
       if (skillDetailTriggerRegistry && skillDetailPreview) {
         skillDetailTriggerRegistry.addEventListener("click", () => {
-          skillDetailPreview.skill = { source: "registry", skill: { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" } };
+          skillDetailPreview.skill = { source: "registry", skill: { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "h-uman", tags: "slack,notifications" } };
         });
       }
 
@@ -2197,9 +2197,9 @@
       const skillRegistryPreview = document.getElementById("skill-registry-preview");
       if (skillRegistryPreview) {
         skillRegistryPreview.results = [
-          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "Human", tags: "slack,notifications" },
-          { name: "GitHub PR", description: "Create and manage pull requests.", version: "2.1.0", author: "Human", tags: "github,pr" },
-          { name: "Calendar Sync", description: "Sync with Google Calendar.", version: "1.0.0", author: "Human", tags: "calendar,google" },
+          { name: "Slack Notify", description: "Send notifications to Slack.", version: "1.2.0", author: "h-uman", tags: "slack,notifications" },
+          { name: "GitHub PR", description: "Create and manage pull requests.", version: "2.1.0", author: "h-uman", tags: "github,pr" },
+          { name: "Calendar Sync", description: "Sync with Google Calendar.", version: "1.0.0", author: "h-uman", tags: "calendar,google" },
         ];
         skillRegistryPreview.tags = ["slack", "github", "calendar", "pr", "notifications"];
         skillRegistryPreview.installedNames = ["slack-notify"];

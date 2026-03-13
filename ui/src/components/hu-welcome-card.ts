@@ -132,7 +132,7 @@ export class ScWelcomeCard extends LitElement {
   override render() {
     if (!this._show) return nothing;
 
-    const greeting = this.userName ? `Welcome to Human, ${this.userName}` : "Welcome to Human";
+    const greeting = this.userName ? `Welcome to h-uman, ${this.userName}` : "Welcome to h-uman";
 
     return html`
       <hu-card elevated accent glass class="card">

@@ -231,7 +231,7 @@ export class ScWelcome extends LitElement {
       key: "connect",
       icon: "zap",
       title: "Connect Gateway",
-      description: "Human is connecting to your local gateway. This happens automatically.",
+      description: "h-uman is connecting to your local gateway. This happens automatically.",
       action: "overview",
       done: false,
     },
@@ -255,7 +255,7 @@ export class ScWelcome extends LitElement {
       key: "chat",
       icon: "message-square",
       title: "Start a Conversation",
-      description: "Send your first message and see Human in action.",
+      description: "Send your first message and see h-uman in action.",
       action: "chat",
       done: false,
     },
@@ -295,7 +295,7 @@ export class ScWelcome extends LitElement {
         <hu-card elevated class="celebration">
           <div class="check-icon">${icons.check}</div>
           <h3>You're all set!</h3>
-          <p>Human is configured and ready. Explore the dashboard to manage your AI assistant.</p>
+          <p>h-uman is configured and ready. Explore the dashboard to manage your AI assistant.</p>
         </hu-card>
       `;
     }
@@ -306,7 +306,7 @@ export class ScWelcome extends LitElement {
     return html`
       <div class="welcome" role="region" aria-label="Welcome and setup guide">
         <div class="greeting">
-          <h2>Welcome to Human</h2>
+          <h2>Welcome to h-uman</h2>
           <p>Let's get you set up. ${done}/${total} steps complete.</p>
         </div>
         <div class="steps">

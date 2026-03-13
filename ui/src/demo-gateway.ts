@@ -234,7 +234,7 @@ const DEMO_REGISTRY = [
     name: "code-review",
     description: "Automated code review with inline suggestions",
     version: "1.2.0",
-    author: "human",
+    author: "h-uman",
     url: "https://github.com/human/skill-registry/tree/main/skills/code-review",
     tags: "development, review",
   },
@@ -242,7 +242,7 @@ const DEMO_REGISTRY = [
     name: "email-digest",
     description: "Daily email digest and inbox summarization",
     version: "1.0.0",
-    author: "human",
+    author: "h-uman",
     url: "https://github.com/human/skill-registry/tree/main/skills/email-digest",
     tags: "email, productivity",
   },
@@ -250,7 +250,7 @@ const DEMO_REGISTRY = [
     name: "web-research",
     description: "Deep web research with source citations",
     version: "2.1.0",
-    author: "human",
+    author: "h-uman",
     url: "https://github.com/human/skill-registry/tree/main/skills/web-research",
     tags: "research, web",
   },
@@ -274,7 +274,7 @@ const DEMO_REGISTRY = [
     name: "test-runner",
     description: "Run and report test suites across languages and frameworks",
     version: "1.1.0",
-    author: "human",
+    author: "h-uman",
     url: "https://github.com/human/skill-registry/tree/main/skills/test-runner",
     tags: "development, testing",
   },
@@ -290,7 +290,7 @@ const DEMO_REGISTRY = [
     name: "doc-writer",
     description: "Generate and maintain API documentation from source code",
     version: "1.3.0",
-    author: "human",
+    author: "h-uman",
     url: "https://github.com/human/skill-registry/tree/main/skills/doc-writer",
     tags: "documentation, development",
   },
@@ -343,7 +343,7 @@ const DEMO_NODES = [
 
 const CONFIG_SCHEMA = {
   type: "object",
-  description: "Human runtime configuration",
+  description: "h-uman runtime configuration",
   properties: {
     default_provider: {
       type: "string",
@@ -1139,7 +1139,7 @@ export class DemoGatewayClient extends EventTarget {
       {
         title: "Generated Code",
         content:
-          '// Example code\nfunction hello() {\n  console.log("Hello from Human!");\n}\n\nhello();',
+          '// Example code\nfunction hello() {\n  console.log("Hello from h-uman!");\n}\n\nhello();',
         language: "javascript",
       },
       {
@@ -1150,7 +1150,7 @@ export class DemoGatewayClient extends EventTarget {
       },
       {
         title: "Script Example",
-        content: '#!/usr/bin/env bash\nset -euo pipefail\necho "Human demo script"\nexit 0',
+        content: '#!/usr/bin/env bash\nset -euo pipefail\necho "h-uman demo script"\nexit 0',
         language: "bash",
       },
       {
@@ -1179,7 +1179,7 @@ export class DemoGatewayClient extends EventTarget {
       `That's a great question about "${userMessage}". Here's what I think — the key insight is that **well-designed systems** tend to be modular and composable. Each piece does one thing well, and the connections between them are clean and predictable.`,
       `Interesting! For "${userMessage}", I'd suggest starting with a minimal implementation. For example:\n\n\`\`\`c\nhu_error_t rc = hu_thing_init(&ctx);\nif (rc != HU_OK) return rc;\n\`\`\`\n\nThen iterate from there. The vtable pattern works well for extensibility.`,
       `Good question. The short answer: **yes**, with some caveats. See the [docs](https://docs.human.dev) for the full picture. The main gotcha is memory ownership — make sure you \`free()\` what you \`malloc()\`.`,
-      `Let me break that down. For "${userMessage}":\n\n1. **Modularity** — keep concerns separated.\n2. **Explicit errors** — no silent failures.\n3. **Testability** — \`HU_IS_TEST\` guards for side effects.\n\nThat's the human way.`,
+      `Let me break that down. For "${userMessage}":\n\n1. **Modularity** — keep concerns separated.\n2. **Explicit errors** — no silent failures.\n3. **Testability** — \`HU_IS_TEST\` guards for side effects.\n\nThat's the h-uman way.`,
     ];
     const fullResponse =
       DEMO_RESPONSES[Math.floor(Math.random() * DEMO_RESPONSES.length)] ?? DEMO_RESPONSES[0]!;

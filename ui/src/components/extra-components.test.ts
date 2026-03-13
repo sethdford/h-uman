@@ -1471,7 +1471,7 @@ describe("hu-welcome-card", () => {
     document.body.appendChild(el);
     await el.updateComplete;
     const heading = el.shadowRoot?.querySelector(".hero h2");
-    expect(heading?.textContent).toContain("Welcome to Human");
+    expect(heading?.textContent).toContain("Welcome to h-uman");
     const desc = el.shadowRoot?.querySelector(".hero p");
     expect(desc?.textContent).toContain("autonomous AI assistant runtime");
     const features = el.shadowRoot?.querySelectorAll(".feature");

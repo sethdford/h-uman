@@ -295,8 +295,8 @@ export class ScAgentsView extends GatewayAwareLitElement {
 
   private _renderHero() {
     return html`
-      <hu-page-hero role="region" aria-label="Human Agent overview">
-        <hu-section-header heading="Human Agent" description="Monitor autonomous agent instances">
+      <hu-page-hero role="region" aria-label="h-uman Agent overview">
+        <hu-section-header heading="h-uman Agent" description="Monitor autonomous agent instances">
           <span class="staleness">${this.stalenessLabel}</span>
           <hu-button size="sm" @click=${() => this.load()} aria-label="Refresh data"
             >Refresh</hu-button

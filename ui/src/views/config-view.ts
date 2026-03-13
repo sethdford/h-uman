@@ -456,7 +456,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       <hu-page-hero role="region" aria-label="Configuration">
         <hu-section-header
           heading="Configuration"
-          description="Manage your Human instance settings"
+          description="Manage your h-uman instance settings"
         ></hu-section-header>
       </hu-page-hero>
       <div class="form hu-stagger">
@@ -480,7 +480,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       <hu-page-hero role="region" aria-label="Configuration">
         <hu-section-header
           heading="Configuration"
-          description="Manage your Human instance settings"
+          description="Manage your h-uman instance settings"
         >
           ${this._renderSaveStatusBadge()}
           <div class="header-actions">
@@ -555,7 +555,7 @@ export class ScConfigView extends GatewayAwareLitElement {
       <hu-page-hero role="region" aria-label="Configuration">
         <hu-section-header
           heading="Configuration"
-          description="Manage your Human instance settings"
+          description="Manage your h-uman instance settings"
         >
           ${this._renderSaveStatusBadge()}
           <div class="header-actions">

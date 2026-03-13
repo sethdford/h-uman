@@ -18,7 +18,7 @@ export interface SessionItem {
 export class ScSessionsTable extends LitElement {
   @property({ type: Array }) sessions: SessionItem[] = [];
   @property({ type: String }) emptyHeading = "No conversations yet";
-  @property({ type: String }) emptyDescription = "Start your first chat to see Human in action.";
+  @property({ type: String }) emptyDescription = "Start your first chat to see h-uman in action.";
   @property({ type: String }) emptyActionLabel = "Start a Conversation";
   @property({ type: String }) emptyActionTarget = "chat";
 

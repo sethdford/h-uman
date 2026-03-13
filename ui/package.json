@@ -1,8 +1,8 @@
 {
   "name": "human-control-ui",
   "version": "0.3.0",
-  "description": "Human Control — real-time AI assistant dashboard",
-  "author": "Human Contributors",
+  "description": "h-uman Control — real-time AI assistant dashboard",
+  "author": "h-uman Contributors",
   "private": true,
   "type": "module",
   "scripts": {

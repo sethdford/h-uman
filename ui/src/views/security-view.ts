@@ -638,7 +638,7 @@ export class ScSecurityView extends GatewayAwareLitElement {
       return html`${hero}
         <hu-empty-state
           heading="Security Policy"
-          description="Connect to a Human gateway to view security settings."
+          description="Connect to a h-uman gateway to view security settings."
         ></hu-empty-state>`;
     }
 

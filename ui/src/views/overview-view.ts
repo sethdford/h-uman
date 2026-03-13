@@ -501,7 +501,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             </hu-tooltip>
             <div class="hero-status">
               <div class="hero-meta">
-                <span>${cap.version ?? "Human"}</span>
+                <span>${cap.version ?? "h-uman"}</span>
                 ${this.updateInfo.available
                   ? html`<span>&middot;</span>
                       <a

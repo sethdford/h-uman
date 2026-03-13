@@ -389,7 +389,7 @@ export class ScSidebar extends LitElement {
               <circle cx="16" cy="27" r="2" fill="currentColor" />
             </svg>
           </div>
-          <span class="brand">Human</span>
+          <span class="brand">h-uman</span>
         </header>
 
         <nav class="nav">

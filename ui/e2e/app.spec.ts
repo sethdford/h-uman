@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("Human Control UI", () => {
+test.describe("h-uman Control UI", () => {
   test("loads and shows the page title", async ({ page }) => {
     await page.goto("/");
-    await expect(page).toHaveTitle(/Human Control/);
+    await expect(page).toHaveTitle(/h-uman Control/);
   });
 
   test("app shell renders with custom element", async ({ page }) => {

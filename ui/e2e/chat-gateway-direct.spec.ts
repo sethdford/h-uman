@@ -130,7 +130,9 @@ test.describe("Chat via Gateway Direct", () => {
     await expect(async () => {
       const pageText = await page.evaluate(() => document.body.innerText);
       const hasAssistant =
-        pageText.includes("assistant") || pageText.includes("Human") || pageText.includes("Gemini");
+        pageText.includes("assistant") ||
+        pageText.includes("h-uman") ||
+        pageText.includes("Gemini");
       expect(hasAssistant).toBe(true);
     }).toPass({ timeout: 15000 });
 
