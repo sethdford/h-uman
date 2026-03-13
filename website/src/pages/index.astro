@@ -271,12 +271,14 @@ const tools = [
         </div>
       </section>
 
+      <hr class="section-divider" />
+
       {/* ═══ THE NUMBERS ═══ */}
 
       <section class="py-16 md:py-24 px-6">
         <div class="max-w-5xl mx-auto">
           <div
-            class="numbers-grid glass px-4 md:px-8 py-8 md:py-10 grid grid-cols-3 md:grid-cols-6 gap-0"
+            class="numbers-grid glass glass-enter px-4 md:px-8 py-8 md:py-10 grid grid-cols-3 md:grid-cols-6 gap-0"
           >
             {
               [
@@ -337,7 +339,7 @@ const tools = [
             {
               bloatItems.map((item, i) => (
                 <div
-                  class={`bloat-card glass px-8 py-4 text-[clamp(1rem,2vw,1.25rem)] w-full max-w-md text-center ${i === bloatItems.length - 1 ? "italic" : ""}`}
+                  class={`bloat-card glass glass-enter px-8 py-4 text-[clamp(1rem,2vw,1.25rem)] w-full max-w-md text-center ${i === bloatItems.length - 1 ? "italic" : ""}`}
                   data-reveal="scale"
                   style={`--ri: ${i}; color: ${i === bloatItems.length - 1 ? "var(--color-text-tertiary)" : "var(--color-text-secondary)"}`}
                 >
@@ -358,6 +360,8 @@ const tools = [
           </p>
         </div>
       </section>
+
+      <hr class="section-divider" />
 
       {/* ═══ DEVICE SPECTRUM ═══ */}
 
@@ -402,7 +406,7 @@ const tools = [
                 },
               ].map(({ icon, title, desc }, i) => (
                 <div
-                  class="spectrum-card card-glow card-spotlight glass px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1"
+                  class="spectrum-card card-glow card-spotlight glass glass-enter px-6 py-8 text-center transition-all duration-300 hover:-translate-y-1"
                   data-reveal="scale-up"
                   style={`--ri: ${i}; --tw-shadow: var(--hu-shadow-md);`}
                 >
@@ -609,6 +613,8 @@ const tools = [
         </div>
       </section>
 
+      <hr class="section-divider" />
+
       {/* ═══ ECOSYSTEM ═══ */}
 
       <section class="py-16 md:py-32 px-6">
@@ -672,6 +678,8 @@ const tools = [
         </div>
       </section>
 
+      <hr class="section-divider" />
+
       {/* ═══ TERMINAL ═══ */}
 
       <section class="py-16 md:py-32 px-6">
@@ -718,6 +726,8 @@ const tools = [
         </div>
       </section>
 
+      <hr class="section-divider" />
+
       {/* ═══ DASHBOARD PREVIEW ═══ */}
 
       <section class="py-16 md:py-32 px-6">
@@ -738,7 +748,7 @@ const tools = [
             KB.
           </p>
           <div
-            class="dash-preview opacity-0 glass rounded-2xl overflow-hidden"
+            class="dash-preview opacity-0 glass-prominent rounded-2xl overflow-hidden"
             style="box-shadow: var(--hu-shadow-xl);"
           >
             <div
@@ -1036,10 +1046,7 @@ const tools = [
     </main>
 
     {/* ── Footer ── */}
-    <footer
-      class="py-12 px-6"
-      style="border-top: 1px solid var(--color-border)"
-    >
+    <footer class="site-footer py-12 px-6">
       <div
         class="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4"
       >
@@ -1130,7 +1137,7 @@ const tools = [
           },
           { threshold: 0.15, rootMargin: "0px 0px -50px 0px" },
         );
-        document.querySelectorAll("[data-reveal]").forEach((el) => {
+        document.querySelectorAll("[data-reveal], .glass-enter").forEach((el) => {
           revealObserver.observe(el);
         });
 
