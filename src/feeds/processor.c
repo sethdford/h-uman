@@ -1,6 +1,10 @@
 #include "human/feeds/processor.h"
 #ifdef HU_ENABLE_FEEDS
 #include "human/feeds/news.h"
+#include "human/feeds/gmail.h"
+#include "human/feeds/imessage.h"
+#include "human/feeds/twitter.h"
+#include "human/feeds/file_ingest.h"
 #endif
 #include "human/core/string.h"
 #include <ctype.h>
@@ -200,6 +204,16 @@ const char *hu_feed_type_str(hu_feed_type_t type) {
         return "apple_health";
     case HU_FEED_EMAIL:
         return "email";
+    case HU_FEED_GMAIL:
+        return "gmail";
+    case HU_FEED_IMESSAGE:
+        return "imessage";
+    case HU_FEED_TWITTER:
+        return "twitter";
+    case HU_FEED_TIKTOK:
+        return "tiktok";
+    case HU_FEED_FILE_INGEST:
+        return "file_ingest";
     default:
         return "unknown";
     }
@@ -313,6 +327,16 @@ static const char *feed_type_to_category(hu_feed_type_t type) {
         return "Health";
     case HU_FEED_EMAIL:
         return "Email";
+    case HU_FEED_GMAIL:
+        return "Email";
+    case HU_FEED_IMESSAGE:
+        return "Messages";
+    case HU_FEED_TWITTER:
+        return "Social";
+    case HU_FEED_TIKTOK:
+        return "Social";
+    case HU_FEED_FILE_INGEST:
+        return "Ingest";
     default:
         return "Other";
     }
@@ -585,22 +609,141 @@ hu_error_t hu_feed_processor_poll(hu_feed_processor_t *proc,
         /* Mark as polled regardless of fetch outcome to avoid tight retry loops */
         last_poll_ms[i] = now_ms;
 
-        /* For news RSS, use the existing news fetch path if available */
         if (type == HU_FEED_NEWS_RSS) {
 #ifdef HU_ENABLE_FEEDS
-            hu_rss_article_t articles[10];
-            size_t article_count = 0;
-            static const char default_feed[] = "https://feeds.bbci.co.uk/news/world/rss.xml";
-            if (hu_news_fetch_rss(proc->alloc, default_feed, sizeof(default_feed) - 1,
-                                  articles, 10, &article_count) == HU_OK) {
-                for (size_t a = 0; a < article_count; a++) {
+            static const char *ai_rss_feeds[] = {
+                "https://feeds.bbci.co.uk/news/technology/rss.xml",
+                "https://hnrss.org/newest?q=AI+OR+LLM+OR+GPT+OR+Claude",
+                "https://arxiv.org/rss/cs.AI",
+                "https://arxiv.org/rss/cs.CL",
+                "https://blog.google/technology/ai/rss/",
+                "https://openai.com/blog/rss.xml",
+            };
+            static const size_t ai_feed_count = sizeof(ai_rss_feeds) / sizeof(ai_rss_feeds[0]);
+            for (size_t fi = 0; fi < ai_feed_count; fi++) {
+                hu_rss_article_t articles[10];
+                size_t article_count = 0;
+                size_t url_len = strlen(ai_rss_feeds[fi]);
+                if (hu_news_fetch_rss(proc->alloc, ai_rss_feeds[fi], url_len,
+                                      articles, 10, &article_count) == HU_OK) {
+                    for (size_t a = 0; a < article_count; a++) {
+                        hu_feed_item_stored_t item = {0};
+                        snprintf(item.source, sizeof(item.source), "rss");
+                        snprintf(item.content_type, sizeof(item.content_type), "article");
+                        snprintf(item.content, sizeof(item.content), "%s: %s",
+                            articles[a].title, articles[a].description);
+                        item.content_len = strlen(item.content);
+                        snprintf(item.url, sizeof(item.url), "%s", articles[a].link);
+                        item.ingested_at = (int64_t)(now_ms / 1000);
+                        (void)hu_feed_processor_store_item(proc, &item);
+                        (*items_ingested)++;
+                    }
+                }
+            }
+#endif
+        }
+
+        if (type == HU_FEED_GMAIL) {
+#ifdef HU_ENABLE_FEEDS
+            hu_feed_ingest_item_t gmail_items[10];
+            size_t gmail_count = 0;
+            if (hu_gmail_feed_fetch(proc->alloc,
+                    NULL, 0, NULL, 0, NULL, 0,
+                    gmail_items, 10, &gmail_count) == HU_OK) {
+                for (size_t g = 0; g < gmail_count; g++) {
                     hu_feed_item_stored_t item = {0};
-                    snprintf(item.source, sizeof(item.source), "rss");
-                    snprintf(item.content_type, sizeof(item.content_type), "article");
-                    snprintf(item.content, sizeof(item.content), "%s", articles[a].title);
-                    item.content_len = strlen(item.content);
-                    snprintf(item.url, sizeof(item.url), "%s", articles[a].link);
-                    item.ingested_at = (int64_t)(now_ms / 1000);
+                    snprintf(item.source, sizeof(item.source), "%s", gmail_items[g].source);
+                    snprintf(item.content_type, sizeof(item.content_type), "%s",
+                        gmail_items[g].content_type);
+                    size_t clen = gmail_items[g].content_len;
+                    if (clen >= sizeof(item.content))
+                        clen = sizeof(item.content) - 1;
+                    memcpy(item.content, gmail_items[g].content, clen);
+                    item.content[clen] = '\0';
+                    item.content_len = clen;
+                    item.ingested_at = gmail_items[g].ingested_at;
+                    (void)hu_feed_processor_store_item(proc, &item);
+                    (*items_ingested)++;
+                }
+            }
+#endif
+        }
+
+        if (type == HU_FEED_IMESSAGE) {
+#ifdef HU_ENABLE_FEEDS
+            int64_t since = (int64_t)(now_ms / 1000) - 86400;
+            hu_feed_ingest_item_t im_items[20];
+            size_t im_count = 0;
+            if (hu_imessage_feed_fetch(proc->alloc, since,
+                    im_items, 20, &im_count) == HU_OK) {
+                for (size_t m = 0; m < im_count; m++) {
+                    hu_feed_item_stored_t item = {0};
+                    snprintf(item.source, sizeof(item.source), "%s", im_items[m].source);
+                    snprintf(item.contact_id, sizeof(item.contact_id), "%s",
+                        im_items[m].contact_id);
+                    snprintf(item.content_type, sizeof(item.content_type), "%s",
+                        im_items[m].content_type);
+                    size_t clen = im_items[m].content_len;
+                    if (clen >= sizeof(item.content))
+                        clen = sizeof(item.content) - 1;
+                    memcpy(item.content, im_items[m].content, clen);
+                    item.content[clen] = '\0';
+                    item.content_len = clen;
+                    item.ingested_at = im_items[m].ingested_at;
+                    (void)hu_feed_processor_store_item(proc, &item);
+                    (*items_ingested)++;
+                }
+            }
+#endif
+        }
+
+        if (type == HU_FEED_TWITTER) {
+#ifdef HU_ENABLE_FEEDS
+            hu_feed_ingest_item_t tw_items[20];
+            size_t tw_count = 0;
+            if (hu_twitter_feed_fetch(proc->alloc,
+                    NULL, 0, tw_items, 20, &tw_count) == HU_OK) {
+                for (size_t t = 0; t < tw_count; t++) {
+                    hu_feed_item_stored_t item = {0};
+                    snprintf(item.source, sizeof(item.source), "%s", tw_items[t].source);
+                    snprintf(item.content_type, sizeof(item.content_type), "%s",
+                        tw_items[t].content_type);
+                    size_t clen = tw_items[t].content_len;
+                    if (clen >= sizeof(item.content))
+                        clen = sizeof(item.content) - 1;
+                    memcpy(item.content, tw_items[t].content, clen);
+                    item.content[clen] = '\0';
+                    item.content_len = clen;
+                    if (tw_items[t].url[0])
+                        snprintf(item.url, sizeof(item.url), "%s", tw_items[t].url);
+                    item.ingested_at = tw_items[t].ingested_at;
+                    (void)hu_feed_processor_store_item(proc, &item);
+                    (*items_ingested)++;
+                }
+            }
+#endif
+        }
+
+        if (type == HU_FEED_FILE_INGEST) {
+#ifdef HU_ENABLE_FEEDS
+            hu_feed_ingest_item_t fi_items[20];
+            size_t fi_count = 0;
+            if (hu_file_ingest_fetch(proc->alloc,
+                    fi_items, 20, &fi_count) == HU_OK) {
+                for (size_t f = 0; f < fi_count; f++) {
+                    hu_feed_item_stored_t item = {0};
+                    snprintf(item.source, sizeof(item.source), "%s", fi_items[f].source);
+                    snprintf(item.content_type, sizeof(item.content_type), "%s",
+                        fi_items[f].content_type);
+                    size_t clen = fi_items[f].content_len;
+                    if (clen >= sizeof(item.content))
+                        clen = sizeof(item.content) - 1;
+                    memcpy(item.content, fi_items[f].content, clen);
+                    item.content[clen] = '\0';
+                    item.content_len = clen;
+                    if (fi_items[f].url[0])
+                        snprintf(item.url, sizeof(item.url), "%s", fi_items[f].url);
+                    item.ingested_at = fi_items[f].ingested_at;
                     (void)hu_feed_processor_store_item(proc, &item);
                     (*items_ingested)++;
                 }

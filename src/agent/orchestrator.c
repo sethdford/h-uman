@@ -1,4 +1,5 @@
 #include "human/agent/orchestrator.h"
+#include "human/agent/registry.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -31,15 +32,19 @@ hu_error_t hu_orchestrator_register_agent(hu_orchestrator_t *orch, const char *a
     a->agent_id[n] = '\0';
     a->agent_id_len = n;
 
-    n = role_len < sizeof(a->role) - 1 ? role_len : sizeof(a->role) - 1;
-    strncpy(a->role, role, n);
-    a->role[n] = '\0';
-    a->role_len = n;
+    if (role && role_len > 0) {
+        n = role_len < sizeof(a->role) - 1 ? role_len : sizeof(a->role) - 1;
+        strncpy(a->role, role, n);
+        a->role[n] = '\0';
+        a->role_len = n;
+    }
 
-    n = skills_len < sizeof(a->skills) - 1 ? skills_len : sizeof(a->skills) - 1;
-    strncpy(a->skills, skills, n);
-    a->skills[n] = '\0';
-    a->skills_len = n;
+    if (skills && skills_len > 0) {
+        n = skills_len < sizeof(a->skills) - 1 ? skills_len : sizeof(a->skills) - 1;
+        strncpy(a->skills, skills, n);
+        a->skills[n] = '\0';
+        a->skills_len = n;
+    }
 
     a->capacity = 1.0;
     orch->agent_count++;
@@ -239,4 +244,28 @@ const char *hu_task_status_str(hu_task_status_t status) {
     default:
         return "unknown";
     }
+}
+
+hu_error_t hu_orchestrator_load_from_registry(hu_orchestrator_t *orch,
+                                               const hu_agent_registry_t *registry) {
+    if (!orch || !registry)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    for (size_t i = 0; i < registry->count; i++) {
+        const hu_named_agent_config_t *cfg = &registry->agents[i];
+        if (!cfg->name)
+            continue;
+
+        const char *role = cfg->role ? cfg->role : "general";
+        const char *caps = cfg->capabilities ? cfg->capabilities : "";
+
+        hu_error_t err = hu_orchestrator_register_agent(
+            orch, cfg->name, strlen(cfg->name),
+            role, strlen(role), caps, strlen(caps));
+        if (err == HU_ERR_SUBAGENT_TOO_MANY)
+            break;
+        if (err != HU_OK && err != HU_ERR_SUBAGENT_TOO_MANY)
+            return err;
+    }
+    return HU_OK;
 }

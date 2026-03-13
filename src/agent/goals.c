@@ -395,6 +395,13 @@ hu_error_t hu_goal_build_context(hu_goal_engine_t *engine,
 
     hu_goal_free(engine->alloc, goals, count);
     buf[pos] = '\0';
+
+    if (pos + 1 < est) {
+        char *trimmed = (char *)engine->alloc->realloc(engine->alloc->ctx, buf, est, pos + 1);
+        if (trimmed)
+            buf = trimmed;
+    }
+
     *out = buf;
     *out_len = pos;
     return HU_OK;

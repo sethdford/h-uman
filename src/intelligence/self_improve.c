@@ -236,13 +236,26 @@ hu_error_t hu_self_improve_get_prompt_patches(hu_self_improve_t *engine,
     if (rc != SQLITE_OK)
         return HU_ERR_MEMORY_STORE;
 
+    char *copies[10];
     hu_str_t parts[10];
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && count < 10) {
         const char *text = (const char *)sqlite3_column_text(stmt, 0);
-        if (text && text[0]) {
-            parts[count].ptr = text;
-            parts[count].len = (size_t)sqlite3_column_bytes(stmt, 0);
+        int bytes = sqlite3_column_bytes(stmt, 0);
+        if (text && text[0] && bytes > 0) {
+            size_t len = (size_t)bytes;
+            char *copy = (char *)engine->alloc->alloc(engine->alloc->ctx, len + 1);
+            if (!copy) {
+                for (size_t j = 0; j < count; j++)
+                    engine->alloc->free(engine->alloc->ctx, copies[j], parts[j].len + 1);
+                sqlite3_finalize(stmt);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memcpy(copy, text, len);
+            copy[len] = '\0';
+            copies[count] = copy;
+            parts[count].ptr = copy;
+            parts[count].len = len;
             count++;
         }
     }
@@ -260,6 +273,8 @@ hu_error_t hu_self_improve_get_prompt_patches(hu_self_improve_t *engine,
 
     hu_str_t sep = HU_STR_LIT("\n");
     char *joined = hu_str_join(engine->alloc, parts, count, sep);
+    for (size_t i = 0; i < count; i++)
+        engine->alloc->free(engine->alloc->ctx, copies[i], parts[i].len + 1);
     if (!joined)
         return HU_ERR_OUT_OF_MEMORY;
     *out = joined;

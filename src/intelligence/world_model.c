@@ -64,14 +64,14 @@ hu_error_t hu_world_model_init_tables(hu_world_model_t *model) {
     if (rc != SQLITE_OK) {
         if (err)
             sqlite3_free(err);
-        return HU_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_STORE;
     }
     err = NULL;
     rc = sqlite3_exec(model->db, sql2, NULL, NULL, &err);
     if (rc != SQLITE_OK) {
         if (err)
             sqlite3_free(err);
-        return HU_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_STORE;
     }
     return HU_OK;
 }
@@ -126,7 +126,7 @@ hu_error_t hu_world_simulate(hu_world_model_t *model,
                                 "WHERE action LIKE ? ORDER BY confidence DESC",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_STORE;
 
     sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
 
@@ -285,7 +285,7 @@ hu_error_t hu_world_record_outcome(hu_world_model_t *model,
                                 "confidence, observed_at) VALUES(?, ?, NULL, ?, ?)",
                                 -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_STORE;
 
     sqlite3_bind_text(stmt, 1, action, (int)action_len, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, outcome, (int)outcome_len, SQLITE_STATIC);
@@ -294,7 +294,7 @@ hu_error_t hu_world_record_outcome(hu_world_model_t *model,
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_BACKEND;
+    return (rc == SQLITE_DONE) ? HU_OK : HU_ERR_MEMORY_STORE;
 }
 
 hu_error_t hu_world_causal_depth(hu_world_model_t *model,
@@ -325,7 +325,7 @@ hu_error_t hu_world_causal_depth(hu_world_model_t *model,
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(model->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK)
-        return HU_ERR_MEMORY_BACKEND;
+        return HU_ERR_MEMORY_STORE;
 
     sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
 
