@@ -390,6 +390,19 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             goto fail;
     }
 
+    /* Available skills */
+    if (config->skills_context && config->skills_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap, "\n## Available Skills\n\n", 22);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, config->skills_context, config->skills_context_len);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+        if (err != HU_OK)
+            goto fail;
+    }
+
     /* Memory context */
     err = append(alloc, &buf, &len, &cap, "## Memory Context\n\n", 19);
     if (err != HU_OK)
