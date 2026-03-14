@@ -1,6 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
+export type CardSurface = "default" | "high" | "highest";
+
 @customElement("hu-card")
 export class ScCard extends LitElement {
   @property({ type: Boolean, reflect: true }) hoverable = false;
@@ -9,6 +11,8 @@ export class ScCard extends LitElement {
   @property({ type: Boolean }) elevated = false;
   @property({ type: Boolean }) glass = true;
   @property({ type: Boolean }) solid = false;
+  /** Tonal surface: default (container), high (interactive/elevated), highest (emphasis). */
+  @property({ type: String }) surface: CardSurface = "default";
 
   static override styles = css`
     :host {
@@ -17,7 +21,7 @@ export class ScCard extends LitElement {
 
     .card {
       position: relative;
-      background: var(--hu-surface-container);
+      background: var(--hu-card-surface, var(--hu-surface-container));
       background-image: var(--hu-surface-gradient);
       border: 1px solid var(--hu-border-subtle);
       border-radius: var(--hu-radius-xl);
@@ -113,7 +117,11 @@ export class ScCard extends LitElement {
 
     /* Glass variant — Apple Liquid Glass with specular highlight */
     .card.glass {
-      background: color-mix(in srgb, var(--hu-surface-container) 65%, transparent);
+      background: color-mix(
+        in srgb,
+        var(--hu-card-surface, var(--hu-surface-container)) 65%,
+        transparent
+      );
       backdrop-filter: blur(var(--hu-blur-lg)) saturate(var(--hu-glass-standard-saturate));
       -webkit-backdrop-filter: blur(var(--hu-blur-lg)) saturate(var(--hu-glass-standard-saturate));
       border: 1px solid color-mix(in srgb, var(--hu-border-subtle) 40%, transparent);
@@ -174,6 +182,13 @@ export class ScCard extends LitElement {
   }
 
   render() {
+    const surfaceToken =
+      this.surface === "high"
+        ? "var(--hu-surface-container-high)"
+        : this.surface === "highest"
+          ? "var(--hu-surface-container-highest)"
+          : "var(--hu-surface-container)";
+
     const classes = [
       "card",
       this.hoverable ? "hoverable" : "",
@@ -188,6 +203,7 @@ export class ScCard extends LitElement {
     return html`
       <div
         class=${classes}
+        style="--hu-card-surface: ${surfaceToken}"
         role=${this.clickable ? "button" : undefined}
         tabindex=${this.clickable ? 0 : undefined}
         @keydown=${this._onKeyDown}

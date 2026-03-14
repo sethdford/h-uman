@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import "./hu-card.js";
 import "./hu-animated-number.js";
+import "./hu-sparkline-enhanced.js";
 import { icons } from "../icons.js";
 
 @customElement("hu-stat-card")
@@ -10,6 +11,7 @@ export class ScStatCard extends LitElement {
   /** When set, renders this string instead of animated number (e.g. "2d 0h", "5.9 MB") */
   @property({ type: String }) valueStr = "";
   @property({ type: String }) label = "";
+  @property({ type: Array }) sparklineData: number[] = [];
   @property({ type: String }) trend = "";
   @property({ type: String }) trendDirection: "up" | "down" | "flat" = "flat";
   @property({ type: Number }) progress = -1;
@@ -78,6 +80,17 @@ export class ScStatCard extends LitElement {
       letter-spacing: 0.04em;
     }
 
+    .sparkline-wrap {
+      margin-top: var(--hu-space-sm);
+      width: 100%;
+    }
+
+    .sparkline-wrap hu-sparkline-enhanced {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+    }
+
     .progress-bar {
       height: 0.125rem;
       background: var(--hu-bg-inset);
@@ -140,6 +153,20 @@ export class ScStatCard extends LitElement {
                 `}
           </div>
           <div class="label">${this.label}</div>
+          ${this.sparklineData.length >= 2
+            ? html`
+                <div class="sparkline-wrap">
+                  <hu-sparkline-enhanced
+                    .data=${this.sparklineData}
+                    width=${120}
+                    height=${32}
+                    color="var(--hu-accent)"
+                    .showTooltip=${false}
+                    .fillGradient=${true}
+                  ></hu-sparkline-enhanced>
+                </div>
+              `
+            : nothing}
           ${this.progress >= 0
             ? html`
                 <div class="progress-bar">

@@ -8,6 +8,7 @@ export interface StatMetric {
   label: string;
   value?: number;
   valueStr?: string;
+  sparklineData?: number[];
 }
 
 export interface MetricRowItem {
@@ -41,6 +42,7 @@ export class ScOverviewStats extends LitElement {
                 .value=${m.value ?? 0}
                 .valueStr=${m.valueStr ?? ""}
                 .label=${m.label}
+                .sparklineData=${m.sparklineData ?? []}
                 style="--hu-stagger-delay: ${i * 50}ms"
               ></hu-stat-card>
             `,

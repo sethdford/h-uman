@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { icons } from "../icons.js";
 import "./hu-status-dot.js";
@@ -104,6 +104,80 @@ export class ScSidebar extends LitElement {
       gap: var(--hu-space-sm);
       padding: var(--hu-space-md);
       flex-shrink: 0;
+      position: relative;
+    }
+
+    .header::after {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: var(--hu-space-md);
+      right: var(--hu-space-md);
+      height: 1px;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        color-mix(in srgb, var(--hu-accent) 20%, transparent),
+        transparent
+      );
+      opacity: 0;
+      transition: opacity var(--hu-duration-slow) var(--hu-ease-out);
+    }
+
+    :host .header.connected::after {
+      opacity: 1;
+      animation: hu-ambient-sweep var(--hu-duration-ambient, 25s) linear infinite;
+      background-size: 200% 100%;
+    }
+
+    @keyframes hu-ambient-sweep {
+      0% {
+        background-position: -200% center;
+      }
+      100% {
+        background-position: 200% center;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .header::after {
+        animation: none !important;
+      }
+    }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: var(--hu-space-xs);
+      min-width: 0;
+    }
+
+    .connected-pulse {
+      flex-shrink: 0;
+      width: var(--hu-space-xs);
+      height: var(--hu-space-xs);
+      border-radius: var(--hu-radius-full);
+      background: var(--hu-accent);
+      opacity: 0.9;
+      animation: hu-pulse-ambient var(--hu-duration-slow) var(--hu-ease-in-out) infinite;
+    }
+
+    @keyframes hu-pulse-ambient {
+      0%,
+      100% {
+        opacity: 0.9;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.5;
+        transform: scale(1.15);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .connected-pulse {
+        animation: none;
+      }
     }
 
     .logo {
@@ -128,7 +202,7 @@ export class ScSidebar extends LitElement {
       transition: opacity var(--hu-duration-normal) var(--hu-ease-out);
     }
 
-    :host([collapsed]) .brand {
+    :host([collapsed]) .brand-wrap {
       opacity: 0;
       width: 0;
       overflow: hidden;
@@ -359,7 +433,7 @@ export class ScSidebar extends LitElement {
   override render() {
     return html`
       <aside class="sidebar">
-        <header class="header">
+        <header class="header ${this.connectionStatus === "connected" ? "connected" : ""}">
           <div class="logo" aria-hidden="true">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
               <path
@@ -389,7 +463,16 @@ export class ScSidebar extends LitElement {
               <circle cx="16" cy="27" r="2" fill="currentColor" />
             </svg>
           </div>
-          <span class="brand">h-uman</span>
+          <div class="brand-wrap">
+            ${this.connectionStatus === "connected"
+              ? html`<span
+                  class="connected-pulse"
+                  aria-hidden="true"
+                  title="Gateway connected"
+                ></span>`
+              : nothing}
+            <span class="brand">h-uman</span>
+          </div>
         </header>
 
         <nav class="nav">

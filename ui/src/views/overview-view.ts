@@ -57,18 +57,6 @@ interface SessionItem {
   turn_count?: number;
 }
 
-function formatUptime(secs: number | undefined): string {
-  if (secs == null || secs <= 0) return "-";
-  const d = Math.floor(secs / 86400);
-  const h = Math.floor((secs % 86400) / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}d`);
-  if (h > 0) parts.push(`${h}h`);
-  if (m > 0 || parts.length === 0) parts.push(`${m}m`);
-  return parts.join(" ");
-}
-
 @customElement("hu-overview-view")
 export class ScOverviewView extends GatewayAwareLitElement {
   override autoRefreshInterval = 30_000;
@@ -524,20 +512,46 @@ export class ScOverviewView extends GatewayAwareLitElement {
 
   /* ── Stats row ─────────────────────────────────────── */
 
+  /** Deterministic mock trend data for sparklines (no flicker on re-render). */
+  private _mockTrendData(base: number, variance: number, points = 12): number[] {
+    const out: number[] = [];
+    let v = base;
+    for (let i = 0; i < points; i++) {
+      const wave = Math.sin((i / points) * Math.PI * 2) * 0.5 + 0.5;
+      v = Math.max(0, base + (wave - 0.3) * variance);
+      out.push(Math.round(v * 10) / 10);
+    }
+    return out;
+  }
+
   private _renderMetrics() {
     const cap = this.capabilities;
-    const uptimeValue =
-      this.health.uptime_secs != null && this.health.uptime_secs > 0
-        ? formatUptime(this.health.uptime_secs)
-        : this.gatewayOperational
-          ? "24/7"
-          : "-";
-    const rssValue = cap.peak_rss_mb != null ? `${cap.peak_rss_mb.toFixed(1)} MB` : "5.9 MB";
+    const providers = cap.providers ?? 0;
+    const channels = cap.channels ?? 0;
+    const tools = cap.tools ?? 0;
+    const memoryMb = cap.peak_rss_mb ?? 5.9;
+    const memoryStr = `${memoryMb.toFixed(1)} MB`;
     const metrics = [
-      { label: "Channels", value: cap.channels ?? 0 },
-      { label: "Tools", value: cap.tools ?? 0 },
-      { label: "Uptime", valueStr: uptimeValue },
-      { label: "Peak RSS", valueStr: rssValue },
+      {
+        label: "Providers",
+        value: providers,
+        sparklineData: this._mockTrendData(providers || 9, 2),
+      },
+      {
+        label: "Channels",
+        value: channels,
+        sparklineData: this._mockTrendData(channels || 34, 3),
+      },
+      {
+        label: "Tools",
+        value: tools,
+        sparklineData: this._mockTrendData(tools || 67, 4),
+      },
+      {
+        label: "Memory",
+        valueStr: memoryStr,
+        sparklineData: this._mockTrendData(memoryMb, 0.8),
+      },
     ];
     const metricRowItems = [
       { label: "Sessions Today", value: String(this.sessions.length) },
@@ -572,6 +586,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
             <hu-card
               glass
               clickable
+              surface="high"
               class="quick-action-card"
               role="button"
               tabindex="0"
@@ -599,11 +614,11 @@ export class ScOverviewView extends GatewayAwareLitElement {
     return html`
       <div class="details">
         <div class="bento">
-          <hu-card hoverable accent class="activity">
+          <hu-card hoverable accent surface="high" class="activity">
             <hu-activity-timeline .events=${this.activityEvents}></hu-activity-timeline>
           </hu-card>
 
-          <hu-card hoverable accent class="channels">
+          <hu-card hoverable accent surface="high" class="channels">
             <div class="section-label">Channels</div>
             ${this.channels.length === 0
               ? html`
@@ -640,7 +655,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
                 `}
           </hu-card>
 
-          <hu-card hoverable accent class="sessions">
+          <hu-card hoverable accent surface="high" class="sessions">
             <div class="section-label">Recent Sessions</div>
             <hu-sessions-table
               .sessions=${this.recentSessions}
