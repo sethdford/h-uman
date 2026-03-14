@@ -124,7 +124,7 @@ export class ScSidebar extends LitElement {
       transition: opacity var(--hu-duration-slow) var(--hu-ease-out);
     }
 
-    :host .header.connected::after {
+    .header:has(.connected-pulse)::after {
       opacity: 1;
       animation: hu-ambient-sweep var(--hu-duration-ambient, 25s) linear infinite;
       background-size: 200% 100%;
@@ -433,7 +433,7 @@ export class ScSidebar extends LitElement {
   override render() {
     return html`
       <aside class="sidebar">
-        <header class="header ${this.connectionStatus === "connected" ? "connected" : ""}">
+        <header class="header">
           <div class="logo" aria-hidden="true">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
               <path
