@@ -213,3 +213,5 @@ const char *hu_retrieval_strategy_str(hu_retrieval_strategy_t strat) {
 }
 
 #endif /* HU_ENABLE_SQLITE */
+
+typedef int hu_strategy_learner_empty_unit_guard;

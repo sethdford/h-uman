@@ -6,6 +6,7 @@
 #if defined(__unix__) || defined(__APPLE__)
 #include <pthread.h>
 #include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 #include "human/agent.h"
@@ -1103,7 +1104,127 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
 #endif
     }
 
-    fprintf(stderr, "Usage: human pwa [list|tabs [url_pattern]|read <app>|send <app> [target] <message>]\n");
+    if (strcmp(sub, "watch") == 0) {
+#if HU_IS_TEST
+        fprintf(stderr, "PWA: browser automation unavailable in test build\n");
+        return HU_OK;
+#else
+        hu_pwa_browser_t browser;
+        hu_error_t err = hu_pwa_detect_browser(&browser);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA: no supported browser found\n");
+            return err;
+        }
+
+        int interval = 5;
+        if (argc >= 4 && argv[3])
+            interval = atoi(argv[3]);
+        if (interval < 1)
+            interval = 5;
+
+        printf("Watching PWA tabs (poll every %ds, Ctrl-C to stop)...\n", interval);
+        printf("Browser: %s\n\n", hu_pwa_browser_name(browser));
+        fflush(stdout);
+
+        uint32_t *hashes = (uint32_t *)alloc->alloc(alloc->ctx,
+                                                      PWA_APP_COUNT * sizeof(uint32_t));
+        if (!hashes)
+            return HU_ERR_OUT_OF_MEMORY;
+        memset(hashes, 0, PWA_APP_COUNT * sizeof(uint32_t));
+
+        for (;;) {
+            for (size_t i = 0; i < PWA_APP_COUNT; i++) {
+                const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(PWA_APP_NAMES[i]);
+                if (!drv || !drv->read_messages_js)
+                    continue;
+
+                char *result = NULL;
+                size_t result_len = 0;
+                err = hu_pwa_read_messages(alloc, browser, PWA_APP_NAMES[i], &result, &result_len);
+                if (err != HU_OK || !result)
+                    continue;
+
+                uint32_t h = 2166136261u;
+                for (size_t j = 0; j < result_len; j++)
+                    h = (h ^ (uint8_t)result[j]) * 16777619u;
+
+                if (h != hashes[i]) {
+                    time_t now = time(NULL);
+                    struct tm *tm = localtime(&now);
+                    char ts[32];
+                    strftime(ts, sizeof(ts), "%H:%M:%S", tm);
+                    printf("[%s] %s: new content detected\n", ts,
+                           drv->display_name ? drv->display_name : drv->app_name);
+
+                    const char *last = result + result_len;
+                    while (last > result && *(last - 1) != '\n')
+                        last--;
+                    if (*last == '\n')
+                        last++;
+                    printf("  > %s\n", last);
+                    fflush(stdout);
+                    hashes[i] = h;
+                }
+                alloc->free(alloc->ctx, result, result_len + 1);
+            }
+            sleep((unsigned)interval);
+        }
+        alloc->free(alloc->ctx, hashes, PWA_APP_COUNT * sizeof(uint32_t));
+        return HU_OK;
+#endif
+    }
+
+    if (strcmp(sub, "scan") == 0) {
+#if HU_IS_TEST
+        fprintf(stderr, "PWA: browser automation unavailable in test build\n");
+        return HU_OK;
+#else
+        hu_pwa_browser_t browser;
+        hu_error_t err = hu_pwa_detect_browser(&browser);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA: no supported browser found\n");
+            return err;
+        }
+        printf("Scanning all open PWA tabs...\n");
+        printf("Browser: %s\n\n", hu_pwa_browser_name(browser));
+        fflush(stdout);
+
+        size_t found = 0;
+        for (size_t i = 0; i < PWA_APP_COUNT; i++) {
+            const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(PWA_APP_NAMES[i]);
+            if (!drv || !drv->read_messages_js)
+                continue;
+
+            hu_pwa_tab_t tab;
+            err = hu_pwa_find_tab(alloc, browser, drv->url_pattern, &tab);
+            if (err != HU_OK)
+                continue;
+
+            printf("=== %s (%s) ===\n", drv->display_name ? drv->display_name : drv->app_name,
+                   tab.url ? tab.url : "?");
+            fflush(stdout);
+
+            char *result = NULL;
+            size_t result_len = 0;
+            err = hu_pwa_exec_js(alloc, &tab, drv->read_messages_js, &result, &result_len);
+            hu_pwa_tab_free(alloc, &tab);
+
+            if (err == HU_OK && result && result_len > 0) {
+                printf("%.*s\n\n", (int)result_len, result);
+                alloc->free(alloc->ctx, result, result_len + 1);
+                found++;
+            } else {
+                printf("(no content or read failed)\n\n");
+                if (result)
+                    alloc->free(alloc->ctx, result, result_len + 1);
+            }
+        }
+        printf("--- Scanned %zu apps with content ---\n", found);
+        return HU_OK;
+#endif
+    }
+
+    fprintf(stderr, "Usage: human pwa [list|tabs|scan|watch [secs]|read <app>|send <app> [target] <message>]\n");
     return HU_ERR_INVALID_ARGUMENT;
 }
 
