@@ -110,6 +110,44 @@ These items block a release tag:
 
 ---
 
+## Quarterly Award-Criteria Audit (60 min)
+
+**Cadence:** First Monday of each quarter (Q1 Jan, Q2 Apr, Q3 Jul, Q4 Oct)
+**Owner:** Project lead or design lead
+
+### Checklist
+
+1. Review the quality scorecard (`docs/quality-scorecard.md`) against the 63+/70 target:
+   ```bash
+   bash scripts/quality-score-report.sh
+   ```
+2. Run the competitive benchmark and compare against named competitors:
+   ```bash
+   bash scripts/benchmark-competitive.sh --markdown
+   ```
+3. Audit each surface against the award-criteria checklists in `docs/standards/quality/award-criteria.md`:
+   - **Website**: Awwwards checklist (Lighthouse, LCP, WebGL, scroll narrative, View Transitions)
+   - **Dashboard**: Webby checklist (performance, UX, functionality)
+   - **iOS**: Apple Design Award checklist (Dynamic Type, VoiceOver, haptics, App Intents)
+   - **Android**: Google Play Best App checklist (Material 3, Compose, predictive back, widget)
+4. Update per-surface scores in `docs/quality-scorecard.md` with evidence
+5. Identify the top 3 gaps per surface and create implementation plans
+6. Review the Design Innovation Pipeline in `docs/standards/design/design-strategy.md`:
+   - Did we adopt the planned quarterly feature?
+   - Queue the next quarter's feature adoption
+7. Check award submission readiness in `docs/competitive-benchmarks.md`
+8. Log results and create remediation issues for any regressions
+
+### What "Pass" Looks Like
+
+- All surface scores updated with evidence
+- No surface has regressed from the previous quarter
+- At least one surface has improved by 2+ points
+- Next quarter's innovation pipeline feature is identified
+- Award submission blockers are documented with remediation plans
+
+---
+
 ## Ceremony Hygiene
 
 - **Never skip a ceremony.** If the weekly audit finds nothing, log "clean" and move on. The act of checking is the value.
