@@ -274,12 +274,12 @@ export class ScSidebar extends LitElement {
       border-radius: var(--hu-radius);
     }
 
-    .nav-item:hover:not(.active) {
+    .nav-item:hover:not([aria-current]) {
       background: var(--hu-hover-overlay);
       color: var(--hu-text);
     }
 
-    .nav-item.active {
+    .nav-item[aria-current] {
       background: var(--hu-accent-subtle);
       border-left: 3px solid var(--hu-accent);
       color: var(--hu-accent-text, var(--hu-accent));
