@@ -128,6 +128,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       display: flex;
       flex-direction: column;
       gap: var(--hu-space-xl);
+      container-type: inline-size;
     }
 
     .bento {
@@ -225,9 +226,9 @@ export class ScOverviewView extends GatewayAwareLitElement {
       grid-area: sessions;
     }
 
-    /* ── Responsive ───────────────────────────────────── */
+    /* ── Responsive (container queries) ─────────────────── */
 
-    @media (max-width: var(--hu-breakpoint-md)) /* --hu-breakpoint-md */ {
+    @container (max-width: 768px) {
       .bento {
         grid-template-columns: 1fr;
         grid-template-areas:
@@ -250,7 +251,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       }
     }
 
-    @media (max-width: var(--hu-breakpoint-sm)) /* --hu-breakpoint-sm */ {
+    @container (max-width: 480px) {
       :host {
         padding: var(--hu-space-md) var(--hu-space-lg);
       }
@@ -291,7 +292,7 @@ export class ScOverviewView extends GatewayAwareLitElement {
       font-weight: var(--hu-weight-medium);
       color: var(--hu-text);
     }
-    @media (max-width: var(--hu-breakpoint-md)) /* --hu-breakpoint-md */ {
+    @container (max-width: 768px) {
       .quick-actions {
         grid-template-columns: 1fr;
       }
