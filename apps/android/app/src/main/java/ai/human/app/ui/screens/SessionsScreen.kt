@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.IntOffset
 import ai.human.app.ui.HUTokens
 
 private data class SessionItem(
@@ -44,7 +45,7 @@ private data class SessionItem(
     val messageCount: Int,
 )
 
-private val sessionSpring = spring<Float>(
+private val sessionSpring = spring<IntOffset>(
     dampingRatio = 0.7f,
     stiffness = HUTokens.springStandardStiffness,
 )

@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,7 +32,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.IntOffset
+import ai.human.app.GatewayClient
 import ai.human.app.ui.HUTokens
 
 private data class ChatMessage(
@@ -40,23 +45,32 @@ private data class ChatMessage(
     val isUser: Boolean,
 )
 
-private val chatSpring = spring<Float>(
+private val chatSpring = spring<IntOffset>(
     dampingRatio = 0.7f,
     stiffness = HUTokens.springStandardStiffness,
 )
 
 @Composable
-fun ChatScreen() {
+fun ChatScreen(gateway: GatewayClient = GatewayClient()) {
     val colorScheme = MaterialTheme.colorScheme
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessage(1, "Hello! How can I help you today?", false),
-            ChatMessage(2, "What's the weather like?", true),
-            ChatMessage(3, "I don't have access to real-time weather data, but I can help you find weather information or suggest checking a weather app.", false),
-        )
-    }
+    var nextId = remember { 1 }
+    val messages = remember { mutableStateListOf<ChatMessage>() }
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val events by gateway.events.collectAsState()
+
+    LaunchedEffect(events) {
+        events?.let { event ->
+            if (event.type == "message" || event.type == "response") {
+                val text = event.payload?.optString("text", "")
+                    ?: event.payload?.optString("content", "")
+                    ?: ""
+                if (text.isNotBlank()) {
+                    messages.add(ChatMessage(nextId++, text, false))
+                }
+            }
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -128,6 +142,19 @@ fun ChatScreen() {
                             innerTextField()
                         }
                     },
+                    onTextLayout = {},
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSend = {
+                            if (inputText.isNotBlank()) {
+                                messages.add(ChatMessage(nextId++, inputText, true))
+                                gateway.send("chat", mapOf("text" to inputText))
+                                inputText = ""
+                            }
+                        },
+                    ),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                    ),
                 )
             }
         }
@@ -146,8 +173,11 @@ private fun ChatBubble(
         colorScheme.primaryContainer to colorScheme.onSurface
     }
 
+    val role = if (isUser) "You" else "Assistant"
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "$role said: $text" },
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Box(

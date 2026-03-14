@@ -115,11 +115,14 @@ export class ScApp extends LitElement {
       padding: var(--hu-space-xs) var(--hu-space-md);
       background: var(--hu-accent);
       color: var(--hu-on-accent);
+      border: none;
       border-radius: var(--hu-radius-sm);
-      text-decoration: none;
+      font-family: var(--hu-font);
+      font-size: var(--hu-text-sm);
       font-weight: 600;
+      cursor: pointer;
     }
-    .hu-skip-link:focus {
+    .hu-skip-link:focus-visible {
       top: var(--hu-space-md);
     }
 
@@ -434,6 +437,7 @@ export class ScApp extends LitElement {
     window.addEventListener("hashchange", this._hashHandler);
     this._onHashChange();
     dynamicLight.start();
+    this._initAmbientIntelligence();
 
     const wsUrl =
       typeof window !== "undefined" &&
@@ -625,6 +629,17 @@ export class ScApp extends LitElement {
     localStorage.setItem(SIDEBAR_KEY, String(this.sidebarCollapsed));
   }
 
+  private _initAmbientIntelligence(): void {
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) return;
+    const hour = new Date().getHours();
+    let warmth = 0;
+    if (hour < 7 || hour > 19) warmth = 0.08;
+    else if (hour < 10 || hour > 17) warmth = 0.04;
+    document.documentElement.style.setProperty("--hu-ambient-warmth", `${warmth}`);
+    document.documentElement.style.setProperty("--hu-ambient-hour", `${hour}`);
+  }
+
   private _switchToDemo(): void {
     this._fallbackTimer = null;
     this._inFallbackWindow = false;
@@ -689,15 +704,14 @@ export class ScApp extends LitElement {
 
   override render() {
     return html`
-      <a
-        href="#main-content"
+      <button
         class="hu-skip-link"
-        @click=${(e: Event) => {
-          e.preventDefault();
+        @click=${() => {
           this.shadowRoot?.getElementById("main-content")?.focus();
         }}
-        >Skip to content</a
       >
+        Skip to content
+      </button>
       ${this.connectionStatus === "disconnected" && !this._inFallbackWindow
         ? html`<div class="disconnect-banner" role="alert">
             Disconnected from server

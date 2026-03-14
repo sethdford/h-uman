@@ -16,41 +16,76 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import ai.human.app.ConnectionState
+import ai.human.app.GatewayClient
 import ai.human.app.ui.HUTokens
 
-private val overviewSpring = spring<Float>(
+private val overviewSpring = spring<IntOffset>(
     dampingRatio = 0.7f,
     stiffness = HUTokens.springStandardStiffness,
 )
 
 @Composable
-fun OverviewScreen() {
+fun OverviewScreen(
+    gateway: GatewayClient = GatewayClient(),
+    connectionState: ConnectionState = ConnectionState.DISCONNECTED,
+) {
     val colorScheme = MaterialTheme.colorScheme
     var visible by remember { mutableStateOf(false) }
-    val recentActivity = remember {
-        mutableStateListOf(
-            "Chat with human via CLI",
-            "Telegram message received",
-            "Discord channel synced",
-        )
-    }
+    val events by gateway.events.collectAsState()
+    val recentActivity = remember { mutableStateListOf<String>() }
 
     LaunchedEffect(Unit) {
         visible = true
+    }
+
+    LaunchedEffect(events) {
+        events?.let { event ->
+            val summary = when (event.type) {
+                "message" -> "Message: ${event.payload?.optString("text", "")?.take(60) ?: ""}"
+                "channel_event" -> "Channel: ${event.payload?.optString("channel", "unknown")}"
+                "tool_call" -> "Tool: ${event.payload?.optString("name", "unknown")}"
+                "status" -> "Status: ${event.payload?.optString("status", "")}"
+                else -> "${event.type}: ${event.payload?.optString("text", "")?.take(40) ?: "event"}"
+            }
+            if (summary.isNotBlank()) {
+                recentActivity.add(0, summary)
+                if (recentActivity.size > 20) recentActivity.removeRange(20, recentActivity.size)
+            }
+        }
+    }
+
+    val statusLabel = when (connectionState) {
+        ConnectionState.CONNECTED -> "Connected"
+        ConnectionState.CONNECTING -> "Connecting..."
+        ConnectionState.DISCONNECTED -> "Disconnected"
+    }
+    val statusColor = when (connectionState) {
+        ConnectionState.CONNECTED -> colorScheme.primary
+        ConnectionState.CONNECTING -> colorScheme.tertiary
+        ConnectionState.DISCONNECTED -> colorScheme.error
     }
 
     LazyColumn(
@@ -70,11 +105,36 @@ fun OverviewScreen() {
                         initialOffsetY = { it / 4 },
                     ),
             ) {
-                Text(
-                    text = "Welcome back",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = colorScheme.onBackground,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Welcome back",
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = colorScheme.onBackground,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(HUTokens.spaceXs),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Gateway status: $statusLabel"
+                        },
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(statusColor),
+                        )
+                        Text(
+                            text = statusLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
 
@@ -96,13 +156,13 @@ fun OverviewScreen() {
                     horizontalArrangement = Arrangement.spacedBy(HUTokens.spaceMd),
                 ) {
                     StatCard(
-                        title = "Messages sent",
-                        value = "1,247",
+                        title = "Gateway",
+                        value = statusLabel,
                         modifier = Modifier.weight(1f),
                     )
                     StatCard(
-                        title = "Active channels",
-                        value = "3",
+                        title = "Events",
+                        value = "${recentActivity.size}",
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -119,8 +179,8 @@ fun OverviewScreen() {
                     ),
             ) {
                 StatCard(
-                    title = "Uptime",
-                    value = "4d 12h",
+                    title = "Connection",
+                    value = if (connectionState == ConnectionState.CONNECTED) "Active" else "Offline",
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -140,7 +200,7 @@ fun OverviewScreen() {
                     ),
             ) {
                 Text(
-                    text = "Recent activity",
+                    text = if (recentActivity.isEmpty()) "No activity yet" else "Live activity",
                     style = MaterialTheme.typography.titleMedium,
                     color = colorScheme.onBackground,
                 )
@@ -152,7 +212,7 @@ fun OverviewScreen() {
                 visible = visible,
                 enter = fadeIn(animationSpec = tween(HUTokens.durationNormal.toInt(), delayMillis = 200)) +
                     slideInVertically(
-                        animationSpec =                         spring(
+                        animationSpec = spring<IntOffset>(
                             dampingRatio = 0.7f,
                             stiffness = HUTokens.springStandardStiffness,
                         ),
@@ -176,7 +236,8 @@ private fun StatCard(
         modifier = modifier
             .clip(RoundedCornerShape(HUTokens.radiusLg))
             .background(colorScheme.primaryContainer)
-            .padding(HUTokens.spaceMd),
+            .padding(HUTokens.spaceMd)
+            .semantics { contentDescription = "$title: $value" },
     ) {
         Column {
             Text(

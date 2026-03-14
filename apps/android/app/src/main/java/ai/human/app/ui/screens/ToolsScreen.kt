@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.IntOffset
 import ai.human.app.ui.HUTokens
 
 private data class ToolItem(
@@ -47,7 +48,7 @@ private data class ToolCategory(
     val tools: List<ToolItem>,
 )
 
-private val sessionSpring = spring<Float>(
+private val sessionSpring = spring<IntOffset>(
     dampingRatio = 0.7f,
     stiffness = HUTokens.springStandardStiffness,
 )

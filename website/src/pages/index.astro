@@ -620,7 +620,10 @@ const tools = [
           >
             Connect to any AI model. Reach users on any platform.
           </p>
-          <div class="provider-grid-wrap flex flex-wrap gap-3 justify-center" id="provider-grid">
+          <div
+            class="provider-grid-wrap flex flex-wrap gap-3 justify-center"
+            id="provider-grid"
+          >
             {
               providers.map((name, i) => (
                 <span
@@ -773,7 +776,9 @@ const tools = [
               class="p-6 md:p-8"
               style="background: var(--color-terminal-bg);"
             >
-              <div class="dash-stats-grid grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div
+                class="dash-stats-grid grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"
+              >
                 <div
                   class="text-left p-4 rounded-xl"
                   style="background: color-mix(in srgb, white 4%, transparent); border: 1px solid color-mix(in srgb, white 6%, transparent);"
@@ -1757,6 +1762,42 @@ const tools = [
         };
         update();
         window.addEventListener("scroll", update, { passive: true });
+      }
+    </script>
+    <script>
+      {
+        const root = document.documentElement;
+        const prefersReduced = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        if (!prefersReduced) {
+          const hour = new Date().getHours();
+          let warmth = 0;
+          if (hour < 7 || hour > 19) warmth = 0.12;
+          else if (hour < 10 || hour > 17) warmth = 0.06;
+          else warmth = 0;
+          root.style.setProperty("--hu-ambient-warmth", `${warmth}`);
+
+          let ticking = false;
+          window.addEventListener(
+            "scroll",
+            () => {
+              if (!ticking) {
+                ticking = true;
+                requestAnimationFrame(() => {
+                  const scrollH =
+                    document.documentElement.scrollHeight - window.innerHeight;
+                  const depth =
+                    scrollH > 0 ? Math.min(window.scrollY / scrollH, 1) : 0;
+                  root.style.setProperty("--hu-scroll-depth", depth.toFixed(3));
+                  ticking = false;
+                });
+              }
+            },
+            { passive: true },
+          );
+          root.style.setProperty("--hu-scroll-depth", "0");
+        }
       }
     </script>
   </body>

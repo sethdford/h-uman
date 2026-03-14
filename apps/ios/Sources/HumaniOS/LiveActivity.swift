@@ -1,3 +1,4 @@
+#if canImport(ActivityKit)
 import ActivityKit
 import SwiftUI
 import WidgetKit
@@ -80,3 +81,4 @@ struct HumanLiveActivity: Widget {
         }
     }
 }
+#endif

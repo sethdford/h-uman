@@ -1248,11 +1248,26 @@ hu-card.hu-entrance.hu-visible {
   padding: var(--hu-space-xs, 0.5rem) var(--hu-space-md, 1rem);
   background: var(--hu-accent);
   color: var(--hu-on-accent);
+  border: none;
   border-radius: var(--hu-radius-sm, 6px);
-  text-decoration: none;
+  font-family: var(--hu-font);
   font-weight: 600;
+  cursor: pointer;
 }
 
-.hu-skip-link:focus {
+.hu-skip-link:focus-visible {
   top: var(--hu-space-md, 1rem);
+}
+
+/* ── Ambient Intelligence ── */
+:root {
+  --hu-ambient-warmth: 0;
+  --hu-ambient-hour: 12;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root {
+    filter: sepia(var(--hu-ambient-warmth)) saturate(calc(1 + var(--hu-ambient-warmth) * 0.2));
+    transition: filter 3s ease;
+  }
 }
