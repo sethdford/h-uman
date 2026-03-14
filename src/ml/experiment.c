@@ -15,6 +15,7 @@
 #include "human/ml/prepare.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
+#include "human/ml/experiment_store.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -182,6 +183,19 @@ static hu_error_t run_single_experiment(hu_allocator_t *alloc,
         return HU_OK;
     }
 
+    /* Register model params with optimizer so gradients flow */
+    err = hu_gpt_register_params(&model, &optimizer);
+    if (err != HU_OK) {
+        hu_ml_dataloader_deinit(val_dl);
+        hu_ml_dataloader_deinit(train_dl);
+        optimizer.vtable->deinit(optimizer.ctx, alloc);
+        model.vtable->deinit(model.ctx, alloc);
+        result->status = HU_EXPERIMENT_CRASH;
+        snprintf(result->description, sizeof(result->description),
+                 "param registration failed: %d", (int)err);
+        return HU_OK;
+    }
+
     hu_ml_train_result_t train_result = {0};
     err = hu_ml_train(alloc, &model, &optimizer, train_dl, val_dl,
                       &cfg->training, NULL, cfg->gpt.vocab_size, &train_result);
@@ -226,6 +240,16 @@ hu_error_t hu_experiment_loop(hu_allocator_t *alloc,
 
     hu_experiment_config_t current_config = config->base_config;
 
+    /* Copy LR schedule from optimizer config to training config */
+    current_config.training.warmup_ratio = current_config.optimizer.warmup_ratio;
+    current_config.training.warmdown_ratio = current_config.optimizer.warmdown_ratio;
+    current_config.training.final_lr_frac = current_config.optimizer.final_lr_frac;
+
+    /* Open experiment store if a results path is given */
+    hu_experiment_store_t *store = NULL;
+    if (config->results_path)
+        hu_experiment_store_open(alloc, config->results_path, &store);
+
     for (int i = 0; i < config->max_iterations; i++) {
         hu_experiment_result_t result = {0};
         result.iteration = i;
@@ -260,12 +284,18 @@ hu_error_t hu_experiment_loop(hu_allocator_t *alloc,
             }
         }
 
+        if (store)
+            hu_experiment_store_save(store, &result);
+
         if (callback)
             callback(&result, user_data);
 
         if (config->convergence_threshold > 0.0 && best_bpb <= config->convergence_threshold)
             break;
     }
+
+    if (store)
+        hu_experiment_store_close(store);
 
     (void)best_iter;
     return HU_OK;

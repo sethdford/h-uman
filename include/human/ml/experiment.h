@@ -32,6 +32,9 @@ typedef struct hu_experiment_loop_config {
     const char *data_dir;
     const char *results_path;
     double convergence_threshold;
+    void *provider;      /* optional hu_provider_t* for agent-driven mutations */
+    void *memory;        /* optional hu_memory_t* for experiment persistence */
+    const char *persona; /* optional persona name for research agent prompt */
 } hu_experiment_loop_config_t;
 
 typedef void (*hu_experiment_loop_callback_t)(const hu_experiment_result_t *result,

@@ -58,6 +58,10 @@ typedef struct hu_training_config {
     size_t device_batch_size;
     int time_budget_secs;
     size_t eval_tokens;
+    size_t grad_accum_steps;
+    float warmup_ratio;
+    float warmdown_ratio;
+    float final_lr_frac;
 } hu_training_config_t;
 
 typedef struct hu_ml_train_result {

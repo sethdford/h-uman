@@ -213,6 +213,7 @@ static void muon_adamw_deinit(void *ctx, hu_allocator_t *alloc)
     }
     if (m->groups)
         alloc->free(alloc->ctx, m->groups, m->group_capacity * sizeof(hu_param_group_t));
+    alloc->free(alloc->ctx, m, sizeof(hu_muon_adamw_t));
 }
 
 static const hu_ml_optimizer_vtable_t muon_adamw_vtable = {

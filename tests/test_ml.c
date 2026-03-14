@@ -12,6 +12,8 @@
 #include "human/ml/cli.h"
 #include "human/ml/tokenizer_ml.h"
 #include "human/ml/train.h"
+#include "human/ml/checkpoint.h"
+#include "human/ml/experiment_store.h"
 #include "test_framework.h"
 
 #include <math.h>
@@ -642,13 +644,48 @@ static void test_train_pipeline(void) {
     rmdir(dir);
 }
 
-/* ─── GPT: backward returns not supported ──────────────────────────────────── */
+/* ─── GPT: backward produces finite gradients ────────────────────────────── */
 
-static void test_gpt_backward_not_supported(void) {
+static void test_gpt_backward_runs(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_gpt_config_t cfg = {0};
-    cfg.sequence_len = 8;
-    cfg.vocab_size = 64;
+    cfg.sequence_len = 4;
+    cfg.vocab_size = 32;
+    cfg.n_layer = 1;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 64;
+    cfg.head_dim = 32;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
+
+    int32_t ids[] = {0, 1, 2, 3};
+    hu_ml_tensor_t input = { .data = ids, .shape = {1, 4, 0, 0}, .ndim = 2,
+                             .dtype = HU_ML_DTYPE_I32, .size_bytes = 4*sizeof(int32_t) };
+    hu_ml_tensor_t output = {0};
+    HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &output), HU_OK);
+
+    size_t logits_sz = 1 * 4 * 32;
+    float *d_logits = (float *)alloc.alloc(alloc.ctx, logits_sz * sizeof(float));
+    for (size_t i = 0; i < logits_sz; i++) d_logits[i] = 0.001f;
+
+    hu_ml_tensor_t grad = { .data = d_logits, .shape = {1, 4, 32, 0}, .ndim = 3,
+                            .dtype = HU_ML_DTYPE_F32, .size_bytes = logits_sz * sizeof(float) };
+    HU_ASSERT_EQ(model.vtable->backward(model.ctx, &grad), HU_OK);
+
+    alloc.free(alloc.ctx, d_logits, logits_sz * sizeof(float));
+    alloc.free(alloc.ctx, output.data, output.size_bytes);
+    model.vtable->deinit(model.ctx, &alloc);
+}
+
+/* ─── GPT: backward null grad returns error ─────────────────────────────── */
+
+static void test_gpt_backward_null_grad(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 4;
+    cfg.vocab_size = 32;
     cfg.n_layer = 1;
     cfg.n_head = 2;
     cfg.n_kv_head = 2;
@@ -657,11 +694,177 @@ static void test_gpt_backward_not_supported(void) {
 
     hu_model_t model = {0};
     hu_gpt_create(&alloc, &cfg, &model);
+    HU_ASSERT_EQ(model.vtable->backward(model.ctx, NULL), HU_ERR_INVALID_ARGUMENT);
+    model.vtable->deinit(model.ctx, &alloc);
+}
 
-    hu_ml_tensor_t grad = {0};
-    HU_ASSERT_EQ(model.vtable->backward(model.ctx, &grad), HU_ERR_NOT_SUPPORTED);
+/* ─── Helper: compute cross-entropy loss for given model + input/targets ── */
+
+static float compute_ce_loss(hu_allocator_t *alloc, hu_model_t *model,
+                             int32_t *ids, int32_t *targets, size_t BS, size_t V)
+{
+    hu_ml_tensor_t input = { .data = ids, .shape = {1, BS, 0, 0}, .ndim = 2,
+                             .dtype = HU_ML_DTYPE_I32, .size_bytes = BS * sizeof(int32_t) };
+    hu_ml_tensor_t output = {0};
+    model->vtable->forward(model->ctx, &input, &output);
+    float *logits = (float *)output.data;
+    float loss = 0.0f;
+    for (size_t i = 0; i < BS; i++) {
+        float *li = logits + i * V;
+        float mx = li[0];
+        for (size_t k = 1; k < V; k++) if (li[k] > mx) mx = li[k];
+        float sum = 0.0f;
+        for (size_t k = 0; k < V; k++) sum += expf(li[k] - mx);
+        loss += -(li[targets[i]] - mx - logf(sum));
+    }
+    alloc->free(alloc->ctx, output.data, output.size_bytes);
+    return loss / (float)BS;
+}
+
+/* ─── GPT: finite-difference gradient check on lm_head ───────────────────── */
+
+static void test_gpt_backward_finite_diff(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 2;
+    cfg.vocab_size = 8;
+    cfg.n_layer = 1;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 4;
+    cfg.head_dim = 2;
+
+    int32_t ids[] = {0, 1};
+    int32_t targets[] = {1, 2};
+    size_t V = 8, BS = 2;
+    float eps = 1e-3f;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
+
+    hu_ml_tensor_t *params = NULL;
+    size_t pcount = 0;
+    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &pcount), HU_OK);
+
+    /* Pick lm_head (params[1]) for finite-difference check — output layer
+     * has the strongest gradient signal, least attenuated by chain rule. */
+    float *lm_data = (float *)params[1].data;
+    size_t lm_sz = params[1].size_bytes / sizeof(float);
+    size_t check_n = lm_sz < 8 ? lm_sz : 8;
+
+    int finite_count = 0, nonzero_count = 0;
+    for (size_t j = 0; j < check_n; j++) {
+        float orig = lm_data[j];
+
+        lm_data[j] = orig + eps;
+        float loss_plus = compute_ce_loss(&alloc, &model, ids, targets, BS, V);
+        lm_data[j] = orig - eps;
+        float loss_minus = compute_ce_loss(&alloc, &model, ids, targets, BS, V);
+        lm_data[j] = orig;
+
+        float numerical_grad = (loss_plus - loss_minus) / (2.0f * eps);
+        if (isfinite(numerical_grad)) finite_count++;
+        if (fabsf(numerical_grad) > 1e-8f) nonzero_count++;
+    }
+
+    HU_ASSERT_EQ(finite_count, (int)check_n);
+    HU_ASSERT_GT(nonzero_count, 0);
 
     model.vtable->deinit(model.ctx, &alloc);
+}
+
+/* ─── GPT: register params with optimizer ────────────────────────────────── */
+
+static void test_gpt_register_params(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 4;
+    cfg.vocab_size = 16;
+    cfg.n_layer = 1;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 4;
+    cfg.head_dim = 2;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
+
+    hu_optimizer_config_t opt_cfg = { .embedding_lr = 0.01f, .unembedding_lr = 0.01f,
+        .matrix_lr = 0.01f, .scalar_lr = 0.01f, .weight_decay = 0.0f,
+        .adam_beta1 = 0.9f, .adam_beta2 = 0.999f };
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &opt_cfg, &opt), HU_OK);
+    HU_ASSERT_EQ(hu_gpt_register_params(&model, &opt), HU_OK);
+    HU_ASSERT_EQ(hu_gpt_register_params(NULL, &opt), HU_ERR_INVALID_ARGUMENT);
+
+    opt.vtable->deinit(opt.ctx, &alloc);
+    model.vtable->deinit(model.ctx, &alloc);
+}
+
+/* ─── Training with real backward pass ───────────────────────────────────── */
+
+static void test_train_with_backward(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t gpt_cfg = {0};
+    gpt_cfg.sequence_len = 4;
+    gpt_cfg.vocab_size = 16;
+    gpt_cfg.n_layer = 1;
+    gpt_cfg.n_head = 2;
+    gpt_cfg.n_kv_head = 2;
+    gpt_cfg.n_embd = 4;
+    gpt_cfg.head_dim = 2;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &gpt_cfg, &model), HU_OK);
+
+    hu_optimizer_config_t opt_cfg = { .embedding_lr = 0.01f, .unembedding_lr = 0.01f,
+        .matrix_lr = 0.01f, .scalar_lr = 0.001f, .weight_decay = 0.0f,
+        .adam_beta1 = 0.9f, .adam_beta2 = 0.999f };
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &opt_cfg, &opt), HU_OK);
+    HU_ASSERT_EQ(hu_gpt_register_params(&model, &opt), HU_OK);
+
+    /* Create tiny training data */
+    char tmpdir[] = "/tmp/hu_bw_XXXXXX";
+    HU_ASSERT(mkdtemp(tmpdir) != NULL);
+    char path[256];
+    snprintf(path, sizeof(path), "%s/train.bin", tmpdir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT(f != NULL);
+    int32_t data[16];
+    for (int i = 0; i < 16; i++) data[i] = i % 16;
+    fwrite(data, sizeof(int32_t), 16, f);
+    fclose(f);
+
+    snprintf(path, sizeof(path), "%s/val.bin", tmpdir);
+    f = fopen(path, "wb");
+    HU_ASSERT(f != NULL);
+    fwrite(data, sizeof(int32_t), 16, f);
+    fclose(f);
+
+    hu_ml_dataloader_t *train_dl = NULL, *val_dl = NULL;
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, tmpdir, 2, 4, "train", &train_dl), HU_OK);
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, tmpdir, 2, 4, "val", &val_dl), HU_OK);
+
+    hu_training_config_t train_cfg = { .total_batch_size = 2, .device_batch_size = 2,
+        .time_budget_secs = 5, .eval_tokens = 8, .grad_accum_steps = 1 };
+    hu_ml_train_result_t result = {0};
+    hu_error_t err = hu_ml_train(&alloc, &model, &opt, train_dl, val_dl,
+                                  &train_cfg, NULL, 16, &result);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT(result.num_steps > 0);
+
+    hu_ml_dataloader_deinit(val_dl);
+    hu_ml_dataloader_deinit(train_dl);
+    opt.vtable->deinit(opt.ctx, &alloc);
+    model.vtable->deinit(model.ctx, &alloc);
+
+    /* Cleanup */
+    snprintf(path, sizeof(path), "%s/train.bin", tmpdir);
+    remove(path);
+    snprintf(path, sizeof(path), "%s/val.bin", tmpdir);
+    remove(path);
+    rmdir(tmpdir);
 }
 
 /* ─── GPT: forward produces finite logits ──────────────────────────────── */
@@ -699,9 +902,9 @@ static void test_gpt_forward_logits_finite(void) {
     model.vtable->deinit(model.ctx, &alloc);
 }
 
-/* ─── GPT: get_params returns NOT_SUPPORTED ────────────────────────────── */
+/* ─── GPT: get_params returns param descriptors ────────────────────────── */
 
-static void test_gpt_get_params_stub(void) {
+static void test_gpt_get_params(void) {
     hu_allocator_t alloc = hu_system_allocator();
     hu_gpt_config_t cfg = {0};
     cfg.sequence_len = 8;
@@ -717,7 +920,14 @@ static void test_gpt_get_params_stub(void) {
 
     hu_ml_tensor_t *params = NULL;
     size_t count = 0;
-    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &count), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &count), HU_OK);
+    HU_ASSERT_NOT_NULL(params);
+    /* 2 global (wte, lm_head) + 8 per layer */
+    HU_ASSERT_EQ(count, 2 + 1 * 8);
+    for (size_t i = 0; i < count; i++) {
+        HU_ASSERT_NOT_NULL(params[i].data);
+        HU_ASSERT_GT(params[i].size_bytes, 0);
+    }
 
     model.vtable->deinit(model.ctx, &alloc);
 }
@@ -1208,6 +1418,276 @@ static void test_experiment_loop_convergence(void) {
     HU_ASSERT_EQ(last_callback_result.status, HU_EXPERIMENT_CRASH);
 }
 
+/* ─── Training: loss decreases over multiple steps ────────────────────────── */
+
+static void test_train_loss_decreases(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t gpt_cfg = {0};
+    gpt_cfg.sequence_len = 8;
+    gpt_cfg.vocab_size = 16;
+    gpt_cfg.n_layer = 1;
+    gpt_cfg.n_head = 2;
+    gpt_cfg.n_kv_head = 2;
+    gpt_cfg.n_embd = 4;
+    gpt_cfg.head_dim = 2;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &gpt_cfg, &model), HU_OK);
+
+    hu_optimizer_config_t opt_cfg = { .embedding_lr = 0.01f, .unembedding_lr = 0.01f,
+        .matrix_lr = 0.01f, .scalar_lr = 0.001f, .weight_decay = 0.0f,
+        .adam_beta1 = 0.9f, .adam_beta2 = 0.999f };
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &opt_cfg, &opt), HU_OK);
+    HU_ASSERT_EQ(hu_gpt_register_params(&model, &opt), HU_OK);
+
+    int32_t ids[8], targets[8];
+    for (int i = 0; i < 8; i++) { ids[i] = i % 16; targets[i] = (i + 1) % 16; }
+    size_t V = 16, BS = 8;
+
+    float prev_loss = 1e9f;
+    int decreases = 0;
+
+    for (int step = 0; step < 10; step++) {
+        hu_ml_tensor_t input = { .data = ids, .shape = {1, 8, 0, 0}, .ndim = 2,
+                                 .dtype = HU_ML_DTYPE_I32, .size_bytes = 8 * sizeof(int32_t) };
+        hu_ml_tensor_t output = {0};
+        HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &output), HU_OK);
+
+        float *logits = (float *)output.data;
+        float *d_logits = (float *)alloc.alloc(alloc.ctx, BS * V * sizeof(float));
+
+        float loss = 0.0f;
+        for (size_t i = 0; i < BS; i++) {
+            float *li = logits + i * V;
+            float *di = d_logits + i * V;
+            float mx = li[0];
+            for (size_t k = 1; k < V; k++) if (li[k] > mx) mx = li[k];
+            float sum = 0;
+            for (size_t k = 0; k < V; k++) { di[k] = expf(li[k] - mx); sum += di[k]; }
+            for (size_t k = 0; k < V; k++) di[k] /= sum;
+            loss += -logf(di[targets[i]] + 1e-10f);
+            di[targets[i]] -= 1.0f;
+            for (size_t k = 0; k < V; k++) di[k] /= (float)BS;
+        }
+        loss /= (float)BS;
+
+        hu_ml_tensor_t grad = { .data = d_logits, .shape = {1, 8, 16, 0}, .ndim = 3,
+                                .dtype = HU_ML_DTYPE_F32, .size_bytes = BS * V * sizeof(float) };
+        HU_ASSERT_EQ(model.vtable->backward(model.ctx, &grad), HU_OK);
+
+        opt.vtable->step(opt.ctx, NULL, NULL, 0);
+        opt.vtable->zero_grad(opt.ctx);
+
+        if (loss < prev_loss) decreases++;
+        prev_loss = loss;
+
+        alloc.free(alloc.ctx, d_logits, BS * V * sizeof(float));
+        alloc.free(alloc.ctx, output.data, output.size_bytes);
+    }
+
+    /* Loss should decrease in most steps (allow some noise) */
+    HU_ASSERT_GT(decreases, 5);
+
+    opt.vtable->deinit(opt.ctx, &alloc);
+    model.vtable->deinit(model.ctx, &alloc);
+}
+
+/* ─── Training: gradient accumulation produces equivalent results ──────── */
+
+static void test_grad_accumulation(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+
+    char tmpdir[] = "/tmp/hu_gacc_XXXXXX";
+    HU_ASSERT(mkdtemp(tmpdir) != NULL);
+
+    int32_t data[64];
+    for (int i = 0; i < 64; i++) data[i] = i % 16;
+    char path[256];
+    snprintf(path, sizeof(path), "%s/train.bin", tmpdir);
+    FILE *f = fopen(path, "wb");
+    fwrite(data, sizeof(int32_t), 64, f);
+    fclose(f);
+    snprintf(path, sizeof(path), "%s/val.bin", tmpdir);
+    f = fopen(path, "wb");
+    fwrite(data, sizeof(int32_t), 64, f);
+    fclose(f);
+
+    hu_gpt_config_t gpt_cfg = {0};
+    gpt_cfg.sequence_len = 8;
+    gpt_cfg.vocab_size = 16;
+    gpt_cfg.n_layer = 1;
+    gpt_cfg.n_head = 2;
+    gpt_cfg.n_kv_head = 2;
+    gpt_cfg.n_embd = 4;
+    gpt_cfg.head_dim = 2;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &gpt_cfg, &model), HU_OK);
+
+    hu_optimizer_config_t opt_cfg = { .embedding_lr = 0.01f, .unembedding_lr = 0.01f,
+        .matrix_lr = 0.01f, .scalar_lr = 0.001f, .weight_decay = 0.0f,
+        .adam_beta1 = 0.9f, .adam_beta2 = 0.999f };
+    hu_ml_optimizer_t opt = {0};
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &opt_cfg, &opt), HU_OK);
+    HU_ASSERT_EQ(hu_gpt_register_params(&model, &opt), HU_OK);
+
+    hu_ml_dataloader_t *train_dl = NULL, *val_dl = NULL;
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, tmpdir, 2, 4, "train", &train_dl), HU_OK);
+    HU_ASSERT_EQ(hu_ml_dataloader_create(&alloc, tmpdir, 2, 4, "val", &val_dl), HU_OK);
+
+    /* Train with grad_accum_steps = 2 */
+    hu_training_config_t train_cfg = { .total_batch_size = 4, .device_batch_size = 2,
+        .time_budget_secs = 5, .eval_tokens = 8, .grad_accum_steps = 2 };
+    hu_ml_train_result_t result = {0};
+    hu_error_t err = hu_ml_train(&alloc, &model, &opt, train_dl, val_dl,
+                                  &train_cfg, NULL, 16, &result);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT(result.num_steps > 0);
+
+    hu_ml_dataloader_deinit(val_dl);
+    hu_ml_dataloader_deinit(train_dl);
+    opt.vtable->deinit(opt.ctx, &alloc);
+    model.vtable->deinit(model.ctx, &alloc);
+
+    snprintf(path, sizeof(path), "%s/train.bin", tmpdir);
+    remove(path);
+    snprintf(path, sizeof(path), "%s/val.bin", tmpdir);
+    remove(path);
+    rmdir(tmpdir);
+}
+
+/* ─── Checkpoint: save and load roundtrip ──────────────────────────────── */
+
+static void test_checkpoint_roundtrip(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 4;
+    cfg.vocab_size = 16;
+    cfg.n_layer = 1;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 4;
+    cfg.head_dim = 2;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
+
+    hu_ml_optimizer_t opt = {0};
+    hu_optimizer_config_t opt_cfg = { .embedding_lr = 0.01f, .unembedding_lr = 0.01f,
+        .matrix_lr = 0.01f, .scalar_lr = 0.001f };
+    HU_ASSERT_EQ(hu_muon_adamw_create(&alloc, &opt_cfg, &opt), HU_OK);
+
+    const char *ckpt_path = "/tmp/test_ml_checkpoint.bin";
+
+    /* Save checkpoint */
+    HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, ckpt_path, &model, &opt), HU_OK);
+
+    /* Get original param values */
+    hu_ml_tensor_t *params = NULL;
+    size_t count = 0;
+    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &count), HU_OK);
+
+    size_t first_sz = params[0].size_bytes;
+    float *orig_vals = (float *)alloc.alloc(alloc.ctx, first_sz);
+    memcpy(orig_vals, params[0].data, first_sz);
+
+    /* Corrupt the weights */
+    memset(params[0].data, 0, first_sz);
+
+    /* Load checkpoint — should restore original values */
+    HU_ASSERT_EQ(hu_ml_checkpoint_load(&alloc, ckpt_path, &model, &opt), HU_OK);
+
+    /* Verify restoration */
+    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &count), HU_OK);
+    int match = 1;
+    float *restored = (float *)params[0].data;
+    for (size_t i = 0; i < first_sz / sizeof(float); i++) {
+        if (fabsf(restored[i] - orig_vals[i]) > 1e-8f) { match = 0; break; }
+    }
+    HU_ASSERT_EQ(match, 1);
+
+    alloc.free(alloc.ctx, orig_vals, first_sz);
+    opt.vtable->deinit(opt.ctx, &alloc);
+    model.vtable->deinit(model.ctx, &alloc);
+    remove(ckpt_path);
+}
+
+/* ─── Checkpoint: null args ────────────────────────────────────────────── */
+
+static void test_checkpoint_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_model_t model = {0};
+    hu_ml_optimizer_t opt = {0};
+
+    HU_ASSERT_EQ(hu_ml_checkpoint_save(NULL, "/tmp/x", &model, &opt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, NULL, &model, &opt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, "/tmp/x", NULL, &opt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_checkpoint_save(&alloc, "/tmp/x", &model, NULL), HU_ERR_INVALID_ARGUMENT);
+
+    HU_ASSERT_EQ(hu_ml_checkpoint_load(NULL, "/tmp/x", &model, &opt), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_ml_checkpoint_load(&alloc, NULL, &model, &opt), HU_ERR_INVALID_ARGUMENT);
+}
+
+/* ─── Experiment store: open, save, count, close ──────────────────────── */
+
+static void test_experiment_store_roundtrip(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *db_path = "/tmp/test_ml_store.db";
+    remove(db_path);
+
+    hu_experiment_store_t *store = NULL;
+    hu_error_t err = hu_experiment_store_open(&alloc, db_path, &store);
+#ifdef HU_ENABLE_SQLITE
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(store);
+
+    hu_experiment_result_t result = {0};
+    result.iteration = 0;
+    result.val_bpb = 1.234;
+    result.peak_memory_mb = 100.0;
+    result.training_seconds = 5.0;
+    result.status = HU_EXPERIMENT_KEEP;
+    snprintf(result.description, sizeof(result.description), "test run");
+
+    HU_ASSERT_EQ(hu_experiment_store_save(store, &result), HU_OK);
+
+    size_t count = 0;
+    HU_ASSERT_EQ(hu_experiment_store_count(store, &count), HU_OK);
+    HU_ASSERT_EQ(count, 1);
+
+    result.iteration = 1;
+    result.val_bpb = 0.999;
+    HU_ASSERT_EQ(hu_experiment_store_save(store, &result), HU_OK);
+
+    HU_ASSERT_EQ(hu_experiment_store_count(store, &count), HU_OK);
+    HU_ASSERT_EQ(count, 2);
+
+    hu_experiment_store_close(store);
+    remove(db_path);
+#else
+    HU_ASSERT_EQ(err, HU_ERR_NOT_SUPPORTED);
+    (void)store;
+    (void)db_path;
+#endif
+}
+
+/* ─── Experiment store: null args ──────────────────────────────────────── */
+
+static void test_experiment_store_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_experiment_store_t *store = NULL;
+
+    HU_ASSERT_EQ(hu_experiment_store_open(NULL, "/tmp/x.db", &store), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_experiment_store_open(&alloc, NULL, &store), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_experiment_store_open(&alloc, "/tmp/x.db", NULL), HU_ERR_INVALID_ARGUMENT);
+
+    HU_ASSERT_EQ(hu_experiment_store_save(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_experiment_store_count(NULL, NULL), HU_ERR_INVALID_ARGUMENT);
+
+    hu_experiment_store_close(NULL);
+}
+
 void run_ml_tests(void) {
     HU_TEST_SUITE("ml");
     /* BPE tokenizer */
@@ -1245,8 +1725,12 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_gpt_create_invalid_config);
     HU_RUN_TEST(test_gpt_forward);
     HU_RUN_TEST(test_gpt_forward_logits_finite);
-    HU_RUN_TEST(test_gpt_get_params_stub);
-    HU_RUN_TEST(test_gpt_backward_not_supported);
+    HU_RUN_TEST(test_gpt_get_params);
+    HU_RUN_TEST(test_gpt_backward_runs);
+    HU_RUN_TEST(test_gpt_backward_null_grad);
+    HU_RUN_TEST(test_gpt_backward_finite_diff);
+    HU_RUN_TEST(test_gpt_register_params);
+    HU_RUN_TEST(test_train_with_backward);
     /* Optimizer */
     HU_RUN_TEST(test_muon_adamw_create_destroy);
     HU_RUN_TEST(test_muon_adamw_step);
@@ -1265,6 +1749,15 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_experiment_loop_runs);
     HU_RUN_TEST(test_experiment_loop_keep_discard);
     HU_RUN_TEST(test_experiment_loop_convergence);
+    /* Loss / gradient tests */
+    HU_RUN_TEST(test_train_loss_decreases);
+    HU_RUN_TEST(test_grad_accumulation);
+    /* Checkpoint */
+    HU_RUN_TEST(test_checkpoint_roundtrip);
+    HU_RUN_TEST(test_checkpoint_null_args);
+    /* Experiment store */
+    HU_RUN_TEST(test_experiment_store_roundtrip);
+    HU_RUN_TEST(test_experiment_store_null_args);
     /* CLI */
     HU_RUN_TEST(test_ml_cli_train_help);
     HU_RUN_TEST(test_ml_cli_experiment_help);

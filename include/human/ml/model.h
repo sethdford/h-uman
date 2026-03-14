@@ -36,6 +36,11 @@ typedef struct hu_model_vtable {
 
 /* GPT model factory (CPU reference implementation). */
 hu_error_t hu_gpt_create(hu_allocator_t *alloc, const hu_gpt_config_t *config,
-                        hu_model_t *out);
+                          hu_model_t *out);
+
+/* Register all GPT parameters with the optimizer (param + grad pairs).
+ * Forward-declared to avoid circular include with optimizer.h. */
+struct hu_ml_optimizer;
+hu_error_t hu_gpt_register_params(hu_model_t *model, struct hu_ml_optimizer *opt);
 
 #endif
