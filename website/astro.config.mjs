@@ -7,8 +7,9 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   site: "https://h-uman.ai",
   base: "/",
+  compressHTML: true,
   build: {
-    inlineStylesheets: "auto",
+    inlineStylesheets: "always",
   },
   prefetch: {
     prefetchAll: true,

@@ -22,14 +22,14 @@
   src: url("/fonts/avenir/Avenir-Medium.woff2") format("woff2");
   font-weight: 500;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
 }
 @font-face {
   font-family: "Avenir";
   src: url("/fonts/avenir/Avenir-Heavy.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
 }
 @font-face {
   font-family: "Avenir";
@@ -37,6 +37,48 @@
   font-weight: 900;
   font-style: normal;
   font-display: swap;
+}
+
+/* ── Native View Transitions (cross-document, no JS needed) ── */
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root) {
+  animation: hu-vt-fade-out var(--hu-duration-normal, 200ms) ease-out both;
+}
+
+::view-transition-new(root) {
+  animation: hu-vt-fade-in var(--hu-duration-normal, 200ms) ease-in both;
+}
+
+@keyframes hu-vt-fade-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes hu-vt-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
 }
 
 @layer base {
@@ -316,14 +358,11 @@
         from 0deg at 50% 50%,
         color-mix(in srgb, var(--hu-accent) 18%, transparent) 0deg,
         transparent 60deg,
-        color-mix(in srgb, var(--hu-accent-tertiary) 14%, transparent)
-          120deg,
+        color-mix(in srgb, var(--hu-accent-tertiary) 14%, transparent) 120deg,
         transparent 180deg,
-        color-mix(in srgb, var(--hu-accent-secondary) 12%, transparent)
-          240deg,
+        color-mix(in srgb, var(--hu-accent-secondary) 12%, transparent) 240deg,
         transparent 300deg,
-        color-mix(in srgb, var(--hu-accent-tertiary) 10%, transparent)
-          340deg,
+        color-mix(in srgb, var(--hu-accent-tertiary) 10%, transparent) 340deg,
         color-mix(in srgb, var(--hu-accent) 18%, transparent) 360deg
       ),
       radial-gradient(
@@ -333,8 +372,7 @@
       ),
       radial-gradient(
         ellipse at 80% 20%,
-        color-mix(in srgb, var(--hu-accent-tertiary) 10%, transparent)
-          0%,
+        color-mix(in srgb, var(--hu-accent-tertiary) 10%, transparent) 0%,
         transparent 50%
       );
     animation: mesh-drift 25s ease-in-out infinite alternate;
@@ -499,7 +537,6 @@
     );
   }
 
-
   /* ── Hero choreographed entrance (CSS-only — visible before JS loads) ── */
   .hero-logo {
     animation: hu-hero-rise var(--hu-duration-slowest, 700ms)
@@ -535,8 +572,10 @@
     opacity: 0;
     transform: translateY(20px);
     transition:
-      opacity var(--hu-duration-slower, 0.5s) var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
-      transform var(--hu-duration-slower, 0.5s) var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+      opacity var(--hu-duration-slower, 0.5s)
+        var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+      transform var(--hu-duration-slower, 0.5s)
+        var(--hu-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
   }
   [data-reveal].revealed {
     opacity: 1;
@@ -613,8 +652,12 @@
       animation-range: 0% 50%;
     }
     @keyframes hu-parallax-drift {
-      from { transform: translateY(0) scale(1); }
-      to   { transform: translateY(-15%) scale(1.05); }
+      from {
+        transform: translateY(0) scale(1);
+      }
+      to {
+        transform: translateY(-15%) scale(1.05);
+      }
     }
   }
 
@@ -644,8 +687,7 @@
     border-radius: 50%;
     background: radial-gradient(
       circle,
-      color-mix(in srgb, var(--hu-accent-secondary) 15%, transparent)
-        0%,
+      color-mix(in srgb, var(--hu-accent-secondary) 15%, transparent) 0%,
       transparent 70%
     );
     pointer-events: none;
@@ -873,9 +915,45 @@
     transform: translateY(var(--hu-physics-card-hover-translateY, -2px));
   }
 
-  /* ── Hero headline text shadow for depth ── */
+  /* ── Hero headline — typography as hero element ── */
   .hero-headline {
-    text-shadow: 0 2px 30px color-mix(in srgb, var(--hu-accent) 12%, transparent);
+    text-shadow: 0 2px 30px
+      color-mix(in srgb, var(--hu-accent) 12%, transparent);
+    font-feature-settings:
+      "kern" 1,
+      "liga" 1;
+    text-wrap: balance;
+  }
+
+  .hero-headline .text-gradient {
+    font-style: italic;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Branded scrollbar (modern browsers) ── */
+  @supports (scrollbar-color: auto) {
+    html {
+      scrollbar-color: color-mix(in srgb, var(--hu-accent) 30%, transparent)
+        transparent;
+      scrollbar-width: thin;
+    }
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--hu-accent) 30%, transparent);
+    border-radius: var(--hu-radius-full);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--hu-accent) 50%, transparent);
   }
 
   /* ── Section gradient dividers ── */
@@ -898,6 +976,156 @@
   .site-footer {
     border-top: 1px solid var(--hu-web-border);
     background: color-mix(in srgb, var(--hu-accent) 2%, var(--hu-web-bg));
+  }
+
+  /* ── WebGL hero canvas ── */
+  .hero-webgl-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  /* ── Custom cursor ── */
+  .custom-cursor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid var(--hu-accent);
+    pointer-events: none;
+    z-index: 9998;
+    opacity: 0;
+    mix-blend-mode: difference;
+    transition:
+      width var(--hu-duration-fast) var(--hu-ease-out),
+      height var(--hu-duration-fast) var(--hu-ease-out),
+      border-color var(--hu-duration-fast) var(--hu-ease-out),
+      background var(--hu-duration-fast) var(--hu-ease-out);
+    will-change: transform;
+  }
+
+  .custom-cursor.cursor-hover {
+    width: 40px;
+    height: 40px;
+    background: color-mix(in srgb, var(--hu-accent) 15%, transparent);
+    border-color: var(--hu-accent-hover);
+    transform: translate(calc(var(--cx, 0) - 20px), calc(var(--cy, 0) - 20px));
+  }
+
+  @media (pointer: coarse) {
+    .custom-cursor {
+      display: none;
+    }
+  }
+
+  /* ── @starting-style for dynamically added elements ── */
+  @supports (selector(:popover-open)) {
+    [popover] {
+      @starting-style {
+        opacity: 0;
+        transform: translateY(8px) scale(0.96);
+      }
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      transition:
+        opacity var(--hu-duration-normal) var(--hu-ease-out),
+        transform var(--hu-duration-normal)
+          var(--hu-ease-spring-gentle, cubic-bezier(0.22, 1.2, 0.36, 1)),
+        display var(--hu-duration-normal) allow-discrete,
+        overlay var(--hu-duration-normal) allow-discrete;
+    }
+  }
+
+  .terminal-line,
+  .dash-preview .flex {
+    @starting-style {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+      opacity var(--hu-duration-normal) var(--hu-ease-out),
+      transform var(--hu-duration-normal) var(--hu-ease-out);
+  }
+
+  /* ── Micro-gradients on interactive elements ── */
+  .spectrum-card {
+    background-image: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--hu-accent) 3%, transparent),
+      transparent 60%
+    );
+  }
+
+  .provider-pill {
+    background-image: linear-gradient(
+      135deg,
+      color-mix(in srgb, white 3%, transparent),
+      transparent
+    );
+  }
+
+  .numbers-grid {
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--hu-accent) 2%, transparent),
+      transparent
+    );
+  }
+
+  /* ── Comparison bars ── */
+  .comparison-bar {
+    transition: width 0.8s
+      var(--hu-ease-spring-gentle, cubic-bezier(0.22, 1.2, 0.36, 1));
+  }
+
+  .comparison-row {
+    transition: opacity var(--hu-duration-normal) var(--hu-ease-out);
+  }
+
+  .comparison-row:hover .comparison-bar-label {
+    opacity: 1;
+  }
+
+  /* ── prefers-contrast: more ── */
+  @media (prefers-contrast: more) {
+    :root {
+      --hu-web-border: rgba(0, 0, 0, 0.25);
+      --hu-web-border-strong: rgba(0, 0, 0, 0.4);
+      --hu-web-text-secondary: #4a4a4a;
+      --hu-web-text-tertiary: #5a5a5a;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --hu-web-border: rgba(255, 255, 255, 0.3);
+        --hu-web-border-strong: rgba(255, 255, 255, 0.5);
+        --hu-web-text-secondary: #c8c8c8;
+        --hu-web-text-tertiary: #b0b0b0;
+      }
+    }
+
+    .glass,
+    .glass-subtle,
+    .glass-prominent {
+      border-width: 2px;
+    }
+
+    .btn-primary,
+    .btn-outline {
+      font-weight: 700;
+    }
+
+    .text-gradient {
+      -webkit-text-fill-color: var(--hu-accent);
+    }
   }
 
   /* ── Architecture node pulse ── */
@@ -951,6 +1179,7 @@
 .ambient-accent,
 .ambient-indigo,
 .dash-preview,
+.custom-cursor,
 #terminal,
 #arch-diagram {
   will-change: transform, opacity;
@@ -1037,6 +1266,18 @@
   .ambient-indigo {
     display: none;
   }
+
+  .custom-cursor {
+    display: none !important;
+  }
+
+  .hero-webgl-canvas {
+    display: none !important;
+  }
+
+  .comparison-bar {
+    transition: none !important;
+  }
 }
 
 /* ── Forced Colors Mode (Windows High Contrast) ── */
@@ -1072,6 +1313,15 @@
     outline: 2px solid Highlight !important;
     outline-offset: 2px;
   }
+
+  .custom-cursor,
+  .hero-webgl-canvas {
+    display: none !important;
+  }
+
+  .comparison-bar {
+    background: Highlight !important;
+  }
 }
 
 /* ── Reduced Transparency ── */
@@ -1089,6 +1339,10 @@
 
   .hero-gradient {
     opacity: 0.3;
+  }
+
+  .hero-webgl-canvas {
+    opacity: 0.3 !important;
   }
 }
 
