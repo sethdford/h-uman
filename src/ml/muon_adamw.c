@@ -89,6 +89,116 @@ static void step_adamw(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
     }
 }
 
+/* ─── Newton-Schulz orthogonalization (Muon reference implementation) ──────── */
+
+#define NS_STEPS 10
+#define NS_A  3.4445f
+#define NS_B -4.7750f
+#define NS_C  2.0315f
+
+/* Frobenius norm of rows x cols matrix */
+static float mat_frob_norm(const float *m, size_t n)
+{
+    float s = 0.0f;
+    for (size_t i = 0; i < n; i++) s += m[i] * m[i];
+    return sqrtf(s) + 1e-12f;
+}
+
+/* Y[m×m] = X[m×n] @ X[m×n]^T  (or X^T @ X for tall matrices, handled by caller) */
+static void matmul_xxt(float *y, const float *x, size_t m, size_t n)
+{
+    for (size_t i = 0; i < m; i++)
+        for (size_t j = 0; j <= i; j++) {
+            float s = 0.0f;
+            for (size_t k = 0; k < n; k++) s += x[i * n + k] * x[j * n + k];
+            y[i * m + j] = s;
+            y[j * m + i] = s;
+        }
+}
+
+/* Newton-Schulz iteration: X = a*X + (b*A + c*A@A) @ X
+ * where A = X@X^T (or X^T@X for tall). Operates on the "wide" form.
+ * X is m×n (m <= n), A is m×m, scratch is m×m + m×n. */
+/* Newton-Schulz orthogonalization on rows×cols matrix x (modified in-place).
+ * For tall matrices (rows > cols), transposes to wide form, orthogonalizes,
+ * then transposes back so the caller always sees rows×cols output. */
+static hu_error_t newton_schulz_orthogonalize(float *x, size_t rows, size_t cols,
+                                               hu_allocator_t *alloc)
+{
+    int transposed = 0;
+    size_t m = rows, n = cols;
+    float *work = NULL;
+
+    if (m > n) {
+        transposed = 1;
+        work = (float *)alloc->alloc(alloc->ctx, m * n * sizeof(float));
+        if (!work) return HU_ERR_OUT_OF_MEMORY;
+        for (size_t i = 0; i < m; i++)
+            for (size_t j = 0; j < n; j++)
+                work[j * m + i] = x[i * n + j];
+        size_t tmp = m; m = n; n = tmp;
+    } else {
+        work = (float *)alloc->alloc(alloc->ctx, m * n * sizeof(float));
+        if (!work) return HU_ERR_OUT_OF_MEMORY;
+        memcpy(work, x, m * n * sizeof(float));
+    }
+
+    /* Frobenius normalize */
+    float fnorm = mat_frob_norm(work, m * n);
+    for (size_t i = 0; i < m * n; i++) work[i] /= fnorm;
+
+    float *a = (float *)alloc->alloc(alloc->ctx, m * m * sizeof(float));
+    float *a2 = (float *)alloc->alloc(alloc->ctx, m * m * sizeof(float));
+    float *xnew = (float *)alloc->alloc(alloc->ctx, m * n * sizeof(float));
+    if (!a || !a2 || !xnew) {
+        if (a) alloc->free(alloc->ctx, a, m * m * sizeof(float));
+        if (a2) alloc->free(alloc->ctx, a2, m * m * sizeof(float));
+        if (xnew) alloc->free(alloc->ctx, xnew, m * n * sizeof(float));
+        alloc->free(alloc->ctx, work, rows * cols * sizeof(float));
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+
+    for (int step = 0; step < NS_STEPS; step++) {
+        /* A = work @ work^T  (m×m) */
+        matmul_xxt(a, work, m, n);
+
+        /* A2 = A @ A  (m×m) */
+        for (size_t i = 0; i < m; i++)
+            for (size_t j = 0; j < m; j++) {
+                float s = 0.0f;
+                for (size_t k = 0; k < m; k++) s += a[i * m + k] * a[k * m + j];
+                a2[i * m + j] = s;
+            }
+
+        /* combined = b*A + c*A2, then X_new = a*X + combined @ X */
+        for (size_t i = 0; i < m * m; i++) a[i] = NS_B * a[i] + NS_C * a2[i];
+
+        for (size_t i = 0; i < m; i++)
+            for (size_t j = 0; j < n; j++) {
+                float s = 0.0f;
+                for (size_t k = 0; k < m; k++) s += a[i * m + k] * work[k * n + j];
+                xnew[i * n + j] = NS_A * work[i * n + j] + s;
+            }
+
+        memcpy(work, xnew, m * n * sizeof(float));
+    }
+
+    alloc->free(alloc->ctx, a, m * m * sizeof(float));
+    alloc->free(alloc->ctx, a2, m * m * sizeof(float));
+    alloc->free(alloc->ctx, xnew, m * n * sizeof(float));
+
+    if (transposed) {
+        for (size_t i = 0; i < m; i++)
+            for (size_t j = 0; j < n; j++)
+                x[j * m + i] = work[i * n + j];
+    } else {
+        memcpy(x, work, m * n * sizeof(float));
+    }
+
+    alloc->free(alloc->ctx, work, rows * cols * sizeof(float));
+    return HU_OK;
+}
+
 /* ─── Muon step (2D matrices) ──────────────────────────────────────────────── */
 
 static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cfg,
@@ -101,6 +211,7 @@ static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cf
 
     (void)cfg;
 
+    /* Nesterov momentum: m = beta*m + (1-beta)*grad; g_buf = grad + beta*m */
     for (size_t i = 0; i < n; i++) {
         float grad_val = g->grad[i];
         g->momentum_buf[i] = beta * g->momentum_buf[i] + (1.0f - beta) * grad_val;
@@ -112,26 +223,26 @@ static hu_error_t step_muon(hu_param_group_t *g, const hu_optimizer_config_t *cf
     for (size_t i = 0; i < n; i++)
         g_buf[i] = g->grad[i] + beta * g->momentum_buf[i];
 
-    /* Row-normalize g (simplified orthogonalization) */
-    for (size_t r = 0; r < rows; r++) {
-        float *row = g_buf + r * cols;
-        float norm_sq = 0.0f;
-        for (size_t c = 0; c < cols; c++)
-            norm_sq += row[c] * row[c];
-        float norm = sqrtf(norm_sq) + 1e-12f;
-        for (size_t c = 0; c < cols; c++)
-            row[c] /= norm;
+    /* Polar Express Newton-Schulz orthogonalization */
+    hu_error_t ns_err = newton_schulz_orthogonalize(g_buf, rows, cols, alloc);
+    if (ns_err != HU_OK) {
+        alloc->free(alloc->ctx, g_buf, n * sizeof(float));
+        return ns_err;
     }
+
+    /* Scale by aspect ratio: lr * max(1, rows/cols)^0.5 */
+    float aspect = (rows > cols) ? sqrtf((float)rows / (float)cols) : 1.0f;
+    float effective_lr = lr * aspect;
 
     /* param -= lr * g */
     for (size_t i = 0; i < n; i++)
-        g->param[i] -= lr * g_buf[i];
+        g->param[i] -= effective_lr * g_buf[i];
 
     /* Cautious weight decay: mask = (g * param >= 0); param -= lr * wd * param * mask */
     if (wd > 0.0f) {
         for (size_t i = 0; i < n; i++) {
             float mask = (g_buf[i] * g->param[i] >= 0.0f) ? 1.0f : 0.0f;
-            g->param[i] -= lr * wd * g->param[i] * mask;
+            g->param[i] -= effective_lr * wd * g->param[i] * mask;
         }
     }
 

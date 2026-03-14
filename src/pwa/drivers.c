@@ -660,10 +660,10 @@ hu_error_t hu_pwa_driver_registry_load_dir(hu_allocator_t *alloc, hu_pwa_driver_
         const char *read_contacts_js = hu_json_get_string(root, "read_contacts_js");
         const char *navigate_js = hu_json_get_string(root, "navigate_js");
 
-        hu_json_free(alloc, root);
-
-        if (!app_name || !display_name || !url_pattern || !read_messages_js || !send_message_js)
+        if (!app_name || !display_name || !url_pattern || !read_messages_js || !send_message_js) {
+            hu_json_free(alloc, root);
             continue;
+        }
 
         hu_pwa_driver_t driver = {
             .app_name = app_name,
@@ -675,6 +675,7 @@ hu_error_t hu_pwa_driver_registry_load_dir(hu_allocator_t *alloc, hu_pwa_driver_
             .navigate_js = navigate_js,
         };
         (void)hu_pwa_driver_registry_add(alloc, reg, &driver); /* ignore add failure */
+        hu_json_free(alloc, root);
     }
 
 done:

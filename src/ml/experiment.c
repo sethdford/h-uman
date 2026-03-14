@@ -107,10 +107,13 @@ static void mutate_config(hu_experiment_config_t *cfg, int iteration)
         cfg->optimizer.warmdown_ratio = (xorshift32(&seed) % 3) * 0.25f;
         break;
     case 5: {
-        size_t new_dim = cfg->gpt.n_embd + ((xorshift32(&seed) % 2) ? 128 : -128);
-        if (new_dim >= 128 && new_dim <= 2048) {
+        size_t hd = cfg->gpt.head_dim;
+        if (hd == 0) break;
+        size_t delta = hd;  /* step in multiples of head_dim */
+        size_t new_dim = cfg->gpt.n_embd + ((xorshift32(&seed) % 2) ? delta : (size_t)(-(int64_t)delta));
+        if (new_dim >= hd && new_dim <= 2048 && new_dim % hd == 0) {
             cfg->gpt.n_embd = new_dim;
-            cfg->gpt.n_head = new_dim / cfg->gpt.head_dim;
+            cfg->gpt.n_head = new_dim / hd;
             cfg->gpt.n_kv_head = cfg->gpt.n_head;
         }
         break;
@@ -245,10 +248,13 @@ hu_error_t hu_experiment_loop(hu_allocator_t *alloc,
     current_config.training.warmdown_ratio = current_config.optimizer.warmdown_ratio;
     current_config.training.final_lr_frac = current_config.optimizer.final_lr_frac;
 
-    /* Open experiment store if a results path is given */
+    /* Open experiment store if a results path is given (non-fatal on failure) */
     hu_experiment_store_t *store = NULL;
-    if (config->results_path)
-        hu_experiment_store_open(alloc, config->results_path, &store);
+    if (config->results_path) {
+        hu_error_t store_err = hu_experiment_store_open(alloc, config->results_path, &store);
+        if (store_err != HU_OK)
+            store = NULL;
+    }
 
     for (int i = 0; i < config->max_iterations; i++) {
         hu_experiment_result_t result = {0};

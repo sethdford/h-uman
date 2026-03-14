@@ -185,6 +185,11 @@ hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser,
     if (n > 0)
         out->url[n < (int)ulen ? n : (int)ulen] = '\0';
     out->title = hu_strdup(alloc, "Test PWA Tab");
+    if (!out->title) {
+        alloc->free(alloc->ctx, out->url, ulen + 1);
+        out->url = NULL;
+        return HU_ERR_OUT_OF_MEMORY;
+    }
     return HU_OK;
 }
 
@@ -368,6 +373,14 @@ hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser,
     *sep3 = '\0';
     out->url = hu_strdup(alloc, p);
     out->title = hu_strdup(alloc, sep3 + 1);
+    if (!out->url || !out->title) {
+        if (out->url)
+            hu_str_free(alloc, out->url);
+        if (out->title)
+            hu_str_free(alloc, out->title);
+        alloc->free(alloc->ctx, result, result_len + 1);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
 
     alloc->free(alloc->ctx, result, result_len + 1);
     return HU_OK;
@@ -450,12 +463,21 @@ hu_error_t hu_pwa_list_tabs(hu_allocator_t *alloc, hu_pwa_browser_t browser,
                         char *s3 = strchr(s2 + 1, '|');
                         if (s3) {
                             *s3 = '\0';
-                            tabs[idx].browser = browser;
-                            tabs[idx].window_idx = atoi(line);
-                            tabs[idx].tab_idx = atoi(s1 + 1);
-                            tabs[idx].url = hu_strdup(alloc, s2 + 1);
-                            tabs[idx].title = hu_strdup(alloc, s3 + 1);
-                            idx++;
+                            char *url_dup = hu_strdup(alloc, s2 + 1);
+                            char *title_dup = hu_strdup(alloc, s3 + 1);
+                            if (url_dup && title_dup) {
+                                tabs[idx].browser = browser;
+                                tabs[idx].window_idx = atoi(line);
+                                tabs[idx].tab_idx = atoi(s1 + 1);
+                                tabs[idx].url = url_dup;
+                                tabs[idx].title = title_dup;
+                                idx++;
+                            } else {
+                                if (url_dup)
+                                    hu_str_free(alloc, url_dup);
+                                if (title_dup)
+                                    hu_str_free(alloc, title_dup);
+                            }
                         }
                     }
                 }
