@@ -24,6 +24,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +60,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HumanApp() {
     var selectedTab by remember { mutableIntStateOf(0) }
+    val gateway = remember { GatewayClient() }
+    val connectionState by gateway.state.collectAsState()
+
+    DisposableEffect(Unit) {
+        gateway.connect("http://localhost:3000")
+        onDispose { gateway.disconnect() }
+    }
 
     Scaffold(
         bottomBar = {
@@ -106,12 +115,12 @@ fun HumanApp() {
                 label = "screen_transition",
             ) { tab ->
                 when (tab) {
-                    0 -> OverviewScreen()
-                    1 -> ChatScreen()
+                    0 -> OverviewScreen(gateway = gateway, connectionState = connectionState)
+                    1 -> ChatScreen(gateway = gateway)
                     2 -> SessionsScreen()
                     3 -> ToolsScreen()
                     4 -> SettingsScreen()
-                    else -> OverviewScreen()
+                    else -> OverviewScreen(gateway = gateway, connectionState = connectionState)
                 }
             }
         }
