@@ -587,6 +587,7 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 if (n > 0 && (size_t)n < sizeof(pwa_dir))
                     hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
             }
+            hu_pwa_set_global_registry(&bi->pwa_driver_registry);
         }
     }
 #endif
@@ -1327,8 +1328,10 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
     if (bi->agent_registry_ok)
         hu_agent_registry_destroy(&bi->agent_registry);
 #if HU_HAS_PWA
-    if (bi->pwa_driver_registry_ok)
+    if (bi->pwa_driver_registry_ok) {
+        hu_pwa_set_global_registry(NULL);
         hu_pwa_driver_registry_destroy(alloc, &bi->pwa_driver_registry);
+    }
 #endif
 #ifdef HU_HAS_SKILLS
     if (bi->skillforge_ok)

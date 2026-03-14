@@ -267,6 +267,12 @@ static hu_error_t run_applescript(hu_allocator_t *alloc, const char *script,
         return err;
     }
     if (!result.success) {
+        if (result.stderr_buf && result.stderr_len > 0 &&
+            strstr(result.stderr_buf, "JavaScript from Apple Events")) {
+            fprintf(stderr,
+                    "[pwa] Chrome's \"Allow JavaScript from Apple Events\" is disabled.\n"
+                    "      Enable it: View > Developer > Allow JavaScript from Apple Events\n");
+        }
         hu_run_result_free(alloc, &result);
         return HU_ERR_IO;
     }

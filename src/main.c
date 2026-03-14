@@ -940,8 +940,9 @@ static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv) {
 
 /* ─── pwa subcommand ─────────────────────────────────────────────────── */
 
-static const char *const PWA_APP_NAMES[] = {"slack", "discord", "whatsapp", "gmail", "calendar",
-                                            "notion", "twitter", "telegram", "linkedin"};
+static const char *const PWA_APP_NAMES[] = {"slack",    "discord",  "whatsapp", "gmail",
+                                            "calendar", "notion",   "twitter",  "telegram",
+                                            "linkedin", "facebook"};
 #define PWA_APP_COUNT (sizeof(PWA_APP_NAMES) / sizeof(PWA_APP_NAMES[0]))
 
 static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
@@ -952,7 +953,7 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
         (void)hu_pwa_drivers_all(&count);
         printf("PWA Drivers (%zu apps):\n", count);
         for (size_t i = 0; i < PWA_APP_COUNT; i++) {
-            const hu_pwa_driver_t *d = hu_pwa_driver_find(PWA_APP_NAMES[i]);
+            const hu_pwa_driver_t *d = hu_pwa_driver_resolve(PWA_APP_NAMES[i]);
             if (!d)
                 continue;
             printf("  %-10s %-16s [%s]  %s%s%s\n", d->app_name,
@@ -1016,7 +1017,7 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "PWA: browser automation unavailable in test build\n");
         return HU_OK;
 #else
-        const hu_pwa_driver_t *drv = hu_pwa_driver_find(app);
+        const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(app);
         if (!drv) {
             fprintf(stderr, "PWA: unknown app '%s'\n", app);
             return HU_ERR_NOT_FOUND;
@@ -1072,7 +1073,7 @@ static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
         fprintf(stderr, "PWA: browser automation unavailable in test build\n");
         return HU_OK;
 #else
-        const hu_pwa_driver_t *drv = hu_pwa_driver_find(app);
+        const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(app);
         if (!drv) {
             fprintf(stderr, "PWA: unknown app '%s'\n", app);
             return HU_ERR_NOT_FOUND;

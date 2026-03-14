@@ -58,6 +58,15 @@ static void test_driver_find_telegram(void) {
     HU_ASSERT_NOT_NULL(d);
 }
 
+static void test_driver_find_facebook(void) {
+    const hu_pwa_driver_t *d = hu_pwa_driver_find("facebook");
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_STR_EQ(d->url_pattern, "facebook.com");
+    HU_ASSERT_NOT_NULL(d->read_messages_js);
+    HU_ASSERT_NOT_NULL(d->send_message_js);
+    HU_ASSERT_NOT_NULL(d->navigate_js);
+}
+
 static void test_driver_find_linkedin(void) {
     const hu_pwa_driver_t *d = hu_pwa_driver_find("linkedin");
     HU_ASSERT_NOT_NULL(d);
@@ -438,6 +447,51 @@ static void test_pwa_tool_send_missing_app(void) {
     tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+/* ── Global Registry ───────────────────────────────────────────────── */
+
+static void test_global_registry_resolve_builtin(void) {
+    hu_pwa_set_global_registry(NULL);
+    const hu_pwa_driver_t *d = hu_pwa_driver_resolve("slack");
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_STR_EQ(d->app_name, "slack");
+}
+
+static void test_global_registry_resolve_custom_override(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_pwa_driver_registry_t reg;
+    hu_pwa_driver_registry_init(&reg);
+
+    hu_pwa_driver_t custom = {
+        .app_name = "myapp",
+        .display_name = "My App",
+        .url_pattern = "myapp.example.com",
+        .read_messages_js = "(function(){ return 'custom'; })()",
+        .send_message_js = NULL,
+        .read_contacts_js = NULL,
+        .navigate_js = NULL,
+    };
+    hu_pwa_driver_registry_add(&alloc, &reg, &custom);
+    hu_pwa_set_global_registry(&reg);
+
+    const hu_pwa_driver_t *d = hu_pwa_driver_resolve("myapp");
+    HU_ASSERT_NOT_NULL(d);
+    HU_ASSERT_STR_EQ(d->app_name, "myapp");
+    HU_ASSERT_STR_EQ(d->url_pattern, "myapp.example.com");
+
+    const hu_pwa_driver_t *slack = hu_pwa_driver_resolve("slack");
+    HU_ASSERT_NOT_NULL(slack);
+    HU_ASSERT_STR_EQ(slack->app_name, "slack");
+
+    hu_pwa_set_global_registry(NULL);
+    hu_pwa_driver_registry_destroy(&alloc, &reg);
+}
+
+static void test_global_registry_resolve_unknown(void) {
+    hu_pwa_set_global_registry(NULL);
+    const hu_pwa_driver_t *d = hu_pwa_driver_resolve("nonexistent_app_xyz");
+    HU_ASSERT_NULL(d);
+}
+
 /* ── Channel ───────────────────────────────────────────────────────── */
 
 static void test_pwa_channel_create_destroy(void) {
@@ -522,6 +576,7 @@ void run_pwa_tests(void) {
     HU_RUN_TEST(test_driver_find_twitter);
     HU_RUN_TEST(test_driver_find_telegram);
     HU_RUN_TEST(test_driver_find_linkedin);
+    HU_RUN_TEST(test_driver_find_facebook);
     HU_RUN_TEST(test_driver_find_unknown_returns_null);
     HU_RUN_TEST(test_driver_find_null_returns_null);
     HU_RUN_TEST(test_driver_find_by_url_slack);
@@ -566,6 +621,11 @@ void run_pwa_tests(void) {
     HU_RUN_TEST(test_pwa_tool_read_slack);
     HU_RUN_TEST(test_pwa_tool_unknown_action);
     HU_RUN_TEST(test_pwa_tool_send_missing_app);
+
+    HU_TEST_SUITE("pwa_global_registry");
+    HU_RUN_TEST(test_global_registry_resolve_builtin);
+    HU_RUN_TEST(test_global_registry_resolve_custom_override);
+    HU_RUN_TEST(test_global_registry_resolve_unknown);
 
     HU_TEST_SUITE("pwa_channel");
     HU_RUN_TEST(test_pwa_channel_create_destroy);

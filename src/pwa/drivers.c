@@ -399,6 +399,58 @@ static const hu_pwa_driver_t DRIVER_LINKEDIN = {
     .navigate_js = NULL,
 };
 
+/* ── Facebook/Messenger ────────────────────────────────────────────── */
+
+static const hu_pwa_driver_t DRIVER_FACEBOOK = {
+    .app_name = "facebook",
+    .display_name = "Facebook",
+    .url_pattern = "facebook.com",
+
+    .read_messages_js =
+        "(function(){"
+        "  var msgs = document.querySelectorAll('[data-scope=\"messages_table\"] "
+        "[role=\"row\"], [class*=\"__message\"]');"
+        "  if(msgs.length === 0) msgs = document.querySelectorAll("
+        "    '[role=\"main\"] [dir=\"auto\"]');"
+        "  var out = [];"
+        "  msgs.forEach(function(m){"
+        "    var text = m.textContent.trim();"
+        "    if(text && text.length > 0 && text.length < 500)"
+        "      out.push(text);"
+        "  });"
+        "  return out.slice(-20).join('\\n');"
+        "})()",
+
+    .send_message_js =
+        "(function(){"
+        "  var el = document.querySelector('[contenteditable=\"true\"][role=\"textbox\"]');"
+        "  if(!el) return 'ERROR: input not found';"
+        "  el.focus();"
+        "  document.execCommand('insertText', false, '%s');"
+        "  setTimeout(function(){"
+        "    var ev = new KeyboardEvent('keydown',"
+        "      {key:'Enter',code:'Enter',keyCode:13,bubbles:true});"
+        "    el.dispatchEvent(ev);"
+        "  }, 150);"
+        "  return 'sent';"
+        "})()",
+
+    .read_contacts_js = NULL,
+
+    .navigate_js =
+        "(function(){"
+        "  var search = document.querySelector('[type=\"search\"], "
+        "[aria-label=\"Search Facebook\"]');"
+        "  if(!search) return 'search not found';"
+        "  search.focus();"
+        "  var nv = Object.getOwnPropertyDescriptor("
+        "    window.HTMLInputElement.prototype, 'value').set;"
+        "  nv.call(search, '%s');"
+        "  search.dispatchEvent(new Event('input', {bubbles:true}));"
+        "  return 'searching';"
+        "})()",
+};
+
 /* ── Driver Registry ───────────────────────────────────────────────── */
 
 static const hu_pwa_driver_t *const ALL_DRIVERS[] = {
@@ -411,6 +463,7 @@ static const hu_pwa_driver_t *const ALL_DRIVERS[] = {
     &DRIVER_TWITTER,
     &DRIVER_TELEGRAM,
     &DRIVER_LINKEDIN,
+    &DRIVER_FACEBOOK,
 };
 
 #define DRIVER_COUNT (sizeof(ALL_DRIVERS) / sizeof(ALL_DRIVERS[0]))

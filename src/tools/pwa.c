@@ -19,15 +19,16 @@
 #define HU_PWA_TOOL_NAME "pwa"
 #define HU_PWA_TOOL_DESC                                                                          \
     "Drive installed Progressive Web Apps (Slack, Discord, WhatsApp, Gmail, Calendar, Notion, "   \
-    "Twitter, Telegram, LinkedIn) through browser automation. No API keys needed — uses your "    \
-    "existing browser sessions. Actions: list_apps, list_tabs, read, send, navigate, exec_js."
+    "Twitter, Telegram, LinkedIn, Facebook) through browser automation. No API keys needed — "    \
+    "uses your existing browser sessions. Actions: list_apps, list_tabs, read, send, navigate, "  \
+    "exec_js."
 
 #define HU_PWA_TOOL_PARAMS                                                                        \
     "{\"type\":\"object\",\"properties\":{"                                                       \
     "\"action\":{\"type\":\"string\",\"enum\":[\"list_apps\",\"list_tabs\",\"read\",\"send\","   \
     "\"navigate\",\"exec_js\"]},"                                                                 \
     "\"app\":{\"type\":\"string\",\"description\":\"App name (slack, discord, whatsapp, gmail, " \
-    "calendar, notion, twitter, telegram, linkedin)\"},"                                          \
+    "calendar, notion, twitter, telegram, linkedin, facebook)\"},"                                          \
     "\"target\":{\"type\":\"string\",\"description\":\"Channel, contact, or search query\"},"    \
     "\"message\":{\"type\":\"string\",\"description\":\"Message to send\"},"                     \
     "\"javascript\":{\"type\":\"string\",\"description\":\"Raw JS to execute (exec_js only)\"}," \
@@ -69,11 +70,11 @@ static hu_error_t action_list_apps(hu_allocator_t *alloc, hu_tool_result_t *out)
 
     /* The drivers array is contiguous but accessed via pointer array.
      * We iterate using hu_pwa_driver_find by index. */
-    const char *apps[] = {"slack", "discord", "whatsapp", "gmail", "calendar",
-                          "notion", "twitter", "telegram", "linkedin"};
+    const char *apps[] = {"slack", "discord", "whatsapp", "gmail",     "calendar",
+                          "notion", "twitter", "telegram", "linkedin", "facebook"};
     size_t napps = sizeof(apps) / sizeof(apps[0]);
     for (size_t i = 0; i < napps && pos < buf_size - 128; i++) {
-        const hu_pwa_driver_t *d = hu_pwa_driver_find(apps[i]);
+        const hu_pwa_driver_t *d = hu_pwa_driver_resolve(apps[i]);
         if (!d)
             continue;
         n = snprintf(buf + pos, buf_size - pos,
@@ -237,7 +238,7 @@ static hu_error_t action_navigate(hu_allocator_t *alloc, hu_pwa_tool_ctx_t *ctx,
         return HU_OK;
     }
 
-    const hu_pwa_driver_t *drv = hu_pwa_driver_find(app);
+    const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(app);
     if (!drv) {
         *out = hu_tool_result_fail("Unknown app", 11);
         return HU_OK;
@@ -302,7 +303,7 @@ static hu_error_t action_exec_js(hu_allocator_t *alloc, hu_pwa_tool_ctx_t *ctx,
 
     const char *url_pattern = app;
     if (app) {
-        const hu_pwa_driver_t *drv = hu_pwa_driver_find(app);
+        const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(app);
         if (drv)
             url_pattern = drv->url_pattern;
     }

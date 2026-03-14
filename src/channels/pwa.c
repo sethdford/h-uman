@@ -104,7 +104,7 @@ static hu_error_t pwa_start(void *ctx) {
     c->browser_detected = true;
     /* Validate at least one monitored tab is open */
     for (size_t i = 0; i < c->app_count; i++) {
-        const hu_pwa_driver_t *drv = hu_pwa_driver_find(c->app_names[i]);
+        const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(c->app_names[i]);
         if (!drv || !drv->read_messages_js)
             continue;
         hu_pwa_tab_t tab;
@@ -225,7 +225,7 @@ static bool pwa_health_check(void *ctx) {
     if (hu_pwa_detect_browser(&browser) != HU_OK)
         return false;
     for (size_t i = 0; i < c->app_count; i++) {
-        const hu_pwa_driver_t *drv = hu_pwa_driver_find(c->app_names[i]);
+        const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(c->app_names[i]);
         if (!drv || !drv->read_messages_js)
             continue;
         hu_pwa_tab_t tab;
@@ -254,8 +254,8 @@ static const hu_channel_vtable_t pwa_vtable = {
 
 /* Build app list from all drivers with read_messages_js when apps is NULL. */
 static const char *const PWA_APPS_WITH_READ[] = {
-    "slack", "discord", "whatsapp", "gmail", "calendar",
-    "notion", "twitter", "telegram", "linkedin",
+    "slack", "discord", "whatsapp", "gmail",     "calendar",
+    "notion", "twitter", "telegram", "linkedin", "facebook",
 };
 #define PWA_APPS_WITH_READ_COUNT (sizeof(PWA_APPS_WITH_READ) / sizeof(PWA_APPS_WITH_READ[0]))
 
@@ -300,7 +300,7 @@ hu_error_t hu_pwa_channel_create(hu_allocator_t *alloc, const char *const *apps,
         const char *name = src[i];
         if (!name)
             break;
-        const hu_pwa_driver_t *drv = hu_pwa_driver_find(name);
+        const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(name);
         if (!drv || !drv->read_messages_js)
             continue;
         c->app_names[c->app_count] = hu_strdup(alloc, name);
