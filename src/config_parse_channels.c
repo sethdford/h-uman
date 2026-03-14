@@ -918,6 +918,25 @@ hu_error_t parse_channels(hu_allocator_t *a, hu_config_t *cfg, const hu_json_val
     if (qq_obj)
         parse_qq_channel(a, cfg, qq_obj);
 
+    hu_json_value_t *pwa_obj = hu_json_object_get(obj, "pwa");
+    if (pwa_obj && pwa_obj->type == HU_JSON_OBJECT) {
+        hu_json_value_t *apps_arr = hu_json_object_get(pwa_obj, "apps");
+        if (apps_arr && apps_arr->type == HU_JSON_ARRAY) {
+            if (cfg->channels.pwa.apps) {
+                for (size_t i = 0; i < cfg->channels.pwa.apps_count; i++)
+                    if (cfg->channels.pwa.apps[i])
+                        a->free(a->ctx, cfg->channels.pwa.apps[i],
+                                strlen(cfg->channels.pwa.apps[i]) + 1);
+                a->free(a->ctx, cfg->channels.pwa.apps,
+                        cfg->channels.pwa.apps_count * sizeof(char *));
+            }
+            parse_string_array(a, &cfg->channels.pwa.apps, &cfg->channels.pwa.apps_count,
+                               apps_arr);
+        }
+        cfg->channels.pwa.poll_interval_sec =
+            (int)hu_json_get_number(pwa_obj, "poll_interval_sec", 5.0);
+    }
+
     cfg->channels.channel_config_len = 0;
     if (obj->data.object.pairs && cfg->channels.channel_config_len < HU_CHANNEL_CONFIG_MAX) {
         for (size_t i = 0; i < obj->data.object.len; i++) {

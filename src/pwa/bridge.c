@@ -298,6 +298,13 @@ hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser,
 
     const char *app = hu_pwa_browser_name(browser);
 
+    char *escaped_pattern = NULL;
+    size_t escaped_len = 0;
+    hu_error_t esc_err = hu_pwa_escape_applescript(alloc, url_pattern, strlen(url_pattern),
+                                                    &escaped_pattern, &escaped_len);
+    if (esc_err != HU_OK)
+        return esc_err;
+
     char script[2048];
     int n = snprintf(script, sizeof(script),
         "tell application \"%s\"\n"
@@ -310,7 +317,8 @@ hu_error_t hu_pwa_find_tab(hu_allocator_t *alloc, hu_pwa_browser_t browser,
         "  end repeat\n"
         "  return \"NOT_FOUND\"\n"
         "end tell",
-        app, url_pattern);
+        app, escaped_pattern);
+    alloc->free(alloc->ctx, escaped_pattern, escaped_len + 1);
     if (n <= 0 || (size_t)n >= sizeof(script))
         return HU_ERR_PARSE;
 
@@ -367,6 +375,13 @@ hu_error_t hu_pwa_list_tabs(hu_allocator_t *alloc, hu_pwa_browser_t browser,
     const char *app = hu_pwa_browser_name(browser);
     const char *filter = url_pattern ? url_pattern : "";
 
+    char *escaped_filter = NULL;
+    size_t escaped_filter_len = 0;
+    hu_error_t esc_err = hu_pwa_escape_applescript(alloc, filter, strlen(filter),
+                                                    &escaped_filter, &escaped_filter_len);
+    if (esc_err != HU_OK)
+        return esc_err;
+
     char script[2048];
     int n = snprintf(script, sizeof(script),
         "set output to \"\"\n"
@@ -381,7 +396,8 @@ hu_error_t hu_pwa_list_tabs(hu_allocator_t *alloc, hu_pwa_browser_t browser,
         "  end repeat\n"
         "end tell\n"
         "return output",
-        app, filter, filter);
+        app, escaped_filter, escaped_filter);
+    alloc->free(alloc->ctx, escaped_filter, escaped_filter_len + 1);
     if (n <= 0 || (size_t)n >= sizeof(script))
         return HU_ERR_PARSE;
 
@@ -521,7 +537,7 @@ hu_error_t hu_pwa_send_message(hu_allocator_t *alloc, hu_pwa_browser_t browser,
     if (!alloc || !app_name || !message || !out_result || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 
-    const hu_pwa_driver_t *drv = hu_pwa_driver_find(app_name);
+    const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(app_name);
     if (!drv)
         return HU_ERR_NOT_FOUND;
     if (!drv->send_message_js)
@@ -577,7 +593,7 @@ hu_error_t hu_pwa_read_messages(hu_allocator_t *alloc, hu_pwa_browser_t browser,
     if (!alloc || !app_name || !out_result || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
 
-    const hu_pwa_driver_t *drv = hu_pwa_driver_find(app_name);
+    const hu_pwa_driver_t *drv = hu_pwa_driver_resolve(app_name);
     if (!drv)
         return HU_ERR_NOT_FOUND;
     if (!drv->read_messages_js)

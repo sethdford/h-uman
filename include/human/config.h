@@ -342,6 +342,11 @@ typedef struct hu_channels_config {
     hu_twilio_channel_config_t twilio;
     hu_onebot_channel_config_t onebot;
     hu_qq_channel_config_t qq;
+    struct {
+        char **apps;         /* app names to monitor, NULL = all */
+        size_t apps_count;
+        int poll_interval_sec;
+    } pwa;
 } hu_channels_config_t;
 
 typedef struct hu_memory_config {

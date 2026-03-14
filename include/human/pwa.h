@@ -79,6 +79,33 @@ const hu_pwa_driver_t *hu_pwa_driver_find(const char *app_name);
 const hu_pwa_driver_t *hu_pwa_driver_find_by_url(const char *url);
 const hu_pwa_driver_t *hu_pwa_drivers_all(size_t *count);
 
+/* ── Driver Registry ────────────────────────────────────────────────── */
+
+typedef struct hu_pwa_driver_registry {
+    hu_pwa_driver_t *custom_drivers;
+    size_t custom_count;
+    size_t custom_cap;
+} hu_pwa_driver_registry_t;
+
+hu_error_t hu_pwa_driver_registry_init(hu_pwa_driver_registry_t *reg);
+void hu_pwa_driver_registry_destroy(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg);
+
+hu_error_t hu_pwa_driver_registry_load_dir(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg,
+                                          const char *dir_path);
+
+hu_error_t hu_pwa_driver_registry_add(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg,
+                                      const hu_pwa_driver_t *driver);
+
+const hu_pwa_driver_t *hu_pwa_driver_registry_find(const hu_pwa_driver_registry_t *reg,
+                                                   const char *app_name);
+
+/* Set a global registry for the bridge to consult (custom drivers override built-in).
+ * Pass NULL to clear. The pointer must outlive all bridge calls. */
+void hu_pwa_set_global_registry(hu_pwa_driver_registry_t *reg);
+
+/* Resolve a driver by name: checks global registry (if set) first, then built-in. */
+const hu_pwa_driver_t *hu_pwa_driver_resolve(const char *app_name);
+
 /* ── High-Level Actions ────────────────────────────────────────────── */
 
 hu_error_t hu_pwa_send_message(hu_allocator_t *alloc, hu_pwa_browser_t browser,

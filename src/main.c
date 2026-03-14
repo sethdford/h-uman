@@ -61,6 +61,7 @@
 #include "human/paperclip/client.h"
 #include "human/paperclip/heartbeat.h"
 #endif
+#include "human/pwa.h"
 #include "human/plugin_loader.h"
 #include "human/tool.h"
 #include "human/tools/factory.h"
@@ -161,6 +162,7 @@ static hu_error_t cmd_service(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_service_loop(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_skills(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv);
+static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv);
 static hu_error_t cmd_migrate(hu_allocator_t *alloc, int argc, char **argv);
 #ifdef HU_HAS_PERSONA
 static hu_error_t cmd_persona(hu_allocator_t *alloc, int argc, char **argv);
@@ -210,6 +212,7 @@ static const hu_command_t commands[] = {
     {"channel", "Channel management", cmd_channel},
     {"skills", "Skill discovery and integration", cmd_skills},
     {"agents", "Manage named agent definitions", cmd_agents},
+    {"pwa", "Drive installed PWA web apps", cmd_pwa},
     {"hardware", "Hardware peripheral management", cmd_hardware},
     {"sandbox", "Show sandbox status and backends", cmd_sandbox},
     {"migrate", "Migrate memory backends", cmd_migrate},
@@ -932,6 +935,174 @@ static hu_error_t cmd_agents(hu_allocator_t *alloc, int argc, char **argv) {
 
     hu_agent_registry_destroy(&reg);
     fprintf(stderr, "Usage: human agents [list|show <name>]\n");
+    return HU_ERR_INVALID_ARGUMENT;
+}
+
+/* ─── pwa subcommand ─────────────────────────────────────────────────── */
+
+static const char *const PWA_APP_NAMES[] = {"slack", "discord", "whatsapp", "gmail", "calendar",
+                                            "notion", "twitter", "telegram", "linkedin"};
+#define PWA_APP_COUNT (sizeof(PWA_APP_NAMES) / sizeof(PWA_APP_NAMES[0]))
+
+static hu_error_t cmd_pwa(hu_allocator_t *alloc, int argc, char **argv) {
+    const char *sub = (argc >= 3 && argv[2]) ? argv[2] : "list";
+
+    if (strcmp(sub, "list") == 0) {
+        size_t count = 0;
+        (void)hu_pwa_drivers_all(&count);
+        printf("PWA Drivers (%zu apps):\n", count);
+        for (size_t i = 0; i < PWA_APP_COUNT; i++) {
+            const hu_pwa_driver_t *d = hu_pwa_driver_find(PWA_APP_NAMES[i]);
+            if (!d)
+                continue;
+            printf("  %-10s %-16s [%s]  %s%s%s\n", d->app_name,
+                   d->display_name ? d->display_name : "?",
+                   d->url_pattern ? d->url_pattern : "?",
+                   d->read_messages_js ? "read " : "",
+                   d->send_message_js ? "send " : "",
+                   d->navigate_js ? "navigate" : "");
+        }
+        return HU_OK;
+    }
+
+    if (strcmp(sub, "tabs") == 0) {
+#if HU_IS_TEST
+        (void)alloc;
+        (void)argc;
+        (void)argv;
+        fprintf(stderr, "PWA: browser automation unavailable in test build\n");
+        return HU_OK;
+#else
+        hu_pwa_browser_t browser;
+        hu_error_t err = hu_pwa_detect_browser(&browser);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA: no supported browser found (Chrome, Arc, Brave, Edge on macOS)\n");
+            return err;
+        }
+        const char *url_pattern = (argc >= 4 && argv[3]) ? argv[3] : NULL;
+        hu_pwa_tab_t *tabs = NULL;
+        size_t count = 0;
+        err = hu_pwa_list_tabs(alloc, browser, url_pattern, &tabs, &count);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA tabs: %s\n", hu_error_string(err));
+            return err;
+        }
+        printf("Browser: %s\n", hu_pwa_browser_name(browser));
+        printf("Open tabs (%zu):\n", count);
+        for (size_t i = 0; i < count; i++) {
+            const hu_pwa_driver_t *drv =
+                tabs[i].url ? hu_pwa_driver_find_by_url(tabs[i].url) : NULL;
+            printf("  [%d:%d] %s — %s", tabs[i].window_idx, tabs[i].tab_idx,
+                   tabs[i].title ? tabs[i].title : "?",
+                   tabs[i].url ? tabs[i].url : "?");
+            if (drv)
+                printf(" [PWA: %s]", drv->app_name);
+            printf("\n");
+        }
+        hu_pwa_tabs_free(alloc, tabs, count);
+        return HU_OK;
+#endif
+    }
+
+    if (strcmp(sub, "read") == 0) {
+        if (argc < 4 || !argv[3]) {
+            fprintf(stderr, "Usage: human pwa read <app>\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        const char *app = argv[3];
+#if HU_IS_TEST
+        (void)alloc;
+        (void)app;
+        fprintf(stderr, "PWA: browser automation unavailable in test build\n");
+        return HU_OK;
+#else
+        const hu_pwa_driver_t *drv = hu_pwa_driver_find(app);
+        if (!drv) {
+            fprintf(stderr, "PWA: unknown app '%s'\n", app);
+            return HU_ERR_NOT_FOUND;
+        }
+        if (!drv->read_messages_js) {
+            fprintf(stderr, "PWA: app '%s' does not support reading messages\n", app);
+            return HU_ERR_NOT_SUPPORTED;
+        }
+        hu_pwa_browser_t browser;
+        hu_error_t err = hu_pwa_detect_browser(&browser);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA: no supported browser found\n");
+            return err;
+        }
+        printf("Reading from %s...\n", drv->display_name ? drv->display_name : app);
+        fflush(stdout);
+        char *result = NULL;
+        size_t result_len = 0;
+        err = hu_pwa_read_messages(alloc, browser, app, &result, &result_len);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA read failed: %s\n", hu_error_string(err));
+            return err;
+        }
+        if (result && result_len > 0) {
+            printf("%.*s\n", (int)result_len, result);
+            alloc->free(alloc->ctx, result, result_len + 1);
+        } else {
+            printf("(no messages)\n");
+        }
+        return HU_OK;
+#endif
+    }
+
+    if (strcmp(sub, "send") == 0) {
+        if (argc < 5 || !argv[3] || !argv[4]) {
+            fprintf(stderr, "Usage: human pwa send <app> [target] <message>\n");
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+        const char *app = argv[3];
+        const char *target = NULL;
+        const char *message;
+        if (argc >= 6 && argv[4] && argv[5]) {
+            target = argv[4];
+            message = argv[5];
+        } else {
+            message = argv[4];
+        }
+#if HU_IS_TEST
+        (void)alloc;
+        (void)app;
+        (void)target;
+        (void)message;
+        fprintf(stderr, "PWA: browser automation unavailable in test build\n");
+        return HU_OK;
+#else
+        const hu_pwa_driver_t *drv = hu_pwa_driver_find(app);
+        if (!drv) {
+            fprintf(stderr, "PWA: unknown app '%s'\n", app);
+            return HU_ERR_NOT_FOUND;
+        }
+        if (!drv->send_message_js) {
+            fprintf(stderr, "PWA: app '%s' does not support sending messages\n", app);
+            return HU_ERR_NOT_SUPPORTED;
+        }
+        hu_pwa_browser_t browser;
+        hu_error_t err = hu_pwa_detect_browser(&browser);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA: no supported browser found\n");
+            return err;
+        }
+        char *result = NULL;
+        size_t result_len = 0;
+        err = hu_pwa_send_message(alloc, browser, app, target, message, &result, &result_len);
+        if (err != HU_OK) {
+            fprintf(stderr, "PWA send: %s\n", hu_error_string(err));
+            return err;
+        }
+        if (result && result_len > 0) {
+            printf("%.*s\n", (int)result_len, result);
+            alloc->free(alloc->ctx, result, result_len + 1);
+        }
+        return HU_OK;
+#endif
+    }
+
+    fprintf(stderr, "Usage: human pwa [list|tabs [url_pattern]|read <app>|send <app> [target] <message>]\n");
     return HU_ERR_INVALID_ARGUMENT;
 }
 

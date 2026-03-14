@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "human/pwa.h"
+#include "human/channels/pwa.h"
 #include "human/tools/pwa.h"
 #include "human/core/json.h"
 #include <string.h>
@@ -94,6 +95,81 @@ static void test_drivers_all_returns_count(void) {
     const hu_pwa_driver_t *first = hu_pwa_drivers_all(&count);
     HU_ASSERT(count >= 9);
     HU_ASSERT_NOT_NULL(first);
+}
+
+/* ── Driver Registry ────────────────────────────────────────────────── */
+
+static void test_registry_init_destroy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_pwa_driver_registry_t reg;
+    HU_ASSERT_EQ(hu_pwa_driver_registry_init(&reg), HU_OK);
+    HU_ASSERT(reg.custom_drivers == NULL);
+    HU_ASSERT_EQ(reg.custom_count, 0);
+    hu_pwa_driver_registry_destroy(&alloc, &reg);
+}
+
+static void test_registry_add_find_custom_overrides_builtin(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_pwa_driver_registry_t reg;
+    HU_ASSERT_EQ(hu_pwa_driver_registry_init(&reg), HU_OK);
+
+    const hu_pwa_driver_t *builtin = hu_pwa_driver_find("slack");
+    HU_ASSERT_NOT_NULL(builtin);
+    HU_ASSERT_STR_EQ(builtin->display_name, "Slack");
+
+    hu_pwa_driver_t custom = {
+        .app_name = "slack",
+        .display_name = "Slack Custom",
+        .url_pattern = "app.slack.com",
+        .read_messages_js = "(function(){return 'custom';})()",
+        .send_message_js = "(function(){return 'sent';})()",
+        .read_contacts_js = NULL,
+        .navigate_js = NULL,
+    };
+    HU_ASSERT_EQ(hu_pwa_driver_registry_add(&alloc, &reg, &custom), HU_OK);
+
+    const hu_pwa_driver_t *found = hu_pwa_driver_registry_find(&reg, "slack");
+    HU_ASSERT_NOT_NULL(found);
+    HU_ASSERT_STR_EQ(found->display_name, "Slack Custom");
+    HU_ASSERT_STR_EQ(found->read_messages_js, "(function(){return 'custom';})()");
+
+    found = hu_pwa_driver_registry_find(&reg, "discord");
+    HU_ASSERT_NOT_NULL(found);
+    HU_ASSERT_STR_EQ(found->app_name, "discord");
+
+    found = hu_pwa_driver_registry_find(&reg, "nonexistent");
+    HU_ASSERT(found == NULL);
+
+    hu_pwa_driver_registry_destroy(&alloc, &reg);
+}
+
+static void test_registry_load_dir_test_mode_returns_ok(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_pwa_driver_registry_t reg;
+    HU_ASSERT_EQ(hu_pwa_driver_registry_init(&reg), HU_OK);
+    hu_error_t err = hu_pwa_driver_registry_load_dir(&alloc, &reg, "/nonexistent/path");
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(reg.custom_count, 0);
+    hu_pwa_driver_registry_destroy(&alloc, &reg);
+}
+
+static void test_registry_add_invalid_returns_error(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_pwa_driver_registry_t reg;
+    HU_ASSERT_EQ(hu_pwa_driver_registry_init(&reg), HU_OK);
+
+    hu_pwa_driver_t bad = {
+        .app_name = NULL,
+        .display_name = "X",
+        .url_pattern = "x.com",
+        .read_messages_js = NULL,
+        .send_message_js = NULL,
+        .read_contacts_js = NULL,
+        .navigate_js = NULL,
+    };
+    HU_ASSERT_EQ(hu_pwa_driver_registry_add(&alloc, &reg, &bad), HU_ERR_INVALID_ARGUMENT);
+
+    hu_pwa_driver_registry_destroy(&alloc, &reg);
 }
 
 /* ── JS String Escaping ────────────────────────────────────────────── */
@@ -259,7 +335,6 @@ static void test_send_message_unknown_app(void) {
 }
 
 static void test_read_messages_null_args(void) {
-    hu_allocator_t alloc = hu_system_allocator();
     char *r = NULL;
     size_t rl = 0;
     HU_ASSERT_EQ(hu_pwa_read_messages(NULL, HU_PWA_BROWSER_CHROME, "slack", &r, &rl),
@@ -363,6 +438,77 @@ static void test_pwa_tool_send_missing_app(void) {
     tool.vtable->deinit(tool.ctx, &alloc);
 }
 
+/* ── Channel ───────────────────────────────────────────────────────── */
+
+static void test_pwa_channel_create_destroy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    const char *apps[] = {"slack", "discord"};
+    hu_error_t err = hu_pwa_channel_create(&alloc, apps, 2, &ch);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(ch.ctx);
+    HU_ASSERT_NOT_NULL(ch.vtable);
+    hu_pwa_channel_destroy(&ch);
+}
+
+static void test_pwa_channel_name(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_pwa_channel_create(&alloc, NULL, 0, &ch);
+    HU_ASSERT_STR_EQ(ch.vtable->name(ch.ctx), "pwa");
+    hu_pwa_channel_destroy(&ch);
+}
+
+static void test_pwa_channel_health(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_pwa_channel_create(&alloc, NULL, 0, &ch);
+    HU_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    hu_pwa_channel_destroy(&ch);
+}
+
+static void test_pwa_channel_send_stores_message(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_pwa_channel_create(&alloc, NULL, 0, &ch);
+    hu_error_t err = ch.vtable->send(ch.ctx, "pwa:slack", 9, "hello", 5, NULL, 0);
+    HU_ASSERT_EQ(err, HU_OK);
+    size_t len = 0;
+    const char *last = hu_pwa_channel_test_get_last(&ch, &len);
+    HU_ASSERT_NOT_NULL(last);
+    HU_ASSERT_STR_EQ(last, "hello");
+    HU_ASSERT_EQ(len, 5);
+    hu_pwa_channel_destroy(&ch);
+}
+
+static void test_pwa_channel_poll_inject(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_pwa_channel_create(&alloc, NULL, 0, &ch);
+    hu_pwa_channel_test_inject(&ch, "slack", "alice: Hey there!");
+    hu_channel_loop_msg_t msgs[4];
+    memset(msgs, 0, sizeof(msgs));
+    size_t count = 0;
+    hu_error_t err = hu_pwa_channel_poll(ch.ctx, &alloc, msgs, 4, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 1);
+    HU_ASSERT_STR_EQ(msgs[0].session_key, "pwa:slack");
+    HU_ASSERT_STR_EQ(msgs[0].content, "alice: Hey there!");
+    hu_pwa_channel_destroy(&ch);
+}
+
+static void test_pwa_channel_poll_empty(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    hu_pwa_channel_create(&alloc, NULL, 0, &ch);
+    hu_channel_loop_msg_t msgs[4];
+    size_t count = 99;
+    hu_error_t err = hu_pwa_channel_poll(ch.ctx, &alloc, msgs, 4, &count);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ(count, 0);
+    hu_pwa_channel_destroy(&ch);
+}
+
 /* ── Suite Runner ──────────────────────────────────────────────────── */
 
 void run_pwa_tests(void) {
@@ -382,6 +528,12 @@ void run_pwa_tests(void) {
     HU_RUN_TEST(test_driver_find_by_url_gmail);
     HU_RUN_TEST(test_driver_find_by_url_unknown);
     HU_RUN_TEST(test_drivers_all_returns_count);
+
+    HU_TEST_SUITE("pwa_registry");
+    HU_RUN_TEST(test_registry_init_destroy);
+    HU_RUN_TEST(test_registry_add_find_custom_overrides_builtin);
+    HU_RUN_TEST(test_registry_load_dir_test_mode_returns_ok);
+    HU_RUN_TEST(test_registry_add_invalid_returns_error);
 
     HU_TEST_SUITE("pwa_escaping");
     HU_RUN_TEST(test_escape_js_basic);
@@ -414,4 +566,12 @@ void run_pwa_tests(void) {
     HU_RUN_TEST(test_pwa_tool_read_slack);
     HU_RUN_TEST(test_pwa_tool_unknown_action);
     HU_RUN_TEST(test_pwa_tool_send_missing_app);
+
+    HU_TEST_SUITE("pwa_channel");
+    HU_RUN_TEST(test_pwa_channel_create_destroy);
+    HU_RUN_TEST(test_pwa_channel_name);
+    HU_RUN_TEST(test_pwa_channel_health);
+    HU_RUN_TEST(test_pwa_channel_send_stores_message);
+    HU_RUN_TEST(test_pwa_channel_poll_inject);
+    HU_RUN_TEST(test_pwa_channel_poll_empty);
 }

@@ -34,6 +34,10 @@
 #if HU_HAS_IMESSAGE
 #include "human/channels/imessage.h"
 #endif
+#if HU_HAS_PWA
+#include "human/channels/pwa.h"
+#include "human/pwa.h"
+#endif
 #if HU_HAS_IMAP
 #include "human/channels/imap.h"
 #endif
@@ -130,6 +134,13 @@ static void destroy_email_wrap(hu_channel_t *ch, hu_allocator_t *a) {
 static void destroy_imessage_wrap(hu_channel_t *ch, hu_allocator_t *a) {
     (void)a;
     hu_imessage_destroy(ch);
+    (void)ch;
+}
+#endif
+#if HU_HAS_PWA
+static void destroy_pwa_wrap(hu_channel_t *ch, hu_allocator_t *a) {
+    (void)a;
+    hu_pwa_channel_destroy(ch);
     (void)ch;
 }
 #endif
@@ -336,6 +347,11 @@ typedef struct hu_bootstrap_internal {
 #endif
     hu_agent_registry_t agent_registry;
     bool agent_registry_ok;
+
+#if HU_HAS_PWA
+    hu_pwa_driver_registry_t pwa_driver_registry;
+    bool pwa_driver_registry_ok;
+#endif
 
     bool provider_ok;
     bool agent_ok;
@@ -559,6 +575,22 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         }
     }
 
+#if HU_HAS_PWA
+    {
+        hu_error_t pwa_err = hu_pwa_driver_registry_init(&bi->pwa_driver_registry);
+        if (pwa_err == HU_OK) {
+            bi->pwa_driver_registry_ok = true;
+            const char *home = getenv("HOME");
+            if (home && home[0]) {
+                char pwa_dir[512];
+                int n = snprintf(pwa_dir, sizeof(pwa_dir), "%s/.human/pwa", home);
+                if (n > 0 && (size_t)n < sizeof(pwa_dir))
+                    hu_pwa_driver_registry_load_dir(alloc, &bi->pwa_driver_registry, pwa_dir);
+            }
+        }
+    }
+#endif
+
     if (with_agent) {
         const char *prov_name = bi->cfg.default_provider ? bi->cfg.default_provider : "openai";
         size_t prov_name_len = strlen(prov_name);
@@ -713,6 +745,27 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
             fprintf(stderr,
                     "[bootstrap] WARNING: iMessage configured in config but binary was built "
                     "without HU_ENABLE_IMESSAGE — rebuild with -DSC_ENABLE_IMESSAGE=ON\n");
+#endif
+
+#if HU_HAS_PWA
+        if (cfg->channels.pwa.apps_count > 0 && ch_count < HU_BOOTSTRAP_CHANNELS_MAX) {
+            err = hu_pwa_channel_create(alloc,
+                                        (const char *const *)cfg->channels.pwa.apps,
+                                        cfg->channels.pwa.apps_count,
+                                        &bi->channel_slots[ch_count]);
+            if (err == HU_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = hu_pwa_channel_poll;
+                bi->channels[ch_count].interval_ms =
+                    (uint32_t)(cfg->channels.pwa.poll_interval_sec > 0
+                                   ? cfg->channels.pwa.poll_interval_sec * 1000
+                                   : 5000);
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_pwa_wrap;
+                ch_count++;
+            }
+        }
 #endif
 
 #if HU_HAS_GMAIL
@@ -1273,6 +1326,10 @@ void hu_app_teardown(hu_app_ctx_t *ctx) {
         hu_plugin_registry_destroy(bi->plugin_reg);
     if (bi->agent_registry_ok)
         hu_agent_registry_destroy(&bi->agent_registry);
+#if HU_HAS_PWA
+    if (bi->pwa_driver_registry_ok)
+        hu_pwa_driver_registry_destroy(alloc, &bi->pwa_driver_registry);
+#endif
 #ifdef HU_HAS_SKILLS
     if (bi->skillforge_ok)
         hu_skillforge_destroy(&bi->skillforge);

@@ -11,6 +11,10 @@
  * The %s placeholder in navigate_js is replaced with the escaped target name.
  */
 #include "human/pwa.h"
+#include "human/core/json.h"
+#include "human/core/string.h"
+#include <dirent.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ── Slack ──────────────────────────────────────────────────────────── */
@@ -435,4 +439,226 @@ const hu_pwa_driver_t *hu_pwa_drivers_all(size_t *count) {
     if (count)
         *count = DRIVER_COUNT;
     return ALL_DRIVERS[0];
+}
+
+/* ── Driver Registry ───────────────────────────────────────────────── */
+
+#define REGISTRY_INITIAL_CAP 8
+
+hu_error_t hu_pwa_driver_registry_init(hu_pwa_driver_registry_t *reg) {
+    if (!reg)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(reg, 0, sizeof(*reg));
+    return HU_OK;
+}
+
+void hu_pwa_driver_registry_destroy(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg) {
+    if (!alloc || !reg)
+        return;
+    for (size_t i = 0; i < reg->custom_count; i++) {
+        hu_pwa_driver_t *d = &reg->custom_drivers[i];
+        if (d->app_name)
+            hu_str_free(alloc, (char *)d->app_name);
+        if (d->display_name)
+            hu_str_free(alloc, (char *)d->display_name);
+        if (d->url_pattern)
+            hu_str_free(alloc, (char *)d->url_pattern);
+        if (d->read_messages_js)
+            hu_str_free(alloc, (char *)d->read_messages_js);
+        if (d->send_message_js)
+            hu_str_free(alloc, (char *)d->send_message_js);
+        if (d->read_contacts_js)
+            hu_str_free(alloc, (char *)d->read_contacts_js);
+        if (d->navigate_js)
+            hu_str_free(alloc, (char *)d->navigate_js);
+    }
+    if (reg->custom_drivers)
+        alloc->free(alloc->ctx, reg->custom_drivers,
+                    reg->custom_cap * sizeof(hu_pwa_driver_t));
+    reg->custom_drivers = NULL;
+    reg->custom_count = 0;
+    reg->custom_cap = 0;
+}
+
+hu_error_t hu_pwa_driver_registry_add(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg,
+                                      const hu_pwa_driver_t *driver) {
+    if (!alloc || !reg || !driver)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!driver->app_name || !driver->display_name || !driver->url_pattern)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    if (reg->custom_count >= reg->custom_cap) {
+        size_t new_cap = reg->custom_cap == 0 ? REGISTRY_INITIAL_CAP : reg->custom_cap * 2;
+        hu_pwa_driver_t *new_arr =
+            (hu_pwa_driver_t *)alloc->realloc(alloc->ctx, reg->custom_drivers,
+                                             reg->custom_cap * sizeof(hu_pwa_driver_t),
+                                             new_cap * sizeof(hu_pwa_driver_t));
+        if (!new_arr)
+            return HU_ERR_OUT_OF_MEMORY;
+        reg->custom_drivers = new_arr;
+        reg->custom_cap = new_cap;
+    }
+
+    hu_pwa_driver_t *d = &reg->custom_drivers[reg->custom_count];
+    memset(d, 0, sizeof(*d));
+    d->app_name = hu_strdup(alloc, driver->app_name);
+    d->display_name = hu_strdup(alloc, driver->display_name);
+    d->url_pattern = hu_strdup(alloc, driver->url_pattern);
+    d->read_messages_js = driver->read_messages_js ? hu_strdup(alloc, driver->read_messages_js)
+                                                    : NULL;
+    d->send_message_js = driver->send_message_js ? hu_strdup(alloc, driver->send_message_js)
+                                                  : NULL;
+    d->read_contacts_js = driver->read_contacts_js ? hu_strdup(alloc, driver->read_contacts_js)
+                                                    : NULL;
+    d->navigate_js = driver->navigate_js ? hu_strdup(alloc, driver->navigate_js) : NULL;
+
+    if (!d->app_name || !d->display_name || !d->url_pattern) {
+        if (d->app_name)
+            hu_str_free(alloc, (char *)d->app_name);
+        if (d->display_name)
+            hu_str_free(alloc, (char *)d->display_name);
+        if (d->url_pattern)
+            hu_str_free(alloc, (char *)d->url_pattern);
+        if (d->read_messages_js)
+            hu_str_free(alloc, (char *)d->read_messages_js);
+        if (d->send_message_js)
+            hu_str_free(alloc, (char *)d->send_message_js);
+        if (d->read_contacts_js)
+            hu_str_free(alloc, (char *)d->read_contacts_js);
+        if (d->navigate_js)
+            hu_str_free(alloc, (char *)d->navigate_js);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    reg->custom_count++;
+    return HU_OK;
+}
+
+#if !HU_IS_TEST
+static bool ends_with_json(const char *name) {
+    size_t n = strlen(name);
+    return n >= 5 && strcmp(name + n - 5, ".json") == 0;
+}
+#endif
+
+hu_error_t hu_pwa_driver_registry_load_dir(hu_allocator_t *alloc, hu_pwa_driver_registry_t *reg,
+                                           const char *dir_path) {
+    if (!alloc || !reg || !dir_path)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if HU_IS_TEST
+    (void)alloc;
+    (void)reg;
+    (void)dir_path;
+    return HU_OK;
+#else
+#ifndef _WIN32
+    DIR *d = opendir(dir_path);
+    if (!d)
+        return HU_OK; /* directory missing is not an error */
+
+    char path_buf[1024];
+    size_t dir_len = strlen(dir_path);
+    if (dir_len >= sizeof(path_buf) - 64)
+        goto done;
+
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.' || !ends_with_json(e->d_name))
+            continue;
+
+        int n = snprintf(path_buf, sizeof(path_buf), "%s/%s", dir_path, e->d_name);
+        if (n < 0 || (size_t)n >= sizeof(path_buf))
+            continue;
+
+        FILE *f = fopen(path_buf, "rb");
+        if (!f)
+            continue;
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz <= 0 || sz > 65536) {
+            fclose(f);
+            continue;
+        }
+        char *buf = (char *)alloc->alloc(alloc->ctx, (size_t)sz + 1);
+        if (!buf) {
+            fclose(f);
+            closedir(d);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        size_t rd = fread(buf, 1, (size_t)sz, f);
+        fclose(f);
+        buf[rd] = '\0';
+
+        hu_json_value_t *root = NULL;
+        hu_error_t err = hu_json_parse(alloc, buf, rd, &root);
+        alloc->free(alloc->ctx, buf, (size_t)sz + 1);
+        if (err != HU_OK || !root || root->type != HU_JSON_OBJECT) {
+            if (root)
+                hu_json_free(alloc, root);
+            continue; /* skip invalid files */
+        }
+
+        const char *app_name = hu_json_get_string(root, "app_name");
+        const char *display_name = hu_json_get_string(root, "display_name");
+        const char *url_pattern = hu_json_get_string(root, "url_pattern");
+        const char *read_messages_js = hu_json_get_string(root, "read_messages_js");
+        const char *send_message_js = hu_json_get_string(root, "send_message_js");
+        const char *read_contacts_js = hu_json_get_string(root, "read_contacts_js");
+        const char *navigate_js = hu_json_get_string(root, "navigate_js");
+
+        hu_json_free(alloc, root);
+
+        if (!app_name || !display_name || !url_pattern || !read_messages_js || !send_message_js)
+            continue;
+
+        hu_pwa_driver_t driver = {
+            .app_name = app_name,
+            .display_name = display_name,
+            .url_pattern = url_pattern,
+            .read_messages_js = read_messages_js,
+            .send_message_js = send_message_js,
+            .read_contacts_js = read_contacts_js,
+            .navigate_js = navigate_js,
+        };
+        (void)hu_pwa_driver_registry_add(alloc, reg, &driver); /* ignore add failure */
+    }
+
+done:
+    closedir(d);
+#else
+    (void)dir_path;
+#endif
+    return HU_OK;
+#endif
+}
+
+const hu_pwa_driver_t *hu_pwa_driver_registry_find(const hu_pwa_driver_registry_t *reg,
+                                                   const char *app_name) {
+    if (!reg || !app_name)
+        return NULL;
+    for (size_t i = 0; i < reg->custom_count; i++) {
+        if (strcmp(reg->custom_drivers[i].app_name, app_name) == 0)
+            return &reg->custom_drivers[i];
+    }
+    return hu_pwa_driver_find(app_name);
+}
+
+/* ── Global Registry ───────────────────────────────────────────────── */
+
+static hu_pwa_driver_registry_t *g_pwa_registry = NULL;
+
+void hu_pwa_set_global_registry(hu_pwa_driver_registry_t *reg) {
+    g_pwa_registry = reg;
+}
+
+const hu_pwa_driver_t *hu_pwa_driver_resolve(const char *app_name) {
+    if (!app_name)
+        return NULL;
+    if (g_pwa_registry) {
+        const hu_pwa_driver_t *d = hu_pwa_driver_registry_find(g_pwa_registry, app_name);
+        if (d)
+            return d;
+    }
+    return hu_pwa_driver_find(app_name);
 }
