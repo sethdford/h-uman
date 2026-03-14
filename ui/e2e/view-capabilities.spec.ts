@@ -53,6 +53,8 @@ test.describe("Chat Capabilities", () => {
   });
 
   test.fixme("demo messages render with correct roles", async ({ page }) => {
+    await page.goto("/?demo#chat:sess-c3");
+    await page.waitForTimeout(WAIT);
     await expect(async () => {
       const text: string = await page.evaluate(deepText("hu-chat-view"));
       expect(text).toContain("memory leak");
