@@ -32,6 +32,7 @@ typedef enum hu_verify_mode {
     HU_VERIFY_SOFT = 1,
     HU_VERIFY_STRICT = 2,
     HU_VERIFY_TELEMETRY = 3,
+    HU_VERIFY_INLINE = 4, /* W11: provider emits control tokens during generation */
 } hu_verify_mode_t;
 
 typedef struct hu_provenance_receipt {
