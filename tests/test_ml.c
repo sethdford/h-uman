@@ -3194,6 +3194,131 @@ static void test_gpt_lora_forward(void) {
     model.vtable->deinit(model.ctx, &alloc);
 }
 
+/* W13 Phase 4 — disk-saved LoRA is loaded from disk, attached to a
+ * fresh GPT, and the forward pass is biased by it. Detaching restores
+ * the baseline. Proves the full save/load/attach round trip the huml
+ * provider now exercises. */
+static void test_lora_disk_roundtrip_biases_gpt_forward(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_gpt_config_t cfg = {0};
+    cfg.sequence_len = 4;
+    cfg.vocab_size = 8;
+    cfg.n_layer = 1;
+    cfg.n_head = 2;
+    cfg.n_kv_head = 2;
+    cfg.n_embd = 8;
+    cfg.head_dim = 4;
+
+    hu_model_t model = {0};
+    HU_ASSERT_EQ(hu_gpt_create(&alloc, &cfg, &model), HU_OK);
+    hu_ml_tensor_t *params = NULL;
+    size_t nparams = 0;
+    HU_ASSERT_EQ(model.vtable->get_params(model.ctx, &params, &nparams), HU_OK);
+    for (size_t p = 0; p < nparams; p++) {
+        float *d = (float *)params[p].data;
+        size_t n = params[p].size_bytes / sizeof(float);
+        for (size_t i = 0; i < n; i++)
+            d[i] = 0.01f * (float)((i + p * 7) % 37) - 0.18f;
+    }
+
+    /* Build a non-trivial adapter (B != 0 so delta is nonzero), persist,
+     * destroy in-process, load from disk, attach, verify forward differs. */
+    hu_lora_config_t lora_cfg = {.rank = 2, .alpha = 4.0f, .dropout = 0.0f,
+                                 .targets = HU_LORA_TARGET_QV};
+    hu_lora_adapter_t *src = NULL;
+    HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, 8, 8, 1, &src), HU_OK);
+    float A_vals[16];
+    float B_vals[16];
+    memset(A_vals, 0, sizeof(A_vals));
+    A_vals[0] = 7.0f;
+    A_vals[9] = 7.0f;
+    for (int i = 0; i < 16; i++)
+        B_vals[i] = 0.5f;
+    HU_ASSERT_EQ(hu_lora_set_layer_weights(src, 0, A_vals, B_vals), HU_OK);
+
+    char path[] = "/tmp/hu_w13_disk_roundtrip_XXXXXX";
+    int fd = mkstemp(path);
+    HU_ASSERT(fd >= 0);
+    close(fd);
+    HU_ASSERT_EQ(hu_lora_save(src, path), HU_OK);
+    hu_lora_destroy(&alloc, src);
+
+    /* Round trip: load from disk and verify the forward pass is biased. */
+    hu_lora_adapter_t *loaded = NULL;
+    HU_ASSERT_EQ(hu_lora_load(&alloc, path, &loaded), HU_OK);
+    HU_ASSERT_NOT_NULL(loaded);
+
+    size_t in_dim = 0, out_dim = 0, n_layers = 0;
+    hu_lora_get_dims(loaded, &in_dim, &out_dim, &n_layers);
+    HU_ASSERT_EQ(in_dim, (size_t)8);
+    HU_ASSERT_EQ(out_dim, (size_t)8);
+    HU_ASSERT_EQ(n_layers, (size_t)1);
+
+    int32_t ids[4] = {0, 1, 2, 3};
+    hu_ml_tensor_t input = {.data = ids, .shape = {1, 4, 0, 0}, .ndim = 2,
+                            .dtype = HU_ML_DTYPE_I32, .size_bytes = 16};
+
+    hu_ml_tensor_t out_base = {0};
+    HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &out_base), HU_OK);
+    size_t n_logits = out_base.size_bytes / sizeof(float);
+    float base_sum = 0.0f;
+    for (size_t i = 0; i < n_logits; i++)
+        base_sum += fabsf(((float *)out_base.data)[i]);
+    alloc.free(alloc.ctx, out_base.data, out_base.size_bytes);
+
+    HU_ASSERT_EQ(hu_gpt_attach_lora(&model, loaded, NULL, loaded, NULL, NULL, NULL), HU_OK);
+    hu_ml_tensor_t out_lora = {0};
+    HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &out_lora), HU_OK);
+    float lora_sum = 0.0f;
+    for (size_t i = 0; i < n_logits; i++)
+        lora_sum += fabsf(((float *)out_lora.data)[i]);
+    alloc.free(alloc.ctx, out_lora.data, out_lora.size_bytes);
+
+    /* The disk-loaded adapter must measurably bias the forward pass. */
+    HU_ASSERT(fabsf(lora_sum - base_sum) > 1e-4f);
+
+    /* Detach and verify the forward pass returns to the baseline. */
+    hu_gpt_attach_lora(&model, NULL, NULL, NULL, NULL, NULL, NULL);
+    hu_ml_tensor_t out_post = {0};
+    HU_ASSERT_EQ(model.vtable->forward(model.ctx, &input, &out_post), HU_OK);
+    float post_sum = 0.0f;
+    for (size_t i = 0; i < n_logits; i++)
+        post_sum += fabsf(((float *)out_post.data)[i]);
+    alloc.free(alloc.ctx, out_post.data, out_post.size_bytes);
+    HU_ASSERT(fabsf(post_sum - base_sum) < 1e-3f);
+
+    hu_lora_destroy(&alloc, loaded);
+    model.vtable->deinit(model.ctx, &alloc);
+    (void)remove(path);
+}
+
+/* hu_lora_get_dims must report the same dims used at create time and
+ * tolerate a NULL adapter without crashing. */
+static void test_lora_get_dims_round_trip(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_lora_config_t cfg = {.rank = 4, .alpha = 8.0f, .dropout = 0.0f,
+                            .targets = HU_LORA_TARGET_QV};
+    hu_lora_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_lora_create(&alloc, &cfg, /*in_dim=*/16, /*out_dim=*/24,
+                                /*n_layers=*/3, &a),
+                 HU_OK);
+    size_t in = 0, out = 0, layers = 0;
+    hu_lora_get_dims(a, &in, &out, &layers);
+    HU_ASSERT_EQ(in, (size_t)16);
+    HU_ASSERT_EQ(out, (size_t)24);
+    HU_ASSERT_EQ(layers, (size_t)3);
+    hu_lora_destroy(&alloc, a);
+
+    /* NULL adapter must zero the outs without crashing. */
+    in = 9;
+    out = 9;
+    layers = 9;
+    hu_lora_get_dims(NULL, &in, &out, &layers);
+    HU_ASSERT_EQ(in, (size_t)0);
+    HU_ASSERT_EQ(out, (size_t)0);
+    HU_ASSERT_EQ(layers, (size_t)0);
+}
+
 /* ─── LoRA-GPT training: loss decreases with LoRA fine-tuning ─────────── */
 
 static void test_gpt_lora_training(void) {
@@ -4625,6 +4750,8 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_gpt_soft_cap_backward_finite_diff);
     /* LoRA-GPT integration */
     HU_RUN_TEST(test_gpt_lora_forward);
+    HU_RUN_TEST(test_lora_disk_roundtrip_biases_gpt_forward);
+    HU_RUN_TEST(test_lora_get_dims_round_trip);
     HU_RUN_TEST(test_gpt_lora_training);
     /* Edge-case tests */
     HU_RUN_TEST(test_dataloader_invalid_split);

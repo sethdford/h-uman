@@ -55,6 +55,12 @@ hu_error_t hu_lora_backward(hu_lora_adapter_t *adapter, size_t layer_idx,
 hu_error_t hu_lora_register_params(hu_lora_adapter_t *adapter, hu_ml_optimizer_t *opt);
 size_t hu_lora_num_params(const hu_lora_adapter_t *adapter);
 
+/* Adapter shape — used by callers (e.g. providers) to validate compatibility
+ * with a target model before calling hu_gpt_attach_lora. Returns 0s when
+ * adapter is NULL. Each pointer is optional. */
+void hu_lora_get_dims(const hu_lora_adapter_t *adapter, size_t *out_in_dim,
+                      size_t *out_out_dim, size_t *out_n_layers);
+
 hu_error_t hu_lora_save(const hu_lora_adapter_t *adapter, const char *path);
 hu_error_t hu_lora_load(hu_allocator_t *alloc, const char *path, hu_lora_adapter_t **out);
 

@@ -25,6 +25,16 @@
 
 #define HUML_MAX_ADAPTER_ID 64
 
+/* Reference-GPT shape used by the huml provider. Adapters must match
+ * these dims to attach into the forward pass; otherwise we keep the
+ * adapter in the slot but skip attach + log a one-shot caveat. */
+#define HUML_GPT_N_EMBD 512
+#define HUML_GPT_N_LAYER 8
+#define HUML_GPT_VOCAB 8192
+#define HUML_GPT_N_HEAD 4
+#define HUML_GPT_HEAD_DIM 128
+#define HUML_GPT_SEQ_LEN 2048
+
 typedef struct {
     hu_allocator_t *alloc;
     char checkpoint_path[512];
@@ -39,8 +49,16 @@ typedef struct {
      * most one adapter live at a time". */
     hu_lora_adapter_t *active_lora;
     char active_adapter_id[HUML_MAX_ADAPTER_ID];
+    bool active_lora_attached;
 #endif
 } huml_ctx_t;
+
+#ifdef HU_ENABLE_ML
+/* Forward declarations for attach helpers — definitions live with the
+ * adapter-loading code below to keep all LoRA glue in one block. */
+static void huml_try_attach_active_lora(huml_ctx_t *ctx);
+static void huml_detach_active_lora(huml_ctx_t *ctx);
+#endif
 
 #if defined(HU_ENABLE_ML) && !HU_IS_TEST
 static hu_error_t ensure_loaded(huml_ctx_t *ctx) {
@@ -50,13 +68,13 @@ static hu_error_t ensure_loaded(huml_ctx_t *ctx) {
         return HU_ERR_INVALID_ARGUMENT;
 
     hu_gpt_config_t gpt_cfg = {0};
-    gpt_cfg.sequence_len = 2048;
-    gpt_cfg.vocab_size = 8192;
-    gpt_cfg.n_layer = 8;
-    gpt_cfg.n_head = 4;
-    gpt_cfg.n_kv_head = 4;
-    gpt_cfg.n_embd = 512;
-    gpt_cfg.head_dim = 128;
+    gpt_cfg.sequence_len = HUML_GPT_SEQ_LEN;
+    gpt_cfg.vocab_size = HUML_GPT_VOCAB;
+    gpt_cfg.n_layer = HUML_GPT_N_LAYER;
+    gpt_cfg.n_head = HUML_GPT_N_HEAD;
+    gpt_cfg.n_kv_head = HUML_GPT_N_HEAD;
+    gpt_cfg.n_embd = HUML_GPT_N_EMBD;
+    gpt_cfg.head_dim = HUML_GPT_HEAD_DIM;
     memcpy(gpt_cfg.window_pattern, "SSSL", 5);
     gpt_cfg.activation = HU_ML_ACT_RELU_SQ;
     gpt_cfg.logit_soft_cap = 30.0f;
@@ -87,6 +105,10 @@ static hu_error_t ensure_loaded(huml_ctx_t *ctx) {
     }
 
     ctx->loaded = true;
+
+    /* W13 Phase 4 — lazy attach: if an adapter was loaded before the
+     * model, attach it now so the very first forward pass is biased. */
+    huml_try_attach_active_lora(ctx);
     return HU_OK;
 }
 
@@ -294,6 +316,7 @@ static void huml_deinit(void *ctx_ptr, hu_allocator_t *alloc) {
         return;
 #ifdef HU_ENABLE_ML
     if (ctx->active_lora) {
+        huml_detach_active_lora(ctx);
         hu_lora_destroy(alloc, ctx->active_lora);
         ctx->active_lora = NULL;
     }
@@ -310,14 +333,45 @@ static void huml_deinit(void *ctx_ptr, hu_allocator_t *alloc) {
 }
 
 #ifdef HU_ENABLE_ML
+/* W13 Phase 4 — attach the loaded adapter to the GPT's Q+V slots so
+ * gpt_forward applies it on every token. Must be called only after
+ * the model is loaded. Mirrors the training-time wiring in
+ * `human ml lora-persona` (Q+V default). Adapter shape must match
+ * HUML_GPT_N_EMBD on both axes; otherwise we leave the adapter in
+ * the slot, mark unattached, and emit a one-shot stderr caveat so
+ * the operator knows the adapter is loaded but inert. */
+static void huml_try_attach_active_lora(huml_ctx_t *ctx) {
+    if (!ctx || !ctx->loaded || !ctx->active_lora || ctx->active_lora_attached)
+        return;
+    size_t in_dim = 0, out_dim = 0, n_layers = 0;
+    hu_lora_get_dims(ctx->active_lora, &in_dim, &out_dim, &n_layers);
+    if (in_dim != HUML_GPT_N_EMBD || out_dim != HUML_GPT_N_EMBD ||
+        n_layers != HUML_GPT_N_LAYER) {
+        fprintf(stderr,
+                "[huml] adapter '%s' shape (%zux%zu, %zu layers) does not "
+                "match reference GPT (%dx%d, %d layers); not attaching to "
+                "forward pass\n",
+                ctx->active_adapter_id, in_dim, out_dim, n_layers,
+                HUML_GPT_N_EMBD, HUML_GPT_N_EMBD, HUML_GPT_N_LAYER);
+        return;
+    }
+    if (hu_gpt_attach_lora(&ctx->model, ctx->active_lora, NULL, ctx->active_lora,
+                           NULL, NULL, NULL) == HU_OK)
+        ctx->active_lora_attached = true;
+}
+
+static void huml_detach_active_lora(huml_ctx_t *ctx) {
+    if (!ctx || !ctx->loaded || !ctx->active_lora_attached)
+        return;
+    (void)hu_gpt_attach_lora(&ctx->model, NULL, NULL, NULL, NULL, NULL, NULL);
+    ctx->active_lora_attached = false;
+}
+
 /* W13 — adapter loading. Loads the adapter blob from disk via
- * hu_lora_load, stashes it under `adapter_id`. If an adapter is already
- * live we drop it first so the contract is "at most one adapter
- * resident". The adapter is bound but NOT yet merged into the forward
- * pass — chat-time merging arrives in Phase 4 of the FIX 15 frontier
- * bridge plan. Until then `active_adapter()` correctly reports the
- * loaded id so the daemon and `human ml status` can verify the loop
- * end-to-end. */
+ * hu_lora_load, stashes it under `adapter_id`, and (Phase 4) attaches
+ * it to the live GPT's Q+V projections so the next forward pass is
+ * actually biased by the adapter. If the model isn't loaded yet, we
+ * remember the adapter and attach lazily when ensure_loaded() runs. */
 static hu_error_t huml_load_adapter(void *ctx_ptr, hu_allocator_t *alloc,
                                     const char *adapter_path, size_t adapter_path_len,
                                     const char *adapter_id, size_t adapter_id_len) {
@@ -341,17 +395,23 @@ static hu_error_t huml_load_adapter(void *ctx_ptr, hu_allocator_t *alloc,
 
     /* Replace any incumbent only after the new one loads cleanly. */
     if (ctx->active_lora) {
+        huml_detach_active_lora(ctx);
         hu_lora_destroy(alloc, ctx->active_lora);
         ctx->active_lora = NULL;
         ctx->active_adapter_id[0] = '\0';
     }
 
     ctx->active_lora = fresh;
+    ctx->active_lora_attached = false;
     size_t copy_len = adapter_id_len < sizeof(ctx->active_adapter_id) - 1
                           ? adapter_id_len
                           : sizeof(ctx->active_adapter_id) - 1;
     memcpy(ctx->active_adapter_id, adapter_id, copy_len);
     ctx->active_adapter_id[copy_len] = '\0';
+
+    /* If the model is already loaded, attach now; otherwise the
+     * lazy-load path in ensure_loaded() will attach after model load. */
+    huml_try_attach_active_lora(ctx);
     return HU_OK;
 }
 
@@ -370,6 +430,7 @@ static hu_error_t huml_unload_adapter(void *ctx_ptr, const char *adapter_id,
         return HU_OK;
     if (!ctx->alloc)
         return HU_ERR_INVALID_ARGUMENT;
+    huml_detach_active_lora(ctx);
     hu_lora_destroy(ctx->alloc, ctx->active_lora);
     ctx->active_lora = NULL;
     ctx->active_adapter_id[0] = '\0';

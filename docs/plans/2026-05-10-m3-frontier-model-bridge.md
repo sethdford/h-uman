@@ -144,13 +144,45 @@ users.
 - `lora-persona --mlx-base <hf-id>` path.
 - Bench against Bridge A on M2; pick a default for Apple Silicon.
 
-## Phase 4 — Provider selection at chat time (target: +2 weeks)
+## Phase 4 — Provider selection at chat time
 
-- Config schema gains `personalization.lora_adapter` (path).
-- When set, the chat provider applies the adapter for every turn for that
-  user / contact.
-- Adapter A/B test framework (already exists in experiment loop) gates
-  promotion of new adapters.
+### 4.0 Reference-GPT path (DONE 2026-05-10, FIX 18→20)
+
+For the **reference HUML GPT** specifically, the chat-time merge is
+landed today. The huml provider:
+
+- Loads adapters via `hu_provider_load_adapter` (FIX 18).
+- Validates adapter shape against `HUML_GPT_N_EMBD` / `HUML_GPT_N_LAYER`
+  before attaching; mismatched adapters stay loaded but unattached and
+  the operator sees a one-shot stderr caveat.
+- Calls `hu_gpt_attach_lora(model, adapter, NULL, adapter, NULL, NULL,
+  NULL)` (Q+V mirroring training-time targets) so every subsequent
+  forward pass is biased.
+- Detaches before destroying the adapter on unload / replace / deinit.
+
+Coverage: `test_lora_disk_roundtrip_biases_gpt_forward` saves a LoRA to
+disk, `hu_lora_load`s it, attaches to a GPT, asserts the logit sum is
+measurably different from the base, then detaches and asserts the base
+is restored within 1e-3.  This proves the disk → load → attach →
+forward path that the chat path now exercises.
+
+**What's still pending in Phase 4:** config-driven adapter wiring
+(`personalization.lora_adapter` path) so the daemon auto-loads on
+startup, and the same wiring for non-huml providers (which requires
+Bridge A or B to land). Tracking those here:
+
+### 4.1 Config-driven auto-load (target: +1 week)
+
+- Config schema: `personalization.lora_adapter_path` (str), 
+  `personalization.lora_adapter_id` (str).
+- Daemon, after `hu_w7_facade_open`, calls
+  `hu_provider_load_adapter(provider, ...)` when the path is set.
+
+### 4.2 Frontier-provider chat-time merge (blocked on Bridge A or B)
+
+- Only applies once `llamacpp` or `mlx` provider lands.
+- Same vtable triple, but the implementation maps onto the underlying
+  framework's adapter API.
 
 # What an honest CLAUDE.md M3 row looks like (Phase 2)
 
@@ -180,3 +212,4 @@ Pick this up when ANY of these become true:
 | Date | Phase | Notes |
 |------|------|-------|
 | 2026-05-10 | 0 | FIX 15: `--checkpoint` honest, caveat printed, plan doc landed |
+| 2026-05-10 | 4.0 | FIX 20: huml chat-time LoRA merge — `hu_gpt_attach_lora` wired into provider load/unload; e2e disk-roundtrip test asserts forward-pass bias |

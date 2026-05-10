@@ -261,6 +261,16 @@ hu_error_t hu_lora_register_params(hu_lora_adapter_t *adapter, hu_ml_optimizer_t
     return HU_OK;
 }
 
+void hu_lora_get_dims(const hu_lora_adapter_t *adapter, size_t *out_in_dim,
+                      size_t *out_out_dim, size_t *out_n_layers) {
+    if (out_in_dim)
+        *out_in_dim = adapter ? adapter->in_dim : 0;
+    if (out_out_dim)
+        *out_out_dim = adapter ? adapter->out_dim : 0;
+    if (out_n_layers)
+        *out_n_layers = adapter ? adapter->n_layers : 0;
+}
+
 size_t hu_lora_num_params(const hu_lora_adapter_t *adapter) {
     if (!adapter)
         return 0;
