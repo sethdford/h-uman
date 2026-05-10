@@ -539,10 +539,16 @@ static hu_error_t cmd_status(hu_allocator_t *alloc, int argc, char **argv) {
 }
 
 static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
-    /* `human doctor imessage` — focused channel diagnostics. Always available;
-     * non-iMessage builds get a single "not built in" line. */
+    /* `human doctor imessage [--json]` — focused channel diagnostics.
+     * Always available; non-iMessage builds get a single "not built in" line.
+     * --json emits a stable, easy-to-parse object for monitoring integrations
+     * (Datadog/Slack alerts/etc.) without scraping pretty-printed text. */
     if (argc >= 3 && argv[2] && strcmp(argv[2], "imessage") == 0) {
-        printf("\n  human doctor imessage — channel diagnostics\n\n");
+        bool emit_json = false;
+        for (int i = 3; i < argc; i++) {
+            if (argv[i] && strcmp(argv[i], "--json") == 0)
+                emit_json = true;
+        }
         hu_diag_item_t *items = NULL;
         size_t item_count = 0;
         size_t cap = 16;
@@ -557,20 +563,64 @@ static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
             hu_doctor_check_imessage(alloc, now_epoch, kStaleAfterSecs, &items, &item_count, &cap);
         size_t ok_n = 0, warn_n = 0, err_n = 0;
         for (size_t i = 0; i < item_count; i++) {
-            const char *sev_str;
-            if (items[i].severity == HU_DIAG_ERR) {
-                sev_str = "error  ";
+            if (items[i].severity == HU_DIAG_ERR)
                 err_n++;
-            } else if (items[i].severity == HU_DIAG_WARN) {
-                sev_str = "warn   ";
+            else if (items[i].severity == HU_DIAG_WARN)
                 warn_n++;
-            } else {
-                sev_str = "ok     ";
+            else
                 ok_n++;
-            }
-            printf("  %s %s\n", sev_str, items[i].message ? items[i].message : "");
         }
-        printf("\n  Summary: %zu ok, %zu warnings, %zu errors\n\n", ok_n, warn_n, err_n);
+
+        if (emit_json) {
+            const char *summary = err_n > 0 ? "error" : (warn_n > 0 ? "warn" : "ok");
+            printf("{");
+            printf("\"summary\":\"%s\",", summary);
+            printf("\"ok\":%zu,\"warn\":%zu,\"error\":%zu,", ok_n, warn_n, err_n);
+            printf("\"checked_at_epoch\":%lld,", (long long)now_epoch);
+            printf("\"items\":[");
+            for (size_t i = 0; i < item_count; i++) {
+                const char *sev = (items[i].severity == HU_DIAG_ERR)    ? "error"
+                                  : (items[i].severity == HU_DIAG_WARN) ? "warn"
+                                                                        : "ok";
+                printf("%s{", i == 0 ? "" : ",");
+                printf("\"severity\":\"%s\"", sev);
+                if (items[i].category) {
+                    printf(",\"category\":\"");
+                    for (const char *p = items[i].category; *p; p++) {
+                        if (*p == '"' || *p == '\\')
+                            putchar('\\');
+                        putchar(*p);
+                    }
+                    putchar('"');
+                }
+                if (items[i].message) {
+                    printf(",\"message\":\"");
+                    for (const char *p = items[i].message; *p; p++) {
+                        if (*p == '"' || *p == '\\')
+                            putchar('\\');
+                        else if (*p == '\n')
+                            printf("\\n");
+                        else if ((unsigned char)*p < 0x20)
+                            continue;
+                        else
+                            putchar(*p);
+                    }
+                    putchar('"');
+                }
+                putchar('}');
+            }
+            printf("]}\n");
+        } else {
+            printf("\n  human doctor imessage — channel diagnostics\n\n");
+            for (size_t i = 0; i < item_count; i++) {
+                const char *sev_str = (items[i].severity == HU_DIAG_ERR)    ? "error  "
+                                       : (items[i].severity == HU_DIAG_WARN) ? "warn   "
+                                                                             : "ok     ";
+                printf("  %s %s\n", sev_str, items[i].message ? items[i].message : "");
+            }
+            printf("\n  Summary: %zu ok, %zu warnings, %zu errors\n\n", ok_n, warn_n, err_n);
+        }
+
         for (size_t i = 0; i < item_count; i++) {
             if (items[i].category)
                 alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);

@@ -17,6 +17,10 @@
 #include "human/channels/imessage.h"
 #endif
 
+#if HU_HAS_IMESSAGE && defined(HU_ENABLE_SQLITE)
+#include <sqlite3.h>
+#endif
+
 #define HU_DOCTOR_LINE_CATEGORY "doctor_line"
 
 static hu_error_t doctor_push_line(hu_allocator_t *alloc, hu_diag_item_t **buf, size_t *n,
@@ -454,7 +458,15 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                             "[doctor] iMessage: not built into this binary "
                             "(HU_ENABLE_IMESSAGE=OFF)");
 #else
-    /* 1. chat.db readability — the FDA gate. */
+    /* 1. chat.db readability — the FDA gate.
+     *
+     * IMPORTANT: `access(R_OK)` only checks POSIX permissions, NOT macOS TCC.
+     * When Full Disk Access is revoked (the textbook FDA-after-rebuild
+     * symptom), POSIX still says the file is readable but sqlite3_open_v2()
+     * returns SQLITE_AUTH (23). To produce a diagnostic that actually
+     * matches what the daemon experiences, we attempt a real sqlite open
+     * (read-only) and run a no-op query. Without sqlite at build time we
+     * fall back to access() and explicitly disclaim the limitation. */
     const char *home = getenv("HOME");
     if (!home || !home[0]) {
         doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR,
@@ -463,8 +475,65 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
         char db_path[768];
         int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
         if (n > 0 && (size_t)n < sizeof(db_path)) {
+#ifdef HU_ENABLE_SQLITE
+            sqlite3 *probe = NULL;
+            int rc = sqlite3_open_v2(db_path, &probe, SQLITE_OPEN_READONLY, NULL);
+            if (rc == SQLITE_OK && probe) {
+                /* Run a tiny query to actually trigger TCC, since open alone
+                 * sometimes succeeds before TCC fires on first read. */
+                sqlite3_stmt *stmt = NULL;
+                int qrc = sqlite3_prepare_v2(probe, "SELECT 1 FROM message LIMIT 1", -1, &stmt,
+                                             NULL);
+                if (qrc == SQLITE_OK)
+                    qrc = sqlite3_step(stmt);
+                if (stmt)
+                    sqlite3_finalize(stmt);
+                hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(qrc);
+                sqlite3_close(probe);
+                if (cls == HU_IMESSAGE_ERR_NONE || qrc == SQLITE_DONE || qrc == SQLITE_ROW) {
+                    char *msg =
+                        hu_sprintf(alloc, "[doctor] iMessage chat.db: readable via sqlite (%s)",
+                                   db_path);
+                    if (msg) {
+                        doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+                        alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+                    }
+                } else {
+                    char *msg = hu_sprintf(
+                        alloc,
+                        "[doctor] iMessage chat.db: sqlite returned %s (rc=%d) — Full Disk "
+                        "Access likely revoked. Re-grant FDA on the daemon binary at "
+                        "$(launchctl print gui/$UID/ai.human.service-loop | grep program)",
+                        hu_imessage_error_class_name(cls), qrc);
+                    if (msg) {
+                        doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+                        alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+                    }
+                }
+            } else {
+                if (probe)
+                    sqlite3_close(probe);
+                hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(rc);
+                char *msg = hu_sprintf(
+                    alloc,
+                    "[doctor] iMessage chat.db: sqlite_open failed %s (rc=%d) — %s",
+                    hu_imessage_error_class_name(cls), rc,
+                    cls == HU_IMESSAGE_ERR_AUTH
+                        ? "Full Disk Access denied; grant FDA to the daemon binary"
+                        : "see sqlite docs");
+                if (msg) {
+                    doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+                    alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+                }
+            }
+#else
+            /* No sqlite at build time: weakened POSIX-only check. */
             if (access(db_path, R_OK) == 0) {
-                char *msg = hu_sprintf(alloc, "[doctor] iMessage chat.db: readable (%s)", db_path);
+                char *msg =
+                    hu_sprintf(alloc,
+                               "[doctor] iMessage chat.db: POSIX-readable (%s) — TCC not "
+                               "checked (HU_ENABLE_SQLITE=OFF)",
+                               db_path);
                 if (msg) {
                     doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
                     alloc->free(alloc->ctx, msg, strlen(msg) + 1);
@@ -475,6 +544,7 @@ hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
                     "[doctor] iMessage chat.db: NOT readable — grant Full Disk Access to "
                     "$(readlink -f $(which human)) in System Settings → Privacy & Security");
             }
+#endif /* HU_ENABLE_SQLITE */
         }
     }
 
