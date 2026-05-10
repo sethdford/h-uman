@@ -17,6 +17,7 @@
 #include "human/core/string.h"
 
 /* Subsystem facades — each aggregates related implementation headers */
+#include "human/agent/autodream.h"
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -51,6 +52,7 @@
 
 /* Music preview integration */
 #include "human/music.h"
+#include "human/persona/persona_deltas.h"
 /* Proactive image generation */
 #include "human/tools/image_gen.h"
 /* Daemon modules */
@@ -2237,6 +2239,12 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     }
     if (graph && agent && agent->retrieval_engine)
         hu_retrieval_set_graph(agent->retrieval_engine, graph);
+    /* W4 verifier wire (FIX 2 follow-up): expose the daemon's bitemporal
+     * graph to the agent so per-turn response verification can score claims
+     * against actual stored facts (instead of falling through TELEMETRY's
+     * graph-less "every claim unsupported" path). */
+    if (graph && agent)
+        agent->verifier_graph = graph;
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
@@ -2553,6 +2561,82 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 #ifdef HU_ENABLE_SQLITE
+                /* W2 AutoDream + W5 persona evolver — daily housekeeping that
+                 * was previously shipped as code with zero callers. Runs once
+                 * per day in the 3-5 AM window so it doesn't compete with the
+                 * 2 AM reflection cycle for sqlite write locks. Both functions
+                 * respect their own runtime budgets and never block channel
+                 * polling on the daemon. */
+                {
+                    static bool autodream_done_today = false;
+                    static bool evolver_done_today = false;
+                    struct tm tm_dream;
+#if defined(_WIN32) && !defined(__CYGWIN__)
+                    struct tm *lt_dream = (localtime_s(&tm_dream, &t) == 0) ? &tm_dream : NULL;
+#else
+                    struct tm *lt_dream = localtime_r(&t, &tm_dream);
+#endif
+                    if (lt_dream && graph) {
+                        if (lt_dream->tm_hour == 3 && lt_dream->tm_min == 0 &&
+                            !autodream_done_today) {
+                            hu_autodream_config_t ad_cfg = hu_autodream_default_config();
+                            ad_cfg.now_ms = (int64_t)t * 1000LL;
+                            hu_autodream_report_t ad_report;
+                            memset(&ad_report, 0, sizeof(ad_report));
+                            hu_error_t ad_err =
+                                hu_autodream_run(alloc, graph, &ad_cfg, &ad_report);
+                            if (ad_err == HU_OK) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "autodream: quarantine reviewed=%zu released=%zu "
+                                            "dropped=%zu communities=%zu edges=%zu derived=%zu "
+                                            "budget_exceeded=%d",
+                                            ad_report.quarantine_reviewed,
+                                            ad_report.quarantine_released,
+                                            ad_report.quarantine_dropped,
+                                            ad_report.communities_summarized,
+                                            ad_report.edges_reweighted,
+                                            ad_report.derived_facts_added,
+                                            ad_report.budget_exceeded ? 1 : 0);
+                            } else {
+                                hu_log_error("human", agent ? agent->observer : NULL,
+                                             "autodream failed: %s (last_error=%s)",
+                                             hu_error_string(ad_err), ad_report.last_error);
+                            }
+                            autodream_done_today = true;
+                        }
+                        /* Persona evolver runs at 3:05 AM so it sees the
+                         * fresh AutoDream output. Empty contact_id means
+                         * "process global deltas"; per-contact evolution
+                         * happens lazily on each turn (W5 future work). */
+                        if (lt_dream->tm_hour == 3 && lt_dream->tm_min == 5 &&
+                            !evolver_done_today) {
+                            hu_persona_evolver_config_t pe_cfg =
+                                hu_persona_evolver_default_config();
+                            pe_cfg.now_ms = (int64_t)t * 1000LL;
+                            hu_persona_evolver_report_t pe_report;
+                            memset(&pe_report, 0, sizeof(pe_report));
+                            hu_error_t pe_err =
+                                hu_persona_evolver_run(graph, "", 0, &pe_cfg, &pe_report);
+                            if (pe_err == HU_OK) {
+                                hu_log_info("human", agent ? agent->observer : NULL,
+                                            "persona evolver: proposed=%zu applied=%zu "
+                                            "dropped=%zu quarantined=%zu pending=%zu",
+                                            pe_report.proposed_total, pe_report.applied,
+                                            pe_report.dropped, pe_report.quarantined,
+                                            pe_report.still_pending);
+                            } else {
+                                hu_log_error("human", agent ? agent->observer : NULL,
+                                             "persona evolver failed: %s",
+                                             hu_error_string(pe_err));
+                            }
+                            evolver_done_today = true;
+                        }
+                        if (lt_dream->tm_hour == 6) {
+                            autodream_done_today = false;
+                            evolver_done_today = false;
+                        }
+                    }
+                }
                 /* P7: Feed processor poll — every 5 minutes (per-type intervals apply) */
                 {
                     static uint64_t last_feed_poll_types[HU_FEED_COUNT] = {0};

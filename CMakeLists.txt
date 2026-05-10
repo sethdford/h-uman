@@ -2221,6 +2221,7 @@ set(HU_TEST_SOURCES
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
     tests/test_w5_persona_deltas.c
+    tests/test_daemon_housekeeping.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c
