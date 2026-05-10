@@ -761,8 +761,11 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         const char *prov_name = bi->cfg.default_provider ? bi->cfg.default_provider : "openai";
         size_t prov_name_len = strlen(prov_name);
 
-        err = hu_provider_create_from_config(alloc, &bi->cfg, prov_name, prov_name_len,
-                                             &bi->provider);
+        /* hu_provider_create_default auto-wraps a plain default provider with
+         * cfg->reliability.fallback_providers[] (if configured), so a single
+         * unreachable provider transparently fails over to the next. Composite
+         * names ("router"/"ensemble"/"reliable") are passed through unchanged. */
+        err = hu_provider_create_default(alloc, &bi->cfg, &bi->provider);
         if (err == HU_ERR_NOT_SUPPORTED) {
             const char *api_key = hu_config_default_provider_key(&bi->cfg);
             size_t api_key_len = api_key ? strlen(api_key) : 0;

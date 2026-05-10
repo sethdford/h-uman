@@ -120,49 +120,59 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
         if (err != HU_OK)
             return err;
 
-        hu_provider_t fallback = {0};
-        if (cfg->reliability.fallback_providers_len > 0 && cfg->reliability.fallback_providers[0] &&
-            cfg->reliability.fallback_providers[0][0]) {
-            const char *fb_name = cfg->reliability.fallback_providers[0];
-            size_t fb_len = strlen(fb_name);
-            char *fb_key = resolve_key(alloc, cfg, fb_name);
-            size_t fb_key_len = fb_key ? strlen(fb_key) : 0;
-            const char *fb_url = hu_config_get_provider_base_url(cfg, fb_name);
-            size_t fb_url_len = fb_url ? strlen(fb_url) : 0;
-            if (!fb_url || fb_url_len == 0) {
-                fb_url = hu_compatible_provider_url(fb_name);
-                fb_url_len = fb_url ? strlen(fb_url) : 0;
-            }
-            err = hu_provider_create(alloc, fb_name, fb_len, fb_key, fb_key_len, fb_url, fb_url_len,
-                                     &fallback);
-            if (err != HU_OK) {
+        /* Build the full extras chain from cfg->reliability.fallback_providers[].
+         * Previously only fallback_providers[0] was honoured, which silently
+         * dropped users' carefully configured 2nd / 3rd fallbacks. */
+        size_t extras_capacity = cfg->reliability.fallback_providers_len;
+        hu_reliable_provider_entry_t *extras = NULL;
+        size_t extras_count = 0;
+        size_t extras_alloc_size = 0;
+        if (extras_capacity > 0) {
+            extras_alloc_size = extras_capacity * sizeof(*extras);
+            extras = (hu_reliable_provider_entry_t *)alloc->alloc(alloc->ctx, extras_alloc_size);
+            if (!extras) {
                 if (primary.vtable && primary.vtable->deinit)
                     primary.vtable->deinit(primary.ctx, alloc);
-                return err;
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memset(extras, 0, extras_alloc_size);
+            for (size_t i = 0; i < extras_capacity; i++) {
+                const char *fb_name = cfg->reliability.fallback_providers[i];
+                if (!fb_name || !fb_name[0])
+                    continue;
+                hu_provider_t fb = {0};
+                if (create_provider_from_name(alloc, cfg, fb_name, &fb) != HU_OK) {
+                    hu_log_warn("provider", NULL,
+                                "reliable: skipping unconfigured fallback '%s'", fb_name);
+                    continue;
+                }
+                extras[extras_count].name = fb_name;
+                extras[extras_count].name_len = strlen(fb_name);
+                extras[extras_count].provider = fb;
+                extras_count++;
             }
         }
 
-        hu_reliable_config_t rcfg = {
-            .primary = primary,
-            .fallback = fallback,
-            .max_retries =
-                cfg->reliability.provider_retries > 0 ? (int)cfg->reliability.provider_retries : 3,
-            .base_delay_ms = cfg->reliability.provider_backoff_ms > 0
-                                 ? (int)cfg->reliability.provider_backoff_ms
-                                 : 1000,
-            .max_delay_ms = 30000,
-            .failure_threshold = 5,
-            .recovery_timeout_seconds = 60,
-        };
-
-        err = hu_reliable_provider_create(alloc, &rcfg, out);
+        uint32_t max_retries =
+            cfg->reliability.provider_retries > 0 ? cfg->reliability.provider_retries : 3;
+        uint64_t backoff_ms = cfg->reliability.provider_backoff_ms > 0
+                                  ? cfg->reliability.provider_backoff_ms
+                                  : 1000;
+        err = hu_reliable_create_ex(alloc, primary, max_retries, backoff_ms, extras, extras_count,
+                                    NULL, 0, out);
         if (err != HU_OK) {
             if (primary.vtable && primary.vtable->deinit)
                 primary.vtable->deinit(primary.ctx, alloc);
-            if (fallback.vtable && fallback.vtable->deinit)
-                fallback.vtable->deinit(fallback.ctx, alloc);
+            for (size_t i = 0; i < extras_count; i++) {
+                if (extras[i].provider.vtable && extras[i].provider.vtable->deinit)
+                    extras[i].provider.vtable->deinit(extras[i].provider.ctx, alloc);
+            }
+            if (extras)
+                alloc->free(alloc->ctx, extras, extras_alloc_size);
             return err;
         }
+        if (extras)
+            alloc->free(alloc->ctx, extras, extras_alloc_size);
         return HU_OK;
     }
 
@@ -225,4 +235,106 @@ hu_error_t hu_provider_create_from_config(hu_allocator_t *alloc, const hu_config
         nbuf[name_len] = '\0';
         return create_provider_from_name(alloc, cfg, nbuf, out);
     }
+}
+
+/* Composite provider names handle their own internal fallback / routing logic,
+ * so we never auto-wrap them. */
+static bool default_is_composite(const char *name) {
+    if (!name || !name[0])
+        return false;
+    return (strcmp(name, "router") == 0) || (strcmp(name, "ensemble") == 0) ||
+           (strcmp(name, "reliable") == 0);
+}
+
+hu_error_t hu_provider_create_default(hu_allocator_t *alloc, const hu_config_t *cfg,
+                                      hu_provider_t *out) {
+    if (!alloc || !cfg || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *prov_name = cfg->default_provider ? cfg->default_provider : "openai";
+    size_t prov_name_len = strlen(prov_name);
+
+    hu_provider_t base = {0};
+    hu_error_t err = hu_provider_create_from_config(alloc, cfg, prov_name, prov_name_len, &base);
+    if (err != HU_OK)
+        return err;
+
+    /* No fallbacks configured, or default is itself a composite that already
+     * encodes a chain — return the base provider as-is. */
+    bool fallbacks_configured = false;
+    for (size_t i = 0; i < cfg->reliability.fallback_providers_len; i++) {
+        const char *n = cfg->reliability.fallback_providers[i];
+        if (n && n[0]) {
+            fallbacks_configured = true;
+            break;
+        }
+    }
+    if (!fallbacks_configured || default_is_composite(prov_name)) {
+        *out = base;
+        return HU_OK;
+    }
+
+    /* Build a hu_reliable_create_ex chain: base + each configured fallback.
+     * The wrapper takes ownership of base on success. */
+    size_t extras_capacity = cfg->reliability.fallback_providers_len;
+    size_t extras_alloc_size = extras_capacity * sizeof(hu_reliable_provider_entry_t);
+    hu_reliable_provider_entry_t *extras =
+        (hu_reliable_provider_entry_t *)alloc->alloc(alloc->ctx, extras_alloc_size);
+    if (!extras) {
+        if (base.vtable && base.vtable->deinit)
+            base.vtable->deinit(base.ctx, alloc);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    memset(extras, 0, extras_alloc_size);
+
+    size_t extras_count = 0;
+    for (size_t i = 0; i < extras_capacity; i++) {
+        const char *fb_name = cfg->reliability.fallback_providers[i];
+        if (!fb_name || !fb_name[0])
+            continue;
+        /* Skip a fallback that is the SAME as the primary — that would just
+         * be duplicate work and could confuse the breaker accounting. */
+        if (strcmp(fb_name, prov_name) == 0)
+            continue;
+        hu_provider_t fb = {0};
+        if (create_provider_from_name(alloc, cfg, fb_name, &fb) != HU_OK) {
+            hu_log_warn("provider", NULL,
+                        "default_provider auto-wrap: skipping unconfigured fallback '%s'", fb_name);
+            continue;
+        }
+        extras[extras_count].name = fb_name;
+        extras[extras_count].name_len = strlen(fb_name);
+        extras[extras_count].provider = fb;
+        extras_count++;
+    }
+
+    if (extras_count == 0) {
+        /* All fallbacks were unusable — return the base unwrapped rather than
+         * a degenerate single-provider "reliable" wrapper. */
+        alloc->free(alloc->ctx, extras, extras_alloc_size);
+        *out = base;
+        return HU_OK;
+    }
+
+    uint32_t max_retries =
+        cfg->reliability.provider_retries > 0 ? cfg->reliability.provider_retries : 2;
+    uint64_t backoff_ms =
+        cfg->reliability.provider_backoff_ms > 0 ? cfg->reliability.provider_backoff_ms : 500;
+
+    hu_log_info("provider", NULL,
+                "default_provider '%s' auto-wrapped with %zu fallback(s) for self-healing",
+                prov_name, extras_count);
+
+    err = hu_reliable_create_ex(alloc, base, max_retries, backoff_ms, extras, extras_count, NULL, 0,
+                                out);
+    if (err != HU_OK) {
+        if (base.vtable && base.vtable->deinit)
+            base.vtable->deinit(base.ctx, alloc);
+        for (size_t i = 0; i < extras_count; i++) {
+            if (extras[i].provider.vtable && extras[i].provider.vtable->deinit)
+                extras[i].provider.vtable->deinit(extras[i].provider.ctx, alloc);
+        }
+    }
+    alloc->free(alloc->ctx, extras, extras_alloc_size);
+    return err;
 }

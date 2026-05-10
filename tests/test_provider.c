@@ -696,6 +696,306 @@ static void test_from_config_ensemble_creates_provider(void) {
     backing.free(backing.ctx, cfg, sizeof(hu_config_t));
 }
 
+/* ─── hu_provider_create_default + multi-fallback wiring ────────────────────
+ * Verifies the auto-fallback shipping promise: a plain default_provider with a
+ * non-empty reliability.fallback_providers[] is transparently wrapped in the
+ * reliable composite, and the wrap survives all the easy-to-get-wrong edges
+ * (no fallbacks, composite default, same-name fallback, unknown fallback). */
+
+static hu_error_t failover_mock_chat(void *ctx, hu_allocator_t *alloc,
+                                     const hu_chat_request_t *req, const char *model,
+                                     size_t model_len, double temperature,
+                                     hu_chat_response_t *out) {
+    (void)req;
+    (void)temperature;
+    (void)model;
+    (void)model_len;
+    int *state = (int *)ctx; /* state[0] = call count, state[1] = fail-first-N flag */
+    state[0]++;
+    memset(out, 0, sizeof(*out));
+    if (state[1] > 0 && state[0] <= state[1])
+        return HU_ERR_PROVIDER_UNAVAILABLE;
+    const char *who = "primary";
+    if (state[2])
+        who = "fallback-A";
+    if (state[2] == 2)
+        who = "fallback-B";
+    size_t len = strlen(who);
+    char *buf = (char *)alloc->alloc(alloc->ctx, len + 1);
+    if (!buf)
+        return HU_ERR_OUT_OF_MEMORY;
+    memcpy(buf, who, len + 1);
+    out->content = buf;
+    out->content_len = len;
+    return HU_OK;
+}
+
+static const char *failover_mock_get_name(void *ctx) {
+    (void)ctx;
+    return "mock";
+}
+
+static bool failover_mock_supports_native_tools(void *ctx) {
+    (void)ctx;
+    return false;
+}
+
+static hu_provider_vtable_t failover_mock_vtable = {
+    .chat = failover_mock_chat,
+    .get_name = failover_mock_get_name,
+    .supports_native_tools = failover_mock_supports_native_tools,
+};
+
+static void test_failover_primary_succeeds_extras_unused(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    int prim_state[3] = {0, 0, 0}; /* never fail */
+    int fb_state[3] = {0, 0, 1};
+    hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
+    hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
+    hu_reliable_provider_entry_t extras[1] = {
+        {.name = "fb-a", .name_len = 4, .provider = fb}};
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(resp.content, "primary");
+    HU_ASSERT_EQ(prim_state[0], 1);
+    HU_ASSERT_EQ(fb_state[0], 0); /* extras not consulted when primary OK */
+    hu_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_failover_primary_fails_first_fallback_succeeds(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    int prim_state[3] = {0, 99, 0};   /* always fail */
+    int fb_state[3] = {0, 0, 1};       /* always succeed */
+    hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
+    hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
+    hu_reliable_provider_entry_t extras[1] = {
+        {.name = "fb-a", .name_len = 4, .provider = fb}};
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(resp.content, "fallback-A");
+    HU_ASSERT_EQ(prim_state[0], 1);
+    HU_ASSERT_EQ(fb_state[0], 1);
+    hu_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_failover_walks_chain_until_one_succeeds(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    int prim_state[3] = {0, 99, 0}; /* fail */
+    int fb_a_state[3] = {0, 99, 1}; /* fail */
+    int fb_b_state[3] = {0, 0, 2};  /* succeed */
+    hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
+    hu_provider_t fb_a = {.ctx = fb_a_state, .vtable = &failover_mock_vtable};
+    hu_provider_t fb_b = {.ctx = fb_b_state, .vtable = &failover_mock_vtable};
+    hu_reliable_provider_entry_t extras[2] = {
+        {.name = "fb-a", .name_len = 4, .provider = fb_a},
+        {.name = "fb-b", .name_len = 4, .provider = fb_b},
+    };
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 2, NULL, 0, &prov), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(resp.content, "fallback-B");
+    HU_ASSERT_EQ(prim_state[0], 1);
+    HU_ASSERT_EQ(fb_a_state[0], 1);
+    HU_ASSERT_EQ(fb_b_state[0], 1);
+    hu_chat_response_free(&alloc, &resp);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_failover_all_fail_returns_error(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    int prim_state[3] = {0, 99, 0};
+    int fb_state[3] = {0, 99, 1};
+    hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
+    hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
+    hu_reliable_provider_entry_t extras[1] = {
+        {.name = "fb-a", .name_len = 4, .provider = fb}};
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
+
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    hu_error_t err = prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp);
+    HU_ASSERT_NEQ(err, HU_OK);
+    HU_ASSERT_NULL(resp.content);
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+static void test_failover_primary_recovers_after_partial_failure(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    /* primary fails the first call only, then succeeds for ever. */
+    int prim_state[3] = {0, 1, 0};
+    int fb_state[3] = {0, 0, 1};
+    hu_provider_t primary = {.ctx = prim_state, .vtable = &failover_mock_vtable};
+    hu_provider_t fb = {.ctx = fb_state, .vtable = &failover_mock_vtable};
+    hu_reliable_provider_entry_t extras[1] = {
+        {.name = "fb-a", .name_len = 4, .provider = fb}};
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_reliable_create_ex(&alloc, primary, 0, 50, extras, 1, NULL, 0, &prov), HU_OK);
+
+    /* call 1: primary fails → fallback wins. */
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(resp.content, "fallback-A");
+    hu_chat_response_free(&alloc, &resp);
+
+    /* call 2: primary recovered → primary wins, fallback NOT touched again. */
+    int fb_calls_before = fb_state[0];
+    HU_ASSERT_EQ(prov.vtable->chat(prov.ctx, &alloc, &req, "m", 1, 0.0, &resp), HU_OK);
+    HU_ASSERT_STR_EQ(resp.content, "primary");
+    HU_ASSERT_EQ(fb_state[0], fb_calls_before);
+    hu_chat_response_free(&alloc, &resp);
+
+    if (prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, &alloc);
+}
+
+/* ─── hu_provider_create_default wiring (config-driven auto-wrap) ─────────── */
+
+static hu_config_t *make_failover_config(hu_allocator_t *backing, hu_arena_t **arena_out,
+                                         const char *json) {
+    hu_arena_t *arena = hu_arena_create(*backing);
+    if (!arena)
+        return NULL;
+    hu_config_t *cfg = (hu_config_t *)backing->alloc(backing->ctx, sizeof(hu_config_t));
+    if (!cfg) {
+        hu_arena_destroy(arena);
+        return NULL;
+    }
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->arena = arena;
+    cfg->allocator = hu_arena_allocator(arena);
+    if (hu_config_parse_json(cfg, json, strlen(json)) != HU_OK) {
+        hu_arena_destroy(arena);
+        backing->free(backing->ctx, cfg, sizeof(hu_config_t));
+        return NULL;
+    }
+    *arena_out = arena;
+    return cfg;
+}
+
+static void free_failover_config(hu_allocator_t *backing, hu_arena_t *arena, hu_config_t *cfg) {
+    hu_arena_destroy(arena);
+    backing->free(backing->ctx, cfg, sizeof(hu_config_t));
+}
+
+static void test_create_default_no_fallbacks_returns_unwrapped(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_arena_t *arena = NULL;
+    hu_config_t *cfg = make_failover_config(
+        &backing, &arena,
+        "{\"default_provider\":\"openai\","
+        "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}]}");
+    HU_ASSERT_NOT_NULL(cfg);
+    hu_provider_t out = {0};
+    HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
+    HU_ASSERT_NOT_NULL(out.ctx);
+    /* Without fallbacks, the inner is openai itself (no wrap). */
+    HU_ASSERT_STR_EQ(out.vtable->get_name(out.ctx), "openai");
+    if (out.vtable->deinit)
+        out.vtable->deinit(out.ctx, &backing);
+    free_failover_config(&backing, arena, cfg);
+}
+
+static void test_create_default_with_fallbacks_wraps(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_arena_t *arena = NULL;
+    hu_config_t *cfg = make_failover_config(
+        &backing, &arena,
+        "{\"default_provider\":\"openai\","
+        "\"providers\":["
+        "{\"name\":\"openai\",\"api_key\":\"sk-test\"},"
+        "{\"name\":\"anthropic\",\"api_key\":\"sk-ant-test\"}],"
+        "\"reliability\":{\"fallback_providers\":[\"anthropic\"]}}");
+    HU_ASSERT_NOT_NULL(cfg);
+    hu_provider_t out = {0};
+    HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
+    HU_ASSERT_NOT_NULL(out.ctx);
+    /* Wrapped reliable returns the inner's name ("openai") via get_name, so
+     * we cannot distinguish from there. We do verify the provider is
+     * functional (chat works in test mode) and deinit is safe. */
+    hu_chat_request_t req = {0};
+    hu_chat_response_t resp = {0};
+    hu_error_t err = out.vtable->chat(out.ctx, &backing, &req, "gpt-4", 5, 0.0, &resp);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(resp.content);
+    hu_chat_response_free(&backing, &resp);
+    if (out.vtable->deinit)
+        out.vtable->deinit(out.ctx, &backing);
+    free_failover_config(&backing, arena, cfg);
+}
+
+static void test_create_default_composite_default_is_passthrough(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_arena_t *arena = NULL;
+    /* default = "router" → should NOT auto-wrap even with fallbacks set. */
+    hu_config_t *cfg = make_failover_config(
+        &backing, &arena,
+        "{\"default_provider\":\"router\","
+        "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}],"
+        "\"router\":{\"standard\":\"openai\"},"
+        "\"reliability\":{\"fallback_providers\":[\"anthropic\"]}}");
+    HU_ASSERT_NOT_NULL(cfg);
+    hu_provider_t out = {0};
+    HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
+    HU_ASSERT_NOT_NULL(out.ctx);
+    HU_ASSERT_STR_EQ(out.vtable->get_name(out.ctx), "router");
+    if (out.vtable->deinit)
+        out.vtable->deinit(out.ctx, &backing);
+    free_failover_config(&backing, arena, cfg);
+}
+
+static void test_create_default_same_name_fallback_skipped(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_arena_t *arena = NULL;
+    /* fallback list contains the default itself → must be skipped, leaving an
+     * empty effective chain → returns base unwrapped. */
+    hu_config_t *cfg = make_failover_config(
+        &backing, &arena,
+        "{\"default_provider\":\"openai\","
+        "\"providers\":[{\"name\":\"openai\",\"api_key\":\"sk-test\"}],"
+        "\"reliability\":{\"fallback_providers\":[\"openai\"]}}");
+    HU_ASSERT_NOT_NULL(cfg);
+    hu_provider_t out = {0};
+    HU_ASSERT_EQ(hu_provider_create_default(&backing, cfg, &out), HU_OK);
+    HU_ASSERT_NOT_NULL(out.ctx);
+    HU_ASSERT_STR_EQ(out.vtable->get_name(out.ctx), "openai");
+    if (out.vtable->deinit)
+        out.vtable->deinit(out.ctx, &backing);
+    free_failover_config(&backing, arena, cfg);
+}
+
+static void test_create_default_null_args_rejected(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_config_t cfg = {0};
+    hu_provider_t out = {0};
+    HU_ASSERT_EQ(hu_provider_create_default(NULL, &cfg, &out), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_create_default(&alloc, NULL, &out), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_create_default(&alloc, &cfg, NULL), HU_ERR_INVALID_ARGUMENT);
+}
+
 /* ─── helpers.c ───────────────────────────────────────────────────────────── */
 static void test_helpers_is_reasoning_model_o1(void) {
     HU_ASSERT_TRUE(hu_helpers_is_reasoning_model("o1", 2));
@@ -826,6 +1126,16 @@ void run_provider_tests(void) {
     HU_RUN_TEST(test_from_config_null_out_returns_error);
     HU_RUN_TEST(test_from_config_unknown_provider_returns_not_supported);
     HU_RUN_TEST(test_from_config_router_creates_provider);
+    HU_RUN_TEST(test_failover_primary_succeeds_extras_unused);
+    HU_RUN_TEST(test_failover_primary_fails_first_fallback_succeeds);
+    HU_RUN_TEST(test_failover_walks_chain_until_one_succeeds);
+    HU_RUN_TEST(test_failover_all_fail_returns_error);
+    HU_RUN_TEST(test_failover_primary_recovers_after_partial_failure);
+    HU_RUN_TEST(test_create_default_no_fallbacks_returns_unwrapped);
+    HU_RUN_TEST(test_create_default_with_fallbacks_wraps);
+    HU_RUN_TEST(test_create_default_composite_default_is_passthrough);
+    HU_RUN_TEST(test_create_default_same_name_fallback_skipped);
+    HU_RUN_TEST(test_create_default_null_args_rejected);
     HU_RUN_TEST(test_from_config_reliable_creates_provider);
     HU_RUN_TEST(test_from_config_ensemble_creates_provider);
 
