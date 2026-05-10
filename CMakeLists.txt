@@ -1243,7 +1243,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(human_core PUBLIC m dl)
 endif()
 if(APPLE)
-    target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate")
+    target_link_libraries(human_core PRIVATE "-framework ApplicationServices" "-framework ImageIO" "-framework Accelerate" "-framework IOKit" "-framework CoreFoundation")
     # New CBLAS headers; avoids -Wdeprecated-declarations on cblas_sgemm (macOS 13.3+).
     target_compile_definitions(human_core PRIVATE ACCELERATE_NEW_LAPACK=1)
 endif()

@@ -569,6 +569,57 @@ static void test_w14_expired_jobs_marked_after_latest_at(void) {
 
 #endif /* HU_ENABLE_SQLITE */
 
+/* ── Probe tests (no SQLite needed) ───────────────────────────────────── */
+
+static void test_w14_probe_load_pct_honors_test_override(void) {
+    clear_w14_env();
+    setenv("HU_TEST_LOAD_PCT", "73", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_load_pct(), 73);
+    setenv("HU_TEST_LOAD_PCT", "0", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_load_pct(), 0);
+    clear_w14_env();
+}
+
+static void test_w14_probe_battery_pct_honors_test_override(void) {
+    clear_w14_env();
+    setenv("HU_TEST_BATTERY_PCT", "42", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_battery_pct(), 42);
+    clear_w14_env();
+}
+
+static void test_w14_probe_on_ac_honors_test_override(void) {
+    clear_w14_env();
+    setenv("HU_TEST_ON_AC", "0", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_on_ac_power(), false);
+    setenv("HU_TEST_ON_AC", "1", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_on_ac_power(), true);
+    clear_w14_env();
+}
+
+static void test_w14_probe_quiet_hours_honors_test_override(void) {
+    clear_w14_env();
+    setenv("HU_TEST_QUIET_HOURS", "1", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(0, NULL), true);
+    setenv("HU_TEST_QUIET_HOURS", "0", 1);
+    HU_ASSERT_EQ(hu_scheduler_probe_quiet_hours(0, NULL), false);
+    clear_w14_env();
+}
+
+static void test_w14_probe_load_returns_in_range_or_unknown(void) {
+    /* With test override unset the probe falls through to OS-level
+     * paths.  All we can prove portably is that the value is either
+     * -1 (unknown) or in [0,100]. */
+    clear_w14_env();
+    int v = hu_scheduler_probe_load_pct();
+    HU_ASSERT_TRUE(v == -1 || (v >= 0 && v <= 100));
+}
+
+static void test_w14_probe_battery_returns_in_range_or_unknown(void) {
+    clear_w14_env();
+    int v = hu_scheduler_probe_battery_pct();
+    HU_ASSERT_TRUE(v == -1 || (v >= 0 && v <= 100));
+}
+
 void run_w14_scheduler_tests(void) {
     HU_TEST_SUITE("W14 scheduler - sleep-time compute scheduler hu_scheduler_t + counterfactual rehearsal");
 
@@ -587,4 +638,12 @@ void run_w14_scheduler_tests(void) {
     HU_RUN_TEST(test_w14_counterfactual_rehearsal_caps_at_five_per_tick);
     HU_RUN_TEST(test_w14_expired_jobs_marked_after_latest_at);
 #endif
+
+    /* Probe tests run without SQLite — pure env/OS-state checks. */
+    HU_RUN_TEST(test_w14_probe_load_pct_honors_test_override);
+    HU_RUN_TEST(test_w14_probe_battery_pct_honors_test_override);
+    HU_RUN_TEST(test_w14_probe_on_ac_honors_test_override);
+    HU_RUN_TEST(test_w14_probe_quiet_hours_honors_test_override);
+    HU_RUN_TEST(test_w14_probe_load_returns_in_range_or_unknown);
+    HU_RUN_TEST(test_w14_probe_battery_returns_in_range_or_unknown);
 }
