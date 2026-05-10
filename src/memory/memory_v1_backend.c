@@ -25,7 +25,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 /* Bridges declared by memory.c. */
@@ -287,7 +286,13 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
     struct hu_memory_v1_ctx *ctx = vctx;
     if (q->kind != HU_MEM_RELATION) return HU_ERR_INVALID_ARGUMENT;
 
-    if (q->as.by_id.id == HU_MEMORY_REL_VERIFIER_SCAN) {
+    /* P4 — Honor explicit variant when present. The legacy AUTO path uses
+     * `q->as.by_id.id == HU_MEMORY_REL_VERIFIER_SCAN` as an implicit
+     * discriminator, which is fragile if a window caller ever sets
+     * `from_ts` to that sentinel value. The explicit tag takes priority. */
+    hu_memory_query_variant_t v = q->variant;
+    if (v == HU_MEMORY_QUERY_BY_ID ||
+        (v == HU_MEMORY_QUERY_AUTO && q->as.by_id.id == HU_MEMORY_REL_VERIFIER_SCAN)) {
         size_t lim = q->as.by_id.limit > 0 ? q->as.by_id.limit : 64;
         hu_graph_relation_t *rels = NULL;
         size_t count = 0;
@@ -339,8 +344,13 @@ static hu_error_t v1_relation_read(void *vctx, const hu_memory_query_t *q,
 
     /* Window query is the only relation read shape v1 exposes through a
      * direct list call; list_relations also exists for "top-N by weight"
-     * which we offer when no window is given. */
-    if (q->as.window.from_ts != 0 || q->as.window.to_ts != 0) {
+     * which we offer when no window is given.
+     *
+     * P4 — Explicit WINDOW takes priority. Falling back to legacy AUTO
+     * triggers a window read when either timestamp is non-zero. */
+    if (v == HU_MEMORY_QUERY_WINDOW ||
+        (v == HU_MEMORY_QUERY_AUTO &&
+         (q->as.window.from_ts != 0 || q->as.window.to_ts != 0))) {
         hu_graph_relation_t *rels = NULL;
         size_t count = 0;
         size_t lim = q->as.window.limit > 0 ? q->as.window.limit : 32;
@@ -590,7 +600,7 @@ static hu_error_t v1_case_read(void *vctx, const hu_memory_query_t *q, hu_alloca
     struct hu_memory_v1_ctx *ctx = vctx;
     if (q->kind != HU_MEM_CASE || !q->as.cases.goal_verb || q->as.cases.goal_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(ctx->graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(ctx->graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     hu_error_t se = v1_case_ensure_schema(db);
@@ -738,7 +748,7 @@ static hu_error_t v1_case_write(void *vctx, const hu_memory_record_t *rec) {
     const hu_memory_case_payload_t *p = (const hu_memory_case_payload_t *)rec->payload;
     if (!p->goal_verb || p->goal_verb_len == 0)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(ctx->graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(ctx->graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (v1_case_ensure_schema(db) != HU_OK)

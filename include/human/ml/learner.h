@@ -90,11 +90,34 @@ typedef struct hu_learner_config {
                                    * backend enforces this; MLX/ggml backends MUST
                                    * also implement DP-SGD clipping + noise when this
                                    * flag is set. */
+    float dp_clip_norm;            /* W15: per-sample gradient clipping max norm.
+                                    * 0 = use default (1.0). Only applies when
+                                    * dp_enabled is true. */
     int64_t budget_ms;            /* total wall budget; 0 = short-circuit */
     uint64_t seed;                /* seeds the backend PRNG; 0 → default */
 } hu_learner_config_t;
 
 hu_learner_config_t hu_learner_default_config(void);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * W15 — Rényi DP privacy accountant.
+ *
+ * Tracks cumulative privacy spend across multiple training rounds using
+ * basic composition (advanced composition / RDP conversion is a future
+ * refinement). Each call to `record_query` represents one training run
+ * that consumed `epsilon_step` of the budget. The accountant accumulates
+ * linearly (sequential composition theorem).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+typedef struct hu_dp_accountant {
+    double epsilon_spent;         /* cumulative epsilon consumed */
+    double delta;                 /* fixed delta (per-run, not cumulative) */
+    int queries_count;            /* number of training rounds recorded */
+} hu_dp_accountant_t;
+
+void hu_dp_accountant_init(hu_dp_accountant_t *a, double delta);
+void hu_dp_accountant_record_query(hu_dp_accountant_t *a, double epsilon_step);
+double hu_dp_accountant_total_epsilon(const hu_dp_accountant_t *a);
 
 typedef struct hu_learner_report {
     size_t signals_consumed;
@@ -131,6 +154,9 @@ typedef struct hu_learner {
      * signals. 0 means "no signals consumed yet". */
     int64_t pending_persona_delta_id_high;
     int64_t pending_outcome_ts_high;
+    /* W15 privacy accountant — tracks cumulative DP budget across training
+     * rounds. Initialized lazily on first DP-enabled train call. */
+    hu_dp_accountant_t dp_accountant;
 } hu_learner_t;
 
 /* Hard cap on the per-learner pending buffer. Once full, new signals are

@@ -3,7 +3,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdlib.h>
@@ -61,7 +60,7 @@ hu_error_t hu_hyperedge_upsert(hu_memory_facade_t *m, const char *contact_id, si
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_schema(db) != HU_OK)
@@ -139,7 +138,7 @@ hu_error_t hu_hyperedge_query_by_member(hu_memory_facade_t *m, hu_allocator_t *a
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_schema(db) != HU_OK)

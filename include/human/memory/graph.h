@@ -75,6 +75,15 @@ hu_error_t hu_graph_open(hu_allocator_t *alloc, const char *db_path, size_t db_p
                          hu_graph_t **out);
 void hu_graph_close(hu_graph_t *g, hu_allocator_t *alloc);
 
+#ifdef HU_ENABLE_SQLITE
+struct sqlite3;
+/* SQLite connection backing this graph. For DDL and auxiliary tables that share
+ * the same DB file (scheduler metadata, persona_deltas). Prefer
+ * `hu_memory_facade_read` / `hu_memory_facade_write` when a W7 facade is
+ * available for memory rows. Returns NULL if the graph has no DB. */
+struct sqlite3 *hu_graph_sqlite_connection(hu_graph_t *g);
+#endif
+
 /* Entity operations (contact_id scopes entities per-contact for privacy) */
 hu_error_t hu_graph_upsert_entity(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
                                   const char *name, size_t name_len, hu_entity_type_t type,

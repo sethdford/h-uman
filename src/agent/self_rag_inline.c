@@ -255,6 +255,178 @@ static hu_self_rag_vtable_t inline_vt = {
     .deinit = inline_deinit,
 };
 
+/* ── Streaming self-RAG filter ─────────────────────────────────────────── */
+
+/* Control token patterns we scan for in the stream. */
+static const char *const k_stream_tags[] = {"<retrieve>", "<critique>", "<refuse>", NULL};
+static const size_t k_stream_tag_lens[] = {10, 10, 8};
+
+/* Forward buffered bytes as a content chunk to the original callback.
+ * Returns the original callback's return value (true = continue). */
+static bool flush_buffer_to_original(hu_self_rag_stream_ctx_t *ctx,
+                                      const char *data, size_t len) {
+    if (!ctx->original_cb || len == 0)
+        return true;
+    hu_stream_chunk_t fwd;
+    memset(&fwd, 0, sizeof(fwd));
+    fwd.type = HU_STREAM_CONTENT;
+    fwd.delta = data;
+    fwd.delta_len = len;
+    return ctx->original_cb(ctx->original_ctx, &fwd);
+}
+
+hu_error_t hu_self_rag_stream_wrap(hu_self_rag_stream_ctx_t *ctx,
+                                    hu_stream_callback_t original_cb,
+                                    void *original_ctx,
+                                    hu_memory_facade_t *memory,
+                                    hu_allocator_t *alloc) {
+    if (!ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->original_cb = original_cb;
+    ctx->original_ctx = original_ctx;
+    ctx->memory = memory;
+    ctx->alloc = alloc;
+    return HU_OK;
+}
+
+/* Check if the token buffer starts with a prefix of any control tag.
+ * Returns the tag index (0=retrieve, 1=critique, 2=refuse) or -1. */
+static int match_tag_prefix(const char *buf, size_t len) {
+    for (int i = 0; k_stream_tags[i]; i++) {
+        size_t tl = k_stream_tag_lens[i];
+        size_t cmp = len < tl ? len : tl;
+        if (cmp > 0 && memcmp(buf, k_stream_tags[i], cmp) == 0)
+            return i;
+    }
+    return -1;
+}
+
+/* Check if the buffer contains a complete control tag starting at position 0. */
+static int match_complete_tag(const char *buf, size_t len) {
+    for (int i = 0; k_stream_tags[i]; i++) {
+        size_t tl = k_stream_tag_lens[i];
+        if (len >= tl && memcmp(buf, k_stream_tags[i], tl) == 0)
+            return i;
+    }
+    return -1;
+}
+
+bool hu_self_rag_stream_callback(void *vctx, const hu_stream_chunk_t *chunk) {
+    hu_self_rag_stream_ctx_t *ctx = (hu_self_rag_stream_ctx_t *)vctx;
+    if (!ctx || !chunk)
+        return false;
+
+    /* Non-content chunks and final markers pass through unchanged. */
+    if (chunk->type != HU_STREAM_CONTENT || chunk->is_final) {
+        if (ctx->original_cb)
+            return ctx->original_cb(ctx->original_ctx, chunk);
+        return true;
+    }
+
+    if (!chunk->delta || chunk->delta_len == 0)
+        return true;
+
+    /* If refuse already triggered, suppress all further content. */
+    if (ctx->refuse_triggered)
+        return true;
+
+    /* Process each byte of the incoming delta. We scan for '<' which may
+     * begin a control tag, buffer potential tag characters, and flush
+     * non-tag content to the original callback. */
+    const char *data = chunk->delta;
+    size_t data_len = chunk->delta_len;
+    size_t i = 0;
+
+    while (i < data_len) {
+        if (ctx->refuse_triggered)
+            return true;
+
+        /* If we're mid-buffer (accumulating a potential tag), keep feeding. */
+        if (ctx->token_buf_len > 0) {
+            /* Add one byte at a time to the buffer. */
+            if (ctx->token_buf_len < HU_SELF_RAG_TOKEN_BUF_SIZE - 1) {
+                ctx->token_buf[ctx->token_buf_len++] = data[i];
+                ctx->token_buf[ctx->token_buf_len] = '\0';
+                i++;
+            } else {
+                /* Buffer full without a match — flush it all as normal text. */
+                if (!flush_buffer_to_original(ctx, ctx->token_buf, ctx->token_buf_len))
+                    return false;
+                ctx->token_buf_len = 0;
+                continue;
+            }
+
+            /* Check if we still have a valid prefix. */
+            int tag_idx = match_tag_prefix(ctx->token_buf, ctx->token_buf_len);
+            if (tag_idx < 0) {
+                /* No longer a prefix of any tag — flush buffer as content. */
+                if (!flush_buffer_to_original(ctx, ctx->token_buf, ctx->token_buf_len))
+                    return false;
+                ctx->token_buf_len = 0;
+                continue;
+            }
+
+            /* Check for complete tag match. */
+            int complete = match_complete_tag(ctx->token_buf, ctx->token_buf_len);
+            if (complete >= 0) {
+                size_t tag_len = k_stream_tag_lens[complete];
+                /* Tag matched — set the flag, strip the tag, and flush any
+                 * trailing bytes that were buffered after the tag. */
+                switch (complete) {
+                case 0: ctx->retrieval_triggered = true; break;
+                case 1: ctx->critique_triggered = true; break;
+                case 2: ctx->refuse_triggered = true; break;
+                }
+
+                if (ctx->refuse_triggered) {
+                    ctx->token_buf_len = 0;
+                    return true;
+                }
+
+                /* If buffer has bytes beyond the tag, flush them. */
+                size_t remaining = ctx->token_buf_len - tag_len;
+                if (remaining > 0) {
+                    memmove(ctx->token_buf, ctx->token_buf + tag_len, remaining);
+                    ctx->token_buf_len = remaining;
+                } else {
+                    ctx->token_buf_len = 0;
+                }
+            }
+            /* Otherwise keep accumulating — it's a valid prefix but incomplete. */
+            continue;
+        }
+
+        /* Not in the middle of buffering — scan for '<'. */
+        if (data[i] == '<') {
+            ctx->token_buf[0] = '<';
+            ctx->token_buf_len = 1;
+            ctx->token_buf[1] = '\0';
+            i++;
+            continue;
+        }
+
+        /* Normal character — find the next '<' and flush everything before it. */
+        size_t start = i;
+        while (i < data_len && data[i] != '<')
+            i++;
+        if (!flush_buffer_to_original(ctx, data + start, i - start))
+            return false;
+    }
+
+    return true;
+}
+
+void hu_self_rag_stream_flush(hu_self_rag_stream_ctx_t *ctx) {
+    if (!ctx || ctx->token_buf_len == 0)
+        return;
+    /* Flush any remaining partial buffer as normal content. This handles
+     * the case where the stream ends mid-tag (e.g. "<retr" with no
+     * closing "ieve>"). Safe-by-default: pass through unchanged. */
+    flush_buffer_to_original(ctx, ctx->token_buf, ctx->token_buf_len);
+    ctx->token_buf_len = 0;
+}
+
 hu_error_t hu_self_rag_inline(hu_memory_facade_t *m, hu_provider_t *chat,
                                hu_self_rag_t *out) {
     if (!out)

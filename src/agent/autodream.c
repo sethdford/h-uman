@@ -6,7 +6,6 @@
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdio.h>
@@ -89,7 +88,7 @@ static hu_error_t ensure_autodream_schema(struct sqlite3 *db) {
  */
 static hu_error_t phase_quarantine_review(hu_graph_t *g, const hu_autodream_config_t *cfg,
                                           hu_autodream_report_t *r, int64_t deadline_ms) {
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
@@ -287,7 +286,7 @@ hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *g
     (void)alloc;
     if (!graph)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_autodream_schema(db) != HU_OK)
@@ -330,7 +329,7 @@ hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t
         return HU_ERR_INVALID_ARGUMENT;
     *out_summary = NULL;
     *out_summary_len = 0;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -368,7 +367,7 @@ hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t
  * days. Conservative; we only nudge weight, never delete. */
 static hu_error_t phase_edge_reweight(hu_graph_t *g, const hu_autodream_config_t *cfg,
                                       hu_autodream_report_t *r, int64_t deadline_ms) {
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
@@ -415,7 +414,7 @@ static hu_error_t phase_edge_reweight(hu_graph_t *g, const hu_autodream_config_t
 static hu_error_t phase_community_summaries(hu_allocator_t *alloc, hu_graph_t *g,
                                             const hu_autodream_config_t *cfg,
                                             hu_autodream_report_t *r, int64_t deadline_ms) {
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_autodream_schema(db) != HU_OK)
@@ -453,7 +452,7 @@ hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
                             hu_autodream_report_t *out_report) {
     if (!alloc || !graph || !cfg || !out_report)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_autodream_schema(db) != HU_OK)

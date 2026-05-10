@@ -32,14 +32,13 @@ typedef struct hu_anticipatory_result {
     size_t action_count;
 } hu_anticipatory_result_t;
 
-/* Analyze graph for anticipatory actions for a contact */
+/* Analyze graph for anticipatory actions for a contact. Opens a short-lived
+ * memory facade around `graph` and delegates to `hu_anticipatory_analyze_memory`. */
 hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, int64_t now_ts,
                                    hu_anticipatory_result_t *result);
 
-/* Same as `hu_anticipatory_analyze` but takes the W7 facade (uses
- * `hu_memory_facade_graph_handle` internally). Prefer in code paths that
- * already hold `hu_memory_facade_t *` so graph access stays facade-adjacent. */
+/* Primary implementation: temporal + causal queries through the W7 facade. */
 hu_error_t hu_anticipatory_analyze_memory(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                           const char *contact_id, size_t contact_id_len,
                                           int64_t now_ts, hu_anticipatory_result_t *result);

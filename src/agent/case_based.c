@@ -8,10 +8,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 
-#include <sqlite3.h>
-
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
-
 /* Compute case score: anchor-overlap (Jaccard-ish) + recency decay.
  *   overlap = |A ∩ B| / max(|A|, |B|)
  *   recency = exp(-age_days / 60)
@@ -70,11 +66,8 @@ hu_error_t hu_case_record(hu_memory_facade_t *m, const char *contact_id, size_t 
     hu_error_t e = hu_memory_facade_write(m, &rec);
     if (e != HU_OK)
         return e;
-    if (out_id) {
-        hu_graph_t *g = hu_memory_facade_graph_handle(m);
-        struct sqlite3 *db = g ? hu_graph__db_handle(g) : NULL;
-        *out_id = db ? (int64_t)sqlite3_last_insert_rowid(db) : 0;
-    }
+    if (out_id)
+        *out_id = hu_memory_facade_last_case_rowid(m);
     return HU_OK;
 }
 

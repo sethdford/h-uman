@@ -3,7 +3,7 @@
  * Periodic background sweep that picks up aging relation rows
  * (last_seen older than `max_age_ms`) and recomputes a fresh confidence
  * score against W11's self-RAG verifier. The output is written back to
- * the relation row through `hu_graph_set_relation_confidence`, advancing
+ * the relation row through `hu_memory_facade_set_relation_belief`, advancing
  * `last_seen` so the relation is "freshened" by the act of re-verification.
  *
  * Behavior is intentionally bounded — at most `max_relations_per_tick`
@@ -24,6 +24,7 @@
 #include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
 #include "human/core/allocator.h"
+#include "human/memory/belief.h"
 #include "human/memory/memory.h"
 
 #include <string.h>
@@ -35,11 +36,8 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     (void)budget_ms;
     if (!m || !spec)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g)
+    if (!hu_memory_facade_graph_handle(m))
         return HU_OK;
-    /* Belief mean/variance updates are still graph-local UPDATE-by-id until a
-     * facade write shape covers that without upsert semantics. */
 
     hu_belief_reverify_ctx_t *ctx = (hu_belief_reverify_ctx_t *)user_data;
     int64_t max_age_ms = ctx ? ctx->max_age_ms : 0;
@@ -88,6 +86,8 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
         return e;
     }
 
+    hu_provider_t *provider = ctx ? ctx->provider : NULL;
+
     size_t reverified = 0;
     size_t decayed = 0;
     for (size_t i = 0; i < n; i++) {
@@ -97,36 +97,44 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
         if (cutoff_ms != 0 && r->last_seen >= cutoff_ms)
             continue;  /* fresh enough */
 
-        /* W8 P2A — pull the current (mean, variance) belief if the row
-         * was migrated. Legacy rows that haven't been touched since
-         * migration return HU_ERR_NOT_FOUND; in that case we fall back
-         * to scalar `confidence` and assume variance = 0. */
         float mean = 0.0f, variance = 0.0f;
         hu_error_t readbelief =
-            hu_graph_get_relation_belief(g, r->id, &mean, &variance);
+            hu_memory_facade_get_relation_belief(m, r->id, &mean, &variance);
         if (readbelief != HU_OK) {
             mean = r->confidence > 0.0f ? r->confidence : 1.0f;
             variance = 0.0f;
         }
 
-        /* The reverify runner can't ground the claim against a frontier
-         * model here (this is the heuristic mode the agent loop also
-         * uses by default). Without grounding, "silence" is a weak
-         * signal — the right semantic is age-based decay, NOT a
-         * Bayesian observation. We therefore decay the mean by 5% and
-         * GROW variance to reflect rising uncertainty as the fact
-         * ages without confirmation. The variance growth is bounded
-         * by the [0, 0.25] cap inside hu_graph_set_relation_belief. */
         (void)verifier;
         float new_mean = mean * 0.95f;
-        /* Uncertainty rises by ~1% of the variance ceiling per pass.
-         * Over 25 unverified passes that saturates at the cap (0.25),
-         * which corresponds to a uniform prior — i.e. "we no longer
-         * know what to believe" without re-verification. */
         float new_variance = variance + 0.0025f;
 
-        hu_error_t we = hu_graph_set_relation_belief(
-            g, r->id, new_mean, new_variance, now_ms);
+        /* When a provider is available, check for semantic conflicts
+         * against other relations in the batch sharing an entity.
+         * Conflicting relations get a larger variance boost (3x the
+         * base increment) to signal contested knowledge faster. */
+        if (r->context && r->context_len > 0) {
+            for (size_t j = i + 1; j < n; j++) {
+                const hu_graph_relation_t *o =
+                    (const hu_graph_relation_t *)recs[j].payload;
+                if (!o || !o->context || o->context_len == 0)
+                    continue;
+                if (o->source_id != r->source_id && o->target_id != r->target_id)
+                    continue;
+                hu_belief_conflict_t conflict =
+                    hu_belief_semantic_conflict_with_provider(
+                        r->context, r->context_len,
+                        o->context, o->context_len,
+                        provider, alloc);
+                if (conflict == HU_BELIEF_CONFLICT_CONTRADICT) {
+                    new_variance += 0.005f;
+                    break;
+                }
+            }
+        }
+
+        hu_error_t we = hu_memory_facade_set_relation_belief(
+            m, r->id, new_mean, new_variance, now_ms);
         if (we == HU_OK) {
             reverified++;
             if (new_mean < mean)

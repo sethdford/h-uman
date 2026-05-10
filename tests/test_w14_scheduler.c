@@ -15,7 +15,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdint.h>
@@ -133,7 +132,7 @@ static void test_w14_open_close_round_trip(void) {
     HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
 
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
     HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 0);
 
@@ -224,7 +223,7 @@ static void test_w14_scheduler_skips_jobs_on_battery_when_required(void) {
 
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
     HU_ASSERT_EQ(counter, 0);
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 1);
 
     /* Plug in: AC available → job runs on next tick. */
@@ -271,7 +270,7 @@ static void test_w14_scheduler_respects_quiet_hours(void) {
     HU_ASSERT_EQ(dispatch_log[0] / 100, (int)HU_JOB_LORA_TRAINING);
     HU_ASSERT_EQ(dispatch_log[0] % 100, 2);
 
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 1);
 
     clear_w14_env();
@@ -294,7 +293,7 @@ static void test_w14_scheduler_budget_enforced_per_job(void) {
     HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
 
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     /* Runner overran its budget → marked failed. */
     HU_ASSERT_EQ(count_jobs_with_status(db, "failed"), 1);
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 0);
@@ -329,7 +328,7 @@ static void test_w14_autodream_runner_registered_by_default(void) {
     HU_ASSERT_EQ(hu_scheduler_enqueue(s, &d), HU_OK);
 
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 3);
 
     close_stack_(g, m, s);
@@ -451,7 +450,7 @@ static void test_w14_adversarial_runner_returns_error_does_not_crash_scheduler(v
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
     HU_ASSERT_EQ(counter, 1);
 
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_EQ(count_jobs_with_status(db, "failed"), 1);
     HU_ASSERT_EQ(count_jobs_with_status(db, "done"), 1);
 
@@ -508,7 +507,7 @@ static void test_w14_counterfactual_rehearsal_caps_at_five_per_tick(void) {
     HU_ASSERT_EQ(hu_scheduler_enqueue(s, &job), HU_OK);
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
 
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     sqlite3_stmt *st = NULL;
     int n = -1;
     HU_ASSERT_EQ(sqlite3_prepare_v2(db,
@@ -560,7 +559,7 @@ static void test_w14_expired_jobs_marked_after_latest_at(void) {
     /* now_ms well past latest_at → job marked expired without running. */
     HU_ASSERT_EQ(hu_scheduler_tick(s, 1735690000000LL), HU_OK);
     HU_ASSERT_EQ(counter, 0);
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_EQ(count_jobs_with_status(db, "expired"), 1);
     HU_ASSERT_EQ(count_jobs_with_status(db, "pending"), 0);
 

@@ -26,7 +26,6 @@
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/emotional_residue.h"
 #include <sqlite3.h>
-extern struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 /* ---- alloc helpers (method-pointer style) -------------------------- */
@@ -81,7 +80,7 @@ hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id, size_t 
 #else
     if (!g || !nm) return HU_ERR_INVALID_ARGUMENT;
     if (nm->text[0] == '\0') return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db) return HU_ERR_INVALID_ARGUMENT;
     if (ensure_negative_memory_schema(db) != HU_OK) return HU_ERR_IO;
 
@@ -119,7 +118,7 @@ hu_error_t hu_negative_memory_list(hu_graph_t *g, hu_allocator_t *alloc,
     if (!g || !alloc || !out || !out_count) return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db) return HU_ERR_INVALID_ARGUMENT;
     if (ensure_negative_memory_schema(db) != HU_OK) return HU_ERR_IO;
 
@@ -320,7 +319,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
     wm->valence = 0.0f;
 #ifdef HU_ENABLE_SQLITE
     if (g) {
-        struct sqlite3 *db = hu_graph__db_handle(g);
+        struct sqlite3 *db = hu_graph_sqlite_connection(g);
         if (db) {
             hu_emotional_residue_t *residues = NULL;
             size_t residue_n = 0;
@@ -356,7 +355,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
      * goals table doesn't exist yet the engine returns 0 rows. */
 #ifdef HU_ENABLE_SQLITE
     if (g) {
-        struct sqlite3 *db = hu_graph__db_handle(g);
+        struct sqlite3 *db = hu_graph_sqlite_connection(g);
         if (db) {
             hu_goal_engine_t ge;
             if (hu_goal_engine_create(alloc, db, &ge) == HU_OK) {

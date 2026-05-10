@@ -12,7 +12,6 @@
 #include <time.h>
 
 /* SQLite handle from the graph's internal DB — same pattern as cross_graph.c. */
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 
 /* Maximum blob payload: 100 MB.  Larger inputs are rejected before any SQL
  * work; the per-user quota and eviction are handled by W14. */
@@ -74,7 +73,7 @@ static hu_error_t ensure_schema(struct sqlite3 *db) {
 
 static struct sqlite3 *get_db(hu_memory_facade_t *m) {
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    return g ? hu_graph__db_handle(g) : NULL;
+    return g ? hu_graph_sqlite_connection(g) : NULL;
 }
 
 /* ── Anchor CSV helpers ───────────────────────────────────────────────────── */

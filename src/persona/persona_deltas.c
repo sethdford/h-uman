@@ -2,7 +2,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdio.h>
@@ -72,7 +71,7 @@ hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
         return HU_ERR_INVALID_ARGUMENT;
 
 #ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     hu_error_t e = ensure_schema(db);
@@ -128,7 +127,7 @@ hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const
         limit = 64;
 
 #ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     hu_error_t e = ensure_schema(db);
@@ -269,7 +268,7 @@ hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
     memset(out_report, 0, sizeof(*out_report));
 
 #ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     hu_error_t e = ensure_schema(db);

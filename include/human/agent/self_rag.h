@@ -29,7 +29,7 @@
 #include "human/core/error.h"
 #include "human/memory/belief.h"           /* hu_belief_t, hu_provenance_atom_t */
 #include "human/memory/memory.h"           /* hu_memory_facade_t */
-#include "human/provider.h"                /* hu_provider_t (forward use only) */
+#include "human/provider.h"                /* hu_provider_t, hu_stream_callback_t */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -147,6 +147,47 @@ void hu_self_rag_close(hu_self_rag_t *r);
  * Always null-terminates if cap > 0. Public so tests and the channel
  * renderer can share the same source-of-truth strings. */
 void hu_self_rag_render_refusal(hu_refusal_reason_t reason, char *buf, size_t cap);
+
+/* ── Inline streaming self-RAG ────────────────────────────────────────────
+ *
+ * Stream filter that intercepts control tokens (<retrieve>, <critique>,
+ * <refuse>) during generation rather than post-hoc. Wraps the original
+ * provider stream callback and buffers partial tokens across chunk
+ * boundaries.
+ *
+ * Enable with HU_SELF_RAG_STREAMING=1 env var (default: disabled).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+#define HU_SELF_RAG_TOKEN_BUF_SIZE 64
+
+typedef struct hu_self_rag_stream_ctx {
+    hu_stream_callback_t original_cb;
+    void *original_ctx;
+    char token_buf[HU_SELF_RAG_TOKEN_BUF_SIZE];
+    size_t token_buf_len;
+    hu_memory_facade_t *memory;
+    hu_allocator_t *alloc;
+    bool retrieval_triggered;
+    bool critique_triggered;
+    bool refuse_triggered;
+} hu_self_rag_stream_ctx_t;
+
+/* Initialize a stream wrapper context. After calling this, pass
+ * hu_self_rag_stream_callback as the provider's stream callback with
+ * `ctx` as the callback context. */
+hu_error_t hu_self_rag_stream_wrap(hu_self_rag_stream_ctx_t *ctx,
+                                    hu_stream_callback_t original_cb,
+                                    void *original_ctx,
+                                    hu_memory_facade_t *memory,
+                                    hu_allocator_t *alloc);
+
+/* Stream callback that detects and strips control tokens, forwarding
+ * clean content to the original callback. */
+bool hu_self_rag_stream_callback(void *ctx, const hu_stream_chunk_t *chunk);
+
+/* Flush any remaining buffered bytes to the original callback. Call
+ * after the stream completes to ensure no partial text is lost. */
+void hu_self_rag_stream_flush(hu_self_rag_stream_ctx_t *ctx);
 
 #ifdef __cplusplus
 }

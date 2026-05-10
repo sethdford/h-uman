@@ -88,7 +88,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 fetch_locomo() {
   local upstream="https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
-  local pinned_sha=""  # set after first known-good fetch; honored when non-empty
+  local pinned_sha="79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4"
   local raw="$TMP_DIR/locomo_raw.json"
   echo "[locomo] fetching $upstream"
   if ! curl -fsSL --max-time 60 -o "$raw" "$upstream"; then
@@ -151,7 +151,7 @@ fetch_locomo() {
 
 fetch_longmemeval() {
   local upstream="https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json"
-  local pinned_sha=""
+  local pinned_sha="d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
   local raw="$TMP_DIR/longmemeval_raw.json"
   echo "[longmemeval] fetching $upstream"
   if ! curl -fsSL --max-time 60 -o "$raw" "$upstream"; then

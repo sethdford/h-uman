@@ -471,6 +471,37 @@ static void test_w7_p2g_null_provenance_uses_default_variance(void) {
     close_facade(g, m);
 }
 
+/* --- relation belief get/set through facade matches graph --- */
+
+static void test_w7_facade_relation_belief_get_set_matches_graph(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = 0, acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL,
+                                         &acme),
+                 HU_OK);
+    int64_t id = write_relation_with_provenance(m, g, alice, acme, 0.82f, "channel:test");
+
+    float gm = -1.0f, gv = -1.0f, fm = -1.0f, fv = -1.0f;
+    HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id, &gm, &gv), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_get_relation_belief(m, id, &fm, &fv), HU_OK);
+    HU_ASSERT_FLOAT_EQ(gm, fm, 1e-4f);
+    HU_ASSERT_FLOAT_EQ(gv, fv, 1e-4f);
+
+    const int64_t ts = 1700000000000LL;
+    HU_ASSERT_EQ(hu_memory_facade_set_relation_belief(m, id, 0.61f, 0.04f, ts), HU_OK);
+    float gm2 = -1.0f, gv2 = -1.0f;
+    HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id, &gm2, &gv2), HU_OK);
+    HU_ASSERT_FLOAT_EQ(gm2, 0.61f, 1e-4f);
+    HU_ASSERT_FLOAT_EQ(gv2, 0.04f, 1e-4f);
+
+    close_facade(g, m);
+}
+
 /* --- anticipatory: facade wrapper matches direct graph analyze --- */
 
 static void test_w7_anticipatory_analyze_memory_matches_graph(void) {
@@ -716,6 +747,7 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_routes_replaced_on_register);
     HU_RUN_TEST(test_w7_p2g_facade_write_seeds_variance_from_provenance);
     HU_RUN_TEST(test_w7_p2g_null_provenance_uses_default_variance);
+    HU_RUN_TEST(test_w7_facade_relation_belief_get_set_matches_graph);
     HU_RUN_TEST(test_w7_anticipatory_analyze_memory_matches_graph);
     HU_RUN_TEST(test_w7_case_write_last_rowid_matches_hu_case_record_out_id);
     HU_RUN_TEST(test_w7_list_entities_returns_inserted_entity);

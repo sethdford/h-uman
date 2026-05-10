@@ -166,6 +166,26 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                  size_t limit, size_t max_chars,
                                  char **out_text, size_t *out_len);
 
+/* W12 — Planner recall with an explicit LLM provider. Uses the LLM
+ * retrieval planner backend (`hu_planner_llm`) for plan emission when
+ * `provider` is non-NULL and HU_IS_TEST is unset; falls back through the
+ * goal-conditioned and heuristic backends otherwise.
+ *
+ * Forward-declares `hu_provider_t` via `human/provider.h`; this is the
+ * only place in this header that needs the provider type, so callers
+ * that don't use the LLM path pay no include cost.
+ *
+ * Returns HU_OK on success (including the "no records" case where
+ * `*out_text == NULL`, `*out_len == 0`). */
+struct hu_provider;
+hu_error_t hu_w12_planner_recall_with_provider(
+    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+    struct hu_provider *provider, const char *model, size_t model_len,
+    const char *contact_id, size_t contact_id_len,
+    const char *query, size_t query_len,
+    size_t limit, size_t max_chars,
+    char **out_text, size_t *out_len);
+
 /* Enqueue the persona evolver as a scheduler job. Mirrors the
  * AutoDream bridge pattern: when the scheduler is available the
  * daemon enqueues instead of running synchronously, so the work

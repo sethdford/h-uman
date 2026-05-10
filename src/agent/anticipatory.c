@@ -171,13 +171,28 @@ hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, con
                                    hu_anticipatory_result_t *result) {
     if (!graph || !alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
+    hu_memory_facade_t *m = NULL;
+    hu_error_t e = hu_memory_facade_open(alloc, graph, &m);
+    if (e != HU_OK)
+        return e;
+    e = hu_anticipatory_analyze_memory(m, alloc, contact_id, contact_id_len, now_ts, result);
+    hu_memory_facade_close(m, alloc);
+    return e;
+}
+
+hu_error_t hu_anticipatory_analyze_memory(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                          const char *contact_id, size_t contact_id_len,
+                                          int64_t now_ts, hu_anticipatory_result_t *result) {
+    if (!m || !alloc || !result)
+        return HU_ERR_INVALID_ARGUMENT;
     memset(result, 0, sizeof(*result));
 
     int64_t to_ts = now_ts + (int64_t)(HU_ANTICIPATORY_DAYS * HU_SECONDS_PER_DAY);
     char *temporal_out = NULL;
     size_t temporal_len = 0;
-    hu_error_t err =
-        hu_graph_query_temporal(graph, alloc, contact_id ? contact_id : "", contact_id ? contact_id_len : 0, now_ts, to_ts, 20, &temporal_out, &temporal_len);
+    hu_error_t err = hu_memory_facade_query_temporal(
+        m, alloc, contact_id ? contact_id : "", contact_id ? contact_id_len : 0, now_ts, to_ts, 20,
+        &temporal_out, &temporal_len);
     if (err == HU_OK && temporal_out && temporal_len > 0) {
         parse_temporal_lines(temporal_out, temporal_len, result, alloc, now_ts);
         alloc->free(alloc->ctx, temporal_out, temporal_len + 1);
@@ -188,37 +203,38 @@ hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, con
     }
 
     if (contact_id && contact_id_len > 0 && result->action_count < HU_ANTICIPATORY_MAX_ACTIONS) {
-        hu_graph_entity_t ent;
-        memset(&ent, 0, sizeof(ent));
-        err = hu_graph_find_entity(graph, contact_id, contact_id_len, contact_id, contact_id_len, &ent);
-        if (err == HU_OK && ent.id > 0) {
-            char *causal_out = NULL;
-            size_t causal_len = 0;
-            hu_error_t c_err =
-                hu_graph_query_causal(graph, alloc, contact_id, contact_id_len, ent.id, 10, &causal_out, &causal_len);
-            if (c_err == HU_OK && causal_out && causal_len > 0) {
-                parse_causal_lines(causal_out, causal_len, result, alloc);
-                alloc->free(alloc->ctx, causal_out, causal_len + 1);
-            } else if (causal_out) {
-                alloc->free(alloc->ctx, causal_out, causal_len + 1);
+        hu_memory_query_t eq;
+        memset(&eq, 0, sizeof(eq));
+        eq.kind = HU_MEM_ENTITY;
+        eq.variant = HU_MEMORY_QUERY_BY_NAME;
+        eq.contact_id = contact_id;
+        eq.contact_id_len = contact_id_len;
+        eq.as.by_name.name = contact_id;
+        eq.as.by_name.name_len = contact_id_len;
+        hu_memory_record_t *erec = NULL;
+        size_t en = 0;
+        err = hu_memory_facade_read(m, &eq, alloc, &erec, &en);
+        if (err == HU_OK && en > 0 && erec[0].payload && erec[0].payload_len >= sizeof(hu_graph_entity_t)) {
+            const hu_graph_entity_t *ep = (const hu_graph_entity_t *)erec[0].payload;
+            if (ep->id > 0) {
+                char *causal_out = NULL;
+                size_t causal_len = 0;
+                hu_error_t c_err = hu_memory_facade_query_causal(m, alloc, contact_id, contact_id_len, ep->id,
+                                                                 10, &causal_out, &causal_len);
+                if (c_err == HU_OK && causal_out && causal_len > 0) {
+                    parse_causal_lines(causal_out, causal_len, result, alloc);
+                    alloc->free(alloc->ctx, causal_out, causal_len + 1);
+                } else if (causal_out) {
+                    alloc->free(alloc->ctx, causal_out, causal_len + 1);
+                }
             }
-            if (ent.name)
-                alloc->free(alloc->ctx, ent.name, ent.name_len + 1);
-            if (ent.metadata_json)
-                alloc->free(alloc->ctx, ent.metadata_json, strlen(ent.metadata_json) + 1);
+            hu_memory_facade_records_free(m, alloc, erec, en);
+        } else if (erec && en > 0) {
+            hu_memory_facade_records_free(m, alloc, erec, en);
         }
     }
 
     return HU_OK;
-}
-
-hu_error_t hu_anticipatory_analyze_memory(hu_memory_facade_t *m, hu_allocator_t *alloc,
-                                          const char *contact_id, size_t contact_id_len,
-                                          int64_t now_ts, hu_anticipatory_result_t *result) {
-    if (!m)
-        return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    return hu_anticipatory_analyze(g, alloc, contact_id, contact_id_len, now_ts, result);
 }
 
 hu_error_t hu_anticipatory_build_context(const hu_anticipatory_result_t *result,

@@ -138,6 +138,36 @@ static void test_w8_semantic_conflict_empty_strings_no_conflict(void) {
                  (int)HU_BELIEF_CONFLICT_NONE);
 }
 
+/* ---- semantic conflict with provider (heuristic fallback in test) ------- */
+
+static void test_w8_semantic_conflict_with_provider_null_uses_heuristic(void) {
+    hu_belief_conflict_t c = hu_belief_semantic_conflict_with_provider(
+        "I like cats", 11, "I do not like cats", 18, NULL, NULL);
+    HU_ASSERT_EQ((int)c, (int)HU_BELIEF_CONFLICT_CONTRADICT);
+}
+
+static void test_w8_semantic_conflict_with_provider_paraphrase(void) {
+    hu_belief_conflict_t c = hu_belief_semantic_conflict_with_provider(
+        "I like cats", 11, "I like cats", 11, NULL, NULL);
+    HU_ASSERT(c == HU_BELIEF_CONFLICT_PARAPHRASE || c == HU_BELIEF_CONFLICT_NONE);
+    HU_ASSERT(c != HU_BELIEF_CONFLICT_CONTRADICT);
+}
+
+static void test_w8_semantic_conflict_with_provider_none(void) {
+    hu_belief_conflict_t c = hu_belief_semantic_conflict_with_provider(
+        "I like cats", 11, "The weather is sunny", 20, NULL, NULL);
+    HU_ASSERT_EQ((int)c, (int)HU_BELIEF_CONFLICT_NONE);
+}
+
+static void test_w8_semantic_conflict_with_provider_null_inputs(void) {
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict_with_provider(
+                     NULL, 0, "hello", 5, NULL, NULL),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+    HU_ASSERT_EQ((int)hu_belief_semantic_conflict_with_provider(
+                     "hello", 5, NULL, 0, NULL, NULL),
+                 (int)HU_BELIEF_CONFLICT_NONE);
+}
+
 /* ---- hyperedge tests (SQLite required) --------------------------------- */
 
 #ifdef HU_ENABLE_SQLITE
@@ -296,6 +326,12 @@ void run_w8_belief_layer_tests(void) {
     HU_RUN_TEST(test_w8_semantic_conflict_different_subjects_no_conflict);
     HU_RUN_TEST(test_w8_semantic_conflict_null_inputs_safe);
     HU_RUN_TEST(test_w8_semantic_conflict_empty_strings_no_conflict);
+
+    /* Semantic conflict with provider (heuristic fallback under HU_IS_TEST). */
+    HU_RUN_TEST(test_w8_semantic_conflict_with_provider_null_uses_heuristic);
+    HU_RUN_TEST(test_w8_semantic_conflict_with_provider_paraphrase);
+    HU_RUN_TEST(test_w8_semantic_conflict_with_provider_none);
+    HU_RUN_TEST(test_w8_semantic_conflict_with_provider_null_inputs);
 
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w8_hyperedge_zero_members_rejected);

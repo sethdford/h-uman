@@ -21,11 +21,14 @@
 extern "C" {
 #endif
 
+typedef struct hu_provider hu_provider_t;
+
 typedef struct hu_belief_reverify_ctx {
     hu_allocator_t *alloc;          /* optional; system allocator if NULL */
     const char *contact_id;         /* optional contact filter; NULL = all */
     int64_t max_age_ms;             /* relations older than this are eligible (default 30d) */
     size_t max_relations_per_tick;  /* hard cap per tick (default 64) */
+    hu_provider_t *provider;        /* optional; enables LLM-judge semantic conflict detection */
     size_t *out_reverified;         /* optional — populated with rows touched */
     size_t *out_decayed;            /* optional — subset of `reverified` that lost confidence */
 } hu_belief_reverify_ctx_t;

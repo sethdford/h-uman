@@ -97,6 +97,19 @@ hu_belief_conflict_t hu_belief_semantic_conflict(
     const char *text_a, size_t len_a,
     const char *text_b, size_t len_b);
 
+/* Provider-aware variant: when a non-NULL provider with chat_with_system
+ * is available (and not in test mode), asks an LLM to judge semantic
+ * conflict. Falls back to the deterministic heuristic on provider error,
+ * NULL provider, or HU_IS_TEST builds. */
+typedef struct hu_provider hu_provider_t;
+typedef struct hu_allocator hu_allocator_t;
+
+hu_belief_conflict_t hu_belief_semantic_conflict_with_provider(
+    const char *a, size_t a_len,
+    const char *b, size_t b_len,
+    hu_provider_t *provider,
+    hu_allocator_t *alloc);
+
 #ifdef __cplusplus
 }
 #endif

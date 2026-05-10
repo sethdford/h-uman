@@ -776,10 +776,13 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
     return HU_OK;
 }
 
-/* Internal accessor for sibling modules (conflict_resolver, write_trust). Not
- * declared in a public header — sibling .c files forward-declare it. */
+/* Internal accessor — prefer `hu_graph_sqlite_connection` in new code. */
 sqlite3 *hu_graph__db_handle(hu_graph_t *g) {
     return g ? g->db : NULL;
+}
+
+struct sqlite3 *hu_graph_sqlite_connection(hu_graph_t *g) {
+    return hu_graph__db_handle(g);
 }
 
 hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64_t community_id) {

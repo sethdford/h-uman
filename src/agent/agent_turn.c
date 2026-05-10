@@ -1273,10 +1273,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         bool planner_ok = false;
 
         if (agent->w7_facade) {
-            hu_error_t pe = hu_w12_planner_recall(
-                agent->w7_facade, agent->alloc, agent->memory_session_id,
-                agent->memory_session_id_len, msg, msg_len, 5, 4000, &contact_text,
-                &contact_text_len);
+            /* P4: route through the LLM planner backend when a provider
+             * is available. Under HU_IS_TEST the LLM planner falls back to
+             * a deterministic single-step plan so tests stay free of
+             * provider I/O. With no provider it degrades to goal-conditioned
+             * → heuristic, identical to the original `hu_w12_planner_recall`
+             * call. */
+            hu_provider_t *provider =
+                agent->provider.vtable ? &agent->provider : NULL;
+            hu_error_t pe = hu_w12_planner_recall_with_provider(
+                agent->w7_facade, agent->alloc, provider,
+                /*model=*/NULL, /*model_len=*/0,
+                agent->memory_session_id, agent->memory_session_id_len,
+                msg, msg_len, 5, 4000, &contact_text, &contact_text_len);
             planner_ok = (pe == HU_OK && contact_text && contact_text_len > 0);
         }
 
@@ -4213,6 +4222,37 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_otlp_span_begin(&otlp_trace, "llm.chat", 8, NULL, &llm_span);
         }
 
+        /* W10: KV cache — check for cached prompt metadata before provider call */
+#ifdef HU_ENABLE_SQLITE
+        bool kv_cache_hit = false;
+        char kv_prompt_hash[24];
+        kv_prompt_hash[0] = '\0';
+        if (agent->w7_facade && system_prompt && system_prompt_len > 0 &&
+            turn_model && turn_model_len > 0) {
+            hu_memory_facade_t *kv_mf = hu_w7_facade_memory_handle(agent->w7_facade);
+            if (kv_mf) {
+                uint64_t kv_phash = hu_prompt_cache_hash(system_prompt, system_prompt_len);
+                snprintf(kv_prompt_hash, sizeof(kv_prompt_hash), "%016llx",
+                         (unsigned long long)kv_phash);
+                char kv_model_ver[64];
+                size_t mv_len = turn_model_len < sizeof(kv_model_ver) - 1
+                                    ? turn_model_len
+                                    : sizeof(kv_model_ver) - 1;
+                memcpy(kv_model_ver, turn_model, mv_len);
+                kv_model_ver[mv_len] = '\0';
+                hu_kv_cache_entry_t *cached = NULL;
+                if (hu_kv_cache_get(kv_mf, kv_prompt_hash, kv_model_ver, agent->alloc,
+                                    &cached) == HU_OK) {
+                    kv_cache_hit = true;
+                    hu_log_info("agent_turn", agent->observer,
+                                "W10 KV cache hit: hash=%s tokens=%lld", kv_prompt_hash,
+                                (long long)cached->prompt_token_count);
+                    hu_kv_cache_entry_free(agent->alloc, cached);
+                }
+            }
+        }
+#endif
+
         /* Provider graceful degradation: try primary -> fallback -> honest failure */
         if (getenv("HU_DEBUG"))
             hu_log_info("agent_turn", NULL,
@@ -4254,6 +4294,27 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         uint64_t llm_duration_ms = hu_agent_internal_clock_diff_ms(llm_start, clock());
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
+
+        /* W10: KV cache — store prompt metadata after successful provider call */
+#ifdef HU_ENABLE_SQLITE
+        if (err == HU_OK && !kv_cache_hit && kv_prompt_hash[0] && agent->w7_facade &&
+            turn_model && turn_model_len > 0) {
+            hu_memory_facade_t *kv_mf = hu_w7_facade_memory_handle(agent->w7_facade);
+            if (kv_mf) {
+                hu_kv_cache_entry_t kv_entry;
+                memset(&kv_entry, 0, sizeof(kv_entry));
+                strncpy(kv_entry.prompt_hash, kv_prompt_hash,
+                        sizeof(kv_entry.prompt_hash) - 1);
+                size_t mv_len = turn_model_len < sizeof(kv_entry.model_version) - 1
+                                    ? turn_model_len
+                                    : sizeof(kv_entry.model_version) - 1;
+                memcpy(kv_entry.model_version, turn_model, mv_len);
+                kv_entry.model_version[mv_len] = '\0';
+                kv_entry.prompt_token_count = (int64_t)resp.usage.prompt_tokens;
+                (void)hu_kv_cache_put(kv_mf, &kv_entry);
+            }
+        }
+#endif
 
         {
             hu_observer_event_t ev = {.tag = HU_OBSERVER_EVENT_LLM_RESPONSE, .data = {{0}}};
@@ -5401,6 +5462,56 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                         agent->memory_session_id ? agent->memory_session_id_len : 0;
                     int64_t trace_id = 0;
                     (void)hu_reasoning_trace_record(nf, rt_cid, rt_cid_len, &rt, &trace_id);
+                }
+            }
+            /* W10: Persist multimodal blobs from this turn's history entries */
+            if (agent->w7_facade && agent->history_count > 0) {
+                hu_memory_facade_t *blob_mf = hu_w7_facade_memory_handle(agent->w7_facade);
+                if (blob_mf) {
+                    const char *blob_cid =
+                        agent->memory_session_id ? agent->memory_session_id : "";
+                    size_t blob_cid_len =
+                        agent->memory_session_id ? agent->memory_session_id_len : 0;
+                    for (size_t hi = agent->history_count; hi > 0 && hi > agent->history_count - 4;
+                         hi--) {
+                        const hu_owned_message_t *hm = &agent->history[hi - 1];
+                        if (!hm->content_parts || hm->content_parts_count == 0)
+                            continue;
+                        for (size_t pi = 0; pi < hm->content_parts_count; pi++) {
+                            const hu_content_part_t *cp = &hm->content_parts[pi];
+                            hu_memory_blob_t blob;
+                            memset(&blob, 0, sizeof(blob));
+                            if (cp->tag == HU_CONTENT_PART_IMAGE_BASE64 &&
+                                cp->data.image_base64.data &&
+                                cp->data.image_base64.data_len > 0) {
+                                blob.bytes = (void *)cp->data.image_base64.data;
+                                blob.bytes_len = cp->data.image_base64.data_len;
+                                if (cp->data.image_base64.media_type)
+                                    strncpy(blob.mime_type, cp->data.image_base64.media_type,
+                                            sizeof(blob.mime_type) - 1);
+                                else
+                                    strncpy(blob.mime_type, "image/png",
+                                            sizeof(blob.mime_type) - 1);
+                            } else if (cp->tag == HU_CONTENT_PART_AUDIO_BASE64 &&
+                                       cp->data.audio_base64.data &&
+                                       cp->data.audio_base64.data_len > 0) {
+                                blob.bytes = (void *)cp->data.audio_base64.data;
+                                blob.bytes_len = cp->data.audio_base64.data_len;
+                                if (cp->data.audio_base64.media_type)
+                                    strncpy(blob.mime_type, cp->data.audio_base64.media_type,
+                                            sizeof(blob.mime_type) - 1);
+                                else
+                                    strncpy(blob.mime_type, "audio/wav",
+                                            sizeof(blob.mime_type) - 1);
+                            } else {
+                                continue;
+                            }
+                            int64_t blob_id = 0;
+                            (void)hu_memory_blob_put(blob_mf, blob_cid, blob_cid_len,
+                                                     &blob, &blob_id);
+                        }
+                        break;
+                    }
                 }
             }
             /* Value learning: detect approval, correction, re-asks, content-specific signals */

@@ -18,7 +18,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 
-extern struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 
 static hu_allocator_t g_alloc;
 static hu_allocator_t *A(void) { g_alloc = hu_system_allocator(); return &g_alloc; }
@@ -270,7 +269,7 @@ static void test_w9_goals_appear_in_world_model(void) {
     open_facade_(&g, &m);
 
     /* Seed the goals table and insert an active goal. */
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_NOT_NULL(db);
     hu_goal_engine_t ge;
     HU_ASSERT_EQ(hu_goal_engine_create(A(), db, &ge), HU_OK);
@@ -321,7 +320,7 @@ static void test_w9_emotion_populated_from_distress_residue(void) {
     hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     HU_ASSERT_NOT_NULL(db);
     ensure_emotional_residue_table_(db);
 
@@ -350,7 +349,7 @@ static void test_w9_emotion_populated_from_joy_residue(void) {
     hu_memory_facade_t *m = NULL;
     open_facade_(&g, &m);
 
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     ensure_emotional_residue_table_(db);
 
     int64_t id1 = 0;

@@ -23,7 +23,13 @@
 #include "human/memory.h"
 #include "human/memory/factory.h"
 #include "human/memory/graph.h"
-#include "human/memory/memory.h"
+/* W7 facade: do not include human/memory/memory.h here — it collides with
+ * legacy human/memory.h (hu_memory_t). Only three entrypoints are needed. */
+typedef struct hu_memory_facade hu_memory_facade_t;
+hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out);
+void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
+hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                        const char *output_path);
 #include "human/providers/factory.h"
 #include "human/security.h"
 #include "human/security/audit.h"

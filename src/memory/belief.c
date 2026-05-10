@@ -1,7 +1,13 @@
 #include "human/memory/belief.h"
 
+#include "human/core/allocator.h"
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+#include "human/provider.h"
+#endif
+
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 /* Clamp helper */
@@ -335,4 +341,79 @@ hu_belief_conflict_t hu_belief_semantic_conflict(
         return HU_BELIEF_CONFLICT_PARAPHRASE;
 
     return HU_BELIEF_CONFLICT_NONE;
+}
+
+/* ── LLM-judge conflict detection ──────────────────────────────────── */
+
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+
+static const char *const CONFLICT_JUDGE_SYSTEM =
+    "You are a semantic conflict detector. Given two statements about a "
+    "person, determine if they contradict each other. Reply with ONLY one "
+    "word: CONFLICT, PARTIAL, or NONE.";
+
+static hu_belief_conflict_t llm_judge_conflict(
+    const char *a, size_t a_len,
+    const char *b, size_t b_len,
+    hu_provider_t *provider,
+    hu_allocator_t *alloc) {
+    if (!provider || !provider->vtable ||
+        !provider->vtable->chat_with_system || !alloc)
+        return hu_belief_semantic_conflict(a, a_len, b, b_len);
+
+    char prompt[2048];
+    int n = snprintf(prompt, sizeof(prompt),
+                     "Statement A: %.*s\n\nStatement B: %.*s",
+                     (int)(a_len > 900 ? 900 : a_len), a,
+                     (int)(b_len > 900 ? 900 : b_len), b);
+    if (n <= 0 || (size_t)n >= sizeof(prompt))
+        return hu_belief_semantic_conflict(a, a_len, b, b_len);
+
+    char *resp = NULL;
+    size_t resp_len = 0;
+    hu_error_t err = provider->vtable->chat_with_system(
+        provider->ctx, alloc,
+        CONFLICT_JUDGE_SYSTEM, strlen(CONFLICT_JUDGE_SYSTEM),
+        prompt, (size_t)n,
+        "", 0,
+        0.0, &resp, &resp_len);
+
+    if (err != HU_OK || !resp)
+        return hu_belief_semantic_conflict(a, a_len, b, b_len);
+
+    /* Strip leading whitespace from response. */
+    const char *p = resp;
+    while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+        p++;
+
+    hu_belief_conflict_t result;
+    if (strncmp(p, "CONFLICT", 8) == 0)
+        result = HU_BELIEF_CONFLICT_CONTRADICT;
+    else if (strncmp(p, "PARTIAL", 7) == 0)
+        result = HU_BELIEF_CONFLICT_PARAPHRASE;
+    else if (strncmp(p, "NONE", 4) == 0)
+        result = HU_BELIEF_CONFLICT_NONE;
+    else
+        result = hu_belief_semantic_conflict(a, a_len, b, b_len);
+
+    alloc->free(alloc->ctx, resp, resp_len + 1);
+    return result;
+}
+
+#endif /* !HU_IS_TEST */
+
+hu_belief_conflict_t hu_belief_semantic_conflict_with_provider(
+    const char *a, size_t a_len,
+    const char *b, size_t b_len,
+    hu_provider_t *provider,
+    hu_allocator_t *alloc) {
+#if defined(HU_IS_TEST) && HU_IS_TEST
+    (void)provider;
+    (void)alloc;
+    return hu_belief_semantic_conflict(a, a_len, b, b_len);
+#else
+    if (!provider || !alloc)
+        return hu_belief_semantic_conflict(a, a_len, b, b_len);
+    return llm_judge_conflict(a, a_len, b, b_len, provider, alloc);
+#endif
 }

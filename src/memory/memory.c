@@ -15,7 +15,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 hu_error_t hu_memory__v1_backend_register(struct hu_memory_facade *m, hu_graph_t *graph);
@@ -46,7 +45,7 @@ static void facade_routes_run(struct sqlite3 *db, const char *sql) {
 
 static void facade_routes_ensure(hu_graph_t *graph) {
     if (!graph) return;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db) return;
     facade_routes_run(db,
         "CREATE TABLE IF NOT EXISTS memory_facade_routes ("
@@ -58,7 +57,7 @@ static void facade_routes_ensure(hu_graph_t *graph) {
 static void facade_routes_upsert(hu_graph_t *graph, hu_memory_kind_t kind,
                                  const char *backend_name) {
     if (!graph || !backend_name) return;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db) return;
     sqlite3_stmt *st = NULL;
     const char *sql =
@@ -77,7 +76,7 @@ static void facade_routes_upsert(hu_graph_t *graph, hu_memory_kind_t kind,
 static char *facade_routes_lookup(hu_graph_t *graph, hu_memory_kind_t kind,
                                    hu_allocator_t *alloc) {
     if (!graph || !alloc) return NULL;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db) return NULL;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
@@ -259,7 +258,7 @@ hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_
     hu_error_t e = s->vt->write(s->ctx, rec);
 #ifdef HU_ENABLE_SQLITE
     if (e == HU_OK && rec->kind == HU_MEM_CASE && m->graph) {
-        struct sqlite3 *db = hu_graph__db_handle(m->graph);
+        struct sqlite3 *db = hu_graph_sqlite_connection(m->graph);
         if (db)
             m->last_case_rowid = sqlite3_last_insert_rowid(db);
     }
@@ -333,7 +332,7 @@ hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m) {
 #ifdef HU_ENABLE_SQLITE
 struct sqlite3 *hu_memory_facade_sqlite_db(hu_memory_facade_t *m) {
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    return g ? hu_graph__db_handle(g) : NULL;
+    return g ? hu_graph_sqlite_connection(g) : NULL;
 }
 #endif
 
@@ -350,6 +349,59 @@ hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
     if (!g) return HU_ERR_NOT_SUPPORTED;
     return hu_graph_list_entities(g, alloc, contact_id, cid_len, limit, out,
                                  out_count);
+}
+
+hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                           const char *contact_id, size_t contact_id_len,
+                                           int64_t from_ts, int64_t to_ts, size_t limit,
+                                           char **out, size_t *out_len) {
+    if (!m || !alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    hu_graph_t *g = m->graph;
+    if (!g)
+        return HU_ERR_NOT_SUPPORTED;
+    const char *cid = contact_id ? contact_id : "";
+    size_t cid_len = contact_id ? contact_id_len : 0;
+    return hu_graph_query_temporal(g, alloc, cid, cid_len, from_ts, to_ts, limit, out, out_len);
+}
+
+hu_error_t hu_memory_facade_query_causal(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                         const char *contact_id, size_t contact_id_len,
+                                         int64_t entity_id, size_t max_results, char **out,
+                                         size_t *out_len) {
+    if (!m || !alloc || !out || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_len = 0;
+    hu_graph_t *g = m->graph;
+    if (!g)
+        return HU_ERR_NOT_SUPPORTED;
+    const char *cid = contact_id ? contact_id : "";
+    size_t cid_len = contact_id ? contact_id_len : 0;
+    return hu_graph_query_causal(g, alloc, cid, cid_len, entity_id, max_results, out, out_len);
+}
+
+hu_error_t hu_memory_facade_get_relation_belief(hu_memory_facade_t *m, int64_t relation_id,
+                                                float *out_mean, float *out_variance) {
+    if (!m)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_graph_t *g = m->graph;
+    if (!g)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_graph_get_relation_belief(g, relation_id, out_mean, out_variance);
+}
+
+hu_error_t hu_memory_facade_set_relation_belief(hu_memory_facade_t *m, int64_t relation_id,
+                                                float mean, float variance,
+                                                int64_t last_seen_now_ms) {
+    if (!m)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_graph_t *g = m->graph;
+    if (!g)
+        return HU_ERR_NOT_SUPPORTED;
+    return hu_graph_set_relation_belief(g, relation_id, mean, variance, last_seen_now_ms);
 }
 
 /* W15 GDPR export — iterate every registered kind, read all records via

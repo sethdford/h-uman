@@ -66,13 +66,12 @@ const char *hu_conflict_resolution_str(hu_conflict_resolution_t r) {
 #ifdef HU_ENABLE_SQLITE
 
 /* graph.c exposes a tiny accessor so we don't drag the full struct here. */
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 
 hu_error_t hu_conflict_apply(hu_graph_t *g, hu_conflict_resolution_t decision,
                              int64_t proposed_id, int64_t existing_id, int64_t cutover_ts) {
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 

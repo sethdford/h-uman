@@ -22,9 +22,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-/* Internal accessor exported by src/memory/graph.c — same pattern used by
- * src/agent/case_based.c and src/persona/persona_deltas.c. */
-extern struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 /* Backend vtables come from learner_cpu.c / learner_mlx.c / learner_ggml.c. */
@@ -47,10 +44,34 @@ hu_learner_config_t hu_learner_default_config(void) {
     c.batch_size = 4;
     c.dp_enabled = false;
     c.dp_epsilon = 0.0f;
-    c.budget_ms = 60000; /* 60s default soft budget */
-    c.seed = 0;          /* backend supplies a deterministic default */
+    c.dp_clip_norm = 0.0f; /* 0 = use default (1.0) */
+    c.budget_ms = 60000;   /* 60s default soft budget */
+    c.seed = 0;            /* backend supplies a deterministic default */
     snprintf(c.model_version, sizeof(c.model_version), "v1");
     return c;
+}
+
+/* ── W15 DP privacy accountant ────────────────────────────────────────── */
+
+void hu_dp_accountant_init(hu_dp_accountant_t *a, double delta) {
+    if (!a)
+        return;
+    a->epsilon_spent = 0.0;
+    a->delta = delta > 0.0 ? delta : 1e-5;
+    a->queries_count = 0;
+}
+
+void hu_dp_accountant_record_query(hu_dp_accountant_t *a, double epsilon_step) {
+    if (!a || epsilon_step <= 0.0)
+        return;
+    a->epsilon_spent += epsilon_step;
+    a->queries_count++;
+}
+
+double hu_dp_accountant_total_epsilon(const hu_dp_accountant_t *a) {
+    if (!a)
+        return 0.0;
+    return a->epsilon_spent;
 }
 
 static hu_error_t open_with(hu_allocator_t *alloc, const hu_learner_vtable_t *vt,
@@ -119,7 +140,13 @@ hu_error_t hu_learner_train(hu_learner_t *l, const hu_learner_config_t *cfg,
         return HU_ERR_INVALID_ARGUMENT;
     if (signals_count > 0 && !signals)
         return HU_ERR_INVALID_ARGUMENT;
-    return l->vt->train(l->ctx, cfg, signals, signals_count, out_report);
+    hu_error_t e = l->vt->train(l->ctx, cfg, signals, signals_count, out_report);
+    if (e == HU_OK && cfg->dp_enabled && cfg->dp_epsilon > 0.0f) {
+        if (l->dp_accountant.queries_count == 0)
+            hu_dp_accountant_init(&l->dp_accountant, 1e-5);
+        hu_dp_accountant_record_query(&l->dp_accountant, (double)cfg->dp_epsilon);
+    }
+    return e;
 }
 
 void hu_learner_close(hu_learner_t *l) {
@@ -277,7 +304,7 @@ hu_error_t hu_learner_signals_from_case_outcomes(hu_memory_facade_t *m, hu_alloc
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 

@@ -3,7 +3,6 @@
 #ifdef HU_ENABLE_SQLITE
 #include "human/core/string.h"
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stdlib.h>
@@ -54,7 +53,7 @@ hu_error_t hu_cross_edge_upsert(hu_graph_t *g, const char *contact_id, size_t co
                                 int64_t event_start, int64_t event_end, float weight) {
     if (!g || !src_graph || !dst_graph || !relation || src_id <= 0 || dst_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_schema(db) != HU_OK)
@@ -122,7 +121,7 @@ hu_error_t hu_cross_graph_traverse(hu_graph_t *g, hu_allocator_t *alloc, const c
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_schema(db) != HU_OK)

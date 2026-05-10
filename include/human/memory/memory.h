@@ -257,6 +257,29 @@ hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
                                           hu_graph_entity_t **out,
                                           size_t *out_count);
 
+/* Markdown digests over `temporal_events` / `causal_links` for the given
+ * contact scope. Thin wrappers on the v1 graph connection; prefer these over
+ * `hu_memory_facade_graph_handle` + `hu_graph_query_*` in migrating call sites.
+ * Output buffers are allocator-owned (same contract as the underlying graph
+ * helpers). */
+hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                            const char *contact_id, size_t contact_id_len,
+                                            int64_t from_ts, int64_t to_ts, size_t limit,
+                                            char **out, size_t *out_len);
+hu_error_t hu_memory_facade_query_causal(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                        const char *contact_id, size_t contact_id_len,
+                                        int64_t entity_id, size_t max_results, char **out,
+                                        size_t *out_len);
+
+/* W8 / W14 — read or UPDATE-by-id belief columns on an existing relation row.
+ * Delegates to `hu_graph_get_relation_belief` / `hu_graph_set_relation_belief`.
+ * Prefer over `hu_memory_facade_graph_handle` + graph calls in migrating runners. */
+hu_error_t hu_memory_facade_get_relation_belief(hu_memory_facade_t *m, int64_t relation_id,
+                                                float *out_mean, float *out_variance);
+hu_error_t hu_memory_facade_set_relation_belief(hu_memory_facade_t *m, int64_t relation_id,
+                                                float mean, float variance,
+                                                int64_t last_seen_now_ms);
+
 /* W15 GDPR data-portability: export all memory records across every registered
  * kind to a JSON-Lines file at `output_path`. Each line is a self-contained
  * JSON object with { "kind", "id", "provenance", "confidence", "payload_len" }.

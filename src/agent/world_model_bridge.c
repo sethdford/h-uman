@@ -14,6 +14,7 @@
 #include "human/agent/self_rag.h"
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
+#include "human/provider.h"
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -375,11 +376,55 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
  * read pass re-fetches with payloads, filtering to the verified set, and
  * formats results into a markdown text block for prompt injection. */
 
-hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                 const char *contact_id, size_t contact_id_len,
-                                 const char *query, size_t query_len,
-                                 size_t limit, size_t max_chars,
-                                 char **out_text, size_t *out_len) {
+/* Build a planner using the best available backend.
+ *
+ * Order: LLM (if `provider` non-NULL and HU_IS_TEST unset) → goal-conditioned
+ * (PageRank-seeded over the contact's graph) → heuristic (deterministic
+ * goal-verb scan). Returns HU_OK on any successful selection and writes the
+ * selected backend name to *out_backend (borrowed string literal).
+ *
+ * On non-OK return `*out` is unchanged and the caller MUST NOT call
+ * hu_planner_close. */
+static hu_error_t select_planner_backend(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                         hu_provider_t *provider,
+                                         const char *model, size_t model_len,
+                                         hu_planner_t *out,
+                                         const char **out_backend) {
+    *out_backend = "none";
+
+    /* LLM backend: requires a provider and (in production) a working
+     * chat_with_system entrypoint. Under HU_IS_TEST the LLM planner
+     * forces the deterministic fallback, but we still take this branch
+     * so the configure path is exercised. */
+    if (provider && provider->vtable && provider->vtable->chat_with_system) {
+        if (hu_planner_llm(provider, out) == HU_OK) {
+            hu_planner_llm_configure(alloc, model, model_len);
+            *out_backend = "llm";
+            return HU_OK;
+        }
+    }
+
+    /* Goal-conditioned (HippoRAG-style) backend: needs the facade. */
+    if (hu_planner_goal_conditioned(m, alloc, out) == HU_OK) {
+        *out_backend = "goal-conditioned";
+        return HU_OK;
+    }
+
+    /* Heuristic: always works. */
+    if (hu_planner_heuristic(out) == HU_OK) {
+        *out_backend = "heuristic";
+        return HU_OK;
+    }
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                      hu_provider_t *provider,
+                                      const char *model, size_t model_len,
+                                      const char *contact_id, size_t contact_id_len,
+                                      const char *query, size_t query_len,
+                                      size_t limit, size_t max_chars,
+                                      char **out_text, size_t *out_len) {
     if (!facade || !facade->m || !alloc || !out_text || !out_len)
         return HU_ERR_INVALID_ARGUMENT;
     *out_text = NULL;
@@ -388,8 +433,8 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     if (limit == 0) limit = 5;
     if (max_chars == 0) max_chars = 4000;
 
-    /* Load the world model so the goal-conditioned backend can run
-     * personalized PageRank over the contact's entity graph. */
+    /* Load the world model so the goal-conditioned and LLM backends can
+     * both ground their plan in the contact's entity graph + state. */
     int64_t now_ms = (int64_t)time(NULL) * 1000;
     hu_world_model_t *wm = NULL;
     if (contact_id && contact_id_len > 0)
@@ -397,14 +442,15 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
 
     hu_planner_t planner;
     memset(&planner, 0, sizeof(planner));
-    hu_error_t err = hu_planner_goal_conditioned(facade->m, alloc, &planner);
+    const char *backend_name = "none";
+    hu_error_t err = select_planner_backend(facade->m, alloc, provider,
+                                            model, model_len, &planner,
+                                            &backend_name);
     if (err != HU_OK) {
-        err = hu_planner_heuristic(&planner);
-        if (err != HU_OK) {
-            if (wm) hu_world_model_free(alloc, wm);
-            return err;
-        }
+        if (wm) hu_world_model_free(alloc, wm);
+        return err;
     }
+    (void)backend_name; /* available for future telemetry */
 
     hu_retrieval_plan_t plan;
     memset(&plan, 0, sizeof(plan));
@@ -555,6 +601,32 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         if (buf) alloc->free(alloc->ctx, buf, buf_cap);
     }
     return HU_OK;
+}
+
+/* Public entrypoint: no provider, no LLM. Preserves the historical API. */
+hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                 const char *contact_id, size_t contact_id_len,
+                                 const char *query, size_t query_len,
+                                 size_t limit, size_t max_chars,
+                                 char **out_text, size_t *out_len) {
+    return planner_recall_impl(facade, alloc, /*provider=*/NULL, NULL, 0,
+                                contact_id, contact_id_len, query, query_len,
+                                limit, max_chars, out_text, out_len);
+}
+
+/* Public entrypoint: routes through the LLM backend when a provider is
+ * available. Falls through to goal-conditioned / heuristic on any failure
+ * or under HU_IS_TEST. */
+hu_error_t hu_w12_planner_recall_with_provider(
+    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+    struct hu_provider *provider, const char *model, size_t model_len,
+    const char *contact_id, size_t contact_id_len,
+    const char *query, size_t query_len,
+    size_t limit, size_t max_chars,
+    char **out_text, size_t *out_len) {
+    return planner_recall_impl(facade, alloc, provider, model, model_len,
+                                contact_id, contact_id_len, query, query_len,
+                                limit, max_chars, out_text, out_len);
 }
 
 /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────

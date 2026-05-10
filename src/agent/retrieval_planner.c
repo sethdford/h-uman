@@ -144,6 +144,12 @@ static hu_retrieval_step_t step_neighbors(const hu_world_model_t *wm,
     memset(&s, 0, sizeof(s));
     s.kind = HU_MEM_ENTITY;
     s.query.kind = HU_MEM_ENTITY;
+    /* P4 — explicit variant tag eliminates the union-aliasing AUTO heuristic
+     * in v1_entity_read. Without this, `neighbors.entity_id` (an int64) would
+     * alias with `by_name.name` (a pointer) and the v1 backend would attempt
+     * to dereference a small integer as a string pointer. See
+     * `tests/test_w7_memory_facade.c::test_w7_p3_neighbors_query_with_variant_tag_safe`. */
+    s.query.variant = HU_MEMORY_QUERY_NEIGHBORS;
     set_contact(&s.query, wm);
     s.query.as.neighbors.entity_id = anchor;
     s.query.as.neighbors.hops      = hops;

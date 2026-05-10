@@ -652,6 +652,209 @@ static void test_w11_e2e_inline_with_world_model_and_memory(void) {
 
 #endif /* HU_ENABLE_SQLITE */
 
+/* ── Streaming self-RAG callback tests ─────────────────────────────────
+ *
+ * These tests exercise the stream filter directly, without requiring
+ * SQLite or graph. They verify:
+ *   - Normal tokens pass through unchanged
+ *   - <retrieve> is detected and stripped
+ *   - <critique> is detected and stripped
+ *   - <refuse> triggers refusal and suppresses subsequent content
+ *   - Partial token buffering works across chunk boundaries
+ *   - Non-content chunks pass through unchanged
+ * ───────────────────────────────────────────────────────────────────── */
+
+typedef struct stream_test_sink {
+    char buf[2048];
+    size_t len;
+    int call_count;
+} stream_test_sink_t;
+
+static bool test_stream_sink_cb(void *ctx, const hu_stream_chunk_t *chunk) {
+    stream_test_sink_t *sink = (stream_test_sink_t *)ctx;
+    if (!chunk || chunk->type != HU_STREAM_CONTENT || !chunk->delta)
+        return true;
+    size_t avail = sizeof(sink->buf) - 1 - sink->len;
+    size_t copy = chunk->delta_len < avail ? chunk->delta_len : avail;
+    if (copy > 0) memcpy(sink->buf + sink->len, chunk->delta, copy);
+    sink->len += copy;
+    sink->buf[sink->len] = '\0';
+    sink->call_count++;
+    return true;
+}
+
+static void send_chunk(hu_self_rag_stream_ctx_t *ctx, const char *text) {
+    hu_stream_chunk_t chunk;
+    memset(&chunk, 0, sizeof(chunk));
+    chunk.type = HU_STREAM_CONTENT;
+    chunk.delta = text;
+    chunk.delta_len = strlen(text);
+    hu_self_rag_stream_callback(ctx, &chunk);
+}
+
+static void test_w11_stream_normal_tokens_pass_through(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    send_chunk(&ctx, "Hello ");
+    send_chunk(&ctx, "world!");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "Hello world!");
+    HU_ASSERT(!ctx.retrieval_triggered);
+    HU_ASSERT(!ctx.critique_triggered);
+    HU_ASSERT(!ctx.refuse_triggered);
+}
+
+static void test_w11_stream_retrieve_detected_and_stripped(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    send_chunk(&ctx, "prefix ");
+    send_chunk(&ctx, "<retrieve>");
+    send_chunk(&ctx, "suffix");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "prefix suffix");
+    HU_ASSERT(ctx.retrieval_triggered);
+    HU_ASSERT(!ctx.critique_triggered);
+    HU_ASSERT(!ctx.refuse_triggered);
+}
+
+static void test_w11_stream_critique_detected_and_stripped(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    send_chunk(&ctx, "hello <critique>world");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "hello world");
+    HU_ASSERT(ctx.critique_triggered);
+}
+
+static void test_w11_stream_refuse_suppresses_content(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    send_chunk(&ctx, "before ");
+    send_chunk(&ctx, "<refuse>");
+    send_chunk(&ctx, "after should be suppressed");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "before ");
+    HU_ASSERT(ctx.refuse_triggered);
+}
+
+static void test_w11_stream_partial_tag_across_chunks(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    /* Split "<retrieve>" across two chunks: "<retr" + "ieve>" */
+    send_chunk(&ctx, "start ");
+    send_chunk(&ctx, "<retr");
+    send_chunk(&ctx, "ieve>");
+    send_chunk(&ctx, " end");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "start  end");
+    HU_ASSERT(ctx.retrieval_triggered);
+}
+
+static void test_w11_stream_partial_refuse_across_chunks(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    /* Split "<refuse>" as "<ref" + "use>" */
+    send_chunk(&ctx, "aaa ");
+    send_chunk(&ctx, "<ref");
+    send_chunk(&ctx, "use>");
+    send_chunk(&ctx, "bbb");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "aaa ");
+    HU_ASSERT(ctx.refuse_triggered);
+}
+
+static void test_w11_stream_non_tag_angle_bracket_passes_through(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    send_chunk(&ctx, "a < b > c <div> d");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "a < b > c <div> d");
+    HU_ASSERT(!ctx.retrieval_triggered);
+    HU_ASSERT(!ctx.critique_triggered);
+    HU_ASSERT(!ctx.refuse_triggered);
+}
+
+static void test_w11_stream_non_content_chunks_pass_through(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    hu_stream_chunk_t chunk;
+    memset(&chunk, 0, sizeof(chunk));
+    chunk.type = HU_STREAM_THINKING;
+    chunk.delta = "<retrieve>should not trigger";
+    chunk.delta_len = 28;
+    bool cont = hu_self_rag_stream_callback(&ctx, &chunk);
+    HU_ASSERT(cont);
+    HU_ASSERT(!ctx.retrieval_triggered);
+}
+
+static void test_w11_stream_wrap_null_returns_error(void) {
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(NULL, NULL, NULL, NULL, NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void test_w11_stream_multiple_tags_in_one_stream(void) {
+    stream_test_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+
+    hu_self_rag_stream_ctx_t ctx;
+    HU_ASSERT_EQ(hu_self_rag_stream_wrap(&ctx, test_stream_sink_cb, &sink,
+                                          NULL, NULL), HU_OK);
+
+    send_chunk(&ctx, "A <retrieve>B <critique>C");
+    hu_self_rag_stream_flush(&ctx);
+
+    HU_ASSERT_STR_EQ(sink.buf, "A B C");
+    HU_ASSERT(ctx.retrieval_triggered);
+    HU_ASSERT(ctx.critique_triggered);
+}
+
 /* ── Test runner ──────────────────────────────────────────────────────── */
 
 void run_w11_self_rag_tests(void) {
@@ -679,4 +882,15 @@ void run_w11_self_rag_tests(void) {
     HU_RUN_TEST(test_w11_adversarial_paraphrase_attack_low_support);
     HU_RUN_TEST(test_w11_e2e_inline_with_world_model_and_memory);
 #endif
+    /* Streaming self-RAG tests don't require SQLite. */
+    HU_RUN_TEST(test_w11_stream_normal_tokens_pass_through);
+    HU_RUN_TEST(test_w11_stream_retrieve_detected_and_stripped);
+    HU_RUN_TEST(test_w11_stream_critique_detected_and_stripped);
+    HU_RUN_TEST(test_w11_stream_refuse_suppresses_content);
+    HU_RUN_TEST(test_w11_stream_partial_tag_across_chunks);
+    HU_RUN_TEST(test_w11_stream_partial_refuse_across_chunks);
+    HU_RUN_TEST(test_w11_stream_non_tag_angle_bracket_passes_through);
+    HU_RUN_TEST(test_w11_stream_non_content_chunks_pass_through);
+    HU_RUN_TEST(test_w11_stream_wrap_null_returns_error);
+    HU_RUN_TEST(test_w11_stream_multiple_tags_in_one_stream);
 }

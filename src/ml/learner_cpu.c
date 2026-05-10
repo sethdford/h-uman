@@ -303,10 +303,12 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
 
     compute_targets(signals, signals_count, targets, n_weights);
 
-    /* SGD loop. Each step: w_i -= lr * 2 * (w_i - target_i). With DP, add
-     * Gaussian noise scaled by 1/dp_epsilon. */
+    /* SGD loop. Each step: w_i -= lr * 2 * (w_i - target_i).
+     * With DP-SGD: (1) clip per-sample gradient to max norm, then
+     * (2) add calibrated Gaussian noise scaled by (clip_norm / epsilon). */
     int max_steps = cfg->max_steps > 0 ? cfg->max_steps : 1;
     float lr = cfg->learning_rate;
+    float clip_norm = cfg->dp_clip_norm > 0.0f ? cfg->dp_clip_norm : 1.0f;
     int64_t deadline = -1;
     if (cfg->budget_ms > 0)
         deadline = now_ms_monotonic() + cfg->budget_ms;
@@ -315,17 +317,42 @@ static hu_error_t cpu_train(void *ctx, const hu_learner_config_t *cfg,
     double loss = 0.0;
     for (steps = 0; steps < max_steps; steps++) {
         loss = 0.0;
-        for (size_t i = 0; i < n_weights; i++) {
-            float diff = weights[i] - targets[i];
-            loss += (double)(diff * diff);
-            float grad = 2.0f * diff;
-            if (cfg->dp_enabled) {
-                float noise = prng_normal(&prng) / cfg->dp_epsilon;
-                grad += 0.001f * noise;
+        if (cfg->dp_enabled) {
+            /* DP-SGD step: compute gradient, clip, then add noise. */
+            double grad_norm_sq = 0.0;
+            for (size_t i = 0; i < n_weights; i++) {
+                float diff = weights[i] - targets[i];
+                loss += (double)(diff * diff);
+                float grad = 2.0f * diff;
+                targets[i] = grad; /* temporarily stash gradient in targets */
+                grad_norm_sq += (double)(grad * grad);
             }
-            weights[i] -= lr * grad;
+            loss /= (double)n_weights;
+
+            /* Per-sample gradient clipping. */
+            float grad_norm = (float)sqrt(grad_norm_sq);
+            float scale = 1.0f;
+            if (grad_norm > clip_norm)
+                scale = clip_norm / grad_norm;
+
+            float noise_sigma = clip_norm / cfg->dp_epsilon;
+            for (size_t i = 0; i < n_weights; i++) {
+                float clipped = targets[i] * scale;
+                float noise = prng_normal(&prng) * noise_sigma;
+                weights[i] -= lr * (clipped + noise);
+            }
+
+            /* Restore targets for next step. */
+            compute_targets(signals, signals_count, targets, n_weights);
+        } else {
+            for (size_t i = 0; i < n_weights; i++) {
+                float diff = weights[i] - targets[i];
+                loss += (double)(diff * diff);
+                float grad = 2.0f * diff;
+                weights[i] -= lr * grad;
+            }
+            loss /= (double)n_weights;
         }
-        loss /= (double)n_weights;
         if (deadline > 0 && now_ms_monotonic() >= deadline)
             break;
     }

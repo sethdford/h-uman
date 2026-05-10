@@ -33,6 +33,7 @@
 #include "human/persona/somatic.h"
 #include "human/security/moderation.h"
 #include "human/security/sycophancy_guard.h"
+#include "human/agent/self_rag.h"
 #include "human/agent/tool_call_parser.h"
 #include "human/tool.h"
 #ifdef HU_ENABLE_SQLITE
@@ -847,6 +848,9 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
     /* ── Streaming tool loop ─────────────────────────────────────────────── */
     char *final_content = NULL;
     size_t final_content_len = 0;
+    bool srag_retrieval_seen = false;
+    bool srag_critique_seen = false;
+    bool srag_refuse_seen = false;
 
     for (int depth = 0; depth < STREAM_V2_MAX_TOOL_DEPTH; depth++) {
         if (agent->cancel_requested)
@@ -945,6 +949,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                                  .initial_delay_ms = v2_pacing,
                                  .first_content_sent = false,
                                  .suppress_content = quality_buffered};
+
+        /* W11 streaming self-RAG: wrap the provider callback to intercept
+         * control tokens during generation. Guarded by env var so the
+         * feature can be enabled incrementally. */
+        hu_self_rag_stream_ctx_t srag_stream_ctx;
+        bool srag_streaming_active = false;
+        hu_stream_callback_t effective_cb = stream_chunk_to_event_cb;
+        void *effective_ctx = &wrap;
+        if (getenv("HU_SELF_RAG_STREAMING") && agent->w7_facade) {
+            hu_memory_facade_t *srag_facade = hu_w7_facade_memory_handle(agent->w7_facade);
+            if (hu_self_rag_stream_wrap(&srag_stream_ctx, stream_chunk_to_event_cb,
+                                         &wrap, srag_facade, agent->alloc) == HU_OK) {
+                effective_cb = hu_self_rag_stream_callback;
+                effective_ctx = &srag_stream_ctx;
+                srag_streaming_active = true;
+            }
+        }
+
         hu_stream_chat_result_t sresp;
         memset(&sresp, 0, sizeof(sresp));
         if (getenv("HU_DEBUG"))
@@ -953,7 +975,15 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                         req.tools_count, system_prompt_len);
         err = agent->provider.vtable->stream_chat(agent->provider.ctx, agent->alloc, &req,
                                                   turn_model, turn_model_len, turn_temp,
-                                                  stream_chunk_to_event_cb, &wrap, &sresp);
+                                                  effective_cb, effective_ctx, &sresp);
+
+        /* Flush any remaining partial buffer from the self-RAG filter. */
+        if (srag_streaming_active) {
+            hu_self_rag_stream_flush(&srag_stream_ctx);
+            if (srag_stream_ctx.retrieval_triggered) srag_retrieval_seen = true;
+            if (srag_stream_ctx.critique_triggered) srag_critique_seen = true;
+            if (srag_stream_ctx.refuse_triggered) srag_refuse_seen = true;
+        }
 
         if (err != HU_OK) {
             agent->alloc->free(agent->alloc->ctx, all_msgs, total_msgs * sizeof(hu_chat_message_t));
@@ -1143,6 +1173,31 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
 
     if (system_prompt)
         agent->alloc->free(agent->alloc->ctx, system_prompt, system_prompt_len + 1);
+
+    /* W11 streaming self-RAG: act on accumulated flags. */
+    if (srag_refuse_seen) {
+        hu_log_info("agent_stream", NULL, "self-RAG streaming: <refuse> detected, replacing response");
+        agent->self_rag_abstentions++;
+        if (final_content) {
+            agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
+            final_content = NULL;
+            final_content_len = 0;
+        }
+        char refusal[256];
+        hu_self_rag_render_refusal(HU_REFUSAL_POLICY, refusal, sizeof(refusal));
+        final_content = hu_strndup(agent->alloc, refusal, strlen(refusal));
+        if (final_content)
+            final_content_len = strlen(refusal);
+    } else {
+        if (srag_retrieval_seen) {
+            hu_log_info("agent_stream", NULL, "self-RAG streaming: <retrieve> detected");
+            agent->self_rag_runs++;
+        }
+        if (srag_critique_seen) {
+            hu_log_info("agent_stream", NULL, "self-RAG streaming: <critique> detected");
+            agent->self_rag_claims_flagged++;
+        }
+    }
 
     /* ── Quality pipeline: GVR → Constitutional AI → Metacognition ──────
      * These three systems were only in agent_turn.c (non-streaming path).

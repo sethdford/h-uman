@@ -3,7 +3,6 @@
 #ifdef HU_ENABLE_SQLITE
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <stddef.h>
@@ -45,7 +44,7 @@ hu_error_t hu_memory_erase_entity(hu_graph_t *graph, int64_t entity_id,
                                   hu_erase_report_t *out_report) {
     if (!graph || !out_report || entity_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -174,7 +173,7 @@ hu_error_t hu_memory_erase_by_provenance(hu_graph_t *graph, const char *provenan
                                          size_t substring_len, hu_erase_report_t *out_report) {
     if (!graph || !provenance_substring || substring_len == 0 || !out_report)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(graph);
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     memset(out_report, 0, sizeof(*out_report));

@@ -193,6 +193,12 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
         return HU_ERR_INVALID_ARGUMENT;
     if (cfg->learning_rate <= 0.0f)
         return HU_ERR_INVALID_ARGUMENT;
+    if (cfg->dp_enabled && cfg->dp_epsilon <= 0.0f) {
+        memset(out_report, 0, sizeof(*out_report));
+        snprintf(out_report->last_error, sizeof(out_report->last_error),
+                 "dp_enabled requires dp_epsilon > 0");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
 
     memset(out_report, 0, sizeof(*out_report));
     out_report->signals_consumed = signals_count;
@@ -294,6 +300,47 @@ static hu_error_t mlx_train(void *ctx, const hu_learner_config_t *cfg,
 
     out_report->steps_completed = steps;
     out_report->final_loss = last_loss;
+
+    /* W15: post-hoc DP noise injection on adapter weights. mlx_lm.lora does
+     * not natively support DP-SGD, so we add calibrated Gaussian noise to
+     * the adapter after training. noise_sigma = sensitivity / epsilon. */
+    if (cfg->dp_enabled) {
+        float sensitivity = cfg->dp_clip_norm > 0.0f ? cfg->dp_clip_norm : 1.0f;
+        float noise_sigma = sensitivity / cfg->dp_epsilon;
+        char dp_cmd[2048];
+        snprintf(dp_cmd, sizeof(dp_cmd),
+                 "python3 -c \""
+                 "import os, glob, numpy as np;"
+                 "adir = '%s';"
+                 "sigma = %g;"
+                 "try:\n"
+                 "    import safetensors.numpy as stn;\n"
+                 "    for f in glob.glob(os.path.join(adir, '*.safetensors')):\n"
+                 "        tensors = dict(stn.load_file(f));\n"
+                 "        noised = {k: v + np.random.normal(0, sigma, v.shape).astype(v.dtype) for k, v in tensors.items()};\n"
+                 "        stn.save_file(noised, f)\n"
+                 "except ImportError:\n"
+                 "    for f in glob.glob(os.path.join(adir, '*.npz')):\n"
+                 "        d = dict(np.load(f));\n"
+                 "        noised = {k: v + np.random.normal(0, sigma, v.shape).astype(v.dtype) for k, v in d.items()};\n"
+                 "        np.savez(f, **noised)\n"
+                 "\" 2>&1",
+                 cfg->adapter_output_path, (double)noise_sigma);
+        FILE *dp_fp = hu_popen(dp_cmd, "r");
+        if (dp_fp) {
+            char dp_line[256];
+            while (fgets(dp_line, sizeof(dp_line), dp_fp)) {
+                /* drain output */
+            }
+            int dp_status = hu_pclose(dp_fp);
+            if (dp_status != 0) {
+                fprintf(stderr, "[mlx-dp] warning: post-hoc DP noise injection "
+                                "failed (status %d); adapter may not satisfy "
+                                "dp_epsilon=%.2f\n",
+                        dp_status, (double)cfg->dp_epsilon);
+            }
+        }
+    }
 
     /* Measure adapter directory size (approximate — sum of regular files). */
     char size_cmd[512];

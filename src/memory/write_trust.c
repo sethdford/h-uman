@@ -2,7 +2,6 @@
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #endif
 
 #include <math.h>
@@ -153,7 +152,7 @@ hu_error_t hu_write_trust_quarantine_relation(hu_graph_t *g, const char *contact
                                               const hu_write_trust_decision_t *decision) {
     if (!g || !decision)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -201,7 +200,7 @@ hu_error_t hu_write_trust_quarantine_count(hu_graph_t *g, const char *contact_id
                                            size_t contact_id_len, size_t *out_count) {
     if (!g || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph__db_handle(g);
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 
