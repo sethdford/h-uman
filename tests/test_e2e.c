@@ -18,6 +18,7 @@
 #include "human/context/intelligence.h"
 #include "human/context/rel_dynamics.h"
 #include "human/observability/log_observer.h"
+#include "human/persona.h"
 #include "human/provider.h"
 #include "human/providers/openai.h"
 #include "human/tool.h"
@@ -511,6 +512,75 @@ static void test_agent_turn_stream_v2_basic(void) {
         HU_ASSERT_EQ((int)coll.types[i], (int)HU_AGENT_STREAM_TEXT);
 
     alloc.free(alloc.ctx, response, response_len + 1);
+    hu_agent_deinit(&agent);
+#endif
+}
+
+/* Regression test for stack-buffer-overflow in agent_stream.c when persona
+ * has multi-example example_banks. Previously the streaming path declared
+ * `const hu_persona_example_t *exs = NULL` (a single 8-byte pointer) and
+ * passed `&exs` with capacity 5 to hu_persona_select_examples, which writes
+ * up to N pointers into out[]. ASan caught this on the live binary.
+ *
+ * The crash manifested in:
+ *   #0 hu_persona_select_examples examples.c:242   (stack-buffer-overflow)
+ *   #1 hu_agent_turn_stream_v2 agent_stream.c:421
+ * Plus a logical bug where `exs[ei].incoming` would dereference a raw
+ * pointer value as a struct.
+ *
+ * This test installs a persona with 5 examples for "imessage" channel and
+ * runs streaming v2. Without the fix, ASan trips the entire test runner. */
+static void test_agent_turn_stream_v2_with_persona_examples(void) {
+#if HU_IS_TEST
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t prov;
+    hu_error_t err = hu_openai_create(&alloc, "test-key", 8, NULL, 0, &prov);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    err = hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4", 5,
+                               "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    /* Build a persona with FIVE example conversations on imessage channel.
+     * The bug would only manifest when select_examples returned >= 2
+     * examples — with exactly 5 the overflow is one full pointer past end. */
+    hu_persona_example_t imsg_examples[] = {
+        {.context = "casual greeting", .incoming = "hey", .response = "yo"},
+        {.context = "making plans", .incoming = "dinner?", .response = "down"},
+        {.context = "tech question", .incoming = "what lang?", .response = "C obviously"},
+        {.context = "scheduling", .incoming = "free at 7?", .response = "ya works"},
+        {.context = "social", .incoming = "movie?", .response = "lemme check"},
+    };
+    hu_persona_example_bank_t banks[] = {
+        {.channel = "imessage", .examples = imsg_examples, .examples_count = 5},
+    };
+    hu_persona_t persona = {0};
+    persona.example_banks = banks;
+    persona.example_banks_count = 1;
+
+    hu_persona_t *prev_persona = agent.persona;
+    agent.persona = &persona;
+    agent.active_channel = "imessage";
+    agent.active_channel_len = 8;
+
+    stream_v2_event_collector_t coll;
+    memset(&coll, 0, sizeof(coll));
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn_stream_v2(&agent, "hi", 2, stream_v2_collect_events, &coll, &response,
+                                  &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(response);
+    HU_ASSERT_TRUE(response_len > 0);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    /* Restore so deinit doesn't try to free our stack persona. */
+    agent.persona = prev_persona;
+    agent.active_channel = NULL;
+    agent.active_channel_len = 0;
     hu_agent_deinit(&agent);
 #endif
 }
@@ -1565,6 +1635,7 @@ void run_e2e_tests(void) {
     HU_RUN_TEST(test_agent_from_config_null_provider);
     HU_RUN_TEST(test_agent_turn_simple);
     HU_RUN_TEST(test_agent_turn_stream_v2_basic);
+    HU_RUN_TEST(test_agent_turn_stream_v2_with_persona_examples);
     HU_RUN_TEST(test_agent_turn_stream_v2_with_tools);
     HU_RUN_TEST(test_agent_turn_stream_v2_fallback_no_streaming);
     HU_RUN_TEST(test_agent_slash_help);

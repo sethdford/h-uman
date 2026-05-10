@@ -414,20 +414,25 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
                     }
                 }
             }
-            /* Add examples to prime the model on correct tone */
+            /* Add examples to prime the model on correct tone.
+             * hu_persona_select_examples writes up to N pointers into out[]
+             * (signature: const hu_persona_example_t **out). Previously this
+             * passed &exs of a single pointer (1×8 bytes) with capacity 5,
+             * which produced a stack-buffer-overflow caught by ASan and a
+             * misuse of exs[ei] as an object instead of a pointer below. */
             {
-                const hu_persona_example_t *exs = NULL;
+                const hu_persona_example_t *exs[5] = {NULL};
                 size_t ex_count = 0;
                 hu_persona_select_examples(p, agent->active_channel, agent->active_channel_len,
-                                           NULL, 0, &exs, &ex_count, 5);
-                if (exs && ex_count > 0) {
+                                           NULL, 0, exs, &ex_count, 5);
+                if (ex_count > 0) {
                     int n = snprintf(lp + lpo, sizeof(lp) - lpo, "\nExamples of how you text:\n");
                     if (n > 0 && lpo + (size_t)n < sizeof(lp))
                         lpo += (size_t)n;
                     for (size_t ei = 0; ei < ex_count; ei++) {
-                        if (exs[ei].incoming && exs[ei].response) {
+                        if (exs[ei] && exs[ei]->incoming && exs[ei]->response) {
                             n = snprintf(lp + lpo, sizeof(lp) - lpo, "them: %s\nyou: %s\n\n",
-                                         exs[ei].incoming, exs[ei].response);
+                                         exs[ei]->incoming, exs[ei]->response);
                             if (n > 0 && lpo + (size_t)n < sizeof(lp))
                                 lpo += (size_t)n;
                         }
