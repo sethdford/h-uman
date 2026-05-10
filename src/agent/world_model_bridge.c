@@ -381,8 +381,8 @@ static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *a
         size_t bn = 0;
         if (hu_memory_facade_read(facade->m, &bq, alloc, &brecs, &bn) == HU_OK && bn > 0) {
             for (size_t bi = 0; bi < bn; bi++) {
-                const hu_graph_relation_t *br =
-                    (const hu_graph_relation_t *)brecs[bi].payload;
+                const hu_memory_relation_row_t *br =
+                    (const hu_memory_relation_row_t *)brecs[bi].payload;
                 if (!br)
                     continue;
                 float rm = 0.0f, rv = 0.0f;
@@ -641,13 +641,13 @@ static hu_error_t planner_recall_impl(hu_w7_facade_t *facade, hu_allocator_t *al
             size_t detail_len = 0;
 
             if (rec->kind == HU_MEM_ENTITY && rec->payload) {
-                hu_graph_entity_t *ent = (hu_graph_entity_t *)rec->payload;
+                hu_memory_entity_row_t *ent = (hu_memory_entity_row_t *)rec->payload;
                 name = ent->name;
                 name_len = ent->name_len;
                 detail = ent->metadata_json;
                 detail_len = detail ? strlen(detail) : 0;
             } else if (rec->kind == HU_MEM_RELATION && rec->payload) {
-                hu_graph_relation_t *rel = (hu_graph_relation_t *)rec->payload;
+                hu_memory_relation_row_t *rel = (hu_memory_relation_row_t *)rec->payload;
                 name = "relation";
                 name_len = 8;
                 detail = rel->context;

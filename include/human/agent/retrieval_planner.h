@@ -70,14 +70,26 @@ typedef struct hu_provider hu_provider_t;
 #define HU_PLANNER_MAX_STEPS               8
 #define HU_PLANNER_MAX_TOTAL_BUDGET_MS     500
 #define HU_PLANNER_MAX_GOAL_LEN            4096   /* adversarial-input ceiling */
+#define HU_PLANNER_ENTITY_NAME_MAX         96     /* per-step name buffer */
 
-/* One step of a retrieval plan. */
+/* One step of a retrieval plan.
+ *
+ * `query.contact_id` and `query.as.by_name.name` are `const char *` views; the
+ * planner backends must keep the underlying storage alive for the lifetime of
+ * the plan. We use two patterns:
+ *
+ *   - contact_id always points to `wm->contact_id` (lives in the caller-owned
+ *     world model snapshot).
+ *   - by_name.name points to `entity_name_buf[]` below when the LLM planner
+ *     emits an explicit entity-name query. The fixed buffer keeps the plan
+ *     a value type (no heap allocation per step). */
 typedef struct hu_retrieval_step {
     hu_memory_kind_t   kind;          /* which backend to dispatch to */
     hu_memory_query_t  query;         /* fully-formed query payload */
     size_t             hops;          /* 0 for direct; 1-3 for traversal */
     int                budget_ms;     /* per-step latency hint */
     bool               verify_after;  /* run W11 self-RAG on the result */
+    char               entity_name_buf[HU_PLANNER_ENTITY_NAME_MAX]; /* BY_NAME storage */
 } hu_retrieval_step_t;
 
 /* A complete plan. Steps run in array order. */

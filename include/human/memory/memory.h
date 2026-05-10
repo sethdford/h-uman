@@ -48,6 +48,12 @@ typedef struct hu_memory_case_payload {
     int64_t happened_at;
 } hu_memory_case_payload_t;
 
+/* v1 backends store entity/relation rows in graph layout; facade reads may
+ * expose the same structs as `payload` or via list_entities. Prefer these
+ * aliases in W7-first agent code over repeating `hu_graph_*` at cast sites. */
+typedef hu_graph_entity_t hu_memory_entity_row_t;
+typedef hu_graph_relation_t hu_memory_relation_row_t;
+
 /* Discriminator for queries / records. Each kind maps to one backend at a time
  * (registered via hu_memory_facade_register_backend). New kinds extend this enum at
  * the bottom; values are stable for on-disk routing tables. */
@@ -248,7 +254,7 @@ struct sqlite3 *hu_memory_facade_sqlite_db(hu_memory_facade_t *m);
  * that delegates to the underlying graph handle. Callers should prefer this
  * over hu_memory_facade_graph_handle + hu_graph_list_entities directly so
  * the facade remains the single entry point. Free results with
- * hu_graph_entities_free. */
+ * hu_memory_facade_free_listed_entities. */
 hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
                                           hu_allocator_t *alloc,
                                           const char *contact_id,
@@ -256,6 +262,11 @@ hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
                                           size_t limit,
                                           hu_graph_entity_t **out,
                                           size_t *out_count);
+
+/* Frees arrays returned by hu_memory_facade_list_entities (delegates to the
+ * graph helper; `m` is reserved for future invariant checks). */
+void hu_memory_facade_free_listed_entities(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                           hu_memory_entity_row_t *entities, size_t count);
 
 /* Markdown digests over `temporal_events` / `causal_links` for the given
  * contact scope. Thin wrappers on the v1 graph connection; prefer these over

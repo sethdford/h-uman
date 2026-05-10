@@ -171,7 +171,7 @@ static void test_w4_provenance_render_handles_missing(void) {
     char buf[160] = {0};
     hu_provenance_render(NULL, buf, sizeof(buf));
     HU_ASSERT(strstr(buf, "no source") != NULL);
-    hu_graph_relation_t r = {0};
+    hu_memory_relation_row_t r = {0};
     hu_provenance_render(&r, buf, sizeof(buf));
     HU_ASSERT(strstr(buf, "from memory") != NULL);
     HU_ASSERT(strstr(buf, "unknown") != NULL);

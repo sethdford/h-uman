@@ -33,7 +33,7 @@ static void render_timestamp(int64_t ms, char *buf, size_t cap) {
     strftime(buf, cap, "%a %Y-%m-%d %H:%M", &tm_buf);
 }
 
-void hu_provenance_render(const hu_graph_relation_t *rel, char *buf, size_t cap) {
+void hu_provenance_render(const hu_memory_relation_row_t *rel, char *buf, size_t cap) {
     if (!buf || cap == 0)
         return;
     if (!rel) {
@@ -168,7 +168,7 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
     float best_conf = 0.0f;
     char best_prov[80] = {0};
     for (size_t ri = 0; ri < nrec; ri++) {
-        const hu_graph_relation_t *rel = (const hu_graph_relation_t *)recs[ri].payload;
+        const hu_memory_relation_row_t *rel = (const hu_memory_relation_row_t *)recs[ri].payload;
         if (!rel)
             continue;
         const char *prov = rel->provenance;

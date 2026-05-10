@@ -60,6 +60,7 @@ static const char *const LLM_SYS_PROMPT =
 "  \"steps\": [\n"
 "    {\n"
 "      \"kind\": \"entity\" | \"relation\" | \"hyperedge\" | \"reasoning_trace\",\n"
+"      \"entity_name\": \"<string, optional>\",  // entity kind only; max 95 bytes\n"
 "      \"hops\": <int 0..3>,\n"
 "      \"budget_ms\": <int 0..500>,\n"
 "      \"verify_after\": <bool>,\n"
@@ -76,6 +77,9 @@ static const char *const LLM_SYS_PROMPT =
 "- Prefer 1 step for trivial recall; 2-3 for entity→relation expansion;\n"
 "  reserve hops>1 for true multi-hop questions only.\n"
 "- Set verify_after=true when the goal asserts a specific fact (who/when/where).\n"
+"- For entity-kind steps: include `entity_name` ONLY when you know the\n"
+"  exact name from the world-model digest. Names must be ASCII-printable\n"
+"  and <= 95 bytes; otherwise omit the field.\n"
 "- Do not invent kinds outside the four listed.\n"
 "- Return ONLY the JSON object, nothing else.\n";
 #endif /* !HU_IS_TEST */
@@ -100,7 +104,7 @@ static char *render_wm_digest(hu_allocator_t *alloc, const hu_world_model_t *wm)
         if (n > 0) off += (size_t)n;
         size_t top = wm->entities_count < 5 ? wm->entities_count : 5;
         for (size_t i = 0; i < top && off + 80 < cap; i++) {
-            const hu_graph_entity_t *e = &wm->entities[i];
+            const hu_memory_entity_row_t *e = &wm->entities[i];
             n = snprintf(buf + off, cap - off, "%s%.40s",
                          i == 0 ? "" : ", ",
                          e->name ? e->name : "");
@@ -207,15 +211,43 @@ static hu_error_t apply_step_from_json(const hu_json_value_t *step,
         out->query.contact_id_len = cidlen;
     }
 
-    /* For entity kind, default to "by_name" with NULL name (caller must
-     * fill); for relation/hyperedge, use the window. We don't know the
-     * entity name from the LLM today — relation-window is the safe path. */
     int64_t from_ms = (int64_t)hu_json_get_number(step, "window_from_ms", 0);
     int64_t to_ms   = (int64_t)hu_json_get_number(step, "window_to_ms", 0);
     int limit       = (int)hu_json_get_number(step, "limit", 16);
     if (to_ms == 0) to_ms = INT64_MAX;
     if (limit <= 0) limit = 16;
     if (limit > 64) limit = 64;
+
+    /* For entity-kind steps the LLM may emit `entity_name` to look up a
+     * specific node by canonical name. We copy the string into the step's
+     * own buffer so the JSON tree can be freed immediately. If the name
+     * is missing, oversized, or contains non-printable bytes we silently
+     * downgrade to a window-style relation listing — the executor's worst
+     * case is "more results than needed", never a crash. */
+    if (out->kind == HU_MEM_ENTITY) {
+        const hu_json_value_t *name_v = hu_json_object_get(step, "entity_name");
+        if (name_v && name_v->type == HU_JSON_STRING &&
+            name_v->data.string.ptr && name_v->data.string.len > 0 &&
+            name_v->data.string.len < HU_PLANNER_ENTITY_NAME_MAX) {
+            /* Validate ASCII-printable. A planner that accepts arbitrary
+             * bytes here would let a malicious provider response sneak
+             * NUL or control characters into downstream SQL bind params. */
+            bool printable = true;
+            for (size_t i = 0; i < name_v->data.string.len; i++) {
+                unsigned char c = (unsigned char)name_v->data.string.ptr[i];
+                if (c < 0x20 || c == 0x7f) { printable = false; break; }
+            }
+            if (printable) {
+                memcpy(out->entity_name_buf, name_v->data.string.ptr,
+                       name_v->data.string.len);
+                out->entity_name_buf[name_v->data.string.len] = '\0';
+                out->query.variant = HU_MEMORY_QUERY_BY_NAME;
+                out->query.as.by_name.name = out->entity_name_buf;
+                out->query.as.by_name.name_len = name_v->data.string.len;
+                return HU_OK;
+            }
+        }
+    }
 
     out->query.variant = HU_MEMORY_QUERY_WINDOW;
     out->query.as.window.from_ts = from_ms;

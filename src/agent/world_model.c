@@ -133,26 +133,23 @@ static hu_error_t negative_memory_list_sqlite(struct sqlite3 *db, hu_allocator_t
     return HU_OK;
 }
 
-#endif /* HU_ENABLE_SQLITE */
-
-hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id, size_t cid_len,
-                                   const hu_negative_memory_t *nm, int64_t *out_id) {
-#ifndef HU_ENABLE_SQLITE
-    (void)g; (void)contact_id; (void)cid_len; (void)nm; (void)out_id;
-    return HU_ERR_NOT_SUPPORTED;
-#else
-    if (!g || !nm) return HU_ERR_INVALID_ARGUMENT;
-    if (nm->text[0] == '\0') return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
-    if (!db) return HU_ERR_INVALID_ARGUMENT;
-    if (ensure_negative_memory_schema(db) != HU_OK) return HU_ERR_IO;
+static hu_error_t negative_memory_add_sqlite(struct sqlite3 *db, const char *contact_id,
+                                             size_t cid_len, const hu_negative_memory_t *nm,
+                                             int64_t *out_id) {
+    if (!db || !nm)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (nm->text[0] == '\0')
+        return HU_ERR_INVALID_ARGUMENT;
+    if (ensure_negative_memory_schema(db) != HU_OK)
+        return HU_ERR_IO;
 
     sqlite3_stmt *st = NULL;
     const char *sql =
         "INSERT INTO negative_memory(contact_id, text, scope, reason, "
         " confidence_mean, confidence_variance, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)";
-    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK) return HU_ERR_IO;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
     sqlite3_bind_text(st, 1, contact_id ? contact_id : "", (int)cid_len, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, nm->text, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 3, nm->scope, -1, SQLITE_STATIC);
@@ -163,19 +160,48 @@ hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id, size_t 
     int rc = sqlite3_step(st);
     int64_t id = sqlite3_last_insert_rowid(db);
     sqlite3_finalize(st);
-    if (rc != SQLITE_DONE) return HU_ERR_IO;
-    if (out_id) *out_id = id;
+    if (rc != SQLITE_DONE)
+        return HU_ERR_IO;
+    if (out_id)
+        *out_id = id;
     return HU_OK;
+}
+
+#endif /* HU_ENABLE_SQLITE */
+
+hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id, size_t cid_len,
+                                   const hu_negative_memory_t *nm, int64_t *out_id) {
+#ifndef HU_ENABLE_SQLITE
+    (void)g; (void)contact_id; (void)cid_len; (void)nm; (void)out_id;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!g || !nm)
+        return HU_ERR_INVALID_ARGUMENT;
+    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
 #endif
 }
 
 hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *contact_id,
                                          size_t cid_len, const hu_negative_memory_t *nm,
                                          int64_t *out_id) {
+#ifndef HU_ENABLE_SQLITE
+    (void)m;
+    (void)contact_id;
+    (void)cid_len;
+    (void)nm;
+    (void)out_id;
+    return HU_ERR_NOT_SUPPORTED;
+#else
     if (!m)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    return hu_negative_memory_add(g, contact_id, cid_len, nm, out_id);
+    struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
+#endif
 }
 
 hu_error_t hu_negative_memory_list(hu_graph_t *g, hu_allocator_t *alloc,
@@ -228,13 +254,13 @@ void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm, si
 
 /* ---- world-model builder ------------------------------------------ */
 
-static hu_error_t copy_entities(hu_allocator_t *alloc, const hu_graph_entity_t *src,
-                                 size_t n, hu_graph_entity_t **out) {
+static hu_error_t copy_entities(hu_allocator_t *alloc, const hu_memory_entity_row_t *src,
+                                 size_t n, hu_memory_entity_row_t **out) {
     if (n == 0) {
         *out = NULL;
         return HU_OK;
     }
-    hu_graph_entity_t *arr = xalloc(alloc, n * sizeof(*arr));
+    hu_memory_entity_row_t *arr = xalloc(alloc, n * sizeof(*arr));
     if (!arr) return HU_ERR_OUT_OF_MEMORY;
     memset(arr, 0, n * sizeof(*arr));
     for (size_t i = 0; i < n; i++) {
@@ -261,7 +287,7 @@ static hu_error_t copy_entities(hu_allocator_t *alloc, const hu_graph_entity_t *
     return HU_OK;
 }
 
-static void free_entities_local(hu_allocator_t *alloc, hu_graph_entity_t *arr, size_t n) {
+static void free_entities_local(hu_allocator_t *alloc, hu_memory_entity_row_t *arr, size_t n) {
     if (!arr) return;
     for (size_t i = 0; i < n; i++) xfree(alloc, arr[i].name, arr[i].name_len + 1);
     xfree(alloc, arr, n * sizeof(*arr));
@@ -294,7 +320,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
     /* Top-K entities through the facade. Goes through the v1 backend's
      * `v1_entity_read` with the BY_NAME variant unset → falls through to
      * `list_entities`. We keep using `hu_memory_facade_list_entities`
-     * because it returns `hu_graph_entity_t*` directly (no record wrap)
+     * because it returns plain entity row pointers (no record wrap)
      * — slightly cheaper than going through the union read path.
      *
      * P4: prior version pulled the graph handle directly via
@@ -306,13 +332,13 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
      * so reads align with the W7 surface even when SQL is not yet modeled
      * as a distinct facade kind. */
     {
-        hu_graph_entity_t *ents = NULL;
+        hu_memory_entity_row_t *ents = NULL;
         size_t n = 0;
         if (hu_memory_facade_list_entities(m, alloc, contact_id, cid_len, 16,
                                            &ents, &n) == HU_OK && n > 0) {
-            hu_graph_entity_t *cloned = NULL;
+            hu_memory_entity_row_t *cloned = NULL;
             hu_error_t err = copy_entities(alloc, ents, n, &cloned);
-            hu_graph_entities_free(alloc, ents, n);
+            hu_memory_facade_free_listed_entities(m, alloc, ents, n);
             if (err != HU_OK) {
                 hu_world_model_free(alloc, wm);
                 return err;
@@ -322,8 +348,8 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
         }
 
         /* Top-K relations through `hu_memory_facade_read` with the AUTO
-         * variant (timestamps both zero → backend dispatches to
-         * `hu_graph_list_relations` top-N path). */
+         * variant (timestamps both zero → backend dispatches to the v1
+         * relation top-N listing path). */
         hu_memory_query_t rq;
         memset(&rq, 0, sizeof(rq));
         rq.kind = HU_MEM_RELATION;
@@ -335,7 +361,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
         hu_memory_record_t *recs = NULL;
         size_t rn = 0;
         if (hu_memory_facade_read(m, &rq, alloc, &recs, &rn) == HU_OK && rn > 0) {
-            hu_graph_relation_t *arr = xalloc(alloc, rn * sizeof(*arr));
+            hu_memory_relation_row_t *arr = xalloc(alloc, rn * sizeof(*arr));
             if (!arr) {
                 hu_memory_facade_records_free(m, alloc, recs, rn);
                 hu_world_model_free(alloc, wm);
@@ -343,7 +369,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
             }
             memset(arr, 0, rn * sizeof(*arr));
             for (size_t i = 0; i < rn; i++) {
-                hu_graph_relation_t *src = (hu_graph_relation_t *)recs[i].payload;
+                hu_memory_relation_row_t *src = (hu_memory_relation_row_t *)recs[i].payload;
                 if (src) arr[i] = *src;
                 /* We do NOT carry context/provenance through into the world
                  * model — keep this snapshot lean. Callers that need them
@@ -495,7 +521,7 @@ hu_error_t hu_world_model_build(hu_memory_facade_t *m, hu_allocator_t *alloc,
     }
     wm->tom.user_thinks_we_are[0] = '\0';
     if (wm->entities_count > 0) {
-        const hu_graph_entity_t *top = &wm->entities[0];
+        const hu_memory_entity_row_t *top = &wm->entities[0];
         if (top->name && top->name_len > 0) {
             size_t cap = sizeof(wm->tom.user_thinks_we_are) - 1;
             size_t copy = top->name_len < cap ? top->name_len : cap;

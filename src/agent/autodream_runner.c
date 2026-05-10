@@ -24,7 +24,6 @@
 #include "human/agent/autodream.h"
 #include "human/agent/scheduler.h"
 #include "human/core/allocator.h"
-#include "human/memory/graph.h"
 #include "human/memory/memory.h"
 
 #include <string.h>
@@ -37,8 +36,7 @@ hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
     (void)user_data;
     if (!m || !spec)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g)
+    if (!hu_memory_facade_graph_handle(m))
         return HU_OK;
 
     hu_autodream_config_t cfg = hu_autodream_default_config();

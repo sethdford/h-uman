@@ -531,6 +531,131 @@ static void test_w12_llm_parse_negative_limits_clamped(void) {
     HU_ASSERT_EQ((int)plan.steps[0].query.as.window.limit, 16);
 }
 
+/* ── Entity-name queries (LLM planner can now emit BY_NAME) ────────────── */
+
+/* Happy path: LLM emits an entity step with `entity_name` ⇒ planner produces
+ * a HU_MEMORY_QUERY_BY_NAME query that points to the step's own buffer. The
+ * pointer must survive a `hu_json_free` so the buffer ownership matters. */
+static void test_w12_llm_parse_entity_name_produces_by_name_variant(void) {
+    const char *json =
+        "{\"steps\":[{\"kind\":\"entity\",\"entity_name\":\"Alice\","
+        "\"hops\":0,\"limit\":4,\"verify_after\":true}]}";
+
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+    snprintf(wm.contact_id, sizeof(wm.contact_id), "u-name");
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), &wm, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_ENTITY);
+    HU_ASSERT_EQ((int)plan.steps[0].query.variant, (int)HU_MEMORY_QUERY_BY_NAME);
+    HU_ASSERT_EQ((int)plan.steps[0].query.as.by_name.name_len, 5);
+    HU_ASSERT_NOT_NULL(plan.steps[0].query.as.by_name.name);
+    /* Pointer must equal the step's own buffer (stable across plan lifetime). */
+    HU_ASSERT_EQ((const void *)plan.steps[0].query.as.by_name.name,
+                 (const void *)plan.steps[0].entity_name_buf);
+    HU_ASSERT_EQ(memcmp(plan.steps[0].query.as.by_name.name, "Alice", 5), 0);
+}
+
+/* Adversarial: oversized name (>= HU_PLANNER_ENTITY_NAME_MAX) must NOT
+ * overflow the buffer. The planner silently downgrades to a window query. */
+static void test_w12_llm_parse_oversized_entity_name_downgrades(void) {
+    char json[256];
+    char big_name[HU_PLANNER_ENTITY_NAME_MAX + 32];
+    memset(big_name, 'a', sizeof(big_name));
+    big_name[sizeof(big_name) - 1] = '\0';
+    int n = snprintf(json, sizeof(json),
+                     "{\"steps\":[{\"kind\":\"entity\",\"entity_name\":\"%s\",\"limit\":4}]}",
+                     big_name);
+    HU_ASSERT(n > 0 && (size_t)n < sizeof(json));
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, (size_t)n, NULL, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    /* Downgrade to WINDOW; the entity_name_buf must remain all-zero. */
+    HU_ASSERT_EQ((int)plan.steps[0].query.variant, (int)HU_MEMORY_QUERY_WINDOW);
+    HU_ASSERT_EQ(plan.steps[0].entity_name_buf[0], '\0');
+}
+
+/* Adversarial: non-printable bytes in entity_name (e.g. NUL injection or
+ * control characters) get rejected — planner downgrades to WINDOW. This
+ * prevents a malicious provider from sneaking control bytes into the
+ * downstream SQL bind. */
+static void test_w12_llm_parse_nonprintable_entity_name_downgrades(void) {
+    /* Inject a \x01 control byte mid-name. */
+    const char *json =
+        "{\"steps\":[{\"kind\":\"entity\",\"entity_name\":\"al\\u0001ce\",\"limit\":4}]}";
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), NULL, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    HU_ASSERT_EQ((int)plan.steps[0].query.variant, (int)HU_MEMORY_QUERY_WINDOW);
+}
+
+/* entity_name on a non-entity kind (relation/hyperedge) must be ignored —
+ * the planner sticks with the window query for those kinds. */
+static void test_w12_llm_parse_entity_name_ignored_on_relation_kind(void) {
+    const char *json =
+        "{\"steps\":[{\"kind\":\"relation\",\"entity_name\":\"Alice\",\"limit\":4}]}";
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), NULL, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_RELATION);
+    HU_ASSERT_EQ((int)plan.steps[0].query.variant, (int)HU_MEMORY_QUERY_WINDOW);
+}
+
+/* End-to-end: parse an LLM-emitted plan with entity_name, execute against a
+ * facade seeded with the matching entity. The executor must dispatch through
+ * the v1 backend's BY_NAME path and return at least one record. This is the
+ * full P3 win — entity-name queries now flow LLM → JSON → executor → SQL. */
+static void test_w12_llm_entity_name_plan_executes_end_to_end(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    int64_t alice_id = add_entity(g, "u1", "Alice", HU_ENTITY_PERSON);
+    HU_ASSERT(alice_id > 0);
+    /* Bystander entities to prove BY_NAME isn't returning everything. */
+    (void)add_entity(g, "u1", "Bob", HU_ENTITY_PERSON);
+    (void)add_entity(g, "u1", "Charlie", HU_ENTITY_PERSON);
+
+    const char *json =
+        "{\"total_budget_ms\":150,\"steps\":["
+        "{\"kind\":\"entity\",\"entity_name\":\"Alice\",\"hops\":0,"
+        "\"budget_ms\":100,\"verify_after\":false,\"limit\":8}"
+        "]}";
+
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+    snprintf(wm.contact_id, sizeof(wm.contact_id), "u1");
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), &wm, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps[0].query.variant, (int)HU_MEMORY_QUERY_BY_NAME);
+
+    hu_memory_record_t *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_planner_execute(m, /*self_rag=*/NULL, &plan, A(), &out, &n), HU_OK);
+    HU_ASSERT_GE((int)n, 1);
+    /* Every record must be the Alice entity (id-match). */
+    bool found = false;
+    for (size_t i = 0; i < n; i++) {
+        if (out[i].id == alice_id && out[i].kind == HU_MEM_ENTITY) {
+            found = true;
+            break;
+        }
+    }
+    HU_ASSERT(found);
+
+    hu_planner_records_free(A(), out, n);
+    close_facade_(g, m);
+}
+
 /* ── PageRank ───────────────────────────────────────────────────────────── */
 
 /* Small ground-truth graph (6 nodes):
@@ -815,6 +940,11 @@ void run_w12_planner_tests(void) {
     HU_RUN_TEST(test_w12_llm_parse_unknown_kind_defaults_to_relation);
     HU_RUN_TEST(test_w12_llm_parse_caps_steps_array_to_max);
     HU_RUN_TEST(test_w12_llm_parse_negative_limits_clamped);
+    HU_RUN_TEST(test_w12_llm_parse_entity_name_produces_by_name_variant);
+    HU_RUN_TEST(test_w12_llm_parse_oversized_entity_name_downgrades);
+    HU_RUN_TEST(test_w12_llm_parse_nonprintable_entity_name_downgrades);
+    HU_RUN_TEST(test_w12_llm_parse_entity_name_ignored_on_relation_kind);
+    HU_RUN_TEST(test_w12_llm_entity_name_plan_executes_end_to_end);
     HU_RUN_TEST(test_w12_pagerank_top_k_matches_expected_subgraph);
     HU_RUN_TEST(test_w12_pagerank_deterministic_repeated_calls);
     HU_RUN_TEST(test_w12_pagerank_zero_seeds_returns_empty);

@@ -214,8 +214,9 @@ hu_error_t hu_anticipatory_analyze_memory(hu_memory_facade_t *m, hu_allocator_t 
         hu_memory_record_t *erec = NULL;
         size_t en = 0;
         err = hu_memory_facade_read(m, &eq, alloc, &erec, &en);
-        if (err == HU_OK && en > 0 && erec[0].payload && erec[0].payload_len >= sizeof(hu_graph_entity_t)) {
-            const hu_graph_entity_t *ep = (const hu_graph_entity_t *)erec[0].payload;
+        if (err == HU_OK && en > 0 && erec[0].payload
+            && erec[0].payload_len >= sizeof(hu_memory_entity_row_t)) {
+            const hu_memory_entity_row_t *ep = (const hu_memory_entity_row_t *)erec[0].payload;
             if (ep->id > 0) {
                 char *causal_out = NULL;
                 size_t causal_len = 0;

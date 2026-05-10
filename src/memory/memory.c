@@ -351,6 +351,14 @@ hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
                                  out_count);
 }
 
+void hu_memory_facade_free_listed_entities(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                           hu_memory_entity_row_t *entities, size_t count) {
+    (void)m;
+    if (!alloc || !entities || count == 0)
+        return;
+    hu_graph_entities_free(alloc, entities, count);
+}
+
 hu_error_t hu_memory_facade_query_temporal(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                            const char *contact_id, size_t contact_id_len,
                                            int64_t from_ts, int64_t to_ts, size_t limit,

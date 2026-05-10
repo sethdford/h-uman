@@ -126,8 +126,8 @@ hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id,
                                    size_t cid_len, const hu_negative_memory_t *nm,
                                    int64_t *out_id);
 
-/* Same insert as `hu_negative_memory_add` but scoped through the W7 facade
- * (graph handle only inside). Prefer in bridge / agent paths that already
+/* Same insert as `hu_negative_memory_add` but uses `hu_memory_facade_sqlite_db`
+ * (W7-first; no graph handle). Prefer in bridge / agent paths that already
  * hold `hu_memory_facade_t *`. */
 hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *contact_id,
                                          size_t cid_len, const hu_negative_memory_t *nm,

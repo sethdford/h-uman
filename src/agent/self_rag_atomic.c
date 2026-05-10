@@ -2,9 +2,12 @@
  *
  * Splits a draft into noun-phrase atomic claims using a deterministic
  * preposition-aware splitter (no LLM, no embedder), then runs each claim
- * through the v1 graph-token-overlap verifier. The atomic backend is
- * provider-agnostic: it does not require the chat provider to emit any
- * special control tokens.
+ * through the v1 graph-token-overlap verifier.
+ *
+ * In STRICT mode with a provider wired, individual claims are verified
+ * via an LLM call against retrieved evidence (provider-backed path).
+ * Under HU_IS_TEST or when no provider is available, the backend falls
+ * back to the deterministic heuristic scorer.
  *
  * Decomposition example:
  *   "Alice works at Acme since 2024 in NYC."
@@ -23,8 +26,7 @@
 #include "human/agent/self_rag.h"
 
 #include "human/memory/corrective_rag.h"
-/* hu_graph_relation_t: payload shape returned by v1 `HU_MEM_RELATION` facade reads. */
-#include "human/memory/graph.h"
+/* Relation row payloads from v1 `HU_MEM_RELATION` facade reads (`hu_memory_relation_row_t`). */
 #include "human/memory/memory.h"
 
 #include <ctype.h>
@@ -281,8 +283,8 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
     int best_idx = -1;
     double best_score = 0.0;
     for (size_t i = 0; i < n; i++) {
-        const hu_graph_relation_t *rels =
-            (const hu_graph_relation_t *)recs[i].payload;
+        const hu_memory_relation_row_t *rels =
+            (const hu_memory_relation_row_t *)recs[i].payload;
         if (!rels)
             continue;
         const char *doc = rels->context;
@@ -301,8 +303,8 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
 
     bool ok = false;
     if (best_idx >= 0) {
-        const hu_graph_relation_t *best =
-            (const hu_graph_relation_t *)recs[best_idx].payload;
+        const hu_memory_relation_row_t *best =
+            (const hu_memory_relation_row_t *)recs[best_idx].payload;
         size_t copy = best->context_len;
         if (copy >= out_cap) copy = out_cap - 1;
         memcpy(out_correction, best->context, copy);
@@ -446,8 +448,8 @@ static bool retrieve_evidence_for_contact(hu_allocator_t *alloc,
     size_t off = 0;
     out_evidence[0] = '\0';
     for (size_t i = 0; i < n && off < out_cap - 2; i++) {
-        const hu_graph_relation_t *rel =
-            (const hu_graph_relation_t *)recs[i].payload;
+        const hu_memory_relation_row_t *rel =
+            (const hu_memory_relation_row_t *)recs[i].payload;
         if (!rel || !rel->context || rel->context_len == 0)
             continue;
         size_t copy = rel->context_len;

@@ -3,7 +3,6 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -97,6 +96,6 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
 
 /* Pure helper: render a relation's bitemporal attribution into a 1-line
  * receipt string. Used by the verifier and by the response renderer. */
-void hu_provenance_render(const hu_graph_relation_t *rel, char *buf, size_t cap);
+void hu_provenance_render(const hu_memory_relation_row_t *rel, char *buf, size_t cap);
 
 #endif /* HU_AGENT_RESPONSE_VERIFIER_H */

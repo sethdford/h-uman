@@ -197,7 +197,7 @@ static hu_error_t phase_quarantine_review(struct sqlite3 *db, hu_graph_t *g,
                 hu_belief_initial_variance_for_provenance(prefixed,
                                                           n > 0 ? (size_t)n : 0);
             if (facade != NULL) {
-                hu_graph_relation_t rel = {0};
+                hu_memory_relation_row_t rel = {0};
                 rel.source_id = source_id;
                 rel.target_id = target_id;
                 rel.type = rtype;

@@ -65,7 +65,7 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     int64_t cutoff_ms = now_ms > 0 ? now_ms - max_age_ms : -max_age_ms;
 
     /* Pull top-N relations for the contact through the facade (same ordering
-     * as v1 `hu_graph_list_relations`: weight desc). Contact filter optional;
+     * as v1 relation listing (weight desc). Contact filter optional;
      * NULL/0 matches legacy graph list (empty scoped key). */
     const char *contact_id = ctx ? ctx->contact_id : NULL;
     size_t contact_id_len = contact_id ? strlen(contact_id) : 0;
@@ -93,7 +93,7 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     size_t reverified = 0;
     size_t decayed = 0;
     for (size_t i = 0; i < n; i++) {
-        const hu_graph_relation_t *r = (const hu_graph_relation_t *)recs[i].payload;
+        const hu_memory_relation_row_t *r = (const hu_memory_relation_row_t *)recs[i].payload;
         if (r == NULL)
             continue;
         if (cutoff_ms != 0 && r->last_seen >= cutoff_ms)
@@ -123,8 +123,8 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
          * scheduler picks them up sooner on the next pass. */
         if (r->context && r->context_len > 0) {
             for (size_t j = i + 1; j < n; j++) {
-                const hu_graph_relation_t *o =
-                    (const hu_graph_relation_t *)recs[j].payload;
+                const hu_memory_relation_row_t *o =
+                    (const hu_memory_relation_row_t *)recs[j].payload;
                 if (!o || !o->context || o->context_len == 0)
                     continue;
                 if (o->source_id != r->source_id && o->target_id != r->target_id)

@@ -4,8 +4,10 @@ created: 2026-05-10
 status: active
 parent: 2026-05-10-memory-v2-roadmap-overview.md
 related:
+  - 2026-05-10-memory-v2-evidence-index.md
   - 2026-05-10-memory-v2-execution-plan.md
   - 2026-05-10-memory-v2-roadmap-overview.md
+  - adr/2026-05-10-w10-kv-replay-deferred.md
   - 2026-05-10-w10-neural-memory.md
   - 2026-05-10-w13-learning-loop.md
   - ../../CLAUDE.md
@@ -125,14 +127,9 @@ Continuous Track F (after every merge that touches tests or presets)
 
 ### Phase C0 — Create the index file
 
-**New file (recommended):** `docs/plans/2026-05-10-memory-v2-evidence-index.md`
+**Created:** [`2026-05-10-memory-v2-evidence-index.md`](2026-05-10-memory-v2-evidence-index.md) (workstream table, CI entrypoints, CMake flags, ADR links, Track B appendix).
 
-**Minimum sections**
-
-1. **Workstream table** (W7–W16): Spec path | Primary types | Key tests (`human_tests` filters) | CI workflow step |
-2. **CMake / flags**: `HU_ENABLE_NEURAL_MEMORY`, `HU_ENABLE_LEARNING`, `HU_ENABLE_SQLITE`, … |
-3. **Known mismatches** (honest): e.g. “KV replay deferred per ADR …” |
-4. **Appendix**: Raw `rg` recipes used in audits |
+**Ongoing:** extend rows when new suites land; keep “Known mismatches” honest.
 
 ### Phase C1 — Keep parent plans honest
 
@@ -258,9 +255,9 @@ Interpretation: **Track C** helps **Track B** (documentation of what “correct�
 
 | Track | Phase | Status | Last proof (link or commit) |
 |-------|-------|--------|----------------------------|
-| A | A0 | `pending` | — |
-| B | B0 | `pending` | — |
-| C | C0 | `pending` | — |
+| A | A0 | `done` | ADR [`adr/2026-05-10-w10-kv-replay-deferred.md`](adr/2026-05-10-w10-kv-replay-deferred.md) — replay deferred |
+| B | B0 | `in_progress` | Count snapshot in [`2026-05-10-memory-v2-evidence-index.md`](2026-05-10-memory-v2-evidence-index.md) appendix A |
+| C | C0 | `done` | Evidence index file (same commit family) |
 | D | D0 | `pending` | — |
 | E | E0 | `pending` | — |
 | F | F0 | `pending` | — |
