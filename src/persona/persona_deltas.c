@@ -165,7 +165,7 @@ static hu_error_t persona_delta_list_db(struct sqlite3 *db, hu_allocator_t *allo
 
 #endif
 
-hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
+hu_error_t hu_persona_delta_propose(struct hu_graph *graph, const char *contact_id,
                                     size_t contact_id_len, hu_persona_delta_kind_t kind,
                                     const char *key, const char *value, float confidence,
                                     const char *source, int64_t proposed_at_ms,
@@ -174,7 +174,7 @@ hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
         return HU_ERR_INVALID_ARGUMENT;
 
 #ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    struct sqlite3 *db = hu_memory_sqlite_from_graph((struct hu_graph *)graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     return persona_delta_propose_db(db, contact_id, contact_id_len, kind, key, value, confidence,
@@ -220,7 +220,7 @@ hu_error_t hu_persona_delta_propose_facade(hu_memory_facade_t *m, const char *co
 #endif
 }
 
-hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_persona_delta_list(struct hu_graph *graph, hu_allocator_t *alloc, const char *contact_id,
                                  size_t contact_id_len, hu_persona_delta_status_t status_filter,
                                  size_t limit, hu_persona_delta_t **out, size_t *out_count) {
     if (!graph || !alloc || !contact_id || !out || !out_count)
@@ -231,7 +231,7 @@ hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const
         limit = 64;
 
 #ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    struct sqlite3 *db = hu_memory_sqlite_from_graph((struct hu_graph *)graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     return persona_delta_list_db(db, alloc, contact_id, contact_id_len, status_filter, limit, out,
@@ -416,7 +416,7 @@ static hu_error_t persona_evolver_run_db(struct sqlite3 *db, const char *contact
 
 #endif
 
-hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
+hu_error_t hu_persona_evolver_run(struct hu_graph *graph, const char *contact_id,
                                   size_t contact_id_len,
                                   const hu_persona_evolver_config_t *cfg,
                                   hu_persona_evolver_report_t *out_report) {
@@ -425,7 +425,7 @@ hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
     memset(out_report, 0, sizeof(*out_report));
 
 #ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    struct sqlite3 *db = hu_memory_sqlite_from_graph((struct hu_graph *)graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     return persona_evolver_run_db(db, contact_id, contact_id_len, cfg, out_report);

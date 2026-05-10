@@ -177,6 +177,8 @@ typedef struct hu_memory_facade hu_memory_facade_t;
  * relation, hyperedge, and (when SQLite is enabled) case_records. Other kinds
  * return HU_ERR_NOT_SUPPORTED until a backend is registered for them. */
 hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out);
+hu_error_t hu_memory_facade_open_on_graph(hu_allocator_t *alloc, struct hu_graph *graph,
+                                          hu_memory_facade_t **out);
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 
 /* W15 — generic audit hook for write/erase ops. The facade invokes this
@@ -242,12 +244,34 @@ char *hu_memory_facade_route_lookup(hu_memory_facade_t *m, hu_memory_kind_t kind
  * detection, Leiden, etc). New code should prefer the facade. */
 hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m);
 
+/* Open / close a v1 on-disk graph (delegates to `hu_graph_open` / `hu_graph_close`).
+ * Surfaces that only hold `struct hu_graph *` can use these instead of spelling
+ * `hu_graph_*` at every call site. */
+hu_error_t hu_memory_v1_graph_open(hu_allocator_t *alloc, const char *db_path, size_t db_path_len,
+                                   struct hu_graph **out);
+void hu_memory_v1_graph_close(struct hu_graph *g, hu_allocator_t *alloc);
+
+/* Delegates to `hu_graph_upsert_relation_with_belief` for graph-only promotion paths. */
+hu_error_t hu_memory_v1_upsert_relation_with_belief(
+    struct hu_graph *g, const char *contact_id, size_t contact_id_len,
+    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+    float weight, int64_t event_start, int64_t event_end,
+    float belief_mean, float belief_variance,
+    const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len,
+    int64_t *out_id);
+
 #ifdef HU_ENABLE_SQLITE
 /* Shared SQLite connection backing the v1 graph (scheduler DDL, counterfactual
  * replays, etc.). Returns NULL if the facade has no graph or SQLite is
  * unavailable. Prefer `hu_memory_facade_read` / `write` for memory rows. */
 struct sqlite3;
 struct sqlite3 *hu_memory_facade_sqlite_db(hu_memory_facade_t *m);
+
+/* Same connection as `hu_graph_sqlite_connection` for a v1-opened graph.
+ * Lets modules that only need raw SQL avoid spelling `hu_graph_sqlite_*`
+ * at every call site when a facade handle is not available. */
+struct sqlite3 *hu_memory_sqlite_from_graph(struct hu_graph *g);
 #endif
 
 /* List all entities for a contact through the facade. Convenience wrapper

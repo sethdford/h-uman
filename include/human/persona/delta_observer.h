@@ -16,9 +16,10 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/graph.h"
 #include <stddef.h>
 #include <stdint.h>
+
+struct hu_graph;
 
 /* Forward decl — keeps this header light for callers that don't link the
  * learner. The W13 sibling below dereferences it through learner_bridge.h. */
@@ -35,7 +36,7 @@ struct hu_learner;
  *
  * `now_ms` is the proposed_at_ms passed through to hu_persona_delta_propose;
  * pass 0 to mean "now". */
-hu_error_t hu_persona_observe_user_correction(hu_graph_t *graph, const char *contact_id,
+hu_error_t hu_persona_observe_user_correction(struct hu_graph *graph, const char *contact_id,
                                               size_t contact_id_len, const char *channel,
                                               size_t channel_len, const char *msg,
                                               size_t msg_len, int64_t now_ms,
@@ -50,7 +51,7 @@ hu_error_t hu_persona_observe_user_correction(hu_graph_t *graph, const char *con
  *
  * `learner` may be NULL (silent no-op for the signal path). */
 hu_error_t hu_persona_observe_user_correction_with_learner(
-    hu_graph_t *graph, struct hu_learner *learner, const char *contact_id, size_t contact_id_len,
+    struct hu_graph *graph, struct hu_learner *learner, const char *contact_id, size_t contact_id_len,
     const char *channel, size_t channel_len, const char *msg, size_t msg_len, int64_t now_ms,
     size_t *out_proposed);
 

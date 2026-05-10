@@ -30,6 +30,7 @@ This document turns [`2026-05-10-memory-v2-roadmap-overview.md`](2026-05-10-memo
 |------|-------------------|----------------|
 | **G0 — compile** | `cmake --build build` (dev preset) | Zero errors, `-Werror` clean on touched TUs |
 | **G1 — unit** | `./build/human_tests` | Zero failures, zero ASan errors |
+| **G1.5 — v2 layered smoke** | `bash scripts/memory-v2-local-proof.sh` | G2 clean + `--suite="v2 E2E"` green (13-stack scenarios + `test_v2_wiring_e2e.c` tail); optional `FULL_V2_SUITES=1` |
 | **G2 — collision** | `scripts/check-memory-v2-header-collision.sh` | No forbidden dual-include in `src/` (see script allowlist) |
 | **G3 — release size** | `cmake --preset release && cmake --build --preset release` + benchmark workflow | Within +500 KB v2 budget when W10/W13 flags enabled |
 | **G4 — product e2e** | Manual / optional `VERIFY_NATIVE=1`, live channels | Out of scope for CI; tracked per release |
@@ -51,7 +52,7 @@ This section records **what is already in the tree** versus what remains spec-fi
 | Phase / W | Overview intent | In-repo today (high level) | Typical “still roadmap” gap |
 |-----------|-----------------|----------------------------|-----------------------------|
 | **0** | Type collision fix | `hu_memory_facade_t` vs legacy `hu_memory_t` split; G2 collision script | None for Phase 0 exit |
-| **1 / W7** | Facade completion | `hu_memory_facade_*`, v1 backend, routes table, CLI/daemon/spawn wiring, `hu_memory_facade_sqlite_db`, export GDPR path | Direct `hu_graph_*` in `world_model.c`, `autodream.c`, persona deltas, etc.; run `bash scripts/w7-phase1-graph-bypass-inventory.sh` for counts |
+| **1 / W7** | Facade completion | `hu_memory_facade_*`, v1 backend, routes table, CLI/daemon/spawn wiring, `hu_memory_facade_sqlite_db`, export GDPR path, thin **`hu_memory_*`** v1 shims in `memory.h` (`hu_memory_sqlite_from_graph`, `hu_memory_v1_graph_*`, `hu_memory_facade_open_on_graph`, `hu_memory_v1_upsert_relation_with_belief`), **`struct hu_graph *`** at agent/persona public boundaries | **Phase 1.1 inventory (scoped grep):** `bash scripts/w7-phase1-graph-bypass-inventory.sh` → **0** matches for substring `hu_graph_` under `src/agent/`, `src/persona/`, `src/feeds/` (v1 graph API remains in `src/memory/`). **Still roadmap:** step 1.2 hot-path semantics, 1.4 ctx lifetime hardening, optional “calls-only” lint beyond this substring gate |
 | **2 / W8** | Belief layer | `hu_belief_t`, graph `confidence_mean` / `confidence_variance`, hyperedge headers | “Replace float everywhere” + W8 adversarial gates per spec |
 | **3 / W9** | Unified world model | `hu_world_model_*`, bridge, cache invalidation | Single-load on every consumer path; p99 gate |
 | **4 / W10** | Neural memory | `HU_ENABLE_NEURAL_MEMORY` CMake option (default OFF), neural headers/tables in flight | Gated ON build + KV hit-rate benchmarks |
@@ -80,7 +81,7 @@ This section records **what is already in the tree** versus what remains spec-fi
 |------|------|--------|
 | 1.1 | Inventory direct `hu_graph_*` / SQLite memory bypasses in `src/agent/`, `src/persona/`, `src/feeds/` | **Done:** [`2026-05-10-w7-phase1-bypass-inventory.md`](2026-05-10-w7-phase1-bypass-inventory.md) + `bash scripts/w7-phase1-graph-bypass-inventory.sh` |
 | 1.2 | Migrate read/write hot paths to `hu_memory_facade_read` / `hu_memory_facade_write` | Per-subsystem tests + existing W7 suite |
-| 1.3 | Trend script (optional CMake target `human_w7_phase1_inventory`) | Developers run target or script before/after migration slices; no default CI hard fail yet |
+| 1.3 | Trend script (optional CMake target `human_w7_phase1_inventory`) | **Done:** POSIX `cmake --build build --target human_w7_phase1_inventory` (or `bash scripts/w7-phase1-graph-bypass-inventory.sh`); no default CI hard fail yet |
 | 1.4 | Shared ctx lifetime + register semantics | `test_w7_*` + adversarial replace tests |
 
 **Exit:** Roadmap metric “>80% lines deleted from direct-graph callers” *or* documented exception list with owner + removal date (inventory doc §Exception policy satisfies the latter until migrations land).

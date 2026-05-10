@@ -42,7 +42,7 @@ struct hu_provider;
 
 /* Open a W7 facade backed by `graph` (the v1 backends). Caller owns the
  * returned pointer and must close with hu_w7_facade_close. */
-hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_facade_t **out);
+hu_error_t hu_w7_facade_open(struct hu_graph *graph, hu_allocator_t *alloc, hu_w7_facade_t **out);
 
 void hu_w7_facade_close(hu_w7_facade_t *facade, hu_allocator_t *alloc);
 

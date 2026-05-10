@@ -1054,7 +1054,7 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
     hu_error_t err = HU_OK;
     if (!agent->w7_facade) {
         hu_w7_facade_t *facade = NULL;
-        err = hu_w7_facade_open((hu_graph_t *)graph, alloc, &facade);
+        err = hu_w7_facade_open(graph, alloc, &facade);
         if (err == HU_OK)
             agent->w7_facade = facade;
         else

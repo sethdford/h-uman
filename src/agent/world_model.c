@@ -169,7 +169,7 @@ static hu_error_t negative_memory_add_sqlite(struct sqlite3 *db, const char *con
 
 #endif /* HU_ENABLE_SQLITE */
 
-hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id, size_t cid_len,
+hu_error_t hu_negative_memory_add(struct hu_graph *g, const char *contact_id, size_t cid_len,
                                    const hu_negative_memory_t *nm, int64_t *out_id) {
 #ifndef HU_ENABLE_SQLITE
     (void)g; (void)contact_id; (void)cid_len; (void)nm; (void)out_id;
@@ -177,7 +177,7 @@ hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id, size_t 
 #else
     if (!g || !nm)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    struct sqlite3 *db = hu_memory_sqlite_from_graph(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     return negative_memory_add_sqlite(db, contact_id, cid_len, nm, out_id);
@@ -204,7 +204,7 @@ hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *cont
 #endif
 }
 
-hu_error_t hu_negative_memory_list(hu_graph_t *g, hu_allocator_t *alloc,
+hu_error_t hu_negative_memory_list(struct hu_graph *g, hu_allocator_t *alloc,
                                     const char *contact_id, size_t cid_len,
                                     size_t limit, hu_negative_memory_t **out,
                                     size_t *out_count) {
@@ -215,7 +215,7 @@ hu_error_t hu_negative_memory_list(hu_graph_t *g, hu_allocator_t *alloc,
 #else
     if (!g || !alloc || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
+    struct sqlite3 *db = hu_memory_sqlite_from_graph(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     return negative_memory_list_sqlite(db, alloc, contact_id, cid_len, limit, out, out_count);

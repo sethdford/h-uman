@@ -3,10 +3,10 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/graph.h"
 #include <stdbool.h>
 #include <stdint.h>
 
+struct hu_graph;
 struct hu_memory_facade;
 
 /* W2 — AutoDream: scheduled background consolidation.
@@ -50,7 +50,7 @@ hu_autodream_config_t hu_autodream_default_config(void);
 
 /* Run one AutoDream cycle synchronously. Caller is responsible for scheduling
  * (e.g. daemon idle detector). Each phase respects the runtime budget. */
-hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_run(hu_allocator_t *alloc, struct hu_graph *graph,
                             const hu_autodream_config_t *cfg,
                             hu_autodream_report_t *out_report);
 
@@ -67,13 +67,13 @@ hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, struct hu_memory_fa
 /* Generate-or-refresh a community summary for one (contact, community) pair.
  * Heuristic backend: produces a structured summary from entity names + edge
  * counts. Replace with an LLM-driven backend by injecting a vtable later. */
-hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, struct hu_graph *graph,
                                             const char *contact_id, size_t contact_id_len,
                                             int64_t community_id, int64_t now_ms);
 
 /* Read the current summary for a (contact, community). Returns HU_ERR_NOT_FOUND
  * if none exists. Caller must free *out_summary via alloc. */
-hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, struct hu_graph *graph,
                                                const char *contact_id, size_t contact_id_len,
                                                int64_t community_id, char **out_summary,
                                                size_t *out_summary_len);

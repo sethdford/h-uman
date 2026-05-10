@@ -1753,6 +1753,15 @@ target_link_libraries(human human_core)
 # Skip on Windows (script is POSIX bash) and when explicitly disabled.
 option(HU_ENABLE_TOPOLOGY_CHECK
        "Enforce 7-layer architectural dependency direction (memory v2 P2E)" ON)
+# W7 Phase 1 — informational `hu_graph_*` substring inventory (agent/persona/feeds).
+# Independent of HU_ENABLE_TOPOLOGY_CHECK; POSIX only (same bash contract as topology).
+if(NOT WIN32)
+    add_custom_target(human_w7_phase1_inventory
+        COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/w7-phase1-graph-bypass-inventory.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "W7 Phase 1 graph bypass inventory (informational)"
+        VERBATIM)
+endif()
 if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
     add_custom_target(human_topology_check
         COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/check-layer-topology.sh
@@ -1760,13 +1769,6 @@ if(HU_ENABLE_TOPOLOGY_CHECK AND NOT WIN32)
         COMMENT "Checking 7-layer architectural topology (P2E)"
         VERBATIM)
     add_dependencies(human human_topology_check)
-    # W7 Phase 1 — informational `hu_graph_*` inventory (agent/persona/feeds).
-    # Run: cmake --build build --target human_w7_phase1_inventory
-    add_custom_target(human_w7_phase1_inventory
-        COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/w7-phase1-graph-bypass-inventory.sh
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        COMMENT "W7 Phase 1 graph bypass inventory (informational)"
-        VERBATIM)
 endif()
 # Embed Info.plist for macOS TCC (accessibility, AppleEvents) identity
 if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/resources/Info.plist")

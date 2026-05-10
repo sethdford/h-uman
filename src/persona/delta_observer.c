@@ -137,7 +137,7 @@ static size_t match_prefix_longest(const char *hay, size_t hay_len, size_t pos,
  * + token) on a match, or 0 on miss. The outer loop uses this to skip past
  * the matched span and avoid double-firing on overlapping prefixes. */
 
-static size_t try_be_more_less(hu_graph_t *graph, const char *contact_id, size_t contact_id_len,
+static size_t try_be_more_less(struct hu_graph *graph, const char *contact_id, size_t contact_id_len,
                                const char *channel, const char *hay, size_t hay_len, size_t pos,
                                int64_t now_ms, size_t *proposed) {
     static const char *const prefixes[] = {"be more ", "be less ", NULL};
@@ -166,7 +166,7 @@ static size_t try_be_more_less(hu_graph_t *graph, const char *contact_id, size_t
     return plen + tlen;
 }
 
-static size_t try_stop_saying(hu_graph_t *graph, const char *contact_id, size_t contact_id_len,
+static size_t try_stop_saying(struct hu_graph *graph, const char *contact_id, size_t contact_id_len,
                               const char *channel, const char *hay, size_t hay_len, size_t pos,
                               int64_t now_ms, size_t *proposed) {
     /* Longest-first ordering. */
@@ -186,7 +186,7 @@ static size_t try_stop_saying(hu_graph_t *graph, const char *contact_id, size_t 
     return plen + tlen;
 }
 
-static size_t try_keep_it(hu_graph_t *graph, const char *contact_id, size_t contact_id_len,
+static size_t try_keep_it(struct hu_graph *graph, const char *contact_id, size_t contact_id_len,
                           const char *channel, const char *hay, size_t hay_len, size_t pos,
                           int64_t now_ms, size_t *proposed) {
     static const char *const prefixes[] = {"keep things ", "keep them ", "keep it ", NULL};
@@ -209,7 +209,7 @@ static size_t try_keep_it(hu_graph_t *graph, const char *contact_id, size_t cont
     return plen + tlen;
 }
 
-static size_t try_dont_talk_about(hu_graph_t *graph, const char *contact_id, size_t contact_id_len,
+static size_t try_dont_talk_about(struct hu_graph *graph, const char *contact_id, size_t contact_id_len,
                                   const char *channel, const char *hay, size_t hay_len,
                                   size_t pos, int64_t now_ms, size_t *proposed) {
     static const char *const prefixes[] = {"stop talking about ", "don't talk about ",
@@ -229,7 +229,7 @@ static size_t try_dont_talk_about(hu_graph_t *graph, const char *contact_id, siz
     return plen + tlen;
 }
 
-hu_error_t hu_persona_observe_user_correction(hu_graph_t *graph, const char *contact_id,
+hu_error_t hu_persona_observe_user_correction(struct hu_graph *graph, const char *contact_id,
                                               size_t contact_id_len, const char *channel,
                                               size_t channel_len, const char *msg,
                                               size_t msg_len, int64_t now_ms,
@@ -305,7 +305,7 @@ hu_error_t hu_persona_observe_user_correction(hu_graph_t *graph, const char *con
 }
 
 hu_error_t hu_persona_observe_user_correction_with_learner(
-    hu_graph_t *graph, struct hu_learner *learner, const char *contact_id, size_t contact_id_len,
+    struct hu_graph *graph, struct hu_learner *learner, const char *contact_id, size_t contact_id_len,
     const char *channel, size_t channel_len, const char *msg, size_t msg_len, int64_t now_ms,
     size_t *out_proposed) {
     /* Step 1: run the standard observation. Same semantics as the original

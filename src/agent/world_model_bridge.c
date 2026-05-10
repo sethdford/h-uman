@@ -29,7 +29,7 @@ struct hu_w7_facade {
     hu_memory_facade_t *m;
 };
 
-hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_facade_t **out) {
+hu_error_t hu_w7_facade_open(struct hu_graph *graph, hu_allocator_t *alloc, hu_w7_facade_t **out) {
     if (!graph || !alloc || !out)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
@@ -37,7 +37,7 @@ hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_fac
     if (!f)
         return HU_ERR_OUT_OF_MEMORY;
     f->m = NULL;
-    hu_error_t e = hu_memory_facade_open(alloc, graph, &f->m);
+    hu_error_t e = hu_memory_facade_open_on_graph(alloc, graph, &f->m);
     if (e != HU_OK) {
         alloc->free(alloc->ctx, f, sizeof(*f));
         return e;

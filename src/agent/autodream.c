@@ -80,15 +80,14 @@ static hu_error_t ensure_autodream_schema(struct sqlite3 *db) {
 }
 
 /* Prefer the facade's shared SQLite handle when AutoDream runs on a W7
- * facade; otherwise use the graph connection. Centralizes lookup so phases
- * take an explicit `db` and do not each call `hu_graph_sqlite_connection`. */
-static struct sqlite3 *ad_sqlite(hu_graph_t *g, hu_memory_facade_t *m) {
+ * facade; otherwise use the v1 store connection via `hu_memory_sqlite_from_graph`. */
+static struct sqlite3 *ad_sqlite(struct hu_graph *g, hu_memory_facade_t *m) {
     if (m != NULL) {
         struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
         if (db != NULL)
             return db;
     }
-    return hu_graph_sqlite_connection(g);
+    return g ? hu_memory_sqlite_from_graph(g) : NULL;
 }
 
 /* Phase 1: Quarantine review.
@@ -99,7 +98,7 @@ static struct sqlite3 *ad_sqlite(hu_graph_t *g, hu_memory_facade_t *m) {
  *     different target and high confidence).
  *   - LEAVE otherwise (re-evaluated next cycle).
  */
-static hu_error_t phase_quarantine_review(struct sqlite3 *db, hu_graph_t *g,
+static hu_error_t phase_quarantine_review(struct sqlite3 *db, struct hu_graph *g,
                                           hu_memory_facade_t *facade,
                                           const hu_autodream_config_t *cfg,
                                           hu_autodream_report_t *r, int64_t deadline_ms) {
@@ -218,7 +217,7 @@ static hu_error_t phase_quarantine_review(struct sqlite3 *db, hu_graph_t *g,
                 rec.payload_len = sizeof(rel);
                 (void)hu_memory_facade_write(facade, &rec);
             } else {
-                (void)hu_graph_upsert_relation_with_belief(
+                (void)hu_memory_v1_upsert_relation_with_belief(
                     g, cid_t, cid_len, source_id, target_id, rtype, weight,
                     event_start, event_end, confidence, initial_variance, ctx,
                     ctx_len, prefixed, n > 0 ? (size_t)n : 0, NULL);
@@ -354,7 +353,7 @@ static hu_error_t summarize_community_impl(hu_allocator_t *alloc, struct sqlite3
     return srch == SQLITE_DONE ? HU_OK : HU_ERR_IO;
 }
 
-hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, struct hu_graph *graph,
                                             const char *contact_id, size_t contact_id_len,
                                             int64_t community_id, int64_t now_ms) {
     if (!graph)
@@ -365,7 +364,7 @@ hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *g
     return summarize_community_impl(alloc, db, contact_id, contact_id_len, community_id, now_ms);
 }
 
-hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, struct hu_graph *graph,
                                                const char *contact_id, size_t contact_id_len,
                                                int64_t community_id, char **out_summary,
                                                size_t *out_summary_len) {
@@ -489,7 +488,7 @@ static hu_error_t phase_community_summaries(hu_allocator_t *alloc, struct sqlite
     return HU_OK;
 }
 
-static hu_error_t autodream_run_impl(hu_allocator_t *alloc, hu_graph_t *graph,
+static hu_error_t autodream_run_impl(hu_allocator_t *alloc, struct hu_graph *graph,
                                      hu_memory_facade_t *facade_opt,
                                      const hu_autodream_config_t *cfg,
                                      hu_autodream_report_t *out_report) {
@@ -539,7 +538,7 @@ static hu_error_t autodream_run_impl(hu_allocator_t *alloc, hu_graph_t *graph,
     return HU_OK;
 }
 
-hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_run(hu_allocator_t *alloc, struct hu_graph *graph,
                             const hu_autodream_config_t *cfg,
                             hu_autodream_report_t *out_report) {
     return autodream_run_impl(alloc, graph, NULL, cfg, out_report);
@@ -550,7 +549,7 @@ hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, hu_memory_facade_t 
                                       hu_autodream_report_t *out_report) {
     if (!m)
         return HU_ERR_INVALID_ARGUMENT;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    struct hu_graph *g = (struct hu_graph *)hu_memory_facade_graph_handle(m);
     if (!g)
         return HU_ERR_INVALID_ARGUMENT;
     return autodream_run_impl(alloc, g, m, cfg, out_report);
@@ -558,7 +557,7 @@ hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, hu_memory_facade_t 
 
 #else /* !HU_ENABLE_SQLITE */
 
-hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_run(hu_allocator_t *alloc, struct hu_graph *graph,
                             const hu_autodream_config_t *cfg,
                             hu_autodream_report_t *out_report) {
     (void)alloc;
@@ -578,7 +577,7 @@ hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, hu_memory_facade_t 
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, struct hu_graph *graph,
                                             const char *contact_id, size_t contact_id_len,
                                             int64_t community_id, int64_t now_ms) {
     (void)alloc;
@@ -590,7 +589,7 @@ hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *g
     return HU_ERR_NOT_SUPPORTED;
 }
 
-hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t *graph,
+hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, struct hu_graph *graph,
                                                const char *contact_id, size_t contact_id_len,
                                                int64_t community_id, char **out_summary,
                                                size_t *out_summary_len) {

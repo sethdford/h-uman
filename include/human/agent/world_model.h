@@ -122,7 +122,7 @@ void hu_world_model_free(hu_allocator_t *alloc, hu_world_model_t *wm);
 
 /* --- negative memory CRUD (used by the synthesizer + later workstreams) --- */
 
-hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id,
+hu_error_t hu_negative_memory_add(struct hu_graph *g, const char *contact_id,
                                    size_t cid_len, const hu_negative_memory_t *nm,
                                    int64_t *out_id);
 
@@ -133,7 +133,7 @@ hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *cont
                                          size_t cid_len, const hu_negative_memory_t *nm,
                                          int64_t *out_id);
 
-hu_error_t hu_negative_memory_list(hu_graph_t *g, hu_allocator_t *alloc,
+hu_error_t hu_negative_memory_list(struct hu_graph *g, hu_allocator_t *alloc,
                                     const char *contact_id, size_t cid_len,
                                     size_t limit, hu_negative_memory_t **out,
                                     size_t *out_count);

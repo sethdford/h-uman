@@ -10,6 +10,12 @@ if ! command -v rg >/dev/null 2>&1; then
     exit 0
 fi
 printf '# hu_graph_* matches (per file, descending by count)\n\n'
+set +e
 rg 'hu_graph_' src/agent src/persona src/feeds -g '*.c' -g '*.h' --count-matches 2>/dev/null \
     | sort -t: -k2 -nr \
-    | awk -F: '{printf "%5d  %s\n", $2, $1; t+=$2} END {printf "\nTOTAL  %d\n", t}'
+    | awk -F: '{printf "%5d  %s\n", $2, $1; t+=$2} END {printf "\nTOTAL  %d\n", t+0}'
+rg_exit=${PIPESTATUS[0]}
+set -e
+if [ "$rg_exit" -ne 0 ] && [ "$rg_exit" -ne 1 ]; then
+    exit "$rg_exit"
+fi

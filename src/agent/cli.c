@@ -22,7 +22,8 @@
 #endif
 #include "human/bus.h"
 #include "human/design_tokens.h"
-#include "human/memory.h"
+/* Legacy `hu_memory_t` comes via `human/agent.h` → `human/memory.h`. Do not
+ * include `human/memory.h` in the same TU as `human/memory/memory.h` (G2 gate). */
 #include "human/memory/engines.h"
 #if defined(HU_ENABLE_FEEDS) && defined(HU_ENABLE_SQLITE)
 #include "human/feeds/findings.h"
@@ -34,7 +35,7 @@
 #include "human/intelligence/self_improve.h"
 #endif
 #include "human/memory/factory.h"
-#include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "human/memory/retrieval.h"
 #include "human/memory/vector.h"
 #include "human/observability/log_observer.h"
@@ -533,7 +534,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
     hu_retrieval_engine_t retrieval_engine =
         hu_retrieval_create_with_vector(alloc, &memory, &embedder, &vector_store);
 #ifdef HU_ENABLE_SQLITE
-    hu_graph_t *cli_graph = NULL;
+    struct hu_graph *cli_graph = NULL;
 #endif
 
 #ifdef HU_HAS_CRON
@@ -565,7 +566,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
         if (cli_graph) {
-            hu_graph_close(cli_graph, alloc);
+            hu_memory_v1_graph_close(cli_graph, alloc);
             cli_graph = NULL;
         }
 #endif
@@ -623,7 +624,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
         if (cli_graph) {
-            hu_graph_close(cli_graph, alloc);
+            hu_memory_v1_graph_close(cli_graph, alloc);
             cli_graph = NULL;
         }
 #endif
@@ -739,7 +740,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             char graph_path[1024];
             int np = snprintf(graph_path, sizeof(graph_path), "%s/.human/graph.db", home);
             if (np > 0 && (size_t)np < sizeof(graph_path))
-                (void)hu_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
+                (void)hu_memory_v1_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
         }
     }
     if (cli_graph) {
@@ -805,7 +806,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
         if (cli_graph) {
-            hu_graph_close(cli_graph, alloc);
+            hu_memory_v1_graph_close(cli_graph, alloc);
             cli_graph = NULL;
         }
 #endif
@@ -994,7 +995,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
             retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
         if (cli_graph) {
-            hu_graph_close(cli_graph, alloc);
+            hu_memory_v1_graph_close(cli_graph, alloc);
             cli_graph = NULL;
         }
 #endif
@@ -1288,7 +1289,7 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
         retrieval_engine.vtable->deinit(retrieval_engine.ctx, alloc);
 #ifdef HU_ENABLE_SQLITE
     if (cli_graph) {
-        hu_graph_close(cli_graph, alloc);
+        hu_memory_v1_graph_close(cli_graph, alloc);
         cli_graph = NULL;
     }
 #endif

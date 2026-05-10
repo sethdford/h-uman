@@ -166,13 +166,13 @@ static void parse_causal_lines(const char *text, size_t text_len, hu_anticipator
     }
 }
 
-hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_anticipatory_analyze(struct hu_graph *graph, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, int64_t now_ts,
                                    hu_anticipatory_result_t *result) {
     if (!graph || !alloc || !result)
         return HU_ERR_INVALID_ARGUMENT;
     hu_memory_facade_t *m = NULL;
-    hu_error_t e = hu_memory_facade_open(alloc, graph, &m);
+    hu_error_t e = hu_memory_facade_open_on_graph(alloc, graph, &m);
     if (e != HU_OK)
         return e;
     e = hu_anticipatory_analyze_memory(m, alloc, contact_id, contact_id_len, now_ts, result);

@@ -178,6 +178,11 @@ hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_me
     return HU_OK;
 }
 
+hu_error_t hu_memory_facade_open_on_graph(hu_allocator_t *alloc, struct hu_graph *graph,
+                                          hu_memory_facade_t **out) {
+    return hu_memory_facade_open(alloc, (hu_graph_t *)graph, out);
+}
+
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc) {
     if (m == NULL) return;
     hu_memory__v1_backend_unregister_all(m);
@@ -341,6 +346,20 @@ void hu_memory_v1_graph_close(struct hu_graph *g, hu_allocator_t *alloc) {
     if (!g || !alloc)
         return;
     hu_graph_close((hu_graph_t *)g, alloc);
+}
+
+hu_error_t hu_memory_v1_upsert_relation_with_belief(
+    struct hu_graph *g, const char *contact_id, size_t contact_id_len,
+    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+    float weight, int64_t event_start, int64_t event_end,
+    float belief_mean, float belief_variance,
+    const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len,
+    int64_t *out_id) {
+    return hu_graph_upsert_relation_with_belief(
+        (hu_graph_t *)g, contact_id, contact_id_len, source_id, target_id, type, weight,
+        event_start, event_end, belief_mean, belief_variance, context, context_len, provenance,
+        provenance_len, out_id);
 }
 
 #ifdef HU_ENABLE_SQLITE

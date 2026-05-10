@@ -34,7 +34,7 @@ typedef struct hu_anticipatory_result {
 
 /* Analyze graph for anticipatory actions for a contact. Opens a short-lived
  * memory facade around `graph` and delegates to `hu_anticipatory_analyze_memory`. */
-hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
+hu_error_t hu_anticipatory_analyze(struct hu_graph *graph, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, int64_t now_ts,
                                    hu_anticipatory_result_t *result);
 
