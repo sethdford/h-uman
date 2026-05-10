@@ -279,6 +279,11 @@ struct hu_agent {
     uint64_t verifier_claims_total;   /* total claims extracted */
     uint64_t verifier_claims_flagged; /* total claims scoring below threshold */
 
+    /* W5 producer telemetry (FIX 9). Counts persona deltas the agent proposed
+     * to its evolver during inbound user-message processing. The 3 AM evolver
+     * (FIX 3) reads the same table on the consumer side. */
+    uint64_t persona_deltas_proposed;
+
     volatile sig_atomic_t cancel_requested; /* set by SIGINT handler to abort turn */
 
     hu_agent_approval_cb approval_cb; /* optional; if NULL, approval-required = denied */

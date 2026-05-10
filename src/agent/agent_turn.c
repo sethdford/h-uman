@@ -29,6 +29,7 @@
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/personal_model.h"
+#include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
 #include "human/security/sycophancy_guard.h"
 
@@ -658,6 +659,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_agent_clear_current_for_tools();
             return HU_OK;
         }
+    }
+
+    /* W5 producer (FIX 9): scan the safe user message for explicit
+     * persona-correction phrases ("be more X", "stop saying Y", etc.) and
+     * record them as delta proposals. The daemon's daily evolver
+     * (FIX 3) reads this table at 3 AM and applies stable proposals. */
+    if (agent->verifier_graph && agent->memory_session_id && agent->memory_session_id_len > 0) {
+        size_t observed = 0;
+        hu_persona_observe_user_correction(
+            agent->verifier_graph, agent->memory_session_id, agent->memory_session_id_len,
+            agent->active_channel, agent->active_channel_len, msg, msg_len, 0, &observed);
+        if (observed > 0)
+            agent->persona_deltas_proposed += observed;
     }
 
     /* Automatic planning + execution for complex tasks */

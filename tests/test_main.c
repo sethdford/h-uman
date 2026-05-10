@@ -210,6 +210,7 @@ void run_w2_autodream_tests(void);
 void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
 void run_w5_persona_deltas_tests(void);
+void run_persona_delta_observer_tests(void);
 void run_daemon_housekeeping_tests(void);
 void run_orphan_channel_audit_tests(void);
 void run_verifier_metrics_tests(void);
@@ -706,6 +707,7 @@ int main(int argc, char **argv) {
     run_w3_multigraph_tests();
     run_w4_verifier_tests();
     run_w5_persona_deltas_tests();
+    run_persona_delta_observer_tests();
     run_daemon_housekeeping_tests();
     run_orphan_channel_audit_tests();
     run_verifier_metrics_tests();

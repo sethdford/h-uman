@@ -635,6 +635,7 @@ set(HU_CORE_SOURCES
     src/agent/response_verifier.c
     src/agent/verifier_metrics.c
     src/persona/persona_deltas.c
+    src/persona/delta_observer.c
     src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
     src/memory/lifecycle/hygiene.c
@@ -2259,6 +2260,7 @@ set(HU_TEST_SOURCES
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
     tests/test_w5_persona_deltas.c
+    tests/test_persona_delta_observer.c
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
