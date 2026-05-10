@@ -634,6 +634,7 @@ set(HU_CORE_SOURCES
     src/agent/scheduler.c
     src/agent/scheduler_probes.c
     src/agent/counterfactual.c
+    src/agent/autodream_runner.c
     src/agent/case_based.c
     src/agent/response_verifier.c
     src/agent/verifier_metrics.c

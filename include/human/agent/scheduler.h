@@ -151,6 +151,26 @@ hu_error_t hu_counterfactual_rehearsal_runner(hu_memory_t *m,
                                               int64_t budget_ms,
                                               void *user_data);
 
+/* AutoDream runner: wraps `hu_autodream_run` so the scheduler can drive
+ * v1's idle-time consolidation (quarantine review, community summaries,
+ * Ebbinghaus reweighting, derived facts).
+ *
+ * The same C function handles all three AUTODREAM_* job kinds — `spec->kind`
+ * decides which phases run:
+ *   HU_JOB_AUTODREAM_QUARANTINE → quarantine_review only
+ *   HU_JOB_AUTODREAM_COMMUNITY  → community_summaries + derived_facts
+ *   HU_JOB_AUTODREAM_DECAY      → edge_reweight only
+ *
+ * `budget_ms` is forwarded to autodream's own runtime budget so the
+ * scheduler's per-tick cap composes with autodream's per-phase cap.
+ *
+ * `user_data` is unused; the runner uses `hu_system_allocator()` for any
+ * scratch allocations. Register once per kind:
+ *   hu_scheduler_register_runner(s, HU_JOB_AUTODREAM_QUARANTINE,
+ *                                hu_autodream_runner, NULL); */
+hu_error_t hu_autodream_runner(hu_memory_t *m, const hu_job_spec_t *spec,
+                               int64_t budget_ms, void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

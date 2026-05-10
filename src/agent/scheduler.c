@@ -19,12 +19,10 @@ struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
 #include <string.h>
 #include <time.h>
 
-/* TODO(W14-daemon): wire `hu_scheduler_tick` into the once-per-minute
- * branch of src/daemon.c's tick loop (currently around line ~2591, the
- * `hu_autodream_run` daily housekeeping block).  Intentionally NOT wired
- * in this commit — that change carries its own concerns (config schema
- * for job intervals, observer hookups, retry/abort policy on daemon
- * shutdown) and belongs in a follow-up. */
+/* DONE(W14-daemon FIX 13): `hu_scheduler_tick` is now wired into the
+ * once-per-minute branch of src/daemon.c via the W14 bridge in
+ * src/agent/world_model_bridge.c.  See the FIX 13 wire-up comment in
+ * daemon.c near the autodream cron block. */
 
 #define HU_SCHED_MAX_JOBS_PER_TICK 32
 #define HU_SCHED_TOTAL_BUDGET_MS 10000

@@ -124,6 +124,16 @@ hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
                                                    size_t contact_id_len,
                                                    int budget_ms);
 
+/* Enqueue the three AutoDream phases (quarantine, community, decay) as
+ * separate scheduler jobs. Mirrors what the legacy 3 AM cron in
+ * daemon.c does, but routes through the W14 queue so it can be paced,
+ * preempted by higher-priority jobs, and deferred when not on AC.
+ *
+ * `now_ms == 0` means "ASAP"; pass a unix-ms value to schedule for a
+ * specific wall time (e.g. the next 3 AM boundary). */
+hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now_ms,
+                                              int budget_ms);
+
 /* Status snapshot for `human ml status` and friends. Always populates
  * the out fields even on partial probe failure. NULL output pointers
  * are tolerated (any subset may be queried). */

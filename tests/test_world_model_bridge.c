@@ -311,6 +311,41 @@ static void w14_scheduler_enqueue_then_tick_drains_job(void) {
     cleanup(g, f);
 }
 
+/* FIX 14: AutoDream runs through the scheduler. Enqueue all three phases
+ * (quarantine / community / decay), tick once, expect the queue to drain
+ * and the runner to return HU_OK on each. The empty graph yields zero
+ * work but the runner must still complete cleanly. */
+static void w14_autodream_phases_drain_through_scheduler(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    hu_w14_scheduler_t *s = NULL;
+    HU_ASSERT_EQ(hu_w14_scheduler_open(f, A(), &s), HU_OK);
+
+    /* Enqueue all three phases via the bridge helper. */
+    HU_ASSERT_EQ(hu_w14_scheduler_enqueue_autodream(s, 0, 100), HU_OK);
+
+    size_t pending = 0;
+    HU_ASSERT_EQ(hu_w14_scheduler_status(s, &pending, NULL, NULL, NULL), HU_OK);
+    HU_ASSERT(pending >= 3); /* one per phase */
+
+    /* Tick once: scheduler should dispatch all three through the
+     * registered hu_autodream_runner. The HU_SCHED_MAX_JOBS_PER_TICK
+     * cap is 32, so 3 jobs fit comfortably. */
+    HU_ASSERT_EQ(hu_w14_scheduler_tick(s, 1000), HU_OK);
+
+    pending = 999;
+    HU_ASSERT_EQ(hu_w14_scheduler_status(s, &pending, NULL, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(pending, (size_t)0);
+
+    hu_w14_scheduler_close(s, A());
+    cleanup(g, f);
+}
+
+static void w14_autodream_rejects_null_args(void) {
+    HU_ASSERT_EQ(hu_w14_scheduler_enqueue_autodream(NULL, 0, 100), HU_ERR_INVALID_ARGUMENT);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -329,5 +364,7 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(w14_scheduler_rejects_null_args);
     HU_RUN_TEST(w14_scheduler_tick_is_noop_when_empty);
     HU_RUN_TEST(w14_scheduler_enqueue_then_tick_drains_job);
+    HU_RUN_TEST(w14_autodream_phases_drain_through_scheduler);
+    HU_RUN_TEST(w14_autodream_rejects_null_args);
 #endif
 }

@@ -339,10 +339,20 @@ hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         alloc->free(alloc->ctx, w, sizeof(*w));
         return e;
     }
-    /* Wire the one runner the spec ships in this commit. The other kinds
-     * keep the no-op default the scheduler installs in hu_scheduler_open. */
+    /* Wire the runners that this commit ships. Other kinds (KV cache
+     * eviction/warming, LoRA training, belief reverification) keep the
+     * no-op default the scheduler installs in hu_scheduler_open until
+     * their own dependencies land. */
     (void)hu_scheduler_register_runner(w->s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
                                        hu_counterfactual_rehearsal_runner, NULL);
+    /* AutoDream: same C function handles all three kinds; spec->kind
+     * inside the runner picks which phase fires. */
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_QUARANTINE,
+                                       hu_autodream_runner, NULL);
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_COMMUNITY,
+                                       hu_autodream_runner, NULL);
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_AUTODREAM_DECAY,
+                                       hu_autodream_runner, NULL);
     *out_sched = w;
     return HU_OK;
 }
@@ -362,6 +372,38 @@ hu_error_t hu_w14_scheduler_tick(hu_w14_scheduler_t *s, int64_t now_ms) {
     if (now_ms == 0)
         now_ms = (int64_t)time(NULL) * 1000;
     return hu_scheduler_tick(s->s, now_ms);
+}
+
+hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now_ms,
+                                              int budget_ms) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    /* AutoDream is global (no contact_id). Each phase becomes its own
+     * job so the scheduler can pace them and so a single phase failure
+     * doesn't poison the others. Quarantine review is the most
+     * sensitive (it can drop facts) so it runs at higher priority. */
+    static const struct {
+        hu_job_kind_t kind;
+        int priority;
+    } phases[] = {
+        {HU_JOB_AUTODREAM_QUARANTINE, 1},
+        {HU_JOB_AUTODREAM_COMMUNITY, 0},
+        {HU_JOB_AUTODREAM_DECAY, 0},
+    };
+    for (size_t i = 0; i < sizeof(phases) / sizeof(phases[0]); i++) {
+        hu_job_spec_t job;
+        memset(&job, 0, sizeof(job));
+        job.kind = phases[i].kind;
+        job.priority = phases[i].priority;
+        job.budget_ms = budget_ms > 0 ? budget_ms : 60000; /* 1 min per phase default */
+        job.requires_idle = false;
+        job.requires_ac_power = false;
+        job.earliest_at = now_ms; /* 0 = ASAP */
+        hu_error_t e = hu_scheduler_enqueue(s->s, &job);
+        if (e != HU_OK)
+            return e;
+    }
+    return HU_OK;
 }
 
 hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
