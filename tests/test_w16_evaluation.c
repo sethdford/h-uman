@@ -15,8 +15,10 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static hu_allocator_t g_alloc;
 static hu_allocator_t *A(void) {
@@ -47,6 +49,10 @@ static const hu_evaluation_metric_t *find_metric(const hu_evaluation_run_report_
 /* ── 1. LoCoMo on synthetic dataset ─────────────────────────────────────── */
 
 static void test_w16_locomo_runs_on_synthetic_dataset(void) {
+    /* Pin to synthetic by pointing HU_EVAL_DATA_DIR at a guaranteed-empty
+     * directory; any real corpus the host might have at ~/.human/... must
+     * not bleed into this test. */
+    setenv("HU_EVAL_DATA_DIR", "/tmp/hu_w16_no_corpus_dir", 1);
     hu_evaluation_t e1 = {0};
     HU_ASSERT_EQ(make_locomo(A(), &e1), HU_OK);
     HU_ASSERT_NOT_NULL(e1.vtable);
@@ -63,6 +69,11 @@ static void test_w16_locomo_runs_on_synthetic_dataset(void) {
     HU_ASSERT(p1->score >= 0.0 && p1->score <= 1.0);
     HU_ASSERT_GT((long long)p1->sample_count, 0);
 
+    /* Synthetic-mode runs annotate real_corpus = 0.0. */
+    const hu_evaluation_metric_t *rc1 = find_metric(&r1, "real_corpus");
+    HU_ASSERT_NOT_NULL(rc1);
+    HU_ASSERT_FLOAT_EQ(rc1->score, 0.0, 1e-9);
+
     /* Determinism: a second run on a fresh instance must match. */
     hu_evaluation_t e2 = {0};
     HU_ASSERT_EQ(make_locomo(A(), &e2), HU_OK);
@@ -76,6 +87,91 @@ static void test_w16_locomo_runs_on_synthetic_dataset(void) {
     hu_evaluation_report_free(A(), &r2);
     hu_evaluation_close(&e1);
     hu_evaluation_close(&e2);
+    unsetenv("HU_EVAL_DATA_DIR");
+}
+
+/* ── 1b. LoCoMo loads a real-corpus JSON when present ────────────────────── */
+
+static void test_w16_locomo_loads_real_corpus_from_disk(void) {
+    /* Write a 3-item JSON corpus to a fresh tmp dir, point
+     * HU_EVAL_DATA_DIR at that dir, and assert the suite uses it. */
+    char dir_template[] = "/tmp/hu_w16_locomo_corpus_XXXXXX";
+    char *dir = mkdtemp(dir_template);
+    HU_ASSERT_NOT_NULL(dir);
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/locomo.json", dir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    const char *body =
+        "{\n"
+        "  \"name\": \"locomo\",\n"
+        "  \"version\": 1,\n"
+        "  \"items\": [\n"
+        "    {\"fact_id\": \"a1\", \"fact\": \"Mara grew up in Reykjavik.\","
+        " \"query\": \"where did mara grow up?\", \"expected_id\": \"a1\"},\n"
+        "    {\"fact_id\": \"a2\", \"fact\": \"Theo collects vintage radios.\","
+        " \"query\": \"what does theo collect?\", \"expected_id\": \"a2\"},\n"
+        "    {\"fact_id\": \"a3\", \"fact\": \"Niamh runs ultras every spring.\","
+        " \"query\": \"what does niamh run?\", \"expected_id\": \"a3\"}\n"
+        "  ]\n"
+        "}\n";
+    fwrite(body, 1, strlen(body), f);
+    fclose(f);
+
+    setenv("HU_EVAL_DATA_DIR", dir, 1);
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_locomo(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+
+    HU_ASSERT_EQ((int)r.prompts_total, 3);
+    const hu_evaluation_metric_t *real = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(real);
+    HU_ASSERT_FLOAT_EQ(real->score, 1.0, 1e-9);
+    const hu_evaluation_metric_t *p = find_metric(&r, "precision_at_1");
+    HU_ASSERT_NOT_NULL(p);
+    /* Each query word-overlaps perfectly with its own fact, so all 3
+     * should be retrieved correctly. */
+    HU_ASSERT_FLOAT_EQ(p->score, 1.0, 1e-9);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+    (void)remove(path);
+    (void)rmdir(dir);
+}
+
+/* ── 1c. LoCoMo gracefully falls back when JSON is malformed ─────────────── */
+
+static void test_w16_locomo_falls_back_when_corpus_malformed(void) {
+    char dir_template[] = "/tmp/hu_w16_locomo_bad_XXXXXX";
+    char *dir = mkdtemp(dir_template);
+    HU_ASSERT_NOT_NULL(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/locomo.json", dir);
+    FILE *f = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(f);
+    /* Missing the "items" key — loader returns HU_ERR_TOOL_VALIDATION,
+     * suite must fall back to synthetic and still report. */
+    fputs("{\"name\": \"locomo\", \"version\": 1}\n", f);
+    fclose(f);
+
+    setenv("HU_EVAL_DATA_DIR", dir, 1);
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_locomo(A(), &e), HU_OK);
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+    HU_ASSERT_EQ((int)r.prompts_total, 10);
+    const hu_evaluation_metric_t *real = find_metric(&r, "real_corpus");
+    HU_ASSERT_NOT_NULL(real);
+    HU_ASSERT_FLOAT_EQ(real->score, 0.0, 1e-9);
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+    unsetenv("HU_EVAL_DATA_DIR");
+    (void)remove(path);
+    (void)rmdir(dir);
 }
 
 /* ── 2. MINJA: W1 trust scorer blocks adversarial inputs ────────────────── */
@@ -441,6 +537,8 @@ void run_w16_evaluation_tests(void) {
     HU_TEST_SUITE(
         "W16 evaluation - continuous benchmark suite (locomo/longmem/dmr/minja/mab/frontier)");
     HU_RUN_TEST(test_w16_locomo_runs_on_synthetic_dataset);
+    HU_RUN_TEST(test_w16_locomo_loads_real_corpus_from_disk);
+    HU_RUN_TEST(test_w16_locomo_falls_back_when_corpus_malformed);
     HU_RUN_TEST(test_w16_minja_attack_blocked_by_w1_write_trust);
     HU_RUN_TEST(test_w16_frontier_compare_pairs_match);
     HU_RUN_TEST(test_w16_regression_gate_fails_on_synthetic_drop);

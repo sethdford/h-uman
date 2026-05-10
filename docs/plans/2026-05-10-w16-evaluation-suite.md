@@ -50,16 +50,35 @@ The full type definitions live in the v1 W6 spec and the future header `include/
 
 ## Datasets
 
-Each suite's dataset lives in `eval_suites/<suite>/`:
+Real corpora live under `$HU_EVAL_DATA_DIR/<suite>.json` (default
+`~/.human/eval-datasets/<suite>.json`). Schema:
 
-- `eval_suites/locomo/` — conversation files.
-- `eval_suites/longmemeval/` — annotated 5-task split.
-- `eval_suites/dmr/` — corpus + queries + judgments.
-- `eval_suites/minja/` — adversarial poisoning prompts.
-- `eval_suites/memoryagentbench/` — multi-agent scenarios.
-- `eval_suites/frontier_compare/` — paired transcripts.
+```json
+{
+  "name": "<suite>",
+  "version": 1,
+  "items": [ ...suite-specific objects... ]
+}
+```
 
-Datasets fetched via `scripts/fetch-evaluation-datasets.sh` (gated by env var since some require API).
+Each backend tries to load this file first and falls back to its inline
+synthetic split when the file is absent or malformed. The
+`real_corpus` metric in each report records which path was taken
+(`1.0` = real corpus, `0.0` = synthetic).
+
+| Suite | Disk loader landed | Fetcher landed |
+|-------|---------------------|----------------|
+| locomo | ✅ `evaluation_dataset_loader.c` | ✅ `scripts/fetch-evaluation-datasets.sh --suite locomo` |
+| longmemeval | ⏳ pending | ⏳ pending |
+| dmr | ⏳ pending | ⏳ pending |
+| minja | ⏳ pending (uses W1 trust scorer offline) | ⏳ pending |
+| memoryagentbench | ⏳ stub | ⏳ stub |
+| frontier_compare | ⏳ stub | ⏳ stub (live API gated) |
+
+Source URLs (LoCoMo: https://github.com/snap-stanford/locomo, MIT)
+documented inline in the fetch script. Each download is checksum-pinned
+where upstream offers stable hashes; mismatches abort with no on-disk
+side effect.
 
 ## CI workflow
 

@@ -637,6 +637,7 @@ set(HU_CORE_SOURCES
     src/agent/autodream_runner.c
     src/agent/case_based.c
     src/agent/response_verifier.c
+    src/agent/response_guard.c
     src/agent/verifier_metrics.c
     src/agent/world_model_bridge.c
     src/persona/persona_deltas.c
@@ -881,6 +882,7 @@ list(APPEND HU_CORE_SOURCES
     src/eval.c
     src/eval/consistency.c
     src/evaluation/evaluation.c
+    src/evaluation/evaluation_dataset_loader.c
     src/evaluation/evaluation_locomo.c
     src/evaluation/evaluation_longmemeval.c
     src/evaluation/evaluation_dmr.c
@@ -2272,6 +2274,8 @@ set(HU_TEST_SOURCES
     tests/test_daemon_housekeeping.c
     tests/test_orphan_channel_audit.c
     tests/test_verifier_metrics.c
+    tests/test_response_guard.c
+    tests/test_response_guard_retry.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
     tests/test_w8_belief_layer.c

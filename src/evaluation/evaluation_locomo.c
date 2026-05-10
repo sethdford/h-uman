@@ -1,19 +1,25 @@
 /* W16 — LoCoMo backend.
  *
  * Real LoCoMo (arxiv 2402.17753) is a 35-session, 9000-token long-conversation
- * recall benchmark. The fetcher is gated behind
- * `scripts/fetch-evaluation-datasets.sh` and licensing review; this commit
- * ships a 10-item synthetic recall set inline so the harness, regression
- * gate, and CI workflow can be exercised offline.
+ * recall benchmark. When the real corpus is available at
+ * `$HU_EVAL_DATA_DIR/locomo.json` (or `~/.human/eval-datasets/locomo.json`)
+ * the suite scores against it; otherwise it falls back to the inline
+ * 10-item synthetic recall set so the harness, regression gate, and CI
+ * workflow can be exercised offline.
  *
- * Score: precision@1 over the synthetic recall queries. For each query we
- * pick the candidate fact whose word overlap with the query is highest; the
- * pick is correct iff it equals the bundled ground-truth fact id. Ties are
- * broken by the first occurrence in the dataset, which keeps the score
+ * Use `scripts/fetch-evaluation-datasets.sh locomo` to populate the real
+ * corpus. The fetcher downloads the official upstream JSON and transforms
+ * it into our schema (see evaluation_dataset_loader.h).
+ *
+ * Score: precision@1 over the recall queries. For each query we pick the
+ * candidate fact whose word overlap with the query is highest; the pick is
+ * correct iff it equals the bundled ground-truth fact id. Ties are broken
+ * by the first occurrence in the dataset, which keeps the score
  * deterministic across runs.
  */
 
 #include "human/evaluation/evaluation.h"
+#include "evaluation_dataset_loader.h"
 #include "evaluation_internal.h"
 
 #include "human/core/allocator.h"
@@ -61,9 +67,25 @@ static const locomo_item_t LOCOMO_ITEMS[] = {
 
 static const size_t LOCOMO_N = sizeof(LOCOMO_ITEMS) / sizeof(LOCOMO_ITEMS[0]);
 
+/* Working-set view: either points at the inline LOCOMO_ITEMS (synthetic)
+ * or at a heap-allocated array materialised from a real on-disk corpus.
+ * We unify the two so the scoring loop is identical. */
 typedef struct {
-    /* No instance state beyond the wrapper; backend reads only constants. */
-    int unused;
+    const char *fact_id;
+    const char *fact;
+    const char *query;
+    const char *expected_id;
+} locomo_view_t;
+
+typedef struct {
+    /* When loaded != 0 the working set is a real corpus and `owned`
+     * holds the malloc-owned strings to be freed at deinit. When loaded
+     * == 0 the working set is the inline synthetic table and there is
+     * nothing to free. */
+    int loaded;
+    locomo_view_t *items;
+    size_t count;
+    hu_eval_locomo_dataset_t owned;
 } locomo_ctx_t;
 
 /* ── word-overlap retriever ─────────────────────────────────────────────── */
@@ -115,17 +137,17 @@ static int word_overlap(const char *query, const char *fact) {
     return matches;
 }
 
-static const char *retrieve_top1(const char *query) {
+static const char *retrieve_top1(const locomo_view_t *items, size_t n, const char *query) {
     int best = -1;
     size_t best_idx = 0;
-    for (size_t i = 0; i < LOCOMO_N; i++) {
-        int score = word_overlap(query, LOCOMO_ITEMS[i].fact);
+    for (size_t i = 0; i < n; i++) {
+        int score = word_overlap(query, items[i].fact);
         if (score > best) {
             best = score;
             best_idx = i;
         }
     }
-    return best > 0 ? LOCOMO_ITEMS[best_idx].fact_id : NULL;
+    return best > 0 ? items[best_idx].fact_id : NULL;
 }
 
 /* ── vtable ─────────────────────────────────────────────────────────────── */
@@ -144,29 +166,82 @@ static int64_t now_ms(void) {
     return (int64_t)time(NULL) * 1000;
 }
 
-static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_report_t *out) {
-    (void)ctx;
-    if (!alloc || !out)
-        return HU_ERR_INVALID_ARGUMENT;
+/* Materialise the working set from the on-disk corpus, falling back to
+ * the inline synthetic table when no real corpus is present. */
+static hu_error_t locomo_ensure_working_set(locomo_ctx_t *c, hu_allocator_t *alloc) {
+    if (c->items)
+        return HU_OK;
+    hu_error_t err = hu_eval_locomo_load(alloc, &c->owned);
+    if (err == HU_OK && c->owned.count > 0) {
+        locomo_view_t *view = (locomo_view_t *)alloc->alloc(
+            alloc->ctx, c->owned.count * sizeof(locomo_view_t));
+        if (!view) {
+            hu_eval_locomo_free(alloc, &c->owned);
+            return HU_ERR_OUT_OF_MEMORY;
+        }
+        for (size_t i = 0; i < c->owned.count; i++) {
+            view[i].fact_id = c->owned.items[i].fact_id;
+            view[i].fact = c->owned.items[i].fact;
+            view[i].query = c->owned.items[i].query;
+            view[i].expected_id = c->owned.items[i].expected_id;
+        }
+        c->items = view;
+        c->count = c->owned.count;
+        c->loaded = 1;
+        return HU_OK;
+    }
+    /* Missing corpus or schema mismatch: fall back to inline synthetic. */
+    locomo_view_t *view =
+        (locomo_view_t *)alloc->alloc(alloc->ctx, LOCOMO_N * sizeof(locomo_view_t));
+    if (!view)
+        return HU_ERR_OUT_OF_MEMORY;
+    for (size_t i = 0; i < LOCOMO_N; i++) {
+        view[i].fact_id = LOCOMO_ITEMS[i].fact_id;
+        view[i].fact = LOCOMO_ITEMS[i].fact;
+        view[i].query = LOCOMO_ITEMS[i].query;
+        view[i].expected_id = LOCOMO_ITEMS[i].expected_id;
+    }
+    c->items = view;
+    c->count = LOCOMO_N;
+    c->loaded = 0;
+    return HU_OK;
+}
 
-    hu_error_t err = hu_evaluation_report_init(alloc, "locomo", out);
+static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run_report_t *out) {
+    if (!alloc || !out || !ctx)
+        return HU_ERR_INVALID_ARGUMENT;
+    locomo_ctx_t *c = (locomo_ctx_t *)ctx;
+
+    hu_error_t err = locomo_ensure_working_set(c, alloc);
+    if (err != HU_OK)
+        return err;
+
+    err = hu_evaluation_report_init(alloc, "locomo", out);
     if (err != HU_OK)
         return err;
     out->started_at_ms = now_ms();
 
     size_t correct = 0;
-    for (size_t i = 0; i < LOCOMO_N; i++) {
-        const char *pick = retrieve_top1(LOCOMO_ITEMS[i].query);
-        if (pick && strcmp(pick, LOCOMO_ITEMS[i].expected_id) == 0)
+    for (size_t i = 0; i < c->count; i++) {
+        const char *pick = retrieve_top1(c->items, c->count, c->items[i].query);
+        if (pick && strcmp(pick, c->items[i].expected_id) == 0)
             correct++;
     }
 
-    out->prompts_total = LOCOMO_N;
+    out->prompts_total = c->count;
     out->prompts_passed = correct;
-    out->prompts_failed = LOCOMO_N - correct;
+    out->prompts_failed = c->count - correct;
 
-    double precision_at_1 = (double)correct / (double)LOCOMO_N;
-    err = hu_evaluation_report_add_metric(alloc, out, "precision_at_1", precision_at_1, LOCOMO_N);
+    double precision_at_1 = (double)correct / (double)c->count;
+    err = hu_evaluation_report_add_metric(alloc, out, "precision_at_1", precision_at_1, c->count);
+    if (err != HU_OK) {
+        hu_evaluation_report_free(alloc, out);
+        return err;
+    }
+    /* Annotate which corpus was used so report consumers (CI, regression
+     * gate, dashboards) can tell synthetic from real. */
+    err = hu_evaluation_report_add_metric(alloc, out, "real_corpus",
+                                          c->loaded ? 1.0 : 0.0, c->count);
     if (err != HU_OK) {
         hu_evaluation_report_free(alloc, out);
         return err;
@@ -178,6 +253,13 @@ static hu_error_t locomo_run(void *ctx, hu_allocator_t *alloc, hu_evaluation_run
 static void locomo_deinit(void *ctx, hu_allocator_t *alloc) {
     if (!ctx || !alloc)
         return;
+    locomo_ctx_t *c = (locomo_ctx_t *)ctx;
+    if (c->items) {
+        alloc->free(alloc->ctx, c->items, c->count * sizeof(locomo_view_t));
+        c->items = NULL;
+    }
+    if (c->loaded)
+        hu_eval_locomo_free(alloc, &c->owned);
     alloc->free(alloc->ctx, ctx, sizeof(locomo_ctx_t));
 }
 
