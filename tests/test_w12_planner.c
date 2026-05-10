@@ -880,6 +880,7 @@ static void test_w12_multi_hop_returns_records_or_empty(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_RELATION;
+    q.variant = HU_MEMORY_QUERY_AUTO;
     q.contact_id = "u1";
     q.contact_id_len = 2;
 
@@ -901,6 +902,7 @@ static void test_w12_multi_hop_null_args_rejected(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_AUTO;
 
     HU_ASSERT_EQ(hu_planner_multi_hop(NULL, A(), &q, 2, &out, &n),
                  HU_ERR_INVALID_ARGUMENT);

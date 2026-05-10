@@ -78,6 +78,8 @@ rg -c 'hu_memory_query_t' src --glob '*.c' | sort -t: -k2 -n
 
 **Interpretation:** every file in the result set should be reviewed so each stack `hu_memory_query_t` sets **`variant`** consistently with `kind` and the active union member. This index does **not** replace line-by-line review; it tells you **where** to look.
 
+**Track B1 (2026-05-10):** Line-by-line pass completed for `src/**/*.c` call sites plus GDPR export generic loop in `src/memory/memory.c` (`HU_MEMORY_QUERY_WINDOW` for full-range window reads). Representative tests now set **`variant`** explicitly in `tests/test_w7_memory_facade.c` and `tests/test_w12_planner.c`. `src/persona/`, `src/feeds/`, and `src/channels/` contain **no** `hu_memory_query_t` references (B1.c N/A).
+
 ---
 
 ## Appendix B — Maintenance

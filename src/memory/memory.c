@@ -329,10 +329,28 @@ hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m) {
     return (m != NULL) ? m->graph : NULL;
 }
 
+hu_error_t hu_memory_v1_graph_open(hu_allocator_t *alloc, const char *db_path, size_t db_path_len,
+                                   struct hu_graph **out) {
+    if (!alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    return hu_graph_open(alloc, db_path, db_path_len, (hu_graph_t **)out);
+}
+
+void hu_memory_v1_graph_close(struct hu_graph *g, hu_allocator_t *alloc) {
+    if (!g || !alloc)
+        return;
+    hu_graph_close((hu_graph_t *)g, alloc);
+}
+
 #ifdef HU_ENABLE_SQLITE
 struct sqlite3 *hu_memory_facade_sqlite_db(hu_memory_facade_t *m) {
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
     return g ? hu_graph_sqlite_connection(g) : NULL;
+}
+
+struct sqlite3 *hu_memory_sqlite_from_graph(struct hu_graph *g) {
+    return hu_graph_sqlite_connection((hu_graph_t *)g);
 }
 #endif
 
@@ -561,6 +579,7 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
         hu_memory_query_t q;
         memset(&q, 0, sizeof(q));
         q.kind = kind;
+        q.variant = HU_MEMORY_QUERY_WINDOW;
         q.as.window.from_ts = 0;
         q.as.window.to_ts = INT64_MAX;
         q.as.window.limit = 10000;

@@ -256,7 +256,7 @@ Interpretation: **Track C** helps **Track B** (documentation of what “correct�
 | Track | Phase | Status | Last proof (link or commit) |
 |-------|-------|--------|----------------------------|
 | A | A0 | `done` | ADR [`adr/2026-05-10-w10-kv-replay-deferred.md`](adr/2026-05-10-w10-kv-replay-deferred.md) — replay deferred |
-| B | B0 | `in_progress` | Count snapshot in [`2026-05-10-memory-v2-evidence-index.md`](2026-05-10-memory-v2-evidence-index.md) appendix A |
+| B | B0–B1 | `done` | `rg` inventory (appendix A) + fixes: `src/memory/memory.c` export loop, `tests/test_w7_memory_facade.c`, `tests/test_w12_planner.c`; `./build/human_tests` 9564/9564 |
 | C | C0 | `done` | Evidence index file (same commit family) |
 | D | D0 | `pending` | — |
 | E | E0 | `pending` | — |

@@ -70,6 +70,7 @@ static void test_w7_unsupported_kind_returns_not_supported(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_KV_CACHE;
+    q.variant = HU_MEMORY_QUERY_AUTO;
     q.contact_id = "u1";
     q.contact_id_len = 2;
     hu_memory_record_t *out = NULL;
@@ -115,6 +116,7 @@ static void test_w7_entity_read_by_name_routes_to_v1(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_BY_NAME;
     q.contact_id = "u1";
     q.contact_id_len = 2;
     q.as.by_name.name = "Alice";
@@ -144,6 +146,7 @@ static void test_w7_entity_read_unknown_returns_zero(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_BY_NAME;
     q.contact_id = "u1";
     q.contact_id_len = 2;
     q.as.by_name.name = "Nobody";
@@ -179,6 +182,7 @@ static void test_w7_relation_list_routes_to_v1(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_RELATION;
+    q.variant = HU_MEMORY_QUERY_AUTO;
     q.contact_id = "u1";
     q.contact_id_len = 2;
     /* leave window unset; backend defaults to list_relations top-K */
@@ -221,6 +225,7 @@ static void test_w7_relation_window_query_routes(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_RELATION;
+    q.variant = HU_MEMORY_QUERY_WINDOW;
     q.contact_id = "u1";
     q.contact_id_len = 2;
     q.as.window.from_ts = 1734000000000LL;
@@ -271,6 +276,7 @@ static void test_w7_register_backend_replaces_existing(void) {
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_ENTITY;
+    q.variant = HU_MEMORY_QUERY_BY_NAME;
     q.contact_id = "u1";
     q.contact_id_len = 2;
     q.as.by_name.name = "Alice";
