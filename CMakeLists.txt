@@ -33,6 +33,12 @@ option(HU_ENABLE_PERSONA "Enable persona system" ON)
 option(HU_ENABLE_AUTHENTIC "Build authentic existence features" OFF)
 option(HU_ENABLE_CARTESIA "Enable Cartesia TTS for voice messages" OFF)
 option(HU_ENABLE_ML "Build ML training subsystem (BPE tokenizer, dataloader, experiment loop)" OFF)
+# W13: learning loop (LoRA + DPO from W4/W5/W3 signals). Defaults follow ML.
+if(HU_ENABLE_ML)
+    option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" ON)
+else()
+    option(HU_ENABLE_LEARNING "Build W13 learning loop (hu_learner_t + CPU/MLX/ggml backends)" OFF)
+endif()
 option(HU_ENABLE_FEEDS "Build feed ingestion and research agent" OFF)
 option(HU_ENABLE_SOCIAL "Build social feed ingestion (Facebook, Instagram)" OFF)
 option(HU_ENABLE_EMBEDDED_MODEL "Enable embedded model provider (llama.cpp/llama-cli)" OFF)
@@ -1124,6 +1130,17 @@ if(HU_ENABLE_ML)
     endif()
 endif()
 
+# W13: learning loop sources (vtable dispatcher, CPU backend, MLX/ggml stubs).
+# Gated independently from HU_ENABLE_ML so tests can opt-in even on minimal builds.
+if(HU_ENABLE_LEARNING)
+    list(APPEND HU_CORE_SOURCES
+        src/ml/learner.c
+        src/ml/learner_cpu.c
+        src/ml/learner_mlx.c
+        src/ml/learner_ggml.c
+    )
+endif()
+
 # Data loader (always compiled)
 list(APPEND HU_CORE_SOURCES
     src/data/loader.c
@@ -1267,6 +1284,9 @@ if(HU_ENABLE_CARTESIA)
 endif()
 if(HU_ENABLE_ML)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_ML=1)
+endif()
+if(HU_ENABLE_LEARNING)
+    target_compile_definitions(human_core PRIVATE HU_ENABLE_LEARNING=1)
 endif()
 if(HU_ENABLE_MCP)
     target_compile_definitions(human_core PRIVATE HU_ENABLE_MCP=1)
@@ -1829,6 +1849,10 @@ if(NOT HU_ENABLE_ML)
         src/ml/lora.c src/ml/agent_trainer.c src/ml/training_data.c
         src/providers/huml.c)
 endif()
+if(NOT HU_ENABLE_LEARNING)
+    list(APPEND HU_TEST_EXTRA_MODULES
+        src/ml/learner.c src/ml/learner_cpu.c src/ml/learner_mlx.c src/ml/learner_ggml.c)
+endif()
 # Phase 7 modules (experience, forgetting, weakness) — tests need them when SQLite is OFF (minimal build)
 if(NOT HU_ENABLE_SQLITE)
     list(APPEND HU_TEST_EXTRA_MODULES
@@ -1856,7 +1880,7 @@ if(HU_ENABLE_CARTESIA)
 endif()
 target_compile_definitions(human_core_test PRIVATE HU_ENABLE_PERSONA=1)
 # Tests always have all module groups available
-target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_ENABLE_ML=1)
+target_compile_definitions(human_core_test PRIVATE HU_HAS_PERIPHERALS=1 HU_HAS_TUNNELS=1 HU_HAS_RUNTIME_EXOTIC=1 HU_HAS_TOOLS_BROWSER=1 HU_HAS_TOOLS_ADVANCED=1 HU_HAS_OTEL=1 HU_HAS_CRON=1 HU_HAS_PUSH=1 HU_HAS_UPDATE=1 HU_HAS_SKILLS=1 HU_HAS_PERSONA=1 HU_ENABLE_ML=1 HU_ENABLE_LEARNING=1)
 target_compile_options(human_core_test PRIVATE -UNDEBUG)
 if(Threads_FOUND)
     target_link_libraries(human_core_test PUBLIC Threads::Threads)
@@ -2234,6 +2258,7 @@ set(HU_TEST_SOURCES
     tests/test_w10_neural_memory.c
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
+    tests/test_w13_learner.c
     tests/test_w15_keystore.c
     tests/test_fast_capture.c
     tests/test_promotion.c
@@ -2604,7 +2629,7 @@ endif()
 if(HU_ENABLE_FIPS_CRYPTO)
     target_compile_definitions(human_tests PRIVATE HU_ENABLE_FIPS_CRYPTO=1)
 endif()
-target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1)
+target_compile_definitions(human_tests PRIVATE HU_ENABLE_ML=1 HU_ENABLE_LEARNING=1)
 
 # Keep assert() active in tests even for Release/MinSizeRel builds (which define NDEBUG).
 # Five test files use libc assert() for guards; without this, those asserts become no-ops
