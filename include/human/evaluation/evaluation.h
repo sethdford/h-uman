@@ -168,6 +168,23 @@ hu_error_t hu_evaluation_minja(hu_allocator_t *alloc, hu_evaluation_t *out);
 hu_error_t hu_evaluation_memoryagentbench(hu_allocator_t *alloc, hu_evaluation_t *out);
 hu_error_t hu_evaluation_frontier_compare(hu_allocator_t *alloc, hu_evaluation_t *out);
 
+/* facade-recall: the only backend that exercises the *production* v2 stack
+ * (W7 facade + W9 world model + W12 heuristic planner + W12 executor) against
+ * a LoCoMo-style synthetic fact-recall dataset.
+ *
+ * Every other backend in this header measures a *self-contained* retriever
+ * (its own cosine index, its own word-overlap scorer). They prove the
+ * benchmark plumbing works but cannot tell us whether *our* memory subsystem
+ * meets the success thresholds in the v2 roadmap.
+ *
+ * facade-recall seeds an in-memory SQLite facade with 12 (subject, predicate,
+ * object) facts, then for each query: builds the world model, runs the W12
+ * heuristic planner, executes the plan, and scores precision_at_1 plus
+ * recall_at_5 / recall_at_10 against the expected entity ids. The score is
+ * the production stack's actual performance on a deterministic offline
+ * corpus. Requires HU_ENABLE_SQLITE; otherwise returns HU_ERR_NOT_SUPPORTED. */
+hu_error_t hu_evaluation_facade_recall(hu_allocator_t *alloc, hu_evaluation_t *out);
+
 /* Adapter that wraps the legacy task-list framework (`include/human/eval.h`,
  * `src/eval.c`) behind the W16 vtable. Lets the `human eval --w16
  * legacy-bridge` CLI surface exercise the W16 dispatcher end-to-end. The

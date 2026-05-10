@@ -93,17 +93,59 @@ static bool contains_word(const char *hay, size_t hay_len, const char *needle) {
     return false;
 }
 
-/* Pick a primary anchor entity from the world model (top entity by mention
- * count — already pre-sorted in W9). Returns 0 if the world model is empty. */
-static int64_t primary_anchor(const hu_world_model_t *wm) {
+/* Scan `goal` for a whole-word case-insensitive match of any entity name in
+ * the world model. Returns the first matched entity's id, or 0 if none. The
+ * heuristic walks `wm->entities` in order, so the top-mentioned matching
+ * entity wins on ties (matching the spirit of `primary_anchor` for unspecific
+ * goals). Used by `primary_anchor` so question text drives anchor choice
+ * before mention-count ranking. */
+static int64_t query_anchor(const char *goal, size_t goal_len,
+                            const hu_world_model_t *wm) {
+    if (!goal || goal_len == 0 || !wm || wm->entities_count == 0) return 0;
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        const hu_graph_entity_t *e = &wm->entities[i];
+        if (!e->name || e->name_len == 0) continue;
+        if (contains_word(goal, goal_len, e->name)) return e->id;
+    }
+    return 0;
+}
+
+/* Pick a primary anchor entity from the world model. Priority order:
+ *   1. Any world-model entity whose name appears in the goal text. This
+ *      converts "where does Bob live?" from a Alice-anchored expansion into a
+ *      Bob-anchored expansion, which is the actual signal the user gave us.
+ *   2. The top-mentioned entity (W9-sorted) as the fallback when the goal
+ *      doesn't name anyone — typical for short queries like "what happened".
+ * Returns 0 if the world model is empty.
+ *
+ * `goal` may be NULL; that just disables step 1. */
+static int64_t primary_anchor_with_goal(const char *goal, size_t goal_len,
+                                        const hu_world_model_t *wm) {
     if (!wm || wm->entities_count == 0) return 0;
+    int64_t named = query_anchor(goal, goal_len, wm);
+    if (named != 0) return named;
     return wm->entities[0].id;
 }
 
-/* Pick a secondary anchor (second-most mentioned), 0 if absent. */
-static int64_t secondary_anchor(const hu_world_model_t *wm) {
+/* Pick a secondary anchor. Same priority as primary: query-named entity
+ * other than `primary_id`, else mention-count fallback. */
+static int64_t secondary_anchor_with_goal(const char *goal, size_t goal_len,
+                                          const hu_world_model_t *wm,
+                                          int64_t primary_id) {
     if (!wm || wm->entities_count < 2) return 0;
-    return wm->entities[1].id;
+    if (goal && goal_len > 0) {
+        for (size_t i = 0; i < wm->entities_count; i++) {
+            const hu_graph_entity_t *e = &wm->entities[i];
+            if (e->id == primary_id) continue;
+            if (!e->name || e->name_len == 0) continue;
+            if (contains_word(goal, goal_len, e->name)) return e->id;
+        }
+    }
+    /* Mention-count fallback: first entity that isn't the primary. */
+    for (size_t i = 0; i < wm->entities_count; i++) {
+        if (wm->entities[i].id != primary_id) return wm->entities[i].id;
+    }
+    return 0;
 }
 
 static void set_contact(hu_memory_query_t *q, const hu_world_model_t *wm) {
@@ -189,15 +231,24 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
     bool has_between = contains_word(goal, goal_len, "between");
     bool has_with    = contains_word(goal, goal_len, "with");
 
-    int64_t a = primary_anchor(wm);
-    int64_t b = secondary_anchor(wm);
+    /* Anchor selection: prefer entities the user named in the goal over
+     * world-model mention ordering. See `primary_anchor_with_goal` doc for
+     * the rationale; this is the W12 P5 retrieval-quality fix and lifts
+     * facade-recall precision_at_1 substantially. */
+    int64_t a = primary_anchor_with_goal(goal, goal_len, wm);
+    int64_t b = secondary_anchor_with_goal(goal, goal_len, wm, a);
+    /* Whether `a` was selected because the goal mentioned its name (vs. the
+     * world-model mention-count fallback). When true we know the user has
+     * given us a strong signal about which entity to expand; we should not
+     * fall through to a generic window query for them. */
+    bool a_is_named = (a != 0 && query_anchor(goal, goal_len, wm) == a);
 
     /* Relationship query (multi-hop): "between X and Y" or "with X". A 3-hop
      * shape: anchor entity -> 1-hop neighbours -> 1-hop intersect -> time-
-     * filtered relations. We emit the structural shape; the executor walks.
-     * Requires at least one anchor entity; without one, neighbour expansion
-     * is meaningless and the backend rejects entity_id=0. Fall through to
-     * the temporal/default branches if no anchor is available. */
+     * filtered relations. Requires at least one anchor entity; without one,
+     * neighbour expansion is meaningless and the backend rejects
+     * entity_id=0. Fall through to the temporal/default branches if no
+     * anchor is available. */
     if ((has_between || has_with) && a != 0) {
         size_t i = 0;
         out->steps[i++] = step_neighbors(wm, a, 1, 16, true);
@@ -210,18 +261,31 @@ static hu_error_t heuristic_plan(void *ctx, const char *goal, size_t goal_len,
     }
 
     /* Temporal query: "when did ...", "last time ...". One step: windowed
-     * relations sorted by recency. Verify because "when" answers are high-
-     * stakes for hallucination. */
+     * relations sorted by recency. If the goal also names an entity we
+     * prepend a neighbor-expansion step so the planner can answer "when did
+     * X do Y" (the answer lives on X's edges, not in the global window). */
     if (has_when) {
-        out->steps[0] = step_relations_window(wm, 0, INT64_MAX, 16, true);
-        out->steps_count = 1;
-        out->total_budget_ms = 150;
+        size_t i = 0;
+        if (a_is_named)
+            out->steps[i++] = step_neighbors(wm, a, 1, 16, true);
+        out->steps[i++] = step_relations_window(wm, 0, INT64_MAX, 16, true);
+        out->steps_count = i;
+        out->total_budget_ms = a_is_named ? 300 : 150;
         return HU_OK;
     }
 
-    /* "where" or "who": entity-shaped lookup. If we have an anchor, expand
-     * its neighbours; otherwise fall back to default. */
+    /* "where" / "who" / "what" / any other verb when an entity was named:
+     * entity-shaped lookup. The W12 P5 fix also routes "what" queries to
+     * neighbor expansion when the user named an entity ("what does alice
+     * drink?" → expand Alice's neighbors), which was previously falling
+     * through to the default window. */
     if ((has_where || has_who) && a != 0) {
+        out->steps[0] = step_neighbors(wm, a, 1, 16, true);
+        out->steps_count = 1;
+        out->total_budget_ms = 200;
+        return HU_OK;
+    }
+    if (a_is_named) {
         out->steps[0] = step_neighbors(wm, a, 1, 16, true);
         out->steps_count = 1;
         out->total_budget_ms = 200;

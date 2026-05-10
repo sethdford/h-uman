@@ -36,6 +36,7 @@ static backend_factory_fn make_dmr = hu_evaluation_dmr;
 static backend_factory_fn make_minja = hu_evaluation_minja;
 static backend_factory_fn make_mab = hu_evaluation_memoryagentbench;
 static backend_factory_fn make_frontier = hu_evaluation_frontier_compare;
+static backend_factory_fn make_facade_recall = hu_evaluation_facade_recall;
 
 static const hu_evaluation_metric_t *find_metric(const hu_evaluation_run_report_t *r,
                                                  const char *name) {
@@ -636,6 +637,43 @@ static void test_w16_memoryagentbench_stub_runs_deterministically(void) {
     hu_evaluation_close(&e2);
 }
 
+/* ── 13. Facade-recall — real W7→W9→W12 stack on in-memory graph ─────────── */
+
+static void test_w16_facade_recall_runs_v2_stack(void) {
+    hu_evaluation_t e = {0};
+    HU_ASSERT_EQ(make_facade_recall(A(), &e), HU_OK);
+    HU_ASSERT_NOT_NULL(e.vtable);
+    HU_ASSERT_STR_EQ(hu_evaluation_get_name(&e), "facade-recall");
+
+#ifndef HU_ENABLE_SQLITE
+    HU_ASSERT_FALSE(hu_evaluation_is_available(&e));
+#else
+    HU_ASSERT_TRUE(hu_evaluation_is_available(&e));
+#endif
+
+    hu_evaluation_run_report_t r = {0};
+    HU_ASSERT_EQ(hu_evaluation_run_suite(&e, &r), HU_OK);
+    HU_ASSERT_STR_EQ(r.suite_name, "facade-recall");
+
+#ifdef HU_ENABLE_SQLITE
+    HU_ASSERT_NULL(r.error_summary);
+    HU_ASSERT_GT(r.metrics_count, (size_t)0);
+    HU_ASSERT_GT(r.prompts_total, (size_t)0);
+    const hu_evaluation_metric_t *p1 = find_metric(&r, "precision_at_1");
+    HU_ASSERT_NOT_NULL(p1);
+    HU_ASSERT(p1->score >= 0.0 && p1->score <= 1.0);
+    HU_ASSERT_GT((long long)p1->sample_count, 0);
+    const hu_evaluation_metric_t *r5 = find_metric(&r, "recall_at_5");
+    HU_ASSERT_NOT_NULL(r5);
+    HU_ASSERT(r5->score >= 0.0 && r5->score <= 1.0);
+#else
+    HU_ASSERT_NOT_NULL(r.error_summary);
+#endif
+
+    hu_evaluation_report_free(A(), &r);
+    hu_evaluation_close(&e);
+}
+
 /* ── runner ────────────────────────────────────────────────────────────── */
 
 void run_w16_evaluation_tests(void) {
@@ -657,4 +695,5 @@ void run_w16_evaluation_tests(void) {
     HU_RUN_TEST(test_w16_longmemeval_falls_back_when_corpus_malformed);
     HU_RUN_TEST(test_w16_dmr_recall_at_k_correct_on_known_index);
     HU_RUN_TEST(test_w16_memoryagentbench_stub_runs_deterministically);
+    HU_RUN_TEST(test_w16_facade_recall_runs_v2_stack);
 }

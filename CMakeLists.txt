@@ -905,6 +905,7 @@ list(APPEND HU_CORE_SOURCES
     src/evaluation/evaluation_memoryagentbench.c
     src/evaluation/evaluation_frontier_compare.c
     src/evaluation/evaluation_legacy_bridge.c
+    src/evaluation/evaluation_facade_recall.c
     src/evaluation/evaluation_baseline.c
     src/evaluation/evaluation_regression.c
     src/eval/turing_score.c

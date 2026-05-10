@@ -50,6 +50,9 @@ static const evaluation_factory_entry_t kEvaluationFactories[] = {
      hu_evaluation_frontier_compare},
     {"legacy-bridge", "Legacy task-list framework adapted to W16 vtable",
      hu_evaluation_legacy_bridge},
+    {"facade-recall", "Production v2 stack (facade + planner + executor) "
+                     "scored against LoCoMo-style fact recall",
+     hu_evaluation_facade_recall},
 };
 
 static const size_t kEvaluationFactoriesCount =
