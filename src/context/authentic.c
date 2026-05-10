@@ -262,19 +262,10 @@ hu_error_t hu_life_thread_create_table_sql(char *buf, size_t cap, size_t *out_le
 }
 
 /* Escape single quotes for SQLite: ' -> '' */
-static size_t escape_sql_string(char *out, size_t cap, const char *in, size_t in_len)
-{
-    size_t j = 0;
-    for (size_t i = 0; i < in_len && j + 2 < cap; i++) {
-        if (in[i] == '\'') {
-            out[j++] = '\'';
-            out[j++] = '\'';
-        } else {
-            out[j++] = in[i];
-        }
-    }
-    out[j] = '\0';
-    return j;
+static size_t escape_sql_string(char *out, size_t cap, const char *in, size_t in_len) {
+    size_t n = 0;
+    (void)hu_sql_quote_escape_into(in, in_len, out, cap, &n);
+    return n;
 }
 
 hu_error_t hu_life_thread_insert_sql(const char *thread, size_t thread_len,

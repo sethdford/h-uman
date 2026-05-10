@@ -234,17 +234,7 @@ hu_error_t hu_visual_generate_screenshot(hu_allocator_t *alloc, hu_security_poli
 #define HU_VISUAL_SQL_BUF    4096
 
 static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap, size_t *out_len) {
-    size_t pos = 0;
-    for (size_t i = 0; i < len && pos + 2 < cap; i++) {
-        if (s[i] == '\'') {
-            buf[pos++] = '\'';
-            buf[pos++] = '\'';
-        } else {
-            buf[pos++] = s[i];
-        }
-    }
-    buf[pos] = '\0';
-    *out_len = pos;
+    (void)hu_sql_quote_escape_into(s, len, buf, cap, out_len);
 }
 
 hu_error_t hu_visual_create_table_sql(char *buf, size_t cap, size_t *out_len) {

@@ -6,23 +6,10 @@
 #define HU_PLANNING_ESCAPE_BUF 2048
 
 /* Escape single quotes by doubling for SQL. Writes to out, returns length or 0 on overflow. */
-static size_t escape_sql_string(const char *s, size_t len, char *out, size_t out_cap)
-{
-    size_t j = 0;
-    for (size_t i = 0; i < len && s[i] != '\0'; i++) {
-        if (s[i] == '\'') {
-            if (j + 2 > out_cap)
-                return 0;
-            out[j++] = '\'';
-            out[j++] = '\'';
-        } else {
-            if (j + 1 > out_cap)
-                return 0;
-            out[j++] = s[i];
-        }
-    }
-    out[j] = '\0';
-    return j;
+static size_t escape_sql_string(const char *s, size_t len, char *out, size_t out_cap) {
+    size_t n = 0;
+    (void)hu_sql_quote_escape_into(s, len, out, out_cap, &n);
+    return n;
 }
 
 hu_error_t hu_planning_create_table_sql(char *buf, size_t cap, size_t *out_len)

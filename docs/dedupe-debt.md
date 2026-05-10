@@ -6,7 +6,7 @@ helpers were copy-pasted across the codebase, hitting the project's
 
 | Helper | Copies | Status |
 |--------|-------:|--------|
-| `escape_sql_string` (SQL single-quote escape) | 18 | **Canonical helper added** + 2 modules migrated; see below |
+| `escape_sql_string` (SQL single-quote escape) | 18 | **All 18 migrated to forwarder** (FIX 7 + FIX 13); see below |
 | `to_lower` (ASCII lowercasing) | 7 | Trivial 4-liner; net win is small. Deferred. |
 | `dev_urandom_bytes` (security-internal CSPRNG) | 2 | Security subsystem internal; consolidating crosses module boundaries. Deferred. |
 | `parse_iso_timestamp` (RFC-3339 -> epoch) | 2 | Different return types (`time_t` vs `int64_t`); consolidate when callers harmonize. Deferred. |
@@ -64,7 +64,7 @@ Migrated to the forwarder pattern in FIX 7:
 - `src/agent/proactive_ext.c`
 - `src/memory/cognitive.c`
 
-Pending (15 modules — apply the forwarder pattern, keep call sites):
+Migrated to the forwarder pattern in FIX 13:
 
 - `src/agent/collab_planning.c`
 - `src/agent/conv_goals.c`
@@ -82,6 +82,10 @@ Pending (15 modules — apply the forwarder pattern, keep call sites):
 - `src/memory/knowledge.c`
 - `src/persona/training.c`
 - `src/visual/content.c`
+
+Pending: none. All 18 callers now route through `hu_sql_quote_escape_into`.
+A future sweep commit can delete the static forwarders and inline the
+canonical name at each call site.
 
 ### How to finish the migration
 
