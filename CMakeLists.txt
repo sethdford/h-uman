@@ -631,6 +631,9 @@ set(HU_CORE_SOURCES
     src/agent/retrieval_planner.c
     src/agent/retrieval_planner_llm.c
     src/agent/autodream.c
+    src/agent/scheduler.c
+    src/agent/scheduler_probes.c
+    src/agent/counterfactual.c
     src/agent/case_based.c
     src/agent/response_verifier.c
     src/agent/verifier_metrics.c
@@ -2274,6 +2277,7 @@ set(HU_TEST_SOURCES
     tests/test_w11_self_rag.c
     tests/test_w12_planner.c
     tests/test_w13_learner.c
+    tests/test_w14_scheduler.c
     tests/test_w15_keystore.c
     tests/test_w16_evaluation.c
     tests/test_fast_capture.c
