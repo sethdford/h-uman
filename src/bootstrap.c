@@ -41,7 +41,6 @@
 #include "human/agent/agent_definition.h"
 #include "human/agent/agent_git.h"
 #include "human/agent/instruction_discover.h"
-#include "human/channels/twilio_media.h"
 #include "human/tools/webhook_tools.h"
 #include "human/webhook.h"
 #ifdef HU_HAS_VOICE_CHANNEL
@@ -332,9 +331,6 @@ static void destroy_voice_wrap(hu_channel_t *ch, hu_allocator_t *a) {
     hu_channel_voice_destroy(ch);
 }
 #endif
-static void destroy_twilio_media_wrap(hu_channel_t *ch, hu_allocator_t *a) {
-    hu_twilio_media_destroy(ch, a);
-}
 
 /* Feature 2: Plugin hook registration context (must be before bootstrap_internal) */
 typedef struct {
@@ -1624,28 +1620,10 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
         }
 #endif /* HU_HAS_VOICE_CHANNEL */
 
-        /* Plan 8: Twilio Media Streams (G.711 codec, real-time voice via WebSocket) */
-        if (cfg->channels.twilio.account_sid && cfg->channels.twilio.account_sid[0] &&
-            ch_count < HU_BOOTSTRAP_CHANNELS_MAX) {
-            hu_twilio_media_config_t tmcfg = {
-                .account_sid = cfg->channels.twilio.account_sid,
-                .auth_token = cfg->channels.twilio.auth_token,
-                .phone_number = cfg->channels.twilio.from_number,
-                .voice_webhook_url = NULL,
-                .voice_provider = "gemini_live",
-            };
-            err = hu_twilio_media_create(alloc, &tmcfg, &bi->channel_slots[ch_count]);
-            if (err == HU_OK) {
-                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
-                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
-                bi->channels[ch_count].poll_fn = NULL;
-                bi->channels[ch_count].webhook_fn = NULL;
-                bi->channels[ch_count].interval_ms = 1000u;
-                bi->channels[ch_count].last_poll_ms = 0;
-                bi->channel_destroys[ch_count] = destroy_twilio_media_wrap;
-                ch_count++;
-            }
-        }
+        /* The "twilio_media" channel facade was removed in FIX 5: its send()
+         * was a no-op in production (silently dropped every outbound message)
+         * and it had no inbound path. Real Twilio voice runs through the
+         * voice channel above; SMS through src/channels/twilio.c. */
 
         bi->channel_count = ch_count;
         ctx->channels = bi->channels;

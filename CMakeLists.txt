@@ -759,7 +759,6 @@ set(HU_CORE_SOURCES
     src/channels/format.c
     src/channels/rate_limit.c
     src/channels/channel_embed.c
-    src/channels/twilio_media.c
     src/channels/channel_http.c
     src/channels/webhook.c
     src/security/policy_engine.c
@@ -2036,7 +2035,6 @@ set(HU_TEST_SOURCES
     tests/test_trust_calibration.c
     tests/test_vision_ocr.c
     tests/test_channel_embeds.c
-    tests/test_twilio_media.c
     tests/test_declarative_tools.c
     tests/test_skill_trust.c
     tests/test_agent_modules.c
