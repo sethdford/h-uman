@@ -511,6 +511,11 @@ set(HU_CORE_SOURCES
     src/feeds/processor.c
     src/feeds/awareness.c
     src/context/behavioral.c
+    src/behavior/dialog_act.c
+    src/behavior/affect.c
+    src/behavior/change.c
+    src/behavior/safety.c
+    src/behavior/policy.c
     src/context/repair.c
     src/calibration/timing_analyzer.c
     src/calibration/style_analyzer.c
@@ -969,6 +974,7 @@ list(APPEND HU_CORE_SOURCES
     src/persona/creator.c
     src/persona/cli.c
     src/persona/feedback.c
+    src/persona/eval.c
     src/persona/replay.c
     src/persona/circadian.c
     src/persona/temporal.c
