@@ -9,18 +9,11 @@
 #define HU_COGNITIVE_ESCAPE_BUF 1024
 #define HU_COGNITIVE_SQL_BUF 4096
 
+/* Thin wrapper around hu_sql_quote_escape_into in core/string.h. Kept to
+ * preserve this module's existing void-return call sites during the gradual
+ * dedupe migration tracked in docs/dedupe-debt.md. */
 static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap, size_t *out_len) {
-    size_t pos = 0;
-    for (size_t i = 0; i < len && pos + 2 < cap; i++) {
-        if (s[i] == '\'') {
-            buf[pos++] = '\'';
-            buf[pos++] = '\'';
-        } else {
-            buf[pos++] = s[i];
-        }
-    }
-    buf[pos] = '\0';
-    *out_len = pos;
+    (void)hu_sql_quote_escape_into(s, len, buf, cap, out_len);
 }
 
 static int tolower_char(unsigned char c) {

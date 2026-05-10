@@ -25,4 +25,17 @@ char *hu_strcasestr(const char *haystack, const char *needle);
 size_t hu_buf_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...)
     __attribute__((format(printf, 4, 5)));
 
+/* SQL single-quote escape — doubles each `'` and copies the rest verbatim, a la
+ * SQLite's `'` quoting (`O'Brien` -> `O''Brien`). Writes a null-terminated
+ * string into `dst` and stores the byte count (excluding the null) into
+ * `*out_len`. Truncates silently when `dst_cap` is exhausted; *out_len always
+ * matches what was actually written. Returns HU_ERR_INVALID_ARGUMENT if any
+ * pointer is NULL or `dst_cap == 0`.
+ *
+ * This is the canonical implementation. ~18 modules in src/ each shipped a
+ * private static copy of this function with two slightly different
+ * signatures; see docs/dedupe-debt.md for the migration plan. */
+hu_error_t hu_sql_quote_escape_into(const char *src, size_t src_len, char *dst, size_t dst_cap,
+                                    size_t *out_len);
+
 #endif

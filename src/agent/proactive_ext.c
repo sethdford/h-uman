@@ -6,19 +6,13 @@
 
 #define HU_PROACTIVE_EXT_ESCAPE_BUF 512
 
+/* SQL quote escape now lives in core/string.h as hu_sql_quote_escape_into.
+ * The local wrapper preserves the void-return signature this module's call
+ * sites already expect; callers are intentionally not rewritten here so the
+ * dedupe migration stays a one-line code change per file. */
 static void escape_sql_string(const char *s, size_t len, char *buf, size_t cap,
                               size_t *out_len) {
-    size_t pos = 0;
-    for (size_t i = 0; i < len && pos + 2 < cap; i++) {
-        if (s[i] == '\'') {
-            buf[pos++] = '\'';
-            buf[pos++] = '\'';
-        } else {
-            buf[pos++] = s[i];
-        }
-    }
-    buf[pos] = '\0';
-    *out_len = pos;
+    (void)hu_sql_quote_escape_into(s, len, buf, cap, out_len);
 }
 
 static uint32_t lcg_next(uint32_t *seed) {

@@ -180,3 +180,28 @@ size_t hu_buf_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...) {
         return cap - 1;
     return off + (size_t)n;
 }
+
+hu_error_t hu_sql_quote_escape_into(const char *src, size_t src_len, char *dst, size_t dst_cap,
+                                    size_t *out_len) {
+    if (!dst || dst_cap == 0 || !out_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_len = 0;
+    /* Reserve one byte for the null terminator; every input char may expand
+     * into two output chars (a single quote becomes two). The +2 guard below
+     * mirrors the pattern shipped by every duplicate static copy this
+     * function replaces. */
+    size_t pos = 0;
+    if (src && src_len > 0) {
+        for (size_t i = 0; i < src_len && pos + 2 < dst_cap; i++) {
+            if (src[i] == '\'') {
+                dst[pos++] = '\'';
+                dst[pos++] = '\'';
+            } else {
+                dst[pos++] = src[i];
+            }
+        }
+    }
+    dst[pos] = '\0';
+    *out_len = pos;
+    return HU_OK;
+}

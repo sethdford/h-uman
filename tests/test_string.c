@@ -1,6 +1,10 @@
 #include "human/core/allocator.h"
+#include "human/core/error.h"
 #include "human/core/string.h"
 #include "test_framework.h"
+
+#include <stdint.h>
+#include <string.h>
 
 static void test_strdup(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -202,6 +206,75 @@ static void test_str_contains_self(void) {
     HU_ASSERT_TRUE(hu_str_contains(HU_STR_LIT("hello"), HU_STR_LIT("hello")));
 }
 
+/* hu_sql_quote_escape_into — canonical SQL quote escaper. Replaces 18 private
+ * static copies (FIX 7). The behavior contract these tests pin:
+ *   - doubles every `'` and copies the rest verbatim
+ *   - always null-terminates within dst_cap
+ *   - silently truncates when dst_cap is exhausted, *out_len reflects what was written
+ *   - HU_ERR_INVALID_ARGUMENT on NULL pointers / dst_cap == 0
+ *   - empty / NULL src writes the empty string and *out_len = 0 */
+
+static void test_sql_quote_escape_no_quotes(void) {
+    char buf[64];
+    size_t n = SIZE_MAX;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("hello world", 11, buf, sizeof(buf), &n), HU_OK);
+    HU_ASSERT_EQ(n, (size_t)11);
+    HU_ASSERT_TRUE(strcmp(buf, "hello world") == 0);
+}
+
+static void test_sql_quote_escape_doubles_quotes(void) {
+    char buf[64];
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("O'Brien", 7, buf, sizeof(buf), &n), HU_OK);
+    HU_ASSERT_EQ(n, (size_t)8);
+    HU_ASSERT_TRUE(strcmp(buf, "O''Brien") == 0);
+}
+
+static void test_sql_quote_escape_only_quotes(void) {
+    char buf[16];
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("'''", 3, buf, sizeof(buf), &n), HU_OK);
+    HU_ASSERT_EQ(n, (size_t)6);
+    HU_ASSERT_TRUE(strcmp(buf, "''''''") == 0);
+}
+
+static void test_sql_quote_escape_empty_input(void) {
+    char buf[8] = "leftover";
+    size_t n = SIZE_MAX;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("", 0, buf, sizeof(buf), &n), HU_OK);
+    HU_ASSERT_EQ(n, (size_t)0);
+    HU_ASSERT_EQ(buf[0], '\0');
+}
+
+static void test_sql_quote_escape_null_src(void) {
+    char buf[8] = "leftover";
+    size_t n = SIZE_MAX;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into(NULL, 0, buf, sizeof(buf), &n), HU_OK);
+    HU_ASSERT_EQ(n, (size_t)0);
+    HU_ASSERT_EQ(buf[0], '\0');
+}
+
+static void test_sql_quote_escape_truncates_silently(void) {
+    /* dst_cap=4 leaves room for at most 2 output chars + NUL. Input has a
+     * single quote that would expand to 2 chars; the loop's `pos + 2 < cap`
+     * guard means the quote pair is the last thing written before truncation. */
+    char buf[4];
+    size_t n = SIZE_MAX;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("ab'cd", 5, buf, sizeof(buf), &n), HU_OK);
+    HU_ASSERT_TRUE(n < 5);
+    HU_ASSERT_EQ(buf[n], '\0');
+}
+
+static void test_sql_quote_escape_invalid_args(void) {
+    char buf[8];
+    size_t n = SIZE_MAX;
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, NULL, sizeof(buf), &n),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, buf, 0, &n), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_sql_quote_escape_into("x", 1, buf, sizeof(buf), NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
 void run_string_tests(void) {
     HU_TEST_SUITE("string");
     HU_RUN_TEST(test_strdup);
@@ -234,4 +307,11 @@ void run_string_tests(void) {
     HU_RUN_TEST(test_str_concat_empty_second);
     HU_RUN_TEST(test_str_contains_empty_needle);
     HU_RUN_TEST(test_str_contains_self);
+    HU_RUN_TEST(test_sql_quote_escape_no_quotes);
+    HU_RUN_TEST(test_sql_quote_escape_doubles_quotes);
+    HU_RUN_TEST(test_sql_quote_escape_only_quotes);
+    HU_RUN_TEST(test_sql_quote_escape_empty_input);
+    HU_RUN_TEST(test_sql_quote_escape_null_src);
+    HU_RUN_TEST(test_sql_quote_escape_truncates_silently);
+    HU_RUN_TEST(test_sql_quote_escape_invalid_args);
 }
