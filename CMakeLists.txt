@@ -1160,6 +1160,7 @@ if(HU_ENABLE_ML)
         src/ml/cli.c
         src/ml/lora.c
         src/ml/agent_trainer.c
+        src/ml/m3_frontier_adapter.c
         src/providers/huml.c
     )
     if(HU_ENABLE_SQLITE)

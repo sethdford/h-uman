@@ -67,6 +67,14 @@ if [ "$C_CHANGED" -eq 1 ]; then
         fi
     fi
 
+    if [ -f scripts/check-memory-query-variant.sh ]; then
+        if bash scripts/check-memory-query-variant.sh; then
+            pass "memory query variant scan (src+tests)"
+        else
+            fail "memory query variant scan (explicit .variant after memset)"
+        fi
+    fi
+
     if [ "$FULL" -eq 1 ]; then
         if ./build/human_tests 2>&1 | tail -3; then
             pass "Full test suite"

@@ -38,6 +38,7 @@ multi-month plan to close the gap honestly.
 | GPU acceleration (Metal / CUDA / MLX) | ❌ CPU only | ✅ on Apple Silicon |
 | HuggingFace / GGUF checkpoint loader | ❌ | ✅ |
 | Adapter inference at chat time (apply LoRA to chat provider) | ❌ | ✅ |
+| **D0.3 seam in-tree** — `hu_m3_frontier_adapter_*` fixture load + noop infer (tests) | ✅ `human/ml/m3_frontier_adapter.h` | ✅ (chat wiring still future) |
 
 # Why this matters
 

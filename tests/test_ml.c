@@ -12,6 +12,7 @@
 #include "human/ml/experiment_store.h"
 #include "human/ml/lora.h"
 #include "human/ml/ml.h"
+#include "human/ml/m3_frontier_adapter.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/prepare.h"
@@ -4686,6 +4687,53 @@ static void test_anticipatory_classify_emotion_null_args(void) {
     HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
 }
 
+/* ─── M3 frontier adapter stub (Track D0.3) ─────────────────────────── */
+
+static void test_m3_frontier_adapter_null_args(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = (hu_m3_frontier_adapter_t *)1;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(NULL, "/x", 2, &a), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, NULL, 0, &a), HU_ERR_INVALID_ARGUMENT);
+    a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/x", 0, &a), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(NULL), HU_OK);
+    hu_m3_frontier_adapter_close(&alloc, NULL);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_schema_version(NULL), 0);
+}
+
+static void test_m3_frontier_adapter_bad_file(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_nonexistent_xyz_abc.bin", 40, &a),
+                 HU_ERR_IO);
+    HU_ASSERT_NULL(a);
+    write_text_file("/tmp/hu_m3_bad_magic.txt", "not-a-stub");
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, "/tmp/hu_m3_bad_magic.txt", 26, &a), HU_ERR_IO);
+    HU_ASSERT_NULL(a);
+}
+
+static void test_m3_frontier_adapter_fixture_roundtrip(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    const char *path = "/tmp/hu_m3_fixture_adapter.bin";
+    FILE *fp = fopen(path, "wb");
+    HU_ASSERT_NOT_NULL(fp);
+    unsigned char blob[12];
+    memcpy(blob, HU_M3_ADAPTER_MAGIC, 8);
+    blob[8] = 7;
+    blob[9] = 0;
+    blob[10] = 0;
+    blob[11] = 0;
+    HU_ASSERT_EQ(fwrite(blob, 1, sizeof(blob), fp), sizeof(blob));
+    fclose(fp);
+
+    hu_m3_frontier_adapter_t *a = NULL;
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_try_open(&alloc, path, strlen(path), &a), HU_OK);
+    HU_ASSERT_NOT_NULL(a);
+    HU_ASSERT_EQ((int)hu_m3_frontier_adapter_schema_version(a), 7);
+    HU_ASSERT_EQ(hu_m3_frontier_adapter_noop_infer(a), HU_OK);
+    hu_m3_frontier_adapter_close(&alloc, a);
+}
+
 void run_ml_tests(void) {
     HU_TEST_SUITE("ml");
     /* BPE tokenizer */
@@ -4848,4 +4896,8 @@ void run_ml_tests(void) {
     /* Emotion classify (test mode uses keyword fallback) */
     HU_RUN_TEST(test_anticipatory_classify_emotion_keywords);
     HU_RUN_TEST(test_anticipatory_classify_emotion_null_args);
+    /* M3 frontier adapter stub (fixture load + noop infer) */
+    HU_RUN_TEST(test_m3_frontier_adapter_null_args);
+    HU_RUN_TEST(test_m3_frontier_adapter_bad_file);
+    HU_RUN_TEST(test_m3_frontier_adapter_fixture_roundtrip);
 }

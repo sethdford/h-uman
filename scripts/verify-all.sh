@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Combined verification script: build, test, doc fleet, skill registry, token lint.
 # Run before claiming any work done, and as part of the weekly drift audit.
+#
+# Environment:
+#   VERIFY_SECURITY_SCAN=1  — run scripts/security-sensitive-api-scan.sh after C tests
+#   VERIFY_SECURITY_SCAN=strict — same scan, but the script exits 1 if hits exist (local triage)
+# Tip: capture full output with `bash scripts/verify-all.sh 2>&1 | tee verify-all.log`
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -38,18 +43,50 @@ echo "=============================="
 echo " human verify-all"
 echo "=============================="
 
-# 1. C build
+# 1. C build (Track F1.2: record success so we never run tests on a failed compile)
+C_BUILD_OK=0
 if [ -d "build" ]; then
-  run_check "C Build" cmake --build build -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+  echo ""
+  echo "=== C Build ==="
+  if cmake --build build -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"; then
+    echo "--- PASS: C Build"
+    PASS=$((PASS + 1))
+    C_BUILD_OK=1
+  else
+    echo "--- FAIL: C Build"
+    FAIL=$((FAIL + 1))
+    C_BUILD_OK=0
+  fi
 else
   skip_check "C Build" "build/ directory not found (run cmake -B build first)"
+  C_BUILD_OK=0
 fi
 
-# 2. C tests
+# 2. C tests — skip when the build failed or was skipped (avoids misleading stale results)
 if [ -f "build/human_tests" ]; then
-  run_check "C Tests" ./build/human_tests
+  if [ "$C_BUILD_OK" -ne 1 ]; then
+    skip_check "C Tests" "skipped because C build failed or was not run (stale binary not executed)"
+  else
+    run_check "C Tests" ./build/human_tests
+  fi
 else
   skip_check "C Tests" "build/human_tests not found"
+fi
+
+# 2b. Memory query explicit-variant guard (Track B2; python3 required)
+if [ -f "scripts/check-memory-query-variant.sh" ]; then
+  run_check "Memory query variant scan" bash scripts/check-memory-query-variant.sh
+fi
+
+# 2c. Optional security surface scan (Track E; informational unless VERIFY_SECURITY_SCAN=strict)
+if [ "${VERIFY_SECURITY_SCAN:-0}" = "1" ] || [ "${VERIFY_SECURITY_SCAN:-}" = "strict" ]; then
+  if [ -f "scripts/security-sensitive-api-scan.sh" ]; then
+    if [ "${VERIFY_SECURITY_SCAN}" = "strict" ]; then
+      run_check "Security sensitive API scan" env VERIFY_SECURITY_SCAN=strict bash scripts/security-sensitive-api-scan.sh
+    else
+      run_check "Security sensitive API scan" bash scripts/security-sensitive-api-scan.sh
+    fi
+  fi
 fi
 
 # 3. UI typecheck + lint + test
