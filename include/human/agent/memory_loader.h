@@ -28,6 +28,12 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
                                  hu_memory_t *memory, hu_retrieval_engine_t *retrieval_engine,
                                  size_t max_entries, size_t max_context_chars);
 
+/* Bind the W7 facade for goal-conditioned planner recall (`hu_w12_planner_recall`).
+ * Call after `hu_memory_loader_init` when `agent->w7_facade` is non-NULL; safe to
+ * pass NULL to clear. Do not mutate `loader->facade` directly — keeps Phase-1 wiring
+ * auditable and grep-friendly. */
+void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade *facade);
+
 /* Load relevant memories for a query and format them as markdown text.
  * Returns HU_OK with *out_context=NULL, *out_context_len=0 if no memories.
  * Caller owns returned string; free with alloc. */

@@ -485,14 +485,17 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
      * event_end = 0 = "still true", confidence = 1.0, no provenance). New
      * callers should prefer hu_graph_upsert_relation_ex which goes through the
      * conflict resolver. ON CONFLICT keeps backward semantics for legacy paths.
-     * W8: writes confidence_mean/confidence_variance explicitly to stay in
-     * sync with the scalar confidence column. */
+     * W8 P2G: confidence_mean = 1.0 (scalar default), confidence_variance =
+     * 0.05 (the "unknown provenance" default from
+     * hu_belief_initial_variance_for_provenance). Writing 0.0 here would
+     * mark the row as "absolute certainty" which is wrong for unscoped
+     * legacy calls. */
     const char *sql =
         "INSERT INTO relations (contact_id, source_id, target_id, relation_type,"
         " weight, first_seen, last_seen, context, event_start, event_end,"
         " confidence, supersedes_id, provenance,"
         " confidence_mean, confidence_variance)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0, NULL, 1.0, 0.0) "
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 0, NULL, 1.0, 0.05) "
         "ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET "
         "weight = (weight + excluded.weight) / 2.0, last_seen = excluded.last_seen, "
         "context = excluded.context";
@@ -529,12 +532,14 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
  *      need to insert a new row with a different target while keeping the old.
  *      Instead, we INSERT-or-UPDATE based on the resolver's decision.
  */
-hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
-                                       size_t contact_id_len, int64_t source_id, int64_t target_id,
-                                       hu_relation_type_t type, float weight, int64_t event_start,
-                                       int64_t event_end, float confidence, const char *context,
-                                       size_t context_len, const char *provenance,
-                                       size_t provenance_len) {
+hu_error_t hu_graph_upsert_relation_with_belief(
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+    float weight, int64_t event_start, int64_t event_end,
+    float belief_mean, float belief_variance,
+    const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len,
+    int64_t *out_id) {
     if (!g || !g->db || source_id <= 0 || target_id <= 0)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -543,10 +548,18 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
     int64_t ts = now_ms();
     if (event_start <= 0)
         event_start = ts;
-    if (confidence < 0.0f)
-        confidence = 1.0f;
-    if (confidence > 1.0f)
-        confidence = 1.0f;
+    if (belief_mean < 0.0f)
+        belief_mean = 1.0f;
+    if (belief_mean > 1.0f)
+        belief_mean = 1.0f;
+    /* Variance is bounded by the maximum of a [0,1] random variable
+     * (Bernoulli at p=0.5 = 0.25). Anything outside [0, 0.25] is the
+     * caller passing garbage; clamp rather than reject so writes
+     * don't silently fail. */
+    if (belief_variance < 0.0f)
+        belief_variance = 0.0f;
+    if (belief_variance > 0.25f)
+        belief_variance = 0.25f;
 
     /* Pre-read the strongest open existing relation with the same (source,
      * type) on the same contact. Used by the resolver. */
@@ -588,22 +601,25 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
     proposed.weight = weight;
     proposed.event_start = event_start;
     proposed.event_end = event_end;
-    proposed.confidence = confidence;
+    proposed.confidence = belief_mean;
 
     hu_conflict_resolution_t decision = hu_conflict_classify(&proposed, &existing);
 
-    /* INSERT the proposed row. Always a fresh row — the resolver may close the
-     * prior afterwards. We don't use ON CONFLICT here: bitemporal history
-     * requires multiple rows, so we want a new id even if (source,target,type)
-     * already exists. W8 P2A: also seed confidence_mean = confidence (variance
-     * = 0 by default per migration); upserts that want a non-zero variance
-     * should call hu_graph_set_relation_belief after upsert. */
+    /* INSERT the proposed row. Always a fresh row — the resolver may close
+     * the prior afterwards. We don't use ON CONFLICT here: bitemporal
+     * history requires multiple rows, so we want a new id even if
+     * (source,target,type) already exists.
+     *
+     * W8 P2A + P2G: confidence (legacy) and confidence_mean both get
+     * `belief_mean`; confidence_variance gets `belief_variance` (was
+     * 0.0 in P2A; P2G allows callers to pass a non-zero prior based on
+     * source reliability). */
     sqlite3_stmt *ins = NULL;
     const char *ins_sql =
         "INSERT INTO relations (contact_id, source_id, target_id, relation_type, weight,"
         " first_seen, last_seen, context, event_start, event_end, confidence, supersedes_id,"
         " provenance, confidence_mean, confidence_variance)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0.0)";
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)";
     int rc = sqlite3_prepare_v2(g->db, ins_sql, -1, &ins, NULL);
     if (rc != SQLITE_OK)
         return HU_ERR_IO;
@@ -621,12 +637,13 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
         sqlite3_bind_null(ins, 8);
     sqlite3_bind_int64(ins, 9, event_start);
     sqlite3_bind_int64(ins, 10, event_end);
-    sqlite3_bind_double(ins, 11, (double)confidence);
+    sqlite3_bind_double(ins, 11, (double)belief_mean);
     if (provenance && provenance_len > 0)
         sqlite3_bind_text(ins, 12, provenance, (int)provenance_len, SQLITE_STATIC);
     else
         sqlite3_bind_null(ins, 12);
-    sqlite3_bind_double(ins, 13, (double)confidence);
+    sqlite3_bind_double(ins, 13, (double)belief_mean);
+    sqlite3_bind_double(ins, 14, (double)belief_variance);
 
     rc = sqlite3_step(ins);
     int64_t proposed_id = (rc == SQLITE_DONE) ? sqlite3_last_insert_rowid(g->db) : 0;
@@ -642,11 +659,30 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
             return apply_rc;
     }
 
+    if (out_id)
+        *out_id = proposed_id;
+
     /* P2 #7 — invalidate the W9 world-model cache for this contact.
      * Wildcard invalidation (NULL contact_id) is also wired so global
      * facts invalidate every cached slot. */
     hu_world_model_invalidate(cid, (size_t)cid_len);
     return HU_OK;
+}
+
+/* P2A backward-compatible thin wrapper: pre-existing callers expect a
+ * scalar confidence with variance defaulted to 0. P2G adds the
+ * variance-aware variant above; this wrapper preserves the original
+ * signature for one release. */
+hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
+                                       size_t contact_id_len, int64_t source_id, int64_t target_id,
+                                       hu_relation_type_t type, float weight, int64_t event_start,
+                                       int64_t event_end, float confidence, const char *context,
+                                       size_t context_len, const char *provenance,
+                                       size_t provenance_len) {
+    return hu_graph_upsert_relation_with_belief(
+        g, contact_id, contact_id_len, source_id, target_id, type, weight,
+        event_start, event_end, confidence, /* variance = */ 0.0f,
+        context, context_len, provenance, provenance_len, /* out_id = */ NULL);
 }
 
 hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
@@ -1498,6 +1534,97 @@ hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const c
     return HU_OK;
 }
 
+hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *alloc,
+                                                 const char *contact_id, size_t contact_id_len,
+                                                 size_t limit, hu_graph_relation_t **out,
+                                                 size_t *out_count) {
+    if (!g || !g->db || !alloc || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    if (limit == 0)
+        limit = 64;
+
+    const char *cid = contact_id ? contact_id : "";
+    int cid_len = contact_id ? (int)contact_id_len : 0;
+
+    const char *sql =
+        "SELECT r.id, r.source_id, r.target_id, r.relation_type, r.weight, "
+        "r.first_seen, r.last_seen, r.context, r.event_start, r.event_end, "
+        "r.confidence, r.supersedes_id, r.provenance, es.name, et.name "
+        "FROM relations r "
+        "JOIN entities es ON r.source_id = es.id AND r.contact_id = es.contact_id "
+        "JOIN entities et ON r.target_id = et.id AND r.contact_id = et.contact_id "
+        "WHERE r.contact_id = ? AND r.event_end = 0 "
+        "ORDER BY r.last_seen DESC LIMIT ?";
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(g->db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(stmt, 1, cid, cid_len, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, (int64_t)limit);
+
+    size_t cap = limit < 64 ? limit : 64;
+    hu_graph_relation_t *arr = alloc->alloc(alloc->ctx, cap * sizeof(hu_graph_relation_t));
+    if (!arr) {
+        sqlite3_finalize(stmt);
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    size_t count = 0;
+    bool oom = false;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (count >= cap) {
+            size_t new_cap = cap * 2;
+            hu_graph_relation_t *tmp =
+                alloc->alloc(alloc->ctx, new_cap * sizeof(hu_graph_relation_t));
+            if (!tmp) {
+                oom = true;
+                break;
+            }
+            memcpy(tmp, arr, count * sizeof(hu_graph_relation_t));
+            alloc->free(alloc->ctx, arr, cap * sizeof(hu_graph_relation_t));
+            arr = tmp;
+            cap = new_cap;
+        }
+        hu_graph_relation_t *r = &arr[count];
+        memset(r, 0, sizeof(*r));
+        r->id = sqlite3_column_int64(stmt, 0);
+        r->source_id = sqlite3_column_int64(stmt, 1);
+        r->target_id = sqlite3_column_int64(stmt, 2);
+        r->type = (hu_relation_type_t)sqlite3_column_int(stmt, 3);
+        r->weight = (float)sqlite3_column_double(stmt, 4);
+        r->first_seen = sqlite3_column_int64(stmt, 5);
+        r->last_seen = sqlite3_column_int64(stmt, 6);
+        const char *ctx = (const char *)sqlite3_column_text(stmt, 7);
+        r->context_len = ctx ? strlen(ctx) : 0;
+        r->context = r->context_len ? hu_strndup(alloc, ctx, r->context_len) : NULL;
+        r->event_start = sqlite3_column_int64(stmt, 8);
+        r->event_end = sqlite3_column_int64(stmt, 9);
+        r->confidence = (float)sqlite3_column_double(stmt, 10);
+        r->supersedes_id = sqlite3_column_int64(stmt, 11);
+        const char *prov = (const char *)sqlite3_column_text(stmt, 12);
+        r->provenance_len = prov ? strlen(prov) : 0;
+        r->provenance = r->provenance_len ? hu_strndup(alloc, prov, r->provenance_len) : NULL;
+        const char *sn = (const char *)sqlite3_column_text(stmt, 13);
+        r->source_name_len = sn ? strlen(sn) : 0;
+        r->source_name = r->source_name_len ? hu_strndup(alloc, sn, r->source_name_len) : NULL;
+        const char *tn = (const char *)sqlite3_column_text(stmt, 14);
+        r->target_name_len = tn ? strlen(tn) : 0;
+        r->target_name = r->target_name_len ? hu_strndup(alloc, tn, r->target_name_len) : NULL;
+        count++;
+    }
+    sqlite3_finalize(stmt);
+    if (oom) {
+        hu_graph_relations_free(alloc, arr, count);
+        *out = NULL;
+        *out_count = 0;
+        return HU_ERR_OUT_OF_MEMORY;
+    }
+    *out = arr;
+    *out_count = count;
+    return HU_OK;
+}
+
 #else
 
 hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
@@ -1516,6 +1643,20 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
 hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, size_t limit,
                                    hu_graph_relation_t **out, size_t *out_count) {
+    (void)g;
+    (void)alloc;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)limit;
+    (void)out;
+    (void)out_count;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *alloc,
+                                                 const char *contact_id, size_t contact_id_len,
+                                                 size_t limit, hu_graph_relation_t **out,
+                                                 size_t *out_count) {
     (void)g;
     (void)alloc;
     (void)contact_id;
@@ -1549,6 +1690,10 @@ void hu_graph_relations_free(hu_allocator_t *alloc, hu_graph_relation_t *relatio
             alloc->free(alloc->ctx, relations[i].context, relations[i].context_len + 1);
         if (relations[i].provenance)
             alloc->free(alloc->ctx, relations[i].provenance, relations[i].provenance_len + 1);
+        if (relations[i].source_name)
+            alloc->free(alloc->ctx, relations[i].source_name, relations[i].source_name_len + 1);
+        if (relations[i].target_name)
+            alloc->free(alloc->ctx, relations[i].target_name, relations[i].target_name_len + 1);
     }
     alloc->free(alloc->ctx, relations, count * sizeof(hu_graph_relation_t));
 }

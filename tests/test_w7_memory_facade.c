@@ -4,6 +4,8 @@
  * The facade is a thin dispatcher; tests verify it routes correctly, returns
  * deterministic shapes, and refuses unsupported kinds. */
 
+#include "human/agent/anticipatory.h"
+#include "human/agent/case_based.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
@@ -12,6 +14,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef HU_ENABLE_SQLITE
 
@@ -40,9 +43,11 @@ static void test_w7_open_registers_v1_for_entity_and_relation(void) {
     HU_ASSERT_NOT_NULL(hu_memory_facade_backend_name(m, HU_MEM_ENTITY));
     HU_ASSERT_NOT_NULL(hu_memory_facade_backend_name(m, HU_MEM_RELATION));
     HU_ASSERT_NOT_NULL(hu_memory_facade_backend_name(m, HU_MEM_HYPEREDGE));
+    HU_ASSERT_NOT_NULL(hu_memory_facade_backend_name(m, HU_MEM_CASE));
     HU_ASSERT_EQ(strcmp(hu_memory_facade_backend_name(m, HU_MEM_ENTITY), "v1-entity"), 0);
     HU_ASSERT_EQ(strcmp(hu_memory_facade_backend_name(m, HU_MEM_RELATION), "v1-relation"), 0);
     HU_ASSERT_EQ(strcmp(hu_memory_facade_backend_name(m, HU_MEM_HYPEREDGE), "v1-hyperedge"), 0);
+    HU_ASSERT_EQ(strcmp(hu_memory_facade_backend_name(m, HU_MEM_CASE), "v1-case"), 0);
 
     /* Kinds without a backend yet (KV_CACHE, REASONING_TRACE, BLOB) still
      * return NULL until W10 lands the neural-memory backends. */
@@ -355,6 +360,157 @@ static void test_w7_routes_replaced_on_register(void) {
     close_facade(g, m);
 }
 
+/* --- P2G: belief variance flows through the facade write path --- */
+
+static int64_t write_relation_with_provenance(hu_memory_facade_t *m, hu_graph_t *g,
+                                              int64_t src, int64_t tgt,
+                                              float confidence,
+                                              const char *provenance) {
+    hu_graph_relation_t payload = {0};
+    payload.source_id = src;
+    payload.target_id = tgt;
+    payload.type = HU_REL_WORKS_AT;
+    payload.weight = 1.0f;
+    payload.context = NULL;
+    payload.context_len = 0;
+
+    hu_memory_record_t rec = {0};
+    rec.kind = HU_MEM_RELATION;
+    rec.event_start = 1735000000000LL;
+    rec.event_end = 0;
+    rec.confidence = confidence;
+    rec.provenance = (char *)provenance;
+    rec.provenance_len = provenance ? strlen(provenance) : 0;
+    rec.payload = &payload;
+    rec.payload_len = sizeof(payload);
+
+    HU_ASSERT_EQ(hu_memory_facade_write(m, &rec), HU_OK);
+    /* P2G: v1 backend doesn't surface the inserted id through the facade,
+     * so we re-list relations for the contact and pick the matching row. */
+    hu_graph_relation_t *rels = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_graph_list_relations(g, A(), "", 0, /*limit=*/64, &rels, &n), HU_OK);
+    int64_t id = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (rels[i].source_id == src && rels[i].target_id == tgt &&
+            rels[i].type == HU_REL_WORKS_AT) {
+            if (rels[i].id > id) id = rels[i].id;
+        }
+    }
+    hu_graph_relations_free(A(), rels, n);
+    HU_ASSERT_TRUE(id > 0);
+    return id;
+}
+
+static void test_w7_p2g_facade_write_seeds_variance_from_provenance(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    int64_t acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
+                 HU_OK);
+    int64_t globex = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Globex", 6, HU_ENTITY_ORGANIZATION, NULL,
+                                         &globex),
+                 HU_OK);
+
+    /* High-confidence direct user statement → low variance. */
+    int64_t id_user = write_relation_with_provenance(
+        m, g, alice, acme, 0.95f, "channel:imessage:user-text");
+
+    /* Heuristic-derived fact → higher variance. */
+    int64_t id_heur = write_relation_with_provenance(
+        m, g, alice, globex, 0.70f, "autodream:released:pattern-001");
+
+    float mean_user = -1, var_user = -1;
+    HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id_user, &mean_user, &var_user), HU_OK);
+    float mean_heur = -1, var_heur = -1;
+    HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id_heur, &mean_heur, &var_heur), HU_OK);
+
+    HU_ASSERT_TRUE(mean_user > 0.94f && mean_user < 0.96f);
+    HU_ASSERT_TRUE(mean_heur > 0.69f && mean_heur < 0.71f);
+
+    /* Variance is monotonic in heuristic distance from ground truth:
+     * user channel < autodream heuristic. */
+    HU_ASSERT_TRUE(var_user < var_heur);
+    /* And both are inside the [0, 0.25] band the heuristic guarantees. */
+    HU_ASSERT_TRUE(var_user >= 0.0f && var_user <= 0.25f);
+    HU_ASSERT_TRUE(var_heur >= 0.0f && var_heur <= 0.25f);
+
+    close_facade(g, m);
+}
+
+static void test_w7_p2g_null_provenance_uses_default_variance(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    int64_t alice = 0, acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
+                 HU_OK);
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL,
+                                         &acme),
+                 HU_OK);
+
+    int64_t id = write_relation_with_provenance(m, g, alice, acme, 1.0f, NULL);
+
+    float mean = -1, var = -1;
+    HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id, &mean, &var), HU_OK);
+
+    /* NULL/empty provenance → default variance band. The exact value lives
+     * in belief.c; we just assert the contract: 0 < var <= 0.25. */
+    HU_ASSERT_TRUE(var > 0.0f);
+    HU_ASSERT_TRUE(var <= 0.25f);
+    HU_ASSERT_TRUE(mean > 0.99f && mean <= 1.0f);
+
+    close_facade(g, m);
+}
+
+/* --- anticipatory: facade wrapper matches direct graph analyze --- */
+
+static void test_w7_anticipatory_analyze_memory_matches_graph(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+    hu_anticipatory_result_t r_graph = {0};
+    hu_anticipatory_result_t r_mem = {0};
+    int64_t now = (int64_t)time(NULL);
+    HU_ASSERT_EQ(hu_anticipatory_analyze(g, A(), "u", 1, now, &r_graph), HU_OK);
+    HU_ASSERT_EQ(hu_anticipatory_analyze_memory(m, A(), "u", 1, now, &r_mem), HU_OK);
+    HU_ASSERT_EQ(r_graph.action_count, r_mem.action_count);
+    hu_anticipatory_result_deinit(&r_graph, A());
+    hu_anticipatory_result_deinit(&r_mem, A());
+    close_facade(g, m);
+}
+
+/* --- case rowid surfaced without hu_graph__db_handle in case_based.c --- */
+
+static void test_w7_case_write_last_rowid_matches_hu_case_record_out_id(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade(&g, &m);
+
+    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), 0);
+
+    int64_t id1 = 0;
+    HU_ASSERT_EQ(hu_case_record(m, "c", 1, "goal", 4, NULL, 0, NULL, 0, "ok", 2, 1000LL, &id1),
+                 HU_OK);
+    HU_ASSERT_TRUE(id1 > 0);
+    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), id1);
+
+    int64_t id2 = 0;
+    HU_ASSERT_EQ(
+        hu_case_record(m, "c", 1, "goal2", 5, NULL, 0, NULL, 0, "x", 1, 2000LL, &id2), HU_OK);
+    HU_ASSERT_TRUE(id2 > id1);
+    HU_ASSERT_EQ(hu_memory_facade_last_case_rowid(m), id2);
+
+    close_facade(g, m);
+}
+
 /* --- adversarial: replacing entity backend doesn't crash on close --- */
 
 static void test_w7_replace_then_close_cleans_up(void) {
@@ -390,6 +546,10 @@ void run_w7_memory_facade_tests(void) {
     HU_RUN_TEST(test_w7_stub_entity_slot_keeps_hyperedge_backend);
     HU_RUN_TEST(test_w7_routes_persisted_after_open);
     HU_RUN_TEST(test_w7_routes_replaced_on_register);
+    HU_RUN_TEST(test_w7_p2g_facade_write_seeds_variance_from_provenance);
+    HU_RUN_TEST(test_w7_p2g_null_provenance_uses_default_variance);
+    HU_RUN_TEST(test_w7_anticipatory_analyze_memory_matches_graph);
+    HU_RUN_TEST(test_w7_case_write_last_rowid_matches_hu_case_record_out_id);
     HU_RUN_TEST(test_w7_replace_then_close_cleans_up);
 #endif
 }

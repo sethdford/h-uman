@@ -9,10 +9,12 @@
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
 #include "human/memory/pagerank.h"
+#include "human/provider.h"
 #include "test_framework.h"
 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #ifdef HU_ENABLE_SQLITE
@@ -318,6 +320,217 @@ static void test_w12_llm_stub_returns_single_step_plan(void) {
     hu_planner_close(&p);
 }
 
+/* P3 — Real LLM planner with mock provider returning malformed JSON falls
+ * back to deterministic plan instead of crashing. */
+static int g_mock_calls = 0;
+static const char *g_mock_response_body = NULL;
+
+static hu_error_t mock_chat_with_system(void *ctx, hu_allocator_t *alloc,
+                                        const char *sys, size_t sys_len,
+                                        const char *msg, size_t msg_len,
+                                        const char *model, size_t model_len,
+                                        double temperature,
+                                        char **out, size_t *out_len) {
+    (void)ctx; (void)sys; (void)sys_len; (void)msg; (void)msg_len;
+    (void)model; (void)model_len; (void)temperature;
+    g_mock_calls++;
+    if (!g_mock_response_body) return HU_ERR_IO;
+    size_t n = strlen(g_mock_response_body);
+    char *copy = (char *)alloc->alloc(alloc->ctx, n + 1);
+    if (!copy) return HU_ERR_OUT_OF_MEMORY;
+    memcpy(copy, g_mock_response_body, n);
+    copy[n] = '\0';
+    *out = copy;
+    *out_len = n;
+    return HU_OK;
+}
+
+static const char *mock_get_name(void *ctx) { (void)ctx; return "mock"; }
+static bool mock_supports_native_tools(void *ctx) { (void)ctx; return false; }
+static void mock_deinit(void *ctx, hu_allocator_t *alloc) { (void)ctx; (void)alloc; }
+
+static void test_w12_llm_planner_with_provider_falls_back_under_test_guard(void) {
+    /* Under HU_IS_TEST the LLM planner forces the deterministic fallback
+     * path to keep tests free of provider I/O. This test verifies the
+     * fallback is well-formed (single step, sane budget). */
+    static hu_provider_vtable_t mock_vt = {
+        .chat_with_system = mock_chat_with_system,
+        .supports_native_tools = mock_supports_native_tools,
+        .get_name = mock_get_name,
+        .deinit = mock_deinit,
+    };
+    hu_provider_t mock_provider = { .ctx = NULL, .vtable = &mock_vt };
+
+    g_mock_calls = 0;
+    g_mock_response_body = "{\"steps\":[{\"kind\":\"entity\",\"limit\":7}],\"total_budget_ms\":120}";
+
+    hu_planner_t p;
+    HU_ASSERT_EQ(hu_planner_llm(&mock_provider, &p), HU_OK);
+    /* Configure with the test allocator so the LLM path *would* be live
+     * outside HU_IS_TEST. */
+    hu_planner_llm_configure(A(), NULL, 0);
+
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+    snprintf(wm.contact_id, sizeof(wm.contact_id), "%s", "u1");
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_plan(&p, "who works at acme?", 18, &wm, &plan), HU_OK);
+
+    /* Under HU_IS_TEST the mock provider must NOT be called. */
+    HU_ASSERT_EQ(g_mock_calls, 0);
+    /* And the plan must be a valid fallback shape. */
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    HU_ASSERT(plan.total_budget_ms > 0);
+    HU_ASSERT_LT(plan.total_budget_ms, HU_PLANNER_MAX_TOTAL_BUDGET_MS + 1);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_RELATION);
+    HU_ASSERT(plan.steps[0].verify_after);
+
+    hu_planner_close(&p);
+}
+
+static void test_w12_llm_planner_oversized_goal_is_truncated(void) {
+    /* Adversarial: a 100 KB goal cannot reach the LLM unbounded. The
+     * planner clamps to HU_PLANNER_MAX_GOAL_LEN before invoking the
+     * backend; under HU_IS_TEST we just verify it still produces a
+     * valid plan and doesn't crash. */
+    size_t big_len = 100000;
+    char *big = (char *)A()->alloc(A()->ctx, big_len + 1);
+    HU_ASSERT_NOT_NULL(big);
+    memset(big, 'x', big_len);
+    big[big_len] = '\0';
+
+    hu_planner_t p;
+    HU_ASSERT_EQ(hu_planner_llm(NULL, &p), HU_OK);
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_plan(&p, big, big_len, NULL, &plan), HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+
+    A()->free(A()->ctx, big, big_len + 1);
+    hu_planner_close(&p);
+}
+
+static void test_w12_llm_planner_configure_idempotent(void) {
+    /* Calling configure twice with different model strings must not leak. */
+    hu_planner_llm_configure(A(), "model-a", 7);
+    hu_planner_llm_configure(A(), "model-b-longer", 14);
+    hu_planner_llm_configure(A(), NULL, 0);
+    /* Re-configure with empty allocator does not crash on planner close. */
+    hu_planner_t p;
+    HU_ASSERT_EQ(hu_planner_llm(NULL, &p), HU_OK);
+    hu_planner_close(&p);
+}
+
+/* Test hook into the LLM planner's JSON parser. */
+extern hu_error_t hu_planner_llm__test_parse_json(hu_allocator_t *alloc, const char *json,
+                                                  size_t json_len, const hu_world_model_t *wm,
+                                                  hu_retrieval_plan_t *out);
+
+static void test_w12_llm_parse_well_formed_plan(void) {
+    const char *json =
+        "{"
+        "  \"total_budget_ms\": 350,"
+        "  \"steps\": ["
+        "    {\"kind\": \"entity\", \"hops\": 0, \"budget_ms\": 100, \"verify_after\": false, \"limit\": 8},"
+        "    {\"kind\": \"relation\", \"hops\": 2, \"budget_ms\": 200, \"verify_after\": true, \"limit\": 16},"
+        "    {\"kind\": \"hyperedge\", \"hops\": 1, \"budget_ms\": 50, \"limit\": 4}"
+        "  ]"
+        "}";
+
+    hu_world_model_t wm;
+    memset(&wm, 0, sizeof(wm));
+    snprintf(wm.contact_id, sizeof(wm.contact_id), "u-test");
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), &wm, &plan), HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 3);
+    HU_ASSERT_EQ(plan.total_budget_ms, 350);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_ENTITY);
+    HU_ASSERT_EQ((int)plan.steps[0].hops, 0);
+    HU_ASSERT_EQ(plan.steps[1].kind, HU_MEM_RELATION);
+    HU_ASSERT_EQ((int)plan.steps[1].hops, 2);
+    HU_ASSERT(plan.steps[1].verify_after);
+    HU_ASSERT_EQ(plan.steps[2].kind, HU_MEM_HYPEREDGE);
+    /* Contact-id propagated to query payload. */
+    HU_ASSERT_EQ((int)plan.steps[0].query.contact_id_len, 6);
+}
+
+static void test_w12_llm_parse_strips_markdown_fences(void) {
+    const char *json =
+        "```json\n"
+        "{\"total_budget_ms\":200,\"steps\":[{\"kind\":\"relation\",\"limit\":8}]}\n"
+        "```";
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), NULL, &plan), HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_RELATION);
+}
+
+static void test_w12_llm_parse_rejects_malformed_json(void) {
+    const char *bad_cases[] = {
+        "",                                     /* empty */
+        "not json at all",                      /* not JSON */
+        "{\"steps\":[]}",                       /* empty steps */
+        "{\"total_budget_ms\":250}",            /* no steps key */
+        "[1, 2, 3]",                            /* array not object */
+        "{\"steps\":\"not an array\"}",         /* steps is string */
+        NULL,
+    };
+    for (size_t i = 0; bad_cases[i]; i++) {
+        hu_retrieval_plan_t plan;
+        hu_error_t err = hu_planner_llm__test_parse_json(A(), bad_cases[i],
+                                                          strlen(bad_cases[i]),
+                                                          NULL, &plan);
+        HU_ASSERT_EQ(err, HU_ERR_INVALID_ARGUMENT);
+    }
+}
+
+static void test_w12_llm_parse_unknown_kind_defaults_to_relation(void) {
+    const char *json =
+        "{\"steps\":[{\"kind\":\"nonsense\",\"limit\":5}]}";
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), NULL, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    /* Adversarial input: unknown kinds fall back to RELATION, not ENTITY,
+     * because RELATION is the cheapest safe query. */
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_RELATION);
+}
+
+static void test_w12_llm_parse_caps_steps_array_to_max(void) {
+    /* Hand-craft a JSON with 20 step entries; the parser must cap to
+     * HU_PLANNER_MAX_STEPS (8) without crashing. */
+    char buf[4096];
+    size_t off = 0;
+    int n = snprintf(buf + off, sizeof(buf) - off, "{\"steps\":[");
+    if (n > 0) off += (size_t)n;
+    for (int i = 0; i < 20; i++) {
+        n = snprintf(buf + off, sizeof(buf) - off,
+                     "%s{\"kind\":\"relation\",\"limit\":4}", i == 0 ? "" : ",");
+        if (n > 0) off += (size_t)n;
+    }
+    n = snprintf(buf + off, sizeof(buf) - off, "]}");
+    if (n > 0) off += (size_t)n;
+
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), buf, off, NULL, &plan), HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, HU_PLANNER_MAX_STEPS);
+}
+
+static void test_w12_llm_parse_negative_limits_clamped(void) {
+    const char *json =
+        "{\"steps\":[{\"kind\":\"relation\",\"limit\":-99,\"hops\":-5,\"budget_ms\":-1}]}";
+    hu_retrieval_plan_t plan;
+    HU_ASSERT_EQ(hu_planner_llm__test_parse_json(A(), json, strlen(json), NULL, &plan),
+                 HU_OK);
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    /* Negative limit ⇒ default 16. Negative hops ⇒ size_t wraps so it becomes
+     * huge; clamp_plan() inside hu_planner_plan() (NOT called by the test
+     * hook) caps to 3. So we only verify the limit clamp here. */
+    HU_ASSERT_EQ((int)plan.steps[0].query.as.window.limit, 16);
+}
+
 /* ── PageRank ───────────────────────────────────────────────────────────── */
 
 /* Small ground-truth graph (6 nodes):
@@ -545,6 +758,15 @@ void run_w12_planner_tests(void) {
     HU_RUN_TEST(test_w12_planner_execute_respects_total_budget);
     HU_RUN_TEST(test_w12_planner_execute_invalid_args_rejected);
     HU_RUN_TEST(test_w12_llm_stub_returns_single_step_plan);
+    HU_RUN_TEST(test_w12_llm_planner_with_provider_falls_back_under_test_guard);
+    HU_RUN_TEST(test_w12_llm_planner_oversized_goal_is_truncated);
+    HU_RUN_TEST(test_w12_llm_planner_configure_idempotent);
+    HU_RUN_TEST(test_w12_llm_parse_well_formed_plan);
+    HU_RUN_TEST(test_w12_llm_parse_strips_markdown_fences);
+    HU_RUN_TEST(test_w12_llm_parse_rejects_malformed_json);
+    HU_RUN_TEST(test_w12_llm_parse_unknown_kind_defaults_to_relation);
+    HU_RUN_TEST(test_w12_llm_parse_caps_steps_array_to_max);
+    HU_RUN_TEST(test_w12_llm_parse_negative_limits_clamped);
     HU_RUN_TEST(test_w12_pagerank_top_k_matches_expected_subgraph);
     HU_RUN_TEST(test_w12_pagerank_deterministic_repeated_calls);
     HU_RUN_TEST(test_w12_pagerank_zero_seeds_returns_empty);

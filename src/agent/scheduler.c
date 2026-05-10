@@ -4,6 +4,7 @@
 #include "human/agent/autodream.h"
 #include "human/core/log.h"
 #include "human/memory/graph.h"
+#include "human/persona/persona_deltas.h"
 
 #ifdef HU_ENABLE_SQLITE
 #include <sqlite3.h>
@@ -113,6 +114,24 @@ static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
     (void)user_data;
     return run_autodream_phase(m, budget_ms, false, false, true, true);
 }
+
+static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
+                                                 const hu_job_spec_t *spec,
+                                                 int64_t budget_ms, void *user_data) {
+    (void)user_data;
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    if (!g)
+        return HU_OK;
+    hu_persona_evolver_config_t cfg = hu_persona_evolver_default_config();
+    /* persona evolver has no wall-clock budget field; it bounds work via
+     * `max_apply` and `rate_limit_per_hour`. The scheduler budget is advisory. */
+    (void)budget_ms;
+    cfg.now_ms = (int64_t)time(NULL) * 1000;
+    const char *cid = (spec && spec->contact_id) ? spec->contact_id : "";
+    size_t cid_len = (spec && spec->contact_id) ? spec->contact_id_len : 0;
+    hu_persona_evolver_report_t rep = {0};
+    return hu_persona_evolver_run(g, cid, cid_len, &cfg, &rep);
+}
 #else
 static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
                                                       const hu_job_spec_t *spec,
@@ -141,6 +160,15 @@ static hu_error_t default_autodream_decay_runner(hu_memory_facade_t *m,
     (void)user_data;
     return HU_OK;
 }
+static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
+                                                 const hu_job_spec_t *spec,
+                                                 int64_t budget_ms, void *user_data) {
+    (void)m;
+    (void)spec;
+    (void)budget_ms;
+    (void)user_data;
+    return HU_OK;
+}
 #endif /* HU_ENABLE_SQLITE */
 
 static void install_default_runners(hu_scheduler_t *s) {
@@ -151,6 +179,7 @@ static void install_default_runners(hu_scheduler_t *s) {
     s->runners[HU_JOB_AUTODREAM_QUARANTINE].fn = default_autodream_quarantine_runner;
     s->runners[HU_JOB_AUTODREAM_COMMUNITY].fn = default_autodream_community_runner;
     s->runners[HU_JOB_AUTODREAM_DECAY].fn = default_autodream_decay_runner;
+    s->runners[HU_JOB_PERSONA_EVOLVER].fn = default_persona_evolver_runner;
 }
 
 #ifdef HU_ENABLE_SQLITE

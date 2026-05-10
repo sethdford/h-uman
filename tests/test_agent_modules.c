@@ -184,6 +184,19 @@ static void test_memory_loader_null_memory_graceful(void) {
     HU_ASSERT_EQ(ctx_len, 0u);
 }
 
+static void test_memory_loader_set_facade_null_loader_noop(void) {
+    hu_memory_loader_set_facade(NULL, NULL);
+}
+
+static void test_memory_loader_init_clears_facade(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_memory_loader_t loader;
+    memset(&loader, 0xAB, sizeof(loader));
+    hu_error_t err = hu_memory_loader_init(&loader, &alloc, NULL, NULL, 10, 4000);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NULL(loader.facade);
+}
+
 /* ─── context_tokens ────────────────────────────────────────────────────── */
 
 static void test_context_tokens_lookup_known_model(void) {
@@ -528,6 +541,8 @@ void run_agent_modules_tests(void) {
     HU_RUN_TEST(test_action_preview_generate_simple);
     HU_RUN_TEST(test_episodic_summarize_and_store_recall);
     HU_RUN_TEST(test_memory_loader_null_memory_graceful);
+    HU_RUN_TEST(test_memory_loader_set_facade_null_loader_noop);
+    HU_RUN_TEST(test_memory_loader_init_clears_facade);
     HU_RUN_TEST(test_context_tokens_lookup_known_model);
     HU_RUN_TEST(test_context_tokens_default);
     HU_RUN_TEST(test_context_tokens_resolve);

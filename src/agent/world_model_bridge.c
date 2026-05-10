@@ -629,6 +629,22 @@ hu_error_t hu_w14_scheduler_enqueue_autodream(hu_w14_scheduler_t *s, int64_t now
     return HU_OK;
 }
 
+hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
+                                                    int64_t now_ms,
+                                                    int budget_ms) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_job_spec_t job;
+    memset(&job, 0, sizeof(job));
+    job.kind = HU_JOB_PERSONA_EVOLVER;
+    job.priority = 0;
+    job.budget_ms = budget_ms > 0 ? budget_ms : 120000;
+    job.requires_idle = true;
+    job.requires_ac_power = false;
+    job.earliest_at = now_ms;
+    return hu_scheduler_enqueue(s->s, &job);
+}
+
 hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
                                                    const char *contact_id,
                                                    size_t contact_id_len,

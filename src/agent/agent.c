@@ -414,11 +414,6 @@ hu_error_t hu_agent_from_config(
             out->persona = (hu_persona_t *)alloc->alloc(alloc->ctx, sizeof(hu_persona_t));
             if (out->persona) {
                 memset(out->persona, 0, sizeof(hu_persona_t));
-                /* TODO(W9): needs hu_memory_facade_t* in scope to migrate.
-                 * w7_facade is not wired until after init (daemon.c sets it
-                 * post-hu_graph_open), and agent.c cannot include
-                 * world_model.h (struct hu_memory tag collision). Also no
-                 * contact_id available at init time. */
                 hu_error_t perr = hu_persona_load(alloc, persona, persona_len, out->persona);
                 if (perr != HU_OK) {
 #ifndef HU_IS_TEST
@@ -705,11 +700,6 @@ hu_error_t hu_agent_set_persona(hu_agent_t *agent, const char *name, size_t name
         return HU_ERR_OUT_OF_MEMORY;
     memset(new_persona, 0, sizeof(hu_persona_t));
 
-    /* TODO(W9): needs bridge extension + contact_id to migrate.
-     * agent.c cannot include world_model.h (struct hu_memory tag
-     * collision via human/agent.h → human/memory.h).  Persona reload
-     * is global (no contact_id), and no bridge API exposes persona
-     * data from the W9 world model yet. */
     hu_error_t err = hu_persona_load(agent->alloc, name, name_len, new_persona);
     if (err != HU_OK) {
         agent->alloc->free(agent->alloc->ctx, new_persona, sizeof(hu_persona_t));
@@ -1049,6 +1039,33 @@ void hu_agent_deinit(hu_agent_t *agent) {
     }
     agent->skill_route_embedder = NULL;
 }
+
+#ifdef HU_ENABLE_SQLITE
+hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
+                                      hu_allocator_t *alloc) {
+    if (!agent || !graph || !alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    agent->verifier_graph = graph;
+    hu_error_t err = HU_OK;
+    if (!agent->w7_facade) {
+        hu_w7_facade_t *facade = NULL;
+        err = hu_w7_facade_open((hu_graph_t *)graph, alloc, &facade);
+        if (err == HU_OK)
+            agent->w7_facade = facade;
+        else
+            hu_log_warn("agent", NULL, "W7 facade open failed: %s", hu_error_string(err));
+    }
+    if (agent->w7_facade && !agent->w14_scheduler) {
+        hu_w14_scheduler_t *sched = NULL;
+        hu_error_t se = hu_w14_scheduler_open(agent->w7_facade, alloc, &sched);
+        if (se == HU_OK)
+            agent->w14_scheduler = sched;
+        else
+            hu_log_warn("agent", NULL, "W14 scheduler open failed: %s", hu_error_string(se));
+    }
+    return err;
+}
+#endif
 
 hu_error_t hu_agent_consolidate_memory(hu_agent_t *agent) {
     if (!agent || !agent->memory || !agent->memory->vtable)

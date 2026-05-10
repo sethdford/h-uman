@@ -46,6 +46,7 @@ typedef struct hu_pool_slot {
     const hu_tool_t *inherit_tools;
     size_t inherit_tools_count;
     void *inherit_memory;
+    void *inherit_verifier_graph;
     void *inherit_session;
     void *inherit_observer;
     uint8_t inherit_autonomy;
@@ -184,6 +185,14 @@ static void *spawn_thread(void *arg) {
             result = hu_strndup(a, "(agent create failed)", 21);
             goto done;
         }
+#ifdef HU_ENABLE_SQLITE
+        if (s->inherit_verifier_graph) {
+            hu_error_t ge = hu_agent_bind_sqlite_graph(
+                ag, (struct hu_graph *)s->inherit_verifier_graph, a);
+            if (ge != HU_OK)
+                hu_log_warn("spawn", NULL, "spawn graph bind: %s", hu_error_string(ge));
+        }
+#endif
         if (s->inherit_metacognition_policy)
             hu_metacognition_apply_config(&ag->infra.metacognition, s->inherit_metacognition_policy);
         ag->agent_id = s->agent_id;
@@ -258,6 +267,14 @@ static void *spawn_thread(void *arg) {
             result = hu_strndup(a, "(agent create failed)", 21);
             goto done;
         }
+#ifdef HU_ENABLE_SQLITE
+        if (s->inherit_verifier_graph) {
+            hu_error_t ge = hu_agent_bind_sqlite_graph(
+                &ag, (struct hu_graph *)s->inherit_verifier_graph, a);
+            if (ge != HU_OK)
+                hu_log_warn("spawn", NULL, "spawn graph bind: %s", hu_error_string(ge));
+        }
+#endif
         if (s->inherit_metacognition_policy)
             hu_metacognition_apply_config(&ag.infra.metacognition, s->inherit_metacognition_policy);
         ag.agent_id = s->agent_id;
@@ -565,6 +582,7 @@ hu_error_t hu_agent_pool_spawn(hu_agent_pool_t *pool, const hu_spawn_config_t *c
     s->inherit_tools = (const hu_tool_t *)cfg->parent_tools;
     s->inherit_tools_count = cfg->parent_tools_count;
     s->inherit_memory = cfg->memory;
+    s->inherit_verifier_graph = cfg->verifier_graph;
     s->inherit_session = cfg->session_store;
     s->inherit_observer = cfg->observer;
     s->inherit_autonomy = cfg->autonomy_level > 0 ? cfg->autonomy_level : 2;
@@ -846,6 +864,8 @@ void hu_spawn_config_apply_parent_agent(hu_spawn_config_t *cfg, const hu_agent_t
     }
     if (parent->memory)
         cfg->memory = parent->memory;
+    if (parent->verifier_graph)
+        cfg->verifier_graph = parent->verifier_graph;
     if (parent->session_store)
         cfg->session_store = parent->session_store;
     if (parent->observer && parent->observer->vtable)

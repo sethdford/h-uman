@@ -1191,7 +1191,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine,
                               cognition_budget.max_memory_entries,
                               cognition_budget.max_memory_chars);
-        loader.facade = agent->w7_facade;
+        hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_error_t load_err = hu_memory_loader_load(
             &loader, msg, msg_len, agent->memory_session_id ? agent->memory_session_id : "",
             agent->memory_session_id ? agent->memory_session_id_len : 0, &memory_ctx,
@@ -7869,7 +7869,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_memory_loader_t mid_loader;
                 hu_memory_loader_init(&mid_loader, agent->alloc, agent->memory,
                                       agent->retrieval_engine, 5, 2000);
-                mid_loader.facade = agent->w7_facade;
+                hu_memory_loader_set_facade(&mid_loader, agent->w7_facade);
                 if (hu_memory_loader_load(&mid_loader, last_result, last_result_len,
                                           agent->memory_session_id ? agent->memory_session_id : "",
                                           agent->memory_session_id ? agent->memory_session_id_len
@@ -7898,7 +7898,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                     hu_memory_loader_t goal_loader;
                     hu_memory_loader_init(&goal_loader, agent->alloc, agent->memory,
                                           agent->retrieval_engine, 3, 1000);
-                    goal_loader.facade = agent->w7_facade;
+                    hu_memory_loader_set_facade(&goal_loader, agent->w7_facade);
                     if (hu_memory_loader_load(
                             &goal_loader, msg, msg_len,
                             agent->memory_session_id ? agent->memory_session_id : "",

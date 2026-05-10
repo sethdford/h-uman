@@ -111,8 +111,10 @@ hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
                                 int64_t now_ms,
                                 hu_world_model_t **out);
 
-/* Invalidate the cached entry for `contact_id`. Called by every
- * hu_memory_facade_write/erase for that contact (wired in this commit). */
+/* Invalidate the cached entry for `(contact_id, cid_len)`.
+ * Special case: `(NULL, 0)` clears the entire LRU (graph teardown / tests).
+ * An empty-string contact with `cid_len == 0` only invalidates that key,
+ * not the whole cache. */
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len);
 
 /* Free a world model returned by build/load. Safe with NULL. */

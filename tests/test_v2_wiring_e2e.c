@@ -18,6 +18,7 @@
 
 #include "human/agent.h"
 #include "human/agent/world_model_bridge.h"
+#include "human/memory/graph.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"
 #include "human/memory/graph.h"
@@ -261,6 +262,33 @@ static void u2_keystore_wrap_unwrap_round_trip(void) {
  * every successful agent turn. Here we just prove the bridge entrypoint
  * is callable end-to-end — argument validation should reject an empty
  * contact_id since rehearsing for nobody is meaningless. */
+/* W7: shared bind helper wires verifier_graph + facade + W14 (daemon/CLI/spawn parity). */
+static void w7_agent_bind_sqlite_graph_wires_facade_and_scheduler(void) {
+#if HU_IS_TEST
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
+    HU_ASSERT_NOT_NULL(g);
+
+    hu_provider_t prov;
+    HU_ASSERT_EQ(hu_openai_create(&alloc, "test-key", 8, NULL, 0, &prov), HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    HU_ASSERT_EQ(
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL),
+        HU_OK);
+    HU_ASSERT_EQ(hu_agent_bind_sqlite_graph(&agent, g, &alloc), HU_OK);
+    HU_ASSERT_EQ((void *)agent.verifier_graph, (void *)g);
+    HU_ASSERT_NOT_NULL(agent.w7_facade);
+    HU_ASSERT_NOT_NULL(agent.w14_scheduler);
+
+    hu_agent_deinit(&agent);
+    hu_graph_close(g, &alloc);
+#endif
+}
+
 static void d3_counterfactual_enqueue_rejects_empty_contact(void) {
     /* NULL scheduler / empty contact_id must return cleanly without
      * crashing. The bridge function tolerates NULLs; any unexpected
@@ -279,6 +307,7 @@ void run_v2_wiring_e2e_tests(void) {
     HU_RUN_TEST(u1_agent_turn_with_learner_no_signal_for_neutral);
     HU_RUN_TEST(u1_agent_turn_without_learner_still_proposes_delta);
     HU_RUN_TEST(u2_keystore_wrap_unwrap_round_trip);
+    HU_RUN_TEST(w7_agent_bind_sqlite_graph_wires_facade_and_scheduler);
     HU_RUN_TEST(d3_counterfactual_enqueue_rejects_empty_contact);
 #endif
 }

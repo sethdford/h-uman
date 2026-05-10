@@ -18,9 +18,9 @@ related:
 bash scripts/w7-phase1-graph-bypass-inventory.sh
 ```
 
-## Snapshot (2026-05-10, workspace)
+## Snapshot (2026-05-10, regenerated)
 
-Per-file match counts for `hu_graph_` (includes type names like `hu_graph_t` and calls like `hu_graph_find_entity`):
+Per-file match counts for `hu_graph_` (includes type names like `hu_graph_t` and calls like `hu_graph_find_entity`). Regenerated with `bash scripts/w7-phase1-graph-bypass-inventory.sh`.
 
 | Count | Path |
 |------:|------|
@@ -28,19 +28,19 @@ Per-file match counts for `hu_graph_` (includes type names like `hu_graph_t` and
 | 18 | `src/agent/autodream.c` |
 | 10 | `src/agent/belief_reverify_runner.c` |
 | 8 | `src/persona/persona_deltas.c` |
-| 8 | `src/agent/case_based.c` |
 | 7 | `src/agent/cli.c` |
 | 6 | `src/persona/delta_observer.c` |
+| 6 | `src/agent/self_rag_atomic.c` |
+| 6 | `src/agent/case_based.c` |
 | 5 | `src/agent/world_model_bridge.c` |
 | 5 | `src/agent/scheduler.c` |
 | 5 | `src/agent/response_verifier.c` |
 | 5 | `src/agent/anticipatory.c` |
 | 4 | `src/agent/counterfactual.c` |
-| 2 | `src/agent/self_rag_atomic.c` |
-| 1 | `src/agent/self_rag.c` |
 | 1 | `src/agent/autodream_runner.c` |
-| 1 | `src/agent/agent.c` |
 | **109** | **total** |
+
+**Delta vs prior snapshot:** `src/agent/self_rag.c` and `src/agent/agent.c` now report **0** `hu_graph_*` matches (callers use `hu_memory_facade_t` / W7 bridge; graph access is indirect). `case_based.c` dropped 8→6; `self_rag_atomic.c` rose 2→6 as atomic path mirrors facade + `hu_graph__db_handle` patterns. Net total unchanged at 109 until remaining modules shed direct graph symbols.
 
 `src/feeds/`: **0** matches (no direct graph API in `.c` / `.h` under that tree at this snapshot).
 
@@ -62,10 +62,11 @@ The execution plan allows **documented exceptions** instead of an immediate “&
 
 ## Recommended migration order (next PRs)
 
-1. **response_verifier** + **case_based** — high visibility on the response path; narrow `hu_graph_*` surface (mostly `hu_graph__db_handle` + typed helpers).
-2. **anticipatory** — replace temporal/causal reads with `hu_memory_facade_read` queries once neighbor/window kinds cover the call shape.
-3. **autodream** — largest raw-SQL + `hu_graph_upsert_relation_ex` bypass; depends on quarantine write semantics on the facade.
-4. **world_model.c** — keep in sync with W9 spec; many calls are already behind facade for reads; remainder tracked per function.
+1. **response_verifier** + **case_based** — **partial:** public APIs take `hu_memory_facade_t *`; remaining matches are `hu_graph__db_handle` / helpers until facade kinds cover case + verifier tables. Next: route writes through `hu_memory_facade_write` and drop raw SQL touchpoints.
+2. **self_rag_atomic** — align with facade read/write kinds for claim scoring so `hu_graph_*` count can fall without duplicating verifier SQL.
+3. **anticipatory** — replace temporal/causal reads with `hu_memory_facade_read` queries once neighbor/window kinds cover the call shape.
+4. **autodream** — largest raw-SQL + `hu_graph_upsert_relation_ex` bypass; depends on quarantine write semantics on the facade.
+5. **world_model.c** — keep in sync with W9 spec; many calls are already behind facade for reads; remainder tracked per function.
 
 ## Proof obligations
 

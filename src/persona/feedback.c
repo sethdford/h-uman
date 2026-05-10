@@ -148,9 +148,6 @@ hu_error_t hu_persona_feedback_apply(hu_allocator_t *alloc, const char *persona_
     /* Read all lines, parse each as JSON, collect corrections */
     char line_buf[8192];
     hu_persona_t persona = {0};
-    /* TODO(W9): needs hu_memory_facade_t* in scope to migrate.
-     * This function only receives alloc + persona_name; no graph or
-     * facade is threaded through. */
     hu_error_t load_err = hu_persona_load(alloc, persona_name, persona_name_len, &persona);
     if (load_err != HU_OK) {
         fclose(f);

@@ -48,6 +48,9 @@ typedef struct hu_spawn_config {
     const void *parent_tools; /* const hu_tool_t * */
     size_t parent_tools_count;
     void *memory;           /* hu_memory_t * */
+    /* Optional struct hu_graph * (SQLite session graph). Child opens its own W7 facade via
+     * hu_agent_bind_sqlite_graph; not owned by the pool. Typically parent's verifier_graph. */
+    void *verifier_graph;
     void *session_store;    /* hu_session_store_t * */
     void *observer;         /* hu_observer_t * */
     uint8_t autonomy_level; /* 0 = default 2 when no parent tools; else typical parent copy */

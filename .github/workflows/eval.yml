@@ -6,6 +6,10 @@ on:
       - "src/**"
       - "include/**"
       - "eval_suites/**"
+      - "tests/**"
+      - "scripts/redteam-eval-fleet.sh"
+      - "data/eval/**"
+      - "scripts/eval_*.py"
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:

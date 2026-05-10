@@ -742,8 +742,12 @@ hu_error_t hu_agent_cli_run(hu_allocator_t *alloc, const char *const *argv, size
                 (void)hu_graph_open(alloc, graph_path, (size_t)np, &cli_graph);
         }
     }
-    if (cli_graph)
+    if (cli_graph) {
         hu_retrieval_set_graph(&retrieval_engine, cli_graph);
+        hu_error_t ge = hu_agent_bind_sqlite_graph(&agent, cli_graph, alloc);
+        if (ge != HU_OK)
+            hu_log_warn("human", NULL, "CLI graph bind: %s", hu_error_string(ge));
+    }
 #endif
     if (cli_awareness.bus)
         hu_agent_set_awareness(&agent, (struct hu_awareness *)&cli_awareness);

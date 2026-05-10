@@ -1,5 +1,6 @@
 #include "human/agent/autodream.h"
 #include "human/core/log.h"
+#include "human/memory/belief.h"
 #include "human/memory/conflict_resolver.h"
 
 #ifdef HU_ENABLE_SQLITE
@@ -173,15 +174,20 @@ static hu_error_t phase_quarantine_review(hu_graph_t *g, const hu_autodream_conf
             char prefixed[512];
             int n = snprintf(prefixed, sizeof(prefixed), "released:autodream:%.*s",
                              (int)(prov_len < 480 ? prov_len : 480), prov ? prov : "");
-            /* TODO(W7-blocked): hu_memory_facade_write cannot be used here
-             * because hu_memory_record_t lacks a contact_id field. The v1
-             * backend's v1_relation_write passes "" for contact_id, losing
-             * the per-contact scoping this call requires. Migration is
-             * blocked until hu_memory_record_t is extended with contact_id
-             * or the facade write path gains a contact-scoping parameter. */
-            (void)hu_graph_upsert_relation_ex(g, cid_t, cid_len, source_id, target_id, rtype,
-                                              weight, event_start, event_end, confidence, ctx,
-                                              ctx_len, prefixed, n > 0 ? (size_t)n : 0);
+            /* P2G — autodream consolidation is heuristic, so seed the
+             * Bayesian variance with the prior for "autodream" (0.10).
+             * The reverify runner will adjust this further over time. The
+             * write itself still goes through the L0 graph helper so we
+             * preserve quarantine release semantics atomically with the
+             * delete below; the W7 facade path is reserved for fresh
+             * ingestion (see daemon.c). */
+            float initial_variance =
+                hu_belief_initial_variance_for_provenance(prefixed,
+                                                          n > 0 ? (size_t)n : 0);
+            (void)hu_graph_upsert_relation_with_belief(
+                g, cid_t, cid_len, source_id, target_id, rtype, weight,
+                event_start, event_end, confidence, initial_variance, ctx,
+                ctx_len, prefixed, n > 0 ? (size_t)n : 0, NULL);
             sqlite3_stmt *del = NULL;
             if (sqlite3_prepare_v2(db, "DELETE FROM quarantine_relations WHERE id = ?", -1, &del,
                                    NULL) == SQLITE_OK) {

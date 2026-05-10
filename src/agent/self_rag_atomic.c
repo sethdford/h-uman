@@ -23,7 +23,9 @@
 #include "human/agent/self_rag.h"
 
 #include "human/memory/corrective_rag.h"
+/* hu_graph_relation_t: payload shape returned by v1 `HU_MEM_RELATION` facade reads. */
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -242,8 +244,8 @@ static size_t decompose_draft(const char *draft, size_t draft_len,
  *
  * On success, writes the correction into `out_correction` (caller-owned
  * buffer, NUL-terminated) and returns true. On no-match, returns false
- * and leaves the buffer untouched. Never throws or allocates beyond what
- * `hu_graph_list_relations` requires (which is freed before return). */
+ * and leaves the buffer untouched. Relations are loaded via
+ * `hu_memory_facade_read` (HU_MEM_RELATION list) and freed before return. */
 static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
                                            hu_memory_facade_t *m,
                                            const char *contact_id,
@@ -256,26 +258,31 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
     if (!contact_id || contact_id_len == 0)
         return false;
 
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g)
-        return false;
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_RELATION;
+    q.contact_id = contact_id;
+    q.contact_id_len = contact_id_len;
+    q.as.window.limit = 64;
 
-    /* Cap at 64 relations: corrections come from the most-weighted edges,
-     * and grading every edge in the graph is wasteful. */
-    hu_graph_relation_t *rels = NULL;
+    hu_memory_record_t *recs = NULL;
     size_t n = 0;
-    hu_error_t err = hu_graph_list_relations(g, alloc, contact_id, contact_id_len,
-                                             64, &rels, &n);
-    if (err != HU_OK || !rels || n == 0) {
-        if (rels) hu_graph_relations_free(alloc, rels, n);
+    hu_error_t err = hu_memory_facade_read(m, &q, alloc, &recs, &n);
+    if (err != HU_OK || !recs || n == 0) {
+        if (recs)
+            hu_memory_facade_records_free(m, alloc, recs, n);
         return false;
     }
 
     int best_idx = -1;
     double best_score = 0.0;
     for (size_t i = 0; i < n; i++) {
-        const char *doc = rels[i].context;
-        size_t doc_len = rels[i].context_len;
+        const hu_graph_relation_t *rels =
+            (const hu_graph_relation_t *)recs[i].payload;
+        if (!rels)
+            continue;
+        const char *doc = rels->context;
+        size_t doc_len = rels->context_len;
         if (!doc || doc_len == 0)
             continue;
         hu_rag_graded_doc_t grade = {0};
@@ -290,13 +297,15 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
 
     bool ok = false;
     if (best_idx >= 0) {
-        size_t copy = rels[best_idx].context_len;
+        const hu_graph_relation_t *best =
+            (const hu_graph_relation_t *)recs[best_idx].payload;
+        size_t copy = best->context_len;
         if (copy >= out_cap) copy = out_cap - 1;
-        memcpy(out_correction, rels[best_idx].context, copy);
+        memcpy(out_correction, best->context, copy);
         out_correction[copy] = '\0';
         ok = true;
     }
-    hu_graph_relations_free(alloc, rels, n);
+    hu_memory_facade_records_free(m, alloc, recs, n);
     return ok;
 }
 

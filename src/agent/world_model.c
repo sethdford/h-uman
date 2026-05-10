@@ -586,8 +586,11 @@ hu_error_t hu_world_model_load(hu_memory_facade_t *m, hu_allocator_t *alloc,
 }
 
 void hu_world_model_invalidate(const char *contact_id, size_t cid_len) {
-    if (!contact_id || cid_len == 0) {
-        /* Wildcard invalidate: drop everything. */
+    /* Global flush is spelled (NULL, 0) — see graph.c teardown and tests.
+     * Do NOT treat ("", 0) as global: empty-string contact_id is a valid
+     * graph scope for some callers; flushing every slot with their mixed
+     * allocators would corrupt the cache. */
+    if (!contact_id && cid_len == 0) {
         for (size_t i = 0; i < HU_WM_CACHE_SLOTS; i++) {
             if (s_cache[i].wm) {
                 hu_world_model_free(s_cache[i].alloc, s_cache[i].wm);
@@ -596,6 +599,8 @@ void hu_world_model_invalidate(const char *contact_id, size_t cid_len) {
         }
         return;
     }
+    if (!contact_id)
+        return;
     struct wm_cache_entry *entry = cache_lookup(contact_id, cid_len);
     if (entry && entry->wm) {
         hu_world_model_free(entry->alloc, entry->wm);

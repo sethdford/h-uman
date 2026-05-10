@@ -28,6 +28,26 @@
 extern "C" {
 #endif
 
+/* HU_MEM_RELATION read: set `q.as.by_id.id` to this sentinel and optional
+ * `q.as.by_id.limit` (default 64) to fetch open-interval relations
+ * (`event_end = 0`) ordered by `last_seen` with endpoint entity names
+ * populated for response-path verification. */
+#define HU_MEMORY_REL_VERIFIER_SCAN ((int64_t)-1)
+
+/* Payload for HU_MEM_CASE records (read returns owned strings; write may use
+ * borrowed pointers that must outlive hu_memory_facade_write). */
+typedef struct hu_memory_case_payload {
+    char *goal_verb;
+    size_t goal_verb_len;
+    int64_t *anchor_entity_ids;
+    size_t anchor_count;
+    char *plan_text;
+    size_t plan_text_len;
+    char *outcome;
+    size_t outcome_len;
+    int64_t happened_at;
+} hu_memory_case_payload_t;
+
 /* Discriminator for queries / records. Each kind maps to one backend at a time
  * (registered via hu_memory_facade_register_backend). New kinds extend this enum at
  * the bottom; values are stable for on-disk routing tables. */
@@ -80,23 +100,36 @@ typedef struct hu_memory_query {
             size_t limit;
         } cases;
         struct {
-            int64_t id; /* generic id-based fetch */
+            int64_t id; /* generic id-based fetch; see HU_MEMORY_REL_VERIFIER_SCAN */
+            size_t limit; /* used with HU_MEM_RELATION + HU_MEMORY_REL_VERIFIER_SCAN */
         } by_id;
     } as;
 } hu_memory_query_t;
 
 /* Universal record carried back from read() and into write(). Kind-specific
  * payload sits in the opaque `payload` blob; consumers cast based on `kind`.
- * The non-payload fields (id, provenance, event window) are honored by every
- * backend so callers can reason about provenance without casting. */
+ * The non-payload fields (id, provenance, event window, contact scope) are
+ * honored by every backend so callers can reason about provenance without
+ * casting. */
 typedef struct hu_memory_record {
     hu_memory_kind_t kind;
     int64_t id;
+    /* Optional contact scope. Backends MUST honor this when present — the v1
+     * graph backend, for example, uses it as the SQL `contact_id` column.
+     * Length is the byte count without a trailing NUL; pass NULL/0 for
+     * unscoped writes (e.g. global hyperedges). */
+    const char *contact_id;
+    size_t contact_id_len;
     char *provenance;       /* nullable; owned-by-record when read returns it */
     size_t provenance_len;
     int64_t event_start;
     int64_t event_end;
-    float confidence;       /* 0.0-1.0; 1.0 default. W8 will replace with hu_belief_t. */
+    float confidence;       /* 0.0-1.0; 1.0 default. W8 mean estimate. */
+    /* P2G — W8 Bayesian belief variance. 0.0 == fully certain. Backends MUST
+     * honor this when present. If `confidence_variance < 0`, the backend
+     * derives a default from provenance via
+     * `hu_belief_initial_variance_for_provenance`. */
+    float confidence_variance;
     void *payload;          /* kind-specific struct; cast via `kind`. */
     size_t payload_len;
 } hu_memory_record_t;
@@ -116,10 +149,9 @@ typedef struct hu_memory_facade_vtable {
 
 typedef struct hu_memory_facade hu_memory_facade_t;
 
-/* Lifecycle. `hu_memory_facade_open` registers the v1 backend for every kind v1
- * supports today (entity, relation, persona_delta, case, cross_edge,
- * quarantine). Other kinds return HU_ERR_NOT_SUPPORTED until a backend is
- * registered for them. */
+/* Lifecycle. `hu_memory_facade_open` registers the v1 backend for entity,
+ * relation, hyperedge, and (when SQLite is enabled) case_records. Other kinds
+ * return HU_ERR_NOT_SUPPORTED until a backend is registered for them. */
 hu_error_t hu_memory_facade_open(hu_allocator_t *alloc, hu_graph_t *graph, hu_memory_facade_t **out);
 void hu_memory_facade_close(hu_memory_facade_t *m, hu_allocator_t *alloc);
 
@@ -134,6 +166,13 @@ hu_error_t hu_memory_facade_register_backend(hu_memory_facade_t *m, hu_memory_ki
 hu_error_t hu_memory_facade_read(hu_memory_facade_t *m, const hu_memory_query_t *q, hu_allocator_t *alloc,
                                 hu_memory_record_t **out, size_t *out_count);
 hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_t *rec);
+
+/* After a successful `hu_memory_facade_write` with `rec->kind == HU_MEM_CASE`, returns
+ * `sqlite3_last_insert_rowid()` for the graph connection (0 if unavailable). The facade
+ * clears this to 0 at the start of every `hu_memory_facade_write` call, then refreshes it
+ * only when the case write succeeds — best-effort; do not rely across concurrent writers. */
+int64_t hu_memory_facade_last_case_rowid(const hu_memory_facade_t *m);
+
 hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, int64_t id);
 
 /* Cross-backend purge by provenance substring. Distinct from the v1 helper
@@ -163,6 +202,19 @@ char *hu_memory_facade_route_lookup(hu_memory_facade_t *m, hu_memory_kind_t kind
  * migrate incrementally without losing access to graph-only APIs (community
  * detection, Leiden, etc). New code should prefer the facade. */
 hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m);
+
+/* List all entities for a contact through the facade. Convenience wrapper
+ * that delegates to the underlying graph handle. Callers should prefer this
+ * over hu_memory_facade_graph_handle + hu_graph_list_entities directly so
+ * the facade remains the single entry point. Free results with
+ * hu_graph_entities_free. */
+hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
+                                          hu_allocator_t *alloc,
+                                          const char *contact_id,
+                                          size_t cid_len,
+                                          size_t limit,
+                                          hu_graph_entity_t **out,
+                                          size_t *out_count);
 
 /* W15 GDPR data-portability: export all memory records across every registered
  * kind to a JSON-Lines file at `output_path`. Each line is a self-contained

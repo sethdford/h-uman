@@ -51,6 +51,7 @@ typedef enum hu_job_kind {
     HU_JOB_LORA_TRAINING,
     HU_JOB_COUNTERFACTUAL_REHEARSAL,
     HU_JOB_BELIEF_REVERIFICATION,
+    HU_JOB_PERSONA_EVOLVER,
     HU_JOB_KIND_MAX
 } hu_job_kind_t;
 

@@ -103,10 +103,18 @@ typedef struct hu_planner {
 /* Heuristic backend: fast, deterministic, no I/O. Always succeeds. */
 hu_error_t hu_planner_heuristic(hu_planner_t *out);
 
-/* LLM backend (PLACEHOLDER in this commit). Captures the provider pointer
- * but does not invoke it; returns a deterministic single-step plan so
- * callers can flip backends without API churn. */
+/* LLM backend. Calls the provider with a JSON-schema-locked prompt, parses
+ * and clamps the response, and falls back to a deterministic single-step
+ * plan when the provider is NULL, the call fails, or the JSON is malformed.
+ * Tests always take the fallback path (HU_IS_TEST) so they stay
+ * deterministic and free of provider I/O. */
 hu_error_t hu_planner_llm(hu_provider_t *p, hu_planner_t *out);
+
+/* Configure the LLM backend's allocator and optional model override. The
+ * allocator is required for the LLM round-trip; without it, `plan()` takes
+ * the deterministic fallback. The model string is copied. Safe to call
+ * multiple times; previous model copy is freed. */
+void hu_planner_llm_configure(hu_allocator_t *alloc, const char *model, size_t model_len);
 
 /* Convenience: invoke the backend's plan() with cap enforcement.
  * Equivalent to vt->plan(...) followed by post-clamp; preferable because

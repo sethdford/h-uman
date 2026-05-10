@@ -201,6 +201,72 @@ static bool starts_with_dont(const char *word) {
            (strncmp(word, "shouldn", 7) == 0);
 }
 
+/* P2G — Initial variance prior keyed by provenance string.
+ *
+ * The variance is what `hu_graph_upsert_relation_ex` writes alongside
+ * the (mean = scalar confidence) when a new relation row is created.
+ * Higher variance means "we don't trust this observation as much yet";
+ * the W14 reverify runner already grows variance over time, so this
+ * function only sets the starting point.
+ *
+ * Sources are matched as case-insensitive prefix tokens up to the
+ * first non-alphanumeric byte, so "imessage" matches both "imessage"
+ * and "imessage:turn-42". This keeps the heuristic robust to
+ * provenance strings that prepend channel info or turn IDs. */
+static int prov_starts_with_token(const char *prov, size_t prov_len,
+                                  const char *token) {
+    size_t tl = strlen(token);
+    if (prov_len < tl) return 0;
+    /* Boundary check: require the next byte (if any) to be a non-letter
+     * so "imessage_x" matches "imessage" but "imessagery" does not. */
+    if (prov_len > tl) {
+        char nxt = prov[tl];
+        if ((nxt >= 'a' && nxt <= 'z') || (nxt >= 'A' && nxt <= 'Z') ||
+            (nxt >= '0' && nxt <= '9'))
+            return 0;
+    }
+    for (size_t i = 0; i < tl; i++) {
+        char a = prov[i], b = token[i];
+        if (a >= 'A' && a <= 'Z') a += 32;
+        if (b >= 'A' && b <= 'Z') b += 32;
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+float hu_belief_initial_variance_for_provenance(const char *prov, size_t prov_len) {
+    if (!prov || prov_len == 0)
+        return 0.05f;
+
+    /* Direct messaging channels and explicit user statements: low
+     * variance. We trust what the user typed — the source itself is
+     * not the unknown. */
+    static const char *const kLow[] = {
+        "imessage", "telegram", "discord", "slack", "whatsapp",
+        "signal", "sms", "facebook", "instagram", "messenger",
+        "user-explicit", "user-statement", "agent_dialogue",
+        "agent-dialogue", NULL,
+    };
+    for (size_t i = 0; kLow[i]; i++) {
+        if (prov_starts_with_token(prov, prov_len, kLow[i]))
+            return 0.02f;
+    }
+
+    /* Heuristic-derived: higher variance because the inference itself
+     * is the unknown. Each of these labels marks a relation that was
+     * not directly stated but synthesized by the system. */
+    static const char *const kHigh[] = {
+        "autodream", "consolidated", "inferred", "extracted",
+        "extraction", "heuristic", "fallback", NULL,
+    };
+    for (size_t i = 0; kHigh[i]; i++) {
+        if (prov_starts_with_token(prov, prov_len, kHigh[i]))
+            return 0.10f;
+    }
+
+    return 0.05f;
+}
+
 hu_belief_conflict_t hu_belief_semantic_conflict(
     const char *text_a, size_t len_a,
     const char *text_b, size_t len_b) {

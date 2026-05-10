@@ -469,6 +469,8 @@ char *hu_agent_handle_slash_command(hu_agent_t *agent, const char *message, size
         }
         if (agent->memory)
             scfg.memory = agent->memory;
+        if (agent->verifier_graph)
+            scfg.verifier_graph = agent->verifier_graph;
         if (agent->session_store)
             scfg.session_store = agent->session_store;
         if (agent->observer && agent->observer->vtable)

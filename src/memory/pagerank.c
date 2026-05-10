@@ -93,17 +93,15 @@ hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc
     if (iterations == 0) iterations = HU_PAGERANK_DEFAULT_ITERATIONS;
     if (iterations > 1000) iterations = 1000;  /* sanity cap */
 
-    /* TODO(W12-facade-list): the W7 facade has no "list all entities for a
-     * contact" query yet (only by_name / by_id / neighbors). Until it does,
-     * we read directly from the underlying graph handle. The W12 spec
-     * explicitly permits this with a TODO marker. */
     hu_graph_t *g = hu_memory_facade_graph_handle(m);
     if (!g) return HU_ERR_NOT_SUPPORTED;
 
     hu_graph_entity_t *ents = NULL;
     size_t n = 0;
-    hu_error_t err = hu_graph_list_entities(g, alloc, contact_id, cid_len,
-                                             HU_PAGERANK_MAX_ENTITIES + 1, &ents, &n);
+    hu_error_t err = hu_memory_facade_list_entities(m, alloc, contact_id,
+                                                     cid_len,
+                                                     HU_PAGERANK_MAX_ENTITIES + 1,
+                                                     &ents, &n);
     if (err != HU_OK && err != HU_ERR_NOT_FOUND) return err;
     if (n == 0) {
         if (ents) hu_graph_entities_free(alloc, ents, n);

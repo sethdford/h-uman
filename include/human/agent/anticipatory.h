@@ -3,7 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,6 +36,13 @@ typedef struct hu_anticipatory_result {
 hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, int64_t now_ts,
                                    hu_anticipatory_result_t *result);
+
+/* Same as `hu_anticipatory_analyze` but takes the W7 facade (uses
+ * `hu_memory_facade_graph_handle` internally). Prefer in code paths that
+ * already hold `hu_memory_facade_t *` so graph access stays facade-adjacent. */
+hu_error_t hu_anticipatory_analyze_memory(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                          const char *contact_id, size_t contact_id_len,
+                                          int64_t now_ts, hu_anticipatory_result_t *result);
 
 /* Build prompt context from anticipatory actions */
 hu_error_t hu_anticipatory_build_context(const hu_anticipatory_result_t *result,

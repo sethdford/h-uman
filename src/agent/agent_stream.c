@@ -328,7 +328,7 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         hu_memory_loader_t loader;
         hu_memory_loader_init(&loader, agent->alloc, agent->memory, agent->retrieval_engine, 10,
                               4000);
-        loader.facade = agent->w7_facade;
+        hu_memory_loader_set_facade(&loader, agent->w7_facade);
         hu_error_t mem_err =
             hu_memory_loader_load(&loader, msg, msg_len, "", 0, &memory_ctx, &memory_ctx_len);
         if (mem_err != HU_OK && mem_err != HU_ERR_NOT_SUPPORTED)

@@ -23,10 +23,6 @@ hu_error_t hu_social_graph_build_context(hu_allocator_t *alloc, hu_graph_t *grap
     *out = NULL;
     *out_len = 0;
 
-    /* TODO(W9): needs hu_memory_facade_t* in scope to migrate.
-     * This TU includes human/memory.h (legacy), so world_model.h
-     * and memory/memory.h cannot be included (struct hu_memory tag
-     * collision).  A bridge function or TU split is required. */
     if (contact_id && contact_id_len > 0)
         return hu_graph_build_contact_context(graph, alloc, query, query_len, contact_id,
                                              contact_id_len, max_hops, max_chars, out, out_len);

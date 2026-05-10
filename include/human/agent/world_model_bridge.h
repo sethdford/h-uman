@@ -166,6 +166,14 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                  size_t limit, size_t max_chars,
                                  char **out_text, size_t *out_len);
 
+/* Enqueue the persona evolver as a scheduler job. Mirrors the
+ * AutoDream bridge pattern: when the scheduler is available the
+ * daemon enqueues instead of running synchronously, so the work
+ * is paced and battery-gated. `budget_ms` of 0 means unlimited. */
+hu_error_t hu_w14_scheduler_enqueue_persona_evolver(hu_w14_scheduler_t *s,
+                                                    int64_t now_ms,
+                                                    int budget_ms);
+
 /* W14 P0 #4 — runner registration helpers.
  *
  * The bridge cannot embed `hu_lora_runner_ctx_t` / `hu_kv_cache_manager_t` /

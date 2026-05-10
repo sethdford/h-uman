@@ -137,8 +137,6 @@ hu_error_t hu_persona_style_reanalyze(hu_allocator_t *alloc, hu_provider_t *prov
     if (parse_err == HU_OK) {
         hu_persona_t current;
         memset(&current, 0, sizeof(current));
-        /* TODO(W9): needs hu_memory_facade_t* in scope to migrate.
-         * Only hu_legacy_memory_t* is available here; no facade. */
         if (hu_persona_load(alloc, persona_name, persona_name_len, &current) == HU_OK) {
             hu_persona_t merged;
             memset(&merged, 0, sizeof(merged));

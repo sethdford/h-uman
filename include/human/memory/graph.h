@@ -60,6 +60,11 @@ typedef struct hu_graph_relation {
     int64_t supersedes_id;    /* prior relation this replaces; 0 = none */
     char *provenance;         /* source URI / channel / turn-id; nullable */
     size_t provenance_len;
+    /* Optional endpoint names (e.g. verifier scan); hu_graph_relations_free frees when set. */
+    char *source_name;
+    size_t source_name_len;
+    char *target_name;
+    size_t target_name_len;
 } hu_graph_relation_t;
 
 /* Graph context (opaque, backed by SQLite) */
@@ -97,6 +102,31 @@ hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
                                        int64_t event_end, float confidence, const char *context,
                                        size_t context_len, const char *provenance,
                                        size_t provenance_len);
+
+/* P2G — upsert with full Bayesian belief (mean + variance).
+ *
+ * The W8 belief layer represents trust as (mean, variance) with
+ * provenance. This function lets ingestion paths set BOTH dimensions
+ * at write time, instead of writing variance=0 and then having to do
+ * a follow-up `hu_graph_set_relation_belief` call.
+ *
+ * `belief_mean` ∈ [0, 1] — point estimate of truth probability;
+ *     callers that pass < 0 get the legacy default of 1.0.
+ * `belief_variance` ∈ [0, 0.25] — initial uncertainty; clamped on
+ *     write. The W14 reverify runner grows this further as the
+ *     relation ages.
+ * `out_id` — optional output: the row id of the inserted relation.
+ *     Pass NULL if the caller does not need the id.
+ *
+ * All other arguments mirror `hu_graph_upsert_relation_ex` exactly. */
+hu_error_t hu_graph_upsert_relation_with_belief(
+    hu_graph_t *g, const char *contact_id, size_t contact_id_len,
+    int64_t source_id, int64_t target_id, hu_relation_type_t type,
+    float weight, int64_t event_start, int64_t event_end,
+    float belief_mean, float belief_variance,
+    const char *context, size_t context_len,
+    const char *provenance, size_t provenance_len,
+    int64_t *out_id);
 
 /* Window query: return relations whose event window overlaps [from_ts, to_ts]. */
 hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
@@ -149,6 +179,13 @@ hu_error_t hu_graph_list_entities(hu_graph_t *g, hu_allocator_t *alloc, const ch
 hu_error_t hu_graph_list_relations(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
                                    size_t contact_id_len, size_t limit,
                                    hu_graph_relation_t **out, size_t *out_count);
+
+/* Open relations only (`event_end = 0`), ordered by `last_seen` descending.
+ * Joins source/target entity names for the same `contact_id` scope. */
+hu_error_t hu_graph_list_relations_verifier_scan(hu_graph_t *g, hu_allocator_t *alloc,
+                                                 const char *contact_id, size_t contact_id_len,
+                                                 size_t limit, hu_graph_relation_t **out,
+                                                 size_t *out_count);
 
 /* Free arrays returned by neighbors */
 void hu_graph_entities_free(hu_allocator_t *alloc, hu_graph_entity_t *entities, size_t count);

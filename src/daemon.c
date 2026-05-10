@@ -120,11 +120,9 @@ static size_t g_classify_model_len = 29;
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((unused))
 #endif
-/* TODO(W9): needs bridge extension to migrate.  This function does
- * real-time per-message emotion detection from history entries, while
- * the W9 world model stores a cached emotional snapshot.  A bridge
- * API that updates and returns wm->dominant_emotion / arousal /
- * valence from the live history is needed before this can migrate. */
+/* W9: real-time emotion detection stays here (per-message, from live
+ * history) while the world model caches a snapshot. The two compose:
+ * this function feeds live state, the world model feeds trend. */
 static hu_emotional_state_t hu_daemon_detect_emotion(hu_allocator_t *alloc, hu_agent_t *agent,
                                                      const hu_channel_history_entry_t *entries,
                                                      size_t count) {
@@ -2276,37 +2274,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
     }
     if (graph && agent && agent->retrieval_engine)
         hu_retrieval_set_graph(agent->retrieval_engine, graph);
-    /* W4 verifier wire (FIX 2 follow-up): expose the daemon's bitemporal
-     * graph to the agent so per-turn response verification can score claims
-     * against actual stored facts (instead of falling through TELEMETRY's
-     * graph-less "every claim unsupported" path). */
-    if (graph && agent)
-        agent->verifier_graph = graph;
-    /* W7+W9 facade wire (FIX 12): open the W7 dispatching memory facade on
-     * the same graph so the per-turn world-model load (W9) has a backend.
-     * The bridge keeps the W7 type out of agent.h's include closure -- see
-     * include/human/agent/world_model_bridge.h. */
-    if (graph && agent && !agent->w7_facade) {
-        hu_w7_facade_t *facade = NULL;
-        hu_error_t fe = hu_w7_facade_open(graph, alloc, &facade);
-        if (fe == HU_OK)
-            agent->w7_facade = facade;
-        else
-            hu_log_warn("human", agent->observer, "W7 facade open failed: %d", (int)fe);
-    }
-    /* W14 scheduler wire (FIX 13): open the sleep-time compute scheduler on
-     * the same memory handle the W7 facade owns. Ticks once per main-loop
-     * iteration below; closes BEFORE the facade so the borrowed memory
-     * handle stays valid through the last tick. The scheduler is a no-op
-     * with no enqueued jobs, so the wire is safe even when no consumer
-     * has yet enqueued work. */
-    if (agent && agent->w7_facade && !agent->w14_scheduler) {
-        hu_w14_scheduler_t *sched = NULL;
-        hu_error_t se = hu_w14_scheduler_open(agent->w7_facade, alloc, &sched);
-        if (se == HU_OK)
-            agent->w14_scheduler = sched;
-        else
-            hu_log_warn("human", agent->observer, "W14 scheduler open failed: %d", (int)se);
+    /* W4/W7/W14: verifier graph + W7 facade + W14 scheduler (see hu_agent_bind_sqlite_graph). */
+    if (graph && agent) {
+        hu_error_t be = hu_agent_bind_sqlite_graph(agent, graph, alloc);
+        if (be != HU_OK)
+            hu_log_warn("human", agent->observer, "agent graph bind: %s", hu_error_string(be));
     }
     /* W14 — register LoRA + KV runners (context-dependent) so sleep-time
      * ticks can drain the W13 learner and prune the KV cache. */
@@ -2779,24 +2751,11 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                         (void)hu_w14_scheduler_status_save(agent->w14_scheduler);
                     }
                 }
-                /* TODO(W14-partial): AutoDream (below) is scheduler-aware —
-                 * it prefers hu_w14_scheduler_enqueue_autodream when
-                 * available and falls back to sync. The sync fallback
-                 * MUST remain for graceful degradation when the scheduler
-                 * is unavailable (test mode, facade open failure).
-                 *
-                 * Remaining work to fully retire this block:
-                 *  1. Add HU_JOB_PERSONA_EVOLVER to hu_job_kind_t
-                 *  2. Implement a persona-evolver runner
-                 *  3. Wire hu_w14_scheduler_enqueue_persona_evolver bridge
-                 *  4. Add scheduler path here (same pattern as autodream)
-                 *  5. After 2 release cycles of scheduler stability, remove
-                 *     the hard-coded clock checks and sync fallbacks
-                 *
-                 * W2 AutoDream + W5 persona evolver — daily housekeeping.
-                 * Runs once per day in the 3-5 AM window so it doesn't
-                 * compete with the 2 AM reflection cycle for sqlite write
-                 * locks. */
+                /* W2 AutoDream + W5 persona evolver — daily housekeeping.
+                 * Both prefer the W14 scheduler (paced, idle-gated) with
+                 * sync fallback for graceful degradation. Runs once per
+                 * day in the 3-5 AM window to avoid the 2 AM reflection
+                 * cycle's SQLite write locks. */
                 {
                     static bool autodream_done_today = false;
                     static bool evolver_done_today = false;
@@ -2882,24 +2841,44 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                          * happens lazily on each turn (W5 future work). */
                         if (lt_dream->tm_hour == 3 && lt_dream->tm_min == 5 &&
                             !evolver_done_today) {
-                            hu_persona_evolver_config_t pe_cfg =
-                                hu_persona_evolver_default_config();
-                            pe_cfg.now_ms = (int64_t)t * 1000LL;
-                            hu_persona_evolver_report_t pe_report;
-                            memset(&pe_report, 0, sizeof(pe_report));
-                            hu_error_t pe_err =
-                                hu_persona_evolver_run(graph, "", 0, &pe_cfg, &pe_report);
-                            if (pe_err == HU_OK) {
-                                hu_log_info("human", agent ? agent->observer : NULL,
-                                            "persona evolver: proposed=%zu applied=%zu "
-                                            "dropped=%zu quarantined=%zu pending=%zu",
-                                            pe_report.proposed_total, pe_report.applied,
-                                            pe_report.dropped, pe_report.quarantined,
-                                            pe_report.still_pending);
+                            if (agent && agent->w14_scheduler) {
+                                hu_error_t enq_err =
+                                    hu_w14_scheduler_enqueue_persona_evolver(
+                                        agent->w14_scheduler, (int64_t)t * 1000LL,
+                                        120000);
+                                if (enq_err == HU_OK) {
+                                    hu_log_info(
+                                        "human", agent ? agent->observer : NULL,
+                                        "persona evolver: enqueued via W14 scheduler");
+                                } else {
+                                    hu_log_error(
+                                        "human", agent ? agent->observer : NULL,
+                                        "persona evolver W14 enqueue failed (%s) "
+                                        "— falling back to sync",
+                                        hu_error_string(enq_err));
+                                    goto persona_evolver_sync;
+                                }
                             } else {
-                                hu_log_error("human", agent ? agent->observer : NULL,
-                                             "persona evolver failed: %s",
-                                             hu_error_string(pe_err));
+                            persona_evolver_sync: ;
+                                hu_persona_evolver_config_t pe_cfg =
+                                    hu_persona_evolver_default_config();
+                                pe_cfg.now_ms = (int64_t)t * 1000LL;
+                                hu_persona_evolver_report_t pe_report;
+                                memset(&pe_report, 0, sizeof(pe_report));
+                                hu_error_t pe_err =
+                                    hu_persona_evolver_run(graph, "", 0, &pe_cfg, &pe_report);
+                                if (pe_err == HU_OK) {
+                                    hu_log_info("human", agent ? agent->observer : NULL,
+                                                "persona evolver (sync): proposed=%zu applied=%zu "
+                                                "dropped=%zu quarantined=%zu pending=%zu",
+                                                pe_report.proposed_total, pe_report.applied,
+                                                pe_report.dropped, pe_report.quarantined,
+                                                pe_report.still_pending);
+                                } else {
+                                    hu_log_error("human", agent ? agent->observer : NULL,
+                                                 "persona evolver failed: %s",
+                                                 hu_error_string(pe_err));
+                                }
                             }
                             evolver_done_today = true;
                         }
@@ -8151,9 +8130,16 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                     hu_anticipatory_result_t antic;
                     memset(&antic, 0, sizeof(antic));
                     int64_t now_ts = (int64_t)time(NULL);
-                    if (hu_anticipatory_analyze(graph, alloc, batch_key, key_len, now_ts, &antic) ==
-                            HU_OK &&
-                        antic.action_count > 0) {
+                    hu_error_t antic_err;
+                    if (agent && agent->w7_facade) {
+                        hu_memory_facade_t *mf = hu_w7_facade_memory_handle(agent->w7_facade);
+                        antic_err =
+                            hu_anticipatory_analyze_memory(mf, alloc, batch_key, key_len, now_ts, &antic);
+                    } else {
+                        antic_err =
+                            hu_anticipatory_analyze(graph, alloc, batch_key, key_len, now_ts, &antic);
+                    }
+                    if (antic_err == HU_OK && antic.action_count > 0) {
                         char *antic_ctx = NULL;
                         size_t antic_ctx_len = 0;
                         if (hu_anticipatory_build_context(&antic, alloc, &antic_ctx,

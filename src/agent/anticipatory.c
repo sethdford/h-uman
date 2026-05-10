@@ -212,6 +212,15 @@ hu_error_t hu_anticipatory_analyze(hu_graph_t *graph, hu_allocator_t *alloc, con
     return HU_OK;
 }
 
+hu_error_t hu_anticipatory_analyze_memory(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                          const char *contact_id, size_t contact_id_len,
+                                          int64_t now_ts, hu_anticipatory_result_t *result) {
+    if (!m)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    return hu_anticipatory_analyze(g, alloc, contact_id, contact_id_len, now_ts, result);
+}
+
 hu_error_t hu_anticipatory_build_context(const hu_anticipatory_result_t *result,
                                          hu_allocator_t *alloc, char **out, size_t *out_len) {
     if (!result || !alloc || !out || !out_len)

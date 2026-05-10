@@ -285,8 +285,9 @@ struct hu_agent {
 
     /* W7+W9 facade handle (FIX 12). Opaque `struct hu_w7_facade`: holds the
      * W7 `hu_memory_facade_t` plus world-model / self-RAG helpers so agent_turn
-     * does not need to include W7/W9 headers directly. Wired by daemon.c after
-     * hu_graph_open. Legacy chat memory remains `agent->memory` (hu_memory_t). */
+     * does not need to include W7/W9 headers directly. Wired via
+     * hu_agent_bind_sqlite_graph (daemon, CLI, spawn). Legacy chat memory remains
+     * `agent->memory` (hu_memory_t). */
     struct hu_w7_facade *w7_facade;
     uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
 
@@ -306,9 +307,9 @@ struct hu_agent {
     uint64_t self_rag_refusals_rendered;
 
     /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
-     * trick as w7_facade above. Wired by daemon.c after hu_w7_facade_open;
-     * ticked once per main-loop iteration; closed BEFORE w7_facade_close
-     * (the scheduler borrows the facade's memory handle). */
+     * trick as w7_facade above. Opened by hu_agent_bind_sqlite_graph after
+     * hu_w7_facade_open; ticked once per main-loop iteration; closed BEFORE
+     * w7_facade_close (the scheduler borrows the facade's memory handle). */
     struct hu_w14_scheduler *w14_scheduler;
     uint64_t scheduler_ticks;     /* telemetry: total ticks since startup */
     int64_t  scheduler_last_tick_ms; /* telemetry: most recent tick wall time */
@@ -455,6 +456,15 @@ hu_error_t hu_agent_from_config(
     const char *persona, size_t persona_len, const hu_agent_context_config_t *ctx_cfg);
 
 void hu_agent_deinit(hu_agent_t *agent);
+
+#ifdef HU_ENABLE_SQLITE
+struct hu_graph;
+/* Wire `agent->verifier_graph`, open W7 facade (`agent->w7_facade`), and W14 scheduler when
+ * missing. Matches daemon/CLI/spawn production paths. `graph` is not owned. Idempotent when
+ * `agent->w7_facade` is already set (still refreshes `verifier_graph`). */
+hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
+                                      hu_allocator_t *alloc);
+#endif
 
 /* Optional: set mailbox and register agent for multi-agent messaging. Caller owns mailbox. */
 void hu_agent_set_mailbox(hu_agent_t *agent, hu_mailbox_t *mailbox);

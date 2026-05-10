@@ -134,6 +134,8 @@ static hu_error_t agent_spawn_execute(void *ctx, hu_allocator_t *alloc, const hu
     }
     if (parent && parent->memory)
         cfg.memory = parent->memory;
+    if (parent && parent->verifier_graph)
+        cfg.verifier_graph = parent->verifier_graph;
     if (parent && parent->session_store)
         cfg.session_store = parent->session_store;
     if (parent && parent->observer && parent->observer->vtable)

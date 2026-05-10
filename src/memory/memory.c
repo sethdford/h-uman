@@ -122,6 +122,7 @@ struct hu_memory_facade {
     hu_graph_t *graph; /* not owned; provided at open() */
     void *v1_bundle_ctx; /* malloc'd v1 shared ctx; freed once in hu_memory_facade_close */
     struct hu_memory_facade_slot slots[HU_MEM_KIND_MAX];
+    int64_t last_case_rowid; /* HU_MEM_CASE insert rowid; see hu_memory_facade_last_case_rowid */
 };
 
 void hu_memory__v1_set_bundle_for_close(hu_memory_facade_t *m, void *ctx) {
@@ -243,7 +244,20 @@ hu_error_t hu_memory_facade_write(hu_memory_facade_t *m, const hu_memory_record_
     if (m == NULL || rec == NULL) return HU_ERR_INVALID_ARGUMENT;
     struct hu_memory_facade_slot *s = slot_for(m, rec->kind);
     if (s == NULL || s->vt->write == NULL) return HU_ERR_NOT_SUPPORTED;
-    return s->vt->write(s->ctx, rec);
+    m->last_case_rowid = 0;
+    hu_error_t e = s->vt->write(s->ctx, rec);
+#ifdef HU_ENABLE_SQLITE
+    if (e == HU_OK && rec->kind == HU_MEM_CASE && m->graph) {
+        struct sqlite3 *db = hu_graph__db_handle(m->graph);
+        if (db)
+            m->last_case_rowid = sqlite3_last_insert_rowid(db);
+    }
+#endif
+    return e;
+}
+
+int64_t hu_memory_facade_last_case_rowid(const hu_memory_facade_t *m) {
+    return m ? m->last_case_rowid : 0;
 }
 
 hu_error_t hu_memory_facade_erase(hu_memory_facade_t *m, hu_memory_kind_t kind, int64_t id) {
@@ -298,6 +312,21 @@ char *hu_memory_facade_route_lookup(hu_memory_facade_t *m, hu_memory_kind_t kind
 
 hu_graph_t *hu_memory_facade_graph_handle(hu_memory_facade_t *m) {
     return (m != NULL) ? m->graph : NULL;
+}
+
+hu_error_t hu_memory_facade_list_entities(hu_memory_facade_t *m,
+                                          hu_allocator_t *alloc,
+                                          const char *contact_id,
+                                          size_t cid_len,
+                                          size_t limit,
+                                          hu_graph_entity_t **out,
+                                          size_t *out_count) {
+    if (!m || !alloc || !contact_id || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_graph_t *g = m->graph;
+    if (!g) return HU_ERR_NOT_SUPPORTED;
+    return hu_graph_list_entities(g, alloc, contact_id, cid_len, limit, out,
+                                 out_count);
 }
 
 /* W15 GDPR export — iterate every registered kind, read all records via

@@ -1,11 +1,6 @@
 #include "human/agent/response_verifier.h"
 #include "human/agent/self_rag.h"
 
-#ifdef HU_ENABLE_SQLITE
-#include <sqlite3.h>
-struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
-#endif
-
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,13 +101,12 @@ static size_t extract_claims(const char *draft, size_t draft_len, hu_verifier_cl
 
 #ifdef HU_ENABLE_SQLITE
 
-/* Heuristic verification: search the relations table for any row whose
- * provenance / context contains tokens from the claim. Score is the fraction
- * of claim tokens (>=4 chars) that appear in some relation row. This is the
- * cheap deterministic backend; the LLM-driven verify_claim.c can replace it
- * by injecting a vtable later. */
-static float verify_claim_against_graph(struct sqlite3 *db, const char *contact_id, int cid_len,
-                                        const char *claim, hu_provenance_receipt_t *out_receipt) {
+/* Heuristic verification: load open-interval relations via the W7 facade
+ * (same row set as the legacy SQL join on entities for names), then score
+ * claim tokens against endpoint names + provenance + context. */
+static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocator_t *alloc,
+                                         const char *contact_id, int cid_len, const char *claim,
+                                         hu_provenance_receipt_t *out_receipt) {
     /* Tokenize claim into >= 4-char alpha tokens. Skip stopwords. */
     static const char *const stop[] = {"is",   "was",   "were", "will", "the",  "and",
                                         "this", "that",  "with", "have", "has",  "had",
@@ -148,31 +142,38 @@ static float verify_claim_against_graph(struct sqlite3 *db, const char *contact_
     if (nt == 0)
         return 0.0f;
 
-    /* Pull recent relations for the contact, count token hits in entity name
-     * + provenance + context. Capped at 64 rows to bound cost. */
-    sqlite3_stmt *st = NULL;
-    const char *sql =
-        "SELECT r.id, r.provenance, r.context, r.event_start, r.event_end, r.confidence,"
-        " es.name, et.name "
-        "FROM relations r "
-        "JOIN entities es ON r.source_id = es.id "
-        "JOIN entities et ON r.target_id = et.id "
-        "WHERE r.contact_id = ? AND r.event_end = 0 "
-        "ORDER BY r.last_seen DESC LIMIT 64";
-    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+    if (!memory || !alloc)
         return 0.0f;
-    sqlite3_bind_text(st, 1, contact_id, cid_len, SQLITE_STATIC);
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_RELATION;
+    q.contact_id = contact_id;
+    q.contact_id_len = (size_t)(cid_len > 0 ? cid_len : 0);
+    q.as.by_id.id = HU_MEMORY_REL_VERIFIER_SCAN;
+    q.as.by_id.limit = 64;
+
+    hu_memory_record_t *recs = NULL;
+    size_t nrec = 0;
+    if (hu_memory_facade_read(memory, &q, alloc, &recs, &nrec) != HU_OK || nrec == 0) {
+        if (recs)
+            hu_memory_facade_records_free(memory, alloc, recs, nrec);
+        return 0.0f;
+    }
 
     float best_score = 0.0f;
     int64_t best_id = 0;
     int64_t best_es = 0, best_ee = 0;
     float best_conf = 0.0f;
     char best_prov[80] = {0};
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        const char *prov = (const char *)sqlite3_column_text(st, 1);
-        const char *ctx = (const char *)sqlite3_column_text(st, 2);
-        const char *en_s = (const char *)sqlite3_column_text(st, 6);
-        const char *en_t = (const char *)sqlite3_column_text(st, 7);
+    for (size_t ri = 0; ri < nrec; ri++) {
+        const hu_graph_relation_t *rel = (const hu_graph_relation_t *)recs[ri].payload;
+        if (!rel)
+            continue;
+        const char *prov = rel->provenance;
+        const char *ctx = rel->context;
+        const char *en_s = rel->source_name;
+        const char *en_t = rel->target_name;
 
         size_t hits = 0;
         char joined[768] = {0};
@@ -190,15 +191,15 @@ static float verify_claim_against_graph(struct sqlite3 *db, const char *contact_
         float row_score = (float)hits / (float)nt;
         if (row_score > best_score) {
             best_score = row_score;
-            best_id = sqlite3_column_int64(st, 0);
-            best_es = sqlite3_column_int64(st, 3);
-            best_ee = sqlite3_column_int64(st, 4);
-            best_conf = (float)sqlite3_column_double(st, 5);
+            best_id = rel->id;
+            best_es = rel->event_start;
+            best_ee = rel->event_end;
+            best_conf = rel->confidence;
             if (prov)
                 snprintf(best_prov, sizeof(best_prov), "%s", prov);
         }
     }
-    sqlite3_finalize(st);
+    hu_memory_facade_records_free(memory, alloc, recs, nrec);
 
     if (out_receipt && best_id > 0) {
         memset(out_receipt, 0, sizeof(*out_receipt));
@@ -240,9 +241,7 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
         return HU_OK;
 
 #ifdef HU_ENABLE_SQLITE
-    hu_graph_t *graph = memory ? hu_memory_facade_graph_handle(memory) : NULL;
-    struct sqlite3 *db = graph ? hu_graph__db_handle(graph) : NULL;
-    if (!db) {
+    if (!memory) {
         for (size_t i = 0; i < n; i++) {
             hu_verifier_claim_t *c = &out_report->claims[i];
             c->score = 0.0f;
@@ -268,7 +267,7 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
 
     for (size_t i = 0; i < n; i++) {
         hu_verifier_claim_t *c = &out_report->claims[i];
-        c->score = verify_claim_against_graph(db, cid, cid_len, c->text, &c->receipt);
+        c->score = verify_claim_against_facade(memory, alloc, cid, cid_len, c->text, &c->receipt);
         c->supported = c->score >= cfg->confidence_threshold;
         if (c->supported) {
             out_report->claims_supported++;
@@ -320,7 +319,8 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_memory_facade_t *memory,
 
     return HU_OK;
 #else
-    (void)graph;
+    (void)memory;
+    (void)alloc;
     (void)contact_id;
     (void)contact_id_len;
     return HU_OK;

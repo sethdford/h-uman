@@ -32,6 +32,14 @@ This document turns [`2026-05-10-memory-v2-roadmap-overview.md`](2026-05-10-memo
 | **G3 — release size** | `cmake --preset release && cmake --build --preset release` + benchmark workflow | Within +500 KB v2 budget when W10/W13 flags enabled |
 | **G4 — product e2e** | Manual / optional `VERIFY_NATIVE=1`, live channels | Out of scope for CI; tracked per release |
 
+### CI wiring (where gates run)
+
+| Gate / work | Workflow | Trigger |
+|---------------|----------|---------|
+| **G2 collision** | `.github/workflows/ci.yml` (`build-and-test`) | Every PR and push (after checkout) |
+| Eval JSON suites + offline red-team | `.github/workflows/eval.yml` | PRs touching `src/**`, `include/**`, `eval_suites/**`, `tests/**`, `scripts/redteam-eval-fleet.sh`, `data/eval/**`, `scripts/eval_*.py`; weekly schedule |
+| W16 bench + `--fail-on-regression` | `.github/workflows/evaluation.yml` | Nightly + `workflow_dispatch` |
+
 ## Phase 0 — Unblock the type system (hard prerequisite) — **DONE (2026-05-10)**
 
 **Problem:** Legacy `human/memory.h` and W7 `human/memory/memory.h` both used the name `hu_memory_t` for different types.

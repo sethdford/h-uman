@@ -46,6 +46,12 @@ hu_error_t hu_memory_loader_init(hu_memory_loader_t *loader, hu_allocator_t *all
     return HU_OK;
 }
 
+void hu_memory_loader_set_facade(hu_memory_loader_t *loader, struct hu_w7_facade *facade) {
+    if (!loader)
+        return;
+    loader->facade = facade;
+}
+
 hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, size_t query_len,
                                  const char *session_id, size_t session_id_len, char **out_context,
                                  size_t *out_context_len) {
@@ -66,7 +72,10 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         hu_query_analysis_t qa = hu_adaptive_analyze_query(query ? query : "", query_len, &acfg);
 
 #ifdef HU_ENABLE_SQLITE
-        /* Strategy learner: override with learned preference if available */
+        /* Strategy learner: override with learned preference if available.
+         * When the learner recommends HU_RSTRAT_GRAPH, skip the retrieval
+         * engine and route directly to the W12 planner. */
+        bool use_planner_path = false;
         if (loader->memory && loader->memory->ctx) {
             sqlite3 *sl_db = hu_sqlite_memory_get_db(loader->memory);
             if (sl_db) {
@@ -82,6 +91,10 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
                     case HU_RSTRAT_VECTOR:
                         qa.recommended_strategy = HU_ADAPTIVE_VECTOR_ONLY;
                         break;
+                    case HU_RSTRAT_GRAPH:
+                        if (loader->facade)
+                            use_planner_path = true;
+                        break;
                     default:
                         break;
                     }
@@ -91,6 +104,43 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
         }
 #endif
 
+        if (
+#ifdef HU_ENABLE_SQLITE
+            use_planner_path &&
+#endif
+            loader->facade) {
+            char *planner_text = NULL;
+            size_t planner_len = 0;
+            hu_error_t pe = hu_w12_planner_recall(
+                loader->facade, loader->alloc, session_id ? session_id : "",
+                session_id_len, query ? query : "", query_len,
+                loader->max_entries, loader->max_context_chars,
+                &planner_text, &planner_len);
+#ifdef HU_ENABLE_SQLITE
+            if (loader->memory && loader->memory->ctx) {
+                sqlite3 *sl_db = hu_sqlite_memory_get_db(loader->memory);
+                if (sl_db) {
+                    hu_strategy_learner_t sl;
+                    if (hu_strategy_learner_create(loader->alloc, sl_db, &sl) == HU_OK) {
+                        hu_strategy_learner_init_tables(&sl);
+                        hu_query_category_t qcat =
+                            hu_strategy_classify_query(query ? query : "", query_len);
+                        hu_strategy_learner_record(&sl, qcat, HU_RSTRAT_GRAPH,
+                                                   pe == HU_OK && planner_len > 0,
+                                                   (int64_t)time(NULL));
+                        hu_strategy_learner_deinit(&sl);
+                    }
+                }
+            }
+#endif
+            if (pe == HU_OK && planner_text && planner_len > 0) {
+                *out_context = planner_text;
+                if (out_context_len)
+                    *out_context_len = planner_len;
+                return HU_OK;
+            }
+        }
+
         hu_retrieval_options_t opts = {
             .mode = adaptive_to_retrieval_mode(qa.recommended_strategy),
             .limit = loader->max_entries,
@@ -98,20 +148,11 @@ hu_error_t hu_memory_loader_load(hu_memory_loader_t *loader, const char *query, 
             .use_reranking = false,
             .temporal_decay_factor = 0.0,
         };
-        /* TODO(W12-partial): planner integration deferred for the retrieval-
-         * engine path. Replacing this with the goal-conditioned planner
-         * requires redesigning the strategy-learner feedback loop (lines
-         * above and below) to record planner-sourced results instead of
-         * engine strategy categories. Sites 3 and 4 (v1 recall fallbacks)
-         * are migrated via hu_w12_planner_recall in this file. */
         hu_retrieval_result_t res = {0};
         err =
             loader->retrieval_engine->vtable->retrieve(loader->retrieval_engine->ctx, loader->alloc,
                                                        query ? query : "", query_len, &opts, &res);
         if (err == HU_ERR_JSON_PARSE) {
-            /* Corrupt / unexpected JSON in the retrieval index (observed in
-             * production with embedding-backed stores). Fall back to v1
-             * SQLite recall instead of failing the entire agent turn. */
             hu_log_warn("memory_loader", NULL,
                         "retrieval engine returned JSON parse error; falling back to v1 recall");
             memset(&res, 0, sizeof(res));

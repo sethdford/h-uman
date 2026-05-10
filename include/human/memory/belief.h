@@ -58,6 +58,28 @@ hu_belief_t hu_belief_combine(const hu_belief_t *a, const hu_belief_t *b);
 bool hu_belief_significantly_disagrees(const hu_belief_t *a, const hu_belief_t *b,
                                         float sigma_threshold);
 
+/* P2G — Initial variance prior for a new belief, keyed by provenance.
+ *
+ * Different ingestion sources have different inherent reliability. A
+ * direct user statement on iMessage should start with low variance
+ * (high confidence in the observation itself), while a relation
+ * inferred at sleep-time consolidation should start with higher
+ * variance (we are less sure the inference is correct).
+ *
+ * The reverify runner (W14) grows variance over time as relations
+ * age; this function only sets the *initial* variance at write time.
+ *
+ * `prov` may be NULL or any source string. Recognized sources:
+ *   - low variance (0.02): direct messaging channels (imessage,
+ *     telegram, discord, slack, whatsapp, signal, sms), explicit
+ *     user statements ("user-explicit"), agent dialogue
+ *   - medium variance (0.05): default, anonymous, or unknown source
+ *   - high variance (0.10): heuristic-derived (autodream,
+ *     consolidated, inferred, extracted, fallback)
+ *
+ * Always returns a value in [0.0, 0.25]. */
+float hu_belief_initial_variance_for_provenance(const char *prov, size_t prov_len);
+
 /* Semantic conflict classification between two text descriptions.
  * Uses deterministic heuristics (substring/negation) as fallback
  * when no LLM provider is available (HU_IS_TEST, no model). */
