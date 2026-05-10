@@ -218,6 +218,7 @@ void run_w8_belief_layer_tests(void);
 void run_w9_world_model_tests(void);
 void run_w10_neural_memory_tests(void);
 void run_w11_self_rag_tests(void);
+void run_w12_planner_tests(void);
 void run_w15_keystore_tests(void);
 void run_fast_capture_tests(void);
 void run_promotion_tests(void);
@@ -710,6 +711,7 @@ int main(int argc, char **argv) {
     run_w9_world_model_tests();
     run_w10_neural_memory_tests();
     run_w11_self_rag_tests();
+    run_w12_planner_tests();
     run_w15_keystore_tests();
     run_fast_capture_tests();
     run_promotion_tests();

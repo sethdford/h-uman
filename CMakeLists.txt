@@ -620,7 +620,10 @@ set(HU_CORE_SOURCES
     src/memory/memory_v1_backend.c
     src/memory/belief.c
     src/memory/hyperedge.c
+    src/memory/pagerank.c
     src/agent/world_model.c
+    src/agent/retrieval_planner.c
+    src/agent/retrieval_planner_llm.c
     src/agent/autodream.c
     src/agent/case_based.c
     src/agent/response_verifier.c
@@ -2231,6 +2234,7 @@ set(HU_TEST_SOURCES
     tests/test_w9_world_model.c
     tests/test_w10_neural_memory.c
     tests/test_w11_self_rag.c
+    tests/test_w12_planner.c
     tests/test_w15_keystore.c
     tests/test_fast_capture.c
     tests/test_promotion.c
