@@ -127,6 +127,12 @@ typedef struct hu_prompt_config {
      * hu_personal_model_has_content() in human/memory/personal_model.h. */
     const char *personal_model_context;
     size_t personal_model_context_len;
+    /* W9 world-model snapshot (FIX 12): goals, negatives, theory-of-mind,
+     * recent topics for the active contact. Rendered per-turn via the W7
+     * bridge (src/agent/world_model_bridge.c). NULL when the load returns
+     * an empty model (callers skip injection). */
+    const char *world_model_context;
+    size_t world_model_context_len;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc. */

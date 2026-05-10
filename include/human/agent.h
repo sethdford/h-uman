@@ -284,6 +284,15 @@ struct hu_agent {
      * (FIX 3) reads the same table on the consumer side. */
     uint64_t persona_deltas_proposed;
 
+    /* W7+W9 facade handle (FIX 12). Opaque on purpose: legacy `hu_memory_t`
+     * (human/memory.h) and the W7 `hu_memory_t` share a struct tag and cannot
+     * coexist in one TU. The bridge in src/agent/world_model_bridge.c owns
+     * the only translation unit that includes the W7 headers; everyone else
+     * refers to this field by the unique forward-declared `struct
+     * hu_w7_facade` tag. Wired by daemon.c after hu_graph_open. */
+    struct hu_w7_facade *w7_facade;
+    uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
+
     volatile sig_atomic_t cancel_requested; /* set by SIGINT handler to abort turn */
 
     hu_agent_approval_cb approval_cb; /* optional; if NULL, approval-required = denied */

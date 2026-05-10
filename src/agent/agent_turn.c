@@ -29,6 +29,7 @@
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/personal_model.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/persona/delta_observer.h"
 #include "human/persona/humor.h"
 #include "human/security/sycophancy_guard.h"
@@ -3110,6 +3111,20 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             }
         }
 
+        /* W9 world-model snapshot (FIX 12). Cached for 60s by hu_world_model_load
+         * so per-turn cost is dominated by the SQL fetch on first miss. We only
+         * inject when the bridge returns a non-empty body (no signal -> NULL ->
+         * skip the section, just like personal_model above). */
+        char *world_model_ctx = NULL;
+        size_t world_model_ctx_len = 0;
+        if (agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0) {
+            hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
+                                     agent->memory_session_id_len, 0, &world_model_ctx,
+                                     &world_model_ctx_len);
+            if (world_model_ctx_len > 0)
+                agent->world_model_loads++;
+        }
+
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -3208,8 +3223,15 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .conv_goals_context_len = conv_goals_ctx_len,
             .personal_model_context = personal_model_ctx,
             .personal_model_context_len = personal_model_ctx_len,
+            .world_model_context = world_model_ctx,
+            .world_model_context_len = world_model_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
+        if (world_model_ctx) {
+            agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
+            world_model_ctx = NULL;
+            world_model_ctx_len = 0;
+        }
         if (persona_prompt)
             agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
         persona_prompt = NULL;

@@ -160,6 +160,15 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
             if (err != HU_OK)
                 goto fail;
         }
+        if (config->world_model_context && config->world_model_context_len > 0) {
+            err = append(alloc, &buf, &len, &cap, config->world_model_context,
+                         config->world_model_context_len);
+            if (err != HU_OK)
+                goto fail;
+            err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+            if (err != HU_OK)
+                goto fail;
+        }
         if (config->relational_episode_context && config->relational_episode_context_len > 0) {
             err = append(alloc, &buf, &len, &cap, config->relational_episode_context,
                          config->relational_episode_context_len);
@@ -595,6 +604,19 @@ hu_error_t hu_prompt_build_system(hu_allocator_t *alloc, const hu_prompt_config_
     if (config->personal_model_context && config->personal_model_context_len > 0) {
         err = append(alloc, &buf, &len, &cap, config->personal_model_context,
                      config->personal_model_context_len);
+        if (err != HU_OK)
+            goto fail;
+        err = append(alloc, &buf, &len, &cap, "\n\n", 2);
+        if (err != HU_OK)
+            goto fail;
+    }
+
+    /* W9 world-model snapshot (FIX 12) — goals, negatives, theory-of-mind,
+     * recent topics. Sits between the personal model (long-term who they
+     * are) and project instructions (operational rules). */
+    if (config->world_model_context && config->world_model_context_len > 0) {
+        err = append(alloc, &buf, &len, &cap, config->world_model_context,
+                     config->world_model_context_len);
         if (err != HU_OK)
             goto fail;
         err = append(alloc, &buf, &len, &cap, "\n\n", 2);

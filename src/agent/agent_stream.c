@@ -24,6 +24,7 @@
 #include "human/humanness.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/memory/personal_model.h"
 #include "human/persona.h"
 #include "human/persona/humor.h"
@@ -725,11 +726,24 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         }
     }
 
+    /* W9 world-model snapshot (FIX 12). Mirror agent_turn.c -- streaming and
+     * non-streaming paths must inject the same context or behavior diverges
+     * by entry point. */
+    char *world_model_ctx = NULL;
+    size_t world_model_ctx_len = 0;
+    if (agent->w7_facade && agent->memory_session_id && agent->memory_session_id_len > 0) {
+        hu_w7_render_world_model(agent->w7_facade, agent->alloc, agent->memory_session_id,
+                                 agent->memory_session_id_len, 0, &world_model_ctx,
+                                 &world_model_ctx_len);
+        if (world_model_ctx_len > 0)
+            agent->world_model_loads++;
+    }
+
     char *system_prompt = NULL;
     size_t system_prompt_len = 0;
     if (agent->cached_static_prompt && !persona_prompt && !awareness_ctx && !somatic_ctx &&
         !trust_ctx && !humor_dir && !tone_hint && !syc_friction_ctx && !intelligence_ctx &&
-        !outcome_ctx && !personal_model_ctx) {
+        !outcome_ctx && !personal_model_ctx && !world_model_ctx) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
                                          memory_ctx_len, &system_prompt, &system_prompt_len);
@@ -785,8 +799,14 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .tone_hint_len = tone_hint_len,
             .personal_model_context = personal_model_ctx,
             .personal_model_context_len = personal_model_ctx_len,
+            .world_model_context = world_model_ctx,
+            .world_model_context_len = world_model_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
+        if (world_model_ctx) {
+            agent->alloc->free(agent->alloc->ctx, world_model_ctx, world_model_ctx_len + 1);
+            world_model_ctx = NULL;
+        }
         if (persona_prompt)
             agent->alloc->free(agent->alloc->ctx, persona_prompt, persona_prompt_len + 1);
         if (memory_ctx)

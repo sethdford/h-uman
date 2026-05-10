@@ -19,6 +19,7 @@
 /* Subsystem facades — each aggregates related implementation headers */
 #include "human/agent/autodream.h"
 #include "human/agent/verifier_metrics.h"
+#include "human/agent/world_model_bridge.h"
 #include "human/agent/choreography.h"
 #include "human/daemon/agent_facade.h"
 #include "human/daemon/context_facade.h"
@@ -2246,6 +2247,18 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
      * graph-less "every claim unsupported" path). */
     if (graph && agent)
         agent->verifier_graph = graph;
+    /* W7+W9 facade wire (FIX 12): open the W7 dispatching memory facade on
+     * the same graph so the per-turn world-model load (W9) has a backend.
+     * The bridge keeps the W7 type out of agent.h's include closure -- see
+     * include/human/agent/world_model_bridge.h. */
+    if (graph && agent && !agent->w7_facade) {
+        hu_w7_facade_t *facade = NULL;
+        hu_error_t fe = hu_w7_facade_open(graph, alloc, &facade);
+        if (fe == HU_OK)
+            agent->w7_facade = facade;
+        else
+            hu_log_warn("human", agent->observer, "W7 facade open failed: %d", (int)fe);
+    }
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
@@ -11659,6 +11672,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_channel_monitor_destroy(chan_monitor);
     if (agent)
         agent->bth_metrics = NULL;
+    /* FIX 12: close W7 facade BEFORE the graph it borrows. The facade does
+     * not own the graph (the v1 backend takes a borrow), so closing in this
+     * order is just hygiene -- but it keeps the assertion footprint clean. */
+    if (agent && agent->w7_facade) {
+        hu_w7_facade_close(agent->w7_facade, alloc);
+        agent->w7_facade = NULL;
+    }
+    if (agent && agent->verifier_graph == graph)
+        agent->verifier_graph = NULL;
     if (graph)
         hu_graph_close(graph, alloc);
     if (agent && agent->outcomes == &daemon_outcomes)
