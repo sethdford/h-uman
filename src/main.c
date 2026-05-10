@@ -247,6 +247,8 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
         return hu_ml_cli_lora_persona(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "train-feed-predictor") == 0)
         return hu_ml_cli_train_feed_predictor(alloc, argc - 2, (const char **)(argv + 2));
+    if (strcmp(sub, "apply-adapter") == 0)
+        return hu_ml_cli_apply_adapter(alloc, argc - 2, (const char **)(argv + 2));
     if (strcmp(sub, "--help") == 0 || strcmp(sub, "help") == 0) {
         printf("Usage: human ml <subcommand>\n\n"
                "Subcommands:\n"
@@ -256,6 +258,7 @@ static hu_error_t cmd_ml(hu_allocator_t *alloc, int argc, char **argv) {
                "  prepare-conversations   Tokenize chat.db + memory.db for training\n"
                "  dpo-train               Run DPO preference training step\n"
                "  lora-persona            Train LoRA adapter from persona examples\n"
+               "  apply-adapter           Load a trained adapter into the local provider (W13)\n"
                "  train-feed-predictor    Train topic/trend predictor from feed data\n"
                "  status                  Show experiment results\n");
         return HU_OK;

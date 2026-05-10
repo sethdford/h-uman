@@ -1044,3 +1044,101 @@ done_collect:
     return err;
 #endif
 }
+
+/* ── W13: apply-adapter — close the LoRA loop ────────────────────────── */
+
+#include "human/providers/huml.h"
+
+hu_error_t hu_ml_cli_apply_adapter(hu_allocator_t *alloc, int argc, const char **argv) {
+    if (!alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    const char *adapter_path = NULL;
+    const char *adapter_id = NULL;
+    bool unload_after = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--adapter") == 0 && i + 1 < argc) {
+            adapter_path = argv[++i];
+        } else if (strcmp(argv[i], "--id") == 0 && i + 1 < argc) {
+            adapter_id = argv[++i];
+        } else if (strcmp(argv[i], "--unload-after") == 0) {
+            unload_after = true;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: human ml apply-adapter --adapter PATH [--id ID] "
+                   "[--unload-after]\n\n"
+                   "  --adapter PATH    Path to a LoRA adapter file produced by\n"
+                   "                    `human ml lora-persona`.\n"
+                   "  --id ID           Identifier the provider should associate with\n"
+                   "                    the adapter (defaults to the basename of PATH).\n"
+                   "  --unload-after    Unload immediately after loading; useful for\n"
+                   "                    smoke-testing the lifecycle.\n\n"
+                   "Closes the W13 loop: trained adapter on disk -> "
+                   "hu_provider_load_adapter -> active_adapter() reports the id.\n"
+                   "Phase 4 of the FIX 15 frontier-bridge plan adds chat-time merging.\n");
+            return HU_OK;
+        } else {
+            fprintf(stderr, "Unknown apply-adapter arg: %s\n", argv[i]);
+            return HU_ERR_INVALID_ARGUMENT;
+        }
+    }
+    if (!adapter_path) {
+        fprintf(stderr, "Usage: human ml apply-adapter --adapter PATH [--id ID] "
+                        "[--unload-after]\n");
+        return HU_ERR_INVALID_ARGUMENT;
+    }
+
+    /* Default id = basename(PATH) so a typical run with just --adapter
+     * produces a meaningful active_adapter() value. */
+    char id_buf[64];
+    if (!adapter_id) {
+        const char *slash = strrchr(adapter_path, '/');
+        const char *base = slash ? slash + 1 : adapter_path;
+        size_t copy = strlen(base);
+        if (copy >= sizeof(id_buf))
+            copy = sizeof(id_buf) - 1;
+        memcpy(id_buf, base, copy);
+        id_buf[copy] = '\0';
+        adapter_id = id_buf;
+    }
+
+    hu_huml_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    /* No checkpoint path: the provider's lazy-load path won't fire because
+     * we're not calling chat. apply-adapter exists to verify the loop
+     * mechanics; chat-time inference with the loaded adapter is Phase 4. */
+    hu_provider_t prov;
+    memset(&prov, 0, sizeof(prov));
+    hu_error_t err = hu_huml_provider_create(alloc, &cfg, &prov);
+    if (err != HU_OK) {
+        fprintf(stderr, "huml provider create failed: %s\n", hu_error_string(err));
+        return err;
+    }
+
+    err = hu_provider_load_adapter(&prov, alloc, adapter_path, strlen(adapter_path),
+                                   adapter_id, strlen(adapter_id));
+    if (err != HU_OK) {
+        fprintf(stderr, "load_adapter failed: %s\n", hu_error_string(err));
+        if (prov.vtable && prov.vtable->deinit)
+            prov.vtable->deinit(prov.ctx, alloc);
+        return err;
+    }
+
+    const char *active = hu_provider_active_adapter(&prov);
+    printf("{\"loaded\":true,\"adapter_id\":\"%s\",\"adapter_path\":\"%s\"}\n",
+           active ? active : "(null)", adapter_path);
+
+    if (unload_after) {
+        err = hu_provider_unload_adapter(&prov, adapter_id, strlen(adapter_id));
+        if (err != HU_OK) {
+            fprintf(stderr, "unload_adapter failed: %s\n", hu_error_string(err));
+        } else {
+            const char *after = hu_provider_active_adapter(&prov);
+            printf("{\"unloaded\":true,\"adapter_id_after\":\"%s\"}\n",
+                   after ? after : "(null)");
+        }
+    }
+
+    if (prov.vtable && prov.vtable->deinit)
+        prov.vtable->deinit(prov.ctx, alloc);
+    return err;
+}

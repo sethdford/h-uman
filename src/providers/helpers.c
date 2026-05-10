@@ -137,3 +137,35 @@ char *hu_helpers_extract_anthropic_content(hu_allocator_t *alloc, const char *bo
     hu_json_free(alloc, parsed);
     return out;
 }
+
+/* W13 — adapter loading helpers. Each NULL-checks the vtable triple
+ * (load_adapter, unload_adapter, active_adapter) and returns
+ * HU_ERR_NOT_SUPPORTED when the provider doesn't implement adapters
+ * (the cloud-API common case). Returning a structured error here lets
+ * callers cleanly fall back to the no-adapter path without crashing. */
+hu_error_t hu_provider_load_adapter(hu_provider_t *provider, hu_allocator_t *alloc,
+                                    const char *adapter_path, size_t adapter_path_len,
+                                    const char *adapter_id, size_t adapter_id_len) {
+    if (!provider || !provider->vtable || !alloc || !adapter_path || adapter_path_len == 0 ||
+        !adapter_id || adapter_id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!provider->vtable->load_adapter)
+        return HU_ERR_NOT_SUPPORTED;
+    return provider->vtable->load_adapter(provider->ctx, alloc, adapter_path, adapter_path_len,
+                                          adapter_id, adapter_id_len);
+}
+
+hu_error_t hu_provider_unload_adapter(hu_provider_t *provider, const char *adapter_id,
+                                      size_t adapter_id_len) {
+    if (!provider || !provider->vtable || !adapter_id || adapter_id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!provider->vtable->unload_adapter)
+        return HU_ERR_NOT_SUPPORTED;
+    return provider->vtable->unload_adapter(provider->ctx, adapter_id, adapter_id_len);
+}
+
+const char *hu_provider_active_adapter(const hu_provider_t *provider) {
+    if (!provider || !provider->vtable || !provider->vtable->active_adapter)
+        return NULL;
+    return provider->vtable->active_adapter(provider->ctx);
+}

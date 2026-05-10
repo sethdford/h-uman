@@ -16,11 +16,14 @@
 
 #ifdef HU_ENABLE_ML
 #include "human/ml/checkpoint.h"
+#include "human/ml/lora.h"
 #include "human/ml/ml.h"
 #include "human/ml/model.h"
 #include "human/ml/optimizer.h"
 #include "human/ml/tokenizer_ml.h"
 #endif
+
+#define HUML_MAX_ADAPTER_ID 64
 
 typedef struct {
     hu_allocator_t *alloc;
@@ -31,6 +34,11 @@ typedef struct {
     hu_ml_optimizer_t optimizer;
     hu_bpe_tokenizer_t *tokenizer;
     bool loaded;
+    /* W13 — single-adapter slot. Multi-adapter routing arrives in Phase 4
+     * of the FIX 15 frontier-bridge plan; for now the contract is "at
+     * most one adapter live at a time". */
+    hu_lora_adapter_t *active_lora;
+    char active_adapter_id[HUML_MAX_ADAPTER_ID];
 #endif
 } huml_ctx_t;
 
@@ -285,6 +293,10 @@ static void huml_deinit(void *ctx_ptr, hu_allocator_t *alloc) {
     if (!ctx || !alloc)
         return;
 #ifdef HU_ENABLE_ML
+    if (ctx->active_lora) {
+        hu_lora_destroy(alloc, ctx->active_lora);
+        ctx->active_lora = NULL;
+    }
     if (ctx->loaded) {
         if (ctx->tokenizer)
             hu_bpe_tokenizer_deinit(ctx->tokenizer);
@@ -297,12 +309,92 @@ static void huml_deinit(void *ctx_ptr, hu_allocator_t *alloc) {
     alloc->free(alloc->ctx, ctx, sizeof(huml_ctx_t));
 }
 
+#ifdef HU_ENABLE_ML
+/* W13 — adapter loading. Loads the adapter blob from disk via
+ * hu_lora_load, stashes it under `adapter_id`. If an adapter is already
+ * live we drop it first so the contract is "at most one adapter
+ * resident". The adapter is bound but NOT yet merged into the forward
+ * pass — chat-time merging arrives in Phase 4 of the FIX 15 frontier
+ * bridge plan. Until then `active_adapter()` correctly reports the
+ * loaded id so the daemon and `human ml status` can verify the loop
+ * end-to-end. */
+static hu_error_t huml_load_adapter(void *ctx_ptr, hu_allocator_t *alloc,
+                                    const char *adapter_path, size_t adapter_path_len,
+                                    const char *adapter_id, size_t adapter_id_len) {
+    huml_ctx_t *ctx = (huml_ctx_t *)ctx_ptr;
+    if (!ctx || !alloc || !adapter_path || adapter_path_len == 0 || !adapter_id ||
+        adapter_id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    /* hu_lora_load takes a NUL-terminated path; copy so callers can pass
+     * any slice. */
+    char path_buf[512];
+    if (adapter_path_len >= sizeof(path_buf))
+        return HU_ERR_INVALID_ARGUMENT;
+    memcpy(path_buf, adapter_path, adapter_path_len);
+    path_buf[adapter_path_len] = '\0';
+
+    hu_lora_adapter_t *fresh = NULL;
+    hu_error_t err = hu_lora_load(alloc, path_buf, &fresh);
+    if (err != HU_OK)
+        return err;
+
+    /* Replace any incumbent only after the new one loads cleanly. */
+    if (ctx->active_lora) {
+        hu_lora_destroy(alloc, ctx->active_lora);
+        ctx->active_lora = NULL;
+        ctx->active_adapter_id[0] = '\0';
+    }
+
+    ctx->active_lora = fresh;
+    size_t copy_len = adapter_id_len < sizeof(ctx->active_adapter_id) - 1
+                          ? adapter_id_len
+                          : sizeof(ctx->active_adapter_id) - 1;
+    memcpy(ctx->active_adapter_id, adapter_id, copy_len);
+    ctx->active_adapter_id[copy_len] = '\0';
+    return HU_OK;
+}
+
+static hu_error_t huml_unload_adapter(void *ctx_ptr, const char *adapter_id,
+                                      size_t adapter_id_len) {
+    huml_ctx_t *ctx = (huml_ctx_t *)ctx_ptr;
+    if (!ctx || !adapter_id || adapter_id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (!ctx->active_lora)
+        return HU_OK; /* nothing to do; idempotent */
+    /* Only drop when the id matches; this lets callers safely call
+     * unload by id without worrying about race conditions where another
+     * adapter has already replaced this one. */
+    if (strncmp(ctx->active_adapter_id, adapter_id, adapter_id_len) != 0 ||
+        ctx->active_adapter_id[adapter_id_len] != '\0')
+        return HU_OK;
+    if (!ctx->alloc)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_lora_destroy(ctx->alloc, ctx->active_lora);
+    ctx->active_lora = NULL;
+    ctx->active_adapter_id[0] = '\0';
+    return HU_OK;
+}
+
+static const char *huml_active_adapter(void *ctx_ptr) {
+    huml_ctx_t *ctx = (huml_ctx_t *)ctx_ptr;
+    if (!ctx || !ctx->active_lora || ctx->active_adapter_id[0] == '\0')
+        return NULL;
+    return ctx->active_adapter_id;
+}
+#endif /* HU_ENABLE_ML */
+
 static const hu_provider_vtable_t huml_vtable = {
     .chat_with_system = huml_chat_with_system,
     .chat = huml_chat,
     .supports_native_tools = huml_supports_native_tools,
     .get_name = huml_get_name,
     .deinit = huml_deinit,
+#ifdef HU_ENABLE_ML
+    .load_adapter = huml_load_adapter,
+    .unload_adapter = huml_unload_adapter,
+    .active_adapter = huml_active_adapter,
+#endif
 };
 
 hu_error_t hu_huml_provider_create(hu_allocator_t *alloc, const hu_huml_config_t *config,

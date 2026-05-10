@@ -4388,6 +4388,83 @@ static void test_huml_provider_get_name(void) {
     provider.vtable->deinit(provider.ctx, &alloc);
 }
 
+/* W13 — adapter loading. Load a tiny synthetic adapter, verify
+ * active_adapter() reports it, unload, verify it's gone. Closes the
+ * vtable side of the LoRA loop. */
+static void test_huml_provider_load_unload_adapter(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_provider_t provider = {0};
+    HU_ASSERT_EQ(hu_huml_provider_create(&alloc, NULL, &provider), HU_OK);
+
+    /* Build + persist a small LoRA adapter to a tmpfile. */
+    hu_lora_config_t lora_cfg = {0};
+    lora_cfg.rank = 4;
+    lora_cfg.alpha = 8.0f;
+    lora_cfg.targets = HU_LORA_TARGET_QV;
+    hu_lora_adapter_t *adapter = NULL;
+    HU_ASSERT_EQ(hu_lora_create(&alloc, &lora_cfg, /*in_dim=*/8, /*out_dim=*/8,
+                                 /*n_layers=*/1, &adapter),
+                 HU_OK);
+
+    char path[] = "/tmp/hu_w13_apply_adapter_XXXXXX";
+    int fd = mkstemp(path);
+    HU_ASSERT(fd >= 0);
+    close(fd);
+    HU_ASSERT_EQ(hu_lora_save(adapter, path), HU_OK);
+    hu_lora_destroy(&alloc, adapter);
+
+    /* Initially no adapter active. */
+    HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
+
+    /* Load it under id "test_persona". */
+    HU_ASSERT_EQ(
+        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "test_persona", 12),
+        HU_OK);
+    const char *id = hu_provider_active_adapter(&provider);
+    HU_ASSERT_NOT_NULL(id);
+    HU_ASSERT_STR_EQ(id, "test_persona");
+
+    /* Unloading a different id is a no-op (idempotent contract). */
+    HU_ASSERT_EQ(hu_provider_unload_adapter(&provider, "other", 5), HU_OK);
+    HU_ASSERT_STR_EQ(hu_provider_active_adapter(&provider), "test_persona");
+
+    /* Unload the actual id. */
+    HU_ASSERT_EQ(hu_provider_unload_adapter(&provider, "test_persona", 12), HU_OK);
+    HU_ASSERT(hu_provider_active_adapter(&provider) == NULL);
+
+    /* Re-loading should work; replacing an incumbent should also work. */
+    HU_ASSERT_EQ(
+        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "first", 5), HU_OK);
+    HU_ASSERT_EQ(
+        hu_provider_load_adapter(&provider, &alloc, path, strlen(path), "second", 6), HU_OK);
+    HU_ASSERT_STR_EQ(hu_provider_active_adapter(&provider), "second");
+
+    provider.vtable->deinit(provider.ctx, &alloc);
+    (void)remove(path);
+}
+
+/* Cloud / non-adapter providers leave the triple NULL. The helper
+ * functions must return HU_ERR_NOT_SUPPORTED rather than crash. */
+static void test_provider_adapter_helpers_not_supported(void) {
+    /* Build a minimal provider with the triple NULL. We can't easily
+     * do that without a non-test provider, so exercise the helper
+     * NULL-check paths directly. */
+    HU_ASSERT_EQ(hu_provider_load_adapter(NULL, NULL, "p", 1, "id", 2),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_provider_unload_adapter(NULL, "id", 2), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT(hu_provider_active_adapter(NULL) == NULL);
+
+    /* A hand-rolled provider with NULL adapter triple should report
+     * NOT_SUPPORTED and active_adapter() returns NULL. */
+    hu_provider_vtable_t empty_vtable = {0};
+    hu_provider_t empty = {.ctx = (void *)1, .vtable = &empty_vtable};
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_EQ(
+        hu_provider_load_adapter(&empty, &alloc, "p", 1, "id", 2), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT_EQ(hu_provider_unload_adapter(&empty, "id", 2), HU_ERR_NOT_SUPPORTED);
+    HU_ASSERT(hu_provider_active_adapter(&empty) == NULL);
+}
+
 /* ─── Speculative predict with model (test mode) ─────────────────────────── */
 
 static void test_speculative_predict_with_model_null_provider(void) {
@@ -4580,6 +4657,8 @@ void run_ml_tests(void) {
     HU_RUN_TEST(test_huml_provider_create_and_deinit);
     HU_RUN_TEST(test_huml_provider_chat_test_mode);
     HU_RUN_TEST(test_huml_provider_get_name);
+    HU_RUN_TEST(test_huml_provider_load_unload_adapter);
+    HU_RUN_TEST(test_provider_adapter_helpers_not_supported);
     /* Speculative predict with model (test mode falls back to heuristic) */
     HU_RUN_TEST(test_speculative_predict_with_model_null_provider);
     /* Emotion classify (test mode uses keyword fallback) */

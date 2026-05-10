@@ -226,7 +226,44 @@ typedef struct hu_provider_vtable {
                               const char *model, size_t model_len, double temperature,
                               hu_stream_callback_t callback, void *callback_ctx,
                               hu_stream_chat_result_t *out);
+
+    /* W13 — On-device personalization adapter loading. Optional triple. A
+     * provider that supports LoRA/PEFT-style adapter swapping at chat time
+     * implements all three. Providers that don't (cloud APIs) leave the
+     * pointers NULL and callers should fall back to the no-adapter path.
+     *
+     *   load_adapter:    Read the adapter blob at `adapter_path` and bind
+     *                    it under `adapter_id` (an opaque label the caller
+     *                    supplies — the persona id is the obvious choice).
+     *                    Implementations may keep multiple adapters resident
+     *                    and switch via `active_adapter`.
+     *   unload_adapter:  Drop the adapter; safe-NULL-arg if not currently
+     *                    loaded. After unload the next chat call falls back
+     *                    to the base model.
+     *   active_adapter:  Return the id of the currently active adapter, or
+     *                    NULL when none is loaded. Owned by the provider
+     *                    (caller must NOT free).
+     *
+     * The contract is intentionally narrow so cloud providers can leave
+     * the pointers NULL with no churn. The local huml provider is the
+     * first reference implementation. */
+    hu_error_t (*load_adapter)(void *ctx, hu_allocator_t *alloc, const char *adapter_path,
+                               size_t adapter_path_len, const char *adapter_id,
+                               size_t adapter_id_len);
+    hu_error_t (*unload_adapter)(void *ctx, const char *adapter_id, size_t adapter_id_len);
+    const char *(*active_adapter)(void *ctx);
 } hu_provider_vtable_t;
+
+/* Optional adapter-loading helpers. Each returns HU_ERR_NOT_SUPPORTED when
+ * the provider's vtable leaves the corresponding method NULL. */
+hu_error_t hu_provider_load_adapter(hu_provider_t *provider, hu_allocator_t *alloc,
+                                    const char *adapter_path, size_t adapter_path_len,
+                                    const char *adapter_id, size_t adapter_id_len);
+hu_error_t hu_provider_unload_adapter(hu_provider_t *provider, const char *adapter_id,
+                                      size_t adapter_id_len);
+/* Returns the active adapter id (provider-owned, caller must not free), or
+ * NULL when none is loaded or the provider doesn't support adapters. */
+const char *hu_provider_active_adapter(const hu_provider_t *provider);
 
 /* Free allocations in a chat response (content, model, tool_calls and their strings). */
 void hu_chat_response_free(hu_allocator_t *alloc, hu_chat_response_t *resp);
