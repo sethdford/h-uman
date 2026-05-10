@@ -392,6 +392,14 @@ struct hu_agent {
     hu_voice_profile_t voice_profile;
     bool voice_profile_initialized;
     bool humanness_ctx_owned; /* true when conversation_context was built by humanness module */
+    /* Pointer + length of the humanness allocation. Tracked separately from
+     * conversation_context because the daemon may legitimately overwrite
+     * conversation_context with its own buffer between turns; the free path
+     * must only release what humanness actually allocated to avoid the
+     * production double-free fixed in tests/test_humanness_context.c
+     * (free_context_handles_daemon_override_after_humanness_owned). */
+    char *humanness_ctx_buf;
+    size_t humanness_ctx_buf_len;
     char *persona_name;
     size_t persona_name_len;
 

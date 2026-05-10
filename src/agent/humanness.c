@@ -180,6 +180,11 @@ hu_error_t hu_agent_build_turn_context(hu_agent_t *agent) {
         agent->conversation_context = buf;
         agent->conversation_context_len = len;
         agent->humanness_ctx_owned = true;
+        /* Track the actual allocation separately so the free path can
+         * distinguish "still owned by humanness" from "daemon overwrote
+         * conversation_context mid-turn". */
+        agent->humanness_ctx_buf = buf;
+        agent->humanness_ctx_buf_len = len;
     } else {
         alloc->free(alloc->ctx, buf, cap);
     }
@@ -189,12 +194,31 @@ hu_error_t hu_agent_build_turn_context(hu_agent_t *agent) {
 void hu_agent_free_turn_context(hu_agent_t *agent) {
     if (!agent || !agent->humanness_ctx_owned)
         return;
-    if (agent->conversation_context && agent->alloc) {
-        agent->alloc->free(agent->alloc->ctx, (void *)agent->conversation_context,
-                           agent->conversation_context_len + 1);
+
+    /* Defensive: only free the buffer humanness actually allocated. If the
+     * daemon overwrote agent->conversation_context with its own buffer
+     * between turns, conversation_context will NOT match humanness_ctx_buf.
+     * In that case we release the humanness allocation (via humanness_ctx_buf)
+     * and leave conversation_context alone — the daemon owns that pointer
+     * and will free it itself.
+     *
+     * Production crash regression (2026-05-10):
+     *   tests/test_humanness_context.c::
+     *     free_context_handles_daemon_override_after_humanness_owned */
+    if (agent->humanness_ctx_buf && agent->alloc) {
+        agent->alloc->free(agent->alloc->ctx, (void *)agent->humanness_ctx_buf,
+                           agent->humanness_ctx_buf_len + 1);
+
+        /* Only clear conversation_context if it still points at the buffer
+         * we just freed. Otherwise the daemon owns that pointer. */
+        if (agent->conversation_context == agent->humanness_ctx_buf) {
+            agent->conversation_context = NULL;
+            agent->conversation_context_len = 0;
+        }
     }
-    agent->conversation_context = NULL;
-    agent->conversation_context_len = 0;
+
+    agent->humanness_ctx_buf = NULL;
+    agent->humanness_ctx_buf_len = 0;
     agent->humanness_ctx_owned = false;
 }
 
