@@ -885,13 +885,68 @@ static void parse_nostr_channel(hu_allocator_t *a, hu_config_t *cfg, const hu_js
 static void parse_signal_channel(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
     if (!obj)
         return;
+    hu_signal_channel_config_t *s = &cfg->channels.signal;
+
     const hu_json_value_t *val = obj;
     if (obj->type == HU_JSON_ARRAY && obj->data.array.len > 0 && obj->data.array.items &&
         obj->data.array.items[0])
         val = obj->data.array.items[0];
     if (!val || val->type != HU_JSON_OBJECT)
         return;
-    parse_daemon_config(a, &cfg->channels.signal.daemon, val);
+
+    /* signal-cli daemon endpoint, e.g. http://localhost:8080. */
+    const char *url = hu_json_get_string(val, "http_url");
+    if (url) {
+        if (s->http_url)
+            a->free(a->ctx, s->http_url, strlen(s->http_url) + 1);
+        s->http_url = hu_strdup(a, url);
+    }
+    /* The signal account/phone number we post from. */
+    const char *acct = hu_json_get_string(val, "account");
+    if (acct) {
+        if (s->account)
+            a->free(a->ctx, s->account, strlen(s->account) + 1);
+        s->account = hu_strdup(a, acct);
+    }
+    /* Optional 1:1 sender allowlist. */
+    hu_json_value_t *af = hu_json_object_get(val, "allow_from");
+    if (af && af->type == HU_JSON_ARRAY && af->data.array.items) {
+        for (size_t i = 0; i < s->allow_from_count; i++) {
+            if (s->allow_from[i])
+                a->free(a->ctx, s->allow_from[i], strlen(s->allow_from[i]) + 1);
+        }
+        s->allow_from_count = 0;
+        for (size_t i = 0;
+             i < af->data.array.len && s->allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX; i++) {
+            hu_json_value_t *item = af->data.array.items[i];
+            if (item && item->type == HU_JSON_STRING && item->data.string.ptr)
+                s->allow_from[s->allow_from_count++] = hu_strdup(a, item->data.string.ptr);
+        }
+    }
+    /* Optional group allowlist (group ids). */
+    hu_json_value_t *gaf = hu_json_object_get(val, "group_allow_from");
+    if (gaf && gaf->type == HU_JSON_ARRAY && gaf->data.array.items) {
+        for (size_t i = 0; i < s->group_allow_from_count; i++) {
+            if (s->group_allow_from[i])
+                a->free(a->ctx, s->group_allow_from[i], strlen(s->group_allow_from[i]) + 1);
+        }
+        s->group_allow_from_count = 0;
+        for (size_t i = 0;
+             i < gaf->data.array.len && s->group_allow_from_count < HU_SIGNAL_ALLOW_FROM_MAX;
+             i++) {
+            hu_json_value_t *item = gaf->data.array.items[i];
+            if (item && item->type == HU_JSON_STRING && item->data.string.ptr)
+                s->group_allow_from[s->group_allow_from_count++] =
+                    hu_strdup(a, item->data.string.ptr);
+        }
+    }
+    const char *gp = hu_json_get_string(val, "group_policy");
+    if (gp) {
+        if (s->group_policy)
+            a->free(a->ctx, s->group_policy, strlen(s->group_policy) + 1);
+        s->group_policy = hu_strdup(a, gp);
+    }
+    parse_daemon_config(a, &s->daemon, val);
 }
 
 hu_error_t parse_channels(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {

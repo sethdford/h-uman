@@ -111,6 +111,9 @@
 #if HU_HAS_NOSTR
 #include "human/channels/nostr.h"
 #endif
+#if HU_HAS_SIGNAL
+#include "human/channels/signal.h"
+#endif
 #if HU_HAS_LARK
 #include "human/channels/lark.h"
 #endif
@@ -280,6 +283,13 @@ static void destroy_irc_wrap(hu_channel_t *ch, hu_allocator_t *a) {
 static void destroy_nostr_wrap(hu_channel_t *ch, hu_allocator_t *a) {
     (void)a;
     hu_nostr_destroy(ch);
+    (void)ch;
+}
+#endif
+#if HU_HAS_SIGNAL
+static void destroy_signal_wrap(hu_channel_t *ch, hu_allocator_t *a) {
+    (void)a;
+    hu_signal_destroy(ch);
     (void)ch;
 }
 #endif
@@ -1418,6 +1428,32 @@ hu_error_t hu_app_bootstrap(hu_app_ctx_t *ctx, hu_allocator_t *alloc, const char
                 bi->channels[ch_count].interval_ms = 1000;
                 bi->channels[ch_count].last_poll_ms = 0;
                 bi->channel_destroys[ch_count] = destroy_irc_wrap;
+                ch_count++;
+            }
+        }
+#endif
+
+#if HU_HAS_SIGNAL
+        if (cfg->channels.signal.http_url && cfg->channels.signal.account &&
+            ch_count < HU_BOOTSTRAP_CHANNELS_MAX) {
+            const char *const *af = (const char *const *)cfg->channels.signal.allow_from;
+            const char *const *gaf = (const char *const *)cfg->channels.signal.group_allow_from;
+            const char *gp =
+                cfg->channels.signal.group_policy ? cfg->channels.signal.group_policy : "";
+            err = hu_signal_create_ex(alloc, cfg->channels.signal.http_url,
+                                      strlen(cfg->channels.signal.http_url),
+                                      cfg->channels.signal.account,
+                                      strlen(cfg->channels.signal.account), af,
+                                      cfg->channels.signal.allow_from_count, gaf,
+                                      cfg->channels.signal.group_allow_from_count, gp, strlen(gp),
+                                      &bi->channel_slots[ch_count]);
+            if (err == HU_OK) {
+                bi->channels[ch_count].channel_ctx = bi->channel_slots[ch_count].ctx;
+                bi->channels[ch_count].channel = &bi->channel_slots[ch_count];
+                bi->channels[ch_count].poll_fn = hu_signal_poll;
+                bi->channels[ch_count].interval_ms = 2000;
+                bi->channels[ch_count].last_poll_ms = 0;
+                bi->channel_destroys[ch_count] = destroy_signal_wrap;
                 ch_count++;
             }
         }

@@ -8,7 +8,6 @@ agents auditing "what's actually wired e2e" should start here.
 
 | Channel | LOC | What's missing | What it would take | Action |
 |---------|----:|----------------|--------------------|--------|
-| `signal.c` | ~706 | Config fields (http_url, account, allow_from, group_policy) only the daemon-config slot exists; bootstrap call. | Add 4 fields to `hu_signal_channel_config_t` + parser + 1 block in `bootstrap.c` mirroring `telegram` | Wire (small follow-up) |
 | `mattermost.c` | ~700 | Config schema, bootstrap call, daemon-config slot. | Add `hu_mattermost_channel_config_t`, parser, bootstrap, daemon entry. Medium effort. | Experimental — defer until product wants it |
 | `maixcam.c` | ~370 | Config schema, bootstrap call, daemon-config slot. AIoT vision board. | Same as above. Niche; gated on hardware availability. | Experimental — defer |
 | `web.c` | ~280 | Config schema, bootstrap call, daemon-config slot. Browser-tab "channel". | Replaced by PWA channel for most use cases. | Experimental — likely subsumed by `pwa.c` |
@@ -20,6 +19,15 @@ agents auditing "what's actually wired e2e" should start here.
 (silently dropped every outbound message) and it had no inbound hooks. Real
 Twilio voice runs through `src/voice/` + `voice_channel.c`; SMS through
 `src/channels/twilio.c`.
+
+`signal.c` was GRADUATED in FIX 14 — added `http_url`, `account`,
+`allow_from`, `group_allow_from`, and `group_policy` to
+`hu_signal_channel_config_t`; added the parser in
+`src/config_parse_channels.c`; added the bootstrap block in
+`src/bootstrap.c`. The orphan-audit suite has been updated with three
+production-wire tests in `tests/test_signal_channel_wire.c`. Production
+configs that set `channels.signal.http_url` and `channels.signal.account`
+will now spin up the signal-cli adapter automatically.
 
 ## Why this matters
 

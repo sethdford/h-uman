@@ -17,7 +17,8 @@
 #include "human/channels/dispatch.h"
 #include "human/channels/maixcam.h"
 #include "human/channels/mattermost.h"
-#include "human/channels/signal.h"
+/* signal.h removed -- signal.c was graduated to production in FIX 14;
+ * its production wires are tested in tests/test_signal_channel_wire.c. */
 #include "human/channels/web.h"
 #include "human/channels/webhook.h"
 #include "human/core/allocator.h"
@@ -31,17 +32,7 @@
 extern hu_error_t hu_cli_create(hu_allocator_t *alloc, hu_channel_t *out);
 extern void hu_cli_destroy(hu_channel_t *ch);
 
-static void orphan_signal_creates_and_names(void) {
-    hu_allocator_t alloc = hu_system_allocator();
-    hu_channel_t ch;
-    memset(&ch, 0, sizeof(ch));
-    HU_ASSERT_EQ(hu_signal_create(&alloc, "http://localhost:8080", 21, "+15555550000", 12, &ch),
-                 HU_OK);
-    HU_ASSERT_NOT_NULL(ch.vtable);
-    HU_ASSERT_NOT_NULL(ch.vtable->name);
-    HU_ASSERT_TRUE(strcmp(ch.vtable->name(ch.ctx), "signal") == 0);
-    hu_signal_destroy(&ch);
-}
+/* signal removed -- graduated in FIX 14 (see test_signal_channel_wire.c). */
 
 static void orphan_mattermost_creates_and_names(void) {
     hu_allocator_t alloc = hu_system_allocator();
@@ -122,7 +113,6 @@ static void orphan_webhook_creates_and_names(void) {
 
 void run_orphan_channel_audit_tests(void) {
     HU_TEST_SUITE("OrphanChannelAudit");
-    HU_RUN_TEST(orphan_signal_creates_and_names);
     HU_RUN_TEST(orphan_mattermost_creates_and_names);
     HU_RUN_TEST(orphan_maixcam_creates_and_names);
     HU_RUN_TEST(orphan_web_creates_and_names);

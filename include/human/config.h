@@ -294,7 +294,22 @@ typedef struct hu_whatsapp_channel_config {
     hu_channel_daemon_config_t daemon;
 } hu_whatsapp_channel_config_t;
 
+#define HU_SIGNAL_ALLOW_FROM_MAX 16
 typedef struct hu_signal_channel_config {
+    /* signal-cli daemon endpoint, e.g. "http://localhost:8080". When NULL or
+     * empty, the channel is disabled and bootstrap skips it (matches the
+     * is_configured() pattern used by the other Tier-2 channels). */
+    char *http_url;
+    /* The signal account/phone number we're posting from, e.g. "+15551234567". */
+    char *account;
+    /* Optional 1:1 sender allowlist. Empty -> accept all 1:1 messages. */
+    char *allow_from[HU_SIGNAL_ALLOW_FROM_MAX];
+    size_t allow_from_count;
+    /* Optional group allowlist (group ids). Used together with group_policy. */
+    char *group_allow_from[HU_SIGNAL_ALLOW_FROM_MAX];
+    size_t group_allow_from_count;
+    /* "open" (default), "allowlist", or "disabled". */
+    char *group_policy;
     hu_channel_daemon_config_t daemon;
 } hu_signal_channel_config_t;
 
