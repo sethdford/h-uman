@@ -29,6 +29,7 @@
 #include "human/persona/somatic.h"
 #include "human/security/moderation.h"
 #include "human/security/sycophancy_guard.h"
+#include "human/agent/tool_call_parser.h"
 #include "human/tool.h"
 #ifdef HU_ENABLE_SQLITE
 #include "human/intelligence/online_learning.h"
@@ -1175,6 +1176,29 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         (void)content_owned;
     }
 #endif /* !HU_IS_TEST */
+
+    /* Strip text-based <tool_call>...</tool_call> blocks that leak on some providers. */
+    if (final_content && final_content_len > 0) {
+        char *tc = NULL;
+        size_t tc_len = 0;
+        if (hu_text_tool_calls_strip(agent->alloc, final_content, final_content_len, &tc,
+                                     &tc_len) == HU_OK) {
+            if (tc) {
+                if (tc_len != final_content_len ||
+                    memcmp(tc, final_content, tc_len) != 0) {
+                    agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
+                    final_content = tc;
+                    final_content_len = tc_len;
+                } else {
+                    agent->alloc->free(agent->alloc->ctx, tc, tc_len + 1);
+                }
+            } else {
+                agent->alloc->free(agent->alloc->ctx, final_content, final_content_len + 1);
+                final_content = NULL;
+                final_content_len = 0;
+            }
+        }
+    }
 
     /* If quality systems buffered the response (suppressed streaming), emit now.
      * Must match the suppression check: lean_prompt disables buffering. */
