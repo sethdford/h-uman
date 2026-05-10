@@ -612,6 +612,8 @@ set(HU_CORE_SOURCES
     src/memory/erasure.c
     src/memory/memory.c
     src/memory/memory_v1_backend.c
+    src/memory/belief.c
+    src/memory/hyperedge.c
     src/agent/autodream.c
     src/agent/case_based.c
     src/agent/response_verifier.c
@@ -2217,6 +2219,7 @@ set(HU_TEST_SOURCES
     tests/test_w5_persona_deltas.c
     tests/test_w6_e2e_adversarial.c
     tests/test_w7_memory_facade.c
+    tests/test_w8_belief_layer.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
