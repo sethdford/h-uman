@@ -175,6 +175,15 @@ typedef struct hu_imessage_ctx {
     bool breaker_log_emitted; /* one-shot log gate */
     hu_imessage_error_class_t last_error_class;
     int64_t last_successful_poll_epoch;
+    /* Watchdog state machine — collapses breaker-tripped + poll-stalled into a
+     * single coarse health enum so the daemon emits exactly ONE log line per
+     * transition rather than spamming on every tick. */
+    hu_imessage_health_t last_logged_health;
+    /* When the breaker is tripped, the poller short-circuits to HU_OK / 0
+     * messages on most ticks but probes chat.db once every N ticks so FDA
+     * recovery is detected promptly. The counter resets on each probe and
+     * after a successful poll. */
+    uint32_t breaker_recovery_probe_counter;
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
     pid_t imsg_watch_pid;
     int imsg_watch_fd;
@@ -323,6 +332,96 @@ int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch) {
     if (!ch || !ch->ctx)
         return 0;
     return ((const hu_imessage_ctx_t *)ch->ctx)->last_successful_poll_epoch;
+}
+
+/* ── Health state + watchdog (always compiled) ─────────────────────────── */
+
+const char *hu_imessage_health_name(hu_imessage_health_t h) {
+    switch (h) {
+    case HU_IMESSAGE_HEALTH_OK:
+        return "OK";
+    case HU_IMESSAGE_HEALTH_STALLED:
+        return "STALLED";
+    case HU_IMESSAGE_HEALTH_TRIPPED:
+        return "TRIPPED";
+    case HU_IMESSAGE_HEALTH_UNKNOWN:
+    default:
+        return "UNKNOWN";
+    }
+}
+
+hu_imessage_health_t hu_imessage_health(const hu_channel_t *ch, int64_t now_epoch,
+                                        int64_t stall_threshold_secs) {
+    if (!ch || !ch->ctx)
+        return HU_IMESSAGE_HEALTH_UNKNOWN;
+    const hu_imessage_ctx_t *c = (const hu_imessage_ctx_t *)ch->ctx;
+    if (c->circuit_breaker_tripped)
+        return HU_IMESSAGE_HEALTH_TRIPPED;
+    if (c->last_successful_poll_epoch <= 0)
+        return HU_IMESSAGE_HEALTH_UNKNOWN;
+    if (stall_threshold_secs <= 0)
+        stall_threshold_secs = HU_IMESSAGE_DEFAULT_STALL_SECS;
+    /* Guard against clock skew: if `now` predates the recorded success, treat
+     * as OK rather than spuriously STALLED. */
+    if (now_epoch < c->last_successful_poll_epoch)
+        return HU_IMESSAGE_HEALTH_OK;
+    if (now_epoch - c->last_successful_poll_epoch > stall_threshold_secs)
+        return HU_IMESSAGE_HEALTH_STALLED;
+    return HU_IMESSAGE_HEALTH_OK;
+}
+
+hu_imessage_health_t hu_imessage_last_logged_health(const hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return HU_IMESSAGE_HEALTH_UNKNOWN;
+    return ((const hu_imessage_ctx_t *)ch->ctx)->last_logged_health;
+}
+
+void hu_imessage_watchdog_tick(hu_channel_t *ch, int64_t now_epoch, int64_t stall_threshold_secs) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    hu_imessage_health_t cur = hu_imessage_health(ch, now_epoch, stall_threshold_secs);
+    /* Don't emit anything until the channel has produced its first signal —
+     * UNKNOWN is "we don't know yet", not a transition to log. */
+    if (cur == HU_IMESSAGE_HEALTH_UNKNOWN)
+        return;
+    if (cur == c->last_logged_health)
+        return;
+
+    hu_imessage_health_t prev = c->last_logged_health;
+    int64_t since_success =
+        c->last_successful_poll_epoch > 0 ? (now_epoch - c->last_successful_poll_epoch) : -1;
+
+    /* Single edge-triggered line per transition. Recovery is info, degradation
+     * is warn, breaker-trip is left to imessage_record_open_result which
+     * already emits an error with FDA remediation guidance — we only mention
+     * the transition target so log readers can correlate. */
+    switch (cur) {
+    case HU_IMESSAGE_HEALTH_OK:
+        hu_log_info("imessage", NULL,
+                    "iMessage health %s → OK (recovered; last success %llds ago)",
+                    hu_imessage_health_name(prev), (long long)since_success);
+        break;
+    case HU_IMESSAGE_HEALTH_STALLED:
+        hu_log_warn("imessage", NULL,
+                    "iMessage health %s → STALLED (no successful poll for %llds, threshold=%llds; "
+                    "imsg watch may be hung — try `launchctl kickstart -k gui/$UID/"
+                    "ai.human.service-loop`)",
+                    hu_imessage_health_name(prev), (long long)since_success,
+                    (long long)stall_threshold_secs);
+        break;
+    case HU_IMESSAGE_HEALTH_TRIPPED:
+        hu_log_warn("imessage", NULL, "iMessage health %s → TRIPPED (see breaker error above)",
+                    hu_imessage_health_name(prev));
+        break;
+    case HU_IMESSAGE_HEALTH_UNKNOWN:
+    default:
+        break;
+    }
+    c->last_logged_health = cur;
+    /* Persist transition so external observers (doctor, monitoring) see it
+     * without needing to tail logs. */
+    imessage_save_poll_status(c);
 }
 
 #if HU_IS_TEST
@@ -3451,6 +3550,22 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     return HU_ERR_NOT_SUPPORTED;
 #else
     hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)channel_ctx;
+
+    /* Breaker tripped: short-circuit with a clean HU_OK / 0 messages so the
+     * daemon's outer poll-loop does not log "[human] poll error" on every
+     * tick. The breaker already emitted ONE explanatory error line; from
+     * there on, the doctor + status file carry the truth. The breaker auto-
+     * resets on the next successful chat.db open, so we still attempt the
+     * occasional probe (every Nth tick) to detect FDA recovery. */
+    if (c->circuit_breaker_tripped) {
+        c->breaker_recovery_probe_counter++;
+        /* ~30 ticks ≈ 30s at 1s poll cadence. Cheap enough; rare enough that
+         * a still-revoked FDA does not regenerate log spam. */
+        if (c->breaker_recovery_probe_counter < 30)
+            return HU_OK;
+        c->breaker_recovery_probe_counter = 0;
+        /* Fall through and attempt one open; if it succeeds, breaker resets. */
+    }
 
     /* When imsg watch is active, skip the SQL query if no new data arrived.
      * This avoids redundant queries while maintaining sub-second latency.

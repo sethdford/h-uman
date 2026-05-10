@@ -2029,6 +2029,149 @@ static void imessage_breaker_test_seam_null_safe(void) {
     HU_ASSERT_FALSE(hu_imessage_test_record_open_result(&ch, 23, 9000));
     hu_imessage_test_record_poll_success(&ch, 9000);
 }
+
+/* ─── Part 25: Watchdog state machine + edge-triggered logging ────────────── */
+
+static void imessage_health_unknown_before_first_poll(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1000, 60), HU_IMESSAGE_HEALTH_UNKNOWN);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_UNKNOWN);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_health_ok_after_recent_success(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1010, 60), HU_IMESSAGE_HEALTH_OK);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_health_stalled_after_threshold(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    /* 1000 + 60 = 1060: still OK at 1060, STALLED at 1061. */
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1060, 60), HU_IMESSAGE_HEALTH_OK);
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1061, 60), HU_IMESSAGE_HEALTH_STALLED);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_health_tripped_overrides_stalled(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    /* Trip the breaker. Even though the success was recent (no stall yet),
+     * TRIPPED must take precedence in the health enum. */
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 23 /* AUTH */, 1010);
+    HU_ASSERT_TRUE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1015, 60), HU_IMESSAGE_HEALTH_TRIPPED);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_health_clock_skew_does_not_falsely_stall(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    /* now < last_success: clock went backwards. Should report OK, not STALLED. */
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 500, 60), HU_IMESSAGE_HEALTH_OK);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_watchdog_silent_on_repeated_ok(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    /* First tick: UNKNOWN → OK transition is recorded. */
+    hu_imessage_watchdog_tick(&ch, 1010, 60);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_OK);
+    /* Repeated ticks while still OK do not change the recorded state — that is
+     * the contract that makes log spam impossible. */
+    hu_imessage_watchdog_tick(&ch, 1020, 60);
+    hu_imessage_watchdog_tick(&ch, 1030, 60);
+    hu_imessage_watchdog_tick(&ch, 1040, 60);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_OK);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_watchdog_records_ok_to_stalled_transition(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    hu_imessage_watchdog_tick(&ch, 1010, 60); /* establish OK */
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_OK);
+    /* Time advances past the stall threshold without another success. */
+    hu_imessage_watchdog_tick(&ch, 1100, 60);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_STALLED);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_watchdog_records_recovery_on_success(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    hu_imessage_watchdog_tick(&ch, 1010, 60);
+    hu_imessage_watchdog_tick(&ch, 1100, 60);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_STALLED);
+    /* New successful poll → next tick should record recovery. */
+    hu_imessage_test_record_poll_success(&ch, 1110);
+    hu_imessage_watchdog_tick(&ch, 1120, 60);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_OK);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_watchdog_records_breaker_trip(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    hu_imessage_watchdog_tick(&ch, 1010, 60); /* OK established */
+    /* Breaker trips. Watchdog tick should record the OK→TRIPPED transition. */
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 23, 1020);
+    hu_imessage_watchdog_tick(&ch, 1030, 60);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(&ch), HU_IMESSAGE_HEALTH_TRIPPED);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_watchdog_default_threshold_used_when_zero(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    hu_imessage_test_record_poll_success(&ch, 1000);
+    /* threshold=0 must fall back to HU_IMESSAGE_DEFAULT_STALL_SECS, not produce
+     * a divide-by-zero or instant STALLED. */
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1010, 0), HU_IMESSAGE_HEALTH_OK);
+    HU_ASSERT_EQ(hu_imessage_health(&ch, 1000 + HU_IMESSAGE_DEFAULT_STALL_SECS - 5, 0),
+                 HU_IMESSAGE_HEALTH_OK);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_watchdog_null_safe(void) {
+    /* All public watchdog calls must be safe on NULL channels (matches the
+     * style of the breaker accessors). */
+    hu_imessage_watchdog_tick(NULL, 1000, 60);
+    HU_ASSERT_EQ(hu_imessage_health(NULL, 1000, 60), HU_IMESSAGE_HEALTH_UNKNOWN);
+    HU_ASSERT_EQ(hu_imessage_last_logged_health(NULL), HU_IMESSAGE_HEALTH_UNKNOWN);
+    /* Health name table must be total. */
+    HU_ASSERT_STR_EQ(hu_imessage_health_name(HU_IMESSAGE_HEALTH_OK), "OK");
+    HU_ASSERT_STR_EQ(hu_imessage_health_name(HU_IMESSAGE_HEALTH_STALLED), "STALLED");
+    HU_ASSERT_STR_EQ(hu_imessage_health_name(HU_IMESSAGE_HEALTH_TRIPPED), "TRIPPED");
+    HU_ASSERT_STR_EQ(hu_imessage_health_name(HU_IMESSAGE_HEALTH_UNKNOWN), "UNKNOWN");
+    /* Out-of-range enum values fall back to UNKNOWN rather than NULL. */
+    HU_ASSERT_STR_EQ(hu_imessage_health_name((hu_imessage_health_t)999), "UNKNOWN");
+}
+
 #endif /* HU_IS_TEST */
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2269,6 +2412,21 @@ void run_imessage_adversarial_tests(void) {
     HU_RUN_TEST(imessage_status_file_roundtrip);
     HU_RUN_TEST(imessage_breaker_null_safe);
     HU_RUN_TEST(imessage_breaker_test_seam_null_safe);
+#endif
+
+    /* Part 25: Watchdog state machine + edge-triggered logging (red team) */
+#if HU_IS_TEST
+    HU_RUN_TEST(imessage_health_unknown_before_first_poll);
+    HU_RUN_TEST(imessage_health_ok_after_recent_success);
+    HU_RUN_TEST(imessage_health_stalled_after_threshold);
+    HU_RUN_TEST(imessage_health_tripped_overrides_stalled);
+    HU_RUN_TEST(imessage_health_clock_skew_does_not_falsely_stall);
+    HU_RUN_TEST(imessage_watchdog_silent_on_repeated_ok);
+    HU_RUN_TEST(imessage_watchdog_records_ok_to_stalled_transition);
+    HU_RUN_TEST(imessage_watchdog_records_recovery_on_success);
+    HU_RUN_TEST(imessage_watchdog_records_breaker_trip);
+    HU_RUN_TEST(imessage_watchdog_default_threshold_used_when_zero);
+    HU_RUN_TEST(imessage_watchdog_null_safe);
 #endif
 }
 #else  /* !HU_HAS_IMESSAGE */

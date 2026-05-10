@@ -11499,6 +11499,35 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
             }
         }
 
+#ifdef HU_HAS_IMESSAGE
+        /* iMessage health watchdog (every 30s).
+         *
+         * The breaker (hu_imessage_breaker_*) only catches sqlite-level
+         * failures on chat.db open. The watchdog also catches the silent
+         * "process is alive but poll loop has not produced a successful read
+         * in a while" failure mode, which on macOS most commonly means imsg
+         * watch is hung or chat.db lock contention is starving us. Edge-
+         * triggered logging means at most one transition line per state
+         * change — no log spam if the daemon sits in OK or STALLED for
+         * hours. */
+        {
+            static int64_t imsg_wd_last_epoch = 0;
+            int64_t wd_now = (int64_t)time(NULL);
+            if (wd_now - imsg_wd_last_epoch >= 30) {
+                imsg_wd_last_epoch = wd_now;
+                const char *env_thresh = getenv("HU_IMESSAGE_STALL_SECS");
+                int64_t threshold =
+                    env_thresh && env_thresh[0] ? atoll(env_thresh) : HU_IMESSAGE_DEFAULT_STALL_SECS;
+                if (threshold <= 0)
+                    threshold = HU_IMESSAGE_DEFAULT_STALL_SECS;
+                for (size_t ci = 0; ci < channel_count; ci++) {
+                    if (channels[ci].poll_fn == hu_imessage_poll && channels[ci].channel)
+                        hu_imessage_watchdog_tick(channels[ci].channel, wd_now, threshold);
+                }
+            }
+        }
+#endif
+
         struct timespec sleep_ts = {.tv_sec = tick_interval_ms / 1000,
                                     .tv_nsec = (long)(tick_interval_ms % 1000) * 1000000L};
         nanosleep(&sleep_ts, NULL);

@@ -162,6 +162,45 @@ int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch);
  * Writes into buf; returns false if HOME unset or buffer too small. */
 bool hu_imessage_status_path(char *buf, size_t cap);
 
+/* ── Health state machine + watchdog ─────────────────────────────────────
+ * The breaker only sees sqlite-level failures. The watchdog also catches the
+ * "process is alive but iMessage poll loop has been silently stuck for N
+ * seconds" case (e.g. imsg watch hung, lock contention). The state machine
+ * collapses both signals into a coarse health enum so the daemon and the
+ * doctor can speak a common language. */
+
+typedef enum {
+    HU_IMESSAGE_HEALTH_UNKNOWN = 0, /* no successful poll has happened yet */
+    HU_IMESSAGE_HEALTH_OK,          /* recent successful poll, breaker not tripped */
+    HU_IMESSAGE_HEALTH_STALLED,     /* breaker not tripped but no success in stall_secs */
+    HU_IMESSAGE_HEALTH_TRIPPED,     /* breaker tripped (FDA, chat.db missing, etc.) */
+} hu_imessage_health_t;
+
+/* Always non-NULL. */
+const char *hu_imessage_health_name(hu_imessage_health_t h);
+
+/* Default stall threshold (seconds) used when the daemon does not pass an
+ * explicit value. Chosen to be much larger than the poll cadence (1s) so
+ * transient backpressure does not produce false STALLED alerts. */
+#ifndef HU_IMESSAGE_DEFAULT_STALL_SECS
+#define HU_IMESSAGE_DEFAULT_STALL_SECS 120
+#endif
+
+/* Pure function: derive current health from the channel's recorded state
+ * relative to wall-clock `now_epoch`. Does NOT log or mutate. Safe on NULL. */
+hu_imessage_health_t hu_imessage_health(const hu_channel_t *ch, int64_t now_epoch,
+                                        int64_t stall_threshold_secs);
+
+/* Periodic watchdog tick. Computes current health and, if it differs from the
+ * last logged health, emits a single info/warn line describing the transition
+ * and persists the new state to the poll status file. Safe on NULL channels
+ * and on channels in HU_IMESSAGE_HEALTH_UNKNOWN. */
+void hu_imessage_watchdog_tick(hu_channel_t *ch, int64_t now_epoch, int64_t stall_threshold_secs);
+
+/* Returns the last logged health for this channel, useful for tests asserting
+ * that watchdog_tick is edge-triggered (no log spam on repeated calls). */
+hu_imessage_health_t hu_imessage_last_logged_health(const hu_channel_t *ch);
+
 #if HU_IS_TEST
 /* Drive the breaker accounting from tests with synthetic sqlite return codes.
  * Returns true if this call caused the breaker to trip. */
