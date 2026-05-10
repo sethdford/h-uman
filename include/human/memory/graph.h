@@ -104,6 +104,10 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
                                         int64_t from_ts, int64_t to_ts, size_t limit,
                                         hu_graph_relation_t **out, size_t *out_count);
 
+/* Set the community_id of a single entity. Used by Leiden internally and by
+ * AutoDream tests. NULL community is allowed (entity left unclustered). */
+hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64_t community_id);
+
 /* Traversal */
 hu_error_t hu_graph_neighbors(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,
                               size_t contact_id_len, int64_t entity_id, size_t max_hops,

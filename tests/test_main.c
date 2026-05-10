@@ -207,6 +207,7 @@ void run_comfort_patterns_tests(void);
 void run_emotional_moments_tests(void);
 void run_graph_tests(void);
 void run_w1_bitemporal_tests(void);
+void run_w2_autodream_tests(void);
 void run_fast_capture_tests(void);
 void run_promotion_tests(void);
 void run_consolidation_tests(void);
@@ -687,6 +688,7 @@ int main(int argc, char **argv) {
     run_emotional_moments_tests();
     run_graph_tests();
     run_w1_bitemporal_tests();
+    run_w2_autodream_tests();
     run_fast_capture_tests();
     run_promotion_tests();
     run_consolidation_tests();

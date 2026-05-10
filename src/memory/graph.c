@@ -712,6 +712,21 @@ sqlite3 *hu_graph__db_handle(hu_graph_t *g) {
     return g ? g->db : NULL;
 }
 
+hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64_t community_id) {
+    if (!g || !g->db || entity_id <= 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(g->db, "UPDATE entities SET community_id = ? WHERE id = ?", -1,
+                                &st, NULL);
+    if (rc != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(st, 1, community_id);
+    sqlite3_bind_int64(st, 2, entity_id);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? HU_OK : HU_ERR_IO;
+}
+
 #else
 
 hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_t contact_id_len,
@@ -766,6 +781,13 @@ hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
     (void)limit;
     (void)out;
     (void)out_count;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_graph_set_entity_community(hu_graph_t *g, int64_t entity_id, int64_t community_id) {
+    (void)g;
+    (void)entity_id;
+    (void)community_id;
     return HU_ERR_NOT_SUPPORTED;
 }
 

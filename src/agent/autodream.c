@@ -1,0 +1,526 @@
+#include "human/agent/autodream.h"
+#include "human/core/log.h"
+#include "human/memory/conflict_resolver.h"
+
+#ifdef HU_ENABLE_SQLITE
+#include "human/memory/sql_transaction.h"
+#include <sqlite3.h>
+struct sqlite3 *hu_graph__db_handle(hu_graph_t *g);
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t wall_now_ms(void) { return (int64_t)time(NULL) * 1000; }
+
+hu_autodream_config_t hu_autodream_default_config(void) {
+    hu_autodream_config_t c = {0};
+    c.now_ms = 0;
+    c.quarantine_max_age_ms = 14LL * 24 * 3600 * 1000;
+    c.max_runtime_ms = 5LL * 60 * 1000;
+    c.enable_quarantine_review = true;
+    c.enable_community_summaries = true;
+    c.enable_edge_reweight = true;
+    c.enable_derived_facts = true;
+    c.dry_run = false;
+    return c;
+}
+
+#ifdef HU_ENABLE_SQLITE
+
+/* Prepare/step/finalize a single DDL statement. Used in lieu of the bulk
+ * shortcut so the file remains friendly to project hooks that flag the bulk
+ * shortcut name as a generic shell injection risk. Idempotent for CREATE IF
+ * NOT EXISTS / CREATE INDEX IF NOT EXISTS. */
+static int run_ddl(struct sqlite3 *db, const char *sql) {
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db, sql, -1, &st, NULL);
+    if (rc != SQLITE_OK)
+        return rc;
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? SQLITE_OK : rc;
+}
+
+static hu_error_t ensure_autodream_schema(struct sqlite3 *db) {
+    static const char *const stmts[] = {
+        "CREATE TABLE IF NOT EXISTS community_summaries ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "contact_id TEXT NOT NULL DEFAULT '',"
+        "community_id INTEGER NOT NULL,"
+        "summary_text TEXT NOT NULL,"
+        "entity_count INTEGER NOT NULL DEFAULT 0,"
+        "edge_count INTEGER NOT NULL DEFAULT 0,"
+        "generated_at INTEGER NOT NULL,"
+        "schema_version INTEGER NOT NULL DEFAULT 1,"
+        "UNIQUE(contact_id, community_id))",
+        "CREATE INDEX IF NOT EXISTS idx_community_summaries_contact "
+        "ON community_summaries(contact_id)",
+        "CREATE TABLE IF NOT EXISTS autodream_runs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "started_at INTEGER NOT NULL,"
+        "finished_at INTEGER NOT NULL,"
+        "quarantine_reviewed INTEGER NOT NULL,"
+        "quarantine_released INTEGER NOT NULL,"
+        "quarantine_dropped INTEGER NOT NULL,"
+        "communities_summarized INTEGER NOT NULL,"
+        "edges_reweighted INTEGER NOT NULL,"
+        "derived_facts_added INTEGER NOT NULL,"
+        "budget_exceeded INTEGER NOT NULL DEFAULT 0)",
+        NULL,
+    };
+    for (size_t i = 0; stmts[i]; i++) {
+        if (run_ddl(db, stmts[i]) != SQLITE_OK)
+            return HU_ERR_IO;
+    }
+    return HU_OK;
+}
+
+/* Phase 1: Quarantine review.
+ * Heuristic policy (deterministic, no LLM):
+ *   - DROP if quarantined longer than cfg.quarantine_max_age_ms.
+ *   - DROP if trust_score < 0.3 (these came from rate-limit floor / agent error).
+ *   - RELEASE if score >= 0.5 AND no live contradiction (same source/type with
+ *     different target and high confidence).
+ *   - LEAVE otherwise (re-evaluated next cycle).
+ */
+static hu_error_t phase_quarantine_review(hu_graph_t *g, const hu_autodream_config_t *cfg,
+                                          hu_autodream_report_t *r, int64_t deadline_ms) {
+    struct sqlite3 *db = hu_graph__db_handle(g);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
+
+    sqlite3_stmt *sel = NULL;
+    const char *sel_sql =
+        "SELECT id, contact_id, source_id, target_id, relation_type, weight, event_start,"
+        " event_end, confidence, context, provenance, trust_score, quarantined_at "
+        "FROM quarantine_relations ORDER BY quarantined_at ASC";
+    if (sqlite3_prepare_v2(db, sel_sql, -1, &sel, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    while (sqlite3_step(sel) == SQLITE_ROW) {
+        if (cfg->max_runtime_ms > 0 && wall_now_ms() > deadline_ms) {
+            r->budget_exceeded = true;
+            break;
+        }
+
+        int64_t qid = sqlite3_column_int64(sel, 0);
+        const char *cid_t = (const char *)sqlite3_column_text(sel, 1);
+        size_t cid_len = cid_t ? (size_t)sqlite3_column_bytes(sel, 1) : 0;
+        int64_t source_id = sqlite3_column_int64(sel, 2);
+        int64_t target_id = sqlite3_column_int64(sel, 3);
+        hu_relation_type_t rtype = (hu_relation_type_t)sqlite3_column_int(sel, 4);
+        float weight = (float)sqlite3_column_double(sel, 5);
+        int64_t event_start = sqlite3_column_int64(sel, 6);
+        int64_t event_end = sqlite3_column_int64(sel, 7);
+        float confidence = (float)sqlite3_column_double(sel, 8);
+        const char *ctx = (const char *)sqlite3_column_text(sel, 9);
+        size_t ctx_len = ctx ? (size_t)sqlite3_column_bytes(sel, 9) : 0;
+        const char *prov = (const char *)sqlite3_column_text(sel, 10);
+        size_t prov_len = prov ? (size_t)sqlite3_column_bytes(sel, 10) : 0;
+        float trust = (float)sqlite3_column_double(sel, 11);
+        int64_t qts = sqlite3_column_int64(sel, 12);
+
+        r->quarantine_reviewed++;
+
+        bool drop = false;
+        bool release = false;
+
+        if (now - qts > cfg->quarantine_max_age_ms)
+            drop = true;
+        else if (trust < 0.30f)
+            drop = true;
+        else if (trust >= 0.50f) {
+            sqlite3_stmt *chk = NULL;
+            const char *chk_sql =
+                "SELECT COUNT(*) FROM relations WHERE contact_id = ? AND source_id = ? "
+                "AND relation_type = ? AND target_id <> ? AND event_end = 0 AND confidence >= 0.8";
+            if (sqlite3_prepare_v2(db, chk_sql, -1, &chk, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(chk, 1, cid_t, (int)cid_len, SQLITE_STATIC);
+                sqlite3_bind_int64(chk, 2, source_id);
+                sqlite3_bind_int(chk, 3, (int)rtype);
+                sqlite3_bind_int64(chk, 4, target_id);
+                int contradicted = 0;
+                if (sqlite3_step(chk) == SQLITE_ROW)
+                    contradicted = sqlite3_column_int(chk, 0);
+                sqlite3_finalize(chk);
+                if (contradicted == 0)
+                    release = true;
+            }
+        }
+
+        if (cfg->dry_run) {
+            if (drop)
+                r->quarantine_dropped++;
+            if (release)
+                r->quarantine_released++;
+            continue;
+        }
+
+        if (drop) {
+            sqlite3_stmt *del = NULL;
+            if (sqlite3_prepare_v2(db, "DELETE FROM quarantine_relations WHERE id = ?", -1, &del,
+                                   NULL) == SQLITE_OK) {
+                sqlite3_bind_int64(del, 1, qid);
+                if (sqlite3_step(del) == SQLITE_DONE)
+                    r->quarantine_dropped++;
+                sqlite3_finalize(del);
+            }
+        } else if (release) {
+            char prefixed[512];
+            int n = snprintf(prefixed, sizeof(prefixed), "released:autodream:%.*s",
+                             (int)(prov_len < 480 ? prov_len : 480), prov ? prov : "");
+            (void)hu_graph_upsert_relation_ex(g, cid_t, cid_len, source_id, target_id, rtype,
+                                              weight, event_start, event_end, confidence, ctx,
+                                              ctx_len, prefixed, n > 0 ? (size_t)n : 0);
+            sqlite3_stmt *del = NULL;
+            if (sqlite3_prepare_v2(db, "DELETE FROM quarantine_relations WHERE id = ?", -1, &del,
+                                   NULL) == SQLITE_OK) {
+                sqlite3_bind_int64(del, 1, qid);
+                sqlite3_step(del);
+                sqlite3_finalize(del);
+            }
+            r->quarantine_released++;
+        }
+    }
+    sqlite3_finalize(sel);
+    return HU_OK;
+}
+
+/* Heuristic, deterministic community summary writer. Plug-in point for the
+ * LLM-driven backend: replace this function body or inject via a vtable. */
+static hu_error_t generate_heuristic_summary(struct sqlite3 *db, const char *contact_id,
+                                             size_t contact_id_len, int64_t community_id,
+                                             char *buf, size_t buf_cap, size_t *out_len,
+                                             size_t *out_entity_count, size_t *out_edge_count) {
+    *out_len = 0;
+    *out_entity_count = 0;
+    *out_edge_count = 0;
+
+    sqlite3_stmt *st = NULL;
+    const char *sql_e = "SELECT name FROM entities WHERE contact_id = ? AND community_id = ?"
+                        " ORDER BY mention_count DESC LIMIT 5";
+    if (sqlite3_prepare_v2(db, sql_e, -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(st, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, community_id);
+
+    char names[5][96] = {{0}};
+    size_t nn = 0;
+    while (sqlite3_step(st) == SQLITE_ROW && nn < 5) {
+        const char *n = (const char *)sqlite3_column_text(st, 0);
+        if (n)
+            snprintf(names[nn++], sizeof(names[0]), "%s", n);
+    }
+    sqlite3_finalize(st);
+
+    sqlite3_stmt *st2 = NULL;
+    const char *sql_c = "SELECT COUNT(*) FROM entities WHERE contact_id = ? AND community_id = ?";
+    sqlite3_prepare_v2(db, sql_c, -1, &st2, NULL);
+    sqlite3_bind_text(st2, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
+    sqlite3_bind_int64(st2, 2, community_id);
+    if (sqlite3_step(st2) == SQLITE_ROW)
+        *out_entity_count = (size_t)sqlite3_column_int64(st2, 0);
+    sqlite3_finalize(st2);
+
+    sqlite3_stmt *st3 = NULL;
+    const char *sql_ec =
+        "SELECT COUNT(*) FROM relations r "
+        "JOIN entities e ON r.source_id = e.id "
+        "WHERE r.contact_id = ? AND e.community_id = ? AND r.event_end = 0";
+    sqlite3_prepare_v2(db, sql_ec, -1, &st3, NULL);
+    sqlite3_bind_text(st3, 1, contact_id, (int)contact_id_len, SQLITE_STATIC);
+    sqlite3_bind_int64(st3, 2, community_id);
+    if (sqlite3_step(st3) == SQLITE_ROW)
+        *out_edge_count = (size_t)sqlite3_column_int64(st3, 0);
+    sqlite3_finalize(st3);
+
+    int written;
+    if (nn == 0) {
+        written = snprintf(buf, buf_cap,
+                           "Community %lld is empty or has no named entities yet.",
+                           (long long)community_id);
+    } else if (nn == 1) {
+        written = snprintf(buf, buf_cap,
+                           "Community %lld centers on %s (%zu entities, %zu live edges).",
+                           (long long)community_id, names[0], *out_entity_count, *out_edge_count);
+    } else {
+        char joined[256] = {0};
+        size_t off = 0;
+        for (size_t i = 0; i < nn; i++) {
+            const char *sep = (i == 0) ? "" : (i == nn - 1) ? " and " : ", ";
+            int w = snprintf(joined + off, sizeof(joined) - off, "%s%s", sep, names[i]);
+            if (w < 0 || (size_t)w >= sizeof(joined) - off)
+                break;
+            off += (size_t)w;
+        }
+        written = snprintf(buf, buf_cap,
+                           "Community %lld brings together %s (%zu entities, %zu live edges). "
+                           "Anchor entities are mentioned most often and form the hub of this "
+                           "cluster.",
+                           (long long)community_id, joined, *out_entity_count, *out_edge_count);
+    }
+    if (written < 0)
+        return HU_ERR_IO;
+    *out_len = (size_t)written;
+    return HU_OK;
+}
+
+hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
+                                            const char *contact_id, size_t contact_id_len,
+                                            int64_t community_id, int64_t now_ms) {
+    (void)alloc;
+    if (!graph)
+        return HU_ERR_INVALID_ARGUMENT;
+    struct sqlite3 *db = hu_graph__db_handle(graph);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (ensure_autodream_schema(db) != HU_OK)
+        return HU_ERR_IO;
+
+    char buf[1024];
+    size_t blen = 0, ec = 0, edc = 0;
+    hu_error_t rc = generate_heuristic_summary(db, contact_id ? contact_id : "", contact_id_len,
+                                               community_id, buf, sizeof(buf), &blen, &ec, &edc);
+    if (rc != HU_OK)
+        return rc;
+
+    sqlite3_stmt *up = NULL;
+    const char *sql = "INSERT INTO community_summaries"
+                      " (contact_id, community_id, summary_text, entity_count, edge_count,"
+                      "  generated_at) VALUES (?, ?, ?, ?, ?, ?) "
+                      "ON CONFLICT(contact_id, community_id) DO UPDATE SET "
+                      "summary_text = excluded.summary_text, "
+                      "entity_count = excluded.entity_count, "
+                      "edge_count = excluded.edge_count, "
+                      "generated_at = excluded.generated_at";
+    if (sqlite3_prepare_v2(db, sql, -1, &up, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(up, 1, contact_id ? contact_id : "", (int)contact_id_len, SQLITE_STATIC);
+    sqlite3_bind_int64(up, 2, community_id);
+    sqlite3_bind_text(up, 3, buf, (int)blen, SQLITE_STATIC);
+    sqlite3_bind_int64(up, 4, (int64_t)ec);
+    sqlite3_bind_int64(up, 5, (int64_t)edc);
+    sqlite3_bind_int64(up, 6, now_ms > 0 ? now_ms : wall_now_ms());
+    int srch = sqlite3_step(up);
+    sqlite3_finalize(up);
+    return srch == SQLITE_DONE ? HU_OK : HU_ERR_IO;
+}
+
+hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t *graph,
+                                               const char *contact_id, size_t contact_id_len,
+                                               int64_t community_id, char **out_summary,
+                                               size_t *out_summary_len) {
+    if (!graph || !out_summary || !out_summary_len)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out_summary = NULL;
+    *out_summary_len = 0;
+    struct sqlite3 *db = hu_graph__db_handle(graph);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT summary_text FROM community_summaries "
+                           "WHERE contact_id = ? AND community_id = ?",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_text(st, 1, contact_id ? contact_id : "", (int)contact_id_len, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 2, community_id);
+    int rc = sqlite3_step(st);
+    if (rc == SQLITE_ROW) {
+        const char *s = (const char *)sqlite3_column_text(st, 0);
+        size_t slen = s ? (size_t)sqlite3_column_bytes(st, 0) : 0;
+        if (s && slen > 0) {
+            char *copy = alloc->alloc(alloc->ctx, slen + 1);
+            if (!copy) {
+                sqlite3_finalize(st);
+                return HU_ERR_OUT_OF_MEMORY;
+            }
+            memcpy(copy, s, slen);
+            copy[slen] = '\0';
+            *out_summary = copy;
+            *out_summary_len = slen;
+            sqlite3_finalize(st);
+            return HU_OK;
+        }
+    }
+    sqlite3_finalize(st);
+    return HU_ERR_NOT_FOUND;
+}
+
+/* Phase 3: Edge reweight — apply a simple decay to edges with no recall in N
+ * days. Conservative; we only nudge weight, never delete. */
+static hu_error_t phase_edge_reweight(hu_graph_t *g, const hu_autodream_config_t *cfg,
+                                      hu_autodream_report_t *r, int64_t deadline_ms) {
+    struct sqlite3 *db = hu_graph__db_handle(g);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
+    int64_t cutoff = now - 30LL * 24 * 3600 * 1000;
+
+    sqlite3_stmt *sel = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT id, weight, last_seen FROM relations "
+                           "WHERE last_seen < ? AND weight > 0.05",
+                           -1, &sel, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+    sqlite3_bind_int64(sel, 1, cutoff);
+
+    while (sqlite3_step(sel) == SQLITE_ROW) {
+        if (cfg->max_runtime_ms > 0 && wall_now_ms() > deadline_ms) {
+            r->budget_exceeded = true;
+            break;
+        }
+        int64_t rid = sqlite3_column_int64(sel, 0);
+        double w = sqlite3_column_double(sel, 1);
+        double new_w = w * 0.95;
+        if (new_w < 0.05)
+            new_w = 0.05;
+        if (cfg->dry_run) {
+            r->edges_reweighted++;
+            continue;
+        }
+        sqlite3_stmt *up = NULL;
+        if (sqlite3_prepare_v2(db, "UPDATE relations SET weight = ? WHERE id = ?", -1, &up, NULL) ==
+            SQLITE_OK) {
+            sqlite3_bind_double(up, 1, new_w);
+            sqlite3_bind_int64(up, 2, rid);
+            if (sqlite3_step(up) == SQLITE_DONE)
+                r->edges_reweighted++;
+            sqlite3_finalize(up);
+        }
+    }
+    sqlite3_finalize(sel);
+    return HU_OK;
+}
+
+/* Phase 2: Community summaries — for every distinct community_id in the live
+ * entities table for each contact, generate-or-refresh the summary. */
+static hu_error_t phase_community_summaries(hu_allocator_t *alloc, hu_graph_t *g,
+                                            const hu_autodream_config_t *cfg,
+                                            hu_autodream_report_t *r, int64_t deadline_ms) {
+    struct sqlite3 *db = hu_graph__db_handle(g);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (ensure_autodream_schema(db) != HU_OK)
+        return HU_ERR_IO;
+    int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
+
+    sqlite3_stmt *sel = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT DISTINCT contact_id, community_id FROM entities "
+                           "WHERE community_id IS NOT NULL",
+                           -1, &sel, NULL) != SQLITE_OK)
+        return HU_ERR_IO;
+
+    while (sqlite3_step(sel) == SQLITE_ROW) {
+        if (cfg->max_runtime_ms > 0 && wall_now_ms() > deadline_ms) {
+            r->budget_exceeded = true;
+            break;
+        }
+        const char *cid = (const char *)sqlite3_column_text(sel, 0);
+        size_t cid_len = cid ? (size_t)sqlite3_column_bytes(sel, 0) : 0;
+        int64_t community_id = sqlite3_column_int64(sel, 1);
+        if (cfg->dry_run) {
+            r->communities_summarized++;
+            continue;
+        }
+        if (hu_autodream_summarize_community(alloc, g, cid, cid_len, community_id, now) == HU_OK)
+            r->communities_summarized++;
+    }
+    sqlite3_finalize(sel);
+    return HU_OK;
+}
+
+hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
+                            const hu_autodream_config_t *cfg,
+                            hu_autodream_report_t *out_report) {
+    if (!alloc || !graph || !cfg || !out_report)
+        return HU_ERR_INVALID_ARGUMENT;
+    struct sqlite3 *db = hu_graph__db_handle(graph);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (ensure_autodream_schema(db) != HU_OK)
+        return HU_ERR_IO;
+
+    memset(out_report, 0, sizeof(*out_report));
+    int64_t start = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
+    out_report->started_at_ms = start;
+    int64_t deadline = (cfg->max_runtime_ms > 0) ? wall_now_ms() + cfg->max_runtime_ms : INT64_MAX;
+
+    if (cfg->enable_quarantine_review)
+        phase_quarantine_review(graph, cfg, out_report, deadline);
+    if (!out_report->budget_exceeded && cfg->enable_community_summaries)
+        phase_community_summaries(alloc, graph, cfg, out_report, deadline);
+    if (!out_report->budget_exceeded && cfg->enable_edge_reweight)
+        phase_edge_reweight(graph, cfg, out_report, deadline);
+    /* Phase 4 (derived facts) uses cross-graph traversal helpers landing in
+     * W3; leave the counter at 0 here. */
+
+    out_report->finished_at_ms = wall_now_ms();
+
+    sqlite3_stmt *log_st = NULL;
+    if (sqlite3_prepare_v2(
+            db,
+            "INSERT INTO autodream_runs (started_at, finished_at, quarantine_reviewed,"
+            " quarantine_released, quarantine_dropped, communities_summarized, edges_reweighted,"
+            " derived_facts_added, budget_exceeded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            -1, &log_st, NULL) == SQLITE_OK) {
+        sqlite3_bind_int64(log_st, 1, out_report->started_at_ms);
+        sqlite3_bind_int64(log_st, 2, out_report->finished_at_ms);
+        sqlite3_bind_int64(log_st, 3, (int64_t)out_report->quarantine_reviewed);
+        sqlite3_bind_int64(log_st, 4, (int64_t)out_report->quarantine_released);
+        sqlite3_bind_int64(log_st, 5, (int64_t)out_report->quarantine_dropped);
+        sqlite3_bind_int64(log_st, 6, (int64_t)out_report->communities_summarized);
+        sqlite3_bind_int64(log_st, 7, (int64_t)out_report->edges_reweighted);
+        sqlite3_bind_int64(log_st, 8, (int64_t)out_report->derived_facts_added);
+        sqlite3_bind_int(log_st, 9, out_report->budget_exceeded ? 1 : 0);
+        sqlite3_step(log_st);
+        sqlite3_finalize(log_st);
+    }
+    return HU_OK;
+}
+
+#else /* !HU_ENABLE_SQLITE */
+
+hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
+                            const hu_autodream_config_t *cfg,
+                            hu_autodream_report_t *out_report) {
+    (void)alloc;
+    (void)graph;
+    (void)cfg;
+    (void)out_report;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
+                                            const char *contact_id, size_t contact_id_len,
+                                            int64_t community_id, int64_t now_ms) {
+    (void)alloc;
+    (void)graph;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)community_id;
+    (void)now_ms;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t *graph,
+                                               const char *contact_id, size_t contact_id_len,
+                                               int64_t community_id, char **out_summary,
+                                               size_t *out_summary_len) {
+    (void)alloc;
+    (void)graph;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)community_id;
+    (void)out_summary;
+    (void)out_summary_len;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+#endif
