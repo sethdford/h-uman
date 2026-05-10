@@ -67,6 +67,19 @@ static void sort_topic_order(const hu_personal_model_t *model, size_t *order) {
     }
 }
 
+bool hu_personal_model_has_content(const hu_personal_model_t *model) {
+    if (!model)
+        return false;
+    if (model->fact_count > 0 || model->topic_count > 0 || model->goal_count > 0)
+        return true;
+    if (model->style.sample_count > 0U)
+        return true;
+    if (model->core.user_name[0] != '\0' || model->core.user_bio[0] != '\0' ||
+        model->core.user_preferences[0] != '\0')
+        return true;
+    return false;
+}
+
 size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *buf, size_t cap) {
     if (!buf || cap == 0)
         return 0;

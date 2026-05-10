@@ -24,6 +24,7 @@
 #include "human/humanness.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
+#include "human/memory/personal_model.h"
 #include "human/persona.h"
 #include "human/persona/humor.h"
 #include "human/persona/somatic.h"
@@ -705,11 +706,30 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
         }
     }
 
+    /* Render personal-model prompt block. Stack-bounded; skipped on a
+     * fresh model so we don't stamp tokens with placeholder text. The
+     * cached-prompt fast path below intentionally ignores this — when the
+     * model has any signal, the cache shortcut is bypassed and we go
+     * through the full prompt builder so the [Personal Context] block
+     * gets composed in. */
+    char personal_model_buf[8192];
+    const char *personal_model_ctx = NULL;
+    size_t personal_model_ctx_len = 0;
+    if (hu_personal_model_has_content(&agent->personal_model)) {
+        size_t pm_n = hu_personal_model_build_prompt(&agent->personal_model,
+                                                     personal_model_buf,
+                                                     sizeof(personal_model_buf));
+        if (pm_n > 0) {
+            personal_model_ctx = personal_model_buf;
+            personal_model_ctx_len = pm_n;
+        }
+    }
+
     char *system_prompt = NULL;
     size_t system_prompt_len = 0;
     if (agent->cached_static_prompt && !persona_prompt && !awareness_ctx && !somatic_ctx &&
         !trust_ctx && !humor_dir && !tone_hint && !syc_friction_ctx && !intelligence_ctx &&
-        !outcome_ctx) {
+        !outcome_ctx && !personal_model_ctx) {
         err = hu_prompt_build_with_cache(agent->alloc, agent->cached_static_prompt,
                                          agent->cached_static_prompt_len, memory_ctx,
                                          memory_ctx_len, &system_prompt, &system_prompt_len);
@@ -763,6 +783,8 @@ hu_error_t hu_agent_turn_stream_v2(hu_agent_t *agent, const char *msg, size_t ms
             .sycophancy_friction_len = syc_friction_ctx_len,
             .tone_hint = tone_hint,
             .tone_hint_len = tone_hint_len,
+            .personal_model_context = personal_model_ctx,
+            .personal_model_context_len = personal_model_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (persona_prompt)

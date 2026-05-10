@@ -121,6 +121,12 @@ typedef struct hu_prompt_config {
     size_t sycophancy_friction_len;
     const char *conv_goals_context;
     size_t conv_goals_context_len;
+    /* Personal model summary (identity, facts, topics, goals, learned style).
+     * Built per-turn from the agent's accumulating hu_personal_model_t.
+     * NULL/empty when the model has no signal yet — see
+     * hu_personal_model_has_content() in human/memory/personal_model.h. */
+    const char *personal_model_context;
+    size_t personal_model_context_len;
 } hu_prompt_config_t;
 
 /* Build the full system prompt. Caller owns returned string; free with alloc. */

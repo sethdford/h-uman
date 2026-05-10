@@ -88,6 +88,12 @@ void hu_personal_model_init(hu_personal_model_t *model);
  * Writes a human-readable summary into buf. Returns bytes written. */
 size_t hu_personal_model_build_prompt(const hu_personal_model_t *model, char *buf, size_t cap);
 
+/* True when the model carries any concrete signal worth injecting into a
+ * system prompt (facts, topics, goals, named identity, or observed style).
+ * Lets callers skip prompt-block injection on a fresh / unused model so we
+ * don't waste tokens on "(No detailed personal data yet.)" noise. */
+bool hu_personal_model_has_content(const hu_personal_model_t *model);
+
 /* Ingest a new message into the personal model.
  * Updates facts, style metrics, topics, and temporal patterns. */
 hu_error_t hu_personal_model_ingest(hu_personal_model_t *model, const char *message,

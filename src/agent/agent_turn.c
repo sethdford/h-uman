@@ -27,6 +27,7 @@
 #include "human/eval/consistency.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
+#include "human/memory/personal_model.h"
 #include "human/persona/humor.h"
 #include "human/security/sycophancy_guard.h"
 
@@ -3075,6 +3076,25 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         const char *cognition_mode_str =
             hu_cognition_mode_name(agent->infra.current_cognition_mode);
         size_t cognition_mode_str_len = strlen(cognition_mode_str);
+
+        /* Render personal-model prompt block from accumulated user signal.
+         * Stack buffer (~8 KB) bounded by HU_PM_MAX_FACTS / TOPICS / GOALS.
+         * Skipped entirely when the model has no real content yet so we
+         * don't burn tokens on the "(No detailed personal data yet.)"
+         * placeholder on a fresh install. */
+        char personal_model_buf[8192];
+        const char *personal_model_ctx = NULL;
+        size_t personal_model_ctx_len = 0;
+        if (hu_personal_model_has_content(&agent->personal_model)) {
+            size_t pm_n = hu_personal_model_build_prompt(&agent->personal_model,
+                                                         personal_model_buf,
+                                                         sizeof(personal_model_buf));
+            if (pm_n > 0) {
+                personal_model_ctx = personal_model_buf;
+                personal_model_ctx_len = pm_n;
+            }
+        }
+
         hu_prompt_config_t cfg = {
             .provider_name = agent->provider.vtable->get_name(agent->provider.ctx),
             .provider_name_len = 0,
@@ -3171,6 +3191,8 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             .sycophancy_friction_len = syc_friction_ctx_len,
             .conv_goals_context = conv_goals_ctx,
             .conv_goals_context_len = conv_goals_ctx_len,
+            .personal_model_context = personal_model_ctx,
+            .personal_model_context_len = personal_model_ctx_len,
         };
         err = hu_prompt_build_system(agent->alloc, &cfg, &system_prompt, &system_prompt_len);
         if (persona_prompt)
