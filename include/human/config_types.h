@@ -44,6 +44,22 @@ typedef struct hu_scheduler_config {
     uint32_t max_concurrent;
 } hu_scheduler_config_t;
 
+/* W13 Phase 4.1 — personalization (LoRA adapter auto-load).
+ *
+ * When `enabled` is true and `lora_adapter_path` resolves to a readable
+ * `.lora` file, the daemon loads the adapter into the configured
+ * provider on startup. Adapter id defaults to the basename when blank.
+ *
+ * Production deployments will typically set this from `human ml
+ * lora-persona`'s output path; on-device personalization closes the
+ * loop without a separate `human ml apply-adapter` invocation.
+ */
+typedef struct hu_personalization_config {
+    bool enabled;
+    char *lora_adapter_path;
+    char *lora_adapter_id;
+} hu_personalization_config_t;
+
 typedef struct hu_behavior_config {
     uint32_t consecutive_limit;      /* max consecutive messages from self before skip (default 3) */
     uint32_t participation_pct;      /* max % of recent messages before skip (default 40) */

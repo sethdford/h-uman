@@ -962,11 +962,55 @@ static void test_config_parse_feeds_section(void) {
     hu_arena_destroy(arena);
 }
 
+/* W13 Phase 4.1 — personalization config plumbing */
+
+static void test_config_parses_personalization_block(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    const char *json =
+        "{\"personalization\":{\"enabled\":true,"
+        "\"lora_adapter_path\":\"/tmp/persona-default.lora\","
+        "\"lora_adapter_id\":\"persona-default\"}}";
+    hu_error_t err = hu_config_parse_json(&cfg_local, json, strlen(json));
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_TRUE(cfg_local.personalization.enabled);
+    HU_ASSERT_NOT_NULL(cfg_local.personalization.lora_adapter_path);
+    HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_path,
+                     "/tmp/persona-default.lora");
+    HU_ASSERT_STR_EQ(cfg_local.personalization.lora_adapter_id, "persona-default");
+    hu_arena_destroy(arena);
+}
+
+static void test_config_personalization_disabled_by_default(void) {
+    hu_allocator_t backing = hu_system_allocator();
+    hu_config_t cfg_local;
+    memset(&cfg_local, 0, sizeof(cfg_local));
+    hu_arena_t *arena = hu_arena_create(backing);
+    HU_ASSERT_NOT_NULL(arena);
+    cfg_local.arena = arena;
+    cfg_local.allocator = hu_arena_allocator(arena);
+    /* Empty JSON must leave personalization off and the path NULL so the
+     * daemon's auto-load skips entirely. */
+    hu_error_t err = hu_config_parse_json(&cfg_local, "{}", 2);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_FALSE(cfg_local.personalization.enabled);
+    HU_ASSERT(cfg_local.personalization.lora_adapter_path == NULL);
+    HU_ASSERT(cfg_local.personalization.lora_adapter_id == NULL);
+    hu_arena_destroy(arena);
+}
+
 void run_config_parse_tests(void) {
     HU_TEST_SUITE("Config parse");
     HU_RUN_TEST(test_config_parse_empty_json);
     HU_RUN_TEST(test_config_parse_with_providers);
     HU_RUN_TEST(test_config_parse_all_sections);
+    HU_RUN_TEST(test_config_parses_personalization_block);
+    HU_RUN_TEST(test_config_personalization_disabled_by_default);
     HU_RUN_TEST(test_config_parse_malformed_missing_brace);
     HU_RUN_TEST(test_config_parse_malformed_bad_types);
     HU_RUN_TEST(test_config_env_overrides);

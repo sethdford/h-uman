@@ -25,6 +25,7 @@ static const char *const hu_config_top_keys[] = {
     "tools",
     "cron",
     "scheduler",
+    "personalization",
     "runtime",
     "tunnel",
     "channels",

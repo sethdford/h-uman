@@ -388,6 +388,9 @@ static void set_defaults(hu_config_t *cfg, hu_allocator_t *a) {
     cfg->cron.interval_minutes = 30;
     cfg->cron.max_run_history = 50;
     cfg->scheduler.max_concurrent = 4;
+    cfg->personalization.enabled = false;
+    cfg->personalization.lora_adapter_path = NULL;
+    cfg->personalization.lora_adapter_id = NULL;
     cfg->behavior.consecutive_limit = 3;
     cfg->behavior.participation_pct = 40;
     cfg->behavior.max_response_chars = 300;

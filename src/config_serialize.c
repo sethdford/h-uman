@@ -314,6 +314,27 @@ hu_error_t hu_config_save(const hu_config_t *cfg) {
         }
     }
 
+    /* personalization (W13 Phase 4.1) */
+    if (cfg->personalization.enabled || cfg->personalization.lora_adapter_path ||
+        cfg->personalization.lora_adapter_id) {
+        hu_json_value_t *pers = hu_json_object_new(&a);
+        if (pers) {
+            hu_json_object_set(&a, pers, "enabled",
+                               hu_json_bool_new(&a, cfg->personalization.enabled));
+            if (cfg->personalization.lora_adapter_path)
+                hu_json_object_set(
+                    &a, pers, "lora_adapter_path",
+                    hu_json_string_new(&a, cfg->personalization.lora_adapter_path,
+                                       strlen(cfg->personalization.lora_adapter_path)));
+            if (cfg->personalization.lora_adapter_id)
+                hu_json_object_set(
+                    &a, pers, "lora_adapter_id",
+                    hu_json_string_new(&a, cfg->personalization.lora_adapter_id,
+                                       strlen(cfg->personalization.lora_adapter_id)));
+            hu_json_object_set(&a, root, "personalization", pers);
+        }
+    }
+
     /* session */
     if (cfg->session.idle_minutes > 0) {
         hu_json_value_t *sess = hu_json_object_new(&a);

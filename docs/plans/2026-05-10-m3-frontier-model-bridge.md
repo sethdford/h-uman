@@ -166,17 +166,42 @@ measurably different from the base, then detaches and asserts the base
 is restored within 1e-3.  This proves the disk → load → attach →
 forward path that the chat path now exercises.
 
-**What's still pending in Phase 4:** config-driven adapter wiring
-(`personalization.lora_adapter` path) so the daemon auto-loads on
-startup, and the same wiring for non-huml providers (which requires
-Bridge A or B to land). Tracking those here:
+**What's still pending in Phase 4:** the same wiring for non-huml
+providers (which requires Bridge A or B to land). Tracking that here:
 
-### 4.1 Config-driven auto-load (target: +1 week)
+### 4.1 Config-driven auto-load (DONE 2026-05-10)
 
-- Config schema: `personalization.lora_adapter_path` (str), 
-  `personalization.lora_adapter_id` (str).
-- Daemon, after `hu_w7_facade_open`, calls
-  `hu_provider_load_adapter(provider, ...)` when the path is set.
+Landed via FIX 24 (`feat(daemon): config-driven LoRA adapter auto-load`):
+
+- Config schema gained a top-level `personalization` block:
+
+  ```json
+  {
+    "personalization": {
+      "enabled": true,
+      "lora_adapter_path": "~/.human/personas/persona-default.lora",
+      "lora_adapter_id": "persona-default"
+    }
+  }
+  ```
+
+- `hu_personalization_config_t` lives in `include/human/config_types.h`;
+  parser at `src/config_parse.c::parse_personalization`; serializer at
+  `src/config_serialize.c`; default state (off, NULL paths) is set in
+  `src/config_merge.c`.
+- Daemon (`src/daemon.c`, immediately after the W14 scheduler open)
+  calls `hu_provider_load_adapter(&agent->provider, alloc, path,
+  strlen(path), id, strlen(id))` when the block is enabled and a path
+  is set.  `adapter_id` defaults to the file basename when blank.
+- Provider returns of `HU_ERR_NOT_SUPPORTED` are logged at info level
+  (cloud providers skip silently); other failures log a warning and
+  fall through to the base model so a missing adapter never breaks
+  startup.
+- Coverage: `test_config_parses_personalization_block` and
+  `test_config_personalization_disabled_by_default` in
+  `tests/test_config_parse.c` exercise the schema; existing
+  `test_huml_provider_load_unload_adapter` covers the load path the
+  daemon dispatches into.
 
 ### 4.2 Frontier-provider chat-time merge (blocked on Bridge A or B)
 

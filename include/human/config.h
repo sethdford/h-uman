@@ -631,6 +631,7 @@ typedef struct hu_config {
     hu_hardware_config_t hardware;
     hu_cron_config_t cron;
     hu_scheduler_config_t scheduler;
+    hu_personalization_config_t personalization;
     hu_behavior_config_t behavior;
     hu_node_entry_t nodes[HU_NODES_MAX];
     size_t nodes_len;

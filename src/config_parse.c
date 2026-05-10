@@ -162,6 +162,36 @@ static hu_error_t parse_scheduler(hu_allocator_t *a, hu_config_t *cfg, const hu_
     return HU_OK;
 }
 
+/* W13 Phase 4.1 — `personalization` block:
+ *   {
+ *     "enabled": true,
+ *     "lora_adapter_path": "~/.human/personas/persona-default.lora",
+ *     "lora_adapter_id": "persona-default"   // optional; defaults to file basename
+ *   }
+ */
+static hu_error_t parse_personalization(hu_allocator_t *a, hu_config_t *cfg,
+                                        const hu_json_value_t *obj) {
+    if (!obj || obj->type != HU_JSON_OBJECT)
+        return HU_OK;
+    cfg->personalization.enabled =
+        hu_json_get_bool(obj, "enabled", cfg->personalization.enabled);
+    const char *path = hu_json_get_string(obj, "lora_adapter_path");
+    if (path) {
+        if (cfg->personalization.lora_adapter_path)
+            a->free(a->ctx, cfg->personalization.lora_adapter_path,
+                    strlen(cfg->personalization.lora_adapter_path) + 1);
+        cfg->personalization.lora_adapter_path = hu_strdup(a, path);
+    }
+    const char *id = hu_json_get_string(obj, "lora_adapter_id");
+    if (id) {
+        if (cfg->personalization.lora_adapter_id)
+            a->free(a->ctx, cfg->personalization.lora_adapter_id,
+                    strlen(cfg->personalization.lora_adapter_id) + 1);
+        cfg->personalization.lora_adapter_id = hu_strdup(a, id);
+    }
+    return HU_OK;
+}
+
 static hu_error_t parse_gateway(hu_allocator_t *a, hu_config_t *cfg, const hu_json_value_t *obj) {
     if (!obj || obj->type != HU_JSON_OBJECT)
         return HU_OK;
@@ -1096,6 +1126,11 @@ hu_error_t hu_config_parse_json(hu_config_t *cfg, const char *content, size_t le
     hu_json_value_t *sched_obj = hu_json_object_get(root, "scheduler");
     if (sched_obj)
         parse_scheduler(a, cfg, sched_obj);
+
+    hu_json_value_t *personalization_obj =
+        hu_json_object_get(root, "personalization");
+    if (personalization_obj)
+        parse_personalization(a, cfg, personalization_obj);
 
     hu_json_value_t *rt_obj = hu_json_object_get(root, "runtime");
     if (rt_obj)

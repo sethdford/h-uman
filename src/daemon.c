@@ -2273,6 +2273,47 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         else
             hu_log_warn("human", agent->observer, "W14 scheduler open failed: %d", (int)se);
     }
+    /* W13 Phase 4.1 — auto-load the configured LoRA adapter into the live
+     * provider. Closes the on-device personalization loop without a
+     * separate `human ml apply-adapter` invocation. Failures log a warning
+     * and continue with the base model so a missing adapter never breaks
+     * the daemon. The provider's own `load_adapter` vtable hook silently
+     * returns HU_ERR_NOT_SUPPORTED for backends that haven't implemented
+     * adapter merging (e.g. cloud providers); we treat that the same as
+     * a configured-but-no-op state. */
+    if (config && config->personalization.enabled &&
+        config->personalization.lora_adapter_path && agent &&
+        agent->provider.vtable) {
+        const char *adapter_path = config->personalization.lora_adapter_path;
+        const char *adapter_id = config->personalization.lora_adapter_id;
+        char id_buf[128];
+        if (!adapter_id || !*adapter_id) {
+            const char *base = strrchr(adapter_path, '/');
+            base = base ? base + 1 : adapter_path;
+            size_t blen = strlen(base);
+            if (blen >= sizeof(id_buf))
+                blen = sizeof(id_buf) - 1;
+            memcpy(id_buf, base, blen);
+            id_buf[blen] = '\0';
+            adapter_id = id_buf;
+        }
+        hu_error_t le = hu_provider_load_adapter(
+            &agent->provider, alloc, adapter_path, strlen(adapter_path),
+            adapter_id, strlen(adapter_id));
+        if (le == HU_OK)
+            hu_log_info("human", agent->observer,
+                        "personalization: loaded adapter '%s' from %s", adapter_id,
+                        adapter_path);
+        else if (le == HU_ERR_NOT_SUPPORTED)
+            hu_log_info("human", agent->observer,
+                        "personalization: provider does not support LoRA adapters; "
+                        "skipping '%s'",
+                        adapter_id);
+        else
+            hu_log_warn("human", agent->observer,
+                        "personalization: load_adapter('%s', %s) failed: %d",
+                        adapter_id, adapter_path, (int)le);
+    }
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
