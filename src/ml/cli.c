@@ -493,6 +493,14 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
             printf("Usage: human ml lora-persona --persona <name> "
                    "[--checkpoint <path>] [--output <path>] "
                    "[--rank <N>] [--max-steps <N>] [--help]\n");
+            printf("\n  --checkpoint  Optional HUML base GPT checkpoint to warm-start "
+                   "before LoRA attaches.\n");
+            printf("                Must match the reference GPT dims (see "
+                   "hu_experiment_config_default).\n");
+            printf("                NOTE: this is the reference HUML GPT, NOT a "
+                   "frontier model.\n");
+            printf("                Frontier model fine-tuning is tracked in\n");
+            printf("                docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
             return HU_OK;
         }
     }
@@ -504,6 +512,7 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     (void)rank;
     (void)max_steps;
     printf("[lora-persona] test mode: skipped\n");
+    printf("[lora-persona] honest-gap doc: docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
     return HU_OK;
 #else
     if (!persona_name) {
@@ -529,7 +538,6 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
     }
 
     hu_experiment_config_t cfg = hu_experiment_config_default();
-    (void)checkpoint_path;
 
     hu_model_t model = {0};
     err = hu_gpt_create(alloc, &cfg.gpt, &model);
@@ -537,6 +545,49 @@ hu_error_t hu_ml_cli_lora_persona(hu_allocator_t *alloc, int argc, const char **
         fprintf(stderr, "Model creation failed: %d\n", err);
         hu_persona_deinit(alloc, &persona);
         return err;
+    }
+
+    /* Honest caveat — this trains a LoRA adapter on the reference HUML GPT,
+     * NOT on a frontier model. Tracked in
+     * docs/plans/2026-05-10-m3-frontier-model-bridge.md (M3 honest gap). */
+    printf("[lora-persona] NOTE: trains LoRA on the reference HUML GPT.\n"
+           "[lora-persona]       This is not a frontier model fine-tune.\n"
+           "[lora-persona]       For Llama/Qwen/Mistral fine-tuning, see\n"
+           "[lora-persona]       docs/plans/2026-05-10-m3-frontier-model-bridge.md\n");
+
+    /* Optional warm-start: load a HUML reference-GPT checkpoint as the base
+     * before attaching LoRA. We use a throwaway optimizer to satisfy the
+     * checkpoint loader's group-count invariant; once the base params are
+     * restored, the temp optimizer is freed and a fresh LoRA-only optimizer
+     * is created below. */
+    if (checkpoint_path && checkpoint_path[0]) {
+        hu_ml_optimizer_t base_opt = {0};
+        hu_error_t base_err = hu_muon_adamw_create(alloc, &cfg.optimizer, &base_opt);
+        if (base_err != HU_OK) {
+            fprintf(stderr, "[lora-persona] failed to create warm-start optimizer: %d\n",
+                    base_err);
+            model.vtable->deinit(model.ctx, alloc);
+            hu_persona_deinit(alloc, &persona);
+            return base_err;
+        }
+        base_err = hu_gpt_register_params(&model, &base_opt);
+        if (base_err == HU_OK) {
+            base_err =
+                hu_ml_checkpoint_load(alloc, checkpoint_path, &model, &base_opt);
+        }
+        base_opt.vtable->deinit(base_opt.ctx, alloc);
+        if (base_err != HU_OK) {
+            fprintf(stderr,
+                    "[lora-persona] failed to load checkpoint '%s': %d "
+                    "(must be a HUML v1 or v2 file produced by hu_ml_checkpoint_save "
+                    "with matching dims: vocab=%zu n_layer=%zu n_embd=%zu)\n",
+                    checkpoint_path, base_err, cfg.gpt.vocab_size, cfg.gpt.n_layer,
+                    cfg.gpt.n_embd);
+            model.vtable->deinit(model.ctx, alloc);
+            hu_persona_deinit(alloc, &persona);
+            return base_err;
+        }
+        printf("[lora-persona] loaded base checkpoint: %s\n", checkpoint_path);
     }
 
     hu_lora_config_t lora_cfg = {
