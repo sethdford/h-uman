@@ -148,6 +148,7 @@ static float verify_claim_against_facade(hu_memory_facade_t *memory, hu_allocato
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_RELATION;
+    q.variant = HU_MEMORY_QUERY_BY_ID;
     q.contact_id = contact_id;
     q.contact_id_len = (size_t)(cid_len > 0 ? cid_len : 0);
     q.as.by_id.id = HU_MEMORY_REL_VERIFIER_SCAN;

@@ -128,6 +128,7 @@ hu_error_t hu_memory_pagerank_seeds(hu_memory_facade_t *m, hu_allocator_t *alloc
     hu_memory_query_t rel_q;
     memset(&rel_q, 0, sizeof(rel_q));
     rel_q.kind = HU_MEM_RELATION;
+    rel_q.variant = HU_MEMORY_QUERY_WINDOW;
     rel_q.contact_id = contact_id;
     rel_q.contact_id_len = cid_len;
     rel_q.as.window.from_ts = 0;

@@ -217,6 +217,7 @@ static hu_error_t apply_step_from_json(const hu_json_value_t *step,
     if (limit <= 0) limit = 16;
     if (limit > 64) limit = 64;
 
+    out->query.variant = HU_MEMORY_QUERY_WINDOW;
     out->query.as.window.from_ts = from_ms;
     out->query.as.window.to_ts = to_ms;
     out->query.as.window.limit = (size_t)limit;
@@ -284,6 +285,7 @@ static void deterministic_fallback(const hu_world_model_t *wm, hu_retrieval_plan
     hu_retrieval_step_t *s = &out->steps[0];
     s->kind = HU_MEM_RELATION;
     s->query.kind = HU_MEM_RELATION;
+    s->query.variant = HU_MEMORY_QUERY_WINDOW;
     if (wm) {
         s->query.contact_id = wm->contact_id;
         size_t maxlen = sizeof(wm->contact_id);

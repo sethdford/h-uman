@@ -261,6 +261,8 @@ static bool retrieve_correction_via_facade(hu_allocator_t *alloc,
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_RELATION;
+    /* AUTO with zero timestamps → top-N relations by weight. */
+    q.variant = HU_MEMORY_QUERY_AUTO;
     q.contact_id = contact_id;
     q.contact_id_len = contact_id_len;
     q.as.window.limit = 64;

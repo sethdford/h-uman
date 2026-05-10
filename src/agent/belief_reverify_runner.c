@@ -75,7 +75,9 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
     rq.kind = HU_MEM_RELATION;
     rq.contact_id = contact_id;
     rq.contact_id_len = contact_id_len;
-    /* v1_relation_read "default list" path: window timestamps both zero. */
+    /* v1_relation_read "default list" path: window timestamps both zero and
+     * AUTO variant — backend falls through to top-N by weight. */
+    rq.variant = HU_MEMORY_QUERY_AUTO;
     rq.as.window.limit = max_per_tick;
 
     hu_memory_record_t *recs = NULL;

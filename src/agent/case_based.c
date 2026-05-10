@@ -117,6 +117,7 @@ hu_error_t hu_case_recall(hu_memory_facade_t *m, hu_allocator_t *alloc, const ch
     hu_memory_query_t q;
     memset(&q, 0, sizeof(q));
     q.kind = HU_MEM_CASE;
+    q.variant = HU_MEMORY_QUERY_CASE;
     q.contact_id = contact_id;
     q.contact_id_len = contact_id_len;
     q.as.cases.goal_verb = goal_verb;

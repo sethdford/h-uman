@@ -501,6 +501,8 @@ hu_error_t hu_memory_facade_export_json(hu_memory_facade_t *m, hu_allocator_t *a
             hu_memory_query_t rq;
             memset(&rq, 0, sizeof(rq));
             rq.kind = HU_MEM_RELATION;
+            /* AUTO falls through to top-N (window timestamps both zero). */
+            rq.variant = HU_MEMORY_QUERY_AUTO;
             rq.contact_id = cid;
             rq.contact_id_len = cid_len;
             rq.as.window.limit = 10000;
