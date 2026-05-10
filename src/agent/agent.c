@@ -1002,6 +1002,10 @@ void hu_agent_deinit(hu_agent_t *agent) {
         hu_w7_facade_close(agent->w7_facade, agent->alloc);
         agent->w7_facade = NULL;
     }
+    if (agent->w15_audit_log) {
+        hu_w7_audit_log_close(agent->w15_audit_log, agent->alloc);
+        agent->w15_audit_log = NULL;
+    }
     if (agent->infra.cognition_db) {
         hu_cognition_db_close(agent->infra.cognition_db);
         agent->infra.cognition_db = NULL;
@@ -1055,6 +1059,20 @@ hu_error_t hu_agent_bind_sqlite_graph(hu_agent_t *agent, struct hu_graph *graph,
             agent->w7_facade = facade;
         else
             hu_log_warn("agent", NULL, "W7 facade open failed: %s", hu_error_string(err));
+    }
+    if (agent->w7_facade && !agent->w15_audit_log) {
+        const char *home = getenv("HOME");
+        if (home) {
+            char audit_path[512];
+            int ap = snprintf(audit_path, sizeof(audit_path), "%s/.human/audit_log.db", home);
+            if (ap > 0 && (size_t)ap < sizeof(audit_path)) {
+                hu_error_t ae = hu_w7_audit_log_open(agent->w7_facade, alloc,
+                                                     audit_path, NULL, &agent->w15_audit_log);
+                if (ae != HU_OK)
+                    hu_log_warn("agent", NULL, "W15 audit log open failed: %s",
+                                hu_error_string(ae));
+            }
+        }
     }
     if (agent->w7_facade && !agent->w14_scheduler) {
         hu_w14_scheduler_t *sched = NULL;

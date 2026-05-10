@@ -19,7 +19,7 @@ Introduce one and only one read/write/erase surface for structured memory kinds.
 
 ## Motivation
 
-Today, `src/agent/context.c` calls `hu_graph_neighbors`, `hu_persona_load`, `hu_emotion_state_load`, `hu_contact_get`, `hu_case_recall`, and `hu_persona_delta_list` directly. Each adds latency, each fails differently, each has its own error model. The verifier (W4) reaches into `hu_graph__db_handle()` to run raw SQL. The planner has no single seam to swap a backend. Result: every new memory shape (W10 KV-cache, W10 multimodal, W13 LoRA adapters, W15 encrypted blobs) would need to thread through every call site.
+Today, `src/agent/context.c` calls `hu_graph_neighbors`, `hu_persona_load`, `hu_emotion_state_load`, `hu_contact_get`, `hu_case_recall`, and `hu_persona_delta_list` directly. Each adds latency, each fails differently, each has its own error model. Some subsystems still reach the backing SQLite connection through **`hu_graph_sqlite_connection`** for operations the facade does not yet expose; the internal `hu_graph__db_handle` name exists only inside `src/memory/graph.c`. The planner has no single seam to swap a backend. Result: every new memory shape (W10 KV-cache, W10 multimodal, W13 LoRA adapters, W15 encrypted blobs) would need to thread through every call site.
 
 ## Prior art
 

@@ -4,6 +4,7 @@
 
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "human/persona/persona_deltas.h"
 #include "test_framework.h"
 
@@ -44,6 +45,41 @@ static void test_w5_propose_persists_and_lists(void) {
     HU_ASSERT_STR_EQ(out[0].key, "slack");
     HU_ASSERT(out[0].confidence > 0.79f && out[0].confidence < 0.81f);
     hu_persona_delta_free(A(), out, n);
+    hu_graph_close(g, A());
+}
+
+/* --- W7: same round-trip through hu_memory_facade_t (scheduler/daemon path) --- */
+static void test_w5_facade_propose_list_and_evolver(void) {
+    hu_graph_t *g = NULL;
+    open_graph(&g);
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
+
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_persona_delta_propose_facade(m, "facade_u", 8, HU_PERSONA_DELTA_TONE, "cli",
+                                                 "calmer", 0.9f, "facade-test", 1735689600000LL,
+                                                 &id),
+                 HU_OK);
+    HU_ASSERT(id > 0);
+
+    hu_persona_delta_t *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_persona_delta_list_facade(m, A(), "facade_u", 8, HU_DELTA_STATUS_PENDING, 16,
+                                               &out, &n),
+                 HU_OK);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_EQ(out[0].id, id);
+    HU_ASSERT_STR_EQ(out[0].value, "calmer");
+    hu_persona_delta_free(A(), out, n);
+
+    hu_persona_evolver_config_t cfg = hu_persona_evolver_default_config();
+    cfg.now_ms = 1735689600000LL + 5000;
+    hu_persona_evolver_report_t r;
+    HU_ASSERT_EQ(hu_persona_evolver_run_facade(m, "facade_u", 8, &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(r.applied, 1);
+    HU_ASSERT_EQ(r.dropped, 0);
+
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -145,6 +181,7 @@ void run_w5_persona_deltas_tests(void) {
     HU_TEST_SUITE("W5 persona deltas + evolver");
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w5_propose_persists_and_lists);
+    HU_RUN_TEST(test_w5_facade_propose_list_and_evolver);
     HU_RUN_TEST(test_w5_evolver_applies_high_confidence);
     HU_RUN_TEST(test_w5_evolver_drops_low_confidence);
     HU_RUN_TEST(test_w5_evolver_requires_corroboration_for_mid_confidence);

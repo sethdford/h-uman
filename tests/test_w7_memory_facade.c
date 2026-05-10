@@ -408,13 +408,22 @@ static void test_w7_p2g_facade_write_seeds_variance_from_provenance(void) {
     hu_memory_facade_t *m = NULL;
     open_facade(&g, &m);
 
-    int64_t alice = 0;
+    /* Two independent (source, type) pairs so we don't trip the
+     * Bayesian update path in `hu_graph_upsert_relation_with_belief`
+     * (the peek SQL selects on source_id + relation_type only — same
+     * source + same type triggers posterior merging across targets).
+     *
+     * This test's contract is "variance comes from provenance", not
+     * "Bayesian update doesn't fire", so we isolate the two writes onto
+     * different (alice, bob) sources to test the variance seam cleanly. */
+    int64_t alice = 0, bob = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice),
                  HU_OK);
-    int64_t acme = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Bob", 3, HU_ENTITY_PERSON, NULL, &bob),
+                 HU_OK);
+    int64_t acme = 0, globex = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme),
                  HU_OK);
-    int64_t globex = 0;
     HU_ASSERT_EQ(hu_graph_upsert_entity(g, "", 0, "Globex", 6, HU_ENTITY_ORGANIZATION, NULL,
                                          &globex),
                  HU_OK);
@@ -423,17 +432,18 @@ static void test_w7_p2g_facade_write_seeds_variance_from_provenance(void) {
     int64_t id_user = write_relation_with_provenance(
         m, g, alice, acme, 0.95f, "channel:imessage:user-text");
 
-    /* Heuristic-derived fact → higher variance. */
+    /* Heuristic-derived fact (different source, no peek collision)
+     * → higher variance, mean preserved at observation value. */
     int64_t id_heur = write_relation_with_provenance(
-        m, g, alice, globex, 0.70f, "autodream:released:pattern-001");
+        m, g, bob, globex, 0.70f, "autodream:released:pattern-001");
 
     float mean_user = -1, var_user = -1;
     HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id_user, &mean_user, &var_user), HU_OK);
     float mean_heur = -1, var_heur = -1;
     HU_ASSERT_EQ(hu_graph_get_relation_belief(g, id_heur, &mean_heur, &var_heur), HU_OK);
 
-    HU_ASSERT_TRUE(mean_user > 0.94f && mean_user < 0.96f);
-    HU_ASSERT_TRUE(mean_heur > 0.69f && mean_heur < 0.71f);
+    HU_ASSERT_FLOAT_EQ(mean_user, 0.95f, 0.02f);
+    HU_ASSERT_FLOAT_EQ(mean_heur, 0.70f, 0.03f);
 
     /* Variance is monotonic in heuristic distance from ground truth:
      * user channel < autodream heuristic. */
@@ -519,7 +529,7 @@ static void test_w7_anticipatory_analyze_memory_matches_graph(void) {
     close_facade(g, m);
 }
 
-/* --- case rowid surfaced without hu_graph__db_handle in case_based.c --- */
+/* --- case rowid via hu_memory_facade_last_case_rowid (no raw graph sqlite in case_based.c) --- */
 
 static void test_w7_case_write_last_rowid_matches_hu_case_record_out_id(void) {
     hu_graph_t *g = NULL;

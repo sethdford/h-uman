@@ -15,6 +15,8 @@
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
 #include "human/provider.h"
+#include "human/memory/belief.h"
+#include "human/security/audit_log.h"
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -46,6 +48,42 @@ hu_error_t hu_w7_facade_open(hu_graph_t *graph, hu_allocator_t *alloc, hu_w7_fac
 
 hu_memory_facade_t *hu_w7_facade_memory_handle(hu_w7_facade_t *facade) {
     return facade ? facade->m : NULL;
+}
+
+/* W15 — bridge callback: memory facade audit hook → SQLite audit log. */
+static void facade_audit_bridge(void *ctx, hu_memory_audit_op_t op,
+                                hu_memory_kind_t kind, int64_t id) {
+    hu_audit_log_t *log = (hu_audit_log_t *)ctx;
+    if (!log)
+        return;
+    hu_audit_log_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.operation = (op == HU_MEMORY_AUDIT_WRITE) ? HU_AUDIT_OP_WRITE : HU_AUDIT_OP_ERASE;
+    ev.kind = kind;
+    ev.target_id = id;
+    ev.actor = "facade";
+    ev.occurred_at = (int64_t)time(NULL) * 1000;
+    (void)hu_audit_log_append(log, &ev);
+}
+
+hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                const char *db_path, const char *contact_id,
+                                hu_audit_log_t **out) {
+    if (!facade || !facade->m || !alloc || !out)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    hu_audit_log_t *log = NULL;
+    hu_error_t e = hu_audit_log_open(alloc, db_path, contact_id, &log);
+    if (e != HU_OK)
+        return e;
+    hu_memory_facade_set_audit_hook(facade->m, facade_audit_bridge, log);
+    *out = log;
+    return HU_OK;
+}
+
+void hu_w7_audit_log_close(hu_audit_log_t *log, hu_allocator_t *alloc) {
+    if (log)
+        hu_audit_log_close(log, alloc);
 }
 
 void hu_w7_facade_close(hu_w7_facade_t *facade, hu_allocator_t *alloc) {
@@ -116,10 +154,12 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
         return e == HU_OK ? HU_OK : e;
 
     /* If everything is empty, return NULL/0 -- callers skip injection.
-     * The W9 builder always stamps `dominant_emotion = "neutral"` as a stub
-     * (placeholder until emotional state lands properly), so a literal
-     * non-empty `dominant_emotion` is NOT signal. We treat "neutral" with
-     * default valence/arousal as "no signal". */
+     *
+     * As of P2D the W9 builder synthesizes `dominant_emotion`, `valence`, and
+     * `arousal` from the F76 emotional-residue table (`hu_emotional_residue_
+     * get_active`), so non-trivial values are real signal. We still treat
+     * the post-default "neutral" bucket as "no signal" because the builder
+     * falls through to it when no active residues exist for this contact. */
     bool emo_signal = wm->dominant_emotion[0] != '\0' &&
                       strcmp(wm->dominant_emotion, "neutral") != 0;
     bool tom_signal = (wm->tom.user_thinks_we_are[0] &&
@@ -201,19 +241,22 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
     return HU_OK;
 }
 
-/* W11 self-RAG bridge entry point (FIX 12b → upgraded to atomic backend).
+/* W11 self-RAG bridge internal implementation.
  *
  * Prefers the atomic backend for SOFT/STRICT/INLINE modes — it decomposes
  * the draft into noun-phrase atomic claims and verifies each against the
  * memory graph, providing finer-grained abstention. Falls back to the
- * heuristic backend if atomic construction fails (defensive). The atomic
- * decomposer is fully deterministic (no LLM, no embedder). */
-hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
-                                  const char *contact_id, size_t contact_id_len,
-                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
-                                  hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
-                                  size_t *out_claims_flagged, char **out_modified,
-                                  size_t *out_modified_len) {
+ * heuristic backend if atomic construction fails (defensive). When
+ * `provider` is non-NULL and mode is STRICT, the atomic backend uses the
+ * provider for real LLM-backed claim verification. */
+static hu_error_t self_rag_verify_impl(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                       hu_provider_t *provider,
+                                       const char *contact_id, size_t contact_id_len,
+                                       const char *draft, size_t draft_len, int mode,
+                                       int64_t now_ms,
+                                       hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+                                       size_t *out_claims_flagged, char **out_modified,
+                                       size_t *out_modified_len) {
     if (out_outcome)
         *out_outcome = HU_W11_OUTCOME_SUPPORTED;
     if (out_claims_total)
@@ -240,9 +283,11 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
 
     /* Prefer atomic backend (noun-phrase decomposition, per-claim scoring).
      * Fall back to heuristic if construction fails. The inline backend is
-     * reserved for providers that emit control tokens mid-stream. */
+     * reserved for providers that emit control tokens mid-stream.
+     * Pass the provider through so the atomic backend can use it for
+     * real LLM-backed claim verification in STRICT mode. */
     hu_self_rag_t r = {0};
-    hu_error_t e = hu_self_rag_atomic(facade->m, NULL, &r);
+    hu_error_t e = hu_self_rag_atomic(facade->m, provider, &r);
     if (e != HU_OK)
         e = hu_self_rag_heuristic(facade->m, &r);
     if (e != HU_OK)
@@ -291,21 +336,18 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         }
     }
     if (resp.outcome == HU_SELF_RAG_ABSTAINED && contact_id && contact_id_len > 0) {
-        hu_graph_t *g = hu_memory_facade_graph_handle(facade->m);
-        if (g) {
-            hu_negative_memory_t nm;
-            memset(&nm, 0, sizeof(nm));
-            size_t draft_cap = sizeof(nm.text) - 10;
-            if (draft_len > draft_cap) draft_len = draft_cap;
-            snprintf(nm.text, sizeof(nm.text), "Refused: %.*s",
-                     (int)draft_len, draft);
-            snprintf(nm.scope, sizeof(nm.scope), "topic");
-            snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
-            nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
-            nm.created_at = now_ms;
-            int64_t nm_id = 0;
-            hu_negative_memory_add(g, contact_id, contact_id_len, &nm, &nm_id);
-        }
+        hu_negative_memory_t nm;
+        memset(&nm, 0, sizeof(nm));
+        size_t draft_cap = sizeof(nm.text) - 10;
+        if (draft_len > draft_cap) draft_len = draft_cap;
+        snprintf(nm.text, sizeof(nm.text), "Refused: %.*s",
+                 (int)draft_len, draft);
+        snprintf(nm.scope, sizeof(nm.scope), "topic");
+        snprintf(nm.reason, sizeof(nm.reason), "self-rag abstention");
+        nm.belief = hu_belief_init(0.6f, "self-rag", now_ms);
+        nm.created_at = now_ms;
+        int64_t nm_id = 0;
+        (void)hu_negative_memory_add_facade(facade->m, contact_id, contact_id_len, &nm, &nm_id);
     }
 
     if (out_claims_total)
@@ -319,6 +361,41 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
         }
         *out_claims_flagged = flagged;
     }
+
+    /* Update relation beliefs based on verification outcome. Supported
+     * claims reinforce confidence; unsupported claims weaken it. We walk
+     * relations for the contact and apply a single Bayesian update per
+     * relation so the posterior evolves with each verification pass. */
+    if (resp.claims_count > 0 && contact_id && contact_id_len > 0 && facade->m) {
+        float obs = (resp.outcome == HU_SELF_RAG_SUPPORTED) ? 0.9f : 0.3f;
+        const char *src = (resp.outcome == HU_SELF_RAG_SUPPORTED) ? "self-rag-confirm"
+                                                                    : "self-rag-disconfirm";
+        hu_memory_query_t bq;
+        memset(&bq, 0, sizeof(bq));
+        bq.kind = HU_MEM_RELATION;
+        bq.contact_id = contact_id;
+        bq.contact_id_len = contact_id_len;
+        bq.variant = HU_MEMORY_QUERY_AUTO;
+        bq.as.window.limit = 16;
+        hu_memory_record_t *brecs = NULL;
+        size_t bn = 0;
+        if (hu_memory_facade_read(facade->m, &bq, alloc, &brecs, &bn) == HU_OK && bn > 0) {
+            for (size_t bi = 0; bi < bn; bi++) {
+                const hu_graph_relation_t *br =
+                    (const hu_graph_relation_t *)brecs[bi].payload;
+                if (!br)
+                    continue;
+                float rm = 0.0f, rv = 0.0f;
+                if (hu_memory_facade_get_relation_belief(facade->m, br->id, &rm, &rv) != HU_OK)
+                    continue;
+                hu_belief_t bp = {.mean = rm, .variance = rv};
+                hu_belief_t bu = hu_belief_update(&bp, obs, src, now_ms);
+                hu_memory_facade_set_relation_belief(facade->m, br->id, bu.mean, bu.variance, now_ms);
+            }
+            hu_memory_facade_records_free(facade->m, alloc, brecs, bn);
+        }
+    }
+
     /* Surface either the rewritten draft (HEDGED/REWRITTEN) or the
      * deterministic refusal template (ABSTAINED) through `out_modified`.
      * The agent loop's replacement path treats both as "swap the response
@@ -366,6 +443,38 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
     }
     hu_self_rag_close(&r);
     return HU_OK;
+}
+
+/* Public entrypoint: no provider. Preserves the historical API. */
+hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                  const char *contact_id, size_t contact_id_len,
+                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
+                                  hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+                                  size_t *out_claims_flagged, char **out_modified,
+                                  size_t *out_modified_len) {
+    return self_rag_verify_impl(facade, alloc, NULL,
+                                contact_id, contact_id_len,
+                                draft, draft_len, mode, now_ms,
+                                out_outcome, out_claims_total,
+                                out_claims_flagged, out_modified,
+                                out_modified_len);
+}
+
+/* Public entrypoint: with provider for LLM-backed claim verification. */
+hu_error_t hu_w11_self_rag_verify_with_provider(
+    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+    hu_provider_t *provider,
+    const char *contact_id, size_t contact_id_len,
+    const char *draft, size_t draft_len, int mode, int64_t now_ms,
+    hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+    size_t *out_claims_flagged, char **out_modified,
+    size_t *out_modified_len) {
+    return self_rag_verify_impl(facade, alloc, provider,
+                                contact_id, contact_id_len,
+                                draft, draft_len, mode, now_ms,
+                                out_outcome, out_claims_total,
+                                out_claims_flagged, out_modified,
+                                out_modified_len);
 }
 
 /* ── W12 goal-conditioned planner recall bridge ───────────────────────────

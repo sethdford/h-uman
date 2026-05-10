@@ -471,6 +471,200 @@ static void test_v2_e2e_full_chain_under_poisoning(void) {
     close_facade(m, g);
 }
 
+/* ── Scenario 11: multi-hop pagerank under variant-tag pressure ─────────────
+ *
+ * The fix in P4 added an explicit `variant` discriminator to
+ * `hu_memory_query_t`. Before the tag, `hu_planner_multi_hop` constructed
+ * neighbor queries whose `entity_id` aliased `by_name.name` in the union
+ * — the v1 backend dereferenced a small integer as a pointer and crashed.
+ *
+ * This scenario builds a graph with ~50 entities and ~150 relations, then
+ * runs the multi-hop planner end-to-end. Without the variant tag, this
+ * crashes inside `v1_entity_read`; with it, the planner must return a
+ * non-empty record set and ASan must remain clean. */
+static void test_v2_e2e_multi_hop_variant_tag_under_density(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = open_facade(&g);
+
+    int64_t ids[50] = {0};
+    for (size_t i = 0; i < 50; i++) {
+        char name[32];
+        int n = snprintf(name, sizeof(name), "ent_%zu", i);
+        HU_ASSERT_EQ(
+            hu_graph_upsert_entity(g, "u1", 2, name, (size_t)n,
+                                   (i % 3 == 0) ? HU_ENTITY_PERSON
+                                                : HU_ENTITY_ORGANIZATION,
+                                   NULL, &ids[i]),
+            HU_OK);
+    }
+    /* Dense edge fan: each entity links to (i+1, i+3, i+5) wrapping. This
+     * gives multi_hop enough surface to chew on. */
+    for (size_t i = 0; i < 50; i++) {
+        size_t targets[3] = {(i + 1) % 50, (i + 3) % 50, (i + 5) % 50};
+        for (size_t t = 0; t < 3; t++) {
+            hu_graph_upsert_relation_ex(g, "u1", 2, ids[i], ids[targets[t]],
+                                         HU_REL_KNOWS, 0.7f,
+                                         1735689600000LL + (int64_t)i * 1000, 0,
+                                         0.7f, "imessage", 8, "imessage", 8);
+        }
+    }
+
+    /* Run the goal-conditioned planner; multi-hop expansion will fire
+     * for each PageRank seed and use NEIGHBORS queries through the
+     * facade. */
+    hu_planner_t be = {0};
+    HU_ASSERT_EQ(hu_planner_goal_conditioned(m, A(), &be), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u1", 2, 1735689600000LL + 60000, &wm),
+                 HU_OK);
+    HU_ASSERT(wm != NULL);
+
+    hu_retrieval_plan_t plan = {0};
+    const char *goal = "who connects ent_0 to ent_25";
+    HU_ASSERT_EQ(hu_planner_plan(&be, goal, strlen(goal), wm, &plan), HU_OK);
+    HU_ASSERT(plan.steps_count >= 1);
+
+    /* Stamp contact + execute. multi_hop runs in the executor; that's
+     * the code path that would crash if variant were absent. */
+    for (size_t s = 0; s < plan.steps_count; s++) {
+        plan.steps[s].query.contact_id = "u1";
+        plan.steps[s].query.contact_id_len = 2;
+    }
+
+    hu_self_rag_t rag = {0};
+    HU_ASSERT_EQ(hu_self_rag_heuristic(m, &rag), HU_OK);
+    hu_memory_record_t *recs = NULL;
+    size_t rn = 0;
+    HU_ASSERT_EQ(hu_planner_execute(m, &rag, &plan, A(), &recs, &rn), HU_OK);
+    /* On a dense graph the verifier should accept many relations. */
+    HU_ASSERT_GE(rn, 1);
+
+    hu_planner_records_free(A(), recs, rn);
+    hu_self_rag_close(&rag);
+    hu_world_model_free(A(), wm);
+    hu_planner_close(&be);
+    close_facade(m, g);
+}
+
+/* ── Scenario 12: LLM planner with NULL provider falls back deterministically
+ *
+ * The W12 LLM planner is wired into `agent_turn` via
+ * `hu_w12_planner_recall_with_provider`. When the provider is NULL or its
+ * `chat_with_system` slot is unset, the backend must degrade through
+ * goal-conditioned → heuristic without ever calling network or
+ * returning HU_ERR_*.  Under HU_IS_TEST the LLM backend also forces the
+ * deterministic fallback, so this scenario exercises both branches.  */
+static void test_v2_e2e_llm_planner_falls_back_without_provider(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = open_facade(&g);
+
+    int64_t alice = 0, acme = 0;
+    hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON, NULL, &alice);
+    hu_graph_upsert_entity(g, "u1", 2, "acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme);
+    hu_graph_upsert_relation_ex(g, "u1", 2, alice, acme, HU_REL_WORKS_AT, 1.0f,
+                                 1735689600000LL, 0, 1.0f, "imessage", 8,
+                                 "imessage", 8);
+
+    /* NULL provider: select_planner_backend must fall through to
+     * goal-conditioned and emit a plan that hits the v1 facade. */
+    hu_planner_t be = {0};
+    HU_ASSERT_EQ(hu_planner_llm(NULL, &be), HU_OK);
+
+    hu_world_model_t *wm = NULL;
+    HU_ASSERT_EQ(hu_world_model_build(m, A(), "u1", 2, 1735689600000LL, &wm), HU_OK);
+    hu_retrieval_plan_t plan = {0};
+    const char *goal = "who does alice work for";
+    HU_ASSERT_EQ(hu_planner_plan(&be, goal, strlen(goal), wm, &plan), HU_OK);
+    /* Deterministic fallback emits exactly 1 step with verify_after = true.
+     * It's the contract the production wiring depends on. */
+    HU_ASSERT_EQ((int)plan.steps_count, 1);
+    HU_ASSERT_EQ(plan.steps[0].kind, HU_MEM_RELATION);
+    HU_ASSERT(plan.steps[0].verify_after);
+
+    hu_world_model_free(A(), wm);
+    hu_planner_close(&be);
+    close_facade(m, g);
+}
+
+/* ── Scenario 13: facade BY_NAME with malicious low-pointer payload  ────────
+ *
+ * Adversarial: callers that mis-set the variant or leave AUTO with a
+ * crafted small-integer `entity_id` should NOT crash the backend. The
+ * pointer-range guard in `v1_entity_read` (`(uintptr_t)nptr > 0x10000u`)
+ * is what stands between us and a SEGV. We test it explicitly with the
+ * three combinations: explicit BY_NAME with NULL, AUTO with low-pointer
+ * pseudo-entity-id, AUTO with valid name. */
+static void test_v2_e2e_facade_query_aliasing_is_safe(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = open_facade(&g);
+
+    /* Set up: one real entity. */
+    int64_t real_id = 0;
+    HU_ASSERT_EQ(hu_graph_upsert_entity(g, "u1", 2, "alice", 5, HU_ENTITY_PERSON,
+                                         NULL, &real_id),
+                 HU_OK);
+    HU_ASSERT(real_id > 0);
+
+    /* Case A — explicit BY_NAME with a NULL name. Must reject cleanly. */
+    {
+        hu_memory_query_t q;
+        memset(&q, 0, sizeof(q));
+        q.kind = HU_MEM_ENTITY;
+        q.variant = HU_MEMORY_QUERY_BY_NAME;
+        q.contact_id = "u1";
+        q.contact_id_len = 2;
+        q.as.by_name.name = NULL;
+        q.as.by_name.name_len = 0;
+        hu_memory_record_t *recs = NULL;
+        size_t n = 0;
+        hu_error_t err = hu_memory_facade_read(m, &q, A(), &recs, &n);
+        HU_ASSERT(err != HU_OK || n == 0);
+        if (recs) hu_memory_facade_records_free(m, A(), recs, n);
+    }
+
+    /* Case B — AUTO with low-address pseudo-pointer (mimics what a
+     * pre-P4 caller produced). The backend must NOT dereference it. */
+    {
+        hu_memory_query_t q;
+        memset(&q, 0, sizeof(q));
+        q.kind = HU_MEM_ENTITY;
+        q.variant = HU_MEMORY_QUERY_AUTO;
+        q.contact_id = "u1";
+        q.contact_id_len = 2;
+        q.as.neighbors.entity_id = real_id; /* small int → low "pointer" */
+        q.as.neighbors.hops = 1;
+        q.as.neighbors.limit = 8;
+        hu_memory_record_t *recs = NULL;
+        size_t n = 0;
+        hu_error_t err = hu_memory_facade_read(m, &q, A(), &recs, &n);
+        /* Either rejected or routed to NEIGHBORS by the heuristic — either
+         * way, NOT a crash, NOT a wild dereference. */
+        HU_ASSERT(err == HU_OK || err == HU_ERR_INVALID_ARGUMENT);
+        if (recs) hu_memory_facade_records_free(m, A(), recs, n);
+    }
+
+    /* Case C — explicit NEIGHBORS with the real id. Returns the entity. */
+    {
+        hu_memory_query_t q;
+        memset(&q, 0, sizeof(q));
+        q.kind = HU_MEM_ENTITY;
+        q.variant = HU_MEMORY_QUERY_NEIGHBORS;
+        q.contact_id = "u1";
+        q.contact_id_len = 2;
+        q.as.neighbors.entity_id = real_id;
+        q.as.neighbors.hops = 1;
+        q.as.neighbors.limit = 8;
+        hu_memory_record_t *recs = NULL;
+        size_t n = 0;
+        hu_error_t err = hu_memory_facade_read(m, &q, A(), &recs, &n);
+        HU_ASSERT_EQ(err, HU_OK);
+        if (recs) hu_memory_facade_records_free(m, A(), recs, n);
+    }
+
+    close_facade(m, g);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_v2_e2e_adversarial_tests(void);
@@ -487,5 +681,8 @@ void run_v2_e2e_adversarial_tests(void) {
     HU_RUN_TEST(test_v2_e2e_persona_deltas_to_learner_signals);
     HU_RUN_TEST(test_v2_e2e_planner_resists_query_injection);
     HU_RUN_TEST(test_v2_e2e_full_chain_under_poisoning);
+    HU_RUN_TEST(test_v2_e2e_multi_hop_variant_tag_under_density);
+    HU_RUN_TEST(test_v2_e2e_llm_planner_falls_back_without_provider);
+    HU_RUN_TEST(test_v2_e2e_facade_query_aliasing_is_safe);
 #endif
 }

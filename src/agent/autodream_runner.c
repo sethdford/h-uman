@@ -81,7 +81,7 @@ hu_error_t hu_autodream_runner(hu_memory_facade_t *m, const hu_job_spec_t *spec,
     hu_autodream_report_t report;
     memset(&report, 0, sizeof(report));
     hu_allocator_t alloc = hu_system_allocator();
-    return hu_autodream_run(&alloc, g, &cfg, &report);
+    return hu_autodream_run_on_facade(&alloc, m, &cfg, &report);
 }
 
 #else /* !HU_ENABLE_SQLITE */

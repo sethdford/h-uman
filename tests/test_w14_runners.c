@@ -248,8 +248,8 @@ static void test_w14_belief_reverify_decays_aging_relations(void) {
     HU_ASSERT_EQ(hu_graph_list_relations(g, A_(), "u1", 2, 10, &after, &na), HU_OK);
     HU_ASSERT_EQ((int)na, 1);
     HU_ASSERT_EQ(after[0].id, rid);
-    HU_ASSERT(after[0].confidence < 0.78f);
-    HU_ASSERT(after[0].confidence > 0.74f);
+    /* Runner applies mean *= 0.95f; allow float tail at the 0.78 boundary. */
+    HU_ASSERT_FLOAT_EQ(after[0].confidence, c0 * 0.95f, 0.02f);
     hu_graph_relations_free(A_(), after, na);
 
     hu_memory_facade_close(m, A_());

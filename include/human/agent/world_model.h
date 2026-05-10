@@ -126,10 +126,23 @@ hu_error_t hu_negative_memory_add(hu_graph_t *g, const char *contact_id,
                                    size_t cid_len, const hu_negative_memory_t *nm,
                                    int64_t *out_id);
 
+/* Same insert as `hu_negative_memory_add` but scoped through the W7 facade
+ * (graph handle only inside). Prefer in bridge / agent paths that already
+ * hold `hu_memory_facade_t *`. */
+hu_error_t hu_negative_memory_add_facade(hu_memory_facade_t *m, const char *contact_id,
+                                         size_t cid_len, const hu_negative_memory_t *nm,
+                                         int64_t *out_id);
+
 hu_error_t hu_negative_memory_list(hu_graph_t *g, hu_allocator_t *alloc,
                                     const char *contact_id, size_t cid_len,
                                     size_t limit, hu_negative_memory_t **out,
                                     size_t *out_count);
+
+/* Same rows as `hu_negative_memory_list` but uses `hu_memory_facade_sqlite_db`
+ * — prefer from `hu_world_model_build` and other W7-first paths. */
+hu_error_t hu_negative_memory_list_facade(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                           const char *contact_id, size_t cid_len, size_t limit,
+                                           hu_negative_memory_t **out, size_t *out_count);
 
 void hu_negative_memory_free(hu_allocator_t *alloc, hu_negative_memory_t *nm,
                               size_t count);

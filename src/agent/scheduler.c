@@ -3,6 +3,7 @@
 
 #include "human/agent/autodream.h"
 #include "human/core/log.h"
+#include "human/memory/memory.h"
 #include "human/persona/persona_deltas.h"
 
 #ifdef HU_ENABLE_SQLITE
@@ -60,8 +61,8 @@ static hu_error_t default_noop_runner(hu_memory_facade_t *m, const hu_job_spec_t
 }
 
 #ifdef HU_ENABLE_SQLITE
-/* Shared autodream wrapper.  Runs hu_autodream_run with selective phase
- * enables so each AutoDream kind owns its slice of consolidation work
+/* Shared autodream wrapper.  Runs `hu_autodream_run_on_facade` with selective
+ * phase enables so each AutoDream kind owns its slice of consolidation work
  * without duplicating logic.  The W14 spec is explicit: WRAP existing
  * autodream.c functions, do not reimplement.
  *
@@ -73,8 +74,9 @@ static hu_error_t default_noop_runner(hu_memory_facade_t *m, const hu_job_spec_t
 static hu_error_t run_autodream_phase(hu_memory_facade_t *m, int64_t budget_ms,
                                       bool quarantine, bool communities,
                                       bool reweight, bool derived) {
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g)
+    if (!m)
+        return HU_OK;
+    if (!hu_memory_facade_graph_handle(m))
         return HU_OK;
     hu_autodream_config_t cfg = hu_autodream_default_config();
     cfg.enable_quarantine_review = quarantine;
@@ -85,7 +87,7 @@ static hu_error_t run_autodream_phase(hu_memory_facade_t *m, int64_t budget_ms,
         cfg.max_runtime_ms = budget_ms;
     hu_autodream_report_t rep = {0};
     hu_allocator_t sys = hu_system_allocator();
-    return hu_autodream_run(&sys, g, &cfg, &rep);
+    return hu_autodream_run_on_facade(&sys, m, &cfg, &rep);
 }
 
 static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,
@@ -116,8 +118,7 @@ static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
                                                  const hu_job_spec_t *spec,
                                                  int64_t budget_ms, void *user_data) {
     (void)user_data;
-    hu_graph_t *g = hu_memory_facade_graph_handle(m);
-    if (!g)
+    if (!m)
         return HU_OK;
     hu_persona_evolver_config_t cfg = hu_persona_evolver_default_config();
     /* persona evolver has no wall-clock budget field; it bounds work via
@@ -127,7 +128,7 @@ static hu_error_t default_persona_evolver_runner(hu_memory_facade_t *m,
     const char *cid = (spec && spec->contact_id) ? spec->contact_id : "";
     size_t cid_len = (spec && spec->contact_id) ? spec->contact_id_len : 0;
     hu_persona_evolver_report_t rep = {0};
-    return hu_persona_evolver_run(g, cid, cid_len, &cfg, &rep);
+    return hu_persona_evolver_run_facade(m, cid, cid_len, &cfg, &rep);
 }
 #else
 static hu_error_t default_autodream_quarantine_runner(hu_memory_facade_t *m,

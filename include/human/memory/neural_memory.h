@@ -7,8 +7,10 @@
  * backed by SQLite tables.  All functions accept a hu_memory_facade_t facade and derive
  * the SQLite handle internally — callers never touch SQLite directly.
  *
- * Eviction (W14) and provider integration (chat_with_kv_cache) are out of scope
- * for this commit; hooks are noted in comments.
+ * Eviction (W14) and **provider short-circuit** (skip LLM when `blob` holds a
+ * replayable assistant payload) are not implemented yet. `agent_turn.c` only
+ * probes prior rows and stores `prompt_token_count` metadata after a successful
+ * chat — see comments there.
  *
  * Gate: functions compile unconditionally; schema creation and SQL execution are
  * guarded by HU_ENABLE_SQLITE inside neural_memory.c.

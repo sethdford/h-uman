@@ -289,6 +289,7 @@ struct hu_agent {
      * hu_agent_bind_sqlite_graph (daemon, CLI, spawn). Legacy chat memory remains
      * `agent->memory` (hu_memory_t). */
     struct hu_w7_facade *w7_facade;
+    struct hu_audit_log *w15_audit_log; /* W15 audit log for facade write/erase ops */
     uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
 
     /* W11 self-RAG telemetry (FIX 12b). Sibling to verifier_* counters --

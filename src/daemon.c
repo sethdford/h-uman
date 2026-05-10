@@ -2814,8 +2814,15 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                     ad_cfg.now_ms = (int64_t)t * 1000LL;
                                     hu_autodream_report_t ad_report;
                                     memset(&ad_report, 0, sizeof(ad_report));
-                                    (void)hu_autodream_run(alloc, graph, &ad_cfg,
-                                                           &ad_report);
+                                    hu_memory_facade_t *ad_m =
+                                        (agent && agent->w7_facade)
+                                            ? hu_w7_facade_memory_handle(agent->w7_facade)
+                                            : NULL;
+                                    if (ad_m)
+                                        (void)hu_autodream_run_on_facade(alloc, ad_m, &ad_cfg,
+                                                                         &ad_report);
+                                    else
+                                        (void)hu_autodream_run(alloc, graph, &ad_cfg, &ad_report);
                                 }
                             } else {
                                 hu_autodream_config_t ad_cfg =
@@ -2823,8 +2830,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 ad_cfg.now_ms = (int64_t)t * 1000LL;
                                 hu_autodream_report_t ad_report;
                                 memset(&ad_report, 0, sizeof(ad_report));
-                                hu_error_t ad_err =
-                                    hu_autodream_run(alloc, graph, &ad_cfg, &ad_report);
+                                hu_memory_facade_t *ad_m =
+                                    (agent && agent->w7_facade)
+                                        ? hu_w7_facade_memory_handle(agent->w7_facade)
+                                        : NULL;
+                                hu_error_t ad_err = ad_m ? hu_autodream_run_on_facade(
+                                                             alloc, ad_m, &ad_cfg, &ad_report)
+                                                         : hu_autodream_run(alloc, graph, &ad_cfg,
+                                                                            &ad_report);
                                 if (ad_err == HU_OK) {
                                     hu_log_info(
                                         "human", agent ? agent->observer : NULL,
@@ -2877,8 +2890,14 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                                 pe_cfg.now_ms = (int64_t)t * 1000LL;
                                 hu_persona_evolver_report_t pe_report;
                                 memset(&pe_report, 0, sizeof(pe_report));
+                                hu_memory_facade_t *pe_m =
+                                    (agent && agent->w7_facade)
+                                        ? hu_w7_facade_memory_handle(agent->w7_facade)
+                                        : NULL;
                                 hu_error_t pe_err =
-                                    hu_persona_evolver_run(graph, "", 0, &pe_cfg, &pe_report);
+                                    pe_m ? hu_persona_evolver_run_facade(pe_m, "", 0, &pe_cfg,
+                                                                         &pe_report)
+                                         : hu_persona_evolver_run(graph, "", 0, &pe_cfg, &pe_report);
                                 if (pe_err == HU_OK) {
                                     hu_log_info("human", agent ? agent->observer : NULL,
                                                 "persona evolver (sync): proposed=%zu applied=%zu "

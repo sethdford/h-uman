@@ -4,6 +4,7 @@
 #include "human/agent/autodream.h"
 #include "human/core/allocator.h"
 #include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include "human/memory/write_trust.h"
 #include "test_framework.h"
 
@@ -119,6 +120,37 @@ static void test_w2_autodream_releases_high_trust_when_no_contradiction(void) {
     HU_ASSERT_STR_CONTAINS(rels[0].provenance, "released:autodream:");
     hu_graph_relations_free(A(), rels, n);
 
+    hu_graph_close(g, A());
+}
+
+/* --- Quarantine release through W7 facade (same observable graph as graph-only run) --- */
+static void test_w2_autodream_quarantine_release_uses_facade_write(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    HU_ASSERT_EQ(hu_graph_open(A(), NULL, 0, &g), HU_OK);
+    HU_ASSERT_EQ(hu_memory_facade_open(A(), g, &m), HU_OK);
+
+    int64_t alice = 0, acme = 0;
+    hu_graph_upsert_entity(g, "u1", 2, "Alice", 5, HU_ENTITY_PERSON, NULL, &alice);
+    hu_graph_upsert_entity(g, "u1", 2, "Acme", 4, HU_ENTITY_ORGANIZATION, NULL, &acme);
+    quarantine(g, alice, acme, 0.65f, 1735689600000LL);
+
+    hu_autodream_config_t cfg = hu_autodream_default_config();
+    cfg.now_ms = 1735689600000LL + 1000;
+    cfg.enable_community_summaries = false;
+    cfg.enable_edge_reweight = false;
+    hu_autodream_report_t r = {0};
+    HU_ASSERT_EQ(hu_autodream_run_on_facade(A(), m, &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(r.quarantine_released, 1);
+
+    hu_graph_relation_t *rels = NULL;
+    size_t n = 0;
+    hu_graph_list_relations(g, A(), "u1", 2, 32, &rels, &n);
+    HU_ASSERT_EQ(n, 1);
+    HU_ASSERT_STR_CONTAINS(rels[0].provenance, "released:autodream:");
+    hu_graph_relations_free(A(), rels, n);
+
+    hu_memory_facade_close(m, A());
     hu_graph_close(g, A());
 }
 
@@ -254,6 +286,7 @@ void run_w2_autodream_tests(void) {
     HU_RUN_TEST(test_w2_autodream_drops_low_trust_quarantine_entries);
     HU_RUN_TEST(test_w2_autodream_drops_aged_quarantine_entries);
     HU_RUN_TEST(test_w2_autodream_releases_high_trust_when_no_contradiction);
+    HU_RUN_TEST(test_w2_autodream_quarantine_release_uses_facade_write);
     HU_RUN_TEST(test_w2_autodream_does_not_release_when_contradicted);
     HU_RUN_TEST(test_w2_autodream_writes_community_summary);
     HU_RUN_TEST(test_w2_autodream_decays_stale_edges);

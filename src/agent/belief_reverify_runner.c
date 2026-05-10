@@ -108,13 +108,19 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
         }
 
         (void)verifier;
+
+        /* Aging without re-confirmation: deterministic multiplicative decay.
+         * 5% mean drop per pass; a small variance bump signals weaker
+         * confidence going forward. Kept simple so callers get predictable
+         * decay over many ticks; semantic-conflict checks below bump
+         * variance further when a provider flags a contradiction. */
         float new_mean = mean * 0.95f;
         float new_variance = variance + 0.0025f;
 
         /* When a provider is available, check for semantic conflicts
          * against other relations in the batch sharing an entity.
-         * Conflicting relations get a larger variance boost (3x the
-         * base increment) to signal contested knowledge faster. */
+         * Conflicting relations get a larger variance boost so the
+         * scheduler picks them up sooner on the next pass. */
         if (r->context && r->context_len > 0) {
             for (size_t j = i + 1; j < n; j++) {
                 const hu_graph_relation_t *o =
@@ -134,6 +140,8 @@ hu_error_t hu_belief_reverify_runner(hu_memory_facade_t *m, const hu_job_spec_t 
                 }
             }
         }
+
+        if (new_variance > 0.25f) new_variance = 0.25f;
 
         hu_error_t we = hu_memory_facade_set_relation_belief(
             m, r->id, new_mean, new_variance, now_ms);

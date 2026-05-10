@@ -236,6 +236,31 @@ static void test_w9_negative_memory_round_trip(void) {
     close_facade_(g, m);
 }
 
+static void test_w9_negative_memory_add_facade_inserts_row(void) {
+    hu_graph_t *g = NULL;
+    hu_memory_facade_t *m = NULL;
+    open_facade_(&g, &m);
+
+    hu_negative_memory_t nm;
+    memset(&nm, 0, sizeof(nm));
+    strcpy(nm.text, "via facade insert");
+    strcpy(nm.scope, "contact");
+    nm.belief = hu_belief_init(0.7f, "test", 1735710000000LL);
+    nm.created_at = 1735710000000LL;
+    int64_t id = 0;
+    HU_ASSERT_EQ(hu_negative_memory_add_facade(m, "u-vf", 4, &nm, &id), HU_OK);
+    HU_ASSERT_GT(id, 0);
+
+    hu_negative_memory_t *out = NULL;
+    size_t n = 0;
+    HU_ASSERT_EQ(hu_negative_memory_list_facade(m, A(), "u-vf", 4, 32, &out, &n), HU_OK);
+    HU_ASSERT_EQ(n, 1u);
+    HU_ASSERT_EQ(strcmp(out[0].text, "via facade insert"), 0);
+
+    hu_negative_memory_free(A(), out, n);
+    close_facade_(g, m);
+}
+
 static void test_w9_negative_memory_appears_in_world_model(void) {
     hu_graph_t *g = NULL;
     hu_memory_facade_t *m = NULL;
@@ -450,6 +475,7 @@ void run_w9_world_model_tests(void) {
     HU_RUN_TEST(test_w9_upsert_auto_invalidates_cache);
     HU_RUN_TEST(test_w9_load_cache_expires_after_ttl);
     HU_RUN_TEST(test_w9_negative_memory_round_trip);
+    HU_RUN_TEST(test_w9_negative_memory_add_facade_inserts_row);
     HU_RUN_TEST(test_w9_negative_memory_appears_in_world_model);
     HU_RUN_TEST(test_w9_goals_appear_in_world_model);
     HU_RUN_TEST(test_w9_emotion_populated_from_distress_residue);

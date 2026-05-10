@@ -3,7 +3,7 @@
 
 #include "human/core/allocator.h"
 #include "human/core/error.h"
-#include "human/memory/graph.h"
+#include "human/memory/memory.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -80,9 +80,21 @@ hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
                                     const char *source, int64_t proposed_at_ms,
                                     int64_t *out_delta_id);
 
+/* Same insert as `hu_persona_delta_propose` using `hu_memory_facade_sqlite_db`. */
+hu_error_t hu_persona_delta_propose_facade(hu_memory_facade_t *m, const char *contact_id,
+                                           size_t contact_id_len, hu_persona_delta_kind_t kind,
+                                           const char *key, const char *value, float confidence,
+                                           const char *source, int64_t proposed_at_ms,
+                                           int64_t *out_delta_id);
+
 hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
                                  size_t contact_id_len, hu_persona_delta_status_t status_filter,
                                  size_t limit, hu_persona_delta_t **out, size_t *out_count);
+
+hu_error_t hu_persona_delta_list_facade(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                         const char *contact_id, size_t contact_id_len,
+                                         hu_persona_delta_status_t status_filter, size_t limit,
+                                         hu_persona_delta_t **out, size_t *out_count);
 
 void hu_persona_delta_free(hu_allocator_t *alloc, hu_persona_delta_t *deltas, size_t count);
 
@@ -90,5 +102,11 @@ hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
                                   size_t contact_id_len,
                                   const hu_persona_evolver_config_t *cfg,
                                   hu_persona_evolver_report_t *out_report);
+
+/* Same logic as `hu_persona_evolver_run` via `hu_memory_facade_sqlite_db`. */
+hu_error_t hu_persona_evolver_run_facade(hu_memory_facade_t *m, const char *contact_id,
+                                         size_t contact_id_len,
+                                         const hu_persona_evolver_config_t *cfg,
+                                         hu_persona_evolver_report_t *out_report);
 
 #endif /* HU_PERSONA_DELTAS_H */

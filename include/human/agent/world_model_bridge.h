@@ -20,6 +20,7 @@
 #include "human/core/error.h"
 #include "human/memory/graph.h"
 #include "human/memory/memory.h"
+#include "human/provider.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,6 +31,14 @@ extern "C" {
 /* Opaque W7 facade handle. Define lives in world_model_bridge.c. */
 struct hu_w7_facade;
 typedef struct hu_w7_facade hu_w7_facade_t;
+
+/* Forward-declare provider type at file scope so all `_with_provider`
+ * entrypoints below agree on `struct hu_provider *` regardless of whether
+ * the caller has already included `human/provider.h`. Without this, each
+ * function prototype implicitly declares a scope-local `struct hu_provider`
+ * and source-file definitions that pull in the full type get "conflicting
+ * types" errors. */
+struct hu_provider;
 
 /* Open a W7 facade backed by `graph` (the v1 backends). Caller owns the
  * returned pointer and must close with hu_w7_facade_close. */
@@ -90,6 +99,22 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                   hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
                                   size_t *out_claims_flagged, char **out_modified,
                                   size_t *out_modified_len);
+
+/* W11 self-RAG verification with provider-backed claim checking.
+ *
+ * Same as hu_w11_self_rag_verify but passes `provider` through to the
+ * atomic backend so it can make real LLM calls to verify individual
+ * claims against retrieved evidence. The provider is only used in STRICT
+ * mode and only in non-test builds. When `provider` is NULL this
+ * behaves identically to the providerless variant. */
+hu_error_t hu_w11_self_rag_verify_with_provider(
+    hu_w7_facade_t *facade, hu_allocator_t *alloc,
+    struct hu_provider *provider,
+    const char *contact_id, size_t contact_id_len,
+    const char *draft, size_t draft_len, int mode, int64_t now_ms,
+    hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+    size_t *out_claims_flagged, char **out_modified,
+    size_t *out_modified_len);
 
 /* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
  *
@@ -177,7 +202,6 @@ hu_error_t hu_w12_planner_recall(hu_w7_facade_t *facade, hu_allocator_t *alloc,
  *
  * Returns HU_OK on success (including the "no records" case where
  * `*out_text == NULL`, `*out_len == 0`). */
-struct hu_provider;
 hu_error_t hu_w12_planner_recall_with_provider(
     hu_w7_facade_t *facade, hu_allocator_t *alloc,
     struct hu_provider *provider, const char *model, size_t model_len,
@@ -239,6 +263,22 @@ hu_error_t hu_w14_scheduler_status_save(hu_w14_scheduler_t *s);
 /* Resolve the canonical status file path. Returns false on overflow or
  * when HOME is unset. */
 bool hu_w14_scheduler_status_path(char *out_path, size_t cap);
+
+/* W15 — audit log bridge.
+ *
+ * Opens a SQLite-backed audit log, registers the facade audit hook so every
+ * successful write/erase is logged, and returns the log handle through
+ * `*out`. The handle must be freed with `hu_w7_audit_log_close` AFTER
+ * `hu_w7_facade_close` (the facade does not fire the hook after close, so
+ * ordering is safe). Pass NULL for `contact_id` for unscoped logging.
+ *
+ * These wrappers keep `human/security/audit_log.h` out of TUs that include
+ * `human/agent.h` (which pulls in the legacy `human/memory.h`). */
+struct hu_audit_log;
+hu_error_t hu_w7_audit_log_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                const char *db_path, const char *contact_id,
+                                struct hu_audit_log **out);
+void hu_w7_audit_log_close(struct hu_audit_log *log, hu_allocator_t *alloc);
 
 #ifdef __cplusplus
 }

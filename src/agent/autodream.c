@@ -4,6 +4,7 @@
 #include "human/memory/conflict_resolver.h"
 
 #ifdef HU_ENABLE_SQLITE
+#include "human/memory/memory.h"
 #include "human/memory/sql_transaction.h"
 #include <sqlite3.h>
 #endif
@@ -78,6 +79,18 @@ static hu_error_t ensure_autodream_schema(struct sqlite3 *db) {
     return HU_OK;
 }
 
+/* Prefer the facade's shared SQLite handle when AutoDream runs on a W7
+ * facade; otherwise use the graph connection. Centralizes lookup so phases
+ * take an explicit `db` and do not each call `hu_graph_sqlite_connection`. */
+static struct sqlite3 *ad_sqlite(hu_graph_t *g, hu_memory_facade_t *m) {
+    if (m != NULL) {
+        struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
+        if (db != NULL)
+            return db;
+    }
+    return hu_graph_sqlite_connection(g);
+}
+
 /* Phase 1: Quarantine review.
  * Heuristic policy (deterministic, no LLM):
  *   - DROP if quarantined longer than cfg.quarantine_max_age_ms.
@@ -86,9 +99,10 @@ static hu_error_t ensure_autodream_schema(struct sqlite3 *db) {
  *     different target and high confidence).
  *   - LEAVE otherwise (re-evaluated next cycle).
  */
-static hu_error_t phase_quarantine_review(hu_graph_t *g, const hu_autodream_config_t *cfg,
+static hu_error_t phase_quarantine_review(struct sqlite3 *db, hu_graph_t *g,
+                                          hu_memory_facade_t *facade,
+                                          const hu_autodream_config_t *cfg,
                                           hu_autodream_report_t *r, int64_t deadline_ms) {
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
@@ -175,18 +189,40 @@ static hu_error_t phase_quarantine_review(hu_graph_t *g, const hu_autodream_conf
                              (int)(prov_len < 480 ? prov_len : 480), prov ? prov : "");
             /* P2G — autodream consolidation is heuristic, so seed the
              * Bayesian variance with the prior for "autodream" (0.10).
-             * The reverify runner will adjust this further over time. The
-             * write itself still goes through the L0 graph helper so we
-             * preserve quarantine release semantics atomically with the
-             * delete below; the W7 facade path is reserved for fresh
-             * ingestion (see daemon.c). */
+             * The reverify runner will adjust this further over time.
+             * When a W7 facade is supplied, release goes through
+             * `hu_memory_facade_write` (HU_MEM_RELATION); otherwise the graph
+             * helper (same underlying v1 backend). */
             float initial_variance =
                 hu_belief_initial_variance_for_provenance(prefixed,
                                                           n > 0 ? (size_t)n : 0);
-            (void)hu_graph_upsert_relation_with_belief(
-                g, cid_t, cid_len, source_id, target_id, rtype, weight,
-                event_start, event_end, confidence, initial_variance, ctx,
-                ctx_len, prefixed, n > 0 ? (size_t)n : 0, NULL);
+            if (facade != NULL) {
+                hu_graph_relation_t rel = {0};
+                rel.source_id = source_id;
+                rel.target_id = target_id;
+                rel.type = rtype;
+                rel.weight = weight;
+                rel.context = (char *)ctx;
+                rel.context_len = ctx_len;
+                hu_memory_record_t rec = {0};
+                rec.kind = HU_MEM_RELATION;
+                rec.contact_id = cid_t;
+                rec.contact_id_len = cid_len;
+                rec.event_start = event_start;
+                rec.event_end = event_end;
+                rec.confidence = confidence;
+                rec.confidence_variance = initial_variance;
+                rec.provenance = prefixed;
+                rec.provenance_len = n > 0 ? (size_t)n : 0;
+                rec.payload = &rel;
+                rec.payload_len = sizeof(rel);
+                (void)hu_memory_facade_write(facade, &rec);
+            } else {
+                (void)hu_graph_upsert_relation_with_belief(
+                    g, cid_t, cid_len, source_id, target_id, rtype, weight,
+                    event_start, event_end, confidence, initial_variance, ctx,
+                    ctx_len, prefixed, n > 0 ? (size_t)n : 0, NULL);
+            }
             sqlite3_stmt *del = NULL;
             if (sqlite3_prepare_v2(db, "DELETE FROM quarantine_relations WHERE id = ?", -1, &del,
                                    NULL) == SQLITE_OK) {
@@ -280,13 +316,10 @@ static hu_error_t generate_heuristic_summary(struct sqlite3 *db, const char *con
     return HU_OK;
 }
 
-hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
-                                            const char *contact_id, size_t contact_id_len,
-                                            int64_t community_id, int64_t now_ms) {
+static hu_error_t summarize_community_impl(hu_allocator_t *alloc, struct sqlite3 *db,
+                                           const char *contact_id, size_t contact_id_len,
+                                           int64_t community_id, int64_t now_ms) {
     (void)alloc;
-    if (!graph)
-        return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_autodream_schema(db) != HU_OK)
@@ -321,6 +354,17 @@ hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *g
     return srch == SQLITE_DONE ? HU_OK : HU_ERR_IO;
 }
 
+hu_error_t hu_autodream_summarize_community(hu_allocator_t *alloc, hu_graph_t *graph,
+                                            const char *contact_id, size_t contact_id_len,
+                                            int64_t community_id, int64_t now_ms) {
+    if (!graph)
+        return HU_ERR_INVALID_ARGUMENT;
+    struct sqlite3 *db = ad_sqlite(graph, NULL);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return summarize_community_impl(alloc, db, contact_id, contact_id_len, community_id, now_ms);
+}
+
 hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t *graph,
                                                const char *contact_id, size_t contact_id_len,
                                                int64_t community_id, char **out_summary,
@@ -329,7 +373,7 @@ hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t
         return HU_ERR_INVALID_ARGUMENT;
     *out_summary = NULL;
     *out_summary_len = 0;
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    struct sqlite3 *db = ad_sqlite(graph, NULL);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
 
@@ -365,9 +409,8 @@ hu_error_t hu_autodream_read_community_summary(hu_allocator_t *alloc, hu_graph_t
 
 /* Phase 3: Edge reweight — apply a simple decay to edges with no recall in N
  * days. Conservative; we only nudge weight, never delete. */
-static hu_error_t phase_edge_reweight(hu_graph_t *g, const hu_autodream_config_t *cfg,
+static hu_error_t phase_edge_reweight(struct sqlite3 *db, const hu_autodream_config_t *cfg,
                                       hu_autodream_report_t *r, int64_t deadline_ms) {
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     int64_t now = cfg->now_ms > 0 ? cfg->now_ms : wall_now_ms();
@@ -411,10 +454,9 @@ static hu_error_t phase_edge_reweight(hu_graph_t *g, const hu_autodream_config_t
 
 /* Phase 2: Community summaries — for every distinct community_id in the live
  * entities table for each contact, generate-or-refresh the summary. */
-static hu_error_t phase_community_summaries(hu_allocator_t *alloc, hu_graph_t *g,
+static hu_error_t phase_community_summaries(hu_allocator_t *alloc, struct sqlite3 *db,
                                             const hu_autodream_config_t *cfg,
                                             hu_autodream_report_t *r, int64_t deadline_ms) {
-    struct sqlite3 *db = hu_graph_sqlite_connection(g);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_autodream_schema(db) != HU_OK)
@@ -440,19 +482,20 @@ static hu_error_t phase_community_summaries(hu_allocator_t *alloc, hu_graph_t *g
             r->communities_summarized++;
             continue;
         }
-        if (hu_autodream_summarize_community(alloc, g, cid, cid_len, community_id, now) == HU_OK)
+        if (summarize_community_impl(alloc, db, cid, cid_len, community_id, now) == HU_OK)
             r->communities_summarized++;
     }
     sqlite3_finalize(sel);
     return HU_OK;
 }
 
-hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
-                            const hu_autodream_config_t *cfg,
-                            hu_autodream_report_t *out_report) {
+static hu_error_t autodream_run_impl(hu_allocator_t *alloc, hu_graph_t *graph,
+                                     hu_memory_facade_t *facade_opt,
+                                     const hu_autodream_config_t *cfg,
+                                     hu_autodream_report_t *out_report) {
     if (!alloc || !graph || !cfg || !out_report)
         return HU_ERR_INVALID_ARGUMENT;
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    struct sqlite3 *db = ad_sqlite(graph, facade_opt);
     if (!db)
         return HU_ERR_INVALID_ARGUMENT;
     if (ensure_autodream_schema(db) != HU_OK)
@@ -464,11 +507,11 @@ hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
     int64_t deadline = (cfg->max_runtime_ms > 0) ? wall_now_ms() + cfg->max_runtime_ms : INT64_MAX;
 
     if (cfg->enable_quarantine_review)
-        phase_quarantine_review(graph, cfg, out_report, deadline);
+        phase_quarantine_review(db, graph, facade_opt, cfg, out_report, deadline);
     if (!out_report->budget_exceeded && cfg->enable_community_summaries)
-        phase_community_summaries(alloc, graph, cfg, out_report, deadline);
+        phase_community_summaries(alloc, db, cfg, out_report, deadline);
     if (!out_report->budget_exceeded && cfg->enable_edge_reweight)
-        phase_edge_reweight(graph, cfg, out_report, deadline);
+        phase_edge_reweight(db, cfg, out_report, deadline);
     /* Phase 4 (derived facts) uses cross-graph traversal helpers landing in
      * W3; leave the counter at 0 here. */
 
@@ -496,6 +539,23 @@ hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
     return HU_OK;
 }
 
+hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
+                            const hu_autodream_config_t *cfg,
+                            hu_autodream_report_t *out_report) {
+    return autodream_run_impl(alloc, graph, NULL, cfg, out_report);
+}
+
+hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, hu_memory_facade_t *m,
+                                      const hu_autodream_config_t *cfg,
+                                      hu_autodream_report_t *out_report) {
+    if (!m)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_graph_t *g = hu_memory_facade_graph_handle(m);
+    if (!g)
+        return HU_ERR_INVALID_ARGUMENT;
+    return autodream_run_impl(alloc, g, m, cfg, out_report);
+}
+
 #else /* !HU_ENABLE_SQLITE */
 
 hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
@@ -503,6 +563,16 @@ hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
                             hu_autodream_report_t *out_report) {
     (void)alloc;
     (void)graph;
+    (void)cfg;
+    (void)out_report;
+    return HU_ERR_NOT_SUPPORTED;
+}
+
+hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, hu_memory_facade_t *m,
+                                      const hu_autodream_config_t *cfg,
+                                      hu_autodream_report_t *out_report) {
+    (void)alloc;
+    (void)m;
     (void)cfg;
     (void)out_report;
     return HU_ERR_NOT_SUPPORTED;

@@ -1,6 +1,7 @@
 #include "human/persona/persona_deltas.h"
 
 #ifdef HU_ENABLE_SQLITE
+#include "human/memory/memory.h"
 #include <sqlite3.h>
 #endif
 
@@ -60,19 +61,12 @@ static hu_error_t ensure_schema(struct sqlite3 *db) {
     return HU_OK;
 }
 
-#endif
-
-hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
-                                    size_t contact_id_len, hu_persona_delta_kind_t kind,
-                                    const char *key, const char *value, float confidence,
-                                    const char *source, int64_t proposed_at_ms,
-                                    int64_t *out_delta_id) {
-    if (!graph || !contact_id || contact_id_len == 0 || !value || kind >= HU_PERSONA_DELTA_MAX)
-        return HU_ERR_INVALID_ARGUMENT;
-
-#ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
-    if (!db)
+static hu_error_t persona_delta_propose_db(struct sqlite3 *db, const char *contact_id,
+                                           size_t contact_id_len, hu_persona_delta_kind_t kind,
+                                           const char *key, const char *value, float confidence,
+                                           const char *source, int64_t proposed_at_ms,
+                                           int64_t *out_delta_id) {
+    if (!db || !contact_id || contact_id_len == 0 || !value || kind >= HU_PERSONA_DELTA_MAX)
         return HU_ERR_INVALID_ARGUMENT;
     hu_error_t e = ensure_schema(db);
     if (e != HU_OK)
@@ -103,33 +97,18 @@ hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
         *out_delta_id = sqlite3_last_insert_rowid(db);
     sqlite3_finalize(st);
     return HU_OK;
-#else
-    (void)contact_id_len;
-    (void)kind;
-    (void)key;
-    (void)value;
-    (void)confidence;
-    (void)source;
-    (void)proposed_at_ms;
-    (void)out_delta_id;
-    return HU_ERR_NOT_SUPPORTED;
-#endif
 }
 
-hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
-                                 size_t contact_id_len, hu_persona_delta_status_t status_filter,
-                                 size_t limit, hu_persona_delta_t **out, size_t *out_count) {
-    if (!graph || !alloc || !contact_id || !out || !out_count)
+static hu_error_t persona_delta_list_db(struct sqlite3 *db, hu_allocator_t *alloc,
+                                        const char *contact_id, size_t contact_id_len,
+                                        hu_persona_delta_status_t status_filter, size_t limit,
+                                        hu_persona_delta_t **out, size_t *out_count) {
+    if (!db || !alloc || !contact_id || !out || !out_count)
         return HU_ERR_INVALID_ARGUMENT;
     *out = NULL;
     *out_count = 0;
     if (limit == 0)
         limit = 64;
-
-#ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
-    if (!db)
-        return HU_ERR_INVALID_ARGUMENT;
     hu_error_t e = ensure_schema(db);
     if (e != HU_OK)
         return e;
@@ -142,9 +121,6 @@ hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const
         "SELECT id, kind, key, value, confidence, proposed_at, source, status, status_reason "
         "FROM persona_deltas WHERE contact_id = ? AND status = ? ORDER BY proposed_at DESC LIMIT ?";
     bool filt = (int)status_filter >= 0;
-    /* status_filter = -1 (cast) means "all"; callers pass an enum value, so we
-     * always filter when the value is meaningful. To opt out, use a large
-     * sentinel = HU_DELTA_STATUS_QUARANTINED + 1. */
     if (status_filter > HU_DELTA_STATUS_QUARANTINED)
         filt = false;
     if (sqlite3_prepare_v2(db, filt ? sql_filt : sql_all, -1, &st, NULL) != SQLITE_OK)
@@ -185,11 +161,115 @@ hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const
     *out = arr;
     *out_count = n;
     return HU_OK;
+}
+
+#endif
+
+hu_error_t hu_persona_delta_propose(hu_graph_t *graph, const char *contact_id,
+                                    size_t contact_id_len, hu_persona_delta_kind_t kind,
+                                    const char *key, const char *value, float confidence,
+                                    const char *source, int64_t proposed_at_ms,
+                                    int64_t *out_delta_id) {
+    if (!graph || !contact_id || contact_id_len == 0 || !value || kind >= HU_PERSONA_DELTA_MAX)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#ifdef HU_ENABLE_SQLITE
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return persona_delta_propose_db(db, contact_id, contact_id_len, kind, key, value, confidence,
+                                    source, proposed_at_ms, out_delta_id);
+#else
+    (void)contact_id_len;
+    (void)kind;
+    (void)key;
+    (void)value;
+    (void)confidence;
+    (void)source;
+    (void)proposed_at_ms;
+    (void)out_delta_id;
+    return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
+hu_error_t hu_persona_delta_propose_facade(hu_memory_facade_t *m, const char *contact_id,
+                                           size_t contact_id_len, hu_persona_delta_kind_t kind,
+                                           const char *key, const char *value, float confidence,
+                                           const char *source, int64_t proposed_at_ms,
+                                           int64_t *out_delta_id) {
+#ifndef HU_ENABLE_SQLITE
+    (void)m;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)kind;
+    (void)key;
+    (void)value;
+    (void)confidence;
+    (void)source;
+    (void)proposed_at_ms;
+    (void)out_delta_id;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!m || !contact_id || contact_id_len == 0 || !value || kind >= HU_PERSONA_DELTA_MAX)
+        return HU_ERR_INVALID_ARGUMENT;
+    struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return persona_delta_propose_db(db, contact_id, contact_id_len, kind, key, value, confidence,
+                                    source, proposed_at_ms, out_delta_id);
+#endif
+}
+
+hu_error_t hu_persona_delta_list(hu_graph_t *graph, hu_allocator_t *alloc, const char *contact_id,
+                                 size_t contact_id_len, hu_persona_delta_status_t status_filter,
+                                 size_t limit, hu_persona_delta_t **out, size_t *out_count) {
+    if (!graph || !alloc || !contact_id || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    if (limit == 0)
+        limit = 64;
+
+#ifdef HU_ENABLE_SQLITE
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return persona_delta_list_db(db, alloc, contact_id, contact_id_len, status_filter, limit, out,
+                                 out_count);
 #else
     (void)contact_id_len;
     (void)status_filter;
     (void)limit;
     return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
+hu_error_t hu_persona_delta_list_facade(hu_memory_facade_t *m, hu_allocator_t *alloc,
+                                        const char *contact_id, size_t contact_id_len,
+                                        hu_persona_delta_status_t status_filter, size_t limit,
+                                        hu_persona_delta_t **out, size_t *out_count) {
+#ifndef HU_ENABLE_SQLITE
+    (void)m;
+    (void)alloc;
+    (void)contact_id;
+    (void)contact_id_len;
+    (void)status_filter;
+    (void)limit;
+    (void)out;
+    (void)out_count;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    if (!m || !alloc || !contact_id || !out || !out_count)
+        return HU_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    *out_count = 0;
+    if (limit == 0)
+        limit = 64;
+    struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return persona_delta_list_db(db, alloc, contact_id, contact_id_len, status_filter, limit, out,
+                                 out_count);
 #endif
 }
 
@@ -257,19 +337,11 @@ static int recent_source_count(struct sqlite3 *db, const char *cid, int cid_len,
     return n;
 }
 
-#endif
-
-hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
-                                  size_t contact_id_len,
-                                  const hu_persona_evolver_config_t *cfg,
-                                  hu_persona_evolver_report_t *out_report) {
-    if (!graph || !contact_id || !out_report)
-        return HU_ERR_INVALID_ARGUMENT;
-    memset(out_report, 0, sizeof(*out_report));
-
-#ifdef HU_ENABLE_SQLITE
-    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
-    if (!db)
+static hu_error_t persona_evolver_run_db(struct sqlite3 *db, const char *contact_id,
+                                          size_t contact_id_len,
+                                          const hu_persona_evolver_config_t *cfg,
+                                          hu_persona_evolver_report_t *out_report) {
+    if (!db || !contact_id || !out_report)
         return HU_ERR_INVALID_ARGUMENT;
     hu_error_t e = ensure_schema(db);
     if (e != HU_OK)
@@ -306,8 +378,6 @@ hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
         float conf = (float)sqlite3_column_double(st, 4);
         const char *source = (const char *)sqlite3_column_text(st, 5);
 
-        /* Rate limit: too many proposals from the same source in the last
-         * hour means quarantine the rest. */
         int recent =
             recent_source_count(db, contact_id, (int)contact_id_len, source, now);
         if (recent > (int)local.rate_limit_per_hour) {
@@ -316,27 +386,20 @@ hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
             continue;
         }
 
-        /* Drop low-confidence deltas. */
         if (conf < local.drop_threshold) {
             mark_status(db, id, HU_DELTA_STATUS_DROPPED, "low-confidence", now);
             out_report->dropped++;
             continue;
         }
 
-        /* Mid-confidence: require corroboration. */
         if (conf < local.apply_threshold) {
             int n = corroboration_count(db, contact_id, (int)contact_id_len, kind, key, value);
             if (n < (int)local.corroboration_min) {
-                /* leave pending; another evidence may corroborate later */
                 out_report->still_pending++;
                 continue;
             }
         }
 
-        /* Apply. The actual write to the persona profile is delegated to the
-         * caller; the evolver records it as APPLIED so other systems can
-         * synchronize. This separation keeps the evolver free of persona
-         * marshaling concerns. */
         if (applied >= local.max_apply) {
             out_report->still_pending++;
             continue;
@@ -349,9 +412,45 @@ hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
     }
     sqlite3_finalize(st);
     return HU_OK;
+}
+
+#endif
+
+hu_error_t hu_persona_evolver_run(hu_graph_t *graph, const char *contact_id,
+                                  size_t contact_id_len,
+                                  const hu_persona_evolver_config_t *cfg,
+                                  hu_persona_evolver_report_t *out_report) {
+    if (!graph || !contact_id || !out_report)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out_report, 0, sizeof(*out_report));
+
+#ifdef HU_ENABLE_SQLITE
+    struct sqlite3 *db = hu_graph_sqlite_connection(graph);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return persona_evolver_run_db(db, contact_id, contact_id_len, cfg, out_report);
 #else
     (void)contact_id_len;
     (void)cfg;
     return HU_ERR_NOT_SUPPORTED;
+#endif
+}
+
+hu_error_t hu_persona_evolver_run_facade(hu_memory_facade_t *m, const char *contact_id,
+                                          size_t contact_id_len,
+                                          const hu_persona_evolver_config_t *cfg,
+                                          hu_persona_evolver_report_t *out_report) {
+    if (!m || !contact_id || !out_report)
+        return HU_ERR_INVALID_ARGUMENT;
+    memset(out_report, 0, sizeof(*out_report));
+#ifndef HU_ENABLE_SQLITE
+    (void)contact_id_len;
+    (void)cfg;
+    return HU_ERR_NOT_SUPPORTED;
+#else
+    struct sqlite3 *db = hu_memory_facade_sqlite_db(m);
+    if (!db)
+        return HU_ERR_INVALID_ARGUMENT;
+    return persona_evolver_run_db(db, contact_id, contact_id_len, cfg, out_report);
 #endif
 }

@@ -4222,9 +4222,12 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
             hu_otlp_span_begin(&otlp_trace, "llm.chat", 8, NULL, &llm_span);
         }
 
-        /* W10: KV cache — check for cached prompt metadata before provider call */
+        /* W10: neural KV table — probe for a prior row (hash, model). This path does
+         * **not** skip the provider: we only persist prompt_token_count today, not a
+         * replayable assistant payload. A future step can short-circuit when `blob`
+         * carries a provider-defined replay block. */
 #ifdef HU_ENABLE_SQLITE
-        bool kv_cache_hit = false;
+        bool kv_row_exists = false;
         char kv_prompt_hash[24];
         kv_prompt_hash[0] = '\0';
         if (agent->w7_facade && system_prompt && system_prompt_len > 0 &&
@@ -4243,10 +4246,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 hu_kv_cache_entry_t *cached = NULL;
                 if (hu_kv_cache_get(kv_mf, kv_prompt_hash, kv_model_ver, agent->alloc,
                                     &cached) == HU_OK) {
-                    kv_cache_hit = true;
+                    kv_row_exists = true;
                     hu_log_info("agent_turn", agent->observer,
-                                "W10 KV cache hit: hash=%s tokens=%lld", kv_prompt_hash,
-                                (long long)cached->prompt_token_count);
+                                "W10 KV prior row (no provider skip): hash=%s tokens=%lld",
+                                kv_prompt_hash, (long long)cached->prompt_token_count);
                     hu_kv_cache_entry_free(agent->alloc, cached);
                 }
             }
@@ -4295,9 +4298,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
         if (llm_span)
             hu_otlp_span_end(llm_span, (err == HU_OK) ? 1 : 2);
 
-        /* W10: KV cache — store prompt metadata after successful provider call */
+        /* W10: persist prompt-token metadata after successful provider call (see probe
+         * comment above: no response replay yet). */
 #ifdef HU_ENABLE_SQLITE
-        if (err == HU_OK && !kv_cache_hit && kv_prompt_hash[0] && agent->w7_facade &&
+        if (err == HU_OK && !kv_row_exists && kv_prompt_hash[0] && agent->w7_facade &&
             turn_model && turn_model_len > 0) {
             hu_memory_facade_t *kv_mf = hu_w7_facade_memory_handle(agent->w7_facade);
             if (kv_mf) {
@@ -4305,13 +4309,19 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 memset(&kv_entry, 0, sizeof(kv_entry));
                 strncpy(kv_entry.prompt_hash, kv_prompt_hash,
                         sizeof(kv_entry.prompt_hash) - 1);
+                kv_entry.prompt_hash[sizeof(kv_entry.prompt_hash) - 1] = '\0';
                 size_t mv_len = turn_model_len < sizeof(kv_entry.model_version) - 1
                                     ? turn_model_len
                                     : sizeof(kv_entry.model_version) - 1;
                 memcpy(kv_entry.model_version, turn_model, mv_len);
                 kv_entry.model_version[mv_len] = '\0';
                 kv_entry.prompt_token_count = (int64_t)resp.usage.prompt_tokens;
-                (void)hu_kv_cache_put(kv_mf, &kv_entry);
+                hu_error_t kv_put = hu_kv_cache_put(kv_mf, &kv_entry);
+                if (kv_put != HU_OK) {
+                    hu_log_info("agent_turn", agent->observer,
+                                "W10 kv_cache_put failed err=%d hash=%s", (int)kv_put,
+                                kv_prompt_hash);
+                }
             }
         }
 #endif
@@ -5247,8 +5257,10 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                                  ? &s_modified
                                                  : NULL;
                             size_t *mod_len_ptr = mod_ptr ? &s_modified_len : NULL;
-                            hu_error_t serr = hu_w11_self_rag_verify(
-                                agent->w7_facade, agent->alloc, agent->memory_session_id,
+                            hu_error_t serr = hu_w11_self_rag_verify_with_provider(
+                                agent->w7_facade, agent->alloc,
+                                &agent->provider,
+                                agent->memory_session_id,
                                 agent->memory_session_id_len, *response_out,
                                 response_effective_len, srag_mode, 0, &s_outcome, &s_total,
                                 &s_flagged, mod_ptr, mod_len_ptr);

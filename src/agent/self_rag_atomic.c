@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* The closed list of decomposition prepositions. Order matters only for
  * cosmetics; the splitter is left-to-right. The trailing/leading spaces are
@@ -43,6 +44,7 @@ static const char *const k_preps[] = {
 
 typedef struct atomic_ctx {
     hu_memory_facade_t *m;
+    hu_provider_t *provider;
 } atomic_ctx_t;
 
 /* Trim leading/trailing ASCII whitespace and write into dst. dst_cap must be
@@ -340,6 +342,138 @@ static void score_atomic_claim(hu_allocator_t *alloc, hu_memory_facade_t *m,
     *out_receipt = report.claims[0].receipt;
 }
 
+/* Provider-backed claim verification. Constructs a verification prompt
+ * asking the LLM whether the claim is supported by retrieved evidence,
+ * then parses the verdict (SUPPORTED / PARTIAL / UNSUPPORTED).
+ *
+ * Returns true if the provider call succeeded and *out_supported is set.
+ * Returns false on any error (caller falls back to heuristic score). */
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+#include <time.h>
+
+static bool verify_claim_via_provider(hu_allocator_t *alloc,
+                                       hu_provider_t *provider,
+                                       const char *claim_text,
+                                       const char *evidence,
+                                       size_t evidence_len,
+                                       bool *out_supported,
+                                       float *out_score) {
+    if (!alloc || !provider || !claim_text || !evidence || evidence_len == 0)
+        return false;
+    if (!provider->vtable || !provider->vtable->chat_with_system)
+        return false;
+
+    static const char sys_prompt[] =
+        "You are a fact-verification assistant. Given evidence from memory "
+        "and a claim, determine if the claim is supported. Reply with "
+        "exactly one word: SUPPORTED, PARTIAL, or UNSUPPORTED.";
+
+    char user_msg[1024];
+    int n = snprintf(user_msg, sizeof(user_msg),
+                     "Evidence: %.*s\n\nClaim: %s\n\n"
+                     "Is this claim supported by the evidence?",
+                     (int)(evidence_len > 600 ? 600 : evidence_len),
+                     evidence, claim_text);
+    if (n <= 0 || (size_t)n >= sizeof(user_msg))
+        return false;
+
+    char *response = NULL;
+    size_t response_len = 0;
+    hu_error_t err = provider->vtable->chat_with_system(
+        provider->ctx, alloc, sys_prompt, sizeof(sys_prompt) - 1,
+        user_msg, (size_t)n, NULL, 0, 0.0, &response, &response_len);
+    if (err != HU_OK || !response || response_len == 0) {
+        if (response)
+            alloc->free(alloc->ctx, response, response_len + 1);
+        return false;
+    }
+
+    *out_supported = false;
+    *out_score = 0.0f;
+    for (size_t i = 0; i < response_len; i++) {
+        if (response_len - i >= 11 &&
+            strncasecmp(response + i, "UNSUPPORTED", 11) == 0) {
+            *out_score = 0.1f;
+            break;
+        }
+        if (response_len - i >= 7 &&
+            strncasecmp(response + i, "PARTIAL", 7) == 0) {
+            *out_score = 0.5f;
+            break;
+        }
+        if (response_len - i >= 9 &&
+            strncasecmp(response + i, "SUPPORTED", 9) == 0) {
+            *out_supported = true;
+            *out_score = 0.9f;
+            break;
+        }
+    }
+
+    alloc->free(alloc->ctx, response, response_len + 1);
+    return true;
+}
+
+/* Retrieve all available evidence for a contact from the memory graph,
+ * concatenated into a single buffer for the provider verification prompt.
+ * Returns true and writes into out_evidence (NUL-terminated) if any
+ * evidence was found; false otherwise. */
+static bool retrieve_evidence_for_contact(hu_allocator_t *alloc,
+                                           hu_memory_facade_t *m,
+                                           const char *contact_id,
+                                           size_t contact_id_len,
+                                           char *out_evidence,
+                                           size_t out_cap) {
+    if (!alloc || !m || !out_evidence || out_cap == 0)
+        return false;
+
+    hu_memory_query_t q;
+    memset(&q, 0, sizeof(q));
+    q.kind = HU_MEM_RELATION;
+    q.variant = HU_MEMORY_QUERY_AUTO;
+    q.contact_id = contact_id;
+    q.contact_id_len = contact_id_len;
+    q.as.window.limit = 32;
+
+    hu_memory_record_t *recs = NULL;
+    size_t n = 0;
+    hu_error_t err = hu_memory_facade_read(m, &q, alloc, &recs, &n);
+    if (err != HU_OK || !recs || n == 0) {
+        if (recs)
+            hu_memory_facade_records_free(m, alloc, recs, n);
+        return false;
+    }
+
+    size_t off = 0;
+    out_evidence[0] = '\0';
+    for (size_t i = 0; i < n && off < out_cap - 2; i++) {
+        const hu_graph_relation_t *rel =
+            (const hu_graph_relation_t *)recs[i].payload;
+        if (!rel || !rel->context || rel->context_len == 0)
+            continue;
+        size_t copy = rel->context_len;
+        if (off + copy + 3 > out_cap - 1)
+            copy = out_cap - 1 - off - 3;
+        if (copy == 0) break;
+        if (off > 0) {
+            out_evidence[off++] = '\n';
+        }
+        memcpy(out_evidence + off, rel->context, copy);
+        off += copy;
+    }
+    out_evidence[off] = '\0';
+    hu_memory_facade_records_free(m, alloc, recs, n);
+    return off > 0;
+}
+
+static int64_t now_ms_monotonic(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+        return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
+    return (int64_t)time(NULL) * 1000;
+}
+
+#endif /* !HU_IS_TEST */
+
 static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
                                  const hu_self_rag_request_t *req,
                                  hu_self_rag_response_t *resp) {
@@ -375,6 +509,28 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
      * below this. Mirrors v1's confidence_threshold default. */
     const float per_claim_floor = 0.6f;
 
+    /* Provider verification is only used in STRICT mode when a real
+     * provider is wired. Under HU_IS_TEST, always use the heuristic
+     * path for determinism. Budget: 500ms total across all claims. */
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+    bool use_provider = ctx->provider &&
+                        ctx->provider->vtable &&
+                        ctx->provider->vtable->chat_with_system &&
+                        req->mode == HU_VERIFY_STRICT;
+    int64_t provider_deadline = 0;
+    if (use_provider)
+        provider_deadline = now_ms_monotonic() + 500;
+    char evidence_buf[2048];
+    bool evidence_loaded = false;
+    if (use_provider && ctx->m) {
+        evidence_loaded = retrieve_evidence_for_contact(
+            alloc, ctx->m, req->contact_id, req->contact_id_len,
+            evidence_buf, sizeof(evidence_buf));
+        if (!evidence_loaded)
+            evidence_buf[0] = '\0';
+    }
+#endif
+
     for (size_t i = 0; i < n; i++) {
         hu_atomic_claim_t *c = &resp->claims[i];
         float score = 0.0f;
@@ -384,6 +540,26 @@ static hu_error_t atomic_verify(void *vctx, hu_allocator_t *alloc,
             score_atomic_claim(alloc, ctx->m, req->contact_id, req->contact_id_len,
                                 c, &score, &rcpt);
         }
+
+#if !(defined(HU_IS_TEST) && HU_IS_TEST)
+        /* Provider verification: only for STRICT mode, when evidence
+         * exists and the latency budget hasn't been exceeded. Falls
+         * back silently to the heuristic score on any failure. */
+        if (use_provider && evidence_loaded &&
+            now_ms_monotonic() < provider_deadline) {
+            bool supported = false;
+            float provider_score = 0.0f;
+            if (verify_claim_via_provider(alloc, ctx->provider,
+                                           c->text, evidence_buf,
+                                           strlen(evidence_buf),
+                                           &supported, &provider_score)) {
+                score = provider_score;
+                snprintf(rcpt.source, sizeof(rcpt.source), "provider-verified");
+                rcpt.confidence = provider_score;
+            }
+        }
+#endif
+
         c->support = hu_belief_init(score, "atomic-graph", now);
         memset(&c->prov, 0, sizeof(c->prov));
         if (rcpt.source[0]) {
@@ -479,13 +655,11 @@ hu_error_t hu_self_rag_atomic(hu_memory_facade_t *m, hu_provider_t *embedder,
                                hu_self_rag_t *out) {
     if (!out)
         return HU_ERR_INVALID_ARGUMENT;
-    /* `embedder` is reserved for the future LLM-driven decomposer. The
-     * deterministic splitter in this commit does not use it. */
-    (void)embedder;
     atomic_ctx_t *ctx = (atomic_ctx_t *)calloc(1, sizeof(*ctx));
     if (!ctx)
         return HU_ERR_OUT_OF_MEMORY;
     ctx->m = m;
+    ctx->provider = embedder;
     out->vt = &atomic_vt;
     out->ctx = ctx;
     return HU_OK;

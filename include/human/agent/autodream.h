@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct hu_memory_facade;
+
 /* W2 — AutoDream: scheduled background consolidation.
  *
  * Drives idle-time refinement of the memory graph. The intent matches Claude
@@ -51,6 +53,16 @@ hu_autodream_config_t hu_autodream_default_config(void);
 hu_error_t hu_autodream_run(hu_allocator_t *alloc, hu_graph_t *graph,
                             const hu_autodream_config_t *cfg,
                             hu_autodream_report_t *out_report);
+
+/* Same as `hu_autodream_run` but when `m` is non-NULL, quarantine **release**
+ * promotes the live relation through `hu_memory_facade_write` (HU_MEM_RELATION)
+ * so ingestion stays on the W7 surface. DDL and batch SQL use the same
+ * SQLite handle as the facade when available. If `m` is NULL or has no graph
+ * handle, returns
+ * HU_ERR_INVALID_ARGUMENT. */
+hu_error_t hu_autodream_run_on_facade(hu_allocator_t *alloc, struct hu_memory_facade *m,
+                                      const hu_autodream_config_t *cfg,
+                                      hu_autodream_report_t *out_report);
 
 /* Generate-or-refresh a community summary for one (contact, community) pair.
  * Heuristic backend: produces a structured summary from entity names + edge
