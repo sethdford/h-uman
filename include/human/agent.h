@@ -301,6 +301,14 @@ struct hu_agent {
     uint64_t self_rag_claims_flagged;
     uint64_t self_rag_abstentions;
 
+    /* W14 sleep-time compute scheduler handle (FIX 13). Same opaque-tag
+     * trick as w7_facade above. Wired by daemon.c after hu_w7_facade_open;
+     * ticked once per main-loop iteration; closed BEFORE w7_facade_close
+     * (the scheduler borrows the facade's memory handle). */
+    struct hu_w14_scheduler *w14_scheduler;
+    uint64_t scheduler_ticks;     /* telemetry: total ticks since startup */
+    int64_t  scheduler_last_tick_ms; /* telemetry: most recent tick wall time */
+
     volatile sig_atomic_t cancel_requested; /* set by SIGINT handler to abort turn */
 
     hu_agent_approval_cb approval_cb; /* optional; if NULL, approval-required = denied */

@@ -6,6 +6,7 @@
  * the bridge exists to dodge. */
 
 #include "human/agent/world_model_bridge.h"
+#include "human/agent/scheduler.h"
 #include "human/agent/self_rag.h"
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
@@ -300,5 +301,115 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
      * structured outcome + claim counts so we can layer it on without
      * reworking the response path yet. */
     hu_self_rag_close(&r);
+    return HU_OK;
+}
+
+/* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
+ *
+ * Owns a `hu_scheduler_t *` and a borrowed reference to the facade's
+ * `hu_memory_t *`. The scheduler does NOT take ownership of the memory
+ * handle (it just uses it for SQLite + dispatch). On close we destroy
+ * the scheduler before the facade so the per-tick SQL handle stays
+ * valid through the last tick.
+ *
+ * The counterfactual-rehearsal runner is registered at open() so the
+ * daemon can enqueue jobs without knowing which kind to register. Other
+ * runners (AUTODREAM_*, KV_CACHE_*, LORA_TRAINING) stay as the no-op
+ * defaults the scheduler installs at open() — they will be wired in
+ * follow-up commits as their dependencies (W13 adapter loading, W10
+ * eviction policy) land. */
+
+struct hu_w14_scheduler {
+    hu_scheduler_t *s;
+};
+
+hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                 hu_w14_scheduler_t **out_sched) {
+    if (out_sched)
+        *out_sched = NULL;
+    if (!facade || !facade->m || !alloc || !out_sched)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    hu_w14_scheduler_t *w = (hu_w14_scheduler_t *)alloc->alloc(alloc->ctx, sizeof(*w));
+    if (!w)
+        return HU_ERR_OUT_OF_MEMORY;
+    w->s = NULL;
+    hu_error_t e = hu_scheduler_open(alloc, facade->m, &w->s);
+    if (e != HU_OK) {
+        alloc->free(alloc->ctx, w, sizeof(*w));
+        return e;
+    }
+    /* Wire the one runner the spec ships in this commit. The other kinds
+     * keep the no-op default the scheduler installs in hu_scheduler_open. */
+    (void)hu_scheduler_register_runner(w->s, HU_JOB_COUNTERFACTUAL_REHEARSAL,
+                                       hu_counterfactual_rehearsal_runner, NULL);
+    *out_sched = w;
+    return HU_OK;
+}
+
+void hu_w14_scheduler_close(hu_w14_scheduler_t *s, hu_allocator_t *alloc) {
+    if (!s)
+        return;
+    if (s->s)
+        hu_scheduler_close(s->s, alloc);
+    if (alloc)
+        alloc->free(alloc->ctx, s, sizeof(*s));
+}
+
+hu_error_t hu_w14_scheduler_tick(hu_w14_scheduler_t *s, int64_t now_ms) {
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    if (now_ms == 0)
+        now_ms = (int64_t)time(NULL) * 1000;
+    return hu_scheduler_tick(s->s, now_ms);
+}
+
+hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
+                                                   const char *contact_id,
+                                                   size_t contact_id_len,
+                                                   int budget_ms) {
+    if (!s || !s->s || !contact_id || contact_id_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_job_spec_t job;
+    memset(&job, 0, sizeof(job));
+    job.kind = HU_JOB_COUNTERFACTUAL_REHEARSAL;
+    job.contact_id = contact_id;
+    job.contact_id_len = contact_id_len;
+    job.priority = 0;
+    job.budget_ms = budget_ms > 0 ? budget_ms : 50;
+    /* Idle-only and not battery-gated: counterfactual rehearsal is light
+     * enough to run on AC- or battery-power; readers can override later
+     * by enqueuing their own spec directly through the bridge if needed. */
+    job.requires_idle = false;
+    job.requires_ac_power = false;
+    return hu_scheduler_enqueue(s->s, &job);
+}
+
+hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pending,
+                                   size_t *out_jobs_completed_today, int *out_battery_pct,
+                                   int *out_on_ac_power) {
+    if (out_jobs_pending)
+        *out_jobs_pending = 0;
+    if (out_jobs_completed_today)
+        *out_jobs_completed_today = 0;
+    if (out_battery_pct)
+        *out_battery_pct = -1;
+    if (out_on_ac_power)
+        *out_on_ac_power = 1;
+    if (!s || !s->s)
+        return HU_ERR_INVALID_ARGUMENT;
+    hu_scheduler_status_t st;
+    memset(&st, 0, sizeof(st));
+    hu_error_t e = hu_scheduler_status(s->s, &st);
+    if (e != HU_OK)
+        return e;
+    if (out_jobs_pending)
+        *out_jobs_pending = st.jobs_pending;
+    if (out_jobs_completed_today)
+        *out_jobs_completed_today = st.jobs_completed_today;
+    if (out_battery_pct)
+        *out_battery_pct = st.battery_pct;
+    if (out_on_ac_power)
+        *out_on_ac_power = st.on_ac_power ? 1 : 0;
     return HU_OK;
 }

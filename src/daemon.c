@@ -2259,6 +2259,20 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         else
             hu_log_warn("human", agent->observer, "W7 facade open failed: %d", (int)fe);
     }
+    /* W14 scheduler wire (FIX 13): open the sleep-time compute scheduler on
+     * the same memory handle the W7 facade owns. Ticks once per main-loop
+     * iteration below; closes BEFORE the facade so the borrowed memory
+     * handle stays valid through the last tick. The scheduler is a no-op
+     * with no enqueued jobs, so the wire is safe even when no consumer
+     * has yet enqueued work. */
+    if (agent && agent->w7_facade && !agent->w14_scheduler) {
+        hu_w14_scheduler_t *sched = NULL;
+        hu_error_t se = hu_w14_scheduler_open(agent->w7_facade, alloc, &sched);
+        if (se == HU_OK)
+            agent->w14_scheduler = sched;
+        else
+            hu_log_warn("human", agent->observer, "W14 scheduler open failed: %d", (int)se);
+    }
     /* Initialize contact identity graph for cross-channel resolution */
     if (agent && agent->memory) {
         sqlite3 *cg_db = hu_sqlite_memory_get_db(agent->memory);
@@ -2601,6 +2615,26 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
                 }
 #endif
 #ifdef HU_ENABLE_SQLITE
+                /* W14 sleep-time compute scheduler tick (FIX 13). The
+                 * scheduler is enqueue-driven: tick is a no-op when no
+                 * jobs are pending, and the per-tick total budget is
+                 * bounded internally (HU_SCHED_TOTAL_BUDGET_MS). We
+                 * rate-limit to once per minute so this stays cheap on
+                 * fast loops; the scheduler itself doesn't care how
+                 * often it's called. */
+                if (agent && agent->w14_scheduler) {
+                    int64_t now_ms = (int64_t)t * 1000LL;
+                    if (agent->scheduler_last_tick_ms == 0 ||
+                        now_ms - agent->scheduler_last_tick_ms >= 60000) {
+                        hu_error_t te = hu_w14_scheduler_tick(agent->w14_scheduler, now_ms);
+                        agent->scheduler_last_tick_ms = now_ms;
+                        agent->scheduler_ticks++;
+                        if (te != HU_OK) {
+                            hu_log_warn("human", agent->observer,
+                                        "scheduler tick failed: %s", hu_error_string(te));
+                        }
+                    }
+                }
                 /* W2 AutoDream + W5 persona evolver — daily housekeeping that
                  * was previously shipped as code with zero callers. Runs once
                  * per day in the 3-5 AM window so it doesn't compete with the
@@ -11672,6 +11706,13 @@ hu_error_t hu_service_run(hu_allocator_t *alloc, uint32_t tick_interval_ms,
         hu_channel_monitor_destroy(chan_monitor);
     if (agent)
         agent->bth_metrics = NULL;
+    /* FIX 13: close W14 scheduler BEFORE W7 facade. The scheduler borrows
+     * the facade's hu_memory_t handle for its SQLite job queue, so the
+     * facade must outlive every tick the scheduler will ever run. */
+    if (agent && agent->w14_scheduler) {
+        hu_w14_scheduler_close(agent->w14_scheduler, alloc);
+        agent->w14_scheduler = NULL;
+    }
     /* FIX 12: close W7 facade BEFORE the graph it borrows. The facade does
      * not own the graph (the v1 backend takes a borrow), so closing in this
      * order is just hygiene -- but it keeps the assertion footprint clean. */

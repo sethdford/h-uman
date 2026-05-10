@@ -241,6 +241,76 @@ static void w11_rejects_invalid_args(void) {
     cleanup(g, f);
 }
 
+/* ── W14 scheduler bridge (FIX 13) ───────────────────────────────────────
+ * Verifies the open/tick/close lifecycle, that tick is a no-op when the
+ * queue is empty, that enqueue + tick consumes a counterfactual job,
+ * and that the bridge rejects invalid arguments cleanly. */
+
+static void w14_scheduler_open_close_clean(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    hu_w14_scheduler_t *s = NULL;
+    HU_ASSERT_EQ(hu_w14_scheduler_open(f, A(), &s), HU_OK);
+    HU_ASSERT_NOT_NULL(s);
+    hu_w14_scheduler_close(s, A());
+    cleanup(g, f);
+}
+
+static void w14_scheduler_rejects_null_args(void) {
+    hu_w14_scheduler_t *s = NULL;
+    HU_ASSERT_EQ(hu_w14_scheduler_open(NULL, A(), &s), HU_ERR_INVALID_ARGUMENT);
+    /* close(NULL) is a no-op. */
+    hu_w14_scheduler_close(NULL, A());
+    HU_ASSERT_EQ(hu_w14_scheduler_tick(NULL, 1000), HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_w14_scheduler_enqueue_counterfactual(NULL, "u", 1, 50),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+static void w14_scheduler_tick_is_noop_when_empty(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    hu_w14_scheduler_t *s = NULL;
+    HU_ASSERT_EQ(hu_w14_scheduler_open(f, A(), &s), HU_OK);
+    /* Tick with empty queue: must succeed and not crash. */
+    HU_ASSERT_EQ(hu_w14_scheduler_tick(s, 1000), HU_OK);
+    HU_ASSERT_EQ(hu_w14_scheduler_tick(s, 0), HU_OK); /* 0 -> use OS clock */
+    /* Status should report 0 pending. */
+    size_t pending = 999;
+    HU_ASSERT_EQ(hu_w14_scheduler_status(s, &pending, NULL, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(pending, (size_t)0);
+    hu_w14_scheduler_close(s, A());
+    cleanup(g, f);
+}
+
+static void w14_scheduler_enqueue_then_tick_drains_job(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    hu_w14_scheduler_t *s = NULL;
+    HU_ASSERT_EQ(hu_w14_scheduler_open(f, A(), &s), HU_OK);
+
+    HU_ASSERT_EQ(hu_w14_scheduler_enqueue_counterfactual(s, "u_cf", 4, 50), HU_OK);
+    /* After enqueue: at least 1 pending (we don't assume exact count
+     * because the scheduler may dedupe / coalesce in the future). */
+    size_t pending = 0;
+    HU_ASSERT_EQ(hu_w14_scheduler_status(s, &pending, NULL, NULL, NULL), HU_OK);
+    HU_ASSERT(pending >= 1);
+
+    /* Tick: counterfactual runner is registered, queue should drain. */
+    HU_ASSERT_EQ(hu_w14_scheduler_tick(s, 2000), HU_OK);
+
+    /* After tick: queue should be empty (counterfactual rehearsal is
+     * cheap; one tick consumes it within the per-tick budget). */
+    pending = 999;
+    HU_ASSERT_EQ(hu_w14_scheduler_status(s, &pending, NULL, NULL, NULL), HU_OK);
+    HU_ASSERT_EQ(pending, (size_t)0);
+
+    hu_w14_scheduler_close(s, A());
+    cleanup(g, f);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -255,5 +325,9 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(w11_off_mode_is_noop);
     HU_RUN_TEST(w11_telemetry_extracts_claims_without_modifying);
     HU_RUN_TEST(w11_rejects_invalid_args);
+    HU_RUN_TEST(w14_scheduler_open_close_clean);
+    HU_RUN_TEST(w14_scheduler_rejects_null_args);
+    HU_RUN_TEST(w14_scheduler_tick_is_noop_when_empty);
+    HU_RUN_TEST(w14_scheduler_enqueue_then_tick_drains_job);
 #endif
 }

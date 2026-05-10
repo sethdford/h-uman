@@ -88,6 +88,49 @@ hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
                                   size_t *out_claims_flagged, char **out_modified,
                                   size_t *out_modified_len);
 
+/* ── W14 sleep-time compute scheduler bridge (FIX 13) ─────────────────────
+ *
+ * The W14 scheduler is the same shape problem: `human/agent/scheduler.h`
+ * pulls in `human/memory/memory.h`, which redefines `struct hu_memory`
+ * for any TU that already has the legacy `human/memory.h` (i.e. anything
+ * including `human/agent.h`). This bridge gives the daemon a way to
+ * open / tick / close the scheduler without paying that include cost. */
+
+struct hu_w14_scheduler;
+typedef struct hu_w14_scheduler hu_w14_scheduler_t;
+
+/* Open a scheduler over the same `hu_memory_t` the W7 facade owns. The
+ * scheduler does not take ownership of the facade — both must outlive
+ * the lifetime of the daemon main loop. Returns HU_OK and `*out_sched`
+ * is non-NULL on success; on failure `*out_sched` is NULL. */
+hu_error_t hu_w14_scheduler_open(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                 hu_w14_scheduler_t **out_sched);
+
+/* Close the scheduler. Safe with NULL. Must be called BEFORE
+ * hu_w7_facade_close because the scheduler borrows the facade's memory
+ * handle. */
+void hu_w14_scheduler_close(hu_w14_scheduler_t *s, hu_allocator_t *alloc);
+
+/* Run one tick of the scheduler. `now_ms` is unix-ms; pass 0 to use the
+ * OS clock. The daemon main loop should call this once per minute (or
+ * more often — the scheduler's own per-tick budget bounds the work). */
+hu_error_t hu_w14_scheduler_tick(hu_w14_scheduler_t *s, int64_t now_ms);
+
+/* Enqueue a counterfactual-rehearsal job for `contact_id`. The runner
+ * is registered automatically at open(); this is just an enqueue
+ * helper that hides the hu_job_spec_t shape from the daemon. */
+hu_error_t hu_w14_scheduler_enqueue_counterfactual(hu_w14_scheduler_t *s,
+                                                   const char *contact_id,
+                                                   size_t contact_id_len,
+                                                   int budget_ms);
+
+/* Status snapshot for `human ml status` and friends. Always populates
+ * the out fields even on partial probe failure. NULL output pointers
+ * are tolerated (any subset may be queried). */
+hu_error_t hu_w14_scheduler_status(hu_w14_scheduler_t *s, size_t *out_jobs_pending,
+                                   size_t *out_jobs_completed_today, int *out_battery_pct,
+                                   int *out_on_ac_power);
+
 #ifdef __cplusplus
 }
 #endif
