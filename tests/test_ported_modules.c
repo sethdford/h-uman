@@ -14,6 +14,10 @@
 #include "human/update.h"
 #include "test_framework.h"
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void doctor_free_semantics_result(hu_allocator_t *alloc, hu_diag_item_t *items,
                                          size_t count) {
@@ -394,6 +398,214 @@ static void test_service_configure_with_ctx(void) {
     hu_service_configure(NULL, NULL);
 }
 
+/* ── hu_doctor_check_imessage red-team ─────────────────────────────────
+ * Cover every failure mode we've encountered or can credibly imagine:
+ *   • null arguments
+ *   • status file absent (daemon never polled)
+ *   • status file present and fresh (success)
+ *   • status file stale (warn — silent failure)
+ *   • status file shows partial failures but breaker not yet tripped (warn)
+ *   • status file shows breaker tripped (error)
+ *   • status file is corrupt / partial JSON (no crash, no false OK)
+ *   • HOME unset (defensive)
+ *   • imsg CLI absent on PATH is exercised implicitly under HU_IS_TEST. */
+
+static void doctor_imsg_swap_home(const char *new_home, char **old_out) {
+    const char *h = getenv("HOME");
+    *old_out = h ? strdup(h) : NULL;
+    setenv("HOME", new_home, 1);
+}
+
+static void doctor_imsg_restore_home(char *old) {
+    if (old) {
+        setenv("HOME", old, 1);
+        free(old);
+    } else {
+        unsetenv("HOME");
+    }
+}
+
+static void doctor_imsg_write_status(const char *home, const char *body) {
+    char dir[256];
+    snprintf(dir, sizeof(dir), "%s/.human", home);
+    mkdir(home, 0700);
+    mkdir(dir, 0700);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.human/imessage.poll_status", home);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fputs(body, f);
+        fclose(f);
+    }
+}
+
+static void doctor_imsg_remove_status(const char *home) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.human/imessage.poll_status", home);
+    unlink(path);
+}
+
+static void test_doctor_check_imessage_null_args_rejected(void) {
+    hu_diag_item_t *items = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    HU_ASSERT_EQ(hu_doctor_check_imessage(NULL, 0, 0, &items, &count, &cap),
+                 HU_ERR_INVALID_ARGUMENT);
+    hu_allocator_t alloc = hu_system_allocator();
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 0, 0, NULL, &count, &cap),
+                 HU_ERR_INVALID_ARGUMENT);
+}
+
+#if HU_HAS_IMESSAGE
+static void test_doctor_check_imessage_no_status_file_warns(void) {
+    char *old = NULL;
+    doctor_imsg_swap_home("/tmp/hu_doctor_imsg_no_status", &old);
+    doctor_imsg_remove_status("/tmp/hu_doctor_imsg_no_status");
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "poll status: file missing"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_imsg_restore_home(old);
+}
+
+static void test_doctor_check_imessage_breaker_tripped_reports_error(void) {
+    char *old = NULL;
+    doctor_imsg_swap_home("/tmp/hu_doctor_imsg_tripped", &old);
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_tripped",
+                             "{\n"
+                             "  \"last_rowid\": 12345,\n"
+                             "  \"last_successful_poll_epoch\": 0,\n"
+                             "  \"consecutive_open_failures\": 9,\n"
+                             "  \"circuit_breaker_tripped\": true,\n"
+                             "  \"last_error_class\": \"AUTH\"\n"
+                             "}\n");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "TRIPPED"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "AUTH"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_imsg_remove_status("/tmp/hu_doctor_imsg_tripped");
+    doctor_imsg_restore_home(old);
+}
+
+static void test_doctor_check_imessage_fresh_poll_reports_ok(void) {
+    char *old = NULL;
+    doctor_imsg_swap_home("/tmp/hu_doctor_imsg_fresh", &old);
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_fresh",
+                             "{\n"
+                             "  \"last_rowid\": 5000,\n"
+                             "  \"last_successful_poll_epoch\": 1000,\n"
+                             "  \"consecutive_open_failures\": 0,\n"
+                             "  \"circuit_breaker_tripped\": false,\n"
+                             "  \"last_error_class\": \"NONE\"\n"
+                             "}\n");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    /* now=1010, threshold=600 → age=10s → fresh */
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1010, 600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "circuit breaker: OK"));
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "poll: fresh"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_imsg_remove_status("/tmp/hu_doctor_imsg_fresh");
+    doctor_imsg_restore_home(old);
+}
+
+static void test_doctor_check_imessage_stale_poll_reports_warn(void) {
+    char *old = NULL;
+    doctor_imsg_swap_home("/tmp/hu_doctor_imsg_stale", &old);
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_stale",
+                             "{\n"
+                             "  \"last_rowid\": 5000,\n"
+                             "  \"last_successful_poll_epoch\": 1000,\n"
+                             "  \"consecutive_open_failures\": 0,\n"
+                             "  \"circuit_breaker_tripped\": false,\n"
+                             "  \"last_error_class\": \"NONE\"\n"
+                             "}\n");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    /* now=2000, threshold=600 → age=1000s → stale */
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 2000, 600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "poll: STALE"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_imsg_remove_status("/tmp/hu_doctor_imsg_stale");
+    doctor_imsg_restore_home(old);
+}
+
+static void test_doctor_check_imessage_partial_failures_warns(void) {
+    char *old = NULL;
+    doctor_imsg_swap_home("/tmp/hu_doctor_imsg_partial", &old);
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_partial",
+                             "{\n"
+                             "  \"last_rowid\": 5000,\n"
+                             "  \"last_successful_poll_epoch\": 990,\n"
+                             "  \"consecutive_open_failures\": 3,\n"
+                             "  \"circuit_breaker_tripped\": false,\n"
+                             "  \"last_error_class\": \"AUTH\"\n"
+                             "}\n");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "circuit breaker: OK (3 recent failures"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_imsg_remove_status("/tmp/hu_doctor_imsg_partial");
+    doctor_imsg_restore_home(old);
+}
+
+static void test_doctor_check_imessage_corrupt_status_does_not_crash(void) {
+    char *old = NULL;
+    doctor_imsg_swap_home("/tmp/hu_doctor_imsg_corrupt", &old);
+    /* Truncated / garbage JSON. Must not crash, must not falsely report fresh. */
+    doctor_imsg_write_status("/tmp/hu_doctor_imsg_corrupt", "{ this is not json");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 1000, 600, &items, &count, &cap), HU_OK);
+    /* With unparseable fields, last_success stays 0 → must report "never recorded". */
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "never recorded a successful poll"));
+    doctor_free_semantics_result(&alloc, items, count);
+    doctor_imsg_remove_status("/tmp/hu_doctor_imsg_corrupt");
+    doctor_imsg_restore_home(old);
+}
+
+static void test_doctor_check_imessage_no_home_reports_error(void) {
+    const char *h = getenv("HOME");
+    char *old = h ? strdup(h) : NULL;
+    unsetenv("HOME");
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_diag_item_t *items =
+        (hu_diag_item_t *)alloc.alloc(alloc.ctx, sizeof(hu_diag_item_t) * 8);
+    size_t count = 0;
+    size_t cap = 8;
+    HU_ASSERT_EQ(hu_doctor_check_imessage(&alloc, 0, 600, &items, &count, &cap), HU_OK);
+    HU_ASSERT_TRUE(doctor_diag_has_substr(items, count, "$HOME is not set"));
+    doctor_free_semantics_result(&alloc, items, count);
+    if (old) {
+        setenv("HOME", old, 1);
+        free(old);
+    }
+}
+#endif
+
 void run_ported_modules_tests(void) {
     HU_TEST_SUITE("Ported Modules");
     HU_RUN_TEST(test_channel_catalog_all);
@@ -432,4 +644,16 @@ void run_ported_modules_tests(void) {
     HU_RUN_TEST(test_service_configure_null);
     HU_RUN_TEST(test_service_double_start);
     HU_RUN_TEST(test_service_configure_with_ctx);
+
+    /* hu_doctor_check_imessage red-team */
+    HU_RUN_TEST(test_doctor_check_imessage_null_args_rejected);
+#if HU_HAS_IMESSAGE
+    HU_RUN_TEST(test_doctor_check_imessage_no_status_file_warns);
+    HU_RUN_TEST(test_doctor_check_imessage_breaker_tripped_reports_error);
+    HU_RUN_TEST(test_doctor_check_imessage_fresh_poll_reports_ok);
+    HU_RUN_TEST(test_doctor_check_imessage_stale_poll_reports_warn);
+    HU_RUN_TEST(test_doctor_check_imessage_partial_failures_warns);
+    HU_RUN_TEST(test_doctor_check_imessage_corrupt_status_does_not_crash);
+    HU_RUN_TEST(test_doctor_check_imessage_no_home_reports_error);
+#endif
 }

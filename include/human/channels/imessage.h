@@ -123,6 +123,54 @@ unsigned int hu_imessage_typing_duration(size_t msg_len, uint32_t seed);
 char *hu_imessage_fetch_gif(hu_allocator_t *alloc, const char *query, size_t query_len,
                             const char *api_key, size_t api_key_len);
 
+/* ── FDA-aware circuit breaker + poll status ─────────────────────────────
+ * The iMessage poller depends on sqlite read access to ~/Library/Messages/chat.db,
+ * which macOS Full Disk Access can revoke at any time (notably across rebuilds of
+ * unsigned binaries). When that happens, sqlite returns SQLITE_AUTH (23) on every
+ * open and the poll/imsg-watch loop will busy-spin forever. The circuit breaker
+ * counts consecutive AUTH/CANTOPEN errors and, after HU_IMESSAGE_BREAKER_THRESHOLD,
+ * marks the channel unhealthy and stops respawning the imsg watch subprocess.
+ * One successful poll resets the breaker. The poll-status file lets the doctor
+ * command and external observers see what state the channel is in without
+ * tailing logs. */
+
+typedef enum {
+    HU_IMESSAGE_ERR_NONE = 0,
+    HU_IMESSAGE_ERR_AUTH,     /* SQLITE_AUTH (23) — typically Full Disk Access denied */
+    HU_IMESSAGE_ERR_CANTOPEN, /* SQLITE_CANTOPEN (14) — chat.db missing or unreadable */
+    HU_IMESSAGE_ERR_BUSY,     /* SQLITE_BUSY/LOCKED — transient, retried internally */
+    HU_IMESSAGE_ERR_OTHER,    /* anything else */
+} hu_imessage_error_class_t;
+
+/* Pure classifier: maps a sqlite3 return code to an error class. */
+hu_imessage_error_class_t hu_imessage_classify_sqlite_error(int rc);
+
+/* Human-readable name for an error class ("NONE", "AUTH", "CANTOPEN", "BUSY",
+ * "OTHER"). Always non-NULL. */
+const char *hu_imessage_error_class_name(hu_imessage_error_class_t cls);
+
+#ifndef HU_IMESSAGE_BREAKER_THRESHOLD
+#define HU_IMESSAGE_BREAKER_THRESHOLD 5
+#endif
+
+bool hu_imessage_breaker_tripped(const hu_channel_t *ch);
+uint32_t hu_imessage_consecutive_failures(const hu_channel_t *ch);
+hu_imessage_error_class_t hu_imessage_last_error_class(const hu_channel_t *ch);
+int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch);
+
+/* Resolve the poll-status JSON path ("$HOME/.human/imessage.poll_status").
+ * Writes into buf; returns false if HOME unset or buffer too small. */
+bool hu_imessage_status_path(char *buf, size_t cap);
+
+#if HU_IS_TEST
+/* Drive the breaker accounting from tests with synthetic sqlite return codes.
+ * Returns true if this call caused the breaker to trip. */
+bool hu_imessage_test_record_open_result(hu_channel_t *ch, int rc, int64_t now_epoch);
+
+/* Drive a synthetic successful poll (resets breaker, advances last_success_epoch). */
+void hu_imessage_test_record_poll_success(hu_channel_t *ch, int64_t now_epoch);
+#endif
+
 #if HU_IS_TEST
 hu_error_t hu_imessage_test_inject_mock(hu_channel_t *ch, const char *session_key,
                                         size_t session_key_len, const char *content,

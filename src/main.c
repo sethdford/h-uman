@@ -539,6 +539,50 @@ static hu_error_t cmd_status(hu_allocator_t *alloc, int argc, char **argv) {
 }
 
 static hu_error_t cmd_doctor(hu_allocator_t *alloc, int argc, char **argv) {
+    /* `human doctor imessage` — focused channel diagnostics. Always available;
+     * non-iMessage builds get a single "not built in" line. */
+    if (argc >= 3 && argv[2] && strcmp(argv[2], "imessage") == 0) {
+        printf("\n  human doctor imessage — channel diagnostics\n\n");
+        hu_diag_item_t *items = NULL;
+        size_t item_count = 0;
+        size_t cap = 16;
+        items = (hu_diag_item_t *)alloc->alloc(alloc->ctx, sizeof(hu_diag_item_t) * cap);
+        if (!items)
+            return HU_ERR_OUT_OF_MEMORY;
+        int64_t now_epoch = (int64_t)time(NULL);
+        /* WARN if no successful poll in the last 10 minutes — well beyond the
+         * normal poll interval and short enough to catch silent FDA loss. */
+        const int64_t kStaleAfterSecs = 600;
+        hu_error_t err =
+            hu_doctor_check_imessage(alloc, now_epoch, kStaleAfterSecs, &items, &item_count, &cap);
+        size_t ok_n = 0, warn_n = 0, err_n = 0;
+        for (size_t i = 0; i < item_count; i++) {
+            const char *sev_str;
+            if (items[i].severity == HU_DIAG_ERR) {
+                sev_str = "error  ";
+                err_n++;
+            } else if (items[i].severity == HU_DIAG_WARN) {
+                sev_str = "warn   ";
+                warn_n++;
+            } else {
+                sev_str = "ok     ";
+                ok_n++;
+            }
+            printf("  %s %s\n", sev_str, items[i].message ? items[i].message : "");
+        }
+        printf("\n  Summary: %zu ok, %zu warnings, %zu errors\n\n", ok_n, warn_n, err_n);
+        for (size_t i = 0; i < item_count; i++) {
+            if (items[i].category)
+                alloc->free(alloc->ctx, (void *)items[i].category, strlen(items[i].category) + 1);
+            if (items[i].message)
+                alloc->free(alloc->ctx, (void *)items[i].message, strlen(items[i].message) + 1);
+        }
+        alloc->free(alloc->ctx, items, cap * sizeof(hu_diag_item_t));
+        if (err != HU_OK)
+            return err;
+        return err_n > 0 ? HU_ERR_INTERNAL : HU_OK;
+    }
+
     bool do_fix = false;
     for (int i = 2; i < argc; i++) {
         if (argv[i] && strcmp(argv[i], "--fix") == 0)

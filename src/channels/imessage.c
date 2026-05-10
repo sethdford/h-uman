@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -35,6 +37,7 @@
 #define HU_IMESSAGE_SENT_RING_SIZE  32
 #define HU_IMESSAGE_SENT_PREFIX_LEN 256
 #define HU_IMESSAGE_ROWID_FILE      ".human/imessage.rowid"
+#define HU_IMESSAGE_STATUS_FILE     ".human/imessage.poll_status"
 
 size_t hu_imessage_extract_attributed_body(const unsigned char *blob, size_t blob_len, char *out,
                                            size_t out_cap) {
@@ -108,6 +111,43 @@ static void imessage_save_rowid(int64_t rowid) {
 
 #endif
 
+/* ── FDA-aware circuit breaker: pure / no-struct helpers ───────────────── */
+
+/* sqlite3 result codes are stable ABI (see SQLITE_OK/AUTH/etc. in sqlite3.h).
+ * We use literal values here so the classifier compiles in any build profile,
+ * including test builds that do not include sqlite3.h. */
+hu_imessage_error_class_t hu_imessage_classify_sqlite_error(int rc) {
+    switch (rc) {
+        case 0:  return HU_IMESSAGE_ERR_NONE;     /* SQLITE_OK */
+        case 23: return HU_IMESSAGE_ERR_AUTH;     /* SQLITE_AUTH */
+        case 14: return HU_IMESSAGE_ERR_CANTOPEN; /* SQLITE_CANTOPEN */
+        case 5:  /* SQLITE_BUSY */
+        case 6:  return HU_IMESSAGE_ERR_BUSY;     /* SQLITE_LOCKED */
+        default: return HU_IMESSAGE_ERR_OTHER;
+    }
+}
+
+const char *hu_imessage_error_class_name(hu_imessage_error_class_t cls) {
+    switch (cls) {
+        case HU_IMESSAGE_ERR_NONE:     return "NONE";
+        case HU_IMESSAGE_ERR_AUTH:     return "AUTH";
+        case HU_IMESSAGE_ERR_CANTOPEN: return "CANTOPEN";
+        case HU_IMESSAGE_ERR_BUSY:     return "BUSY";
+        case HU_IMESSAGE_ERR_OTHER:    return "OTHER";
+    }
+    return "OTHER";
+}
+
+bool hu_imessage_status_path(char *buf, size_t cap) {
+    if (!buf || cap < 16)
+        return false;
+    const char *home = getenv("HOME");
+    if (!home || !home[0])
+        return false;
+    int n = snprintf(buf, cap, "%s/" HU_IMESSAGE_STATUS_FILE, home);
+    return n > 0 && (size_t)n < cap;
+}
+
 typedef struct hu_imessage_ctx {
     hu_allocator_t *alloc;
     char *default_target;
@@ -128,6 +168,13 @@ typedef struct hu_imessage_ctx {
     bool has_imsg_cli;
     const char *loopback_handle;
     int64_t last_ai_send_epoch;
+    /* FDA-aware circuit breaker + poll status (always present so tests + non-Apple
+     * builds can interrogate state without #ifdef gymnastics). */
+    uint32_t consecutive_open_failures;
+    bool circuit_breaker_tripped;
+    bool breaker_log_emitted; /* one-shot log gate */
+    hu_imessage_error_class_t last_error_class;
+    int64_t last_successful_poll_epoch;
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
     pid_t imsg_watch_pid;
     int imsg_watch_fd;
@@ -162,6 +209,137 @@ typedef struct hu_imessage_ctx {
     int64_t last_reaction_message_id;
 #endif
 } hu_imessage_ctx_t;
+
+/* ── Circuit breaker / status: ctx-dependent helpers (always compiled) ── */
+
+/* Persist the channel's poll status to disk. Best-effort: silently no-ops if
+ * HOME is unset or the file cannot be written. The format is intentionally a
+ * tiny, hand-emitted JSON so it can be inspected with `cat` and parsed by the
+ * doctor command without pulling in a JSON library at this layer. Creates
+ * $HOME/.human if it does not exist (matches the rowid file's lifetime
+ * assumption). */
+static void imessage_save_poll_status(const hu_imessage_ctx_t *c) {
+    if (!c)
+        return;
+    char path[512];
+    if (!hu_imessage_status_path(path, sizeof(path)))
+        return;
+    /* Ensure ~/.human exists. mkdir is idempotent (EEXIST ignored). */
+    const char *home = getenv("HOME");
+    if (home && home[0]) {
+        char dir[512];
+        int dn = snprintf(dir, sizeof(dir), "%s/.human", home);
+        if (dn > 0 && (size_t)dn < sizeof(dir))
+            (void)mkdir(dir, 0700);
+    }
+    FILE *f = fopen(path, "w");
+    if (!f)
+        return;
+    fprintf(f,
+            "{\n"
+            "  \"last_rowid\": %lld,\n"
+            "  \"last_successful_poll_epoch\": %lld,\n"
+            "  \"consecutive_open_failures\": %u,\n"
+            "  \"circuit_breaker_tripped\": %s,\n"
+            "  \"last_error_class\": \"%s\"\n"
+            "}\n",
+            (long long)c->last_rowid,
+            (long long)c->last_successful_poll_epoch,
+            (unsigned)c->consecutive_open_failures,
+            c->circuit_breaker_tripped ? "true" : "false",
+            hu_imessage_error_class_name(c->last_error_class));
+    fclose(f);
+}
+
+/* Core breaker accounting. Pure with respect to time (caller passes `now`).
+ * Returns true if this call caused the breaker to trip on this invocation. */
+static bool imessage_record_open_result(hu_imessage_ctx_t *c, int rc, int64_t now) {
+    if (!c)
+        return false;
+    hu_imessage_error_class_t cls = hu_imessage_classify_sqlite_error(rc);
+    c->last_error_class = cls;
+    if (cls == HU_IMESSAGE_ERR_NONE) {
+        bool was_tripped = c->circuit_breaker_tripped;
+        c->consecutive_open_failures = 0;
+        c->circuit_breaker_tripped = false;
+        c->breaker_log_emitted = false;
+        c->last_successful_poll_epoch = now;
+        if (was_tripped)
+            hu_log_info("imessage", NULL, "circuit breaker reset (chat.db open succeeded)");
+        return false;
+    }
+    if (cls == HU_IMESSAGE_ERR_BUSY || cls == HU_IMESSAGE_ERR_OTHER) {
+        /* Transient or unrelated failures do NOT trip the breaker; they would
+         * mask real BUSY backoff and obscure novel errors that need attention. */
+        return false;
+    }
+    /* AUTH or CANTOPEN: consecutive count drives the breaker. */
+    if (c->consecutive_open_failures < UINT32_MAX)
+        c->consecutive_open_failures++;
+    bool just_tripped = false;
+    if (!c->circuit_breaker_tripped &&
+        c->consecutive_open_failures >= HU_IMESSAGE_BREAKER_THRESHOLD) {
+        c->circuit_breaker_tripped = true;
+        just_tripped = true;
+    }
+    if (just_tripped && !c->breaker_log_emitted) {
+        c->breaker_log_emitted = true;
+        hu_log_error("imessage", NULL,
+                     "circuit breaker tripped after %u consecutive %s errors — likely Full "
+                     "Disk Access revoked. Run `human doctor imessage` and re-grant FDA on "
+                     "the binary at $(readlink -f $(which human)).",
+                     (unsigned)c->consecutive_open_failures,
+                     hu_imessage_error_class_name(cls));
+    }
+    return just_tripped;
+}
+
+static void imessage_record_poll_success(hu_imessage_ctx_t *c, int64_t now) {
+    (void)imessage_record_open_result(c, 0, now);
+}
+
+bool hu_imessage_breaker_tripped(const hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return false;
+    return ((const hu_imessage_ctx_t *)ch->ctx)->circuit_breaker_tripped;
+}
+
+uint32_t hu_imessage_consecutive_failures(const hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return 0;
+    return ((const hu_imessage_ctx_t *)ch->ctx)->consecutive_open_failures;
+}
+
+hu_imessage_error_class_t hu_imessage_last_error_class(const hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return HU_IMESSAGE_ERR_NONE;
+    return ((const hu_imessage_ctx_t *)ch->ctx)->last_error_class;
+}
+
+int64_t hu_imessage_last_success_epoch(const hu_channel_t *ch) {
+    if (!ch || !ch->ctx)
+        return 0;
+    return ((const hu_imessage_ctx_t *)ch->ctx)->last_successful_poll_epoch;
+}
+
+#if HU_IS_TEST
+bool hu_imessage_test_record_open_result(hu_channel_t *ch, int rc, int64_t now_epoch) {
+    if (!ch || !ch->ctx)
+        return false;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    bool tripped = imessage_record_open_result(c, rc, now_epoch);
+    imessage_save_poll_status(c);
+    return tripped;
+}
+
+void hu_imessage_test_record_poll_success(hu_channel_t *ch, int64_t now_epoch) {
+    if (!ch || !ch->ctx)
+        return;
+    hu_imessage_ctx_t *c = (hu_imessage_ctx_t *)ch->ctx;
+    imessage_record_poll_success(c, now_epoch);
+    imessage_save_poll_status(c);
+}
+#endif
 
 #if !HU_IS_TEST && defined(__APPLE__) && defined(__MACH__)
 
@@ -332,6 +510,11 @@ static bool imsg_cli_available(hu_imessage_ctx_t *c) {
 static void imsg_watch_start(hu_imessage_ctx_t *c) {
     if (!c || c->imsg_watch_running || !c->use_imsg_cli || !imsg_cli_available(c))
         return;
+    if (c->circuit_breaker_tripped) {
+        /* Refuse to respawn while breaker is tripped; the watch process would
+         * just exit immediately on its own AUTH read of chat.db. */
+        return;
+    }
 
     int pipefd[2];
     if (pipe(pipefd) < 0)
@@ -1220,12 +1403,24 @@ static const char *imessage_name(void *ctx) {
     return "imessage";
 }
 static bool imessage_health_check(void *ctx) {
-    (void)ctx;
 #if !defined(__APPLE__) || !defined(__MACH__)
+    (void)ctx;
     return false;
 #elif HU_IS_TEST
+    /* Honor a tripped breaker even in tests so unit tests can exercise the
+     * unhealthy path; otherwise tests stay healthy by default. */
+    if (ctx) {
+        const hu_imessage_ctx_t *c = (const hu_imessage_ctx_t *)ctx;
+        if (c->circuit_breaker_tripped)
+            return false;
+    }
     return true;
 #else
+    if (ctx) {
+        const hu_imessage_ctx_t *c = (const hu_imessage_ctx_t *)ctx;
+        if (c->circuit_breaker_tripped)
+            return false;
+    }
     const char *home = getenv("HOME");
     if (!home)
         return false;
@@ -3276,7 +3471,12 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     sqlite3 *db = NULL;
     int rc = imessage_open_chatdb(db_path, &db);
     if (rc != SQLITE_OK) {
-        hu_log_error("imessage", NULL, "cannot open chat.db: error %d", rc);
+        /* Log only when not yet circuit-broken; once tripped the breaker
+         * already explained the situation in a single high-priority line. */
+        if (!c->circuit_breaker_tripped)
+            hu_log_error("imessage", NULL, "cannot open chat.db: error %d", rc);
+        (void)imessage_record_open_result(c, rc, (int64_t)time(NULL));
+        imessage_save_poll_status(c);
         return HU_ERR_IO;
     }
 
@@ -3304,6 +3504,8 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
         hu_log_info("imessage", NULL, "late-seeded last_rowid=%lld (only new messages will be processed)",
                 (long long)c->last_rowid);
         sqlite3_close(db);
+        imessage_record_poll_success(c, (int64_t)time(NULL));
+        imessage_save_poll_status(c);
         *out_count = 0;
         return HU_OK;
     }
@@ -3581,6 +3783,9 @@ hu_error_t hu_imessage_poll(void *channel_ctx, hu_allocator_t *alloc, hu_channel
     if (count == 0 && getenv("HU_DEBUG"))
         hu_log_info("imessage", NULL, "poll: 0 messages (last_rowid=%lld)",
                 (long long)c->last_rowid);
+
+    imessage_record_poll_success(c, (int64_t)time(NULL));
+    imessage_save_poll_status(c);
 
     *out_count = count;
     return HU_OK;

@@ -21,6 +21,8 @@
 #include "human/persona.h"
 #include "test_framework.h"
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #define S(lit) (lit), (sizeof(lit) - 1)
 
@@ -1801,6 +1803,235 @@ static void imessage_dm_msg_chat_id_empty(void) {
 #endif /* HU_IS_TEST */
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * Part 24 — FDA-aware circuit breaker + poll-status file (red team)
+ *
+ * Models macOS Full Disk Access being revoked at runtime (the failure mode
+ * we observed in production: 270MB of repeated SQLITE_AUTH errors after a
+ * binary inode change). Verifies the breaker:
+ *   • trips after exactly N consecutive AUTH/CANTOPEN errors
+ *   • does NOT trip on transient SQLITE_BUSY/LOCKED
+ *   • does NOT trip on novel (OTHER) errors
+ *   • resets on the first successful poll
+ *   • marks the channel unhealthy via health_check
+ * Also covers the status-file roundtrip and pure classifier corners.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+#if HU_IS_TEST
+static void imessage_classify_known_codes(void) {
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(0),  HU_IMESSAGE_ERR_NONE);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(23), HU_IMESSAGE_ERR_AUTH);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(14), HU_IMESSAGE_ERR_CANTOPEN);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(5),  HU_IMESSAGE_ERR_BUSY);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(6),  HU_IMESSAGE_ERR_BUSY);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(99), HU_IMESSAGE_ERR_OTHER);
+    HU_ASSERT_EQ(hu_imessage_classify_sqlite_error(-1), HU_IMESSAGE_ERR_OTHER);
+}
+
+static void imessage_classify_name_roundtrip(void) {
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_NONE),     "NONE") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_AUTH),     "AUTH") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_CANTOPEN), "CANTOPEN") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_BUSY),     "BUSY") == 0);
+    HU_ASSERT_TRUE(strcmp(hu_imessage_error_class_name(HU_IMESSAGE_ERR_OTHER),    "OTHER") == 0);
+}
+
+static void imessage_breaker_trips_after_threshold_auth(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    bool tripped = false;
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD - 1; i++) {
+        tripped = hu_imessage_test_record_open_result(&ch, 23 /* AUTH */, 1000);
+        HU_ASSERT_FALSE(tripped);
+        HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+        HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), i + 1);
+    }
+    tripped = hu_imessage_test_record_open_result(&ch, 23, 1000);
+    HU_ASSERT_TRUE(tripped);
+    HU_ASSERT_TRUE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_last_error_class(&ch), HU_IMESSAGE_ERR_AUTH);
+    /* Re-tripping is idempotent: should not double-trip on subsequent failures. */
+    tripped = hu_imessage_test_record_open_result(&ch, 23, 1001);
+    HU_ASSERT_FALSE(tripped);
+    HU_ASSERT_TRUE(hu_imessage_breaker_tripped(&ch));
+    /* health_check now reports unhealthy. */
+    HU_ASSERT_FALSE(ch.vtable->health_check(ch.ctx));
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_breaker_trips_on_cantopen_too(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 14 /* CANTOPEN */, 2000);
+    HU_ASSERT_TRUE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_last_error_class(&ch), HU_IMESSAGE_ERR_CANTOPEN);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_breaker_does_not_trip_on_busy(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    /* 100 BUSY errors must not trip — they are transient by definition. */
+    for (int i = 0; i < 100; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 5 /* BUSY */, 3000);
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 0u);
+    HU_ASSERT_EQ(hu_imessage_last_error_class(&ch), HU_IMESSAGE_ERR_BUSY);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_breaker_does_not_trip_on_other_errors(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    /* Unknown rc (e.g. SQLITE_CORRUPT=11) is suspicious but not the FDA pattern. */
+    for (int i = 0; i < 50; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 11, 4000);
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 0u);
+    HU_ASSERT_EQ(hu_imessage_last_error_class(&ch), HU_IMESSAGE_ERR_OTHER);
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_breaker_resets_on_success(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    /* Trip the breaker. */
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 23, 5000);
+    HU_ASSERT_TRUE(hu_imessage_breaker_tripped(&ch));
+    /* One success clears it. */
+    hu_imessage_test_record_poll_success(&ch, 6000);
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 0u);
+    HU_ASSERT_EQ(hu_imessage_last_error_class(&ch), HU_IMESSAGE_ERR_NONE);
+    HU_ASSERT_EQ(hu_imessage_last_success_epoch(&ch), 6000);
+    /* health_check happy again. */
+    HU_ASSERT_TRUE(ch.vtable->health_check(ch.ctx));
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_breaker_partial_streak_resets_on_success(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    /* Build up a partial streak below threshold. */
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD - 1; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 23, 7000);
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), HU_IMESSAGE_BREAKER_THRESHOLD - 1);
+    /* A successful poll wipes the streak so the next failure starts fresh. */
+    hu_imessage_test_record_poll_success(&ch, 7100);
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 0u);
+    /* New AUTH should restart counting from 1. */
+    (void)hu_imessage_test_record_open_result(&ch, 23, 7200);
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 1u);
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    hu_imessage_destroy(&ch);
+}
+
+static void imessage_status_path_resolves_under_home(void) {
+    char path[512];
+    /* HOME is always set in the test harness. */
+    HU_ASSERT_TRUE(hu_imessage_status_path(path, sizeof(path)));
+    HU_ASSERT_TRUE(strstr(path, "/.human/imessage.poll_status") != NULL);
+}
+
+static void imessage_status_path_rejects_tiny_buffer(void) {
+    char tiny[8];
+    HU_ASSERT_FALSE(hu_imessage_status_path(tiny, sizeof(tiny)));
+}
+
+static void imessage_status_path_handles_no_home(void) {
+    /* Save and clear HOME, then restore. */
+    const char *saved = getenv("HOME");
+    char saved_buf[1024];
+    saved_buf[0] = '\0';
+    if (saved)
+        snprintf(saved_buf, sizeof(saved_buf), "%s", saved);
+    unsetenv("HOME");
+    char path[512];
+    HU_ASSERT_FALSE(hu_imessage_status_path(path, sizeof(path)));
+    if (saved_buf[0])
+        setenv("HOME", saved_buf, 1);
+}
+
+static void imessage_status_file_roundtrip(void) {
+    /* Pin HOME to a guaranteed-writable tmp dir for determinism — other test
+     * suites may have transiently swapped HOME and not all platforms restore
+     * it before we run. The save helper will mkdir(~/.human) on demand. */
+    const char *prev_home = getenv("HOME");
+    char *saved = prev_home ? strdup(prev_home) : NULL;
+    setenv("HOME", "/tmp/hu_imsg_status_roundtrip", 1);
+    /* Best-effort cleanup of stale dir from a previous run (don't fail if it
+     * doesn't exist or contains files; mkdir handles that next). */
+    char prev_status[512];
+    snprintf(prev_status, sizeof(prev_status),
+             "/tmp/hu_imsg_status_roundtrip/.human/imessage.poll_status");
+    unlink(prev_status);
+
+    hu_allocator_t alloc = hu_system_allocator();
+    hu_channel_t ch;
+    HU_ASSERT_EQ(hu_imessage_create(&alloc, "+15551234567", 12, NULL, 0, &ch), HU_OK);
+    (void)hu_imessage_test_record_open_result(&ch, 23, 8000);
+    (void)hu_imessage_test_record_open_result(&ch, 23, 8000);
+    char path[512];
+    HU_ASSERT_TRUE(hu_imessage_status_path(path, sizeof(path)));
+    FILE *f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    char buf[1024];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    HU_ASSERT_TRUE(strstr(buf, "\"consecutive_open_failures\": 2") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"last_error_class\": \"AUTH\"") != NULL);
+    HU_ASSERT_TRUE(strstr(buf, "\"circuit_breaker_tripped\": false") != NULL);
+    for (uint32_t i = 0; i < HU_IMESSAGE_BREAKER_THRESHOLD; i++)
+        (void)hu_imessage_test_record_open_result(&ch, 23, 8000);
+    f = fopen(path, "r");
+    HU_ASSERT_NOT_NULL(f);
+    n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    HU_ASSERT_TRUE(strstr(buf, "\"circuit_breaker_tripped\": true") != NULL);
+    hu_imessage_destroy(&ch);
+
+    unlink(prev_status);
+    if (saved) {
+        setenv("HOME", saved, 1);
+        free(saved);
+    } else {
+        unsetenv("HOME");
+    }
+}
+
+static void imessage_breaker_null_safe(void) {
+    /* Accessors must tolerate NULL channel / NULL ctx. */
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(NULL));
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(NULL), 0u);
+    HU_ASSERT_EQ(hu_imessage_last_error_class(NULL), HU_IMESSAGE_ERR_NONE);
+    HU_ASSERT_EQ(hu_imessage_last_success_epoch(NULL), 0);
+    hu_channel_t ch = {0}; /* ctx == NULL */
+    HU_ASSERT_FALSE(hu_imessage_breaker_tripped(&ch));
+    HU_ASSERT_EQ(hu_imessage_consecutive_failures(&ch), 0u);
+}
+
+static void imessage_breaker_test_seam_null_safe(void) {
+    /* Test seam must not crash on NULL channel. */
+    HU_ASSERT_FALSE(hu_imessage_test_record_open_result(NULL, 23, 9000));
+    hu_imessage_test_record_poll_success(NULL, 9000);
+    hu_channel_t ch = {0};
+    HU_ASSERT_FALSE(hu_imessage_test_record_open_result(&ch, 23, 9000));
+    hu_imessage_test_record_poll_success(&ch, 9000);
+}
+#endif /* HU_IS_TEST */
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * Suite registration
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -2021,6 +2252,24 @@ void run_imessage_adversarial_tests(void) {
     /* Part 23: Group chat routing */
     HU_RUN_TEST(imessage_group_msg_chat_id_populated);
     HU_RUN_TEST(imessage_dm_msg_chat_id_empty);
+
+    /* Part 24: FDA-aware circuit breaker + poll-status file (red team) */
+#if HU_IS_TEST
+    HU_RUN_TEST(imessage_classify_known_codes);
+    HU_RUN_TEST(imessage_classify_name_roundtrip);
+    HU_RUN_TEST(imessage_breaker_trips_after_threshold_auth);
+    HU_RUN_TEST(imessage_breaker_trips_on_cantopen_too);
+    HU_RUN_TEST(imessage_breaker_does_not_trip_on_busy);
+    HU_RUN_TEST(imessage_breaker_does_not_trip_on_other_errors);
+    HU_RUN_TEST(imessage_breaker_resets_on_success);
+    HU_RUN_TEST(imessage_breaker_partial_streak_resets_on_success);
+    HU_RUN_TEST(imessage_status_path_resolves_under_home);
+    HU_RUN_TEST(imessage_status_path_rejects_tiny_buffer);
+    HU_RUN_TEST(imessage_status_path_handles_no_home);
+    HU_RUN_TEST(imessage_status_file_roundtrip);
+    HU_RUN_TEST(imessage_breaker_null_safe);
+    HU_RUN_TEST(imessage_breaker_test_seam_null_safe);
+#endif
 }
 #else  /* !HU_HAS_IMESSAGE */
 void run_imessage_adversarial_tests(void) {

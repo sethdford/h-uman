@@ -42,4 +42,16 @@ hu_error_t hu_doctor_check_memory_health(hu_allocator_t *alloc, const hu_config_
 hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items, size_t *count,
                                   size_t *cap);
 
+/* Diagnose the iMessage channel: chat.db readability, imsg CLI presence on PATH,
+ * poll-status file freshness, and circuit-breaker state. Always available so
+ * non-iMessage builds get a single OK/SKIP line rather than a missing symbol.
+ *
+ * `now_epoch` is the current wall-clock time used for staleness comparisons;
+ * the caller passes it to keep this function pure with respect to time. The
+ * `stale_after_secs` argument controls the WARN threshold for "no successful
+ * poll in the last N seconds" (e.g. 600 for 10 minutes). */
+hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
+                                    int64_t stale_after_secs, hu_diag_item_t **items,
+                                    size_t *count, size_t *cap);
+
 #endif /* HU_DOCTOR_H */

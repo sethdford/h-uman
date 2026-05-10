@@ -1,6 +1,6 @@
 # Eval Suites Manifest
 
-Version: **2026-05-10a** (bump on any task add/remove/reword or judge profile change)
+Version: **2026-05-10b** (bump on any task add/remove/reword or judge profile change)
 
 ## Suites
 
@@ -42,6 +42,48 @@ Human-facing HuLa documentation (config, CLI, ethics, traces): [`docs/guides/hul
 2. **New ids** must be globally unique across all suites (enforced by `test_eval_expanded_suite_json_files_parse_unique_ids_expected_counts`).
 3. **Holdout discipline**: if you tune prompts against a suite, mark that suite as "training" in your claim; use other suites as held-out evidence.
 4. **Judge model**: pin in your claim (see `docs/standards/ai/capability-claims.md`). Default harness judge: `gpt-4o-mini` via `ADV_EVAL_MODEL`.
+
+## iMessage Tier-1 holdout (2026-05-10)
+
+For the M6 mission ("Tier 1 score 8/10+ on naturalness eval"), `imessage_humanness.json`
+contains 8 tasks. **3 tasks are reserved as a permanent held-out slice — never
+tune prompts against them, never read their `expected`/`rubric` while editing
+prompts, and report scores on them separately**:
+
+| Held-out id | Why this one |
+| --- | --- |
+| `imsg-005` (thanks) | Cheapest path to "AI politeness" failure mode; very sensitive to system-prompt drift. |
+| `imsg-007` (no false shared memory) | Core hallucination/grounding axis; must not regress while tuning brevity. |
+| `imsg-008` (vent empathy) | Vulnerability/social-intelligence axis; orthogonal to brevity tuning. |
+
+The remaining 5 (`imsg-001..004`, `imsg-006`) are the training-eligible slice.
+This is convention-only (no JSON change) so the harness still runs all 8;
+report the holdout subset's mean score independently when claiming progress.
+
+## Live baseline runbook
+
+`./build/human eval run eval_suites/<suite>.json` calls the configured
+**`default_provider`**. As of 2026-05-10 the canonical local setup uses
+`mlx_local` (port 8741), which loads on demand and may be cold. To capture a
+baseline manually:
+
+```bash
+# 1. Validate (no provider needed) — should print: Validated 25 suites, 237 tasks, 0 errors
+./build/human eval validate eval_suites
+
+# 2. Bring up the local provider, wait for the model to load
+launchctl kickstart -k gui/$UID/ai.human.mlx-server
+until curl -s -m 1 http://127.0.0.1:8741/v1/models > /dev/null; do sleep 2; done
+
+# 3. Run the new naturalness suites and persist the JSON for diff comparisons
+./build/human eval run eval_suites/imessage_humanness.json   > /tmp/baseline-imsg.json
+./build/human eval run eval_suites/tier1_naturalness.json    > /tmp/baseline-tier1.json
+./build/human eval compare /tmp/baseline-imsg.json /tmp/baseline-tier1.json
+```
+
+If `mlx_local` is unreachable the run will fail with `curl POST failed: code=7`
+in the daemon logs; switching `default_provider` to a Vertex/Gemini ADC entry
+is the no-op fallback (already configured in `~/.human/config.json`).
 
 ## Changelog
 

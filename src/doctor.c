@@ -10,8 +10,12 @@
 #include <string.h>
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 #include "human/persona.h"
+#if HU_HAS_IMESSAGE
+#include "human/channels/imessage.h"
+#endif
 
 #define HU_DOCTOR_LINE_CATEGORY "doctor_line"
 
@@ -364,6 +368,227 @@ hu_error_t hu_doctor_check_skills(hu_allocator_t *alloc, hu_diag_item_t **items,
                      "[doctor] Skill registry: https://github.com/human/skill-registry");
 
     return HU_OK;
+}
+
+/* ── iMessage channel diagnostics ────────────────────────────────────── */
+
+#if HU_HAS_IMESSAGE && !defined(_WIN32)
+/* Lightweight scan of a key:value pair from the poll-status JSON. The status
+ * file is hand-emitted and small, so a substring search is sufficient and
+ * avoids pulling in a JSON parser at this layer. Returns true on hit. */
+static bool doctor_imsg_status_extract_int(const char *blob, const char *key, int64_t *out) {
+    const char *p = strstr(blob, key);
+    if (!p)
+        return false;
+    p = strchr(p, ':');
+    if (!p)
+        return false;
+    p++;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    char *end = NULL;
+    long long v = strtoll(p, &end, 10);
+    if (end == p)
+        return false;
+    *out = (int64_t)v;
+    return true;
+}
+
+static bool doctor_imsg_status_extract_str(const char *blob, const char *key, char *out,
+                                           size_t cap) {
+    const char *p = strstr(blob, key);
+    if (!p)
+        return false;
+    p = strchr(p, ':');
+    if (!p)
+        return false;
+    p++;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (*p != '"')
+        return false;
+    p++;
+    const char *end = strchr(p, '"');
+    if (!end)
+        return false;
+    size_t n = (size_t)(end - p);
+    if (n >= cap)
+        n = cap - 1;
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return true;
+}
+
+static bool doctor_imsg_status_extract_bool(const char *blob, const char *key, bool *out) {
+    const char *p = strstr(blob, key);
+    if (!p)
+        return false;
+    p = strchr(p, ':');
+    if (!p)
+        return false;
+    p++;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (strncmp(p, "true", 4) == 0) {
+        *out = true;
+        return true;
+    }
+    if (strncmp(p, "false", 5) == 0) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+#endif
+
+hu_error_t hu_doctor_check_imessage(hu_allocator_t *alloc, int64_t now_epoch,
+                                    int64_t stale_after_secs, hu_diag_item_t **items,
+                                    size_t *count, size_t *cap) {
+    if (!alloc || !items || !count || !cap)
+        return HU_ERR_INVALID_ARGUMENT;
+
+#if !HU_HAS_IMESSAGE || defined(_WIN32)
+    (void)now_epoch;
+    (void)stale_after_secs;
+    return doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                            "[doctor] iMessage: not built into this binary "
+                            "(HU_ENABLE_IMESSAGE=OFF)");
+#else
+    /* 1. chat.db readability — the FDA gate. */
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) {
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR,
+                         "[doctor] iMessage: $HOME is not set; cannot locate chat.db");
+    } else {
+        char db_path[768];
+        int n = snprintf(db_path, sizeof(db_path), "%s/Library/Messages/chat.db", home);
+        if (n > 0 && (size_t)n < sizeof(db_path)) {
+            if (access(db_path, R_OK) == 0) {
+                char *msg = hu_sprintf(alloc, "[doctor] iMessage chat.db: readable (%s)", db_path);
+                if (msg) {
+                    doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+                    alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+                }
+            } else {
+                doctor_push_line(
+                    alloc, items, count, cap, HU_DIAG_ERR,
+                    "[doctor] iMessage chat.db: NOT readable — grant Full Disk Access to "
+                    "$(readlink -f $(which human)) in System Settings → Privacy & Security");
+            }
+        }
+    }
+
+    /* 2. imsg CLI availability — needed for send/react/watch. */
+#if HU_IS_TEST
+    /* Tests assert deterministic output regardless of host PATH. */
+    doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                     "[doctor] imsg CLI: skipped (test mode)");
+#else
+    if (hu_exe_on_path("imsg"))
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                         "[doctor] imsg CLI: on PATH (send + react + watch enabled)");
+    else
+        doctor_push_line(
+            alloc, items, count, cap, HU_DIAG_WARN,
+            "[doctor] imsg CLI: not on PATH — fallback to AppleScript only "
+            "(install steipete/imsg for send/react/watch)");
+#endif
+
+    /* 3. Poll-status file: presence + freshness + breaker. */
+    char status_path[512];
+    if (!hu_imessage_status_path(status_path, sizeof(status_path))) {
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                         "[doctor] iMessage poll status: cannot resolve path "
+                         "(HOME unset?)");
+        return HU_OK;
+    }
+
+    FILE *f = fopen(status_path, "r");
+    if (!f) {
+        doctor_push_line(
+            alloc, items, count, cap, HU_DIAG_WARN,
+            "[doctor] iMessage poll status: file missing — daemon has not polled yet "
+            "(start `human service-loop` and re-run)");
+        return HU_OK;
+    }
+    char blob[2048];
+    size_t blen = fread(blob, 1, sizeof(blob) - 1, f);
+    fclose(f);
+    blob[blen] = '\0';
+
+    int64_t last_rowid = -1;
+    int64_t last_success = 0;
+    int64_t consecutive = 0;
+    bool tripped = false;
+    char err_class[32];
+    err_class[0] = '\0';
+    (void)doctor_imsg_status_extract_int(blob, "\"last_rowid\"", &last_rowid);
+    (void)doctor_imsg_status_extract_int(blob, "\"last_successful_poll_epoch\"", &last_success);
+    (void)doctor_imsg_status_extract_int(blob, "\"consecutive_open_failures\"", &consecutive);
+    (void)doctor_imsg_status_extract_bool(blob, "\"circuit_breaker_tripped\"", &tripped);
+    (void)doctor_imsg_status_extract_str(blob, "\"last_error_class\"", err_class, sizeof(err_class));
+
+    if (tripped) {
+        char *msg = hu_sprintf(
+            alloc,
+            "[doctor] iMessage circuit breaker: TRIPPED (%lld consecutive %s errors) — "
+            "re-grant Full Disk Access and restart the daemon",
+            (long long)consecutive,
+            err_class[0] ? err_class : "?");
+        if (msg) {
+            doctor_push_line(alloc, items, count, cap, HU_DIAG_ERR, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    } else if (consecutive > 0) {
+        char *msg = hu_sprintf(
+            alloc, "[doctor] iMessage circuit breaker: OK (%lld recent failures, last=%s)",
+            (long long)consecutive, err_class[0] ? err_class : "?");
+        if (msg) {
+            doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    } else {
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_OK,
+                         "[doctor] iMessage circuit breaker: OK");
+    }
+
+    if (last_rowid >= 0) {
+        char *msg = hu_sprintf(alloc, "[doctor] iMessage last_rowid: %lld",
+                               (long long)last_rowid);
+        if (msg) {
+            doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+            alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+        }
+    }
+
+    if (last_success <= 0) {
+        doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN,
+                         "[doctor] iMessage poll: never recorded a successful poll");
+    } else {
+        int64_t age = now_epoch - last_success;
+        if (age < 0)
+            age = 0;
+        if (stale_after_secs > 0 && age > stale_after_secs) {
+            char *msg = hu_sprintf(
+                alloc, "[doctor] iMessage poll: STALE — last success %lld seconds ago",
+                (long long)age);
+            if (msg) {
+                doctor_push_line(alloc, items, count, cap, HU_DIAG_WARN, msg);
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+            }
+        } else {
+            char *msg = hu_sprintf(
+                alloc, "[doctor] iMessage poll: fresh (last success %lld seconds ago)",
+                (long long)age);
+            if (msg) {
+                doctor_push_line(alloc, items, count, cap, HU_DIAG_OK, msg);
+                alloc->free(alloc->ctx, msg, strlen(msg) + 1);
+            }
+        }
+    }
+
+    return HU_OK;
+#endif
 }
 
 /* ── Config semantics (existing, enhanced) ───────────────────────────── */
