@@ -613,6 +613,7 @@ set(HU_CORE_SOURCES
     src/agent/autodream.c
     src/agent/case_based.c
     src/agent/response_verifier.c
+    src/persona/persona_deltas.c
     src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
     src/memory/lifecycle/hygiene.c
@@ -2211,6 +2212,7 @@ set(HU_TEST_SOURCES
     tests/test_w2_autodream.c
     tests/test_w3_multigraph.c
     tests/test_w4_verifier.c
+    tests/test_w5_persona_deltas.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
