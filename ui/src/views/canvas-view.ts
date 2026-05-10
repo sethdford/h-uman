@@ -343,8 +343,12 @@ export class CanvasView extends GatewayAwareLitElement {
       }
 
       @keyframes hu-slide-in-right {
-        from { transform: translateX(100%); }
-        to { transform: translateX(0); }
+        from {
+          transform: translateX(100%);
+        }
+        to {
+          transform: translateX(0);
+        }
       }
 
       .version-panel-header {
@@ -510,8 +514,7 @@ export class CanvasView extends GatewayAwareLitElement {
           title: c.title || c.canvas_id,
           format: resolveFormat(c.format),
           content: c.content || "",
-          imports:
-            c.imports && typeof c.imports === "object" ? c.imports : {},
+          imports: c.imports && typeof c.imports === "object" ? c.imports : {},
           language: c.language || "",
           versionSeq: c.version_seq ?? 0,
           status: "active" as const,
@@ -616,9 +619,7 @@ export class CanvasView extends GatewayAwareLitElement {
       if (res?.content !== undefined) {
         const sid = this.selectedId;
         this.canvases = this.canvases.map((c) =>
-          c.id === sid
-            ? { ...c, content: res.content!, versionSeq: res.version_seq ?? seq }
-            : c,
+          c.id === sid ? { ...c, content: res.content!, versionSeq: res.version_seq ?? seq } : c,
         );
       }
     } catch {
@@ -635,8 +636,12 @@ export class CanvasView extends GatewayAwareLitElement {
           <button
             class="version-panel-close"
             aria-label="Close versions"
-            @click=${() => { this._versionsOpen = false; }}
-          >${icons.x}</button>
+            @click=${() => {
+              this._versionsOpen = false;
+            }}
+          >
+            ${icons.x}
+          </button>
         </div>
         ${this._versions.map(
           (v) => html`

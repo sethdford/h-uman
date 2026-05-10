@@ -1068,9 +1068,27 @@ export class DemoGatewayClient extends EventTarget {
     skills: makeSkills(),
     nodes: [...DEMO_NODES],
     projects: [
-      { id: "proj-1", name: "h-uman Core", instructions: "", pinned: true, color: "var(--hu-brand-primary)" },
-      { id: "proj-2", name: "UI Dashboard", instructions: "", pinned: false, color: "var(--hu-brand-secondary)" },
-      { id: "proj-3", name: "Research", instructions: "", pinned: false, color: "var(--hu-brand-tertiary)" },
+      {
+        id: "proj-1",
+        name: "h-uman Core",
+        instructions: "",
+        pinned: true,
+        color: "var(--hu-brand-primary)",
+      },
+      {
+        id: "proj-2",
+        name: "UI Dashboard",
+        instructions: "",
+        pinned: false,
+        color: "var(--hu-brand-secondary)",
+      },
+      {
+        id: "proj-3",
+        name: "Research",
+        instructions: "",
+        pinned: false,
+        color: "var(--hu-brand-tertiary)",
+      },
     ] as Array<{ id: string; name: string; instructions: string; pinned: boolean; color: string }>,
   };
 
@@ -1384,7 +1402,13 @@ export class DemoGatewayClient extends EventTarget {
       case "projects.create": {
         const name = (params?.name as string) ?? "Untitled";
         const id = `proj-${Date.now()}`;
-        const proj = { id, name, instructions: "", pinned: false, color: "var(--hu-text-tertiary)" };
+        const proj = {
+          id,
+          name,
+          instructions: "",
+          pinned: false,
+          color: "var(--hu-text-tertiary)",
+        };
         this.state.projects.push(proj);
         return { project: proj };
       }
@@ -2528,20 +2552,46 @@ export class DemoGatewayClient extends EventTarget {
       case "mcp.resources.list":
         return {
           resources: [
-            { uri: "file:///project/README.md", name: "Project README", description: "Main project documentation", mimeType: "text/markdown" },
-            { uri: "db://main/users", name: "Users table", description: "User database table schema", mimeType: "application/json" },
+            {
+              uri: "file:///project/README.md",
+              name: "Project README",
+              description: "Main project documentation",
+              mimeType: "text/markdown",
+            },
+            {
+              uri: "db://main/users",
+              name: "Users table",
+              description: "User database table schema",
+              mimeType: "application/json",
+            },
           ],
           templates: [
-            { uriTemplate: "file:///project/{path}", name: "Project files", description: "Access project files by path" },
+            {
+              uriTemplate: "file:///project/{path}",
+              name: "Project files",
+              description: "Access project files by path",
+            },
           ],
         };
       case "mcp.tools.list":
         return {
           tools: [
-            { name: "read_file", description: "Read a file from the filesystem", server: "filesystem" },
+            {
+              name: "read_file",
+              description: "Read a file from the filesystem",
+              server: "filesystem",
+            },
             { name: "write_file", description: "Write content to a file", server: "filesystem" },
-            { name: "search_code", description: "Search codebase using ripgrep", server: "filesystem" },
-            { name: "run_query", description: "Execute a SQL query against the database", server: "database" },
+            {
+              name: "search_code",
+              description: "Search codebase using ripgrep",
+              server: "filesystem",
+            },
+            {
+              name: "run_query",
+              description: "Execute a SQL query against the database",
+              server: "database",
+            },
             { name: "web_fetch", description: "Fetch content from a URL", server: "browser" },
           ],
         };

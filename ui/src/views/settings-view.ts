@@ -364,8 +364,12 @@ export class ScSettingsView extends LitElement {
       animation: hu-settings-fade var(--hu-duration-fast, 150ms) var(--hu-ease-out) both;
     }
     @keyframes hu-settings-fade {
-      from { opacity: 0; }
-      to { opacity: 1; }
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
     }
 
     .loading {

@@ -162,11 +162,7 @@ export class ScInput extends LitElement {
           />
         </div>
         ${this.error
-          ? html`<span
-              class="error-msg"
-              id=${errorId}
-              role="alert"
-              aria-live="polite"
+          ? html`<span class="error-msg" id=${errorId} role="alert" aria-live="polite"
               >${this.error}</span
             >`
           : null}

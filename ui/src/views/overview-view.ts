@@ -618,11 +618,15 @@ export class ScOverviewView extends GatewayAwareLitElement {
     if (this.loading) return this._renderSkeleton();
     return html`
       ${this.error
-        ? html`<hu-empty-state .icon=${icons.warning} heading="Connection Error" description=${this.error}>
+        ? html`<hu-empty-state
+            .icon=${icons.warning}
+            heading="Connection Error"
+            description=${this.error}
+          >
             <hu-button variant="primary" @click=${() => this.load()}> Retry </hu-button>
           </hu-empty-state>`
         : html`${this._renderHero()} ${this._renderMetrics()} ${this._renderQuickActions()}
-      ${this._renderDetails()}`}
+          ${this._renderDetails()}`}
     `;
   }
 
@@ -649,7 +653,13 @@ export class ScOverviewView extends GatewayAwareLitElement {
             ${this.lastLoadedAt
               ? html`<span class="staleness">${this.stalenessLabel}</span>`
               : nothing}
-            <hu-button variant="ghost" size="sm" @click=${() => this.load()} aria-label="Refresh dashboard">${icons.refresh}</hu-button>
+            <hu-button
+              variant="ghost"
+              size="sm"
+              @click=${() => this.load()}
+              aria-label="Refresh dashboard"
+              >${icons.refresh}</hu-button
+            >
           </div>
         </hu-section-header>
         <div class="hero-inner">

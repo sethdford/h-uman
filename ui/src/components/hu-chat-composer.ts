@@ -64,7 +64,8 @@ export class ScChatComposer extends LitElement {
   @property({ type: Number, attribute: "active-memories" }) activeMemories = 0;
   @property({ type: Array }) models: Array<{ id: string; name: string; provider?: string }> = [];
   @property({ type: String }) persona = "";
-  @property({ type: Array }) personas: Array<{ id: string; name: string; description?: string }> = [];
+  @property({ type: Array }) personas: Array<{ id: string; name: string; description?: string }> =
+    [];
 
   @state() private _dragOver = false;
   @state() private _attachedFiles: FilePreviewItem[] = [];
@@ -823,7 +824,13 @@ export class ScChatComposer extends LitElement {
       new CustomEvent("hu-send", {
         bubbles: true,
         composed: true,
-        detail: { message: msg, files, mentionedFiles, thinkingEnabled: this.thinkingEnabled, researchEnabled: this.researchEnabled },
+        detail: {
+          message: msg,
+          files,
+          mentionedFiles,
+          thinkingEnabled: this.thinkingEnabled,
+          researchEnabled: this.researchEnabled,
+        },
       }),
     );
   }
@@ -1130,9 +1137,7 @@ export class ScChatComposer extends LitElement {
               class="thinking-toggle ${this.researchEnabled ? "active" : ""}"
               type="button"
               @click=${this._toggleResearch}
-              aria-label=${this.researchEnabled
-                ? "Disable research mode"
-                : "Enable research mode"}
+              aria-label=${this.researchEnabled ? "Disable research mode" : "Enable research mode"}
               aria-pressed=${this.researchEnabled}
               title="Research mode (${this.researchEnabled ? "on" : "off"})"
             >

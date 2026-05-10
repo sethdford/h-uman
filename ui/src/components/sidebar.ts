@@ -339,11 +339,21 @@ export class ScSidebar extends LitElement {
         transform: translateX(0);
       }
     }
-    .nav-section .nav-item:nth-child(1) { animation-delay: 50ms; }
-    .nav-section .nav-item:nth-child(2) { animation-delay: 100ms; }
-    .nav-section .nav-item:nth-child(3) { animation-delay: 150ms; }
-    .nav-section .nav-item:nth-child(4) { animation-delay: 200ms; }
-    .nav-section .nav-item:nth-child(5) { animation-delay: 250ms; }
+    .nav-section .nav-item:nth-child(1) {
+      animation-delay: 50ms;
+    }
+    .nav-section .nav-item:nth-child(2) {
+      animation-delay: 100ms;
+    }
+    .nav-section .nav-item:nth-child(3) {
+      animation-delay: 150ms;
+    }
+    .nav-section .nav-item:nth-child(4) {
+      animation-delay: 200ms;
+    }
+    .nav-section .nav-item:nth-child(5) {
+      animation-delay: 250ms;
+    }
 
     .nav-item {
       &:active {
@@ -621,7 +631,9 @@ export class ScSidebar extends LitElement {
           data-nav-id=${item.id}
           ?aria-current=${this.activeTab === item.id}
           aria-label=${item.label}
-          aria-describedby=${this._showShortcutTooltip && this._hoveredItemId === item.id ? `shortcut-${item.id}` : undefined}
+          aria-describedby=${this._showShortcutTooltip && this._hoveredItemId === item.id
+            ? `shortcut-${item.id}`
+            : undefined}
           title=${this.collapsed ? item.label : undefined}
           @click=${() => this._dispatchTabChange(item.id)}
           @mouseenter=${() => this._dispatchNavHover(item.id)}
@@ -656,18 +668,16 @@ export class ScSidebar extends LitElement {
         </header>
 
         <nav class="nav" aria-label="Main navigation" @keydown=${this._onNavKeyDown}>
-          <div class="nav-section">
-            ${PRIMARY_NAV.map((item) => this._renderNavItem(item))}
-          </div>
+          <div class="nav-section">${PRIMARY_NAV.map((item) => this._renderNavItem(item))}</div>
           <div class="nav-divider"></div>
-          <div class="nav-section">
-            ${SECONDARY_NAV.map((item) => this._renderNavItem(item))}
-          </div>
+          <div class="nav-section">${SECONDARY_NAV.map((item) => this._renderNavItem(item))}</div>
           <div class="nav-divider"></div>
           <div class="nav-section">
             <button
               class="nav-group-label"
-              @click=${() => { this._systemOpen = !this._systemOpen; }}
+              @click=${() => {
+                this._systemOpen = !this._systemOpen;
+              }}
               aria-expanded=${this._systemOpen}
             >
               <span class="chevron ${this._systemOpen ? "open" : ""}">${icons.chevron}</span>
@@ -935,7 +945,10 @@ export class ScSidebar extends LitElement {
     const buttons = Array.from(nav.querySelectorAll<HTMLElement>(".nav-item"));
     const idx = buttons.indexOf(e.target as HTMLElement);
     if (idx === -1) return;
-    const next = e.key === "ArrowDown" ? (idx + 1) % buttons.length : (idx - 1 + buttons.length) % buttons.length;
+    const next =
+      e.key === "ArrowDown"
+        ? (idx + 1) % buttons.length
+        : (idx - 1 + buttons.length) % buttons.length;
     buttons[next].focus();
   }
 

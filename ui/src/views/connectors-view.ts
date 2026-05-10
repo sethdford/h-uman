@@ -254,7 +254,9 @@ export class ConnectorsView extends GatewayAwareLitElement {
           class="tab-btn"
           role="tab"
           aria-selected=${String(this._activeTab === "servers")}
-          @click=${() => { this._activeTab = "servers"; }}
+          @click=${() => {
+            this._activeTab = "servers";
+          }}
         >
           Servers <span class="section-count">(${this._servers.length})</span>
         </button>
@@ -262,7 +264,9 @@ export class ConnectorsView extends GatewayAwareLitElement {
           class="tab-btn"
           role="tab"
           aria-selected=${String(this._activeTab === "tools")}
-          @click=${() => { this._activeTab = "tools"; }}
+          @click=${() => {
+            this._activeTab = "tools";
+          }}
         >
           Tools <span class="section-count">(${this._tools.length})</span>
         </button>
@@ -270,7 +274,9 @@ export class ConnectorsView extends GatewayAwareLitElement {
           class="tab-btn"
           role="tab"
           aria-selected=${String(this._activeTab === "resources")}
-          @click=${() => { this._activeTab = "resources"; }}
+          @click=${() => {
+            this._activeTab = "resources";
+          }}
         >
           Resources <span class="section-count">(${this._resources.length})</span>
         </button>
@@ -301,8 +307,7 @@ export class ConnectorsView extends GatewayAwareLitElement {
                 <div class="server-header">
                   <span class="server-name">${s.name}</span>
                   <span class="status-badge ${s.status}">
-                    ${s.status === "connected" ? icons.check : icons.x}
-                    ${s.status}
+                    ${s.status === "connected" ? icons.check : icons.x} ${s.status}
                   </span>
                 </div>
                 <div class="server-stats">

@@ -190,10 +190,19 @@ export class ScApp extends LitElement {
       scrollbar-width: thin;
       scrollbar-color: var(--hu-border-subtle) transparent;
     }
-    .main-scroll::-webkit-scrollbar { width: 6px; }
-    .main-scroll::-webkit-scrollbar-track { background: transparent; }
-    .main-scroll::-webkit-scrollbar-thumb { background: var(--hu-border-subtle); border-radius: 3px; }
-    .main-scroll::-webkit-scrollbar-thumb:hover { background: var(--hu-border); }
+    .main-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .main-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .main-scroll::-webkit-scrollbar-thumb {
+      background: var(--hu-border-subtle);
+      border-radius: var(--hu-radius-sm);
+    }
+    .main-scroll::-webkit-scrollbar-thumb:hover {
+      background: var(--hu-border);
+    }
 
     .scroll-progress {
       position: sticky;
@@ -1124,7 +1133,11 @@ export class ScApp extends LitElement {
           @toggle-collapse=${() => this._toggleSidebar()}
         ></hu-sidebar>
 
-        <main id="main-content" tabindex="-1" role="main" class="${this._isConversationalView ? "no-pad" : ""}"
+        <main
+          id="main-content"
+          tabindex="-1"
+          role="main"
+          class="${this._isConversationalView ? "no-pad" : ""}"
         >
           <div
             id="main-scroll"

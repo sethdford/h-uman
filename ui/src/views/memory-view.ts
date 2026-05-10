@@ -569,7 +569,9 @@ export class ScMemoryView extends GatewayAwareLitElement {
         : nothing}
 
       <div class="controls-header">
-        <span class="controls-count">${filtered.length} ${filtered.length === 1 ? "memory" : "memories"}</span>
+        <span class="controls-count"
+          >${filtered.length} ${filtered.length === 1 ? "memory" : "memories"}</span
+        >
         <hu-button
           size="sm"
           variant="ghost"

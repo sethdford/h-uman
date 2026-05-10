@@ -358,8 +358,9 @@ export class ScVoiceView extends GatewayAwareLitElement {
         padding: var(--hu-space-2xs) var(--hu-space-sm);
         border-radius: var(--hu-radius-md);
         border: 1px solid transparent;
-        transition: border-color var(--hu-duration-fast) var(--hu-ease-out),
-                    background var(--hu-duration-fast) var(--hu-ease-out);
+        transition:
+          border-color var(--hu-duration-fast) var(--hu-ease-out),
+          background var(--hu-duration-fast) var(--hu-ease-out);
       }
       .provider-option:hover {
         background: var(--hu-hover-overlay);
@@ -1304,9 +1305,13 @@ export class ScVoiceView extends GatewayAwareLitElement {
     const selected = providers.find((p) => p.id === this._setupMode) ?? providers[0];
     return html`
       <div class="setup-banner" role="region" aria-label="Voice setup">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--hu-space-sm);margin-bottom:var(--hu-space-xs)">
+        <div
+          style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--hu-space-sm);margin-bottom:var(--hu-space-xs)"
+        >
           <h3 style="margin:0;font:var(--hu-font-heading-sm)">Voice Setup</h3>
-          <span style="font-size:var(--hu-text-xs);color:var(--hu-text-faint)">Choose a provider and enter your API key</span>
+          <span style="font-size:var(--hu-text-xs);color:var(--hu-text-faint)"
+            >Choose a provider and enter your API key</span
+          >
         </div>
         <fieldset
           style="border:none;padding:0;margin:0 0 var(--hu-space-sm) 0;display:flex;flex-direction:row;gap:var(--hu-space-xs);flex-wrap:wrap"
@@ -1315,10 +1320,7 @@ export class ScVoiceView extends GatewayAwareLitElement {
         >
           ${providers.map(
             (p) => html`
-              <label
-                class="provider-option"
-                ?data-selected=${this._setupMode === p.id}
-              >
+              <label class="provider-option" ?data-selected=${this._setupMode === p.id}>
                 <input
                   type="radio"
                   name="voice-provider"
@@ -1360,7 +1362,8 @@ export class ScVoiceView extends GatewayAwareLitElement {
             target="_blank"
             rel="noopener noreferrer"
             style="font-size:var(--hu-text-xs);color:var(--hu-text-faint);white-space:nowrap;text-decoration:underline;text-underline-offset:2px"
-          >Get key &rarr;</a>
+            >Get key &rarr;</a
+          >
         </div>
         ${this._setupError
           ? html`<p

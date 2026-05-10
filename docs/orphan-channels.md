@@ -1,3 +1,8 @@
+---
+title: Orphan channels
+description: Channels with implementation files in src/channels/ but no production wiring
+---
+
 # Orphan channels
 
 Channels that have implementation files in `src/channels/` but no production

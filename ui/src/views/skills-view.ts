@@ -509,7 +509,11 @@ export class ScSkillsView extends GatewayAwareLitElement {
         </div>
         <div class="toolbar-right">
           <span class="staleness">${this.stalenessLabel}</span>
-          <hu-button variant="ghost" size="sm" @click=${() => this.load()} aria-label="Refresh skills list"
+          <hu-button
+            variant="ghost"
+            size="sm"
+            @click=${() => this.load()}
+            aria-label="Refresh skills list"
             >${icons.refresh}</hu-button
           >
         </div>

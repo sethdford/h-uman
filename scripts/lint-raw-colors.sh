@@ -12,7 +12,18 @@ if [ "${1:-}" = "--all" ]; then
   MODE="all"
 fi
 
-EXCLUDE='_tokens\.css|_dynamic-color\.css|high-contrast\.css|design-tokens/|generate-assets|\.svg$|\.json$|docs/tokens\.|DesignTokens\.|design_tokens\.|website/src/pages/index\.astro|website/src/pages/design\.astro|website/src/pages/brand\.astro|ui/index\.html|ui/src/components/hu-chart\.ts'
+# Allowlist (regex). Each entry gets a comment explaining why hex is unavoidable.
+# - _tokens.css / _dynamic-color.css / high-contrast.css / design-tokens/ / DesignTokens / design_tokens / docs/tokens.: token *source* files; hex is the definition.
+# - generate-assets: image/icon generators that compose hex into binary outputs.
+# - .svg / .json: binary/data formats with no CSS context.
+# - website index/design/brand .astro: hand-tuned brand showcase pages with documented exceptions.
+# - ui/index.html: bootstrap shell loaded before tokens are wired up.
+# - ui/src/components/hu-chart.ts: chart axis colors come from the data-viz palette CSS but Canvas2D requires a hex string at draw time (no var() lookup).
+# - ui/src/canvas-harness.ts: sandboxed iframe host page; intentionally isolated from parent design tokens.
+# - ui/src/demo-gateway.ts: mock JSON-RPC responses that include inline-styled HTML payloads (representative of *user* responses, not Human UI styling).
+# - website/src/scripts/hero-canvas.ts: Canvas2D fallback hex values when getComputedStyle cannot read the token at runtime.
+# - website/src/pages/404.astro: HTML <meta name="theme-color"> spec requires a hex literal.
+EXCLUDE='_tokens\.css|_dynamic-color\.css|high-contrast\.css|design-tokens/|generate-assets|\.svg$|\.json$|docs/tokens\.|DesignTokens\.|design_tokens\.|website/src/pages/index\.astro|website/src/pages/design\.astro|website/src/pages/brand\.astro|ui/index\.html|ui/src/components/hu-chart\.ts|ui/src/canvas-harness\.ts|ui/src/demo-gateway\.ts|website/src/scripts/hero-canvas\.ts|website/src/pages/404\.astro'
 
 if [ "$MODE" = "all" ]; then
   FILES=$(find ui/src website/src -type f \( -name '*.css' -o -name '*.ts' -o -name '*.tsx' -o -name '*.astro' -o -name '*.html' \) 2>/dev/null | grep -Ev "$EXCLUDE" || true)

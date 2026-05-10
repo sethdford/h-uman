@@ -131,11 +131,7 @@ export class HuWorkflowView extends GatewayAwareLitElement {
 
     if (this.error) {
       return html`${hero}
-        <hu-empty-state
-          .icon=${icons.warning}
-          heading="Error"
-          description=${this.error}
-        >
+        <hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
           <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
         </hu-empty-state>`;
     }

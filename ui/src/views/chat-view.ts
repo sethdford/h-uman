@@ -229,7 +229,8 @@ export class ScChatView extends GatewayAwareLitElement {
         z-index: 10;
         padding: var(--hu-space-sm) 0 var(--hu-space-md);
         background: var(--hu-bg);
-        animation: hu-composer-enter var(--hu-duration-normal, 300ms) var(--hu-ease-out, ease-out) 100ms both;
+        animation: hu-composer-enter var(--hu-duration-normal, 300ms) var(--hu-ease-out, ease-out)
+          100ms both;
       }
       @keyframes hu-composer-enter {
         from {
@@ -426,7 +427,12 @@ export class ScChatView extends GatewayAwareLitElement {
 
   protected override async load(): Promise<void> {
     await this.chat.loadHistory(this.sessionKey);
-    await Promise.all([this._loadSessions(), this._loadModels(), this._loadProjects(), this._loadPersonas()]);
+    await Promise.all([
+      this._loadSessions(),
+      this._loadModels(),
+      this._loadProjects(),
+      this._loadPersonas(),
+    ]);
   }
 
   private async _loadModels(): Promise<void> {
@@ -504,16 +510,25 @@ export class ScChatView extends GatewayAwareLitElement {
     if (!gw) return;
     try {
       const res = await gw.request<{
-        project?: { id: string; name: string; instructions?: string; pinned?: boolean; color?: string };
+        project?: {
+          id: string;
+          name: string;
+          instructions?: string;
+          pinned?: boolean;
+          color?: string;
+        };
       }>("projects.create", { name: e.detail.name });
       if (res?.project) {
-        this._projects = [...this._projects, {
-          id: res.project.id,
-          name: res.project.name,
-          instructions: res.project.instructions ?? "",
-          pinned: res.project.pinned ?? false,
-          color: res.project.color,
-        }];
+        this._projects = [
+          ...this._projects,
+          {
+            id: res.project.id,
+            name: res.project.name,
+            instructions: res.project.instructions ?? "",
+            pinned: res.project.pinned ?? false,
+            color: res.project.color,
+          },
+        ];
       }
     } catch {
       ScToast.show({ message: "Failed to create project", variant: "error" });
@@ -907,8 +922,8 @@ export class ScChatView extends GatewayAwareLitElement {
           @hu-project-create=${this._onProjectCreate}
         ></hu-chat-sessions-panel>
         <div class="container ${isEmpty ? "empty" : ""}">
-          ${this._renderStatusBar()}
-          ${this._renderErrorBanner()} ${this._renderHistoryErrorBanner()} ${this._renderSearch()}
+          ${this._renderStatusBar()} ${this._renderErrorBanner()}
+          ${this._renderHistoryErrorBanner()} ${this._renderSearch()}
           ${this.chat.historyLoading
             ? this._renderSkeleton()
             : html`
@@ -1121,7 +1136,11 @@ export class ScChatView extends GatewayAwareLitElement {
           </button>
           ${this.connectionStatus !== "connected"
             ? html`<hu-status-dot status=${this.connectionStatus}></hu-status-dot>
-                <span>${this.connectionStatus === "connecting" ? "Reconnecting\u2026" : "Disconnected"}</span>`
+                <span
+                  >${this.connectionStatus === "connecting"
+                    ? "Reconnecting\u2026"
+                    : "Disconnected"}</span
+                >`
             : nothing}
         </div>
         <span class="status-title"

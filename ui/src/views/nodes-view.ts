@@ -241,11 +241,7 @@ export class ScNodesView extends GatewayAwareLitElement {
         </hu-button>
       </div>
       ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            .description=${this.error}
-          >
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" .description=${this.error}>
             <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
           </hu-empty-state>`
         : nothing}

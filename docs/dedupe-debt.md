@@ -1,3 +1,8 @@
+---
+title: Duplicated utility functions — migration tracker
+description: Tracks helpers flagged for consolidation under the Rule-of-Three principle
+---
+
 # Duplicated utility functions — migration tracker
 
 Snapshot from FIX 7 of the post-audit punch list. Several private static

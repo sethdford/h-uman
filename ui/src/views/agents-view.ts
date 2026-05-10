@@ -285,15 +285,11 @@ export class ScAgentsView extends GatewayAwareLitElement {
     if (this.loading) return this._renderSkeleton();
     return html`
       ${this.error
-        ? html`<hu-empty-state
-            .icon=${icons.warning}
-            heading="Error"
-            description=${this.error}
-          >
+        ? html`<hu-empty-state .icon=${icons.warning} heading="Error" description=${this.error}>
             <hu-button variant="primary" @click=${() => this.load()}>Retry</hu-button>
           </hu-empty-state>`
         : html`${this._renderHero()} ${this._renderMetrics()} ${this._renderChart()}
-      ${this._renderSessions()} ${this._renderConfig()}`}
+          ${this._renderSessions()} ${this._renderConfig()}`}
     `;
   }
 

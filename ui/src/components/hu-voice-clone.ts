@@ -118,7 +118,8 @@ export class HuVoiceClone extends LitElement {
       height: var(--hu-space-sm);
       background: var(--hu-error);
       border-radius: var(--hu-radius-full);
-      animation: hu-recording-pulse var(--hu-duration-slow) var(--hu-ease-in-out, ease-in-out) infinite;
+      animation: hu-recording-pulse var(--hu-duration-slow) var(--hu-ease-in-out, ease-in-out)
+        infinite;
     }
 
     @keyframes hu-recording-pulse {

@@ -81,8 +81,14 @@ export class HuPersonaSelector extends LitElement {
     }
 
     @keyframes hu-fade-in {
-      from { opacity: 0; transform: translateY(4px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .option {

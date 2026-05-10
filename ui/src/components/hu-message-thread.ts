@@ -131,10 +131,19 @@ export class ScMessageThread extends LitElement {
       scrollbar-width: thin;
       scrollbar-color: var(--hu-border-subtle) transparent;
     }
-    .messages::-webkit-scrollbar { width: 6px; }
-    .messages::-webkit-scrollbar-track { background: transparent; }
-    .messages::-webkit-scrollbar-thumb { background: var(--hu-border-subtle); border-radius: 3px; }
-    .messages::-webkit-scrollbar-thumb:hover { background: var(--hu-border); }
+    .messages::-webkit-scrollbar {
+      width: 6px;
+    }
+    .messages::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .messages::-webkit-scrollbar-thumb {
+      background: var(--hu-border-subtle);
+      border-radius: var(--hu-radius-sm);
+    }
+    .messages::-webkit-scrollbar-thumb:hover {
+      background: var(--hu-border);
+    }
     .message-wrapper {
       position: relative;
       overflow: hidden;
@@ -599,10 +608,18 @@ export class ScMessageThread extends LitElement {
         border-color var(--hu-duration-fast) var(--hu-ease-out),
         background var(--hu-duration-fast) var(--hu-ease-out),
         transform var(--hu-duration-fast) var(--hu-ease-out);
-      &:nth-child(1) { animation-delay: 200ms; }
-      &:nth-child(2) { animation-delay: 260ms; }
-      &:nth-child(3) { animation-delay: 320ms; }
-      &:nth-child(4) { animation-delay: 380ms; }
+      &:nth-child(1) {
+        animation-delay: 200ms;
+      }
+      &:nth-child(2) {
+        animation-delay: 260ms;
+      }
+      &:nth-child(3) {
+        animation-delay: 320ms;
+      }
+      &:nth-child(4) {
+        animation-delay: 380ms;
+      }
       &:hover {
         border-color: var(--hu-accent);
         background: color-mix(in srgb, var(--hu-accent) 8%, transparent);
