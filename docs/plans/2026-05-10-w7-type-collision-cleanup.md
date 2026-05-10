@@ -104,14 +104,23 @@ primary surface for new features, revisit Option A.
 
 Pick up the rename when ANY of these become true:
 
-- More than 6 bridged operations exist (mounting maintenance burden).
 - A new W7 backend (W10 neural memory tier, W15 crypto envelope) needs to
-  be wired into agent_turn.c directly.
+  be wired into `agent_turn.c` directly without going through a bridge.
 - The legacy embedder / session_store / kv_cache_manager are themselves
   refactored to a new vtable — at that point we can rename in one sweep.
+- A bridged operation needs to return a W7 type (rather than a primitive
+  / opaque-tag enum); the bridge's value-only return shape becomes a
+  blocker rather than an isolation tool.
+
+The original "more than 6 bridged operations" trigger was retired in
+FIX 19 — count alone doesn't justify a 200+ file rename when each new
+op is still a narrow facade-shaped helper. Maintenance burden has
+stayed flat as the bridge grew (each new op is a 30-line wrapper, not
+a coupling lever).
 
 # Tracking
 
 | Date | Bridged op count | Notes |
 |------|-----------------:|-------|
 | 2026-05-10 | 2 | FIX 12 bridge: world model render + self-RAG verify |
+| 2026-05-10 | 10 | FIX 13: W14 scheduler open/close/tick/enqueue×2/status. FIX 14 adds the autodream-enqueue helper inside the same scheduler family. Bridge LOC ~410 (still single TU). Decision: stay with bridge. Trigger updated. |
