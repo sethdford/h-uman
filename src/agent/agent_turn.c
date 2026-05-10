@@ -25,6 +25,7 @@
 #include "human/cognition/trust.h"
 #include "human/context/humor.h"
 #include "human/eval/consistency.h"
+#include "human/agent/response_verifier.h"
 #include "human/memory/fact_extract.h"
 #include "human/memory/hallucination_guard.h"
 #include "human/memory/personal_model.h"
@@ -4921,6 +4922,72 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 const size_t response_effective_len = strlen(*response_out);
                 if (response_len_out)
                     *response_len_out = response_effective_len;
+
+                /* Response verifier (W4) — runs on the outbound draft before
+                 * the response is cached, broadcast, or spoken. Default is
+                 * TELEMETRY: extract + score claims so we get hallucination
+                 * metrics without changing the user-visible reply. Opt in to
+                 * SOFT (auto-hedge unsupported claims) or STRICT via the
+                 * HU_VERIFY_MODE env var.
+                 *
+                 * Counters on the agent (verifier_runs / claims_total /
+                 * claims_flagged) make this wire visible to tests and to ops
+                 * dashboards without requiring a log-tap.
+                 *
+                 * verifier_graph may be NULL — the verifier still extracts
+                 * claims (every claim becomes "unsupported"), useful as
+                 * telemetry until production wires a real graph. */
+                if (response_effective_len > 0) {
+                    hu_verifier_config_t vcfg = hu_verifier_default_config();
+                    vcfg.mode = HU_VERIFY_TELEMETRY;
+                    const char *mode_env = getenv("HU_VERIFY_MODE");
+                    if (mode_env) {
+                        if (strcmp(mode_env, "soft") == 0)
+                            vcfg.mode = HU_VERIFY_SOFT;
+                        else if (strcmp(mode_env, "strict") == 0)
+                            vcfg.mode = HU_VERIFY_STRICT;
+                        else if (strcmp(mode_env, "off") == 0)
+                            vcfg.mode = HU_VERIFY_OFF;
+                    }
+                    if (vcfg.mode != HU_VERIFY_OFF) {
+                        const char *contact = (agent->contact_context &&
+                                               agent->contact_context_len > 0)
+                                                  ? agent->contact_context
+                                                  : "";
+                        size_t contact_len = contact[0] ? strlen(contact) : 0;
+                        hu_verifier_report_t vreport;
+                        memset(&vreport, 0, sizeof(vreport));
+                        hu_error_t verr = hu_response_verify(
+                            agent->alloc, agent->verifier_graph, contact, contact_len,
+                            *response_out, response_effective_len, &vcfg, &vreport);
+                        if (verr == HU_OK) {
+                            agent->verifier_runs++;
+                            agent->verifier_claims_total += vreport.claims_extracted;
+                            agent->verifier_claims_flagged += vreport.claims_flagged;
+                            if (vreport.claims_extracted > 0)
+                                hu_log_info("agent_turn", NULL,
+                                            "verifier: %zu claims (%zu supported, %zu flagged)",
+                                            vreport.claims_extracted, vreport.claims_supported,
+                                            vreport.claims_flagged);
+                            /* SOFT mode: replace draft with the hedged version
+                             * when the verifier produced one. */
+                            if (vreport.draft_modified && vcfg.mode == HU_VERIFY_SOFT) {
+                                size_t mod_len = strlen(vreport.modified_draft);
+                                if (mod_len > 0) {
+                                    char *replacement =
+                                        hu_strndup(agent->alloc, vreport.modified_draft, mod_len);
+                                    if (replacement) {
+                                        agent->alloc->free(agent->alloc->ctx, *response_out,
+                                                           response_effective_len + 1);
+                                        *response_out = replacement;
+                                        if (response_len_out)
+                                            *response_len_out = mod_len;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 /* Store in semantic response cache for future lookups */
                 if (agent->infra.response_cache && final_len > 0) {

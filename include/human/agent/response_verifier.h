@@ -19,14 +19,19 @@
  *   "You start work at 9 [from iMessage, Mon 2026-05-09 14:22]."
  *
  * Verification policy (mode):
- *   - HU_VERIFY_OFF    Log only; never modify the draft.
- *   - HU_VERIFY_SOFT   Prepend a hedge to flagged claims; attach provenance.
- *   - HU_VERIFY_STRICT Rewrite the draft via corrective-RAG. */
+ *   - HU_VERIFY_OFF       Skip entirely; report stays zeroed.
+ *   - HU_VERIFY_TELEMETRY Extract + score every claim but NEVER modify the
+ *                         draft. Used by default on the response path so we
+ *                         get hallucination metrics without changing the
+ *                         user-visible reply.
+ *   - HU_VERIFY_SOFT      Prepend a hedge to flagged claims; attach provenance.
+ *   - HU_VERIFY_STRICT    Rewrite the draft via corrective-RAG. */
 
 typedef enum hu_verify_mode {
     HU_VERIFY_OFF = 0,
     HU_VERIFY_SOFT = 1,
     HU_VERIFY_STRICT = 2,
+    HU_VERIFY_TELEMETRY = 3,
 } hu_verify_mode_t;
 
 typedef struct hu_provenance_receipt {

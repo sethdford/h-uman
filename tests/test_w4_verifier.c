@@ -53,6 +53,43 @@ static void test_w4_verifier_off_mode_is_passthrough(void) {
     hu_graph_close(g, A());
 }
 
+/* --- TELEMETRY mode extracts and scores but never modifies the draft.
+ * This is the mode the response path uses by default. --- */
+static void test_w4_verifier_telemetry_mode_extracts_without_mutation(void) {
+    hu_graph_t *g = NULL;
+    open_graph(&g);
+    seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_TELEMETRY;
+    hu_verifier_report_t r;
+    const char *draft = "Alice works at Acme.";
+    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(r.claims_extracted, 1);
+    HU_ASSERT_EQ(r.claims_supported, 1);
+    HU_ASSERT(!r.draft_modified);
+    HU_ASSERT_EQ(r.modified_draft[0], '\0');
+    hu_graph_close(g, A());
+}
+
+/* --- TELEMETRY mode flags hallucinations without rewriting --- */
+static void test_w4_verifier_telemetry_mode_flags_unsupported(void) {
+    hu_graph_t *g = NULL;
+    open_graph(&g);
+    seed_alice_works_at_acme(g, "imessage", 1735689600000LL);
+
+    hu_verifier_config_t cfg = hu_verifier_default_config();
+    cfg.mode = HU_VERIFY_TELEMETRY;
+    hu_verifier_report_t r;
+    const char *draft = "Bob is the CEO of Globex.";
+    HU_ASSERT_EQ(hu_response_verify(A(), g, "u1", 2, draft, strlen(draft), &cfg, &r), HU_OK);
+    HU_ASSERT_EQ(r.claims_extracted, 1);
+    HU_ASSERT_EQ(r.claims_flagged, 1);
+    HU_ASSERT(!r.claims[0].supported);
+    HU_ASSERT(!r.draft_modified);
+    hu_graph_close(g, A());
+}
+
 /* --- Supported claim is detected and gets a receipt --- */
 static void test_w4_verifier_supports_known_fact(void) {
     hu_graph_t *g = NULL;
@@ -209,6 +246,8 @@ void run_w4_verifier_tests(void) {
     HU_TEST_SUITE("W4 verifier + provenance + erasure");
 #ifdef HU_ENABLE_SQLITE
     HU_RUN_TEST(test_w4_verifier_off_mode_is_passthrough);
+    HU_RUN_TEST(test_w4_verifier_telemetry_mode_extracts_without_mutation);
+    HU_RUN_TEST(test_w4_verifier_telemetry_mode_flags_unsupported);
     HU_RUN_TEST(test_w4_verifier_supports_known_fact);
     HU_RUN_TEST(test_w4_verifier_flags_unsupported_claim);
     HU_RUN_TEST(test_w4_verifier_adversarial_poisoning_is_flagged);

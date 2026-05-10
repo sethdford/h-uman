@@ -228,6 +228,10 @@ hu_error_t hu_response_verify(hu_allocator_t *alloc, hu_graph_t *graph, const ch
     if (cfg->mode == HU_VERIFY_OFF || draft_len == 0)
         return HU_OK;
 
+    /* TELEMETRY mode runs full extraction + scoring (so callers can observe
+     * claim counts and supported/flagged ratios) but never touches the draft.
+     * The mutation gates below are SOFT-specific so this falls through naturally. */
+
     size_t max = cfg->max_claims > 0 && cfg->max_claims < 16 ? cfg->max_claims : 16;
     size_t n = extract_claims(draft, draft_len, out_report->claims, max);
     out_report->claims_extracted = n;

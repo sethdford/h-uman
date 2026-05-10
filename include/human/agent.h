@@ -265,6 +265,20 @@ struct hu_agent {
     size_t cached_static_prompt_len;
     size_t cached_static_prompt_cap;
 
+    /* Response verifier telemetry (W4 wire). Updated every turn the verifier
+     * runs. The wire fires whenever `verifier_graph` is non-NULL OR the agent
+     * has any memory at all (graph-less verification still extracts claims;
+     * supported-vs-flagged is only meaningful when verifier_graph is set).
+     * Tests inspect these to prove the verifier ran on the response path. */
+    struct hu_graph *verifier_graph;  /* optional, not owned. Decoupled from
+                                       * agent->memory because legacy
+                                       * hu_memory_t and the W7 facade
+                                       * hu_memory_t are different types
+                                       * with the same name. */
+    uint64_t verifier_runs;           /* total invocations across the agent's lifetime */
+    uint64_t verifier_claims_total;   /* total claims extracted */
+    uint64_t verifier_claims_flagged; /* total claims scoring below threshold */
+
     volatile sig_atomic_t cancel_requested; /* set by SIGINT handler to abort turn */
 
     hu_agent_approval_cb approval_cb; /* optional; if NULL, approval-required = denied */

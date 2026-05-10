@@ -7,6 +7,7 @@
 #include "human/core/string.h"
 #include "human/health.h"
 #include "human/memory.h"
+#include "human/memory/graph.h"
 #ifdef HU_HAS_SKILLS
 #include "human/memory/vector.h"
 #include "human/observability/bth_metrics.h"
@@ -479,10 +480,91 @@ static void test_agent_turn_simple(void) {
     HU_ASSERT_TRUE(strcasecmp(response, "mock response") == 0);
     HU_ASSERT_EQ(response_len, strlen("mock response"));
 
+    /* W4 verifier wire fires unconditionally on the response path now. */
+#ifdef HU_ENABLE_SQLITE
+    HU_ASSERT_EQ((unsigned long)agent.verifier_runs, 1UL);
+#endif
+
     if (response)
         alloc.free(alloc.ctx, response, response_len + 1);
     hu_agent_deinit(&agent);
 }
+
+#ifdef HU_ENABLE_SQLITE
+/* W4 wire proof: every turn runs the response verifier even with NULL graph
+ * (TELEMETRY mode still extracts claims; supported-vs-flagged is meaningful
+ * only when verifier_graph is set). The agent's verifier_runs counter ticks
+ * once per turn — that's the wire proof. */
+static void test_agent_turn_runs_response_verifier_telemetry(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    mock_provider_t mock_ctx;
+    hu_provider_t prov = mock_provider_create(&alloc, &mock_ctx);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+
+    HU_ASSERT_EQ((unsigned long)agent.verifier_runs, 0UL);
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "hello", 5, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_NOT_NULL(response);
+
+    /* Wire proof: verifier ran exactly once on the response. */
+    HU_ASSERT_EQ((unsigned long)agent.verifier_runs, 1UL);
+    /* TELEMETRY mode never modifies the draft. */
+    HU_ASSERT_TRUE(strcasecmp(response, "mock response") == 0);
+
+    /* Second turn: counter ticks again. */
+    char *response2 = NULL;
+    size_t response_len2 = 0;
+    err = hu_agent_turn(&agent, "again", 5, &response2, &response_len2);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((unsigned long)agent.verifier_runs, 2UL);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    if (response2)
+        alloc.free(alloc.ctx, response2, response_len2 + 1);
+    hu_agent_deinit(&agent);
+}
+
+/* W4 wire proof with graph: when the agent has a verifier_graph set and the
+ * graph contains a fact, the verifier's supported/flagged counts are
+ * non-trivial. */
+static void test_agent_turn_response_verifier_with_graph(void) {
+    hu_allocator_t alloc = hu_system_allocator();
+    mock_provider_t mock_ctx;
+    hu_provider_t prov = mock_provider_create(&alloc, &mock_ctx);
+
+    hu_graph_t *g = NULL;
+    HU_ASSERT_EQ(hu_graph_open(&alloc, NULL, 0, &g), HU_OK);
+
+    hu_agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+    hu_error_t err =
+        hu_agent_from_config(&agent, &alloc, prov, NULL, 0, NULL, NULL, NULL, NULL, "gpt-4o", 6,
+                             "openai", 6, 0.7, ".", 1, 25, 50, false, 0, NULL, 0, NULL, 0, NULL);
+    HU_ASSERT_EQ(err, HU_OK);
+    agent.verifier_graph = g;
+
+    char *response = NULL;
+    size_t response_len = 0;
+    err = hu_agent_turn(&agent, "hello", 5, &response, &response_len);
+    HU_ASSERT_EQ(err, HU_OK);
+    HU_ASSERT_EQ((unsigned long)agent.verifier_runs, 1UL);
+
+    if (response)
+        alloc.free(alloc.ctx, response, response_len + 1);
+    hu_agent_deinit(&agent);
+    hu_graph_close(g, &alloc);
+}
+#endif
 
 static void test_agent_turn_stream_v2_basic(void) {
 #if HU_IS_TEST
@@ -1634,6 +1716,10 @@ void run_e2e_tests(void) {
     HU_RUN_TEST(test_agent_from_config_null_alloc);
     HU_RUN_TEST(test_agent_from_config_null_provider);
     HU_RUN_TEST(test_agent_turn_simple);
+#ifdef HU_ENABLE_SQLITE
+    HU_RUN_TEST(test_agent_turn_runs_response_verifier_telemetry);
+    HU_RUN_TEST(test_agent_turn_response_verifier_with_graph);
+#endif
     HU_RUN_TEST(test_agent_turn_stream_v2_basic);
     HU_RUN_TEST(test_agent_turn_stream_v2_with_persona_examples);
     HU_RUN_TEST(test_agent_turn_stream_v2_with_tools);
