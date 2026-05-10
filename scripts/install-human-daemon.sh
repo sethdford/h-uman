@@ -168,15 +168,38 @@ PLIST
 echo "==> launchctl bootstrap (idempotent)"
 # Best-effort bootout. Returns 3/EIO if not loaded — both are fine.
 launchctl bootout "gui/$UID/$SERVICE_LABEL" 2>/dev/null || true
-# Give launchd a beat to release the label before re-bootstrapping; without
-# this delay, bootstrap can race and return EIO (5) on busy systems.
-sleep 1
-if ! launchctl bootstrap "gui/$UID" "$PLIST_PATH" 2>&1; then
-    # Retry once after a longer delay — on macOS Sequoia we have observed the
-    # first bootstrap fail when the prior service is still in "exited" cleanup.
-    sleep 3
-    launchctl bootstrap "gui/$UID" "$PLIST_PATH"
+
+# Wait for the service label to actually be released. Without this loop,
+# `bootstrap` races and returns EIO (5) on busy systems / macOS Sequoia,
+# even after the bootout call has returned. We poll `print` until it
+# reports "Could not find service" (113) which means the label is free.
+echo "==> waiting for service label to release"
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if ! launchctl print "gui/$UID/$SERVICE_LABEL" >/dev/null 2>&1; then
+        # Label is gone — safe to bootstrap.
+        break
+    fi
+    sleep 1
+done
+
+# Bootstrap with retry. EIO (5) on first attempt is common right after
+# bootout; we back off and retry up to 5 times.
+BOOTSTRAP_OK=false
+for attempt in 1 2 3 4 5; do
+    if launchctl bootstrap "gui/$UID" "$PLIST_PATH" 2>&1; then
+        BOOTSTRAP_OK=true
+        break
+    fi
+    echo "    bootstrap attempt $attempt failed, retrying in $((attempt * 2))s..."
+    sleep $((attempt * 2))
+done
+
+if [[ "$BOOTSTRAP_OK" == "false" ]]; then
+    echo "error: launchctl bootstrap failed after 5 retries." >&2
+    echo "       check 'launchctl print-disabled gui/$UID' and the plist." >&2
+    exit 1
 fi
+
 launchctl kickstart -k -p "gui/$UID/$SERVICE_LABEL"
 
 # Give it a beat to do its first poll, then tell the truth about state.
