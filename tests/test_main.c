@@ -212,6 +212,7 @@ void run_w3_multigraph_tests(void);
 void run_w4_verifier_tests(void);
 void run_w5_persona_deltas_tests(void);
 void run_daemon_housekeeping_tests(void);
+void run_orphan_channel_audit_tests(void);
 void run_w6_e2e_adversarial_tests(void);
 void run_w7_memory_facade_tests(void);
 void run_w8_belief_layer_tests(void);
@@ -705,6 +706,7 @@ int main(int argc, char **argv) {
     run_w4_verifier_tests();
     run_w5_persona_deltas_tests();
     run_daemon_housekeeping_tests();
+    run_orphan_channel_audit_tests();
     run_w6_e2e_adversarial_tests();
     run_w7_memory_facade_tests();
     run_w8_belief_layer_tests();

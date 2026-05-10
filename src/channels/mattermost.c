@@ -1,3 +1,9 @@
+/*
+ * Mattermost channel.
+ *
+ * STATUS: ORPHAN (test-only). No config schema, no bootstrap call, no daemon
+ * entry. Tracked in `docs/orphan-channels.md`.
+ */
 #include "human/channel.h"
 #include "human/channel_loop.h"
 #include "human/core/allocator.h"

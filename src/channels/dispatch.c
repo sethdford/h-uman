@@ -1,3 +1,10 @@
+/*
+ * Dispatch channel — multiplex/router over child channels.
+ *
+ * STATUS: ORPHAN (test utility). Production routes through bootstrap's
+ * per-channel iteration directly. Useful as a fan-out fixture in tests.
+ * Tracked in `docs/orphan-channels.md`.
+ */
 #include "human/channels/dispatch.h"
 #include <string.h>
 

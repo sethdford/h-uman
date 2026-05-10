@@ -2,6 +2,15 @@
  * Signal channel — signal-cli daemon HTTP/JSON-RPC.
  * Sends via /api/v1/rpc, receives via SSE at /api/v1/events,
  * health at /api/v1/check.
+ *
+ * STATUS: ORPHAN (test-only). Implementation is complete and exercised by
+ * tests, but `hu_signal_create` is not called from `bootstrap.c` because the
+ * `hu_signal_channel_config_t` struct only carries the daemon-config slot —
+ * no http_url, no account, no allow_from. To graduate to production:
+ *   1. Add http_url/account/allow_from/group_policy fields to the struct.
+ *   2. Add parsing in `src/config_parse_channels.c`.
+ *   3. Add a bootstrap block mirroring `telegram` in `src/bootstrap.c`.
+ * Tracked in `docs/orphan-channels.md`.
  */
 #include "human/channels/signal.h"
 #include "human/core/http.h"

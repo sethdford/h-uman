@@ -1,6 +1,10 @@
 /*
  * Web channel — token validation, streaming events (assistant_chunk/assistant_final).
  * HU_IS_TEST: all transport no-op. Production: stores events for connected clients.
+ *
+ * STATUS: ORPHAN (test-only). No config schema, no bootstrap call. Likely
+ * subsumed by `pwa.c` for the browser-tab use case. Tracked in
+ * `docs/orphan-channels.md`.
  */
 #include "human/channels/web.h"
 #include "human/core/json.h"

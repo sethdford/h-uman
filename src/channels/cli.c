@@ -1,3 +1,11 @@
+/*
+ * CLI channel facade.
+ *
+ * STATUS: ORPHAN (test utility). Production runs `human agent` directly via
+ * `cmd_agent` in `src/agent/cli.c`, not through this channel. Useful as a
+ * test fixture for channel-loop semantics. Tracked in
+ * `docs/orphan-channels.md`.
+ */
 #include "human/channel.h"
 #include "human/core/allocator.h"
 #include "human/core/error.h"

@@ -1,3 +1,9 @@
+/*
+ * MaixCAM peripheral channel — AIoT vision board over serial.
+ *
+ * STATUS: ORPHAN (test-only). No config schema, no bootstrap call. Niche;
+ * gated on hardware availability. Tracked in `docs/orphan-channels.md`.
+ */
 #include "human/channels/maixcam.h"
 #include "human/core/allocator.h"
 #include "human/core/json.h"

@@ -2,6 +2,27 @@
 
 38 channel implementations, each connecting the agent to an external messaging platform. Every channel implements the `hu_channel_t` vtable.
 
+## Production wiring status
+
+Not every channel in this directory is wired into the daemon's `bootstrap.c`.
+Some are complete implementations missing only config plumbing; others are test
+fixtures or experimental work parked for later.
+
+**Orphans (test-only, not wired into production):**
+
+- `signal.c` — implementation complete, missing config schema fields.
+- `mattermost.c`, `maixcam.c`, `web.c` — missing config schema and bootstrap.
+- `cli.c`, `dispatch.c`, `webhook.c` — used as test fixtures; production paths
+  bypass these facades.
+
+See `docs/orphan-channels.md` for the full table, what's missing per channel,
+and the steps to graduate or remove. Each orphan's `.c` file carries a
+`STATUS: ORPHAN` header comment.
+
+The `OrphanChannelAudit` test suite (`tests/test_orphan_channel_audit.c`)
+asserts each orphan's create function is reachable, so deletions or
+graduations show up as a test failure rather than as silent drift.
+
 ## Vtable Contract
 
 Every channel must implement `hu_channel_vtable_t`:

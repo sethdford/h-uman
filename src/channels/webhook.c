@@ -1,6 +1,10 @@
 /*
  * Webhook outbound channel — JSON callback formatting; inbound parsing for gateway.
  * HU_IS_TEST: send() is a no-op (no HTTP). Non-test: builds JSON only (curl optional).
+ *
+ * STATUS: ORPHAN (test-only). The gateway HTTP server uses webhook handlers
+ * directly (see `src/gateway/gateway.c`); this generic channel facade is not
+ * wired into bootstrap. Tracked in `docs/orphan-channels.md`.
  */
 #include "human/channels/webhook.h"
 #include "human/core/json.h"
