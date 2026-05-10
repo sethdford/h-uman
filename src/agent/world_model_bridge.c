@@ -6,6 +6,7 @@
  * the bridge exists to dodge. */
 
 #include "human/agent/world_model_bridge.h"
+#include "human/agent/self_rag.h"
 #include "human/agent/world_model.h"
 #include "human/memory/memory.h"
 
@@ -181,5 +182,123 @@ hu_error_t hu_w7_render_world_model(hu_w7_facade_t *facade, hu_allocator_t *allo
 
     *out_text = buf;
     *out_len = blen;
+    return HU_OK;
+}
+
+/* W11 self-RAG bridge entry point (FIX 12b). Constructs the heuristic
+ * backend, loads the W9 world model, runs verification, copies relevant
+ * scalars back through the opaque-typed outputs.
+ *
+ * The atomic backend would be richer but it depends on a provider for
+ * embeddings (the noun-phrase decomposer is deterministic but the scoring
+ * leans on similarity); we'll wire that as a follow-up. The heuristic
+ * backend is what the codebase already trusted via FIX 2's
+ * hu_response_verify -- this just lets self-RAG outputs flow through with
+ * structured claims + an explicit abstention outcome. */
+hu_error_t hu_w11_self_rag_verify(hu_w7_facade_t *facade, hu_allocator_t *alloc,
+                                  const char *contact_id, size_t contact_id_len,
+                                  const char *draft, size_t draft_len, int mode, int64_t now_ms,
+                                  hu_w11_outcome_t *out_outcome, size_t *out_claims_total,
+                                  size_t *out_claims_flagged, char **out_modified,
+                                  size_t *out_modified_len) {
+    if (out_outcome)
+        *out_outcome = HU_W11_OUTCOME_SUPPORTED;
+    if (out_claims_total)
+        *out_claims_total = 0;
+    if (out_claims_flagged)
+        *out_claims_flagged = 0;
+    if (out_modified)
+        *out_modified = NULL;
+    if (out_modified_len)
+        *out_modified_len = 0;
+    if (!facade || !facade->m || !alloc || !contact_id || contact_id_len == 0 || !draft ||
+        draft_len == 0)
+        return HU_ERR_INVALID_ARGUMENT;
+
+    if (now_ms == 0)
+        now_ms = (int64_t)time(NULL) * 1000;
+
+    /* OFF: no-op fast path. */
+    if (mode == HU_VERIFY_OFF) {
+        if (out_outcome)
+            *out_outcome = HU_W11_OUTCOME_SUPPORTED;
+        return HU_OK;
+    }
+
+    hu_self_rag_t r = {0};
+    hu_error_t e = hu_self_rag_heuristic(facade->m, &r);
+    if (e != HU_OK)
+        return e;
+
+    hu_world_model_t *wm = NULL;
+    /* Best-effort world-model load. The verifier handles wm == NULL. */
+    (void)hu_world_model_load(facade->m, alloc, contact_id, contact_id_len, now_ms, &wm);
+
+    hu_self_rag_request_t req = {
+        .wm = wm,
+        .contact_id = contact_id,
+        .contact_id_len = contact_id_len,
+        .draft = draft,
+        .draft_len = draft_len,
+        .mode = (hu_verify_mode_t)mode,
+        .abstain_threshold = 0.3f,
+        .now_ms = now_ms,
+    };
+    hu_self_rag_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    e = hu_self_rag_verify(&r, alloc, &req, &resp);
+
+    if (wm)
+        hu_world_model_free(alloc, wm);
+
+    if (e != HU_OK) {
+        hu_self_rag_close(&r);
+        return e;
+    }
+
+    if (out_outcome) {
+        switch (resp.outcome) {
+        case HU_SELF_RAG_SUPPORTED:
+            *out_outcome = HU_W11_OUTCOME_SUPPORTED;
+            break;
+        case HU_SELF_RAG_HEDGED:
+            *out_outcome = HU_W11_OUTCOME_HEDGED;
+            break;
+        case HU_SELF_RAG_REWRITTEN:
+            *out_outcome = HU_W11_OUTCOME_REWRITTEN;
+            break;
+        case HU_SELF_RAG_ABSTAINED:
+            *out_outcome = HU_W11_OUTCOME_ABSTAINED;
+            break;
+        }
+    }
+    if (out_claims_total)
+        *out_claims_total = resp.claims_count;
+    if (out_claims_flagged) {
+        size_t flagged = 0;
+        for (size_t i = 0; i < resp.claims_count; i++) {
+            /* Reuse the abstain threshold to mark "low support" claims. */
+            if (resp.claims[i].support.mean < req.abstain_threshold)
+                flagged++;
+        }
+        *out_claims_flagged = flagged;
+    }
+    if (out_modified && out_modified_len && resp.draft_modified) {
+        size_t mlen = strlen(resp.modified_draft);
+        char *copy = (char *)alloc->alloc(alloc->ctx, mlen + 1);
+        if (copy) {
+            memcpy(copy, resp.modified_draft, mlen);
+            copy[mlen] = '\0';
+            *out_modified = copy;
+            *out_modified_len = mlen;
+        }
+    }
+    /* Note: when outcome == ABSTAINED, the refusal text lives in
+     * resp.refusal_text; callers that want it should ask via a future
+     * extension to this bridge. The agent's existing FIX 2 verifier wire
+     * already handles the SOFT/STRICT modify path; this function exposes the
+     * structured outcome + claim counts so we can layer it on without
+     * reworking the response path yet. */
+    hu_self_rag_close(&r);
     return HU_OK;
 }

@@ -293,6 +293,14 @@ struct hu_agent {
     struct hu_w7_facade *w7_facade;
     uint64_t world_model_loads; /* telemetry: per-turn world_model render count */
 
+    /* W11 self-RAG telemetry (FIX 12b). Sibling to verifier_* counters --
+     * self-RAG runs alongside hu_response_verify on the response path, with
+     * a richer atomic-claim model and an explicit abstention outcome. */
+    uint64_t self_rag_runs;
+    uint64_t self_rag_claims_total;
+    uint64_t self_rag_claims_flagged;
+    uint64_t self_rag_abstentions;
+
     volatile sig_atomic_t cancel_requested; /* set by SIGINT handler to abort turn */
 
     hu_agent_approval_cb approval_cb; /* optional; if NULL, approval-required = denied */

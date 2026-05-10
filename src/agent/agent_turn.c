@@ -4955,7 +4955,7 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                 }
                 /* hu_strndup stops at first '\0' within final_len — length must match allocation.
                  */
-                const size_t response_effective_len = strlen(*response_out);
+                size_t response_effective_len = strlen(*response_out);
                 if (response_len_out)
                     *response_len_out = response_effective_len;
 
@@ -5018,7 +5018,66 @@ hu_error_t hu_agent_turn(hu_agent_t *agent, const char *msg, size_t msg_len, cha
                                         *response_out = replacement;
                                         if (response_len_out)
                                             *response_len_out = mod_len;
+                                        response_effective_len = mod_len;
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    /* W11 self-RAG (FIX 12b). Runs alongside the heuristic
+                     * verifier above, surfacing structured atomic claims +
+                     * an explicit ABSTAINED outcome. Telemetry-only by
+                     * default; opt-in to soft/strict via HU_SELF_RAG_MODE
+                     * (mirrors HU_VERIFY_MODE). Skipped when the W7 facade
+                     * isn't open (no production memory backend). */
+                    if (agent->w7_facade && agent->memory_session_id &&
+                        agent->memory_session_id_len > 0) {
+                        int srag_mode = HU_VERIFY_TELEMETRY;
+                        const char *srag_env = getenv("HU_SELF_RAG_MODE");
+                        if (srag_env) {
+                            if (strcmp(srag_env, "off") == 0)
+                                srag_mode = HU_VERIFY_OFF;
+                            else if (strcmp(srag_env, "soft") == 0)
+                                srag_mode = HU_VERIFY_SOFT;
+                            else if (strcmp(srag_env, "strict") == 0)
+                                srag_mode = HU_VERIFY_STRICT;
+                        }
+                        if (srag_mode != HU_VERIFY_OFF) {
+                            hu_w11_outcome_t s_outcome = HU_W11_OUTCOME_SUPPORTED;
+                            size_t s_total = 0, s_flagged = 0;
+                            char *s_modified = NULL;
+                            size_t s_modified_len = 0;
+                            char **mod_ptr = (srag_mode == HU_VERIFY_SOFT ||
+                                              srag_mode == HU_VERIFY_STRICT)
+                                                 ? &s_modified
+                                                 : NULL;
+                            size_t *mod_len_ptr = mod_ptr ? &s_modified_len : NULL;
+                            hu_error_t serr = hu_w11_self_rag_verify(
+                                agent->w7_facade, agent->alloc, agent->memory_session_id,
+                                agent->memory_session_id_len, *response_out,
+                                response_effective_len, srag_mode, 0, &s_outcome, &s_total,
+                                &s_flagged, mod_ptr, mod_len_ptr);
+                            if (serr == HU_OK) {
+                                agent->self_rag_runs++;
+                                agent->self_rag_claims_total += s_total;
+                                agent->self_rag_claims_flagged += s_flagged;
+                                if (s_outcome == HU_W11_OUTCOME_ABSTAINED)
+                                    agent->self_rag_abstentions++;
+                                if (s_modified && s_modified_len > 0 &&
+                                    (srag_mode == HU_VERIFY_SOFT ||
+                                     srag_mode == HU_VERIFY_STRICT)) {
+                                    agent->alloc->free(agent->alloc->ctx, *response_out,
+                                                       response_effective_len + 1);
+                                    *response_out = s_modified;
+                                    if (response_len_out)
+                                        *response_len_out = s_modified_len;
+                                    response_effective_len = s_modified_len;
+                                    s_modified = NULL; /* ownership transferred */
+                                }
+                                if (s_modified) {
+                                    agent->alloc->free(agent->alloc->ctx, s_modified,
+                                                       s_modified_len + 1);
                                 }
                             }
                         }

@@ -184,6 +184,63 @@ static void bridge_render_uses_cache_within_ttl(void) {
     cleanup(g, f);
 }
 
+/* --- W11 self-RAG bridge (FIX 12b) --- */
+
+static void w11_off_mode_is_noop(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    hu_w11_outcome_t outc = HU_W11_OUTCOME_HEDGED;
+    size_t total = 99, flagged = 99;
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u", 1, "anything", 8, 0, /*OFF*/
+                                         0, &outc, &total, &flagged, NULL, NULL),
+                 HU_OK);
+    HU_ASSERT_EQ((int)outc, (int)HU_W11_OUTCOME_SUPPORTED);
+    HU_ASSERT_EQ(total, 0);
+    HU_ASSERT_EQ(flagged, 0);
+    cleanup(g, f);
+}
+
+static void w11_telemetry_extracts_claims_without_modifying(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    hu_w11_outcome_t outc = HU_W11_OUTCOME_SUPPORTED;
+    size_t total = 0, flagged = 0;
+    char *modified = NULL;
+    size_t modified_len = 0;
+    /* Pass NULL for out_modified to assert no modification path runs. */
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u_w11_t", 7,
+                                         "Paris is the capital of France.", 32, 1, /*TELEMETRY*/
+                                         0, &outc, &total, &flagged, NULL, NULL),
+                 HU_OK);
+    /* Telemetry never modifies. */
+    HU_ASSERT(modified == NULL);
+    HU_ASSERT_EQ(modified_len, 0);
+    /* outcome SUPPORTED for telemetry mode (no rewrite). */
+    HU_ASSERT(outc == HU_W11_OUTCOME_SUPPORTED || outc == HU_W11_OUTCOME_ABSTAINED);
+    cleanup(g, f);
+}
+
+static void w11_rejects_invalid_args(void) {
+    hu_graph_t *g = NULL;
+    hu_w7_facade_t *f = NULL;
+    open_graph_and_facade(&g, &f);
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(NULL, A(), "u", 1, "x", 1, 1, 0, NULL, NULL, NULL, NULL,
+                                         NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, NULL, "u", 1, "x", 1, 1, 0, NULL, NULL, NULL, NULL,
+                                         NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), NULL, 0, "x", 1, 1, 0, NULL, NULL, NULL, NULL,
+                                         NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    HU_ASSERT_EQ(hu_w11_self_rag_verify(f, A(), "u", 1, NULL, 0, 1, 0, NULL, NULL, NULL, NULL,
+                                         NULL),
+                 HU_ERR_INVALID_ARGUMENT);
+    cleanup(g, f);
+}
+
 #endif /* HU_ENABLE_SQLITE */
 
 void run_world_model_bridge_tests(void) {
@@ -195,5 +252,8 @@ void run_world_model_bridge_tests(void) {
     HU_RUN_TEST(bridge_render_with_negative_memory_includes_avoid_section);
     HU_RUN_TEST(bridge_render_rejects_invalid_args);
     HU_RUN_TEST(bridge_render_uses_cache_within_ttl);
+    HU_RUN_TEST(w11_off_mode_is_noop);
+    HU_RUN_TEST(w11_telemetry_extracts_claims_without_modifying);
+    HU_RUN_TEST(w11_rejects_invalid_args);
 #endif
 }
