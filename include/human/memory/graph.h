@@ -48,10 +48,18 @@ typedef struct hu_graph_relation {
     int64_t target_id;
     hu_relation_type_t type;
     float weight;
-    int64_t first_seen;
-    int64_t last_seen;
+    int64_t first_seen;       /* INGEST: first observation */
+    int64_t last_seen;        /* INGEST: most recent observation */
     char *context;
     size_t context_len;
+    /* Bitemporal fields (W1). Legacy rows get event_start = first_seen, event_end = 0,
+     * confidence = 1.0, supersedes_id = 0, provenance = NULL on first read. */
+    int64_t event_start;      /* EVENT: when the relation became true in the world; 0 = unknown */
+    int64_t event_end;        /* EVENT: when it ceased; 0 = still true */
+    float confidence;         /* 0.0-1.0; default 1.0 */
+    int64_t supersedes_id;    /* prior relation this replaces; 0 = none */
+    char *provenance;         /* source URI / channel / turn-id; nullable */
+    size_t provenance_len;
 } hu_graph_relation_t;
 
 /* Graph context (opaque, backed by SQLite) */
@@ -74,6 +82,27 @@ hu_error_t hu_graph_upsert_relation(hu_graph_t *g, const char *contact_id, size_
                                     int64_t source_id, int64_t target_id,
                                     hu_relation_type_t type, float weight, const char *context,
                                     size_t context_len);
+
+/* Bitemporal upsert (W1). Forwards to the deterministic conflict resolver before write.
+ * - event_start: when the fact became true in the world. Pass 0 to default to now().
+ * - event_end:   when it ceased. Pass 0 for "still true."
+ * - confidence:  0.0-1.0. Pass < 0 to default to 1.0.
+ * - provenance:  optional source attribution (channel/turn-id/URL). NULL/0 = none.
+ * On supersession, the prior relation's event_end is set and the new row records
+ * supersedes_id = prior.id.
+ */
+hu_error_t hu_graph_upsert_relation_ex(hu_graph_t *g, const char *contact_id,
+                                       size_t contact_id_len, int64_t source_id, int64_t target_id,
+                                       hu_relation_type_t type, float weight, int64_t event_start,
+                                       int64_t event_end, float confidence, const char *context,
+                                       size_t context_len, const char *provenance,
+                                       size_t provenance_len);
+
+/* Window query: return relations whose event window overlaps [from_ts, to_ts]. */
+hu_error_t hu_graph_relations_in_window(hu_graph_t *g, hu_allocator_t *alloc,
+                                        const char *contact_id, size_t contact_id_len,
+                                        int64_t from_ts, int64_t to_ts, size_t limit,
+                                        hu_graph_relation_t **out, size_t *out_count);
 
 /* Traversal */
 hu_error_t hu_graph_neighbors(hu_graph_t *g, hu_allocator_t *alloc, const char *contact_id,

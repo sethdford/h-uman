@@ -606,6 +606,8 @@ set(HU_CORE_SOURCES
     src/memory/personal_model.c
     src/memory/hallucination_guard.c
     src/memory/graph.c
+    src/memory/conflict_resolver.c
+    src/memory/write_trust.c
     src/memory/multimodal_index.c
     src/memory/lifecycle/cache.c
     src/memory/lifecycle/hygiene.c
@@ -2200,6 +2202,7 @@ set(HU_TEST_SOURCES
     tests/test_comfort_patterns.c
     tests/test_emotional_moments.c
     tests/test_graph.c
+    tests/test_w1_bitemporal.c
     tests/test_fast_capture.c
     tests/test_promotion.c
     tests/test_consolidation.c
